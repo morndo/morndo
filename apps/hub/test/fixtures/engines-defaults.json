@@ -1,0 +1,236 @@
+{
+  "_source": "engine-layer d600d21 (its CLI unchanged since 2293dc0): `engines get --json` with the derived fields removed, and `engines providers --json` with claude-as, agent, codex and studio on PATH, 2026-10-07",
+  "enabled": false,
+  "review_other_provider": false,
+  "roles": {
+    "plan": {
+      "label": "Plan and brief",
+      "chain": [
+        "claude:opus-5.5@high",
+        "codex:gpt-6-astra@high",
+        "agy:gemini-3.1-pro"
+      ]
+    },
+    "implement-backend": {
+      "label": "Implement: backend",
+      "chain": [
+        "cursor:claude-sonnet-5.5@high",
+        "claude:sonnet-5.5@high",
+        "codex:gpt-6.1-sol@high"
+      ],
+      "risk_chain": [
+        "cursor:claude-opus-5.5@high",
+        "claude:opus-5.5@high",
+        "codex:gpt-6-astra@high"
+      ]
+    },
+    "implement-ui": {
+      "label": "Implement: UI",
+      "chain": [
+        "cursor:claude-sonnet-5.5@high",
+        "claude:sonnet-5.5@high",
+        "codex:gpt-6.1-sol@high"
+      ],
+      "risk_chain": [
+        "cursor:claude-opus-5.5@high",
+        "claude:opus-5.5@high",
+        "codex:gpt-6-astra@high"
+      ]
+    },
+    "implement-infra": {
+      "label": "Implement: infra and scripts",
+      "chain": [
+        "cursor:claude-sonnet-5.5@high",
+        "claude:sonnet-5.5@high",
+        "codex:gpt-6.1-sol@high"
+      ],
+      "risk_chain": [
+        "cursor:claude-opus-5.5@high",
+        "claude:opus-5.5@high",
+        "codex:gpt-6-astra@high"
+      ]
+    },
+    "validate": {
+      "label": "Validate findings, write tests",
+      "chain": [
+        "claude:opus-5.5@high",
+        "codex:gpt-6-astra@high"
+      ]
+    },
+    "review": {
+      "label": "Review",
+      "chain": [
+        "claude:opus-5.5@high",
+        "codex:gpt-6-astra@high"
+      ],
+      "other_provider": false
+    },
+    "research": {
+      "label": "Research",
+      "chain": [
+        "studio:chatgpt",
+        "studio:gemini",
+        "codex:gpt-6-astra@high"
+      ]
+    },
+    "read-long": {
+      "label": "Read long documents",
+      "chain": [
+        "studio:gemini",
+        "agy:gemini-3.8-flash",
+        "claude:sonnet-5.5"
+      ]
+    },
+    "images": {
+      "label": "Images and edits",
+      "chain": [
+        "studio:chatgpt",
+        "studio:gemini"
+      ]
+    },
+    "video": {
+      "label": "Video",
+      "chain": [
+        "studio:gemini"
+      ]
+    }
+  },
+  "providers": [
+    {
+      "provider": "claude",
+      "enabled": true,
+      "installed": true,
+      "login": "ok",
+      "login_source": "settings",
+      "marks": [],
+      "family": "anthropic",
+      "models": [
+        "opus-5.5",
+        "sonnet-5.5",
+        "fable-5.1",
+        "haiku-4.5"
+      ],
+      "label": "Claude Code (Max plans, accounts via claude-pool)",
+      "kind": "cli",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "provider": "cursor",
+      "enabled": true,
+      "installed": true,
+      "login": "missing",
+      "login_source": "settings",
+      "marks": [],
+      "family": "by model",
+      "models": [
+        "claude-sonnet-5.5",
+        "claude-opus-5.5",
+        "claude-fable-5.1",
+        "composer-2.5",
+        "grok-4.7",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gemini-3.1-pro",
+        "gemini-3.8-flash",
+        "auto"
+      ],
+      "label": "Cursor CLI (agent)",
+      "kind": "cli",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+    },
+    {
+      "provider": "codex",
+      "enabled": true,
+      "installed": true,
+      "login": "missing",
+      "login_source": "settings",
+      "marks": [],
+      "family": "openai",
+      "models": [
+        "gpt-6.1-sol",
+        "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-6-luna"
+      ],
+      "label": "OpenAI Codex CLI (ChatGPT Plus)",
+      "kind": "cli",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    {
+      "provider": "agy",
+      "enabled": true,
+      "installed": false,
+      "login": "missing",
+      "login_source": "settings",
+      "marks": [],
+      "family": "by model",
+      "models": [
+        "gemini-3.8-flash",
+        "gemini-3.1-pro",
+        "claude-sonnet-5.5",
+        "claude-opus-5.5",
+        "gpt-oss-120b"
+      ],
+      "label": "Google Antigravity CLI (Google AI plan)",
+      "kind": "cli",
+      "efforts": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "provider": "gemini",
+      "enabled": false,
+      "installed": false,
+      "login": "missing",
+      "login_source": "settings",
+      "marks": [],
+      "family": "google",
+      "models": [
+        "gemini-3.1-pro",
+        "gemini-3.8-flash"
+      ],
+      "label": "Google Gemini CLI (paid API key only; no consumer sign-in since 2026-06-18)",
+      "kind": "cli",
+      "efforts": []
+    },
+    {
+      "provider": "studio",
+      "enabled": true,
+      "installed": true,
+      "login": "ok",
+      "login_source": "settings",
+      "marks": [],
+      "family": "by model",
+      "models": [
+        "chatgpt",
+        "gemini",
+        "auto"
+      ],
+      "label": "Studio lane (ChatGPT and Gemini web apps)",
+      "kind": "studio",
+      "efforts": []
+    }
+  ]
+}

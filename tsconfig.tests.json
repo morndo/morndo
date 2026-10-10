@@ -1,0 +1,22 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "lib": [
+      "esnext"
+    ],
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "packages/*/test",
+    "apps/hub/test",
+    "apps/node-agent/test",
+    "apps/fleet/test",
+    "apps/board-cli/test",
+    "apps/connections/test",
+    "test",
+    "scripts",
+    "vitest.config.ts"
+  ]
+}

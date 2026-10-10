@@ -1,0 +1,169 @@
+#!/bin/sh
+# Reject a push that adds a secret, a home path, a private key, or a token.
+# Install with scripts/install-git-hooks.sh. Does not change git config.
+#
+# gitleaks 8.30.1 `protect` scans `git diff` (or `--staged`), not the commits
+# in the push. Those commits are scanned with `gitleaks detect --log-opts`.
+# Git passes "<local ref> <local sha> <remote ref> <remote sha>" on stdin.
+# This script is never scanned: its patterns would match their own source.
+set -eu
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "pre-push: gitleaks is not on PATH (https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1)" >&2
+  exit 1
+fi
+
+zero=0000000000000000000000000000000000000000
+ranges=$(mktemp)
+patterns=$(mktemp)
+paths=$(mktemp)
+specs=$(mktemp)
+trap 'rm -f "$ranges" "$patterns" "$paths" "$specs"' EXIT
+
+gitleaks protect --no-banner --redact
+
+scan_dir() {
+  gitleaks dir . --config .gitleaks.toml --redact --no-banner
+}
+
+scan_push() {
+  # stdin is not a terminal when git runs this hook.
+  if [ -t 0 ]; then
+    scan_dir
+    return
+  fi
+  scanned=0
+  while read -r local_ref local_sha remote_ref remote_sha; do
+    [ -n "${local_sha:-}" ] || continue
+    if [ "$local_sha" = "$zero" ]; then
+      continue
+    fi
+    printf '%s %s\n' "$local_sha" "${remote_sha:-$zero}" >> "$ranges"
+    case "${remote_sha:-$zero}" in
+      "$zero")
+        scan_dir ;;
+      *)
+        gitleaks detect --no-banner --redact --log-opts="${remote_sha}..${local_sha}" ;;
+    esac
+    scanned=1
+  done
+  if [ "$scanned" -eq 0 ]; then
+    scan_dir
+  fi
+}
+
+scan_push
+
+# Generic markers only. Extra regexes, one per line, may live outside the
+# tree at "$(git rev-parse --git-dir)/info/leak-patterns".
+self=scripts/git-hooks/pre-push
+home_re='/(home|Users)/[^/[:space:]]+/'
+key_re='-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----'
+token_re='(ghp_|github_pat_|sk-|xox[baprs]-|AKIA)[A-Za-z0-9_]{16,}'
+
+extra=$(git rev-parse --git-dir)/info/leak-patterns
+if [ -f "$extra" ]; then
+  awk 'NF { print }' "$extra" > "$patterns"
+fi
+
+reject() {
+  echo "pre-push: $*" >&2
+  exit 1
+}
+
+# 0 = a match was printed, 1 = none, other = the search itself failed.
+matched() {
+  set +e
+  "$@" >&2
+  status=$?
+  set -e
+  if [ "$status" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$status" -eq 1 ]; then
+    return 1
+  fi
+  echo "pre-push: pattern search failed" >&2
+  exit 1
+}
+
+check_patterns() {
+  # Remaining args are a grep/git-grep command that already includes the pattern source.
+  if matched "$@"; then
+    return 0
+  fi
+  return 1
+}
+
+scan_file() {
+  file=$1
+  if check_patterns grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" -- "$file"; then
+    reject "home path, private key, or token in $file"
+  fi
+  if [ -s "$patterns" ] && check_patterns grep -I -n -E -f "$patterns" -- "$file"; then
+    reject "local leak pattern in $file"
+  fi
+}
+
+scan_sha() {
+  sha=$1
+  shift
+  if check_patterns git grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@"; then
+    reject "home path, private key, or token in $sha"
+  fi
+  if [ -s "$patterns" ] && check_patterns git grep -I -n -E -f "$patterns" "$sha" -- "$@"; then
+    reject "local leak pattern in $sha"
+  fi
+}
+
+scan_listed() {
+  sha=$1
+  list=$2
+  set --
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    set -- "$@" "$file"
+  done < "$list"
+  [ "$#" -gt 0 ] || return 0
+  if check_patterns git grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@"; then
+    reject "home path, private key, or token in $sha"
+  fi
+  if [ -s "$patterns" ] && check_patterns git grep -I -n -E -f "$patterns" "$sha" -- "$@"; then
+    reject "local leak pattern in $sha"
+  fi
+}
+
+{
+  git diff --name-only --diff-filter=ACMR
+  git diff --cached --name-only --diff-filter=ACMR
+  git ls-files --others --exclude-standard
+} | sort -u > "$paths"
+
+while IFS= read -r file; do
+  [ -n "$file" ] || continue
+  case "$file" in
+    "$self"|./"$self") continue ;;
+  esac
+  [ -f "$file" ] || continue
+  scan_file "$file"
+done < "$paths"
+
+while read -r local_sha remote_sha; do
+  [ -n "${local_sha:-}" ] || continue
+  if [ "$remote_sha" = "$zero" ] && [ -z "$(git for-each-ref --format='%(objectname)' refs/remotes)" ]; then
+    scan_sha "$local_sha" . ":(exclude)$self"
+    continue
+  fi
+  if [ "$remote_sha" = "$zero" ]; then
+    git log --name-only --pretty=format: --diff-filter=ACMR "$local_sha" --not --remotes > "$paths"
+  else
+    git diff --name-only --diff-filter=ACMR "$remote_sha" "$local_sha" > "$paths"
+  fi
+  awk -v self="$self" 'NF && $0 != self && $0 != "./" self { print }' "$paths" > "$specs"
+  if [ -s "$specs" ]; then
+    scan_listed "$local_sha" "$specs"
+  fi
+done < "$ranges"

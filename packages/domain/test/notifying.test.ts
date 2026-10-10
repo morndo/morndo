@@ -1,0 +1,71 @@
+// Notifications (ADR-0008 phase F; N1–N3 in docs/domain.md): numbers only, raised only by a Decision starting to wait,
+// a worker starting to need him (not when muted) or a device linked; per kind the latest wins after a second; never
+// while he is attending on any device. Pure.
+import { describe, expect, it } from "vitest";
+import {
+  ATTENDING_INPUT_MS, NOTIFY_DEBOUNCE_MS, NotificationQueue, anyAttending, isAttending, kindCode, payloadOf, raises, reasonCode,
+} from "../src/index.ts";
+
+const NOW = 1_000_000;
+const counts = { decisions: 2, workers: 1, linked: 0 };
+
+describe("a push service's reason for a refusal (N1: codes, never text)", () => {
+  it("keeps a short code of letters and digits, and nothing else", () => {
+    for (const ok of ["BadJwtToken", "BadTtl", "A", `A${"b".repeat(63)}`]) expect(reasonCode(ok), ok).toBe(ok);
+    for (const no of ["", "42", "Bad Jwt", "bad-jwt", "Bad\nJwt", "<b>no</b>", `A${"b".repeat(64)}`, 7, null, undefined, { code: "X" }]) expect(reasonCode(no), JSON.stringify(no)).toBeUndefined();
+  });
+});
+
+describe("the payload (N1)", () => {
+  it("is numbers only: the kind as its number, then the counts", () => {
+    const p = payloadOf("worker", counts);
+    expect(p).toEqual({ kind: 1, decisions: 2, workers: 1, linked: 0 });
+    expect(Object.values(p).every(v => typeof v === "number")).toBe(true);
+    expect([kindCode("decision"), kindCode("worker"), kindCode("linked")]).toEqual([0, 1, 2]);
+  });
+});
+
+describe("what raises one (N2)", () => {
+  it("a Decision starting to wait, even in a muted conversation's world: mute isn't asked", () => {
+    expect(raises({ kind: "decision", waiting: 1 })).toBe(true);
+    expect(raises({ kind: "decision", waiting: 0 })).toBe(false);
+  });
+  it("a worker only when it starts needing him, and not when its conversation is muted", () => {
+    expect(raises({ kind: "worker", needsYou: true, was: false, muted: false, isAsk: false })).toBe(true);
+    expect(raises({ kind: "worker", needsYou: true, was: true, muted: false, isAsk: false })).toBe(false);   // still needing
+    expect(raises({ kind: "worker", needsYou: false, was: true, muted: false, isAsk: false })).toBe(false);  // answered
+    expect(raises({ kind: "worker", needsYou: true, was: false, muted: true, isAsk: false })).toBe(false);   // muted
+  });
+  it("a worker's question or menu is an Ask: it raises as a Decision on the board, never a second time as a worker (review M1)", () => {
+    expect(raises({ kind: "worker", needsYou: true, was: false, muted: false, isAsk: true })).toBe(false);
+  });
+  it("a device linked (AC13)", () => {
+    expect(raises({ kind: "linked" })).toBe(true);
+  });
+});
+
+describe("attending (N3, the product lane's amendment 3)", () => {
+  it("focus and his input within 2 minutes; a report that aged out isn't", () => {
+    expect(isAttending({ attending: true, at: NOW - ATTENDING_INPUT_MS + 1 }, NOW)).toBe(true);
+    expect(isAttending({ attending: true, at: NOW - ATTENDING_INPUT_MS }, NOW)).toBe(false);
+    expect(isAttending({ attending: false, at: NOW }, NOW)).toBe(false);
+    expect(anyAttending([{ attending: false, at: NOW }, { attending: true, at: NOW - 1000 }], NOW)).toBe(true);
+    expect(anyAttending([], NOW)).toBe(false);
+  });
+});
+
+describe("the queue (N3)", () => {
+  it("per kind the latest wins, and goes a second after it was raised", () => {
+    const q = new NotificationQueue();
+    q.raise("decision", { ...counts, decisions: 1 }, NOW);
+    q.raise("decision", { ...counts, decisions: 2 }, NOW + 500);          // replaces, and the second starts again
+    q.raise("worker", counts, NOW + 100);
+    expect(q.next).toBe(NOW + 100 + NOTIFY_DEBOUNCE_MS);
+    expect(q.due(NOW + NOTIFY_DEBOUNCE_MS)).toEqual([]);
+    expect(q.due(NOW + 100 + NOTIFY_DEBOUNCE_MS).map(p => p.kind)).toEqual(["worker"]);
+    const d = q.due(NOW + 500 + NOTIFY_DEBOUNCE_MS);
+    expect(d).toEqual([{ kind: "decision", counts: { ...counts, decisions: 2 }, dueAt: NOW + 500 + NOTIFY_DEBOUNCE_MS }]);
+    expect(q.next).toBeNull();
+    expect(q.due(NOW + 10_000)).toEqual([]);
+  });
+});

@@ -1,0 +1,73 @@
+/* The phone (ADR-0009): the brand's tokens only (packages/brand, palette "Ink"): monochrome, colour for status alone.
+   Every text and UI pair used here is one the brand's contrast test checks (packages/brand/test/tokens.test.ts):
+   text and muted text on bg and surface; text on fill; ink-fg on ink; status text on its subtle and on bg/surface;
+   the control border on bg and surface. Muted text never sits on a tint (COLOR.md rule 8), and no text is faded with
+   opacity. Type: Outfit (the wordmark's font) for headlines and numbers, Lato for reading, as in the design. */
+@import "@fontsource-variable/outfit/wght.css";
+
+.phone {
+  /* The safe area (WebKit, "Designing Websites for iPhone X"; MDN env()): with viewport-fit=cover and the installed
+     app's black-translucent status bar, the page runs under the status bar, the home indicator and, in landscape, the
+     sensor housing. Every edge bar pads by these. 0 where there is nothing to avoid. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --display: "Outfit Variable", "Lato", sans-serif;
+  --body: "Lato", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --ink: var(--morndo-ink);
+  --ink-fg: var(--morndo-ink-fg);
+  --ok: var(--morndo-success); --ok-text: var(--morndo-success-text); --ok-soft: var(--morndo-success-subtle);
+  --warn: var(--morndo-warning); --warn-text: var(--morndo-warning-text); --warn-soft: var(--morndo-warning-subtle);
+  --bad: var(--morndo-danger); --bad-text: var(--morndo-danger-text); --bad-soft: var(--morndo-danger-subtle);
+  --card-shadow: 0 1px 0 rgb(0 0 0 / 0.02), 0 14px 34px -18px rgb(27 24 19 / 0.28);
+  min-height: 100dvh;
+  display: flex; flex-direction: column;
+  font: 400 15px/22px var(--body);
+  color: var(--fg); background: var(--bg);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .phone { --card-shadow: 0 0 0 1px var(--line), 0 20px 40px -20px rgb(0 0 0 / 0.8); } }
+:root[data-theme="dark"] .phone { --card-shadow: 0 0 0 1px var(--line), 0 20px 40px -20px rgb(0 0 0 / 0.8); }
+.phone.full { height: 100dvh; overflow: hidden; }
+
+.phone .kicker { font: 700 11px/16px var(--body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.phone .num { font-family: var(--display); font-feature-settings: "tnum"; }
+.phone .chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 12px;
+  background: var(--fill); color: var(--fg); font: 700 12px/1 var(--body); white-space: nowrap;
+}
+.phone .chip.ok { background: var(--ok-soft); color: var(--ok-text); }
+.phone .chip.warn { background: var(--warn-soft); color: var(--warn-text); }
+.phone .chip.bad { background: var(--bad-soft); color: var(--bad-text); }
+.phone .avatar {
+  width: 36px; height: 36px; border-radius: 10px; flex: none; display: grid; place-items: center;
+  background: var(--ink); color: var(--ink-fg); font: 700 15px/1 var(--display);
+}
+.phone .avatar.quiet { background: var(--fill); color: var(--fg); }
+.phone .avatar.sm { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+
+/* Buttons: at least 44px high (the design's done criterion 16; Apple's minimum hit target). */
+.phone .pbtn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 50px; padding: 0 18px;
+  border-radius: 14px; border: 1px solid var(--edge); background: transparent; color: var(--fg);
+  font: 700 16px/1.2 var(--body); cursor: pointer; text-decoration: none; text-align: center;
+  -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+}
+.phone .pbtn.primary { background: var(--ink); color: var(--ink-fg); border-color: var(--ink); }
+.phone .pbtn.small { min-height: 44px; padding: 0 14px; border-radius: 11px; font-size: 14px; }
+.phone .pbtn:disabled { cursor: default; border-style: dashed; }
+.phone .pbtn.primary:disabled { background: transparent; color: var(--fg); border-color: var(--edge); }
+.phone .tlink {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 8px; border: 0; background: none;
+  color: var(--fg); font: 700 14px/1.2 var(--body); text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+.phone .note { font: 400 13px/18px var(--body); color: var(--muted); margin: 0; }
+.phone .err { font: 400 14px/20px var(--body); color: var(--bad-text); margin: 0; }
+.phone .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* The connection chip, as on the agents list. */
+.phone .conn { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border-radius: 12px; font: 700 12px/1 var(--body); flex: none; background: var(--fill); color: var(--fg); }
+.phone .conn.live { color: var(--ok-text); background: var(--ok-soft); }
+.phone .conn.reconnecting, .phone .conn.connecting { color: var(--warn-text); background: var(--warn-soft); }
+.phone .conn.offline { color: var(--bad-text); background: var(--bad-soft); }
+.phone .conn i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }

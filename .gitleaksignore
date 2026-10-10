@@ -1,0 +1,10 @@
+# Reviewed false positives (gitleaks fingerprints). Each is synthetic test data, never a secret.
+# A test constant named TOKEN holding a made-up UUID (later replaced by an obviously synthetic one).
+c1855e651a1761fa1dbdd01efcd5111a4d172763:apps/web/test/linking-web.test.ts:generic-api-key:156
+# RFC 8292's own example JWT (section 2.4: aud https://push.example.net, expired January 2016), the published test vector.
+583d8d9914a38b825afeb0948ac841d47458e66f:apps/hub/test/webpush.test.ts:jwt:70
+# The 12-byte DER header that starts every Ed25519 public key (SPKI, base64 "MCowBQYDK2VwAyEA"), used as a placeholder fleetKey in a test config and in the plan's copy of it: public, truncated, no key material.
+fd17b9fab6ac257a780be1461d567797eee90a6f:apps/node-agent/test/config.test.ts:generic-api-key:16
+d752906f6d555537b5f9044cb4a96d9e2270524e:docs/design/fleet-core/plan/03-agent.md:generic-api-key:187
+# The redaction test's synthetic input: the Ed25519 key header plus "xyz=", asserting the log redactor blanks a fleetKey. Not a key.
+29674697f741692cb6b9dbc4adc972da19cad5fd:apps/hub/test/log-agreement.test.ts:generic-api-key:13

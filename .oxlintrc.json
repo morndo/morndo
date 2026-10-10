@@ -1,0 +1,55 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "options": {
+    "typeAware": true,
+    "reportUnusedDisableDirectives": "error"
+  },
+  "plugins": [
+    "typescript",
+    "oxc",
+    "promise"
+  ],
+  "categories": {
+    "correctness": "error"
+  },
+  "rules": {
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "typescript/switch-exhaustiveness-check": "error",
+    "no-console": "off"
+  },
+  "ignorePatterns": [
+    "**/node_modules/**",
+    "**/build/**",
+    "**/.svelte-kit/**",
+    "packages/brand/assets/**"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "packages/node-ops/src/tmux.ts",
+        "packages/domain/src/board.ts",
+        "packages/node-ops/test/tmux*.ts",
+        "apps/hub/src/adapters/manager-protocol.ts",
+        "apps/hub/test/steering.test.ts",
+        "apps/hub/test/tmux-*.ts",
+        "test/fixtures/*.ts",
+        "apps/node-agent/test/fake-claude.fixture.ts"
+      ],
+      "rules": {
+        "no-control-regex": "off"
+      }
+    },
+    {
+      "files": [
+        "apps/hub/src/**",
+        "packages/node-ops/src/**",
+        "apps/node-agent/src/**",
+        "apps/fleet/src/**"
+      ],
+      "rules": {
+        "no-console": "error"
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@morndo/service-kit",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "What the hub, the fleet service and the node agent each need and must do the same way: the numbered-migration runner, the private SQLite open, and the token bucket. Server-side only.",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

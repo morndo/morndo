@@ -1,0 +1,27 @@
+{
+  "name": "@morndo/connections",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
+  },
+  "bin": {
+    "morndo-keys": "./src/main.ts"
+  },
+  "exports": {
+    "./compose": "./src/compose.ts",
+    "./commands": "./src/application/commands.ts"
+  },
+  "dependencies": {
+    "@morndo/domain": "0.0.0",
+    "@morndo/node-ops": "0.0.0",
+    "@morndo/protocol": "0.0.0",
+    "@morndo/service-kit": "0.0.0",
+    "age-encryption": "0.3.1",
+    "better-sqlite3": "^13.0.3"
+  }
+}

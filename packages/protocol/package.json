@@ -1,0 +1,13 @@
+{
+  "name": "@morndo/protocol",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@morndo/domain": "0.0.0",
+    "zod": "^4.6.5"
+  }
+}

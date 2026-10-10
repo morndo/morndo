@@ -1,0 +1,187 @@
+# CI (ADR-0008 phase G): lint, types, tests, the production build and its own checks (no state gallery, the entry and
+# the whole client's JS within budget), then every e2e on a synthetic office with tmux and Playwright's Chromium, whose
+# screenshots are kept as an artifact.
+# Actions are pinned by full commit SHA, resolved from their release tags on 2026-10-02:
+#   actions/checkout v7.0.1 (2026-07-20), https://github.com/actions/checkout/releases/tag/v7.0.1
+#   actions/setup-node v7.0.0 (2026-07-14), https://github.com/actions/setup-node/releases/tag/v7.0.0
+#   actions/upload-artifact v7.0.1 (2026-04-10), https://github.com/actions/upload-artifact/releases/tag/v7.0.1
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      # The runner has no VNC desktop: the one check that needs it says SKIP with its reason (e2e/desktop.e2e.ts).
+      MORNDO_E2E_NO_VNC: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json # engines.node
+          cache: npm
+
+      - id: deps
+        run: npm ci
+
+      - id: tools
+        name: tmux and Playwright's Chromium (with its system libraries)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tmux
+          npx playwright install --with-deps chromium
+
+      # Each check below runs and reports even when another failed (a step's default condition is success();
+      # https://docs.github.com/en/actions/reference/workflows-and-actions/expressions, read 2026-10-02).
+      - name: Lint
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm run lint
+      - name: Types
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm run check
+      # Every negative control's text is still where its entry says (scripts/negative-controls.ts --check: read-only, a
+      # second). The controls themselves run weekly: .github/workflows/negative-controls.yml.
+      - name: Negative controls apply
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: node scripts/negative-controls.ts --check
+      # The fleet's drills run in their own job below, beside this one (`--project=!fleet` leaves them out;
+      # https://vitest.dev/guide/cli.html, --project, v5.0.3, read 2026-10-06).
+      - name: Tests (units, then the Chromium files)
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        run: npx vitest run --project='!fleet'
+      - id: build
+        name: Build
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: npm run build
+      # Its own step (review L5), so a budget or gallery failure shows here and the e2e still run on the build.
+      - name: Build checks (the state gallery absent, the JS within its budget)
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: npm run check:build
+
+      # Each e2e writes its screenshots under one folder, kept as an artifact below.
+      - name: e2e web-endpoint
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/web-endpoint" }
+        run: node e2e/web-endpoint.e2e.ts
+      - name: e2e desktop
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/desktop" }
+        run: node e2e/desktop.e2e.ts
+      - name: e2e ink
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/ink" }
+        run: node e2e/ink.e2e.ts
+      - name: e2e signal
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/signal" }
+        run: node e2e/signal.e2e.ts
+      - name: e2e push
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/push" }
+        run: node e2e/push.e2e.ts
+      # ADR-0009: the phone's catch-up at 390 px, every done criterion it can check (docs/design/mobile-catchup).
+      - name: e2e catchup
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/catchup" }
+        run: node e2e/catchup.e2e.ts
+      - name: e2e catchup-edges
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/catchup-edges" }
+        run: node e2e/catchup-edges.e2e.ts
+      - name: e2e horizon
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/horizon" }
+        run: node e2e/horizon.e2e.ts
+      - name: e2e readability
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/readability" }
+        run: node e2e/readability.e2e.ts
+      # ADR-0012: one fleet service, two agents on two isolated tmux servers, the hub in fleet mode; a revoked node never
+      # appears (spec §9 "Two nodes (CI)"). About 30–60 s.
+      - name: e2e fleet-two-node
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/fleet-two-node" }
+        run: node e2e/fleet-two-node.e2e.ts
+      - name: e2e gallery
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/gallery" }
+        run: node e2e/gallery.e2e.ts
+      - name: e2e inbox
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/inbox" }
+        run: node e2e/inbox.e2e.ts
+      # ADR-0013: the Engines page; on the engine CLI's stand-in here, as the engine layer isn't on GitHub.
+      - name: e2e engines
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/engines" }
+        run: node e2e/engines.e2e.ts
+      # ADR-0015: the board, driven by the morndo-board CLI as the manager and a lane, and by the principal on the desktop.
+      - name: e2e board
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/board" }
+        run: node e2e/board.e2e.ts
+      # ADR-0016: Home, usage across accounts, from status lines posted under a worker token.
+      - name: e2e home
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/home" }
+        run: node e2e/home.e2e.ts
+
+      - name: e2e phone-chat
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/phone-chat" }
+        run: node e2e/phone-chat.e2e.ts
+
+      # The screenshots, passing or failing, for QA and for reading a failure (review L2).
+      - name: Keep the e2e screenshots
+        if: ${{ !cancelled() && steps.tools.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: e2e-screenshots
+          path: ${{ runner.temp }}/e2e
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The fleet's cross-app drills (test/fleet; spec §9): real fleet, agent and hub processes on isolated tmux servers. They
+  # get a job of their own: jobs run in parallel by default
+  # (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax, read 2026-10-06), so their
+  # waiting (reconnects, health every 30 s, the flapping soak) adds no wall time to `ci`. The soak runs the spec's full
+  # 5 minutes here (FLEET_FLAP_MS), and 75 s on a developer's machine.
+  fleet:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json # engines.node
+          cache: npm
+
+      - run: npm ci
+
+      - name: tmux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tmux
+
+      - name: Fleet drills (test/fleet)
+        env:
+          FLEET_FLAP_MS: "300000"
+        run: npx vitest run --project fleet

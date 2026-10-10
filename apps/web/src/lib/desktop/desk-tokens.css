@@ -1,0 +1,77 @@
+/* The desktop's tokens (ADR-0006): Slack's structure, Morndo's Ink colours (packages/brand/COLOR.md): monochrome,
+   colour only for status. Every value aliases @morndo/brand/tokens.css, which switches light, dark and data-theme on its
+   own. Tints (COLOR.md 8): hover < fill < selection, always with --text on them. Recessed areas (the composer bar, the
+   modal body) are the page background in both themes, under surface cards (COLOR.md 11).
+   A class of its own, so the dev-only state gallery (ADR-0008 phase G) renders the same components with the same
+   values. */
+.desk-tokens {
+  --font: "Lato", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  --frame: var(--morndo-neutral-900);
+  --frame-fg: var(--morndo-neutral-100);
+  --frame-hover: rgba(255, 255, 255, 0.16);
+  --frame-active: rgba(255, 255, 255, 0.24);
+  --search-bg: rgba(255, 255, 255, 0.14);
+  --search-bg-hover: rgba(255, 255, 255, 0.22);
+  --sidebar-bg: var(--morndo-bg);
+  --sidebar-fg: var(--morndo-text-muted);
+  --filter-bg: var(--morndo-surface);
+  --main-bg: var(--morndo-surface);
+  --text: var(--morndo-text);
+  --muted: var(--morndo-text-muted);
+  --muted-bg: var(--morndo-fill);                /* tags and chips: the quiet fill */
+  --hover: var(--morndo-hover);                  /* the item under the pointer: the lightest tint */
+  --recessed: var(--morndo-bg);
+  --row-hover: var(--morndo-hover);
+  --border: var(--morndo-divider);
+  --border-soft: var(--morndo-divider);
+  --border-strong: var(--morndo-border);
+  --selected: var(--morndo-selection);
+  --selected-fg: var(--morndo-text);
+  --selected-bar: var(--morndo-ink);             /* the 3px leading bar is the selection's 3:1 cue; the tint only supports it */
+  --you: var(--morndo-ink);                      /* the principal's avatar (COLOR.md 10) */
+  --you-fg: var(--morndo-ink-fg);
+  --manager: var(--morndo-text-muted);
+  --badge: var(--morndo-danger);
+  --count-bg: var(--morndo-ink);
+  --count-fg: var(--morndo-ink-fg);
+  --working: var(--morndo-success);
+  --idle-dot: var(--morndo-border);
+  --link: var(--morndo-link);
+  --send: var(--morndo-ink);
+  --send-fg: var(--morndo-ink-fg);
+  --send-hover: var(--morndo-ink-hover);
+  --control-bg: var(--morndo-success-subtle);
+  --composer-bar: var(--recessed);
+  --code-bg: var(--morndo-fill);
+  --code-border: var(--morndo-divider);
+  --code-fg: var(--morndo-text);
+  --pre-bg: var(--morndo-fill);
+  --term-bg: var(--morndo-neutral-950);
+  --term-fg: var(--morndo-neutral-200);
+  --ok-bg: var(--morndo-success-subtle);
+  --ok-fg: var(--morndo-success-text);
+  --bad-bg: var(--morndo-danger-subtle);
+  --bad-fg: var(--morndo-danger-text);
+  --warn: var(--morndo-warning);
+  --warn-bg: var(--morndo-warning-subtle);
+  --warn-fg: var(--morndo-warning-text);
+  --menu-bg: var(--morndo-raised);               /* menus and popovers: the raised surface (COLOR.md 9), lighter than cards in dark */
+  --menu-hover: var(--morndo-hover);
+  --menu-hover-fg: var(--morndo-text);
+  --menu-checked: var(--morndo-link);
+  --overlay: color-mix(in srgb, var(--morndo-neutral-950) 55%, transparent);
+  --outline: var(--morndo-border);
+  --tab-line: var(--morndo-divider);
+  --modal-body: var(--recessed);
+  /* Shape and depth, so a component never writes a radius or a shadow of its own. The shadows are the darkest neutral
+     at a low opacity (no hue, so the Ink check passes), over a 1px edge that does the work where a shadow can't show
+     (dark). Three steps: a card at rest, a card lifted under the pointer, a menu over the page. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-card: 0 1px 2px color-mix(in srgb, var(--morndo-neutral-950) 6%, transparent);
+  --shadow-lift: 0 2px 4px color-mix(in srgb, var(--morndo-neutral-950) 8%, transparent), 0 8px 20px color-mix(in srgb, var(--morndo-neutral-950) 10%, transparent);
+  --shadow-menu: 0 0 0 1px var(--border), 0 2px 6px color-mix(in srgb, var(--morndo-neutral-950) 10%, transparent), 0 12px 32px color-mix(in srgb, var(--morndo-neutral-950) 18%, transparent);
+  --shadow-modal: 0 0 0 1px var(--border), 0 24px 64px color-mix(in srgb, var(--morndo-neutral-950) 40%, transparent);
+}

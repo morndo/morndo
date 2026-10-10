@@ -1,0 +1,50 @@
+
+  [38;5;246mRan [1m1[0m[38;5;246m shell command [39m
+
+[38;5;231m●[39m The patch applies cleanly (exit 0), and the worktree is clean at 5e3c9ff with node_modules intact. Recording that in validation.md.
+
+  [38;5;246mRan [1m1[0m[38;5;246m shell command [39m
+
+[38;5;231m●[39m STATUS: DONE
+
+  All 15 findings are real bugs introduced by PR #2: 14 are CONFIRMED and 1 (F9) is NEEDS DECISION. Each has a test that fails at 5e3c9ff. None is pre-existing, since the base commit has no source
+  code at all.
+
+  [1mCounts:[0m CONFIRMED 14 · NEEDS DECISION 1 · LIKELY 0 · NOT A BUG 0 · PRE-EXISTING 0 · DUPLICATE 0 · NOT PROVEN 0. There were no LIKELY findings, so I spawned no refuters.
+
+  [1mDecisions:[0m each fix spec already uses the safe default, so nothing waits on the owner:
+  - [1mF9:[0m loosening the access policy revives sessions that had already expired. Default: end expired sessions for good rather than revive them.
+  - [1mF3:[0m a revoke from the console reaches open sockets only at the hub's 5 s / 15 s checks. Default: check the session on every desktop control message.
+  - [1mF7:[0m a pane with no input box (for example a bash shell) is refused rather than typed into.
+  - [1mF15:[0m a draft is dropped when you switch conversations.
+
+  [1mEvidence I checked myself:[0m
+  - At head I reran all 17 new test files: 56 tests fail on their own assertions and 11 controls pass. A test-file typecheck ([38;5;153mtsc -p tsconfig.tests.json[39m) is clean.
+  - At base 9430e3d all 17 files fail only because the code doesn't exist yet (module not found).
+  - I read the deciding facts myself: Node 24's [38;5;153mnew URL("//[")[39m throws, ws 8.22.0 emits [38;5;153m'error'[39m with no listener here, the tmux 3.4 manual describes no filtering of pasted text, and [38;5;153m"constructor" in {}
+[39m    is true.
+  - [38;5;153mgit apply --check tests.patch[39m passes on a clean 5e3c9ff. The worktree is restored, with node_modules intact.
+
+  [1mFor the fix lane:[0m
+  - The F7/F13 fix breaks 4 existing tests in [38;5;153msteering.test.ts[39m, which send into a bare bash pane; they need to move to a framed input box.
+  - The web test needs [38;5;153m(cd apps/web && npx svelte-kit sync)[39m first.
+  - I gave the F15 test's [38;5;153mbeforeEach[39m hook a 60 s timeout because it timed out under load; no assertion changed.
+
+  [1mNot checked:[0m
+  - A real Claude Code pane, since running one would write to ~/.claude. The input box, menu and placeholder rendering come from the binary's strings and the docs.
+  - Whether F2 can be reached through Tailscale Serve; only local reach is shown.
+  - The systemd crash loop after a crash; it is inferred from the unit's restart settings, not run.
+  - Loss rates on real transcripts and ledger data.
+  - The full suite with all fixes together; each fix was only tried in its own throwaway copy.
+  - F14: the paste break is shown at the byte level only. The review's "a bash pane ran [38;5;153mtouch[39m" was not reproduced.
+
+  Files are in /home/owner/.local/share/lanes/reviews/morndo/pr-2/20261001T170724Z/:
+  - validation.md
+  - tests.patch
+
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m❯ [2mapply the fixes with the safe defaults[0m
+[38;5;244m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+[39m  [38;5;77m███[38;5;243m───────[38;5;246m [38;5;77m37%[38;5;246m [38;5;244m|[38;5;246m [38;5;249m5h:[38;5;77m65%[38;5;246m [38;5;249m7d:[38;5;77m79%[38;5;246m [38;5;244m|[38;5;246m Opus 5.5 [38;5;249mxhigh*[39m
+  [1m[38;5;214m#morndo PR #2 validation[0m[38;5;246m [38;5;111mmorndo[38;5;244m/[38;5;80mreview-pr-2[38;5;246m [38;5;244m|[38;5;246m [38;5;77m+1821[38;5;203m-31[39m
+  [38;5;211m⏵⏵ bypass permissions on[38;5;246m (shift+tab to cycle) · ← for agents[39m

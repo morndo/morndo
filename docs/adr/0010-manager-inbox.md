@@ -1,0 +1,47 @@
+# ADR-0010: Answers and messages for the manager go through its inbox
+
+- **Status:** Accepted, 2026-10-04. The owner asked for it; the manager approved the design; built by lane manager-inbox on `feat/manager-inbox`.
+- **Design and incident:** an internal decision record (the inbox and its protocol, outside this tree).
+- **Builds on:** ADR-0006 (decisions, the hub typing into the manager's pane under its lock), ADR-0008 phase C (the outbox, S4 to S8).
+
+## Context
+
+The requirement: messages to the manager go through a queue, so the user does not have to check that a message was actually sent. A screenshot showed text still sitting in the manager's input after the hub had called the send delivered.
+
+What happened (evidence in the design report): at 16:46:20 the hub typed the answer to ny-175 and recorded it as delivered. The manager's transcript only has it at 16:47:05: for 45 seconds the line sat in the manager's input box. The hub pastes and presses Enter in one tmux command, then looks once after 400 ms, and "no draft seen" counted as delivered. Its next three taps on ny-176 found its own line in the box and were refused as `draft_present`. kira, the box's other typist, made the same mistake a minute later. The screen is no delivery receipt.
+
+The box now has one queue for the manager's terminal (`~/.local/share/manager-inbox`) and one deliverer (`manager-inbox.service`). The deliverer types each message once, by the box's rules (the pane lock; never into a menu or over someone else's text; Enter again only on its own line). It counts a message as delivered only when the manager's transcript has it.
+
+## Decision
+
+1. **For the manager's pane the hub no longer types.** A Decision for the manager (a tap line or "About <id>: …") and a Command to it go into the inbox: one file, written once (link(2), `apps/hub/src/adapters/manager-inbox.ts`). The id is the request's own (`answer:<session>:<request id>`, `command:<endpoint>:<request id>`), so a repeat is the same message (S5).
+2. **A Decision is queued, then delivered** (E13 in `docs/domain.md`). Queued, it counts as given (E8: a second answer is refused and shows it), and the card says "Queued, it will be delivered", with the inbox's reason while it waits (someone's text in the box, a menu, the manager not running). Once the inbox reports it in the manager's conversation, it is delivered, and only then recorded (`EscalationAnswered`, with the time it reached the manager). Given up by the inbox (expired, or cancelled by hand), the ask is open again and nothing is recorded. A hub restart keeps waiting (the store keeps the queued Decision with its inbox key).
+3. **A Command to the manager** answers `{ok, queued: true}`; the outbox shows "Queued, it will be delivered" until its echo in the conversation ends it (S8). The inbox adds a short visible id to such a line (" ⟨m:7f3a9c⟩" at the end of its first line); the conversation leaves it out, so the echo matches.
+4. **Workers other than the manager** are typed as before.
+5. **Kill switch:** `manager-inbox disable` (a `disabled` file in the inbox) or leaving `MORNDO_MANAGER_INBOX` unset: the hub types directly, exactly as before this ADR.
+
+### Amended after the two code reviews (2026-10-04/05)
+
+- **Point 5, refined (B6, the manager's decision):** `MORNDO_MANAGER_INBOX` unset, `0` or `off` means off. New answers are then typed directly. An answer already queued is still followed, read-only, in the inbox it went to, until it is delivered (recorded once) or given up (the ask opens again).
+- **One message, one row (B7, B3):** two answers to one ask (asked again in between) are two inbox messages. Each is recorded when it arrives (`pending_answers`, migration 8). The inbox's word on one never changes the other's Decision.
+- **Asked again, settled or expired while queued (B1, H2):** the hub withdraws its answer (`ctl/<key>.cancel`; the deliverer drops it if it hasn't typed it yet).
+- **Typed anyway:** if the line was typed before the cancel arrived, its echo is not an answer to the new ask (H1). The echo is one message: the first tap with that line since the answer was given. Another tap with the same line is a new answer. None is waited for if the inbox never pasted it.
+- **An inbox that can't be read (B2, H3, H4):** a message gone from `msg/` opens the ask again at once. A short gap in reading is no verdict. After 15 minutes without a reading (the inbox moved or deleted, or no inbox known for a row from before migration 8), the answer counts as gone, and the ask opens again.
+
+## Consequences
+
+- `draft_present`, `menu_open`, `no_input_box`, `not_submitted` and `busy` no longer reach the principal for the manager: they are reasons a queued answer waits, and it goes in by itself.
+- The Decision's record time moves from "typed" to "reached the manager". A2 (provenance) holds: the endpoint and session are the ones that answered.
+- The hub depends on the inbox's on-disk contract (v1, in `manager-inbox.ts`'s header), not on its code. A contract check: a message the hub writes is read, and deduplicated, by `manager-inbox status|enqueue`.
+- Not covered: an answer queued while the manager is down for days stays queued (the inbox alerts the owner after 2, 15 and 60 minutes).
+
+## Addendum: Rebuilt on main (2026-10-08)
+
+Rebuilt on current main (`feat/manager-inbox-v2`). The design above stays. What changed against it:
+
+- **Migration 15, not 8.** Main already uses versions 8–12 for the fleet's send-in-doubt columns (`typed_at`, `ask_first_seen`, `node_store`, `worker_id`, `request`, `node_store_seq`), 13 for the board and 14 for usage. `pending_answers` is the same table as the amendment's migration 8, at version 15. No other schema change.
+- **Rollback.** A database this hub has migrated is at user_version 15. Main's hub, whose migrations stop at 14, refuses to open it (`DatabaseFromFuture`) and changes nothing. Rolling back the code means leaving that database unread until this hub runs again, or restoring a copy from before the migration. There is no down migration.
+- **Cancel only while untyped (decision 2).** The deliverer applies `ctl/<key>.cancel` to any non-terminal status, typed or not. The hub writes that file only while the message is still `queued` or `held` with `attempts` 0 (no state file yet counts as that). Once it is `typing`, `sent`, `stuck` or `accepted`, the hub does not cancel: it waits for `delivered` and records the answer then. If the ask was settled or asked again meanwhile, that record is a late answer to the earlier version, and the card says so. A `cancelled` message with `attempts` ≥ 1 may have been typed: its echo is ignored for 24 hours, then forgotten.
+- **Lost and unconfirmed (decision 3).** Neither is final: `lost` is not a terminal spool status, a cleared line goes back to `sent` and is typed again, and `manager-inbox retry` requeues anything not delivered. The hub writes `ctl/<key>.cancel` and leaves the Decision in place. Only once the spool says `cancelled` does the ask reopen, with the card saying the answer did not reach the manager. Until that confirmation the card does not offer Answer again, so one answer cannot reach the manager twice. That sentence is stored with the withdrawn answer, so a restart still shows it. It goes when he answers again, typed or queued, and when the ask itself is gone.
+- **A duplicate enqueue (decision 4).** The hub reads the message already in the inbox. Still `queued`: the same wait. `cancelled`, `expired` or `gone`: the ask is open, and the client is told `not_delivered`, never `ok`. `delivered`, `lost` or `accepted`: nothing new is queued, so a question asked since is not marked delivered by the old message.
+- A Command carries `notAfter` two minutes after it was written (S7), not two minutes after the hub received it, so a menu left open does not type a stale instruction. A `createdAt` in the future, or more than those two minutes old, counts from when the hub received it, so a Retry and a clock that far off are not born already expired. `CommandSent` is still recorded when it is queued. A repeat of an answer the inbox has since delivered says delivered, not still queued. An answer left started, with no worker, because the hub stopped while queueing it is queued again on the next start. A lost or cancelled command is still a duplicate on a plain repeat. The owner's Retry asks the deliverer to run it again; a command that is gone cannot be, and the hub says so. One the spool already delivered is delivered, not a refusal. An expired one is not still queued: a plain repeat stays a duplicate. Only the owner's Retry, after the same seen and name checks as any other send, asks the deliverer to retry. That retry starts the two minutes again. If the inbox is switched off or no deliverer is running, the Retry is typed directly, as a first send would be, and only after the spool copy is cancelled, so a returning deliverer does not type it too. The deliverer ignores the deadline once a command has been retried, so the hub withdraws it, still untyped, when those two minutes pass. The app says Not sent, with Retry, only when the spool says expired. After two minutes it asks again, without Retry, so an expired command does not stay "Queued". A command the spool has accepted, sent, stuck or left unconfirmed keeps that word; two minutes without an echo is not "Not sent". A command typed directly still says it was sent but not seen.

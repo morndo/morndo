@@ -1,0 +1,14 @@
+{
+  "name": "@morndo/node-ops",
+  "version": "0.0.0",
+  "private": true,
+  "description": "What a machine does to its own tmux and ~/.claude: panes, terminal frames and keys, the session registry, transcript bytes, the pane lock and file confinement. Used by the hub's local adapters and the node agent.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@morndo/domain": "0.0.0",
+    "@morndo/protocol": "0.0.0"
+  }
+}

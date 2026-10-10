@@ -1,0 +1,162 @@
+// Numbered schema migrations for the hub's SQLite database (ADR-0008, A1). Design reference, not code: Signal-Desktop
+// ts/sql/migrations/index.node.ts. The schema version is SQLite's user_version; every pending migration runs in one
+// transaction that also sets the version, so a failure leaves the database as it was; a database written by a newer
+// hub is refused rather than guessed at.
+import type Database from "better-sqlite3";
+import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
+
+export type { Migration };
+
+export class DatabaseFromFuture extends Error {
+  readonly found: number;
+  readonly known: number;
+  constructor(found: number, known: number) {
+    super(`The database is at schema version ${found}, but this hub knows migrations only up to ${known}.`);
+    this.name = "DatabaseFromFuture";
+    this.found = found;
+    this.known = known;
+  }
+}
+
+const hasColumn = (db: Database.Database, table: string, column: string) =>
+  (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some(c => c.name === column);
+
+// Each migration can run on a database that already has its change (a hub from before numbered migrations created
+// these tables itself and left user_version at 0), so it checks before it changes anything.
+export const MIGRATIONS: readonly Migration[] = [
+  {
+    version: 1,
+    name: "the schema of increment 1 (Access, audit, decisions)",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS pairing_tokens (
+        id TEXT PRIMARY KEY, secret_hash TEXT UNIQUE NOT NULL, issued_by TEXT NOT NULL,
+        issued_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, redeemed_at INTEGER, redeemed_by TEXT);
+      CREATE TABLE IF NOT EXISTS endpoints (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, credential_id TEXT UNIQUE NOT NULL, public_key BLOB NOT NULL,
+        counter INTEGER NOT NULL, transports TEXT NOT NULL, paired_at INTEGER NOT NULL, paired_with TEXT NOT NULL,
+        last_seen_at INTEGER, revoked_at INTEGER);
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL REFERENCES endpoints(id), started_at INTEGER NOT NULL,
+        last_seen_at INTEGER NOT NULL, ended_at INTEGER, end_reason TEXT);
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS audit (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, type TEXT NOT NULL, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS decisions (escalation_id TEXT PRIMARY KEY, at INTEGER NOT NULL, body TEXT NOT NULL);
+    `),
+  },
+  {
+    version: 2,
+    name: "sessions.verified_at: a session's last user verification (ADR-0006, AC7)",
+    up: db => { if (!hasColumn(db, "sessions", "verified_at")) db.exec("ALTER TABLE sessions ADD COLUMN verified_at INTEGER"); },
+  },
+  {
+    version: 3,
+    name: "sends: each request id typed at most once, across restarts (ADR-0008 phase C, S5)",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS sends (
+      key TEXT PRIMARY KEY, state TEXT NOT NULL CHECK (state IN ('started', 'done')), outcome TEXT, at INTEGER NOT NULL)`),
+  },
+  {
+    version: 4,
+    name: "uploads: the images the principal pasted, attachable after a restart (ADR-0008 phase C, S2)",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS uploads (
+      id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, path TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, at INTEGER NOT NULL)`),
+  },
+  {
+    version: 5,
+    name: "read marks and mute per conversation, on the hub (ADR-0008 phase D, O7)",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS read_marks (conversation TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS conversation_prefs (conversation TEXT PRIMARY KEY, muted INTEGER NOT NULL DEFAULT 0);
+    `),
+  },
+  {
+    version: 6,
+    name: "a code on pairing tokens issued from an Endpoint, and Link requests (ADR-0008 phase E, AC10, AC11)",
+    up: db => {
+      if (!hasColumn(db, "pairing_tokens", "code")) db.exec("ALTER TABLE pairing_tokens ADD COLUMN code TEXT");
+      db.exec(`CREATE TABLE IF NOT EXISTS link_requests (
+        id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, token_secret_hash TEXT NOT NULL, code TEXT NOT NULL,
+        created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, state TEXT NOT NULL, requester TEXT NOT NULL,
+        token_id TEXT, decided_by TEXT, pinned TEXT, proof TEXT)`);
+    },
+  },
+  {
+    version: 7,
+    name: "one push subscription per Endpoint (ADR-0008 phase F, N4)",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint_id TEXT PRIMARY KEY, url TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, at INTEGER NOT NULL)`),
+  },
+  {
+    version: 8,
+    name: "sends.typed_at: when the node typed it, on its own clock, for matching the echo (fleet core §3.1)",
+    up: db => { if (!hasColumn(db, "sends", "typed_at")) db.exec("ALTER TABLE sends ADD COLUMN typed_at INTEGER"); },
+  },
+  {
+    version: 9,
+    name: "ask_first_seen: when an ask without a message was first seen, so its answer key survives a hub restart",
+    up: db => db.exec("CREATE TABLE IF NOT EXISTS ask_first_seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL)"),
+  },
+  {
+    version: 10,
+    name: "sends.node_store: the agent database a send in doubt went to, so a repeat can tell a lost key from a send never started (fleet core §3.1)",
+    up: db => { if (!hasColumn(db, "sends", "node_store")) db.exec("ALTER TABLE sends ADD COLUMN node_store TEXT"); },
+  },
+  {
+    version: 11,
+    name: "sends.worker_id and sends.request: an escalation answer in doubt keeps the worker it went to and the request that sent it, so its repeat asks that node (fleet core §3.1)",
+    up: db => {
+      if (!hasColumn(db, "sends", "worker_id")) db.exec("ALTER TABLE sends ADD COLUMN worker_id TEXT");
+      if (!hasColumn(db, "sends", "request")) db.exec("ALTER TABLE sends ADD COLUMN request TEXT");
+      db.exec("CREATE INDEX IF NOT EXISTS sends_request ON sends (request)");
+    },
+  },
+  {
+    version: 12,
+    name: "sends.node_store_seq: the store sequence a send or an answer in doubt saw from its store, so a repeat can tell that store's database put back from an older copy (fleet core §3.1, §5.3)",
+    up: db => { if (!hasColumn(db, "sends", "node_store_seq")) db.exec("ALTER TABLE sends ADD COLUMN node_store_seq INTEGER"); },
+  },
+  {
+    version: 13,
+    name: "the board (ADR-0015): tasks, their events with provenance, and the agent tokens the manager and the lanes change it with",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS board_tasks (
+        key TEXT PRIMARY KEY, n INTEGER UNIQUE NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL,
+        assignee TEXT, priority TEXT NOT NULL, blocked_reason TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        created_by TEXT NOT NULL, rev INTEGER NOT NULL, done_at INTEGER, comments INTEGER NOT NULL DEFAULT 0);
+      CREATE INDEX IF NOT EXISTS board_tasks_status ON board_tasks (status, assignee);
+      CREATE TABLE IF NOT EXISTS board_events (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, rev INTEGER NOT NULL, at INTEGER NOT NULL, actor TEXT NOT NULL, change TEXT NOT NULL,
+        UNIQUE (key, rev));
+      CREATE TABLE IF NOT EXISTS agent_tokens (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, secret_hash TEXT UNIQUE NOT NULL,
+        created_at INTEGER NOT NULL, last_used_at INTEGER, revoked_at INTEGER);
+    `),
+  },
+  {
+    version: 14,
+    name: "usage (ADR-0016): the latest state of each connected account, as the status lines reported it",
+    up: db => db.exec("CREATE TABLE IF NOT EXISTS usage_accounts (account TEXT PRIMARY KEY, body TEXT NOT NULL, reported_at INTEGER NOT NULL)"),
+  },
+  {
+    version: 15,
+    name: "answers waiting in the manager's inbox, one row per inbox message (ADR-0010; code review B7)",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS pending_answers (
+      key TEXT PRIMARY KEY, escalation_id TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL)`),
+  },
+  {
+    version: 16,
+    name: "one board comment per job (ADR-0017): the job id is the idempotency key, so a replayed ev.job does not comment again",
+    up: db => db.exec("CREATE TABLE IF NOT EXISTS job_notices (id TEXT PRIMARY KEY, result TEXT NOT NULL)"),
+  },
+  {
+    version: 17,
+    name: "a board result waits until the fleet acknowledges it (ADR-0017)",
+    up: db => { if (!hasColumn(db, "job_notices", "acked")) db.exec("ALTER TABLE job_notices ADD COLUMN acked INTEGER NOT NULL DEFAULT 0"); },
+  },
+];
+
+// Runs every migration newer than the database's user_version, in order, in one IMMEDIATE transaction that ends by
+// setting user_version to the newest one. Throws DatabaseFromFuture, changing nothing, if the database is newer.
+export function migrate(db: Database.Database, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {
+  return runMigrations(db, migrations, (found, known) => new DatabaseFromFuture(found, known));
+}

@@ -1,0 +1,117 @@
+// Usage on the hub (ADR-0016): a session's status-line JSON posted under an agent token, kept per account (U1, U2),
+// pushed to every feed when what is shown changed, read back by the principal, and there again after a restart of
+// the service over the same store. Real server on a random port, fake passkeys, synthetic data only.
+import type { WebSocket } from "ws";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
+import { frameText } from "./http-crash-fixture.ts";
+import { UsageService } from "../src/application/usage-service.ts";
+
+let hub: InProcessHub;
+let now: number;
+let workerToken: string;
+const HOUR = 3_600_000;
+type Body = Record<string, unknown>;
+
+// A status line's JSON as Claude Code gives it (code.claude.com/docs/en/statusline): resets_at in epoch seconds, and
+// much the hub doesn't read.
+const statusLine = (o: { session?: string; five?: number | null; week?: number | null; ctx?: number; spend?: boolean } = {}) => ({
+  cwd: "/w", session_id: o.session ?? "s1", model: { id: "claude-opus-5-5", display_name: "Opus" }, version: "2.1.295",
+  cost: { total_cost_usd: 0.1 }, context_window: { used_percentage: o.ctx ?? 8, remaining_percentage: 92 },
+  ...(o.five === null && o.week === null ? {} : {
+    rate_limits: {
+      ...(o.five === null ? {} : { five_hour: { used_percentage: o.five ?? 23.5, resets_at: Math.floor((now + 2 * HOUR) / 1000) } }),
+      ...(o.week === null ? {} : { seven_day: { used_percentage: o.week ?? 41.2, resets_at: Math.floor((now + 72 * HOUR) / 1000) } }),
+      ...(o.spend ? { spend_limit: { used_percentage: 62.8, resets_at: Math.floor((now + 500 * HOUR) / 1000), used_usd: 314.12, limit_usd: 500, period: "monthly" } } : {}),
+    },
+  }),
+});
+const post = (body: unknown, account?: string, lane = "builder", token = workerToken) => fetch(`${hub.base}/api/agent/usage`, {
+  method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": lane, ...(account ? { "x-morndo-account": account } : {}) }, body: JSON.stringify(body),
+});
+const json = async (r: Response) => (await r.json()) as Body;
+function frames(ws: WebSocket) {
+  const seen: Record<string, unknown>[] = [];
+  const waiters: { t: string; resolve: (m: Record<string, unknown>) => void }[] = [];
+  ws.on("message", d => { const m = JSON.parse(frameText(d)) as Record<string, unknown>; seen.push(m); const i = waiters.findIndex(w => w.t === m.t); if (i !== -1) { waiters[i]?.resolve(m); waiters.splice(i, 1); } });
+  const next = (t: string, from = seen.length) => new Promise<Record<string, unknown>>((resolve, reject) => {
+    const had = seen.slice(from).find(m => m.t === t);
+    if (had) return resolve(had);
+    waiters.push({ t, resolve });
+    setTimeout(() => reject(new Error(`no ${t} frame; seen ${JSON.stringify(seen.map(m => m.t))}`)), 3000);
+  });
+  return { seen, next };
+}
+
+beforeEach(async () => {
+  now = Date.now();
+  hub = await startInProcessHub({ now: () => now });
+  workerToken = hub.agents.issue("lanes", "worker").secret;
+});
+afterEach(async () => { await hub.close(); });
+
+describe("reports under an agent token (U1)", () => {
+  it("a status line's JSON becomes the account's windows, in ms, with the session, its lane and its model", async () => {
+    const r = await post(statusLine({ spend: true }), "max-1");
+    expect(r.status).toBe(200);
+    const a = (await json(r)).account as Body;
+    expect(a).toMatchObject({ account: "max-1", reportedAt: now, fiveHour: { usedPercentage: 23.5 }, sevenDay: { usedPercentage: 41.2 }, spend: { usedUsd: 314.12, limitUsd: 500, period: "monthly" } });
+    expect((a.fiveHour as Body).resetsAt).toBe(Math.floor((now + 2 * HOUR) / 1000) * 1000);
+    expect(a.sessions).toEqual([{ sessionId: "s1", lane: "builder", model: "Opus", contextUsed: 8, at: now }]);
+  });
+  it("no account header is the default account; a bad name is refused; no token is refused; a bad body is 400", async () => {
+    expect(((await json(await post(statusLine()))).account as Body).account).toBe("default");
+    expect(await json(await post(statusLine(), "bad name"))).toEqual({ error: "bad_account" });
+    expect((await fetch(`${hub.base}/api/agent/usage`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(401);
+    expect((await post({ no_session: true }, "max-1")).status).toBe(400);
+  });
+  it("reports before the first reply carry no windows and never clear what another session reported (U2)", async () => {
+    await post(statusLine({ session: "s1" }), "max-1");
+    now += 1000;
+    const a = (await json(await post(statusLine({ session: "s2", five: null, week: null }), "max-1"))).account as Body;
+    expect(a).toMatchObject({ fiveHour: { usedPercentage: 23.5 }, sevenDay: { usedPercentage: 41.2 } });
+    expect((a.sessions as Body[]).map(s => s.sessionId)).toEqual(["s2", "s1"]);
+  });
+  it("the manager's token reports as the manager's lane", async () => {
+    const manager = hub.agents.issue("manager", "manager").secret;
+    const a = (await json(await post(statusLine(), "max-1", "", manager))).account as Body;
+    expect((a.sessions as Body[])[0]?.lane).toBe("manager");
+  });
+});
+
+describe("the principal's side and the feed", () => {
+  it("GET /api/usage lists every account, sorted, with past resets dropped and only fresh sessions", async () => {
+    await post(statusLine({ session: "a1" }), "max-2");
+    await post(statusLine({ session: "b1", five: 92 }), "max-1");
+    const cookie = await hub.cookie();
+    const v = await json(await fetch(`${hub.base}/api/usage`, { headers: { cookie: `__Host-morndo=${cookie}` } }));
+    expect((v.accounts as Body[]).map(a => a.account)).toEqual(["max-1", "max-2"]);
+    now += 3 * HOUR;                                                   // the 5-hour windows reset 2 h out; sessions went quiet
+    const later = await json(await fetch(`${hub.base}/api/usage`, { headers: { cookie: `__Host-morndo=${cookie}` } }));
+    expect((later.accounts as Body[])[0]).toMatchObject({ fiveHour: null, sevenDay: { usedPercentage: 41.2 }, sessions: [] });
+    expect((await fetch(`${hub.base}/api/usage`)).status).toBe(401);
+  });
+  it("every feed gets the accounts after its hello, and again only when a report changed what is shown", async () => {
+    const cookie = await hub.cookie();
+    const ws = await hub.socket("/api/feed", cookie);
+    const f = frames(ws);
+    ws.send(JSON.stringify({ t: "hello" }));
+    expect(await f.next("usage")).toMatchObject({ t: "usage", accounts: [] });
+    let mark = f.seen.length;
+    expect((await post(statusLine(), "max-1")).status).toBe(200);
+    expect(((await f.next("usage", mark)).accounts as Body[])[0]).toMatchObject({ account: "max-1" });
+    mark = f.seen.length;
+    expect((await post(statusLine(), "max-1")).status).toBe(200);     // the same again: nothing shown changed
+    await new Promise(r => setTimeout(r, 300));
+    expect(f.seen.slice(mark).filter(m => m.t === "usage")).toEqual([]);
+    expect((await post(statusLine({ five: 30 }), "max-1")).status).toBe(200);
+    const changed = ((await f.next("usage", mark)).accounts as Body[])[0] as Body;
+    expect((changed.fiveHour as Body).usedPercentage).toBe(30);
+    ws.close();
+  });
+  it("the accounts are there again after the service restarts over the same store", async () => {
+    await post(statusLine({ session: "s1", spend: true }), "max-1");
+    const again = new UsageService({ store: hub.store, now: () => now });
+    expect(again.view().accounts.map(a => ({ account: a.account, five: a.fiveHour?.usedPercentage, spend: a.spend?.usedUsd, sessions: a.sessions.length }))).toEqual([{ account: "max-1", five: 23.5, spend: 314.12, sessions: 1 }]);
+  });
+});

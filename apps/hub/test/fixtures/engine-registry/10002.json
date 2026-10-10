@@ -1,0 +1,10 @@
+{
+  "pid": 10002,
+  "name": "lane-a",
+  "status": "idle",
+  "engine": "cursor",
+  "model": "example-model",
+  "title": "cursor:example-model",
+  "startedAt": 1700000001000,
+  "updatedAt": 1700003601000
+}

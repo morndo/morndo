@@ -1,0 +1,270 @@
+[
+  {
+    "id": "anthropic",
+    "label": "Anthropic",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.anthropic.com" }],
+    "models": { "source": "endpoint", "url": "https://api.anthropic.com/v1/models", "shape": "anthropic-list" },
+    "family": "anthropic",
+    "keyShapes": ["sk-ant-"],
+    "spend": ["token-price", "manual"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "sonnet-5.5@high" },
+    "idPatterns": { "sonnet-5.5": "claude-sonnet-5-5(-[0-9]{8})?" },
+    "isolation": "rules",
+    "terms": {
+      "revision": "2025-06-17",
+      "summary": "May not train models on Customer Content from Services.",
+      "sources": ["https://www.anthropic.com/legal/commercial-terms"]
+    }
+  },
+  {
+    "id": "openai",
+    "label": "OpenAI",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "codex", "dialect": "openai-responses", "baseUrl": "https://api.openai.com" }],
+    "models": { "source": "endpoint", "url": "https://api.openai.com/v1/models", "shape": "openai-list" },
+    "family": "openai",
+    "keyShapes": ["sk-"],
+    "spend": ["token-price", "manual"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "gpt-6-astra@high" },
+    "isolation": "rules",
+    "terms": {
+      "revision": "2023-03-01",
+      "summary": "API data is not used to train or improve OpenAI models since 2023-03-01; abuse logs up to 30 days.",
+      "sources": ["https://developers.openai.com/api/docs/guides/your-data"]
+    }
+  },
+  {
+    "id": "deepseek",
+    "label": "DeepSeek",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [
+      { "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.deepseek.com/anthropic" },
+      { "runtime": "codex", "dialect": "openai-responses", "baseUrl": "https://api.deepseek.com/" }
+    ],
+    "models": { "source": "endpoint", "url": "https://api.deepseek.com/models", "shape": "openai-list" },
+    "family": "deepseek",
+    "keyShapes": ["sk-"],
+    "spend": ["balance", "token-price"],
+    "prices": [],
+    "balance": { "endpoint": "https://api.deepseek.com/user/balance", "field": "balance_infos[].total_balance" },
+    "defaultPicks": { "plan": "deepseek-v4-pro@max", "*": "deepseek-v4-pro@high" },
+    "isolation": "os",
+    "terms": {
+      "revision": "2026-04-29",
+      "summary": "Stored in the PRC; may be used for training; opt-out with no API switch.",
+      "sources": ["https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html"]
+    }
+  },
+  {
+    "id": "moonshot",
+    "label": "Moonshot",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.moonshot.ai/anthropic" }],
+    "models": { "source": "endpoint", "url": "https://api.moonshot.ai/v1/models", "shape": "openai-list" },
+    "family": "moonshot",
+    "keyShapes": [],
+    "spend": ["token-price"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "kimi-k3" },
+    "isolation": "os",
+    "terms": {
+      "revision": "2026-10-10",
+      "summary": "May train unless otherwise expressly agreed in writing.",
+      "sources": ["https://platform.kimi.ai/docs/agreement/modeluse"]
+    }
+  },
+  {
+    "id": "openrouter",
+    "label": "OpenRouter",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://openrouter.ai/api" }],
+    "models": { "source": "endpoint", "url": "https://openrouter.ai/api/v1/models", "shape": "openai-list" },
+    "family": "openrouter",
+    "keyShapes": ["sk-or-v1-"],
+    "spend": ["token-price", "manual"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "openrouter/auto" },
+    "idPatterns": { "openrouter/auto": "*" },
+    "isolation": "os",
+    "terms": {
+      "revision": "2026-10-10",
+      "summary": "Keeps no prompts unless you opt in; zero data retention per request or account-wide.",
+      "sources": ["https://openrouter.ai/docs/guides/features/zdr"]
+    }
+  },
+  {
+    "id": "custom-anthropic",
+    "label": "Custom Anthropic",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": null }],
+    "models": { "source": "ask" },
+    "family": "custom",
+    "keyShapes": ["sk-ant-"],
+    "spend": ["manual"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "ask" },
+    "idPatterns": { "ask": "*" },
+    "isolation": "os",
+    "terms": {
+      "revision": "unknown",
+      "summary": "Unknown until the principal names the endpoint.",
+      "sources": []
+    }
+  },
+  {
+    "id": "custom-openai",
+    "label": "Custom OpenAI",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "codex", "dialect": "openai-responses", "baseUrl": null }],
+    "models": { "source": "ask" },
+    "family": "custom",
+    "keyShapes": ["sk-"],
+    "spend": ["manual"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "ask" },
+    "idPatterns": { "ask": "*" },
+    "isolation": "os",
+    "terms": {
+      "revision": "unknown",
+      "summary": "Unknown until the principal names the endpoint.",
+      "sources": []
+    }
+  },
+  {
+    "id": "claude",
+    "label": "Claude",
+    "custody": "morndo",
+    "kinds": ["subscription"],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": null }],
+    "models": { "source": "engine-layer" },
+    "family": "anthropic",
+    "keyShapes": [],
+    "spend": ["provider"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "sonnet-5.5@high" },
+    "idPatterns": { "sonnet-5.5": "claude-sonnet-5-5(-[0-9]{8})?" },
+    "isolation": "rules",
+    "terms": {
+      "revision": "2026-10-10",
+      "summary": "The vendor's terms for the subscription plan.",
+      "sources": ["https://www.anthropic.com/legal/commercial-terms"]
+    }
+  },
+  {
+    "id": "codex",
+    "label": "Codex",
+    "custody": "morndo",
+    "kinds": ["subscription"],
+    "runtimes": [{ "runtime": "codex", "dialect": "openai-responses", "baseUrl": null }],
+    "models": { "source": "engine-layer" },
+    "family": "openai",
+    "keyShapes": [],
+    "spend": ["provider"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "gpt-6-astra@high" },
+    "isolation": "none",
+    "terms": {
+      "revision": "2026-10-10",
+      "summary": "The vendor's terms for the subscription plan. Isolation stays none until the runtime's read-deny is verified.",
+      "sources": ["https://developers.openai.com/api/docs/guides/your-data"]
+    }
+  },
+  {
+    "id": "cursor",
+    "label": "Cursor",
+    "custody": "morndo",
+    "kinds": ["subscription"],
+    "runtimes": [{ "runtime": "cursor", "dialect": "cursor", "baseUrl": null }],
+    "models": { "source": "engine-layer" },
+    "family": "cursor",
+    "keyShapes": [],
+    "spend": ["provider"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "auto" },
+    "isolation": "none",
+    "terms": {
+      "revision": "2026-10-10",
+      "summary": "Privacy Mode: code is not used for training. Off: codebase and prompts may be stored and used to train.",
+      "sources": ["https://cursor.com/terms-of-service", "https://cursor.com/data-use"]
+    }
+  },
+  {
+    "id": "studio",
+    "label": "Studio",
+    "custody": "engine-layer",
+    "kinds": ["subscription"],
+    "runtimes": [{ "runtime": "studio", "dialect": "studio", "baseUrl": null }],
+    "models": { "source": "engine-layer" },
+    "family": "studio",
+    "keyShapes": [],
+    "spend": [],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "chatgpt" },
+    "isolation": null,
+    "terms": {
+      "revision": "unknown",
+      "summary": "Unknown until a source on this provider's own site is recorded.",
+      "sources": []
+    }
+  },
+  {
+    "id": "cursor-cloud",
+    "label": "Cursor Cloud",
+    "custody": "engine-layer",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "cursor", "dialect": "cursor", "baseUrl": null }],
+    "models": { "source": "engine-layer" },
+    "family": "cursor",
+    "keyShapes": [],
+    "spend": ["provider"],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "auto" },
+    "isolation": null,
+    "terms": {
+      "revision": "2026-10-10",
+      "summary": "Privacy Mode: code is not used for training. Off: codebase and prompts may be stored and used to train.",
+      "sources": ["https://cursor.com/terms-of-service", "https://cursor.com/data-use"]
+    }
+  },
+  {
+    "id": "agy",
+    "label": "Antigravity",
+    "custody": "engine-layer",
+    "kinds": ["subscription"],
+    "runtimes": [{ "runtime": "agy", "dialect": "agy", "baseUrl": null }],
+    "models": { "source": "engine-layer" },
+    "family": "agy",
+    "keyShapes": [],
+    "spend": [],
+    "prices": [],
+    "balance": null,
+    "defaultPicks": { "*": "agy" },
+    "isolation": null,
+    "terms": {
+      "revision": "2026-10-10",
+      "summary": "Records interactions and may use them to improve products unless that setting is changed.",
+      "sources": ["https://antigravity.google/terms/"]
+    }
+  }
+]

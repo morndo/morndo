@@ -1,0 +1,25 @@
+{
+  "name": "@morndo/node-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "bin": {
+    "morndo-node": "./src/main.ts",
+    "morndo-job": "./src/job-main.ts"
+  },
+  "dependencies": {
+    "@morndo/domain": "0.0.0",
+    "@morndo/node-ops": "0.0.0",
+    "@morndo/protocol": "0.0.0",
+    "@morndo/service-kit": "0.0.0",
+    "better-sqlite3": "^13.0.3",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/ws": "^8.18.2"
+  }
+}

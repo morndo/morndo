@@ -1,0 +1,44 @@
+title = "Morndo"
+# Extends the built-in rules (gitleaks 8.30.1). Each allowlist is one synthetic
+# finding: that path and that rule, both required. A different rule in the same
+# file, or the same rule in another file, still fails.
+# https://github.com/gitleaks/gitleaks/blob/v8.30.1/README.md
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "RFC 6455 example websocket key in a hub test"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(?:^|/)apps/hub/test/http-upgrade-bad-url\.test\.ts$''']
+
+[[allowlists]]
+description = "Synthetic fleet-key placeholder in a log redaction test"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(?:^|/)apps/hub/test/log-agreement\.test\.ts$''']
+
+[[allowlists]]
+description = "Synthetic fleet-key placeholder in a node-agent config test"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(?:^|/)apps/node-agent/test/config\.test\.ts$''']
+
+[[allowlists]]
+description = "The plan's copy of that same placeholder"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''(?:^|/)docs/design/fleet-core/plan/03-agent\.md$''']
+
+[[allowlists]]
+description = "RFC 8292 example JWT in a web push test"
+condition = "AND"
+targetRules = ["jwt"]
+paths = ['''(?:^|/)apps/hub/test/webpush\.test\.ts$''']
+
+[[allowlists]]
+description = "PEM armor around a sentinel string in a redaction test"
+condition = "AND"
+targetRules = ["private-key"]
+paths = ['''(?:^|/)packages/domain/test/jobs\.test\.ts$''']

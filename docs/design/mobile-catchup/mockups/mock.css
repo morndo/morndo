@@ -1,0 +1,99 @@
+/* Shared styles for the mobile catch-up mockups (design phase, 2026-10-03). Static HTML at 390 px, synthetic data.
+   Colours are the brand's tokens only (packages/brand, palette "Ink"): monochrome, colour for status alone.
+   Type: Outfit (the wordmark's font) for headlines and numbers, Lato (the app's font) for reading. */
+@import url("../../../../packages/brand/assets/tokens/morndo-tokens.css");
+
+@font-face { font-family: "Outfit"; src: url("../../../../packages/brand/source/fonts/Outfit%5Bwght%5D.ttf") format("truetype"); font-weight: 100 900; font-display: block; }
+@font-face { font-family: "Lato"; src: url("../../../../node_modules/@fontsource/lato/files/lato-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Lato"; src: url("../../../../node_modules/@fontsource/lato/files/lato-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Lato"; src: url("../../../../node_modules/@fontsource/lato/files/lato-latin-900-normal.woff2") format("woff2"); font-weight: 900; font-display: block; }
+
+:root {
+  --bg: var(--morndo-bg); --surface: var(--morndo-surface); --raised: var(--morndo-raised);
+  --line: var(--morndo-divider); --edge: var(--morndo-border);
+  --text: var(--morndo-text); --muted: var(--morndo-text-muted);
+  --ink: var(--morndo-ink); --ink-fg: var(--morndo-ink-fg); --fill: var(--morndo-fill);
+  --ok: var(--morndo-success); --ok-text: var(--morndo-success-text); --ok-soft: var(--morndo-success-subtle);
+  --warn: var(--morndo-warning); --warn-text: var(--morndo-warning-text); --warn-soft: var(--morndo-warning-subtle);
+  --bad: var(--morndo-danger); --bad-text: var(--morndo-danger-text); --bad-soft: var(--morndo-danger-subtle);
+  --display: "Outfit", "Lato", sans-serif; --body: "Lato", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --shadow: 0 1px 0 rgb(0 0 0 / 0.02), 0 14px 34px -18px rgb(27 24 19 / 0.28);
+}
+@media (prefers-color-scheme: dark) { :root { --shadow: 0 0 0 1px var(--line), 0 20px 40px -20px rgb(0 0 0 / 0.8); } }
+
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body {
+  width: 390px; min-height: 844px; margin: 0 auto; background: var(--bg); color: var(--text);
+  font: 400 15px/22px var(--body); -webkit-font-smoothing: antialiased; overflow: hidden; position: relative;
+  display: flex; flex-direction: column;
+}
+
+/* ---- the phone's own bar */
+.statusbar { height: 47px; flex: none; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 30px 9px; font: 700 15px/1 var(--body); letter-spacing: 0.01em; }
+.statusbar .right { display: flex; align-items: center; gap: 6px; }
+.statusbar svg { display: block; }
+.homebar { height: 30px; flex: none; display: grid; place-items: center; }
+.homebar i { width: 134px; height: 5px; border-radius: 3px; background: var(--text); opacity: 0.85; }
+
+/* ---- small parts */
+.kicker { font: 700 11px/16px var(--body); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 12px; background: var(--fill); color: var(--text); font: 700 12px/1 var(--body); white-space: nowrap; }
+.chip.ok { background: var(--ok-soft); color: var(--ok-text); }
+.chip.warn { background: var(--warn-soft); color: var(--warn-text); }
+.chip.bad { background: var(--bad-soft); color: var(--bad-text); }
+.chip svg { flex: none; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
+.dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); } .dot.bad { background: var(--bad); }
+.avatar { width: 36px; height: 36px; border-radius: 10px; background: var(--ink); color: var(--ink-fg); display: grid; place-items: center; font: 700 15px/1 var(--display); flex: none; }
+.avatar.sm { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+.avatar.quiet { background: var(--fill); color: var(--text); }
+.muted { color: var(--muted); }
+.num { font-family: var(--display); font-feature-settings: "tnum"; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 50px; padding: 0 18px; border-radius: 14px; border: 1px solid var(--edge); background: transparent; color: var(--text); font: 700 16px/1 var(--body); }
+.btn.primary { background: var(--ink); color: var(--ink-fg); border-color: var(--ink); }
+.btn.small { height: 36px; padding: 0 13px; border-radius: 10px; font-size: 14px; }
+.btn.block { width: 100%; }
+.link { color: var(--text); text-decoration: underline; text-underline-offset: 3px; font-weight: 700; }
+
+/* ---- catch-up frame */
+.cu-top { flex: none; padding: 6px 20px 12px; }
+.cu-top .row { display: flex; align-items: center; justify-content: space-between; height: 40px; }
+.cu-top .back { width: 40px; height: 40px; margin-left: -10px; display: grid; place-items: center; }
+.cu-top .count { font: 600 20px/1 var(--display); letter-spacing: -0.01em; }
+.cu-top .count span { color: var(--muted); font: 400 13px/1 var(--body); margin-left: 8px; letter-spacing: 0; }
+.cu-top .undo { font: 700 14px/1 var(--body); color: var(--muted); }
+.segments { display: flex; gap: 4px; margin-top: 8px; }
+.segments i { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+.segments i.done { background: var(--muted); opacity: 0.55; }
+.segments i.now { background: var(--ink); }
+.segments i.decide { box-shadow: inset 0 0 0 1px var(--edge); background: transparent; }
+.segments i.decide.now, .segments i.decide.done { box-shadow: none; }
+.segments i.decide.now { background: var(--ink); } .segments i.decide.done { background: var(--muted); opacity: 0.55; }
+
+.stack { flex: 1; min-height: 0; position: relative; padding: 0 14px; }
+.stack::before, .stack::after { content: ""; position: absolute; left: 30px; right: 30px; height: 30px; border-radius: 26px; background: var(--surface); border: 1px solid var(--line); }
+.stack::before { bottom: -16px; left: 44px; right: 44px; opacity: 0.5; }
+.stack::after { bottom: -8px; opacity: 0.8; }
+.card { position: relative; z-index: 1; height: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 28px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; }
+.card-head { padding: 16px 20px 13px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }
+.card-head .who { flex: 1; min-width: 0; }
+.card-head .who b { display: block; font: 700 15px/20px var(--body); }
+.card-head .who span { display: block; font: 400 13px/18px var(--body); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.card-body { flex: 1; min-height: 0; padding: 18px 20px 0; overflow: hidden; }
+
+.actions { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 22px 14px 6px; }
+.hint { flex: none; text-align: center; font: 400 12px/16px var(--body); color: var(--muted); padding: 2px 20px 0; }
+
+/* ---- dashboards */
+.dash-top { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 20px 0; height: 48px; }
+.dash-top .mark { width: 26px; height: 26px; border-radius: 7px; color: var(--ink); flex: none; }
+.dash-top b { font: 600 19px/1 var(--display); letter-spacing: 0.02em; flex: 1; }
+.dash-top .live { display: inline-flex; align-items: center; gap: 6px; font: 700 12px/1 var(--body); color: var(--ok-text); background: var(--ok-soft); height: 24px; padding: 0 9px; border-radius: 12px; }
+.scroll { flex: 1; min-height: 0; overflow: hidden; padding: 0 20px; }
+.tabbar { flex: none; display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line); background: var(--surface); padding: 8px 10px 0; }
+.tabbar a { display: grid; justify-items: center; gap: 4px; padding: 4px 0 2px; font: 700 11px/14px var(--body); color: var(--muted); text-decoration: none; position: relative; }
+.tabbar a.on { color: var(--text); }
+.tabbar a.on::before { content: ""; position: absolute; top: -9px; width: 34px; height: 3px; border-radius: 2px; background: var(--ink); }
+.tabbar .badge { position: absolute; top: -2px; left: calc(50% + 6px); min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--ink); color: var(--ink-fg); font: 700 11px/18px var(--body); text-align: center; }

@@ -1,0 +1,29 @@
+# Secrets: bot tokens, API keys, logins. Never commit them.
+.env
+*.env
+.env.*
+*.pem
+*.key
+
+# Trial sandboxes and raw trial logs live outside this repo
+trial/
+
+# Build and dependency output
+node_modules
+dist/
+build/
+target/
+coverage/
+.venv/
+__pycache__/
+
+# Local noise
+*.log
+.DS_Store
+
+# SvelteKit generated files
+.svelte-kit/
+
+# Local agent workspaces: git worktrees per lane, and the subagent-driven-development ledger
+.worktrees/
+.superpowers/

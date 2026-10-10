@@ -1,0 +1,36 @@
+{
+  "name": "morndo",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24.12"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/brand && tsc -p apps/hub && tsc -p apps/board-cli && tsc -p apps/connections && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && npm run check -w @morndo/web",
+    "build": "npm run build -w @morndo/web",
+    "check:build": "npm run check:build -w @morndo/web --",
+    "hub": "node apps/hub/src/main.ts",
+    "fleet": "node apps/fleet/src/main.ts",
+    "e2e": "npm run build && npm run check:build && node e2e/web-endpoint.e2e.ts && node e2e/desktop.e2e.ts && node e2e/ink.e2e.ts && node e2e/signal.e2e.ts && node e2e/push.e2e.ts && node e2e/catchup.e2e.ts && node e2e/catchup-edges.e2e.ts && node e2e/horizon.e2e.ts && node e2e/readability.e2e.ts && node e2e/fleet-two-node.e2e.ts && node e2e/gallery.e2e.ts && node e2e/inbox.e2e.ts && node e2e/engines.e2e.ts && node e2e/board.e2e.ts && node e2e/home.e2e.ts && node e2e/phone-chat.e2e.ts",
+    "lint": "oxlint --format=stylish",
+    "e2e:engines": "npm run build && node e2e/engines.e2e.ts",
+    "e2e:board": "npm run build && node e2e/board.e2e.ts",
+    "e2e:home": "npm run build && node e2e/home.e2e.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "oxlint": "^1.86.0",
+    "oxlint-tsgolint": "^7.0.2003",
+    "playwright": "^1.63.0",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.3"
+  },
+  "allowScripts": {
+    "better-sqlite3": false
+  }
+}

@@ -1,0 +1,27 @@
+/* The board's controls (BoardView, TaskPanel), one set so they match: buttons, fields and labels in the desktop's look,
+   on the Ink tokens (desk-tokens.css): colour, radius and shadow from the token file, nothing of their own. Global on
+   purpose: both components use them. Focus is the page's own token ring (COLOR.md 3), never replaced. */
+.bd-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong); background: var(--main-bg); color: var(--text); font: 700 13px/20px var(--font);
+  cursor: pointer; white-space: nowrap; transition: background 0.1s, border-color 0.1s;
+}
+.bd-btn:hover:not(:disabled) { background: var(--hover); }
+/* Primary: ink, with ink-fg on it, darker under the pointer (COLOR.md 1). No shadow: a flat ink button is the brand's. */
+.bd-btn.primary { background: var(--send); border-color: transparent; color: var(--send-fg); }
+.bd-btn.primary:hover:not(:disabled) { background: var(--send-hover); }
+.bd-btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+.bd-btn.ghost:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.bd-btn.sm { height: 28px; padding: 0 10px; border-radius: var(--radius-sm); font-size: 12px; }
+.bd-btn.icon { width: 34px; padding: 0; }
+.bd-btn.icon.sm { width: 28px; }
+.bd-btn:disabled { opacity: 0.45; cursor: default; }
+.bd-in {
+  height: 34px; padding: 0 12px; border-radius: var(--radius-md); border: 1px solid var(--border-strong); background: var(--main-bg); color: var(--text);
+  font: 400 14px/20px var(--font); min-width: 0; transition: border-color 0.1s;
+}
+.bd-in::placeholder { color: var(--morndo-placeholder); }
+.bd-in:focus { border-color: var(--link); }
+textarea.bd-in { height: auto; padding: 7px 12px; resize: vertical; width: 100%; }
+.bd-in.title { font: 700 16px/22px var(--font); height: 40px; }
+.bd-label { font: 700 12px/16px var(--font); color: var(--muted); letter-spacing: 0.01em; }

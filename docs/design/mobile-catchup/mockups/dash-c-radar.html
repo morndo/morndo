@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>Morndo mockup: dashboard C, Radar (where your attention pays)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  .head { padding: 12px 0 2px; }
+  h1 { font: 600 27px/31px var(--display); letter-spacing: -0.02em; margin-top: 3px; }
+  .radar { position: relative; height: 318px; margin: 0 -20px; }
+  .radar .sweep { position: absolute; left: 50%; top: 158px; width: 304px; height: 304px; margin: -152px 0 0 -152px; border-radius: 50%;
+    background: conic-gradient(from 20deg, color-mix(in srgb, var(--ink) 13%, transparent), transparent 80deg); }
+  .radar svg { position: absolute; inset: 0; width: 390px; height: 318px; }
+  .ring { fill: none; stroke: var(--line); }
+  .ring.in { stroke: var(--edge); stroke-dasharray: 2 5; }
+  .rl { font: 700 9.5px var(--body); letter-spacing: 0.09em; fill: var(--muted); text-transform: uppercase; }
+  .lb { font: 700 12.5px var(--body); fill: var(--text); }
+  .lb.s { font-weight: 400; font-size: 11.5px; fill: var(--muted); }
+  .you { fill: var(--ink); } .yout { fill: var(--ink-fg); font: 700 11px var(--display); }
+  .p-bad { fill: var(--bad); } .p-warn { fill: var(--warn); } .p-ok { fill: var(--ok); } .p-ink { fill: var(--ink); }
+  .halo { fill: var(--bad); opacity: 0.16; }
+  .list { border-top: 1px solid var(--line); }
+  .row { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .row i { font: 600 17px/1 var(--display); font-style: normal; color: var(--muted); }
+  .row b { display: block; font: 700 14.5px/19px var(--body); }
+  .row span.d { display: block; font: 400 12.5px/17px var(--body); color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="statusbar"><span>9:44</span><span class="right">
+    <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".35"/></svg>
+    <svg width="27" height="13" viewBox="0 0 27 13" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="23" height="12" rx="3.5" opacity=".4"/><rect x="2" y="2" width="16" height="9" rx="2" fill="currentColor" stroke="none"/><rect x="25" y="4.5" width="1.5" height="4" rx=".75" fill="currentColor" stroke="none" opacity=".4"/></svg>
+  </span></div>
+
+  <div class="dash-top">
+    <svg class="mark" viewBox="0 0 48 48"><path fill="currentColor" fill-rule="evenodd" d="M0 0L48 0L48 48L0 48ZM8 26A16 16 0 0 1 40 26A16 16 0 0 1 8 26ZM0 27L48 27L48 33L0 33Z"/></svg>
+    <b>morndo</b>
+    <span class="live"><span class="dot ok"></span>Live</span>
+  </div>
+
+  <div class="scroll">
+    <div class="head">
+      <p class="kicker">9 things running · 3 carry risk</p>
+      <h1>Where your attention pays</h1>
+    </div>
+
+    <div class="radar" aria-label="Each dot is a piece of work. The closer to you, the more it needs you. Bigger means more is at stake.">
+      <span class="sweep"></span>
+      <svg viewBox="0 0 390 318">
+        <g transform="translate(20 0)">
+          <circle class="ring" cx="175" cy="158" r="152"/><circle class="ring" cx="175" cy="158" r="124"/><circle class="ring in" cx="175" cy="158" r="88"/>
+          <text class="rl" x="175" y="87" text-anchor="middle">needs you</text>
+          <text class="rl" x="175" y="49" text-anchor="middle">watch</text>
+          <text class="rl" x="175" y="21" text-anchor="middle">fine</text>
+          <circle class="you" cx="175" cy="158" r="19"/><text class="yout" x="175" y="162" text-anchor="middle">you</text>
+
+          <circle class="halo" cx="229" cy="120" r="27"/><circle class="p-bad" cx="229" cy="120" r="17"/>
+          <text class="lb" x="252" y="116">checkout</text><text class="lb s" x="252" y="131">ships 18:00</text>
+
+          <circle class="p-ink" cx="109" cy="134" r="10"/>
+          <text class="lb" x="93" y="131" text-anchor="end">old endpoint</text><text class="lb s" x="93" y="146" text-anchor="end">your call</text>
+
+          <circle class="p-warn" cx="139" cy="258" r="13"/>
+          <text class="lb" x="158" y="256">login page</text><text class="lb s" x="158" y="271">says done</text>
+
+          <circle class="p-warn" cx="225" cy="64" r="8"/>
+          <text class="lb s" x="238" y="68">limit 92%</text>
+
+          <circle class="p-warn" cx="77" cy="204" r="9"/>
+          <text class="lb s" x="77" y="228" text-anchor="middle">billing sync</text>
+
+          <circle class="p-ok" cx="264" cy="264" r="6"/><circle class="p-ok" cx="139" cy="25" r="6"/><circle class="p-ok" cx="35" cy="163" r="5"/><circle class="p-ok" cx="311" cy="182" r="6"/>
+        </g>
+      </svg>
+    </div>
+
+    <div class="list">
+      <div class="row"><i>1</i><div><b>Checkout ships at 18:00</b><span class="d">Production · live payments unchecked</span></div><span class="btn small">Get it checked</span></div>
+      <div class="row"><i>2</i><div><b>Old endpoint waits for you</b><span class="d">Blocks the reviewer · default Mon 09:00</span></div><span class="btn small">Decide</span></div>
+      <div class="row"><i>3</i><div><b>Login page says done</b><span class="d">Only the builder checked it, 5 h ago</span></div><span class="btn small">Open</span></div>
+    </div>
+  </div>
+
+  <nav class="tabbar">
+    <a class="on"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 14.5h18M5.5 14.5a5.5 5.5 0 0 1 11 0M11 4v2M4.3 6.8l1.4 1.4M17.7 6.8l-1.4 1.4M6 18.5h10"/></svg>Today</a>
+    <a><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="3" width="14" height="13" rx="3"/><path d="M7 19h8" stroke-linecap="round"/></svg>Catch up</a>
+    <a><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><circle cx="15.5" cy="9.5" r="2.2"/><path d="M2.5 18c.6-3 2.8-4.5 5.5-4.5s4.900 1.500 5.500 4.500M14 14c2.500-.3 4.600.9 5.500 3.500"/></svg>Agents</a>
+  </nav>
+  <div class="homebar" style="background:var(--surface)"><i></i></div>
+</body>
+</html>

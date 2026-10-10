@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>Morndo mockup: dashboard B, Morning paper (what got done, and which kind of done)</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  .mast { display: flex; align-items: baseline; justify-content: space-between; padding: 10px 0 8px; border-bottom: 3px double var(--text); font: 700 11px/16px var(--body); letter-spacing: 0.09em; text-transform: uppercase; }
+  .mast span:last-child { color: var(--muted); }
+  h1 { font: 600 31px/34px var(--display); letter-spacing: -0.025em; margin: 11px 0 6px; }
+  h1 em { font-style: normal; box-shadow: inset 0 -0.34em 0 var(--ok-soft); }
+  .lede { font: 400 14.5px/20px var(--body); }
+  .lede b.w { color: var(--warn-text); }
+  .lev { display: grid; grid-template-columns: 1fr 1fr 1fr; margin: 11px 0 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+  .lev div { padding: 8px 0 7px; }
+  .lev div + div { border-left: 1px solid var(--line); padding-left: 14px; }
+  .lev b { display: block; font: 600 25px/28px var(--display); letter-spacing: -0.02em; font-feature-settings: "tnum"; }
+  .lev span { font: 400 12px/16px var(--body); color: var(--muted); }
+  .sec { display: flex; align-items: center; gap: 8px; margin: 11px 0 4px; }
+  .sec .kicker { flex: 1; }
+  .item { display: grid; grid-template-columns: 16px 1fr auto; gap: 10px; align-items: start; padding: 6px 0; border-top: 1px solid var(--line); }
+  .item svg, .item .dot { margin-top: 5px; }
+  .item b { display: block; font: 700 14.5px/20px var(--body); }
+  .item span.d { display: block; font: 400 12.5px/17px var(--body); color: var(--muted); }
+  .item .btn { align-self: center; }
+  .more { font: 400 13px/18px var(--body); color: var(--muted); padding: 5px 0 0 26px; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+  <div class="statusbar"><span>9:44</span><span class="right">
+    <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".35"/></svg>
+    <svg width="27" height="13" viewBox="0 0 27 13" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="23" height="12" rx="3.5" opacity=".4"/><rect x="2" y="2" width="16" height="9" rx="2" fill="currentColor" stroke="none"/><rect x="25" y="4.5" width="1.5" height="4" rx=".75" fill="currentColor" stroke="none" opacity=".4"/></svg>
+  </span></div>
+
+  <div class="dash-top">
+    <svg class="mark" viewBox="0 0 48 48"><path fill="currentColor" fill-rule="evenodd" d="M0 0L48 0L48 48L0 48ZM8 26A16 16 0 0 1 40 26A16 16 0 0 1 8 26ZM0 27L48 27L48 33L0 33Z"/></svg>
+    <b>morndo</b>
+    <span class="live"><span class="dot ok"></span>Live</span>
+  </div>
+
+  <div class="scroll">
+    <div class="mast"><span>Saturday 3 October</span><span>Morning edition</span></div>
+    <h1>By morning, <em>7 things</em> were done.</h1>
+    <p class="lede"><b>5 were checked</b> by someone other than the agent that did the work. <b class="w">2 only say they are done.</b></p>
+    <div class="lev">
+      <div><b>14 min</b><span>of your time</span></div>
+      <div><b>31 h</b><span>of agent work</span></div>
+      <div><b>132×</b><span>your time back</span></div>
+    </div>
+
+    <div class="sec"><span class="kicker">Done and checked</span><span class="chip ok">5</span></div>
+    <div class="item"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7.500 3.200 3.200L12 3.800"/></svg><div><b>Invoice export fixed</b><span class="d">Reviewed by reviewer · QA on staging by qa</span></div></div>
+    <div class="item"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7.500 3.200 3.200L12 3.800"/></svg><div><b>Docs search rebuilt</b><span class="d">Reviewed · 2,104 of 2,104 pages match the old index</span></div></div>
+    <p class="more">and 3 more</p>
+
+    <div class="sec"><span class="kicker">Says done, nobody checked</span><span class="chip warn">2</span></div>
+    <div class="item"><span class="dot warn"></span><div><b>Login page built (PR #12)</b><span class="d">Only the builder's own tests ran</span></div><span class="btn small">Get it checked</span></div>
+    <div class="item"><span class="dot warn"></span><div><b>Signup emails reworded</b><span class="d">No review, no test send</span></div><span class="btn small">Get it checked</span></div>
+
+    <div class="sec"><span class="kicker">Decided for you</span><span class="chip">1</span></div>
+    <div class="item"><span class="dot"></span><div><b>Picked the cheaper image host</b><span class="d">Manager, 03:12 · saves about €12 a month</span></div><span class="btn small">Veto</span></div>
+  </div>
+
+  <nav class="tabbar">
+    <a class="on"><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 14.5h18M5.5 14.5a5.5 5.5 0 0 1 11 0M11 4v2M4.3 6.8l1.4 1.4M17.7 6.8l-1.4 1.4M6 18.5h10"/></svg>Today</a>
+    <a><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="4" y="3" width="14" height="13" rx="3"/><path d="M7 19h8" stroke-linecap="round"/></svg>Catch up</a>
+    <a><svg width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="3"/><circle cx="15.5" cy="9.5" r="2.2"/><path d="M2.5 18c.6-3 2.8-4.5 5.5-4.5s4.900 1.500 5.500 4.500M14 14c2.500-.3 4.600.9 5.500 3.500"/></svg>Agents</a>
+  </nav>
+  <div class="homebar" style="background:var(--surface)"><i></i></div>
+</body>
+</html>

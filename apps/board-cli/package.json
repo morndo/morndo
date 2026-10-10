@@ -1,0 +1,15 @@
+{
+  "name": "@morndo/board-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "bin": {
+    "morndo-board": "./src/main.ts"
+  },
+  "dependencies": {
+    "@morndo/domain": "0.0.0"
+  }
+}

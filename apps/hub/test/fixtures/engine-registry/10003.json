@@ -1,0 +1,10 @@
+{
+  "pid": 10003,
+  "name": "cur-y",
+  "status": "busy",
+  "engine": "cursor",
+  "model": "example-model",
+  "title": "cursor:example-model",
+  "startedAt": 1700000002000,
+  "updatedAt": 1700003602000
+}

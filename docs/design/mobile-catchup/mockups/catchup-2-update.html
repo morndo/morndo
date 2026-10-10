@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=390, initial-scale=1">
+<title>Morndo mockup: catch-up, an update card</title>
+<link rel="stylesheet" href="mock.css">
+<style>
+  .headline { font: 600 23px/28px var(--display); letter-spacing: -0.01em; margin: 4px 0 6px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; }
+  .new { display: flex; align-items: center; gap: 10px; margin: 16px 0 10px; font: 700 11px/1 var(--body); letter-spacing: 0.09em; color: var(--bad-text); }
+  .new::before { content: ""; flex: 1; height: 1px; background: var(--bad); opacity: 0.55; }
+  .msg { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 0 0 12px; }
+  .msg b { font: 700 14px/20px var(--body); }
+  .msg time { font: 400 12px/20px var(--body); color: var(--muted); margin-left: 6px; }
+  .msg p { font: 400 14.5px/21px var(--body); }
+  .tools { display: flex; align-items: center; gap: 8px; margin: 0 0 12px 32px; font: 400 13px/18px var(--body); color: var(--muted); }
+  .file { display: flex; align-items: center; gap: 10px; margin: 0 0 12px 32px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; font: 700 13px/18px var(--body); }
+  .file span { color: var(--muted); font-weight: 400; display: block; }
+  .file i { width: 34px; height: 34px; border-radius: 8px; background: var(--fill); display: grid; place-items: center; flex: none; }
+  .fade { position: absolute; left: 0; right: 0; bottom: 62px; height: 46px; background: linear-gradient(to bottom, transparent, var(--surface)); pointer-events: none; }
+  .composer { position: absolute; left: 12px; right: 12px; bottom: 12px; height: 46px; border: 1px solid var(--edge); border-radius: 23px; background: var(--surface); display: flex; align-items: center; gap: 10px; padding: 0 14px; color: var(--morndo-placeholder); font: 400 15px/1 var(--body); }
+  .composer span { flex: 1; }
+</style>
+</head>
+<body>
+  <div class="statusbar"><span>9:42</span><span class="right">
+    <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5" width="3" height="7" rx="1"/><rect x="10" y="2" width="3" height="10" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1" opacity=".35"/></svg>
+    <svg width="27" height="13" viewBox="0 0 27 13" fill="none" stroke="currentColor"><rect x=".5" y=".5" width="23" height="12" rx="3.5" opacity=".4"/><rect x="2" y="2" width="16" height="9" rx="2" fill="currentColor" stroke="none"/><rect x="25" y="4.5" width="1.5" height="4" rx=".75" fill="currentColor" stroke="none" opacity=".4"/></svg>
+  </span></div>
+
+  <div class="cu-top">
+    <div class="row">
+      <span class="back"><svg width="11" height="20" viewBox="0 0 11 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 1.5 1.5 10l8 8.5"/></svg></span>
+      <span class="count">6 left<span>all decided · 6 updates</span></span>
+      <span class="undo">Undo</span>
+    </div>
+    <div class="segments"><i class="decide done"></i><i class="decide done"></i><i class="done"></i><i class="now"></i><i></i><i></i><i></i><i></i><i></i></div>
+  </div>
+
+  <div class="stack">
+    <article class="card">
+      <header class="card-head">
+        <span class="avatar quiet">B</span>
+        <span class="who"><b>builder</b><span>#login-page · quiet for 38 min</span></span>
+        <span class="chip warn">Says done</span>
+      </header>
+      <div class="card-body" style="position:relative; height:100%">
+        <p class="kicker">Update · since you looked 2 h 14 min ago</p>
+        <h1 class="headline">Login page is built. PR #12 is open, not reviewed yet.</h1>
+        <div class="facts">
+          <span class="chip">7 new messages</span><span class="chip">41 min of work</span><span class="chip">1 file</span>
+        </div>
+        <div class="new">NEW</div>
+        <div class="msg"><span class="avatar sm quiet">B</span><div><b>builder</b><time>11:02</time>
+          <p>Tests pass: 14 of 14. I opened PR #12 and attached the before and after.</p></div></div>
+        <div class="file"><i><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="11" rx="2"/><path d="m2.5 11 3.2-3.2 2.6 2.6 2-2 3.2 3.2" stroke-linejoin="round"/></svg></i><div>login-before-after.png<span>PNG · 184 KB</span></div></div>
+        <div class="tools"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8.6 2.2a3 3 0 0 0-3.9 3.9L1.8 9a1.4 1.4 0 0 0 2 2l2.9-2.9a3 3 0 0 0 3.9-3.9L8.8 6 7.6 4.8z" stroke-linejoin="round"/></svg>Used 23 tools: Edit, Bash, Read</div>
+        <div class="msg"><span class="avatar sm quiet">B</span><div><b>builder</b><time>11:06</time>
+          <p>Done. One thing I didn't do: the "forgot password" link still points at the old page.</p></div></div>
+        <div class="fade"></div>
+        <div class="composer"><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9 3.5v11M3.5 9h11"/></svg><span>Message builder</span></div>
+      </div>
+    </article>
+  </div>
+
+  <div class="actions">
+    <span class="btn">Keep unread</span>
+    <span class="btn primary">Mark as read</span>
+  </div>
+  <p class="hint">Swipe right to mark read, left to keep it unread.</p>
+  <div class="homebar"><i></i></div>
+</body>
+</html>
