@@ -38,3 +38,13 @@ describe("round 6, point 3: a renew never revives a revoked Secret, and a disabl
     expect([findSecret(dir, REF)?.status, findSecret(dir, REF)?.expiry]).toEqual(["active", T + DAY]);
   });
 });
+
+describe("round 6, point 4: a renew names the missing Reference before its Expiry, the problem the principal can act on", () => {
+  it("an unheld Reference is missing, whatever Expiry the renew names", () => {
+    for (const expiry of [null, T - DAY, T + DAY]) expect(refusal(renewSecret(emptySecretDirectory(), input(expiry), who, T))).toEqual({ problem: "missing" });
+  });
+  it("a held one with no Expiry, or a passed one, is still a renew's Expiry problem", () => {
+    expect(refusal(renewSecret(held(), input(null), who, T))).toEqual({ problem: "renew_expiry" });
+    expect(refusal(renewSecret(held(), input(T - 1), who, T))).toEqual({ problem: "renew_expiry" });
+  });
+});
