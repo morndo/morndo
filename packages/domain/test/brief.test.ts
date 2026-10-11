@@ -3,7 +3,8 @@
 // §7). The example itself is the fixture; every mutation is one rule broken.
 import { describe, expect, it } from "vitest";
 import {
-  askFromBrief, askVersion, briefMarkdown, cardOf, Escalations, escalationId, hasMoney, HUB_TTL_MS, lintBrief, refusal,
+  askFromBrief, askVersion, briefMarkdown, cardOf, Escalations, escalationId, endpointId, hasMoney, HUB_TTL_MS,
+  KEEP_SETTLED_MS, lintBrief, refusal, sessionId,
   type Ask, type BriefProblem, type DecisionBrief, type Sighting, type SourceState,
 } from "../src/index.ts";
 
@@ -491,6 +492,43 @@ describe("E14: an ask the hub tracks is answerable until the hub withdraws or se
     expect(x.get("d-1")?.status).toBe("open");
     x.reconcile([], DUE + HUB_TTL_MS, true);
     expect(x.get("d-1")?.status).toBe("expired");
+  });
+});
+
+describe("DB9: restating a brief makes the next version and a new ask", () => {
+  const manager = { kind: "manager", name: "Manager", workerId: null } as const;
+  const by = { endpointId: endpointId("e1"), sessionId: sessionId("s1") };
+  const seen = (a: Ask, source: SourceState = { kind: "open" }): Sighting => ({ ask: a, source, answered: null });
+  // The example restated: two other options, so an answer for v1 names no option v2 has.
+  const restated = (): DecisionBrief => {
+    const draft = example();
+    draft.options = [{ key: "c", label: "Buy a hosted add-on" }, { key: "d", label: "Do nothing" }];
+    draft.recommend = "c";
+    draft.headline = "Approve option C: buy the hosted add-on";
+    for (const r of (draft.comparison as { rows: { cells: string[] }[] }).rows) r.cells = r.cells.slice(0, 2);
+    return lintBrief(draft, NOW).brief!;
+  };
+  it("a Decision given for the earlier version no longer answers the new one (E11)", () => {
+    const v1 = lintBrief(example(), NOW).brief!;
+    const x = new Escalations();
+    x.reconcile([seen(askFromBrief("d-1", v1, manager, 1, NOW))], NOW, true);
+    expect(x.record("d-1", { kind: "option", key: "b" }, by, NOW + 1).ok).toBe(true);
+    x.reconcile([seen(askFromBrief("d-1", restated(), manager, 2, NOW + 60_000))], NOW + 60_000, true);
+    const e = x.get("d-1");
+    expect(e?.status).toBe("open");
+    expect(e?.decision).toBe(null);
+    expect(e?.askedAgain).toBe(true);
+    expect(e?.options.map(o => o.key)).toEqual(["c", "d"]);
+  });
+  it("a Decision restored after a restart doesn't answer the newer version either", () => {
+    const x = new Escalations();
+    x.restore([{
+      id: escalationId("d-1"),
+      decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW + 1, via: "here", ...by },
+    }]);
+    x.reconcile([seen(askFromBrief("d-1", restated(), manager, 2, NOW + 60_000))], NOW + 60_000, true);
+    expect(x.get("d-1")?.decision).toBe(null);
+    expect(x.get("d-1")?.status).toBe("open");
   });
 });
 
