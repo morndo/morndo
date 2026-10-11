@@ -208,3 +208,38 @@ describe("DB3: a due time after filing, and the minutes to read and decide", () 
     expect(lines(d => { d.minutes = 31; })).toEqual(["error bad_minutes (minutes)"]);
   });
 });
+
+describe("DB4: one column per option, three to ten factor rows, a note", () => {
+  const rows = (d: Record<string, unknown>) => (d.comparison as { rows: { factor: string; cells: string[] }[] }).rows;
+  it("a row with a cell short is refused: an option has no column", () => {
+    expect(lines(d => { rows(d)[1]!.cells = rows(d)[1]!.cells.slice(0, 2); })).toEqual(["error table_columns (comparison.rows[1])"]);
+  });
+  it("a row with a cell extra is refused: a column has no option", () => {
+    expect(lines(d => { rows(d)[1]!.cells = [...rows(d)[1]!.cells, "extra"]; })).toEqual(["error table_columns (comparison.rows[1])"]);
+  });
+  it("cells that are not a list are refused", () => {
+    expect(lines(d => { (rows(d)[0]! as { factor: string; cells: string[] }).cells = "none" as unknown as string[]; }))
+      .toEqual(["error table_columns (comparison.rows[0])"]);
+  });
+  it("an empty cell is refused: \"n/a\" is a value, an empty cell is not", () => {
+    expect(lines(d => { rows(d)[3]!.cells[1] = " "; })).toEqual(["error empty_cell (comparison.rows[3].cells[1])"]);
+  });
+  it("\"n/a\" and \"none\" are values, not empty cells", () => {
+    expect(lines(d => { rows(d)[3]!.cells[2] = "n/a"; rows(d)[4]!.cells[0] = "none"; })).toEqual([]);
+  });
+  it("two factor rows are refused, and so are eleven", () => {
+    expect(lines(d => { (d.comparison as { rows: unknown[] }).rows = rows(d).slice(0, 2); })).toEqual(["error table_rows (comparison.rows)"]);
+    expect(lines(d => {
+      const more = [...rows(d)];
+      for (let i = more.length; i < 11; i++) more.push({ factor: `Extra factor ${i}`, cells: ["x", "y", "z"] });
+      (d.comparison as { rows: unknown[] }).rows = more;
+    })).toEqual(["error table_rows (comparison.rows)"]);
+  });
+  it("a missing rows list is refused as a missing section", () => {
+    expect(lines(d => { delete (d.comparison as { rows?: unknown }).rows; })).toEqual(["error missing_section (comparison.rows)"]);
+  });
+  it("a missing or blank note is refused", () => {
+    expect(lines(d => { delete (d.comparison as { note?: string }).note; })).toEqual(["error no_table_note (comparison.note)"]);
+    expect(lines(d => { (d.comparison as { note: string }).note = "  "; })).toEqual(["error no_table_note (comparison.note)"]);
+  });
+});
