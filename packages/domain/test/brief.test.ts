@@ -2,7 +2,10 @@
 // example (docs/agents/decision-requests.md), so a lint that stops refusing fails here (the design's mutation table,
 // §7). The example itself is the fixture; every mutation is one rule broken.
 import { describe, expect, it } from "vitest";
-import { cardOf, hasMoney, lintBrief, type Ask, type BriefProblem, type DecisionBrief } from "../src/index.ts";
+import {
+  cardOf, Escalations, escalationId, hasMoney, HUB_TTL_MS, lintBrief, refusal,
+  type Ask, type BriefProblem, type DecisionBrief, type Sighting, type SourceState,
+} from "../src/index.ts";
 
 // The guide's example is dated: `now` is fixed at 2026-10-01, its due is the end of 2026-10-14 (a date alone is the end
 // of its day, as the template adapter will read it).
@@ -436,5 +439,57 @@ describe("the compact card, derived for every Ask (§4.4)", () => {
       topic: "Review the release notes", headline: null, recommended: null, due: DUE, minutes: 10,
       spend: false, quickAnswers: [], hasBrief: false,
     });
+  });
+});
+
+describe("E14: an ask the hub tracks is answerable until the hub withdraws or settles it", () => {
+  const MIN = 60_000;
+  const hubAsk = (over: Partial<Ask> = {}): Ask => ({
+    id: escalationId("d-1"), asker: { kind: "manager", name: "Manager", workerId: null }, need: "decision",
+    title: "Approve option B: extend the in-house triage script", shortTitle: "Support inbox triage", summary: null,
+    minutes: 4, link: null, details: "the brief, as markdown", context: null, contextKind: "markdown",
+    options: [{ key: "b", label: "Extend the triage script", detail: null }], answerBy: "tap",
+    recommendation: null, ifNoAnswer: null, deadline: DUE, blocking: false, project: null,
+    askedAt: NOW, messageId: null, tracking: "hub", ...over,
+  });
+  const seen = (a: Ask, source: SourceState = { kind: "open" }): Sighting => ({ ask: a, source, answered: null });
+
+  it("stays open and answerable while the hub holds it, even when a round of sightings misses it", () => {
+    const x = new Escalations();
+    x.reconcile([seen(hubAsk())], NOW, true);
+    expect(x.get("d-1")?.status).toBe("open");
+    x.reconcile([seen(hubAsk(), { kind: "missing" })], NOW + MIN, true);
+    expect(x.get("d-1")?.status).toBe("open");            // a missing sighting is not a withdrawal
+    expect(refusal(x.get("d-1"), NOW + MIN)).toBe(null);
+  });
+  it("overdue is not expired: it stays answerable past its due time", () => {
+    const x = new Escalations();
+    x.reconcile([seen(hubAsk())], NOW, true);
+    const overdue = DUE + 6 * 24 * 3_600_000;
+    expect(refusal(x.get("d-1"), overdue)).toBe(null);
+    expect(x.check("d-1", { kind: "option", key: "b" }, overdue).ok).toBe(true);
+  });
+  it("expires seven days after its due time, and an answer is then refused", () => {
+    const x = new Escalations();
+    x.reconcile([seen(hubAsk())], NOW, true);
+    expect(x.get("d-1")?.status).toBe("open");
+    x.reconcile([seen(hubAsk())], DUE + HUB_TTL_MS, true);
+    expect(x.get("d-1")?.status).toBe("expired");
+    expect(refusal(x.get("d-1"), DUE + HUB_TTL_MS)).toBe("expired");
+  });
+  it("the asker's withdraw or settle ends it before that", () => {
+    const x = new Escalations();
+    x.reconcile([seen(hubAsk())], NOW, true);
+    x.reconcile([seen(hubAsk(), { kind: "settled", resolution: "Withdrawn: the question went away", at: NOW + MIN })], NOW + MIN, true);
+    expect(x.get("d-1")?.status).toBe("settled");
+    expect(refusal(x.get("d-1"), NOW + MIN)).toBe("settled");
+  });
+  it("an ask no round of sightings reports still ends by its due, not by the day of its message", () => {
+    const x = new Escalations();
+    x.reconcile([seen(hubAsk())], NOW, true);
+    expect(x.reconcile([], DUE + HUB_TTL_MS - 1, true)).toBe(false);
+    expect(x.get("d-1")?.status).toBe("open");
+    x.reconcile([], DUE + HUB_TTL_MS, true);
+    expect(x.get("d-1")?.status).toBe("expired");
   });
 });
