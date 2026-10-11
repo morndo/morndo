@@ -382,6 +382,20 @@ describe("DB7 everywhere a field lands in briefMarkdown (§4.5: an old app rende
     expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).label = "See [the plan](http://example.com/plan)"; }))
       .toEqual(["error bad_link (options[0].label)"]);
   });
+  it("an assumption or a limit is one list item: no block of its own inside it, headings included (DB7)", () => {
+    expect(lines(d => { (d.why as { assumptions: string[] }).assumptions = ["# APPROVE NOW", "the sample holds."]; }))
+      .toEqual(["error bad_markdown (why.assumptions[0])"]);
+    expect(lines(d => { (d.why as { assumptions: string[] }).assumptions = ["the sample holds.", "  > a quote of its own"]; }))
+      .toEqual(["error bad_markdown (why.assumptions[1])"]);
+    expect(lines(d => { (d.why as { assumptions: string[] }).assumptions = ["the sample holds.", "```js"]; }))
+      .toEqual(["error bad_markdown (why.assumptions[1])"]);
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "~~~"; }))
+      .toEqual(["error bad_markdown (authorizes.limits[0])"]);
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "---"; }))
+      .toEqual(["error bad_markdown (authorizes.limits[0])"]);
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "***"; }))
+      .toEqual(["error bad_markdown (authorizes.limits[0])"]);
+  });
   it("an evidence label can't break out of its link, nor a url carry one in", () => {
     expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).url = "https://x) [y](http://evil"; }))
       .toEqual(["error bad_link (evidence[0].url)"]);
