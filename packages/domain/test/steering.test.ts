@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, screenNamedUpload, sniffImage, type Upload } from "../src/index.ts";
+import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, screenNamedUpload, sniffImage, utf8Text, type Upload } from "../src/index.ts";
 
 const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(16).fill(0)]);
 const T0 = Date.UTC(2026, 9, 1, 12);
@@ -41,7 +41,8 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
   });
   it("accepts a PDF by its magic bytes and an image only when the extension matches the bytes", () => {
     expect(acceptNamedUpload(text("%PDF-1.7\n"), "spec.pdf")).toEqual({ ok: true, value: { kind: "pdf", mime: "application/pdf", name: "spec.pdf" } });
-    expect(acceptNamedUpload(png(), "shot.png").ok && acceptNamedUpload(png(), "shot.png").value).toMatchObject({ kind: "image", mime: "image/png", name: "shot.png" });
+    const shot = acceptNamedUpload(png(), "shot.png");
+    expect(shot.ok && shot.value).toMatchObject({ kind: "image", mime: "image/png", name: "shot.png" });
     expect(acceptNamedUpload(jpeg(), "photo.jpg")).toMatchObject({ ok: true, value: { kind: "image", mime: "image/jpeg" } });
     expect(acceptNamedUpload(jpeg(), "photo.jpeg")).toMatchObject({ ok: true, value: { mime: "image/jpeg" } });
     expect(acceptNamedUpload(jpeg(), "shot.png")).toMatchObject({ ok: true, value: { kind: "image", mime: "image/jpeg", name: "shot.png" } });
@@ -77,6 +78,40 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     expect(acceptNamedUpload(new Uint8Array(TEXT_MAX_BYTES + 1), "notes.md")).toEqual({ ok: false, error: "too_big" });
     expect(acceptNamedUpload(new Uint8Array(MAX_UPLOAD_BYTES + 1), "spec.pdf")).toEqual({ ok: false, error: "too_big" });
     expect(acceptNamedUpload(text("hi"), "")).toEqual({ ok: false, error: "not_allowed" });
+  });
+});
+
+describe("S1: UTF-8 is read from the bytes themselves, with no platform decoder", () => {
+  it("reads ASCII and two-, three- and four-byte characters", () => {
+    expect(utf8Text(new Uint8Array(0))).toBe("");
+    expect(utf8Text(text("plain notes\n"))).toBe("plain notes\n");
+    expect(utf8Text(text("café"))).toBe("café");
+    expect(utf8Text(text("日本語"))).toBe("日本語");
+    expect(utf8Text(text("a 😀 note"))).toBe("a 😀 note");
+    expect(acceptNamedUpload(text("日本語のメモ\n"), "notes.md")).toMatchObject({ ok: true, value: { kind: "text" } });
+  });
+  it("refuses an overlong form of every length", () => {
+    expect(utf8Text(new Uint8Array([0xc0, 0xaf]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xe0, 0x80, 0xaf]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xf0, 0x80, 0x80, 0xaf]))).toBeNull();
+  });
+  it("refuses a surrogate half and a code point past U+10FFFF", () => {
+    expect(utf8Text(new Uint8Array([0xed, 0xa0, 0x80]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xed, 0xbf, 0xbf]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xf4, 0x90, 0x80, 0x80]))).toBeNull();
+  });
+  it("refuses a sequence cut short, a stray continuation and an impossible lead", () => {
+    expect(utf8Text(new Uint8Array([0xe2, 0x82]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xf0, 0x9f, 0x98]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0x61, 0x80]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xfe, 0xff]))).toBeNull();
+  });
+  it("refuses a NUL byte", () => {
+    expect(utf8Text(new Uint8Array([0]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0x61, 0x00, 0x62]))).toBeNull();
+  });
+  it("still notices HTML behind a BOM", () => {
+    expect(acceptNamedUpload(new Uint8Array([0xef, 0xbb, 0xbf, ...text("<html><script>")]), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
   });
 });
 

@@ -71,11 +71,33 @@ export function safeUploadName(name: string): string | null {
   return extensionOf(cut) === ext ? cut : null;
 }
 
+// S1: the domain carries no platform, so UTF-8 is read here, byte by byte. An overlong form, a surrogate half, a code
+// point past U+10FFFF or a sequence cut short is not text, and neither is a NUL byte: all of it comes back null.
+export function utf8Text(b: Uint8Array): string | null {
+  let out = "";
+  let i = 0;
+  while (i < b.length) {
+    const lead = b[i++] ?? 0;
+    if (lead === 0) return null;
+    if (lead < 0x80) { out += String.fromCharCode(lead); continue; }
+    const extra = lead < 0xe0 ? 1 : lead < 0xf0 ? 2 : 3;
+    if (lead < 0xc2 || lead > 0xf4) return null;
+    let cp = lead & (extra === 1 ? 0x1f : extra === 2 ? 0x0f : 0x07);
+    for (let k = 0; k < extra; k++) {
+      const c = b[i++];
+      if (c === undefined || (c & 0xc0) !== 0x80) return null;
+      cp = (cp << 6) | (c & 0x3f);
+    }
+    const least = extra === 1 ? 0x80 : extra === 2 ? 0x800 : 0x10000;
+    if (cp < least || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return null;
+    out += String.fromCodePoint(cp);
+  }
+  return out;
+}
+
 function textProblem(b: Uint8Array): "not_allowed" | "not_utf8" | null {
-  if (b.includes(0)) return "not_allowed";
-  let text: string;
-  try { text = new TextDecoder("utf-8", { fatal: true }).decode(b); }
-  catch { return "not_utf8"; }
+  const text = utf8Text(b);
+  if (text === null) return b.includes(0) ? "not_allowed" : "not_utf8";
   return /^(<\?xml|<!doctype\s+html|<html|<svg)\b/i.test(text.replace(/^\uFEFF/, "").trimStart()) ? "not_allowed" : null;
 }
 
