@@ -1232,6 +1232,17 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-percent-encodeuri", task: "secrets-pr2b", file: "packages/node-ops/src/secret-scan.ts",
     find: "  { safe: /^[A-Za-z0-9\\-_.!~*'();/?:@&=+$,#]$/, plus: false },\n", replace: "",
     run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "encodeURI" },
+  // ---- PR 2b (board T-94): node custody, PLAN steps 5 to 13, each guard removed once.
+  { id: "sp2b-key-one-winner", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
+    find: "if (!existsSync(path)) writeNew(path, new Uint8Array(randomBytes(KEY_BYTES)), this.#uid);\n    const key = readPrivate(path, this.#uid);",
+    replace: "const made = new Uint8Array(randomBytes(KEY_BYTES));\n    const key = existsSync(path) ? readPrivate(path, this.#uid) : (writeNew(path, made, this.#uid), made);",
+    run: ["apps/connections/test/node-keys.test.ts"], expect: "racing" },
+  { id: "sp2b-key-length", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
+    find: "    if (key.length !== KEY_BYTES) throw new Error(`${path} is not a ${KEY_BYTES}-byte key`);\n", replace: "",
+    run: ["apps/connections/test/node-keys.test.ts"], expect: "to throw" },
+  { id: "sp2b-fingerprint-keyed", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
+    find: "createHmac(\"sha256\", this.#key(\"fingerprint.key\"))", replace: "createHmac(\"sha256\", new Uint8Array(32))",
+    run: ["apps/connections/test/node-keys.test.ts"], expect: "two nodes" },
 ];
 
 // ---- the runner

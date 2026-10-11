@@ -31,6 +31,8 @@ export class NodeKeys {
   #key(name: string): Uint8Array {
     const path = join(this.#dir, name);
     if (!existsSync(path)) writeNew(path, new Uint8Array(randomBytes(KEY_BYTES)), this.#uid);
-    return readPrivate(path, this.#uid);
+    const key = readPrivate(path, this.#uid);
+    if (key.length !== KEY_BYTES) throw new Error(`${path} is not a ${KEY_BYTES}-byte key`);
+    return key;
   }
 }
