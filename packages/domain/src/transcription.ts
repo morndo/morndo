@@ -127,7 +127,9 @@ const TX_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/;
 // `auto`, or a language code with optional subtags (`de`, `pt-br`). Not case-free: `DE` is not a code.
 const LANGUAGE = /^(auto|[a-z]{2,3}(-[A-Za-z0-9]{1,8})*)$/;
 
-const capable = (c: TranscriptionCapability): boolean =>
+// The one question both contexts ask of it (TX9, S1): present means a ready Transcriber, and a malformed
+// `present` counts as absent.
+export const capabilityReady = (c: TranscriptionCapability): boolean =>
   c.present === true && Number.isInteger(c.maxSeconds) && c.maxSeconds > 0;
 
 const sameRecording = (a: Recording, b: Recording): boolean => a.kind === b.kind && a.id === b.id;
@@ -143,7 +145,7 @@ export function requestTranscription(
   at: number,
   capability: TranscriptionCapability,
 ): Result<Transcription, RequestProblem> {
-  if (!capable(capability)) return err("no_capability");
+  if (!capabilityReady(capability)) return err("no_capability");
   if (!TX_ID.test(body.id)) return err("bad_id");
   const recording = body.recording;
   if (!recording || (recording.kind !== "upload" && recording.kind !== "attachment") || !TX_ID.test(recording.id ?? "")) {
