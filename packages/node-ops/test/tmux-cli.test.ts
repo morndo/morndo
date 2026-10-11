@@ -61,24 +61,26 @@ describe("tmuxLiteral", () => {
   });
   it("a directory arrives as asked for, and a #(…) in it runs nothing; unescaped, tmux expands it (negative control)", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "morndo-literal-")));
-    const odd = [join(dir, "a#{session_name}b"), join(dir, "#(touch m)")];
-    for (const d of odd) mkdirSync(d);
-    const home = process.env.HOME;
+    // A #(…) job runs in the working directory of the tmux client whose command expanded it — not the server's, not
+    // HOME (seen on tmux 3.4). This test's client runs from dir, so the unescaped control's touch lands in dir, its
+    // own throwaway directory, never in the directory the suite runs in.
+    const back = process.cwd();
+    process.chdir(dir);
     try {
-      process.env.HOME = dir;                                           // the server's HOME: where a #(…) job would run
+      const odd = [join(dir, "a#{session_name}b"), join(dir, "#(touch m)")];
+      for (const d of odd) mkdirSync(d);
       t.tmux("new-session", "-d", "-s", "main", "-n", "base", "-c", dir, "sleep 600");
-      if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
       const startIn = (cwd: string) => {
         const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-c", cwd, "sleep 600").trim();
         return t.tmux("display-message", "-p", "-t", pane, "#{pane_start_path}").replace(/\n$/, "");
       };
       for (const d of odd) expect(startIn(tmuxLiteral(d)), d).toBe(d);
-      expect(startIn(odd[0] ?? "")).toBe(join(dir, "amainb"));
-      expect(startIn(odd[1] ?? "")).not.toBe(odd[1]);
       for (let i = 0; i < 10 && !existsSync(join(dir, "m")); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-      expect(existsSync(join(dir, "m"))).toBe(false);
+      expect(existsSync(join(dir, "m"))).toBe(false);                   // escaped, no job ran, though one would land here
+      expect(startIn(odd[0] ?? "")).toBe(join(dir, "amainb"));
+      expect(startIn(odd[1] ?? "")).not.toBe(odd[1]);                   // unescaped, tmux expands it — and its touch lands in dir
     } finally {
-      if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
+      process.chdir(back);
       rmSync(dir, { recursive: true, force: true });
     }
   });
