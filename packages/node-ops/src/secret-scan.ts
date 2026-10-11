@@ -100,3 +100,25 @@ export function encodedForms(value: Uint8Array): EncodedForm[] {
   }
   return forms;
 }
+
+// ---- Index entries and the scanner (stubs until their fix)
+
+export type Keyed = (bytes: Uint8Array) => Uint8Array;
+export const SCAN_WINDOW = 8;
+export type IndexEntry = {
+  encoding: SecretEncoding; alignment: 0 | 1 | 2 | null; length: number; head: string; full: string; before: number; after: number;
+};
+export type Indexed = { kind: "indexed"; entries: IndexEntry[] } | { kind: "too_short" };
+export type ScanRange = { start: number; end: number };
+export type ScanStep = { ranges: ScanRange[]; settled: number };
+export type Scanner = { push(chunk: Uint8Array): ScanStep; end(): ScanStep };
+
+export function indexValue(_value: Uint8Array, _keyed: Keyed): Indexed {
+  return { kind: "too_short" };
+}
+export function createScanner(_entries: readonly IndexEntry[], _keyed: Keyed): Scanner {
+  return { push: () => ({ ranges: [], settled: 0 }), end: () => ({ ranges: [], settled: 0 }) };
+}
+export function scan(_bytes: Uint8Array, _entries: readonly IndexEntry[], _keyed: Keyed): ScanRange[] {
+  return [];
+}

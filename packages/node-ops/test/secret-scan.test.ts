@@ -1,7 +1,10 @@
 // The node's exact filter (ADR-0022; design §8.1, §15.4): the encodings a value is indexed in, the scanner and the index.
 // Values here are synthetic. Buffer and node:crypto are the tests' oracle and keyed hash; secret-scan.ts uses neither.
+import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join as joinPath } from "node:path";
 import { describe, expect, it } from "vitest";
-import { encodedForms } from "../src/secret-scan.ts";
+import { SCAN_WINDOW, createScanner, encodedForms, indexValue, scan, type IndexEntry, type ScanRange } from "../src/secret-scan.ts";
 
 const text = (s: string) => new TextEncoder().encode(s);
 const ascii = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -52,3 +55,125 @@ describe("encodings a value is indexed in (design §8.1)", () => {
     expect(forms(text("abcdefgh")).filter(x => x.encoding !== "base64" && x.encoding !== "base64url").every(x => x.before === 0 && x.after === 0)).toBe(true);
   });
 });
+
+// ---- The index entries and the scanner (design §8.1, §15.4)
+
+const KEY = new Uint8Array(32).fill(7);                      // a synthetic index key
+const keyed = (b: Uint8Array) => new Uint8Array(createHmac("sha256", KEY).update(b).digest());
+const entriesOf = (v: Uint8Array): IndexEntry[] => {
+  const r = indexValue(v, keyed);
+  if (r.kind !== "indexed") throw new Error("not indexed");
+  return r.entries;
+};
+const covers = (ranges: readonly ScanRange[], start: number, end: number) => ranges.some(r => r.start <= start && r.end >= end);
+// In a base64 text, the characters whose 6 bits overlap the value's bytes [lead, lead + n).
+const valueChars = (lead: number, n: number, chars: number) =>
+  Array.from({ length: chars }, (_, j) => j).filter(j => 6 * j < 8 * (lead + n) && 6 * j + 6 > 8 * lead);
+
+describe("index entries: keyed hashes of each form, never the form (design §8.1)", () => {
+  it("a value under 8 bytes is not indexed; one of 8 is, one entry per form", () => {
+    expect(SCAN_WINDOW).toBe(8);
+    expect(indexValue(text("1234567"), keyed)).toEqual({ kind: "too_short" });
+    const entries = entriesOf(text("12345678"));
+    expect(entries.length).toBe(encodedForms(text("12345678")).length);
+    for (const e of entries) {
+      expect(e.head).toMatch(/^[0-9a-f]{64}$/);
+      expect(e.full).toMatch(/^[0-9a-f]{64}$/);
+      expect(e.length).toBeGreaterThanOrEqual(SCAN_WINDOW);
+    }
+  });
+});
+
+describe("the scanner finds each form and covers every character that carries the value (design §15.4)", () => {
+  it("each form inside other text", () => {
+    for (const value of [SAMPLE, BINARY]) {
+      const entries = entriesOf(value);
+      for (const f of encodedForms(value)) {
+        const out = join(text("log line: "), f.bytes, text(" end"));
+        expect(covers(scan(out, entries, keyed), 10 - f.before, 10 + f.bytes.length + f.after), `${f.encoding}/${f.alignment}`).toBe(true);
+      }
+    }
+  });
+  it("base64 of the value inside a longer string, at any offset, padded or not, standard or URL-safe", () => {
+    for (const value of [SAMPLE, BINARY]) {
+      const entries = entriesOf(value);
+      for (const lead of [0, 1, 2, 3, 4, 5]) for (const trail of [0, 1, 2, 4]) {
+        const whole = join(text("user:".slice(0, lead)), fill(Math.max(0, lead - 5), 0x41), value, fill(trail, 0x7a));
+        for (const enc of [Buffer.from(whole).toString("base64"), Buffer.from(whole).toString("base64url")]) {
+          const out = join(text("Authorization: Basic "), text(enc), text("\n"));
+          const ranges = scan(out, entries, keyed);
+          const missed = valueChars(lead, value.length, enc.length).filter(j => !covers(ranges, 21 + j, 22 + j));
+          expect(missed, `${enc} lead ${lead} trail ${trail}`).toEqual([]);
+        }
+      }
+    }
+  });
+  it("a value that shares only its first 8 bytes with an indexed one is not reported", () => {
+    const entries = entriesOf(text("sample-value-0001"));
+    expect(scan(text("x sample-value-0002 y"), entries, keyed)).toEqual([]);
+    expect(scan(text("x sample-value-0001 y"), entries, keyed)).toEqual([{ start: 2, end: 19 }]);
+  });
+  it("a value under 8 bytes is never reported, since it has no entries", () => {
+    expect(scan(text("pin 1234567 end"), [], keyed)).toEqual([]);
+  });
+});
+
+describe("the streaming scanner: split across chunks and at the end of the stream (design §15.4)", () => {
+  const value = SAMPLE;
+  const stream = join(...encodedForms(value).flatMap(f => [text(" | "), f.bytes]), text(" | tail"));
+  const pieces = (bytes: Uint8Array, size: number) => Array.from({ length: Math.ceil(bytes.length / size) }, (_, i) => bytes.subarray(i * size, (i + 1) * size));
+
+  it("finds every form whatever the chunk size, the same ranges as in one piece", () => {
+    const entries = entriesOf(value);
+    const whole = scan(stream, entries, keyed);
+    expect(whole.length).toBeGreaterThan(0);
+    for (const size of [1, 2, 3, 5, 7, 8, 13, 64]) {
+      const s = createScanner(entries, keyed);
+      const found = [...pieces(stream, size).flatMap(c => s.push(c).ranges), ...s.end().ranges];
+      expect(merge(found), `chunks of ${size}`).toEqual(whole);
+    }
+  });
+  it("no range found later starts before what an earlier step called settled", () => {
+    const entries = entriesOf(value);
+    for (const size of [1, 3, 7]) {
+      const s = createScanner(entries, keyed);
+      let settled = 0;
+      for (const c of pieces(stream, size)) {
+        const step = s.push(c);
+        for (const r of step.ranges) expect(r.start).toBeGreaterThanOrEqual(settled);
+        expect(step.settled).toBeGreaterThanOrEqual(settled);
+        settled = step.settled;
+      }
+      const last = s.end();
+      for (const r of last.ranges) expect(r.start).toBeGreaterThanOrEqual(settled);
+      expect(last.settled).toBe(stream.length);
+    }
+  });
+  it("a value that ends the stream is found, its padding included", () => {
+    const entries = entriesOf(value);
+    const enc = text(`${Buffer.from(value).toString("base64")}`);
+    expect(enc.at(-1)).toBe(0x3d);
+    const s = createScanner(entries, keyed);
+    const found = [...s.push(join(text("k="), enc.subarray(0, enc.length - 3))).ranges, ...s.push(enc.subarray(enc.length - 3)).ranges, ...s.end().ranges];
+    expect(covers(merge(found), 2, 2 + enc.length)).toBe(true);
+    expect(covers(scan(join(text("raw="), value), entries, keyed), 4, 4 + value.length)).toBe(true);
+  });
+});
+
+describe("secret-scan.ts is pure (design §8.1: the scanner imports no file system)", () => {
+  it("imports nothing from node:, and uses no process, Buffer or require", () => {
+    const code = readFileSync(joinPath(import.meta.dirname, "../src/secret-scan.ts"), "utf8");
+    expect(code).not.toMatch(/from\s+["']node:/);
+    expect(code).not.toMatch(/\b(process|Buffer|require)\b/);
+  });
+});
+
+function merge(ranges: readonly ScanRange[]): ScanRange[] {
+  const out: ScanRange[] = [];
+  for (const r of [...ranges].sort((a, b) => a.start - b.start || a.end - b.end)) {
+    const last = out.at(-1);
+    if (last && r.start <= last.end) last.end = Math.max(last.end, r.end);
+    else out.push({ ...r });
+  }
+  return out;
+}
