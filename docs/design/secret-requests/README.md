@@ -297,7 +297,7 @@ The lane chat's composer checks its text against the shape catalog before sendin
 ## 6. Custody on the node
 
 - **Vault.** The ADR-0018 vault and identity: one age file per Secret under the Connections home's `vault/`, named by a vault ref of its own kind (`s-<random>`), encrypted to the node's identity.
-  - The adapter gains `storeSealed(ref, ciphertext)`. It opens the file once with the node's identity, refuses one that doesn't open, and writes the ciphertext as received, with ADR-0018's temp file and rename.
+  - The adapter gains `storeSealed(ref, ciphertext)`. It opens the file once with the node's identity, refuses one that doesn't open, and writes the ciphertext as received, with ADR-0018's temp file and rename. The plaintext vault (`MORNDO_VAULT=file`) refuses every sealed store (15.2; decided on T-85).
   - It also refuses a file whose header has more than one recipient stanza. In age, the header "wraps the file key for one or more recipients" and lists "one or more recipient stanzas" [S26], so the node can count them. Exactly one is Morndo's rule, not age's: it makes each copy readable by one node only (5.3, 9.2). age itself requires the same of passphrase files, where "an scrypt stanza, if present, MUST be the only stanza in the header" [S26].
 - **Metadata** is in the Connections database, in new tables (`secrets`, `secret_versions`, `secret_grants`, `secret_uses`, `secret_events`, `secret_workspaces`), with a numbered migration. `secret_versions` is the fingerprint ledger's table (3.4).
 - **Keys of the node.** Besides the age identity: the fingerprint key and the index key, 32 random bytes each, 0600, beside the identity and excluded from backups with it.
@@ -635,6 +635,11 @@ One suite, run against `vault-age`, `vault-file` and an in-memory fake:
 - `remove` leaves nothing;
 - `has` opens nothing;
 - keyed fingerprints are stable on a node and differ across nodes for one value.
+
+`vault-file` takes no sealed value: `storeSealed` refuses it as `plaintext_vault` and writes nothing, and a node on that vault migrates to the age vault first. A sealed value is never written as plaintext at rest; OWASP's Secrets Management Cheat Sheet: "secrets must be stored encrypted somewhere to protect their confidentiality and integrity" (§7, https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html, read 2026-10-12). Decided on T-85. So on `vault-file` the suite asserts that refusal in place of the round trip, the recipient checks, the replace and `remove` after a store; the file cases (0644, foreign owner, `has` opens nothing) run on a file the vault wrote itself. As built (`apps/connections/test/sealed-store-contract.test.ts`, T-94):
+- the port's keyed fingerprint is `keyedFingerprint(ref)`, since `fingerprint(ref)` on the same classes is Connections' unkeyed one (ADR-0018), and `storeSealed` returns the keyed fingerprint with its answer;
+- a refusal names its problem: `not_age`, `stanzas` (other than one recipient stanza), `foreign` (doesn't open with this node's identity) or `plaintext_vault`;
+- the fake seals to named recipients as JSON, so it makes the same two checks.
 
 ### 15.3 The broker
 

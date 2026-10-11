@@ -1255,6 +1255,9 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-sealed-atomic", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
     find: "      writePrivate(this.#file(ref), sealed, this.#uid);", replace: "      if (existsSync(this.#file(ref))) unlinkSync(this.#file(ref));\n      writePrivate(this.#file(ref), sealed, this.#uid);",
     run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "crash between the write and the rename" },
+  { id: "sp2b-file-vault-refuses", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-file.ts",
+    find: "    return { ok: false, problem: \"plaintext_vault\" };", replace: "    writePrivate(this.#path(_ref), _sealed, this.#uid);\n    return { ok: true, fingerprint: \"000000000000\" };",
+    run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "plaintext_vault" },
 ];
 
 // ---- the runner
