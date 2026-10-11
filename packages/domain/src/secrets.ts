@@ -240,7 +240,6 @@ export function answerStored(
   const p = checkAnswer(req, a.seen, a.command, now);
   if (p) return refuseRequest(p);
   if (req.kind === "access") return refuseRequest("kind");
-  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry))) return refuseRequest("expiry");
   if (parseReference(a.reference) === null) return refuseRequest("bad_reference");
   const c = a.confirmation;
   if (c.node !== req.node || !a.nodes.includes(req.node) || !Number.isSafeInteger(c.version) || c.version < 1) return refuseRequest("node");
@@ -249,7 +248,8 @@ export function answerStored(
   if (c.reference !== a.reference || (req.kind !== "new" && a.reference !== req.reference)) return refuseRequest("reference");
   if (!(Number.isFinite(c.at) && c.at >= req.openedAt - CONFIRMATION_SKEW_MS && c.at <= now + CONFIRMATION_SKEW_MS)) return refuseRequest("clock");
   if (req.kind === "renew" && !c.renewed) return refuseRequest("not_renewed");
-  if (req.kind === "renew" && !(typeof a.expiry === "number" && a.expiry > c.at)) return refuseRequest("expiry");
+  // The renew's Expiry, in one place: named, a time, and later than the node's time of the store (T-88).
+  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > c.at)) return refuseRequest("expiry");
   const request: SecretRequest = { ...req, state: "stored", answer: { kind: "stored", at: now, command: a.command, reason: null } };
   return ok({
     request,
