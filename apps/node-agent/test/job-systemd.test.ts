@@ -1169,10 +1169,16 @@ describe.skipIf(!bus.ok)("the log cap rule on the systemd backend, second round"
     expect(store.get(waiting)?.state).toBe("queued");
     expect(await until(filled(dir, capped), 8000)).toBe(true);
     expect(await until(() => showValue(unitOf(quick), "ExecMainExitTimestampMonotonic") !== "0", 8000)).toBe(true);
-    const sweeping = sup.sweep();
-    expect(await until(() => store.get(waiting)?.state !== "queued", 900)).toBe(true);
-    expect((await sup.cancel(capped)).ok).toBe(true);
-    await sweeping;
+    // The grace cannot end while performance.now stands still, so the order below holds however long systemd takes:
+    // the queued job starts while the capped one is still in its grace, and a cancel then wins over the cap.
+    const frozen = vi.spyOn(performance, "now").mockReturnValue(performance.now());
+    try {
+      const sweeping = sup.sweep();
+      expect(await until(() => store.get(waiting)?.state !== "queued", 15_000)).toBe(true);
+      expect(store.get(capped)?.outcome).toBeNull();
+      expect((await sup.cancel(capped)).ok).toBe(true);
+      await sweeping;
+    } finally { frozen.mockRestore(); }
     expect(store.get(capped)?.outcome).toBe("cancelled");
   });
 
