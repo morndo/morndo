@@ -101,9 +101,9 @@ describe("requesting a transcription", () => {
     expect(done.state).toBe("failed");
   });
 
-  it("refuses an id that already names a finished attempt: the new one needs its own id (TX3)", () => {
+  it("an id that names a finished attempt takes its own body again, and only its body (TX3)", () => {
     const done = { ...live(), state: "failed" as const, outcome: "failed" as const, problem: "engine" as const };
-    expect(requestTranscription([done], ask(), AT + 5, READY)).toEqual({ ok: false, error: "id_conflict" });
+    expect(requestTranscription([done], ask(), AT + 5, READY)).toEqual({ ok: true, value: done });
     const finished = { ...live({ id: "tx-7" }), state: "done" as const, outcome: "done" as const };
     expect(requestTranscription([finished], ask({ id: "tx-7", recording: { kind: "upload", id: "up-9" } }), AT + 5, READY))
       .toEqual({ ok: false, error: "id_conflict" });
