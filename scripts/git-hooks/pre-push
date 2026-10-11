@@ -1,5 +1,7 @@
 #!/bin/sh
 # Reject a push that adds a secret, a home path, a private key, or a token.
+# Added lines are checked, so a marker already in a file does not fail a later
+# edit. A private-key header in a test or fixture file is a fixture.
 # Install with scripts/install-git-hooks.sh. Does not change git config.
 #
 # gitleaks 8.30.1 `protect` scans `git diff` (or `--staged`), not the commits
@@ -20,8 +22,9 @@ zero=0000000000000000000000000000000000000000
 ranges=$(mktemp)
 patterns=$(mktemp)
 paths=$(mktemp)
-specs=$(mktemp)
-trap 'rm -f "$ranges" "$patterns" "$paths" "$specs"' EXIT
+patch=$(mktemp)
+hits=$(mktemp)
+trap 'rm -f "$ranges" "$patterns" "$paths" "$patch" "$hits"' EXIT
 
 gitleaks protect --no-banner --redact
 
@@ -60,9 +63,37 @@ scan_push
 # Generic markers only. Extra regexes, one per line, may live outside the
 # tree at "$(git rev-parse --git-dir)/info/leak-patterns".
 self=scripts/git-hooks/pre-push
+listfile=scripts/git-hooks/leak-allowlist
 home_re='/(home|Users)/[^/[:space:]]+/'
 key_re='-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----'
 token_re='(ghp_|github_pat_|sk-|xox[baprs]-|AKIA)[A-Za-z0-9_]{16,}'
+# Exact path and exact match, tab-separated. A different match in that file still fails.
+# Resolved from this script so a proof can run it against another checkout.
+allowlist=$(dirname "$(readlink -f "$0")")/leak-allowlist
+
+allowed() {
+  [ -f "$allowlist" ] || return 1
+  needle=$(printf '%s\t%s' "$1" "$2")
+  grep -F -x -q -- "$needle" "$allowlist"
+}
+
+# 0 when a private-key header sits in a test or fixture. A home path or a
+# token in that file still fails.
+obvious_fixture() {
+  case "$1" in
+    *.test.ts|*.test.tsx|*.test.js|*.test.mjs|*.e2e.ts|*.fixture.ts|*.fixture.js) ;;
+    */test/*|*/tests/*|*/fixtures/*) ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "$2" | grep -E -q '^-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----$'
+}
+
+skip_file() {
+  case "$1" in
+    "$self"|./"$self"|"$listfile"|./"$listfile") return 0 ;;
+  esac
+  return 1
+}
 
 extra=$(git rev-parse --git-dir)/info/leak-patterns
 if [ -f "$extra" ]; then
@@ -74,96 +105,166 @@ reject() {
   exit 1
 }
 
-# 0 = a match was printed, 1 = none, other = the search itself failed.
-matched() {
-  set +e
-  "$@" >&2
-  status=$?
-  set -e
-  if [ "$status" -eq 0 ]; then
-    return 0
-  fi
-  if [ "$status" -eq 1 ]; then
-    return 1
-  fi
+search_failed() {
   echo "pre-push: pattern search failed" >&2
   exit 1
 }
 
-check_patterns() {
-  # Remaining args are a grep/git-grep command that already includes the pattern source.
-  if matched "$@"; then
-    return 0
+# Every match on one line. An allowlisted or fixture match does not hide a
+# later match, or a local pattern, on that same line. A search error aborts.
+scan_text() {
+  file=$1
+  text=$2
+  status=0
+  raw=$(printf '%s\n' "$text" | grep -o -E -e "$home_re" -e "$key_re" -e "$token_re") || status=$?
+  [ "$status" -le 1 ] || search_failed
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$raw" > "$hits"
+    while IFS= read -r one || [ -n "$one" ]; do
+      [ -n "$one" ] || continue
+      allowed "$file" "$one" && continue
+      obvious_fixture "$file" "$one" && continue
+      reject "home path, private key, or token in $file"
+    done < "$hits"
   fi
-  return 1
+  [ -s "$patterns" ] || return 0
+  status=0
+  printf '%s\n' "$text" | grep -E -q -f "$patterns" || status=$?
+  [ "$status" -ne 0 ] || reject "local leak pattern in $file"
+  [ "$status" -eq 1 ] || search_failed
 }
 
 scan_file() {
   file=$1
-  if check_patterns grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" -- "$file"; then
-    reject "home path, private key, or token in $file"
+  skip_file "$file" && return 0
+  status=0
+  raw=$(grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" -- "$file") || status=$?
+  [ "$status" -le 1 ] || search_failed
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$raw" > "$hits"
+    while IFS= read -r one || [ -n "$one" ]; do
+      [ -n "$one" ] || continue
+      allowed "$file" "$one" && continue
+      obvious_fixture "$file" "$one" && continue
+      reject "home path, private key, or token in $file"
+    done < "$hits"
   fi
-  if [ -s "$patterns" ] && check_patterns grep -I -n -E -f "$patterns" -- "$file"; then
-    reject "local leak pattern in $file"
-  fi
+  [ -s "$patterns" ] || return 0
+  status=0
+  grep -I -q -E -f "$patterns" -- "$file" || status=$?
+  [ "$status" -ne 0 ] || reject "local leak pattern in $file"
+  [ "$status" -eq 1 ] || search_failed
 }
 
 scan_sha() {
   sha=$1
   shift
-  if check_patterns git grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@"; then
-    reject "home path, private key, or token in $sha"
+  status=0
+  raw=$(git grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@" ":(exclude)$listfile") || status=$?
+  [ "$status" -le 1 ] || search_failed
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$raw" > "$hits"
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -n "$line" ] || continue
+      rest=${line#"$sha":}
+      file=${rest%%:*}
+      hit=${rest#*:}
+      skip_file "$file" && continue
+      allowed "$file" "$hit" && continue
+      obvious_fixture "$file" "$hit" && continue
+      reject "home path, private key, or token in $file"
+    done < "$hits"
   fi
-  if [ -s "$patterns" ] && check_patterns git grep -I -n -E -f "$patterns" "$sha" -- "$@"; then
-    reject "local leak pattern in $sha"
-  fi
+  [ -s "$patterns" ] || return 0
+  status=0
+  git grep -I -q -E -f "$patterns" "$sha" -- "$@" ":(exclude)$listfile" || status=$?
+  [ "$status" -ne 0 ] || reject "local leak pattern in $sha"
+  [ "$status" -eq 1 ] || search_failed
 }
 
-scan_listed() {
-  sha=$1
-  list=$2
-  set --
-  while IFS= read -r file; do
-    [ -n "$file" ] || continue
-    set -- "$@" "$file"
-  done < "$list"
-  [ "$#" -gt 0 ] || return 0
-  if check_patterns git grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@"; then
-    reject "home path, private key, or token in $sha"
-  fi
-  if [ -s "$patterns" ] && check_patterns git grep -I -n -E -f "$patterns" "$sha" -- "$@"; then
-    reject "local leak pattern in $sha"
-  fi
+# New-file length from a hunk header. Omitted count means one line.
+hunk_new_lines() {
+  rest=${1#*+}
+  rest=${rest%% @@*}
+  case "$rest" in
+    *,*) rest=${rest#*,} ;;
+    *) rest=1 ;;
+  esac
+  case "$rest" in
+    *[!0-9]*|'') printf '0' ;;
+    *) printf '%s' "$rest" ;;
+  esac
 }
 
-{
-  git diff --name-only --diff-filter=ACMR
-  git diff --cached --name-only --diff-filter=ACMR
-  git ls-files --others --exclude-standard
-} | sort -u > "$paths"
+# Added lines of a unified diff. Headers are read only outside a hunk, and a
+# hunk is the number of new-file lines the header names. A marker already in
+# the file is not an added line.
+scan_patch() {
+  file=
+  left=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$left" -gt 0 ]; then
+      case "$line" in
+        '\'*) continue ;;
+        '-'*) continue ;;
+        '+'*)
+          text=${line#+}
+          case "$file" in
+            ''|/dev/null) ;;
+            *) skip_file "$file" || scan_text "$file" "$text" ;;
+          esac
+          left=$((left - 1))
+          ;;
+        *)
+          left=$((left - 1))
+          ;;
+      esac
+      continue
+    fi
+    case "$line" in
+      'diff --git '*)
+        file=
+        ;;
+      '+++ '*)
+        file=${line#+++ }
+        case "$file" in
+          '"'*) file=${file#\"}; file=${file%\"} ;;
+        esac
+        file=${file#b/}
+        ;;
+      '@@'*)
+        left=$(hunk_new_lines "$line")
+        ;;
+    esac
+  done < "$1"
+}
 
+git diff -U0 --diff-filter=ACMR -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
+scan_patch "$patch"
+git diff --cached -U0 --diff-filter=ACMR -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
+scan_patch "$patch"
+git ls-files --others --exclude-standard > "$paths"
 while IFS= read -r file; do
   [ -n "$file" ] || continue
-  case "$file" in
-    "$self"|./"$self") continue ;;
-  esac
+  skip_file "$file" && continue
   [ -f "$file" ] || continue
   scan_file "$file"
 done < "$paths"
 
+mails=$(dirname "$(readlink -f "$0")")/commit-traces
 while read -r local_sha remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   if [ "$remote_sha" = "$zero" ] && [ -z "$(git for-each-ref --format='%(objectname)' refs/remotes)" ]; then
-    scan_sha "$local_sha" . ":(exclude)$self"
+    sh "$mails" mails "$local_sha"
+    scan_sha "$local_sha" . ":(exclude)$self" ":(exclude)$listfile"
     continue
   fi
   if [ "$remote_sha" = "$zero" ]; then
-    git log --name-only --pretty=format: --diff-filter=ACMR "$local_sha" --not --remotes > "$paths"
+    sh "$mails" mails "$local_sha" --not --remotes
+    git log -p -U0 --pretty=format: --diff-filter=ACMR "$local_sha" --not --remotes -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
   else
-    git diff --name-only --diff-filter=ACMR "$remote_sha" "$local_sha" > "$paths"
+    sh "$mails" mails "${remote_sha}..${local_sha}"
+    git diff -U0 --diff-filter=ACMR "$remote_sha" "$local_sha" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
   fi
-  awk -v self="$self" 'NF && $0 != self && $0 != "./" self { print }' "$paths" > "$specs"
-  if [ -s "$specs" ]; then
-    scan_listed "$local_sha" "$specs"
-  fi
+  scan_patch "$patch"
 done < "$ranges"
