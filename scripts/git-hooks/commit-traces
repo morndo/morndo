@@ -23,9 +23,12 @@ fail() {
 }
 
 # Already-published commits whose identity cannot be fixed without rewriting
-# history: one full sha per line, a '#' line says why. Nothing else is excepted.
-# Resolved from this script so a proof can run it against another checkout.
-exceptions=$(dirname "$(readlink -f "$0")")/traces-published-exceptions
+# history: one full sha per line, a '#' line says why. Nothing else is
+# excepted. CI and the pre-push hook export TRACES_PUBLISHED_EXCEPTIONS with
+# the copy from the branch the check protects, so a change under test cannot
+# list itself; without it the list is the file beside this script, resolved
+# from this script so a proof can run it against another checkout.
+exceptions=${TRACES_PUBLISHED_EXCEPTIONS:-$(dirname "$(readlink -f "$0")")/traces-published-exceptions}
 
 published_exception() {
   [ -f "$exceptions" ] || return 1

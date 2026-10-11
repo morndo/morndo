@@ -117,18 +117,50 @@ set -e
 [ "$code" -eq 1 ] || fail "web-flow author should exit 1, got $code"
 
 # The published exception is fabricated: this throwaway repo publishes a
-# commit with a personal author address, and a copy of the checker carries
-# an exceptions list naming it. No real history is needed, so the proof runs
+# commit with a personal author address, and the checker reads the list
+# through TRACES_PUBLISHED_EXCEPTIONS, the way CI points it at the copy on
+# the branch under protection. No real history is needed, so the proof runs
 # in any clone, shallow included.
 published=$(env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
   -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'published with a personal address' \
   && git rev-parse HEAD)
-hooks=$scratch/hooks
-mkdir -p "$hooks"
-cp "$checker" "$hooks/commit-traces"
-printf '%s\n' "$published" > "$hooks/traces-published-exceptions"
-sh "$hooks/commit-traces" range "$published" --max-count=1 || fail "the listed published commit should exit 0"
-sh "$hooks/commit-traces" range "$published^..$published" || fail "a range holding the published commit should exit 0"
+protected=$scratch/protected
+printf '%s\n' "$published" > "$protected"
+TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published" --max-count=1 || fail "the listed published commit should exit 0"
+TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published^..$published" || fail "a range holding the published commit should exit 0"
+
+# A branch cannot list itself: the tree under test adds its own bad commit
+# to the list, and the check still reads the copy from the branch it
+# protects, the way CI does.
+selflist=$scratch/selflist
+git init -q "$selflist"
+cd "$selflist"
+printf 'base\n' > note.txt
+git add note.txt
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q -m 'selflist base'
+base=$(git rev-parse HEAD)
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'bad mail commit'
+bad=$(git rev-parse HEAD)
+mkdir -p scripts/git-hooks
+printf '%s\n' "$bad" > scripts/git-hooks/traces-published-exceptions
+git add scripts/git-hooks
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q -m 'the tree lists itself'
+tip=$(git rev-parse HEAD)
+git update-ref refs/remotes/origin/main "$base"
+basecopy=$scratch/basecopy
+if git cat-file -e "refs/remotes/origin/main:scripts/git-hooks/traces-published-exceptions" 2>/dev/null; then
+  git show "refs/remotes/origin/main:scripts/git-hooks/traces-published-exceptions" > "$basecopy"
+else
+  : > "$basecopy"
+fi
+set +e
+TRACES_PUBLISHED_EXCEPTIONS="$basecopy" sh "$checker" range "$base..$tip"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a tree that lists its own bad commit should exit 1, got $code"
+printf '%s\n' "$bad" > "$basecopy"
+TRACES_PUBLISHED_EXCEPTIONS="$basecopy" sh "$checker" range "$base..$tip" || fail "a bad commit listed on the protected branch should exit 0"
 
 cd "$root"
 set +e

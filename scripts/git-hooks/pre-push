@@ -26,7 +26,8 @@ patterns=$(mktemp)
 paths=$(mktemp)
 patch=$(mktemp)
 hits=$(mktemp)
-trap 'rm -f "$ranges" "$patterns" "$paths" "$patch" "$hits"' EXIT
+exc=$(mktemp)
+trap 'rm -f "$ranges" "$patterns" "$paths" "$patch" "$hits" "$exc"' EXIT
 
 gitleaks protect --no-banner --redact
 
@@ -254,20 +255,39 @@ while IFS= read -r file; do
 done < "$paths"
 
 mails=$(dirname "$(readlink -f "$0")")/commit-traces
+exceptions=scripts/git-hooks/traces-published-exceptions
+# The published exceptions are read from the remote side of the push, never
+# from the tree being pushed: a branch cannot list itself. A push that
+# creates a ref has no remote side yet; then the list in the tree is the
+# registry that travels with the repository.
+load_exceptions() {
+  : > "$exc"
+  if [ "$1" = "$zero" ]; then
+    list=$(dirname "$(readlink -f "$0")")/traces-published-exceptions
+    if [ -f "$list" ]; then
+      cat "$list" > "$exc"
+    fi
+    return 0
+  fi
+  git cat-file -e "$1:$exceptions" 2>/dev/null || return 0
+  git show "$1:$exceptions" > "$exc"
+}
+
 # Every check below a push names is limited to commits that are not on any
 # remote: the remote tip git reports and every remote-tracking ref.
 while read -r local_sha remote_sha; do
   [ -n "${local_sha:-}" ] || continue
+  load_exceptions "$remote_sha"
   if [ "$remote_sha" = "$zero" ] && [ -z "$(git for-each-ref --format='%(objectname)' refs/remotes)" ]; then
-    sh "$mails" mails "$local_sha"
+    TRACES_PUBLISHED_EXCEPTIONS="$exc" sh "$mails" mails "$local_sha"
     scan_sha "$local_sha" . ":(exclude)$self" ":(exclude)$listfile"
     continue
   fi
   if [ "$remote_sha" = "$zero" ]; then
-    sh "$mails" mails "$local_sha" --not --remotes
+    TRACES_PUBLISHED_EXCEPTIONS="$exc" sh "$mails" mails "$local_sha" --not --remotes
     git log -p -U0 --pretty=format: --diff-filter=ACMR "$local_sha" --not --remotes -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
   else
-    sh "$mails" mails "$local_sha" --not "$remote_sha" --remotes
+    TRACES_PUBLISHED_EXCEPTIONS="$exc" sh "$mails" mails "$local_sha" --not "$remote_sha" --remotes
     git log -p -U0 --pretty=format: --diff-filter=ACMR "$local_sha" --not "$remote_sha" --remotes -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
   fi
   scan_patch "$patch"
