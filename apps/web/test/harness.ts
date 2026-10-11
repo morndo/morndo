@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page, type Request as PageRequest } from "playwright";
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
 const WEB = join(import.meta.dirname, "..");
@@ -39,12 +39,57 @@ export async function startWeb(html = DESKTOP_PAGE): Promise<Web> {
     optimizeDeps: { noDiscovery: true, include: [] },
   });
   await server.listen();
-  const browser = await chromium.launch();
+  const browser = steady(await chromium.launch());
   return {
     url: server.resolvedUrls?.local[0] ?? "",
     browser,
     close: async () => { await browser.close(); await server.close(); rmSync(cacheDir, { recursive: true, force: true }); },
   };
+}
+
+// Chromium fails every request in flight with net::ERR_NETWORK_CHANGED when an address comes or goes on any of the
+// machine's interfaces, though the page only talks to 127.0.0.1 (crbug.com/974711, closed as won't fix). Where other
+// work creates and removes container networks, a bridge's address does so every few seconds. A page whose modules were
+// cut that way still fires load but mounts nothing, and its test reads an empty page or waits out its timeout: seen
+// 2026-10-12, every module request of two pages failing in the same millisecond, as a container network went away. So
+// each page of a steady() browser loads again when one of its goto's or reload's requests failed that way, and only
+// then; any other failure stands. One container's start or stop is a burst of address changes, and a load at once
+// after a cut was cut again, 3 times running in 5 of 50 runs beside two container churners: so it waits 250 ms, then
+// twice as long each time, up to 5 loads in all (3.75 s of waiting). browser.newPage() makes its context with
+// newContext too.
+export function steady(browser: Browser): Browser {
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (...args) => {
+    const context = await newContext(...args);
+    const newPage = context.newPage.bind(context);
+    context.newPage = async () => reloadsWhenCut(await newPage());
+    return context;
+  };
+  return browser;
+}
+
+const CUT = "net::ERR_NETWORK_CHANGED";
+const LOADS = 5;
+function reloadsWhenCut(page: Page): Page {
+  for (const name of ["goto", "reload"] as const) {
+    const load = page[name].bind(page) as (...args: unknown[]) => ReturnType<Page["reload"]>;
+    page[name] = (async (...args: unknown[]) => {
+      for (let attempt = 1; ; attempt++) {
+        let cut = false;
+        const failed = (r: PageRequest) => { if (r.failure()?.errorText === CUT) cut = true; };
+        page.on("requestfailed", failed);
+        try {
+          const response = await load(...args);
+          if (!cut || attempt === LOADS) return response;
+        } catch (e) {
+          if ((!cut && !String(e).includes(CUT)) || attempt === LOADS) throw e;
+        } finally { page.off("requestfailed", failed); }
+        console.warn(`${CUT} cut this page's ${name} (load ${attempt}): loading it again`);
+        await new Promise(resolve => { setTimeout(resolve, 250 * 2 ** (attempt - 1)); });
+      }
+    }) as never;
+  }
+  return page;
 }
 
 // The page's globals the fake feed adds. This file is type-checked without the DOM lib.
