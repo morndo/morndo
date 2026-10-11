@@ -11,9 +11,10 @@ import { Decrypter, Encrypter, generateX25519Identity, identityToRecipient } fro
 import { assertPrivate, readPrivate, refuseBareHome, writeNew, writePrivate, writePrivatePair } from "./file-mode.ts";
 import { fingerprintOf, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
+import type { SealedProblem, SealedStore } from "../application/ports.ts";
 import type { Vault } from "./vault.ts";
 
-export class AgeVault implements Vault {
+export class AgeVault implements Vault, SealedStore {
   readonly #dir: string;
   readonly #identityPath: string;
   readonly #uid: number;
@@ -67,6 +68,19 @@ export class AgeVault implements Vault {
       assertPrivate(path, "file", this.#uid);
       unlinkSync(path);
     }
+  }
+
+  // The node's age recipient (age1…), from its identity, made on first use.
+  async recipient(): Promise<string> {
+    return this.#recipientOf();
+  }
+
+  async storeSealed(_ref: string, _sealed: Uint8Array): Promise<{ ok: true; fingerprint: string } | { ok: false; problem: SealedProblem }> {
+    return { ok: false, problem: "not_age" };
+  }
+
+  async keyedFingerprint(_ref: string): Promise<string | null> {
+    return null;
   }
 
   async #recipientOf(): Promise<string> {
