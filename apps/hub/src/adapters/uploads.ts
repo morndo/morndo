@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { IMAGE_EXTENSION, UPLOAD_TTL_MS, acceptUpload, type EndpointId, type ImageMime, type Result, type Upload, type UploadRefusal } from "@morndo/domain";
+import { IMAGE_EXTENSION, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, type EndpointId, type ImageMime, type Result, type Upload, type UploadRefusal } from "@morndo/domain";
 
 const KEEP_FILES_MS = 7 * 24 * 3_600_000;
 
@@ -41,7 +41,7 @@ export function stripMetadata(b: Uint8Array, mime: ImageMime): Uint8Array {
 }
 
 export type Inbox = {
-  save(bytes: Uint8Array, endpointId: EndpointId): Result<Upload, UploadRefusal>;
+  save(bytes: Uint8Array, endpointId: EndpointId, name?: string): Result<Upload, UploadRefusal>;
   get(id: string): Upload | undefined;
   sweep(): void;
 };
@@ -64,16 +64,25 @@ export function uploadInbox(opts: { dir: string; now?: () => number; registry?: 
   const known = opts.registry ?? memoryRegistry();
   const stamp = (t: number) => new Date(t).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
   return {
-    save(bytes, endpointId) {
-      const accepted = acceptUpload(bytes);
-      if (!accepted.ok) return accepted;
-      const mime = accepted.value;
+    save(bytes, endpointId, name = "") {
       const at = now();
       const id = randomBytes(12).toString("hex");
-      const path = join(opts.dir, `pasted-${stamp(at)}-${id.slice(0, 6)}.${IMAGE_EXTENSION[mime]}`);
-      const clean = stripMetadata(bytes, mime);
+      if (name) {
+        const accepted = acceptNamedUpload(bytes, name);
+        if (!accepted.ok) return accepted;
+        const path = join(opts.dir, `pasted-${stamp(at)}-${id.slice(0, 6)}-${accepted.value.name}`);
+        const clean = accepted.value.kind === "image" ? stripMetadata(bytes, accepted.value.mime) : bytes;
+        writeFileSync(path, clean, { mode: 0o600 });
+        const upload: Upload = { id, endpointId, path, mime: accepted.value.mime, size: clean.length, at };
+        known.saveUpload(upload);
+        return { ok: true, value: upload };
+      }
+      const accepted = acceptUpload(bytes);
+      if (!accepted.ok) return accepted;
+      const path = join(opts.dir, `pasted-${stamp(at)}-${id.slice(0, 6)}.${IMAGE_EXTENSION[accepted.value]}`);
+      const clean = stripMetadata(bytes, accepted.value);
       writeFileSync(path, clean, { mode: 0o600 });
-      const upload: Upload = { id, endpointId, path, mime, size: clean.length, at };
+      const upload: Upload = { id, endpointId, path, mime: accepted.value, size: clean.length, at };
       known.saveUpload(upload);
       return { ok: true, value: upload };
     },

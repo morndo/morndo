@@ -6,7 +6,7 @@ import { assertLocalDisk } from "@morndo/service-kit";
 import { migrate } from "./migrations.ts";
 import {
   endpointId, pairingTokenId, sessionId,
-  type AccessEvent, type AccountUsage, type BoardChanged, type EnginesChanged, type EscalationAnswered, type Endpoint, type ImageMime, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
+  type AccessEvent, type AccountUsage, type BoardChanged, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
   type Session, type Task, type TaskEvent, type Upload,
 } from "@morndo/domain";
 
@@ -198,7 +198,7 @@ export class Store {
   }
   upload(id: string): Upload | undefined {
     const r = this.db.prepare("SELECT * FROM uploads WHERE id = ?").get(id) as Row | undefined;
-    return r ? { id: r.id as string, endpointId: endpointId(r.endpoint_id as string), path: r.path as string, mime: r.mime as ImageMime, size: r.size as number, at: r.at as number } : undefined;
+    return r ? { id: r.id as string, endpointId: endpointId(r.endpoint_id as string), path: r.path as string, mime: r.mime as Upload["mime"], size: r.size as number, at: r.at as number } : undefined;
   }
   pruneUploads(before: number): number { return this.db.prepare("DELETE FROM uploads WHERE at < ?").run(before).changes; }
 
