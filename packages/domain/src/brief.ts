@@ -139,6 +139,17 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     }
   }
 
+  // DB3: a due time after the moment the brief is filed or restated, and the minutes it takes to read and decide.
+  let due = 0;
+  if (draft.due === undefined || draft.due === null) lint.error("no_due", "due", "the decision needs a due date after now");
+  else if (typeof draft.due !== "number" || !Number.isFinite(draft.due)) lint.error("bad_due", "due", "a due is a time in ms since the epoch; the template reads a date alone as the end of that day");
+  else if (draft.due <= now) lint.error("due_past", "due", `the due time is at ${new Date(draft.due).toISOString()}, not after now; pick one still ahead`);
+  else due = draft.due;
+  let minutes = 0;
+  if (typeof draft.minutes !== "number" || !Number.isInteger(draft.minutes) || draft.minutes < 1 || draft.minutes > 30) {
+    lint.error("bad_minutes", "minutes", "minutes to read and decide, a whole number from 1 to 30");
+  } else minutes = draft.minutes;
+
   const topic = lint.string("topic", draft.topic, CAPS.topic);
   const headline = lint.string("headline", draft.headline, CAPS.headline);
   if (recommend && headline !== null) {
@@ -213,8 +224,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   // rules are (DB3); the optionals default as the wire schema reads them.
   const brief: DecisionBrief = {
     topic: topic!, headline: headline!,
-    due: typeof draft.due === "number" ? draft.due : 0,
-    minutes: typeof draft.minutes === "number" ? draft.minutes : 0,
+    due, minutes,
     recommend,
     ask: { text: askText!, alternative: alternative!, uncertainty: uncertainty! },
     whyNow: whyNow!,
