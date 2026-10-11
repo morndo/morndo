@@ -388,7 +388,7 @@ Layer, as in design §3.3: **domain** (decided in `secrets.ts`, proved by a doma
 
 | # | Invariant | Layer |
 |---|---|---|
-| SR1 | One open request per (node, Reference). A repeat from another lane joins it; the same lane again changes nothing. | domain service + store |
+| SR1 | One open request per (node, Reference). A repeat from another lane joins it; the same lane again changes nothing, and every caller without a lane counts as one waiter. | domain service + store |
 | SR2 | The requester's broker answers `available` when the use gate admits the caller; with a value but no Grant the request opens as `access`, a card with no field. | application |
 | SR3 | A request carries a purpose (plain text, 1 to 300 characters), a valid Reference and Grant. No type has a field a value could travel in; the wire refuses a value-like key whole. | domain + adapter |
 | SR4 | One answer. Withdrawn only when its last waiting lane withdraws. Expired 7 days after it opened. | domain |

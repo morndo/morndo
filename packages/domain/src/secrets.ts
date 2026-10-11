@@ -147,7 +147,8 @@ export function joinRequest(req: SecretRequest, waiter: Omit<Waiter, "at">, now:
   if (req.state !== "open") return refuseRequest("answered");
   const w = waiterProblem(waiter);
   if (w) return refuseRequest(w);
-  if (waiter.lane !== null && req.waiting.some(x => x.lane === waiter.lane)) return ok({ request: req, events: [] });
+  // One waiter per lane, and one for every caller without a lane: a repeat changes nothing (SR1).
+  if (req.waiting.some(x => x.lane === waiter.lane)) return ok({ request: req, events: [] });
   const request = { ...req, waiting: [...req.waiting, { ...waiter, at: now }], version: req.version + 1 };
   return ok({ request, events: [{ type: "SecretRequestJoined", request: req.id, lane: waiter.lane, at: now }] });
 }
