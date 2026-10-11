@@ -1,7 +1,9 @@
 #!/bin/sh
 # Reject a push that adds a secret, a home path, a private key, or a token.
 # Added lines are checked, so a marker already in a file does not fail a later
-# edit. A private-key header in a test or fixture file is a fixture.
+# edit. A private-key header in a test or fixture file is a fixture. Only
+# commits that are not on any remote are checked, so a branch that merges main
+# never re-checks published history.
 # Install with scripts/install-git-hooks.sh. Does not change git config.
 #
 # gitleaks 8.30.1 `protect` scans `git diff` (or `--staged`), not the commits
@@ -252,6 +254,8 @@ while IFS= read -r file; do
 done < "$paths"
 
 mails=$(dirname "$(readlink -f "$0")")/commit-traces
+# Every check below a push names is limited to commits that are not on any
+# remote: the remote tip git reports and every remote-tracking ref.
 while read -r local_sha remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   if [ "$remote_sha" = "$zero" ] && [ -z "$(git for-each-ref --format='%(objectname)' refs/remotes)" ]; then
@@ -263,8 +267,8 @@ while read -r local_sha remote_sha; do
     sh "$mails" mails "$local_sha" --not --remotes
     git log -p -U0 --pretty=format: --diff-filter=ACMR "$local_sha" --not --remotes -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
   else
-    sh "$mails" mails "${remote_sha}..${local_sha}"
-    git diff -U0 --diff-filter=ACMR "$remote_sha" "$local_sha" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
+    sh "$mails" mails "$local_sha" --not "$remote_sha" --remotes
+    git log -p -U0 --pretty=format: --diff-filter=ACMR "$local_sha" --not "$remote_sha" --remotes -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
   fi
   scan_patch "$patch"
 done < "$ranges"

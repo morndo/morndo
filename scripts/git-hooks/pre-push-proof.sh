@@ -343,4 +343,57 @@ set -e
 [ "$code" -eq 1 ] || fail "committer email should exit 1, got $code"
 cd "$root"
 
+# A branch that merges main never re-checks published history. The clone's
+# origin/main holds the published merge of the listed exception and one more
+# published commit with a personal author address that no exception lists: the
+# remote-tip range of the push fails the plain range check, while the hook,
+# limited to commits that are not on any remote, passes it. A new home path or
+# a personal author address on the merged branch still fails.
+published=15448f3daca454ecf7916ec50d097e4ebe6381b7
+git clone --quiet --local "$root" "$scratch/merged"
+cd "$scratch/merged"
+git checkout -q -b feature "$published^"
+printf 'clean\n' > feature.txt
+git add feature.txt
+commit_ok -m 'feature work'
+remote_tip=$(git rev-parse HEAD)
+bad_tip=$(env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit-tree "$published^{tree}" -p "$published" -m 'published main commit')
+git update-ref refs/remotes/origin/main "$bad_tip"
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com merge -q --no-edit origin/main
+merge_tip=$(git rev-parse HEAD)
+for sha in "$published" "$bad_tip"; do
+  git rev-list "$remote_tip..$merge_tip" | grep -F -x -q "$sha" || fail "the pushed range should hold $sha"
+done
+set +e
+sh "$root/scripts/git-hooks/commit-traces" mails "$remote_tip..$merge_tip"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "the remote-tip range alone should fail on published commits, got $code"
+set +e
+printf '%s %s %s %s\n' refs/heads/feature "$merge_tip" refs/heads/feature "$remote_tip" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a branch that merges main should exit 0, got $code"
+
+printf '/%s/%s/notes\n' home example-user > merged-note.txt
+git add merged-note.txt
+commit_ok -m 'home path after the merge'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/feature "$tip" refs/heads/feature "$remote_tip" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a home path after the merge should exit 1, got $code"
+git reset -q --hard "$merge_tip"
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
+  commit -q --allow-empty -m 'bad author after the merge'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/feature "$tip" refs/heads/feature "$remote_tip" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a personal author address after the merge should exit 1, got $code"
+cd "$root"
+
 echo "pre-push proof ok"
