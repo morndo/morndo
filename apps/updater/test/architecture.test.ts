@@ -18,13 +18,17 @@ const walk = (dir: string): string[] =>
     e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith(".ts") ? [join(dir, e.name)] : []);
 const under = (dir: string, suffix: string) => walk(dir).filter(f => relative(dir, f).startsWith(suffix));
 
-const importsOf = (code: string) => [...code.matchAll(/(?:import|export)\s[^'"]*?from\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g)].map(m => m[1] ?? m[2] ?? "");
+const importsOf = (code: string) => [...code.matchAll(/(?:import|export)\s[^'"]*?from\s*["']([^"']+)["']|import\s*["']([^"']+)["']|import\(\s*["']([^"']+)["']\s*\)/g)].map(m => m[1] ?? m[2] ?? m[3] ?? "");
 
 // The application layer: the domain, the protocol, its siblings — and nothing else, no adapter, no Node.
 const APP_LAYER_OK = /^(?:\.{1,2}\/[\w-]+\.ts|@morndo\/domain|@morndo\/protocol)$/;
 export const applicationOffending = (code: string) => importsOf(code).filter(spec => !APP_LAYER_OK.test(spec));
 // @morndo/node-ops holds the tmux code (RL13).
 export const bannedImports = (code: string) => importsOf(code).filter(spec => spec === "@morndo/node-ops" || spec.startsWith("@morndo/node-ops/"));
+// No other app imports the updater, by path or by its package name (every app is @morndo/<app>).
+export const updaterImports = (code: string) => importsOf(code).filter(spec =>
+  spec === "@morndo/updater" || spec.startsWith("@morndo/updater/")
+  || /(^|\/)apps\/updater\//.test(spec) || /(^|\/)\.\.\/updater\//.test(spec.replace(/^\.\//, "")));
 // One door for node:crypto (the verifier); other node:* modules are the adapters' and the CLI's to use.
 export const cryptoImports = (code: string) => importsOf(code).filter(spec => spec === "node:crypto");
 const NODE_GLOBALS = /\b(?:Buffer|process)\.\w|\bnew Buffer\b|\brequire\(|\b__dirname\b|\bimport\.meta\.dirname\b/;
@@ -53,9 +57,7 @@ describe("updater architecture (§4.7)", () => {
   it("no other app imports apps/updater: the hub runs the program", () => {
     const others = readdirSync(join(ROOT, "apps"), { withFileTypes: true })
       .filter(e => e.isDirectory() && e.name !== "updater").flatMap(e => walk(join(ROOT, "apps", e.name, "src")));
-    const bad = others.flatMap(f => importsOf(readFileSync(f, "utf8"))
-      .filter(spec => /(^|\/)apps\/updater\//.test(spec) || /(^|\/)\.\.\/updater\//.test(spec.replace(/^\.\//, "")))
-      .map(spec => `${relative(ROOT, f)} -> ${spec}`));
+    const bad = others.flatMap(f => updaterImports(readFileSync(f, "utf8")).map(spec => `${relative(ROOT, f)} -> ${spec}`));
     expect(bad).toEqual([]);
   });
   it("the checks catch what they forbid (negative controls)", () => {
@@ -65,9 +67,15 @@ describe("updater architecture (§4.7)", () => {
     expect(applicationOffending(`import { tmux } from "${OPS}";`)).toEqual([OPS]);
     expect(applicationOffending(`import { p } from "../adapters/installer.ts";`)).toEqual(["../adapters/installer.ts"]);
     expect(applicationOffending(`import { admit } from "@morndo/domain";\nimport { f } from "./feed.ts";`)).toEqual([]);
+    expect(applicationOffending(`import "../adapters/installer.ts";`)).toEqual(["../adapters/installer.ts"]);
     expect(bannedImports(`import { tmux } from "${OPS}";`)).toEqual([OPS]);
     expect(bannedImports(`import { x } from "${OPS}/tmux";`)).toEqual([`${OPS}/tmux`]);
     expect(cryptoImports(`import { createHash } from "node:crypto";`)).toEqual(["node:crypto"]);
+    expect(cryptoImports(`import "node:crypto";`)).toEqual(["node:crypto"]);
+    expect(updaterImports(`import { runUpdate } from "@morndo/updater";`)).toEqual(["@morndo/updater"]);
+    expect(updaterImports(`import { x } from "@morndo/updater/run";`)).toEqual(["@morndo/updater/run"]);
+    expect(updaterImports(`import { x } from "../../apps/updater/src/main.ts";`)).toEqual(["../../apps/updater/src/main.ts"]);
+    expect(updaterImports(`import { x } from "@morndo/hub";`)).toEqual([]);
     expect(`const b = Buffer.from(s);`).toMatch(NODE_GLOBALS);
     expect(`if (process.env.X) {}`).toMatch(NODE_GLOBALS);
   });

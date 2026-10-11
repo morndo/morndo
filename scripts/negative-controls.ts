@@ -1100,6 +1100,16 @@ export const CONTROLS: Control[] = [
     find: "z.regex(/^(?!\\.(?:\\/|$))(?!\\.\\.(?:\\/|$))[^/\\u0000\\n\\r\\u2028\\u2029]+(?:\\/(?!\\.(?:\\/|$))(?!\\.\\.(?:\\/|$))[^/\\u0000\\n\\r\\u2028\\u2029]+)*$/),",
     replace: "z.regex(/^(?!\\/)(?!.*(?:^|\\/)\\.\\.(?:\\/|$)).+$/),",
     run: ["packages/protocol/test/releases-wire.test.ts"], expect: "a NUL byte" },
+  // The review of 2026-10-11: the updater's architecture scanner missed side-effect imports, and the "no other app"
+  // check missed the package-name import @morndo/updater.
+  { id: "pr1-arch-side-effect-imports", task: "pr1", file: "apps/updater/test/architecture.test.ts",
+    find: "const importsOf = (code: string) => [...code.matchAll(/(?:import|export)\\s[^'\"]*?from\\s*[\"']([^\"']+)[\"']|import\\s*[\"']([^\"']+)[\"']|import\\(\\s*[\"']([^\"']+)[\"']\\s*\\)/g)].map(m => m[1] ?? m[2] ?? m[3] ?? \"\");",
+    replace: "const importsOf = (code: string) => [...code.matchAll(/(?:import|export)\\s[^'\"]*?from\\s*[\"']([^\"']+)[\"']|import\\(\\s*[\"']([^\"']+)[\"']\\s*\\)/g)].map(m => m[1] ?? m[2] ?? \"\");",
+    run: ["apps/updater/test/architecture.test.ts"], expect: "adapters/installer.ts" },
+  { id: "pr1-arch-package-name-import", task: "pr1", file: "apps/updater/test/architecture.test.ts",
+    find: "spec === \"@morndo/updater\" || spec.startsWith(\"@morndo/updater/\")",
+    replace: "false",
+    run: ["apps/updater/test/architecture.test.ts"], expect: "@morndo/updater" },
   { id: "pr1-state-mark-any-order", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (!MARK_NEEDS[mark].includes(u.state)) return err(\"step_out_of_order\");",
     replace: "if (false) return err(\"step_out_of_order\");",
