@@ -4,9 +4,8 @@
 // reaps it a moment later). A server started at once on the same socket can meet the dying one ("server exited
 // unexpectedly", seen with tmux 3.3a), so it waits until tmux itself says no server runs there and that server pid has
 // left the process table; then it removes the socket file, which tmux leaves behind. Each command gets the environment
-// as it is at that moment (a test may set
-// PATH for the server it starts), minus TMUX and TMUX_PANE, so a test run from inside a tmux pane (a lane running the
-// suite) behaves as anywhere else.
+// as it is at that moment (a test may set PATH for the server it starts), minus TMUX and TMUX_PANE, so a test run from
+// inside a tmux pane (a lane running the suite) behaves as anywhere else.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
