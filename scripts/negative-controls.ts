@@ -1030,6 +1030,28 @@ export const CONTROLS: Control[] = [
   { id: "sp1-sealed-only-three", task: "secrets-pr1", file: "packages/protocol/src/secrets.ts",
     find: "export const SecretsTransferResult = z.strictObject({ sealed: SealedValue });", replace: "export const SecretsTransferResult = z.strictObject({ sealed: SealedValue, copy: SealedValue });",
     run: ["packages/protocol/test/secrets-wire.test.ts"], expect: "SecretsTransferResult.copy" },
+  // The follow-ups (board T-72), each guard removed once.
+  { id: "sp1-version-past-held", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: ", ...(before?.versions.map(v => v.number) ?? [])];", replace: "];",
+    run: ["packages/domain/test/secrets-followup.test.ts"], expect: "expected 1 to be 4" },
+  { id: "sp1-admission-waiters", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: 'if (full(same) && !same.waiting.some(w => sameWaiter(w, lane, ask.waiter.workspace))) return { kind: "refuse", limit: "request-waiters" };', replace: "",
+    run: ["packages/domain/test/secrets-followup.test.ts"], expect: "request-waiters" },
+  { id: "sp1-request-full", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: 'if (full(req)) return refuseRequest("full");', replace: "",
+    run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'full'" },
+  { id: "sp1-renew-expiry", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: 'if (req.kind === "renew" && !renews) return refuseRequest("expiry");', replace: "",
+    run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'expiry'" },
+  { id: "sp1-rotation-shape", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: "shape: input.shape ?? before.shape,", replace: "shape: input.shape,",
+    run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'shape-a'" },
+  { id: "sp1-wire-destinations-max", task: "secrets-pr1", file: "packages/protocol/src/secrets.ts",
+    find: "z.maxLength(DESTINATIONS_MAX), ", replace: "",
+    run: ["packages/protocol/test/secrets-wire-followup.test.ts"], expect: "too_big" },
+  { id: "sp1-wire-modes-length", task: "secrets-pr1", file: "packages/protocol/src/secrets.ts",
+    find: "z.minLength(1), z.maxLength(USE_MODES.length), ", replace: "",
+    run: ["packages/protocol/test/secrets-wire-followup.test.ts"], expect: "too_small" },
 ];
 
 // ---- the runner
