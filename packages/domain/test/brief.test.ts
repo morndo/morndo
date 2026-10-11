@@ -192,6 +192,14 @@ describe("DB2: one recommendation, named in the headline", () => {
     expect(lines(d => { d.headline = "Approve the extension of the triage script"; }))
       .toEqual(["error headline_option (headline)"]);
   });
+  it("the recommendation names an option key whatever its case, and comes back as the option's own key", () => {
+    // One case-blind comparison for every key check (DB2): the table heads uppercase the keys, so an asker writing
+    // "B" means the option keyed "b", as a headline naming "option B" already does.
+    const r = lint(d => { d.recommend = "B"; });
+    expect(r.problems).toEqual([]);
+    expect(r.brief?.recommend).toBe("b");
+    expect(lines(d => { d.recommend = "d"; })).toEqual(["error no_recommendation (recommend)"]);
+  });
   it("a headline that names two options is refused", () => {
     expect(lines(d => { d.headline = "Approve option B or option C"; }))
       .toEqual(["error headline_option (headline)"]);
