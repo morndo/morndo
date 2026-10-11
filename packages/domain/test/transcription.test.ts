@@ -154,6 +154,15 @@ describe("starting and ending a transcription", () => {
     expect(endTranscription(run(), { outcome: "done", at: AT + 40, engine: broken(["ein Wort"]), engineName: "local", model: "small" }).ok).toBe(false);
   });
 
+  it("repeating the done the cap turned into too_long is the same report, not a conflict (TX3)", () => {
+    const tooLong = value(endTranscription(run(), { outcome: "done", at: AT + 700_000, engine: heard("zu lang", 700_000), engineName: "local", model: "small" }));
+    expect(tooLong).toMatchObject({ state: "failed", outcome: "failed", problem: "too_long" });
+    const retried = endTranscription(tooLong, { outcome: "done", at: AT + 800_000, engine: heard("zu lang", 700_000), engineName: "local", model: "small" });
+    expect(retried).toEqual({ ok: true, value: tooLong });
+    expect(endTranscription(tooLong, { outcome: "done", at: AT + 800_000, engine: heard("kurz", 100_000), engineName: "local", model: "small" }))
+      .toEqual({ ok: false, error: "already_terminal" });
+  });
+
   it("a restart with no recorded end marks the run lost and keeps the row; what never ran waits on (TX4)", () => {
     const rows = [live({ id: "tx-q" }), starting({ id: "tx-s" }), run({ id: "tx-r" }),
       value(endTranscription(run({ id: "tx-d" }), { outcome: "done", at: AT + 40, engine: heard("w"), engineName: "e", model: "m" }))];
