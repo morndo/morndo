@@ -21,10 +21,16 @@ export function capStep(sight: CapSight | null, size: number, cap: number, now: 
   return { kind: "grace", sight };
 }
 
-// Both sides are CLOCK_MONOTONIC microseconds: systemd's ExecMainExitTimestampMonotonic (org.freedesktop.systemd1(5),
-// systemd 255: the ExecStart CLOCK_REALTIME/CLOCK_MONOTONIC pair), and process.hrtime, which is libuv's uv_hrtime,
-// clock_gettime(CLOCK_MONOTONIC) on Linux (libuv 1.52.1 src/unix/core.c and linux.c, read 2026-10-11).
-// 0 means the main process has not exited.
-export function endedBeforeStop(exitedUsec: number, sentUsec: bigint): boolean {
-  return exitedUsec > 0 && BigInt(exitedUsec) < sentUsec;
+// CLOCK_MONOTONIC microseconds now. process.hrtime is libuv's uv_hrtime, clock_gettime(CLOCK_MONOTONIC) on Linux
+// (libuv 1.52.1 src/unix/core.c and linux.c, read 2026-10-11): the clock of systemd's *TimestampMonotonic properties
+// (org.freedesktop.systemd1(5), systemd 255: the ExecStart CLOCK_REALTIME/CLOCK_MONOTONIC pair).
+export const monotonicUsec = (): bigint => process.hrtime.bigint() / 1000n;
+
+// Whether a unit's main process ended before the stop was sent at `sentUsec`. `seenUsec` is when a look began that
+// systemd answered with the unit still running: an exit recorded before it belongs to no run this stop could have
+// ended. 0 for `exitedUsec` means the main process has not exited.
+export function endedBeforeStop(exitedUsec: number, sentUsec: bigint, seenUsec = 0n): boolean {
+  if (exitedUsec <= 0) return false;
+  const exited = BigInt(exitedUsec);
+  return exited >= seenUsec && exited < sentUsec;
 }

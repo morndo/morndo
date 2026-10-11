@@ -133,7 +133,8 @@ async function main(): Promise<void> {
     if (spec.logBytes > 0) {
       try { size = statSync(spec.logPath).size; } catch { /* a missing log is not over the cap */ }
     }
-    const step = capStep(sight, size, spec.logBytes, Date.now(), existsSync(capRequest(spec.exitPath)));
+    // The grace is timed on the monotonic clock, so a wall-clock step neither stretches nor ends it.
+    const step = capStep(sight, size, spec.logBytes, performance.now(), existsSync(capRequest(spec.exitPath)));
     if (step.kind === "under") return;
     if (step.kind === "grace" && !childExited) { sight = step.sight; return; }
     // setImmediate runs after this turn's poll phase, where libuv hands over a child exit the kernel already reported,

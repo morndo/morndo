@@ -15,7 +15,7 @@ import {
 import { deniedBy, denyRoots, processAlive, resolvedRoots } from "@morndo/node-ops";
 import { errno } from "@morndo/service-kit";
 import { psStarts, readRecorded, sameProcess, START_RECORD_GRACE_MS, writeProcessFile, type Recorded } from "./job-identity.ts";
-import { capStep, endedBeforeStop, UNIT_CAP_LOOK_MS, type CapSight } from "./job-cap.ts";
+import { capStep, endedBeforeStop, monotonicUsec, UNIT_CAP_LOOK_MS, type CapSight } from "./job-cap.ts";
 import { MAX_TIMER_MS } from "./job-limits.ts";
 import { askHub, JobGrants } from "./job-grant.ts";
 import { killJobUnit, managerEnv, probeUserManager, resetJobUnit, runMs, showUnit, spawnFailed, startJobUnit, stopJobUnit, type ProbeResult, type UnitLook, type UnitState } from "./job-systemd.ts";
@@ -205,6 +205,10 @@ export class JobSupervisor {
   #managerEnv: Promise<string[] | null> | null = null;
   #server: Server | null = null;
   #tails = new Map<string, Promise<void>>();
+  // Design §5: the grace of each capped systemd job, running beside the sweep (see #watchCap).
+  #capWatches = new Map<string, Promise<void>>();
+  // A closed supervisor's watches stop acting: the agent that replaces it owns the jobs.
+  #closed = false;
 
   constructor(store: JobStore, opts: {
     home: string;
@@ -278,6 +282,7 @@ export class JobSupervisor {
   }
 
   close(): void {
+    this.#closed = true;
     this.#server?.close();
     this.#server = null;
     try { unlinkSync(this.#socketPath); } catch (e) { if (errno(e) !== "ENOENT") throw e; }
@@ -326,6 +331,12 @@ export class JobSupervisor {
       for (const job of jobs) await this.#exclusive(job.id, () => this.#sweepOne(job.id, pending, starts));
     }
     await this.#promote(this.#starting(), guard);
+    // Design §5: a capped unit's grace runs beside the sweep, so it holds up no other job and no cancel. The sweep
+    // still ends with those decisions, and starts what they freed.
+    if (this.#capWatches.size > 0) {
+      await Promise.all([...this.#capWatches.values()]);
+      await this.#promote(this.#starting());
+    }
   }
 
   async #exclusive<T>(id: string, fn: () => Promise<T> | T): Promise<T> {
@@ -583,6 +594,7 @@ export class JobSupervisor {
 
   async #sweepUnit(id: string, pending: Set<string>): Promise<void> {
     if (!this.#open(id)) return;
+    const seenUsec = monotonicUsec();
     const look = await showUnit(id, this.#toolEnv);
     const job = this.#open(id);
     if (!job) return;
@@ -598,7 +610,7 @@ export class JobSupervisor {
     const view = look.view;
     if (view.active === "activating" || (view.active === "active" && view.sub === "running")) {
       if (job.state === "starting") this.#store.started(id);
-      if (this.#overCap(id)) await this.#capUnit(id, view);
+      if (this.#overCap(id)) this.#watchCap(id, view, seenUsec);
       return;
     }
     await this.#settleUnit(id, view);
@@ -623,24 +635,43 @@ export class JobSupervisor {
     await resetJobUnit(id, this.#toolEnv);
   }
 
-  // Design §5: on systemd the sweep that sees the cap owns it. The grace runs here, looking every UNIT_CAP_LOOK_MS, so
-  // the 1-second sweep does not stretch it. Each look checks the log and the unit's main process; only when that
-  // process is gone does it ask systemd how the unit ended. The .cap file notes the sighting, so a later sweep, or a
-  // restarted agent, still knows the log is at the cap.
-  async #capUnit(id: string, view: UnitState): Promise<void> {
+  // Design §5: on systemd the supervisor owns the cap. The sweep that sees it starts one watch per job, which runs the
+  // grace beside the sweep on the monotonic clock, looking every UNIT_CAP_LOOK_MS, and takes the job's lock only to
+  // settle or stop. The .cap file notes the sighting, so a later sweep, or a restarted agent, still knows the log is
+  // at the cap. `seenUsec`: when the look began that showed the unit running.
+  #watchCap(id: string, view: UnitState, seenUsec: bigint): void {
+    if (this.#capWatches.has(id)) return;
     this.#requestCap(id);
+    const watch = this.#capUnit(id, view, seenUsec)
+      .catch(() => { /* the next sweep looks again */ })
+      .finally(() => { this.#capWatches.delete(id); });
+    this.#capWatches.set(id, watch);
+  }
+
+  // Each look checks the log and the unit's main process; only when that process is gone does it ask systemd how the
+  // unit ended.
+  async #capUnit(id: string, view: UnitState, seenUsec: bigint): Promise<void> {
     let sight: CapSight | null = null;
+    let seen = seenUsec;
     for (;;) {
-      const step = capStep(sight, this.#logSize(id), this.#store.logBytes, Date.now(), true);
+      const step = capStep(sight, this.#logSize(id), this.#store.logBytes, performance.now(), true);
       if (step.kind !== "grace") break;
       sight = step.sight;
       await wait(UNIT_CAP_LOOK_MS);
+      if (this.#closed || !this.#open(id)) return;
       if (view.mainPid > 0 && processAlive(view.mainPid)) continue;
+      const lookedAt = monotonicUsec();
       const look = await showUnit(id, this.#toolEnv);
       if (look.kind === "absent") return;
-      if (look.kind === "found" && !this.#live(look.view)) { await this.#settleUnit(id, look.view); return; }
+      if (look.kind === "found" && !this.#live(look.view)) {
+        const ended = look.view;
+        await this.#exclusive(id, () => this.#settleUnit(id, ended));
+        return;
+      }
+      if (look.kind === "found") seen = lookedAt;
     }
-    await this.#stopForCap(id);
+    if (this.#closed) return;
+    await this.#exclusive(id, () => this.#stopForCap(id, seen));
   }
 
   #logSize(id: string): number {
@@ -875,11 +906,11 @@ export class JobSupervisor {
     return after;
   }
 
-  // Design §5: no code for a unit still running when the stop is sent. A main process that exited normally (CLD_EXITED,
-  // ExecMainCode 1) before the stop keeps its own result. One found killed by a signal after the stop was stopped by it.
-  async #stopForCap(id: string): Promise<void> {
-    this.#requestCap(id);
-    const sentUsec = process.hrtime.bigint() / 1000n;
+  // Design §5: no code for a unit still running when the stop is sent. A main process that ended before it keeps its
+  // own result: its exit code, or 128 plus the signal when someone else killed it.
+  async #stopForCap(id: string, seenUsec: bigint): Promise<void> {
+    if (!this.#open(id)) return;
+    const sentUsec = monotonicUsec();
     const after = await this.#endLive(id);
     if (after === "unsignalled" || after === "signalled" || after.kind !== "found") return;
     const job = this.#open(id);
@@ -889,7 +920,7 @@ export class JobSupervisor {
       if (!started.ok) return;
     }
     const durationMs = runMs(after.view, job.startedAt);
-    const own = after.view.execCode === 1 && endedBeforeStop(after.view.exitedUsec, sentUsec) ? exitOf(after.view, durationMs) : null;
+    const own = endedBeforeStop(after.view.exitedUsec, sentUsec, seenUsec) ? exitOf(after.view, durationMs) : null;
     try { this.#store.settle(id, own ?? { outcome: "exited", exitCode: null, durationMs }); } catch { return; }
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
