@@ -1,6 +1,7 @@
 #!/bin/sh
-# Reject assistant attribution in a commit message, author, or committer,
-# and an author or committer email that is not @users.noreply.github.com.
+# Reject assistant attribution in a commit message, author, or committer.
+# The author address must be @users.noreply.github.com. The committer address
+# may also be GitHub's web-flow address, noreply@github.com.
 #   sh commit-traces message FILE
 #   sh commit-traces range <git rev-list args>
 #   sh commit-traces mails <git rev-list args>
@@ -39,12 +40,18 @@ noreply_mail() {
   printf '%s' "$1" | grep -E -i -q '^[^@[:space:]]+@users\.noreply\.github\.com$'
 }
 
+# Web merges and the web editor commit as GitHub <noreply@github.com>.
+github_committer() {
+  printf '%s' "$1" | grep -E -i -q '^noreply@github\.com$'
+}
+
 check_mails() {
   sha=$1
   ae=$(git log -1 --format='%ae' "$sha")
   ce=$(git log -1 --format='%ce' "$sha")
-  if ! noreply_mail "$ae" || ! noreply_mail "$ce"; then
-    fail "$sha author or committer email is not @users.noreply.github.com"
+  noreply_mail "$ae" || fail "$sha author email is not @users.noreply.github.com"
+  if ! noreply_mail "$ce" && ! github_committer "$ce"; then
+    fail "$sha committer email is not a noreply address"
   fi
 }
 

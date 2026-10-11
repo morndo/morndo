@@ -89,5 +89,19 @@ sh "$checker" range "$mail_base..$tip"
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "committer email should exit 1, got $code"
+git reset -q --hard "$mail_base"
+env GIT_COMMITTER_EMAIL=noreply@github.com git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
+  commit -q --allow-empty -m 'fix: clean note'
+tip=$(git rev-parse HEAD)
+sh "$checker" range "$mail_base..$tip" || fail "web-flow committer should exit 0"
+git reset -q --hard "$mail_base"
+env GIT_AUTHOR_EMAIL=noreply@github.com git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
+  commit -q --allow-empty -m 'fix: clean note'
+tip=$(git rev-parse HEAD)
+set +e
+sh "$checker" range "$mail_base..$tip"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "web-flow author should exit 1, got $code"
 
 echo "commit-traces proof ok"
