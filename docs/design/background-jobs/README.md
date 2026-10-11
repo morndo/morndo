@@ -203,6 +203,13 @@ Cancel removes a queued job from the line and reports `cancelled` without it eve
 
 Per job, the log is capped at 8 MiB, keeping the tail. Across jobs, logs are capped at 256 MiB (the relay's existing disk budget is the model, not a shared pool with it). A start that cannot create a log inside that cap is refused `disk`, not queued.
 
+**When a log reaches its cap.** One rule, the same on both backends (`apps/node-agent/src/ops/job-cap.ts`):
+
+- **One owner decides.** On the helper backend the helper decides, because it is the only process that runs while the agent is down. The supervisor's sweep never stops a helper's command; it writes `<id>.cap` to say it saw the log at the cap, and the helper treats that file like its own sighting. On the systemd backend the supervisor decides, in the sweep that sees the cap (it also writes `<id>.cap`, so a later sweep, or a restarted agent, still knows).
+- **The grace.** From the owner's first sighting, the command has 1 second to end on its own, as long as the log does not grow. If the log grows again, the owner stops the command at once, so a command that keeps writing gets past the cap only what it writes between two looks (the helper looks every 30 ms; on systemd the sweep that saw the cap looks every 50 ms until it decides). The grace runs on that owner's clock only, inside one look loop, so the 1-second sweep does not stretch it. Stopping is SIGTERM to the process group, then SIGKILL.
+- **The exit code.** A command whose main process ended before the owner sent the stop keeps its own code (`exited`, the code, or 128 plus the signal when someone else killed it). This holds when the log is at the cap, and when processes it left behind keep its group alive: those are stopped, and the code stays. A command still running when the stop is sent is `exited` with no code (`exit: -`), whatever it does after the signal: a SIGTERM handler that exits 0 is still `-`. "Before" is checked, not guessed: the helper first handles every child exit already queued for it, then decides; the systemd path compares the unit's `ExecMainExitTimestampMonotonic` with the CLOCK_MONOTONIC time the stop was sent.
+- **Restart.** The result is written once, by the owner: the helper's `<id>.exit`, or the supervisor's terminal row. A supervisor that starts later takes `<id>.exit` as written, so a code the helper kept while no supervisor ran stays, and a `<id>.cap` on disk changes nothing. A systemd unit that ended while the agent was down is read from systemd, with its own code; one still running starts the grace again.
+
 **Why this, and not the alternatives.**
 
 | Option | Verdict |
