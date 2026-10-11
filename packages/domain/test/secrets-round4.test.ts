@@ -94,8 +94,8 @@ describe("round 4, points 2 and 6: the hub's answer always names the Expiry its 
     node: "node-a", reference: REF, kind: "renew", waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
   }, "r1", T)).request;
   it("an answer that leaves the Expiry out does not compile, so none is refused by accident; one that names none is refused", () => {
-    // @ts-expect-error: the Expiry is required, null when the store named none.
-    const left = answerStored(renew, { seen: 1, command: "c2", reference: REF, version: 2, confirmations: [{ reference: REF, node: "node-a", version: 2, at: T + 1, renewed: true }] }, T + 1);
+    // @ts-expect-error: the Expiry is required, null when the store named none. Its absence is the only error on the line.
+    const left = answerStored(renew, { seen: 1, command: "c2", reference: REF, confirmations: [{ reference: REF, node: "node-a", version: 2, at: T + 1, renewed: true }] }, T + 1);
     expect(left.ok ? "ok" : left.error.problem).toBe("expiry");
     const none = answerStored(renew, { seen: 1, command: "c2", reference: REF, expiry: null, confirmations: [{ reference: REF, node: "node-a", version: 2, at: T + 1, renewed: true }] }, T + 1);
     expect(none.ok ? "ok" : none.error.problem).toBe("expiry");
