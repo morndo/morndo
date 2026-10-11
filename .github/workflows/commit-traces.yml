@@ -2,9 +2,6 @@
 # assistant attribution (trailers, generated-by lines, session links, vendor
 # addresses, and the author and committer names). The author address is
 # @users.noreply.github.com. The committer may also be noreply@github.com.
-# The published exceptions are read from the branch this check protects -
-# the pull request's base branch, or the state of main before a push -
-# never from the checkout under test, so a change cannot list itself.
 # actions/checkout v7.0.1, same pin as ci.yml.
 name: Commit traces
 
@@ -33,33 +30,15 @@ jobs:
       - name: Check commits
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.event.after }}
         run: |
           zero=0000000000000000000000000000000000000000
-          # The published exceptions come from the branch this check
-          # protects, never from the checkout under test.
-          exceptions=scripts/git-hooks/traces-published-exceptions
-          protected=$(mktemp)
           if [ "$EVENT_NAME" = "pull_request" ]; then
             test -n "$BASE_SHA"
             test -n "$HEAD_SHA"
-            source="origin/$BASE_REF"
-          elif [ "$BEFORE_SHA" = "$zero" ]; then
-            source=
-          else
-            source="$BEFORE_SHA"
-          fi
-          if [ -n "$source" ] && git cat-file -e "$source:$exceptions" 2>/dev/null; then
-            git show "$source:$exceptions" > "$protected"
-          else
-            : > "$protected"
-          fi
-          export TRACES_PUBLISHED_EXCEPTIONS="$protected"
-          if [ "$EVENT_NAME" = "pull_request" ]; then
             exec sh scripts/git-hooks/commit-traces range "$BASE_SHA..$HEAD_SHA"
           fi
           if [ "$BEFORE_SHA" = "$zero" ]; then
@@ -67,7 +46,5 @@ jobs:
           else
             set -- "$BEFORE_SHA..$AFTER_SHA"
           fi
-          # Every commit in the pushed range is checked. An exception skips
-          # the mail check of the exact sha it lists, never a message, a
-          # name, or an ancestor.
+          # Every commit in the pushed range is checked.
           exec sh scripts/git-hooks/commit-traces range "$@"

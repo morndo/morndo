@@ -1,5 +1,3 @@
 # One maintainer until the org has a team. Needs write access or review requests do not attach.
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 * @jacksnxly
-# The published-exceptions list exempts commits from the traces check.
-/scripts/git-hooks/traces-published-exceptions @jacksnxly

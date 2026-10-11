@@ -82,8 +82,6 @@ set -e
 [ "$code" -eq 1 ] || fail "range including a bot author should exit 1, got $code"
 
 mail_base=$(git rev-parse HEAD)
-# These run with traces-published-exceptions in effect: a fresh commit with a
-# personal author address is not the listed sha and still fails.
 env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
   commit -q --allow-empty -m 'fix: clean note'
 tip=$(git rev-parse HEAD)
@@ -115,99 +113,6 @@ sh "$checker" range "$mail_base..$tip"
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "web-flow author should exit 1, got $code"
-
-# The published exception is fabricated: this throwaway repo publishes a
-# commit with a personal author address, and the checker reads the list
-# through TRACES_PUBLISHED_EXCEPTIONS, the way CI points it at the copy on
-# the branch under protection. No real history is needed, so the proof runs
-# in any clone, shallow included.
-published=$(env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
-  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'published with a personal address' \
-  && git rev-parse HEAD)
-protected=$scratch/protected
-printf '%s\n' "$published" > "$protected"
-TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published" --max-count=1 || fail "the listed published commit should exit 0"
-TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published^..$published" || fail "a range holding the published commit should exit 0"
-
-# The exception skips the mail check only: a listed commit whose message
-# attributes the change still fails. The commit-msg hook would refuse the
-# message, so this bad commit is made with --no-verify.
-msg=$(printf '%s\n\nCo-authored-by: %s <a@example.invalid>\n' 'fix: clean note' 'Claude')
-env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
-  commit -q --no-verify --allow-empty -m "$msg"
-tip=$(git rev-parse HEAD)
-printf '%s\n' "$tip" > "$protected"
-set +e
-TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published..$tip"
-code=$?
-set -e
-[ "$code" -eq 1 ] || fail "a listed commit with an assistant trailer should exit 1, got $code"
-
-# Listing a sha excludes no ancestor: the plain range CI passes holds the
-# unlisted parent, and its personal address still fails.
-git reset -q --hard "$published"
-env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
-  commit -q --allow-empty -m 'unlisted ancestor'
-parent=$(git rev-parse HEAD)
-env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
-  commit -q --allow-empty -m 'published with a personal address'
-listed=$(git rev-parse HEAD)
-printf '%s\n' "$listed" > "$protected"
-set +e
-TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published..$listed"
-code=$?
-set -e
-[ "$code" -eq 1 ] || fail "an ancestor beside a listed commit should exit 1, got $code"
-TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$listed^..$listed" || fail "the listed commit alone should exit 0"
-
-# The one parser trims the list: a spaced line with a carriage return still
-# excepts, and a malformed line fails the check loudly.
-spaced=$scratch/spaced
-printf '  %s  \r\n' "$listed" > "$spaced"
-TRACES_PUBLISHED_EXCEPTIONS="$spaced" sh "$checker" range "$listed^..$listed" || fail "a spaced CR-terminated line should still except"
-git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'clean note'
-clean=$(git rev-parse HEAD)
-malformed=$scratch/malformed
-{ printf '# published before the check, unfixable\n'; printf '%s\n' "zz$listed"; } > "$malformed"
-set +e
-out=$(TRACES_PUBLISHED_EXCEPTIONS="$malformed" sh "$checker" range "$listed..$clean" 2>&1)
-code=$?
-set -e
-[ "$code" -eq 1 ] || fail "a malformed list line should exit 1, got $code"
-printf '%s\n' "$out" | grep -q malformed || fail "a malformed list line should say malformed"
-
-# A branch cannot list itself: the tree under test adds its own bad commit
-# to the list, and the check still reads the copy from the branch it
-# protects, the way CI does.
-selflist=$scratch/selflist
-git init -q "$selflist"
-cd "$selflist"
-printf 'base\n' > note.txt
-git add note.txt
-git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q -m 'selflist base'
-base=$(git rev-parse HEAD)
-env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
-  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'bad mail commit'
-bad=$(git rev-parse HEAD)
-mkdir -p scripts/git-hooks
-printf '%s\n' "$bad" > scripts/git-hooks/traces-published-exceptions
-git add scripts/git-hooks
-git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q -m 'the tree lists itself'
-tip=$(git rev-parse HEAD)
-git update-ref refs/remotes/origin/main "$base"
-basecopy=$scratch/basecopy
-if git cat-file -e "refs/remotes/origin/main:scripts/git-hooks/traces-published-exceptions" 2>/dev/null; then
-  git show "refs/remotes/origin/main:scripts/git-hooks/traces-published-exceptions" > "$basecopy"
-else
-  : > "$basecopy"
-fi
-set +e
-TRACES_PUBLISHED_EXCEPTIONS="$basecopy" sh "$checker" range "$base..$tip"
-code=$?
-set -e
-[ "$code" -eq 1 ] || fail "a tree that lists its own bad commit should exit 1, got $code"
-printf '%s\n' "$bad" > "$basecopy"
-TRACES_PUBLISHED_EXCEPTIONS="$basecopy" sh "$checker" range "$base..$tip" || fail "a bad commit listed on the protected branch should exit 0"
 
 cd "$root"
 set +e

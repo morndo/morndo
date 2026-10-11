@@ -345,8 +345,7 @@ cd "$root"
 
 # A branch that merges main never re-checks published history. The repo is
 # throwaway and its origin/main is fabricated: one published commit with a
-# personal author address that no exception lists, carrying a synthetic key
-# that only gitleaks flags.
+# personal author address, carrying a synthetic key that only gitleaks flags.
 # The remote-tip range of the push fails the plain range check, while the
 # hook, limited to commits that are not on the remote pushed to, passes it.
 # A new home path, a personal author address, or an unpublished synthetic
@@ -491,51 +490,6 @@ printf '%s %s %s %s\n' refs/heads/main "$remote_tip" refs/heads/main "$carry" | 
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "a commit published on the remote pushed to should exit 0, got $code"
-cd "$root"
-
-# The published exceptions come from the remote side of the push, never from
-# the tree being pushed or from beside the hook: a branch that lists its own
-# bad commit still fails, and a commit the remote side lists passes. The
-# hook is a copy so this proof does not edit the tree it protects.
-selfhook=$scratch/selfhook
-git init -q "$selfhook"
-cp "$root/.gitleaks.toml" "$selfhook/.gitleaks.toml"
-mkdir -p "$selfhook/hooks"
-cp "$root/scripts/git-hooks/pre-push" "$root/scripts/git-hooks/commit-traces" "$selfhook/hooks/"
-cd "$selfhook"
-printf 'ok\n' > readme.txt
-git add readme.txt .gitleaks.toml
-commit_ok -m 'selfhook base'
-remote_tip=$(git rev-parse HEAD)
-env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
-  commit -q --allow-empty -m 'bad mail commit'
-bad=$(git rev-parse HEAD)
-mkdir -p scripts/git-hooks
-printf '%s\n' "$bad" > scripts/git-hooks/traces-published-exceptions
-git add scripts/git-hooks
-commit_ok -m 'the tree lists itself'
-tip=$(git rev-parse HEAD)
-cp scripts/git-hooks/traces-published-exceptions "$selfhook/hooks/traces-published-exceptions"
-set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$remote_tip" | sh "$selfhook/hooks/pre-push" origin >/dev/null 2>&1
-code=$?
-set -e
-[ "$code" -eq 1 ] || fail "a branch that lists its own bad commit should exit 1, got $code"
-rm -f "$selfhook/hooks/traces-published-exceptions"
-
-# The remote side of the push lists the bad commit, so its mail is skipped.
-git checkout -q "$remote_tip"
-mkdir -p scripts/git-hooks
-printf '%s\n' "$bad" > scripts/git-hooks/traces-published-exceptions
-git add scripts/git-hooks
-commit_ok -m 'the remote side lists the bad commit'
-remote_side=$(git rev-parse HEAD)
-git checkout -q "$tip"
-set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$remote_side" | sh "$selfhook/hooks/pre-push" origin >/dev/null 2>&1
-code=$?
-set -e
-[ "$code" -eq 0 ] || fail "a bad commit listed on the remote side should exit 0, got $code"
 cd "$root"
 
 echo "pre-push proof ok"
