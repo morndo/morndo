@@ -7,6 +7,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { IndexFileRefused, readSecretIndex } from "../src/secret-index-file.ts";
 
+// A Node that doesn't strip types (T-94): the flag this Node knows for it, renamed in v24.12.0
+// (https://nodejs.org/docs/latest-v24.x/api/cli.html#--no-strip-types, read 2026-10-12); none before v22.6.0, which never did.
+const NO_STRIP = ["--no-strip-types", "--no-experimental-strip-types"].filter(f => process.allowedNodeEnvironmentFlags.has(f)).slice(0, 1);
+
 let dir = "";
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "secret-index-review-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
@@ -24,7 +28,7 @@ describe("round 7, point 2: a file that isn't regular is refused at once, withou
     const script = `import { IndexFileRefused, readSecretIndex } from ${JSON.stringify(module)};
       try { readSecretIndex(${JSON.stringify(fifo)}); console.log("read"); }
       catch (e) { console.log(e instanceof IndexFileRefused ? e.problem : "other"); }`;
-    const r = spawnSync(process.execPath, ["--input-type=module", "-e", script], { encoding: "utf8", timeout: 5000 });
+    const r = spawnSync(process.execPath, [...NO_STRIP, "--input-type=module", "-e", script], { encoding: "utf8", timeout: 5000 });
     expect(r.signal, "killed by the timeout: the open blocked").toBeNull();
     expect(r.stdout.trim()).toBe("kind");
   });
