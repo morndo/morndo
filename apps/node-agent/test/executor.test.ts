@@ -4,6 +4,7 @@
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpName } from "@morndo/protocol";
+import { Flight } from "@morndo/service-kit";
 import { ALL_OPS } from "../src/config.ts";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { DoneKeys } from "../src/ops/done-keys.ts";
@@ -16,7 +17,7 @@ const EXPECT = { server: "0a1b2c3d", window: "api" };
 const open: { adb: AgentDb; cleanup: () => void }[] = [];
 afterEach(() => { vi.useRealTimers(); for (const o of open.splice(0)) { o.adb.close(); o.cleanup(); } });
 
-function executor(ops: OpTable, allowed: readonly OpName[] = ALL_OPS, o: { afterStarted?: (key: string) => boolean; noDoneKeys?: boolean } = {}) {
+function executor(ops: OpTable, allowed: readonly OpName[] = ALL_OPS, o: { afterStarted?: (key: string) => boolean; noDoneKeys?: boolean; held?: () => boolean; flight?: Flight } = {}) {
   const h = tempHome();
   const adb = openAgentDb(join(h.home, "agent.db"));
   open.push({ adb, cleanup: h.cleanup });
@@ -24,6 +25,8 @@ function executor(ops: OpTable, allowed: readonly OpName[] = ALL_OPS, o: { after
   const ex = new OpExecutor({
     ops, allowed: new Set(allowed), doneKeys, invVersion: () => 42, log: captureLog().log,
     ...(o.afterStarted ? { afterStarted: o.afterStarted } : {}),
+    ...(o.held ? { held: o.held } : {}),
+    ...(o.flight ? { flight: o.flight } : {}),
   });
   let n = 0;
   const call = (op: string, args: unknown, o: { key?: string; timeoutMs?: number } = {}) =>
@@ -229,5 +232,37 @@ describe("deadlines (spec §5.3) under a wall-clock jump (Review Focus 4)", () =
     const x = executor({ "pane.send": effect(() => "pane:%4", async (_a, ctx) => { const late = ctx.ready(); return late ? { ok: false, error: late } : ok<"pane.send">({ problem: null, typedAt: 1 }); }) });
     expect(await x.call("pane.send", sendArgs(), { key: "hub:t", timeoutMs: 100 })).toMatchObject({ ok: false, error: { code: "timeout", executed: "no" } });
     expect(x.doneKeys.status("hub:t")).toEqual({ state: "unknown" });
+  });
+});
+
+describe("a hold, and a stop that waits for the op in flight", () => {
+  it("refuses a new keyed op while held, and does not record it as started", async () => {
+    const x = executor({
+      "pane.send": effect(() => "q", async () => ok<"pane.send">({ problem: null, typedAt: 1 })),
+      "connections.revoke": effect(() => "q", async () => ok<"connections.revoke">({ ok: true })),
+    }, ALL_OPS, { held: () => true });
+    expect(await x.call("pane.send", sendArgs(), { key: "hub:held" })).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
+    expect(x.doneKeys.status("hub:held")).toEqual({ state: "unknown" });
+    expect(await x.call("connections.revoke", { version: 1, name: "work" }, { key: "hub:revoke" })).toMatchObject({ ok: true });
+  });
+  it("a stop waits until the keyed op finishes and records done", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const flight = new Flight();
+    const x = executor({
+      "pane.send": effect(() => "q", async () => { await gate; return ok<"pane.send">({ problem: null, typedAt: 1 }); }),
+    }, ALL_OPS, { flight });
+    const pending = x.call("pane.send", sendArgs(), { key: "hub:drain" });
+    await vi.waitFor(() => expect(flight.list()).toEqual([{ kind: "pane.send", id: "hub:drain" }]));
+    expect(x.doneKeys.status("hub:drain")).toEqual({ state: "started" });
+    let idle = false;
+    const waiting = flight.idle().then(() => { idle = true; });
+    await Promise.resolve();
+    expect(idle).toBe(false);
+    release();
+    expect(await pending).toMatchObject({ ok: true });
+    await waiting;
+    expect(x.doneKeys.status("hub:drain").state).toBe("done");
+    expect(flight.list()).toEqual([]);
   });
 });

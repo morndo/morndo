@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS } from "@morndo/protocol";
+import { LIMITS, NodeStatusHealth } from "@morndo/protocol";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
 import { agentPaths } from "../src/paths.ts";
 import { openAgentDb } from "../src/db/open.ts";
@@ -66,6 +66,18 @@ describe("over the connection", () => {
     expect(agent.status().jobs).toMatch(/disabled by config error/);
     const health = await fleet.waitFor(m => m.t === "ev.health");
     expect((health as { health: { jobs?: string } }).health.jobs).toMatch(/disabled by config error/);
+  });
+
+  it("writes the product version, ready, and the fleet state into status.json", async () => {
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    expect(await until(() => agent.status().state === "online")).toBe(true);
+    const body = JSON.parse(readFileSync(agentPaths(home.home).statusFile, "utf8")) as { version?: string; ready?: boolean; state?: string };
+    expect(NodeStatusHealth.safeParse(body).success).toBe(true);
+    const root = JSON.parse(readFileSync(join(import.meta.dirname, "../../../package.json"), "utf8")) as { version: string };
+    expect(body.version).toBe(root.version);
+    expect(body.ready).toBe(true);
+    expect(body.state).toBe("online");
   });
 
   it("asks the policy's tmux server for health (tmuxOk), not the default one", async () => {

@@ -8,7 +8,7 @@ import { formatStatus, readStatus } from "./conn/status-file.ts";
 import { exitOnCrash } from "./crash.ts";
 import { DatabaseFromFuture } from "./db/migrations.ts";
 import { DatabaseUnreadable } from "./db/open.ts";
-import { NotLocalDisk } from "@morndo/service-kit";
+import { NotLocalDisk, productVersion } from "@morndo/service-kit";
 import { JoinError, join } from "./join.ts";
 import { log } from "./log.ts";
 import { agentPaths } from "./paths.ts";
@@ -53,6 +53,11 @@ function ensureUtf8Locale() {
   if (/utf-?8/i.test(first)) return;
   if (process.env.LC_ALL) log.warn("LC_ALL is set to a locale without UTF-8; tmux output may lose characters");
   else process.env.LC_CTYPE = "C.UTF-8";
+}
+
+if (cmd === "--version") {
+  print(productVersion());
+  process.exit(0);
 }
 
 switch (cmd) {

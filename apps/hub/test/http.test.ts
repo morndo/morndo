@@ -1,10 +1,12 @@
 // The HTTP adapter's guards, against a real server on a random port (synthetic data only).
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { ServiceHealth, ReadyOnlyHealth } from "@morndo/protocol";
+import { SCHEMA_VERSION } from "../src/adapters/migrations.ts";
 import { Store } from "../src/adapters/store.ts";
 import { loadOrCreateIdentity } from "../src/adapters/identity.ts";
 import { passkeys } from "../src/adapters/passkeys.ts";
@@ -141,5 +143,25 @@ describe("live feed upgrade", () => {
       expect(await code({ "tailscale-user-login": LOGIN, origin: "https://evil.example.test" })).toBe(403);
       expect(await code({ "tailscale-user-login": LOGIN, origin: config.origin })).toBe(401);
     }
+  });
+});
+
+describe("health", () => {
+  it("on the machine, reports one version, the schema, ready, and what is in flight", async () => {
+    const end = http.flight.begin({ kind: "http", id: "POST /api/workers/%1/send" });
+    const res = await req("/api/health", { login: null });
+    const body = await res.json();
+    end();
+    expect(res.status).toBe(200);
+    expect(ServiceHealth.safeParse(body).success).toBe(true);
+    const root = JSON.parse(readFileSync(join(import.meta.dirname, "../../../package.json"), "utf8")) as { version: string };
+    expect(body).toMatchObject({ version: root.version, schema: SCHEMA_VERSION, ready: true, inFlight: [{ kind: "http", id: "POST /api/workers/%1/send" }] });
+  });
+  it("through the proxy, with no session, reports ready and nothing else", async () => {
+    const res = await req("/api/health");
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ ready: true });
+    expect(ReadyOnlyHealth.safeParse(body).success).toBe(true);
   });
 });

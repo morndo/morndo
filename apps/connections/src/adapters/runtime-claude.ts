@@ -21,6 +21,7 @@
 // https://code.claude.com/docs/en/env-vars
 import { spawn, type SpawnOptions } from "node:child_process";
 import { statSync } from "node:fs";
+import { join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { Isolation } from "@morndo/domain";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
@@ -228,8 +229,13 @@ export function childEnv(parent: NodeJS.ProcessEnv, extra: Readonly<Record<strin
   return env;
 }
 
-export function helperCommand(execPath: string, main: string, lease: string): string {
-  return `${execPath} --experimental-strip-types ${main} helper --lease ${lease}`;
+// The keys helper is the stable launcher, not a Version's own path (design: releases, section 5).
+export function keysLauncher(home: string): string {
+  return join(home, ".local", "bin", "morndo-keys");
+}
+
+export function helperCommand(launcher: string, lease: string): string {
+  return `${launcher} helper --lease ${lease}`;
 }
 
 const SANDBOX = { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } as const;

@@ -10,7 +10,7 @@ import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { ClaudeRuntime, helperCommand, isStatusRefusal } from "./adapters/runtime-claude.ts";
+import { ClaudeRuntime, helperCommand, isStatusRefusal, keysLauncher } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
@@ -170,7 +170,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const row = findConnection(home.store.load().directory, name);
   const lease = row && row.custody === "morndo" ? row.leases.find(item => item.id === granted.id) : undefined;
   if (!lease) return fail(io, "missing");
-  const main = join(import.meta.dirname, "main.ts");
+  const launcher = keysLauncher(home.env.HOME ?? "");
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
@@ -202,11 +202,11 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const child = connection.runtime === "codex"
       ? await new CodexRuntime({
         bin, profilePath: saved.MORNDO_CODEX_CONFIG ?? join(home.dir, "codex-profile.toml"), configDir,
-        ...helperParts(process.execPath, main, lease.id), baseUrl, parent: saved,
+        ...helperParts(launcher, lease.id), baseUrl, parent: saved,
       }).execute(plan, parsed.rest, hooks)
       : connection.runtime === "cursor"
         ? await new CursorRuntime(saved.MORNDO_CURSOR_BIN ?? "agent", saved).execute(plan, parsed.rest, hooks)
-        : await new ClaudeRuntime(bin, helperCommand(process.execPath, main, lease.id), saved).execute(plan, parsed.rest, hooks);
+        : await new ClaudeRuntime(bin, helperCommand(launcher, lease.id), saved).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
   } catch (error) {

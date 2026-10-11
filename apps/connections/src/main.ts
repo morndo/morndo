@@ -1,5 +1,11 @@
 #!/usr/bin/env node
+import { productVersion } from "@morndo/service-kit";
 import { run } from "./cli.ts";
+
+if (process.argv.includes("--version")) {
+  process.stdout.write(`${productVersion()}\n`);
+  process.exit(0);
+}
 
 const readStdin = process.stdin.isTTY || process.argv.includes("helper") || process.argv.includes("run");
 const stdin = readStdin ? Promise.resolve("") : new Promise<string>(resolve => {
