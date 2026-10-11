@@ -10,6 +10,7 @@ import { JobStore, type NoticeHandoff } from "../src/ops/job-store.ts";
 import { namesFromEnvironmentExport, probeUserManager, showUnit, unitOf, unsetNameOrder, type ProbeResult } from "../src/ops/job-systemd.ts";
 import { openJobRuntime } from "../src/ops/job-runtime.ts";
 import { JobSupervisor, openJobSupervisor, type JobStart } from "../src/ops/job-supervisor.ts";
+import { CAP_GRACE_MS } from "../src/ops/job-cap.ts";
 import { agentPaths } from "../src/paths.ts";
 import { until, tempHome, wait } from "./helpers.ts";
 
@@ -1183,4 +1184,123 @@ describe.skipIf(!bus.ok)("the log cap rule on the systemd backend, second round"
     try { await sup.sweep(); } finally { frozen.mockRestore(); }
     expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: null });
   }, 15_000);
+});
+
+// Design §5, the cap watch beside the sweep (review range-9633c9e--84e6389): a planted running job whose log is at the
+// cap, and a fake systemctl, so each case controls what systemd answers and when. An ended unit's exit time is far
+// after any stop the watch sends.
+describe("the cap watch beside the sweep", () => {
+  const running = (pid: number) => `printf '%s\\n' LoadState=loaded ActiveState=active SubState=running Result=success ExecMainCode=0 ExecMainStatus=0 MainPID=${pid} RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=0`;
+  const ended = (code: number, status: number) => `printf '%s\\n' LoadState=loaded ActiveState=inactive SubState=dead Result=exit-code ExecMainCode=${code} ExecMainStatus=${status} MainPID=0 RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=9000000000000000`;
+
+  function plantedCap(systemctl: (home: string) => string, errors: string[] = []) {
+    const h = tempHome();
+    const adb = openAgentDb(join(h.home, "agent.db"));
+    const dir = join(h.home, "job-logs");
+    mkdirSync(dir, { recursive: true });
+    const store = new JobStore(adb.db, dir, () => Date.now(), { home: h.home, logBytes: 8 });
+    const paths = agentPaths(h.home);
+    const sup = new JobSupervisor(store, {
+      home: h.home, stateDir: paths.stateDir, socketPath: paths.jobSock,
+      systemd: { slice: "morndofake.slice", toolEnv: fakeTools(h.home, systemctl(h.home)) },
+      log: { error: message => { errors.push(message); } },
+    });
+    open.push({ adb, cleanup: h.cleanup, dir, sup });
+    const id = track(jobId());
+    const hash = "ab".repeat(16);
+    const accepted = store.accept({
+      id, lane: "builder", name: "pack", jobClass: "default",
+      notify: { kind: "lane", name: "builder" }, commandHash: hash, cwdHash: hash,
+    });
+    if (!accepted.ok) throw new Error(accepted.error);
+    store.applySchedule({ default: 1 }, "off");
+    const started = store.started(id);
+    if (!started.ok) throw new Error(started.error);
+    writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
+    return { store, sup, id, home: h.home, cap: join(dir, `${id}.cap`) };
+  }
+
+  it("logs an error the watch could not handle, instead of dropping it", async () => {
+    const errors: string[] = [];
+    const { store, sup, cap } = plantedCap(() => `#!/bin/sh\nif [ "$2" = "show" ]; then ${running(1)}; fi\nexit 0\n`, errors);
+    // The store fails only for the watch's own reads (its frames are in the stack), so the sweep itself still works.
+    const get = store.get.bind(store);
+    const spy = vi.spyOn(store, "get").mockImplementation(id => {
+      if (new Error().stack?.includes("#capUnit")) throw new Error("disk I/O error");
+      return get(id);
+    });
+    try {
+      await sup.sweep();
+    } finally { spy.mockRestore(); }
+    expect(existsSync(cap)).toBe(true);
+    expect(errors.some(line => line.includes("cap watch"))).toBe(true);
+  });
+
+  it("a closed supervisor's watch does not settle the job", async () => {
+    const gone = spawn("true");
+    await new Promise(resolve => gone.on("exit", resolve));
+    const { store, sup, id, cap, home } = plantedCap(home => `#!/bin/sh
+if [ "$2" = "show" ]; then
+  if [ -f '${join(home, "shown")}' ]; then touch '${join(home, "looking")}'; sleep 0.4; ${ended(1, 0)}; else touch '${join(home, "shown")}'; ${running(gone.pid ?? 0)}; fi
+fi
+exit 0
+`);
+    const sweeping = sup.sweep();
+    expect(await until(() => existsSync(cap) && existsSync(join(home, "looking")))).toBe(true);
+    sup.close();
+    await sweeping;
+    expect(store.get(id)).toMatchObject({ state: "running", outcome: null });
+  });
+
+  it("a cancel that signalled the unit during the grace is not recorded as the job's own exit", async () => {
+    const holder = spawn("sleep", ["30"], { stdio: "ignore" });
+    const { store, sup, id, cap } = plantedCap(home => `#!/bin/sh
+if [ "$2" = "kill" ]; then kill -TERM ${holder.pid}; date +%s%N > '${join(home, "killed-at")}'; exit 0; fi
+if [ "$2" = "show" ]; then
+  if [ ! -f '${join(home, "killed-at")}' ]; then ${running(holder.pid ?? 0)}; exit 0; fi
+  if [ $(( $(date +%s%N) - $(cat '${join(home, "killed-at")}') )) -lt 300000000 ]; then exit 1; fi
+  ${ended(2, 15)}
+fi
+exit 0
+`);
+    try {
+      const sweeping = sup.sweep();
+      expect(await until(() => existsSync(cap))).toBe(true);
+      expect(await sup.cancel(id)).toEqual({ ok: false, error: "signalled" });
+      await sweeping;
+      expect(store.get(id)).toMatchObject({ outcome: "cancelled", exitCode: null });
+    } finally { holder.kill("SIGKILL"); }
+  });
+
+  it("a sweep that finds a watch already running does not wait for it", async () => {
+    const { sup, cap } = plantedCap(home => `#!/bin/sh
+if [ "$2" = "kill" ]; then touch '${join(home, "killed")}'; exit 0; fi
+if [ "$2" = "show" ]; then if [ -f '${join(home, "killed")}' ]; then ${ended(2, 15)}; else ${running(1)}; fi; fi
+exit 0
+`);
+    let firstDone = false;
+    const first = sup.sweep().then(() => { firstDone = true; });
+    expect(await until(() => existsSync(cap))).toBe(true);
+    await sup.sweep();
+    expect(firstDone).toBe(false);
+    await first;
+  });
+
+  it("a watch that ended undecided leaves its sighting, so the next one does not grant a new grace", async () => {
+    const { store, sup, id, home } = plantedCap(home => `#!/bin/sh
+if [ "$2" = "kill" ]; then
+  if [ -f '${join(home, "refused")}' ]; then touch '${join(home, "killed")}'; exit 0; fi
+  touch '${join(home, "refused")}'; exit 1
+fi
+if [ "$2" = "show" ]; then if [ -f '${join(home, "killed")}' ]; then ${ended(2, 15)}; else ${running(1)}; fi; fi
+exit 0
+`);
+    await sup.sweep();
+    expect(existsSync(join(home, "refused"))).toBe(true);
+    expect(store.get(id)).toMatchObject({ state: "running", outcome: null });
+    const began = performance.now();
+    await sup.sweep();
+    expect(performance.now() - began).toBeLessThan(CAP_GRACE_MS);
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: null });
+  });
 });
