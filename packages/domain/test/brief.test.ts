@@ -3,7 +3,7 @@
 // §7). The example itself is the fixture; every mutation is one rule broken.
 import { describe, expect, it } from "vitest";
 import {
-  cardOf, Escalations, escalationId, hasMoney, HUB_TTL_MS, lintBrief, refusal,
+  askFromBrief, askVersion, briefMarkdown, cardOf, Escalations, escalationId, hasMoney, HUB_TTL_MS, lintBrief, refusal,
   type Ask, type BriefProblem, type DecisionBrief, type Sighting, type SourceState,
 } from "../src/index.ts";
 
@@ -491,5 +491,80 @@ describe("E14: an ask the hub tracks is answerable until the hub withdraws or se
     expect(x.get("d-1")?.status).toBe("open");
     x.reconcile([], DUE + HUB_TTL_MS, true);
     expect(x.get("d-1")?.status).toBe("expired");
+  });
+});
+
+describe("briefMarkdown: the brief as one text, in the guide's own shape", () => {
+  it("renders the guide's sections in the guide's order, and its table one column per option", () => {
+    const brief = lintBrief(example(), NOW).brief!;
+    const md = briefMarkdown(brief);
+    expect(md.startsWith("# Approve option B: extend the in-house triage script\n\n## The ask\n")).toBe(true);
+    expect(md).toContain("Alternative: buy the hosted add-on (C) for **$180 a month**; it starts faster and costs more from month 14.");
+    expect(md).toContain("Main uncertainty: the saving comes from a two-week sample of 310 tickets.");
+    expect(md).toContain("| Factor | A · Keep manual triage | B · Extend the triage script | C · Buy a hosted add-on |");
+    expect(md).toContain("| Year-one cost | $0 | $2,400 | $2,160 |");
+    expect(md).toContain("Note: costs are cash only, without tax. Agent-days and staff hours are not priced.");
+    expect(md).toContain("Downside case: if the saving is only 2 hours a week, B still beats A, but C's reporting view would have been worth more; we would switch to C at the review point, having spent the $2,400.");
+    expect(md).toContain("Risk: the script routes an urgent ticket to the wrong queue.\nControl: for the first two weeks a person checks every ticket tagged urgent before it is routed, and the error rate is posted daily.");
+    expect(md).toContain("Needs fresh approval: any spend above $2,400, a new vendor, or sending ticket text outside our systems.");
+    expect(md).toContain("## If no decision by the due date\nThe contractor's slot lapses. We keep manual triage (A) and ask again in January.");
+    expect(md).toContain("## Decision\n- [a] Keep manual triage\n- [b] Extend the triage script\n- [c] Buy a hosted add-on");
+    expect(md).toContain("## Evidence\n- [Two-week triage sample](https://example.com/triage-sample)\n- [Contractor quote](https://example.com/contractor-quote)\n- [Hosted add-on trial notes](https://example.com/addon-trial)");
+    const headings = ["# Approve", "## The ask", "## Why now", "## Options compared", "## Why the recommendation",
+      "## What would change the recommendation", "## Main risk and control", "## What approval authorizes",
+      "## If no decision by the due date", "## Decision", "## Evidence"].map(h => md.indexOf(h));
+    expect(headings).toEqual([...headings].sort((a, b) => a - b));
+  });
+  it("leaves out the sections a brief leaves out", () => {
+    const draft = example();
+    draft.ifNoAnswer = null;
+    draft.evidence = [];
+    const brief = lintBrief(draft, NOW).brief!;            // no_evidence is a warning; the brief stands
+    const md = briefMarkdown(brief);
+    expect(md).not.toContain("## If no decision by the due date");
+    expect(md).not.toContain("## Evidence");
+  });
+});
+
+describe("askFromBrief: one Ask, filled for the apps that don't know briefs (§4.5)", () => {
+  const manager = { kind: "manager", name: "Manager", workerId: null } as const;
+  it("fills every field an old app reads, the recommended option first", () => {
+    const brief = lintBrief(example(), NOW).brief!;
+    const ask = askFromBrief("d-12", brief, manager, 1, NOW);
+    expect(ask).toEqual({
+      id: "d-12", asker: manager, need: "decision",
+      title: "Approve option B: extend the in-house triage script",
+      shortTitle: "Support inbox triage", summary: "Approve option B: extend the in-house triage script",
+      minutes: 4, link: null, details: briefMarkdown(brief), context: null, contextKind: "markdown",
+      options: [
+        { key: "b", label: "Extend the triage script", detail: null },
+        { key: "a", label: "Keep manual triage", detail: null },
+        { key: "c", label: "Buy a hosted add-on", detail: null },
+      ],
+      answerBy: "tap", recommendation: "Approve option B: extend the in-house triage script",
+      ifNoAnswer: "The contractor's slot lapses. We keep manual triage (A) and ask again in January.",
+      deadline: DUE, blocking: false, project: "support", askedAt: NOW, messageId: null, tracking: "hub",
+      briefVersion: 1,
+    });
+  });
+});
+
+describe("askVersion: a restated brief changes it, with or without the markdown (§4.5)", () => {
+  it("the brief's version number is in the hash, so a restate changes it even when the text doesn't", () => {
+    const brief = lintBrief(example(), NOW).brief!;
+    const manager = { kind: "manager", name: "Manager", workerId: null } as const;
+    const a = askFromBrief("d-12", brief, manager, 1, NOW);
+    const v1 = askVersion(a);
+    expect(v1).toBe(askVersion(a));                          // pure: the same ask, the same version
+    expect(askVersion({ ...a, briefVersion: 2 })).not.toBe(v1);
+  });
+  it("an ask without a brief hashes as before, digit for digit", () => {
+    const v = askVersion({
+      askedAt: 1_790_736_000_000, messageId: "m-1", title: "Question ny-1", context: "Some context.",
+      options: [{ key: "ship", label: "Ship it" }, { key: "hold", label: "Hold" }],
+      recommendation: null, ifNoAnswer: "hold", deadline: null,
+      shortTitle: "Short", summary: "One sentence.", minutes: 2, link: null, details: "The long text.",
+    });
+    expect(v).toBe("vd53659b59b");                           // pinned before briefVersion joined the hash
   });
 });
