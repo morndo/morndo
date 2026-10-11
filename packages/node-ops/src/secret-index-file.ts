@@ -20,10 +20,12 @@ export class IndexFileRefused extends Error {
 // link under O_NOFOLLOW is ELOOP on Linux and macOS and EMLINK on FreeBSD, a socket is ENXIO on Linux and EOPNOTSUPP on
 // macOS and FreeBSD (T-94). A FIFO, a device or a directory opens at once and is refused by its fstat.
 const WRONG_KIND = ["ELOOP", "EMLINK", "ENXIO", "EOPNOTSUPP"];
+// Exported so a test can open a FIFO with exactly these flags in a child of its own, where a blocking open can't hang it.
+export const INDEX_OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 export function readSecretIndex(path: string, uid: number = process.getuid?.() ?? -1): SecretIndex {
   let fd: number;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    fd = openSync(path, INDEX_OPEN_FLAGS);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return emptySecretIndex();

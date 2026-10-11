@@ -5,7 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { IndexFileRefused, readSecretIndex } from "../src/secret-index-file.ts";
+import { INDEX_OPEN_FLAGS, IndexFileRefused, readSecretIndex } from "../src/secret-index-file.ts";
 
 // A Node that doesn't strip types (T-94): the flag this Node knows for it, renamed in v24.12.0
 // (https://nodejs.org/docs/latest-v24.x/api/cli.html#--no-strip-types, read 2026-10-12); none before v22.6.0, which never did.
@@ -23,14 +23,17 @@ describe("round 7, point 2: a file that isn't regular is refused at once, withou
   it("a FIFO at the index path is refused as the wrong kind, without waiting for a writer", () => {
     const fifo = join(dir, "index");
     execFileSync("mkfifo", [fifo]);
-    // In a child with a timeout: a blocking open would hang this test's worker, not fail it.
-    const module = join(import.meta.dirname, "../src/secret-index-file.ts");
-    const script = `import { IndexFileRefused, readSecretIndex } from ${JSON.stringify(module)};
-      try { readSecretIndex(${JSON.stringify(fifo)}); console.log("read"); }
-      catch (e) { console.log(e instanceof IndexFileRefused ? e.problem : "other"); }`;
-    const r = spawnSync(process.execPath, [...NO_STRIP, "--input-type=module", "-e", script], { encoding: "utf8", timeout: 5000 });
+    // First the reader's own open flags, in a plain JS child with a timeout: a blocking open would hang this test's worker,
+    // not fail it. The child imports no TypeScript, so it runs on any Node (T-94).
+    const script = `import { closeSync, fstatSync, openSync } from "node:fs";
+      const fd = openSync(process.argv[1], Number(process.argv[2]));
+      console.log(fstatSync(fd).isFIFO() ? "fifo" : "other");
+      closeSync(fd);`;
+    const r = spawnSync(process.execPath, [...NO_STRIP, "--input-type=module", "-e", script, fifo, String(INDEX_OPEN_FLAGS)], { encoding: "utf8", timeout: 5000 });
     expect(r.signal, "killed by the timeout: the open blocked").toBeNull();
-    expect(r.stdout.trim()).toBe("kind");
+    expect(r.stdout.trim()).toBe("fifo");
+    // That open returns at once, so the reader itself runs here, and refuses the FIFO by its fstat.
+    expect(problem(() => readSecretIndex(fifo))).toBe("kind");
   });
   it("a Unix socket and a character device are refused as the wrong kind too", async () => {
     const path = join(dir, "sock");
