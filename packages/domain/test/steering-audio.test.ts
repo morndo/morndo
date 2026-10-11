@@ -9,7 +9,7 @@ const READY: TranscriptionCapability = { present: true, maxSeconds: 600 };
 const bytes = (head: number[], ...rest: number[]) => new Uint8Array([...head, ...rest]);
 const OGGS = bytes([0x4f, 0x67, 0x67, 0x53]);
 const EBML = bytes([0x1a, 0x45, 0xdf, 0xa3, 0xbf]);
-const MP4 = bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41]);
+const MP4 = bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20]);
 const ID3 = bytes([0x49, 0x44, 0x33, 0x04]);
 const WAVE = bytes([0x52, 0x49, 0x46, 0x46, 0x24, 0x08, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]);
 
@@ -39,12 +39,12 @@ describe("an audio upload", () => {
     expect(acceptNamedUpload(bytes([0x89, 0x50, 0x4e, 0x47]), "note.mp3", READY)).toEqual({ ok: false, error: "not_allowed" });
   });
 
-  it("an iso-bmff photo or movie under an audio name is not audio: the brand must be M4A", () => {
+  it("an iso-bmff image under an audio name is not audio; a movie brand is (S1)", () => {
     const HEIC = bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]);
     const ISOM = bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
     expect(acceptNamedUpload(HEIC, "note.m4a", READY)).toEqual({ ok: false, error: "not_allowed" });
-    expect(acceptNamedUpload(ISOM, "note.webm", READY)).toEqual({ ok: false, error: "not_allowed" });
-    expect(acceptNamedUpload(MP4, "note.m4a", READY).ok).toBe(true);
+    expect(acceptNamedUpload(ISOM, "note.webm", READY)).toEqual({ ok: false, error: "not_allowed" });   // the name claims another container
+    expect(acceptNamedUpload(ISOM, "note.m4a", READY)).toEqual({ ok: true, value: { kind: "audio", container: "mp4", name: "note.m4a" } });
   });
 
   it("is at most 10 MiB, refused on name and size before anyone reads the bytes", () => {
