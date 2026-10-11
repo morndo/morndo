@@ -1036,6 +1036,18 @@ export const CONTROLS: Control[] = [
     find: "  if (kind === \"audio\" && !capabilityReady(capability)) return err(\"not_allowed\");",
     replace: "",
     run: ["packages/domain/test/steering-audio.test.ts"], expect: "not_allowed" },
+  { id: "tx-brand-allowlist", task: "tx", file: "packages/domain/src/transcription.ts",
+    find: "  if (b.length >= 12 && at(b, 4, 0x66, 0x74, 0x79, 0x70)\n    && MP4_BRANDS.has(String.fromCharCode(b[8]!, b[9]!, b[10]!, b[11]!))) return \"mp4\";",
+    replace: "  if (b.length >= 12 && at(b, 4, 0x66, 0x74, 0x79, 0x70)) return \"mp4\";",
+    run: ["packages/domain/test/transcription.test.ts"], expect: "and only those" },
+  { id: "tx-accept-idempotent", task: "tx", file: "packages/domain/src/transcription.ts",
+    find: "  if (held) return sameBody(held, body) ? ok(held) : err(\"id_conflict\");",
+    replace: "  if (held) return err(\"id_conflict\");",
+    run: ["packages/domain/test/transcription.test.ts"], expect: "takes its own body again" },
+  { id: "tx-queue-key", task: "tx", file: "packages/domain/src/transcription.ts",
+    find: "const rowKey = (tx: Transcription): string => `${tx.recording.kind}:${tx.recording.id}:${tx.language}`;",
+    replace: "const rowKey = (tx: Transcription): string => tx.id;",
+    run: ["packages/domain/test/transcription.test.ts"], expect: "each get their own slot" },
 ];
 
 // ---- the runner
