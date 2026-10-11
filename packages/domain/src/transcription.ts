@@ -63,9 +63,13 @@ const utf8Bytes = (ch: string): number => {
   return c <= 0x7f ? 1 : c <= 0x7ff ? 2 : c <= 0xffff ? 3 : 4;
 };
 
-// The engine's segments become one text: trimmed words joined by a space, capped to MAX_TEXT_BYTES.
+// The engine's segments become one text: trimmed words joined by a space, capped to MAX_TEXT_BYTES. Words that fit
+// are kept whole; only a cut sets room aside for the mark that names it.
 export function makeText(engine: EngineText, engineName: string, model: string): TranscriptionText {
   const joined = engine.segments.map(seg => seg.text.trim()).filter(word => word !== "").join(" ");
+  if (utf8Len(joined) <= MAX_TEXT_BYTES) {
+    return { language: engine.language, text: joined, edit: null, edited: false, engine: engineName, model };
+  }
   const room = MAX_TEXT_BYTES - TEXT_MARK.length;
   let out = "";
   let bytes = 0;
