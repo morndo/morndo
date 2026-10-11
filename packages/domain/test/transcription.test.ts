@@ -4,7 +4,7 @@
 // the text it produced. No engine name, no file, no clock of its own.
 import { describe, expect, it } from "vitest";
 import { afterRestart, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
-  type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
+  editText, type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
 
 const bytes = (head: number[], ...rest: number[]) => new Uint8Array([...head, ...rest]);
 const AT = 1_700_000_000_000;
@@ -229,5 +229,35 @@ describe("the caps on a recording, a run and its text (TX6)", () => {
     expect(effectiveMaxSeconds(600, 300)).toBe(300);
     expect(effectiveMaxSeconds(300, 600)).toBe(300);
     expect(effectiveMaxSeconds(700, 600)).toBe(600);
+  });
+});
+
+describe("editing the text of a done transcription (TX7)", () => {
+  const done = (): Transcription => value(endTranscription(
+    { ...live(), state: "running", startedAt: AT + 10 },
+    { outcome: "done", at: AT + 40, engine: heard("guten Morgen"), engineName: "local", model: "small" }));
+
+  it("keeps the engine's words and keeps the edit beside them, marked", () => {
+    const edited = value(editText(done(), "  guten Abend "));
+    expect(edited.text).toEqual({ language: "de", text: "guten Morgen", edit: "guten Abend", edited: true, engine: "local", model: "small" });
+    const again = value(editText(edited, "guten Nacht"));
+    expect(again.text).toMatchObject({ text: "guten Morgen", edit: "guten Nacht", edited: true });
+  });
+
+  it("only a done attempt has a Text to edit", () => {
+    expect(editText(live(), "x")).toEqual({ ok: false, error: "not_done" });
+    const failed = value(endTranscription({ ...live(), state: "running" }, { outcome: "failed", at: AT + 20, problem: "engine" }));
+    expect(editText(failed, "x")).toEqual({ ok: false, error: "not_done" });
+  });
+
+  it("refuses empty words and words past the cap", () => {
+    expect(editText(done(), "   ")).toEqual({ ok: false, error: "bad_text" });
+    expect(editText(done(), "w".repeat(MAX_TEXT_BYTES + 1))).toEqual({ ok: false, error: "bad_text" });
+    expect(editText(done(), "ä".repeat(MAX_TEXT_BYTES)).ok).toBe(false);
+  });
+
+  it("words identical to the engine's are no edit", () => {
+    const row = done();
+    expect(value(editText(row, "guten Morgen"))).toBe(row);
   });
 });
