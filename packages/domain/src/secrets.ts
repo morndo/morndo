@@ -91,8 +91,8 @@ export type RequestAsk = {
 };
 export type RequestEvent =
   | { type: "SecretRequested"; request: string; node: string; reference: string; kind: RequestKind; at: number }
-  | { type: "SecretRequestJoined"; request: string; lane: string | null; at: number }
-  | { type: "SecretRequestLeft"; request: string; lane: string | null; at: number }
+  | { type: "SecretRequestJoined"; request: string; lane: string | null; workspace: string | null; at: number }
+  | { type: "SecretRequestLeft"; request: string; lane: string | null; workspace: string | null; at: number }
   | { type: "SecretRequestWithdrawn"; request: string; at: number }
   | { type: "SecretRequestStored"; request: string; reference: string; nodes: readonly string[]; version: number; at: number; command: string }
   | { type: "SecretRequestGranted"; request: string; at: number; command: string }
@@ -164,7 +164,7 @@ export function joinRequest(req: SecretRequest, waiter: Omit<Waiter, "at">, now:
   if (req.waiting.some(x => sameWaiter(x, waiter.lane, waiter.workspace))) return ok({ request: req, events: [] });
   if (full(req)) return refuseRequest("full");
   const request = { ...req, waiting: [...req.waiting, { ...waiter, at: now }], version: req.version + 1 };
-  return ok({ request, events: [{ type: "SecretRequestJoined", request: req.id, lane: waiter.lane, at: now }] });
+  return ok({ request, events: [{ type: "SecretRequestJoined", request: req.id, lane: waiter.lane, workspace: waiter.workspace, at: now }] });
 }
 
 // A withdrawal names its waiter: a lane, or for a caller without one, its workspace.
@@ -172,10 +172,12 @@ export function withdrawRequest(req: SecretRequest, waiter: WaiterKey, now: numb
   if (req.state !== "open") return refuseRequest("answered");
   const { lane, workspace } = waiter;
   const at = req.waiting.findIndex(w => sameWaiter(w, lane, workspace));
-  if (at < 0) return refuseRequest("not_waiting");
+  const gone = req.waiting[at];
+  if (!gone) return refuseRequest("not_waiting");
   if (req.waiting.length > 1) {
     const request = { ...req, waiting: req.waiting.filter((_, i) => i !== at), version: req.version + 1 };
-    return ok({ request, events: [{ type: "SecretRequestLeft", request: req.id, lane, at: now }] });
+    // The event names the waiter as the request recorded it.
+    return ok({ request, events: [{ type: "SecretRequestLeft", request: req.id, lane: gone.lane, workspace: gone.workspace, at: now }] });
   }
   return ok({ request: { ...req, state: "withdrawn" }, events: [{ type: "SecretRequestWithdrawn", request: req.id, at: now }] });
 }
