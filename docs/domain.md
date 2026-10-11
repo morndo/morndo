@@ -406,7 +406,7 @@ Layer, as in design §3.3: **domain** (decided in `secrets.ts`, proved by a doma
 | SC5 | A value reaches a program only through the use modes; no command prints one. | application + adapter |
 | SC6 | Every output path on the node passes the exact filter before it leaves. | adapter |
 | SC7 | Narrowing is anyone's; widening, judged by effect, is the principal's. Disable is anyone's. | domain + application |
-| SC8 | Disable and Revoke refuse new Uses at once. Revoke destroys the current value and keeps the Reference, history and Grants; Delete removes the Reference and Grants; the ledger keeps the fingerprints. | domain + adapter |
+| SC8 | Disable and Revoke refuse new Uses at once. Revoke destroys the current value and keeps the Reference, history and Grants; Delete removes the Reference and Grants; the ledger keeps the fingerprints, and a value stored again under that Reference takes the next version, so (Reference, version) always names one value. | domain + adapter |
 | SC9 | Expiry warns once at 7, 2 and 1 days, then refuses; a later Expiry clears the warnings. A Rotation takes the new value's Expiry and clears them too, so renewing an expired Secret is a Rotation; it keeps the Grants and Destinations. | domain |
 | SC10 | A Secret grants nothing: a Use is not a Mandate. | domain |
 | SC11 | A transfer starts from a Secret that could be used now and carries only the Grants that haven't ended; the target stores it through its own ledger. | domain + adapter |

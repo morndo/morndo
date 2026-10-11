@@ -289,7 +289,8 @@ function place(dir: SecretDirectory, input: StoreInput, command: string, at: num
   const check = checkFingerprint(dir.ledger, input.reference, input.fingerprint);
   if (check.kind === "refuse") return refuse(check.reason);
   const before = findSecret(dir, input.reference);
-  const number = before ? Math.max(0, ...before.versions.map(v => v.number)) + 1 : 1;
+  // The ledger outlives a Delete, so numbering continues from it: (Reference, version) names one value forever.
+  const number = Math.max(0, ...dir.ledger.filter(e => e.reference === input.reference).map(e => e.version), ...(before?.versions.map(v => v.number) ?? [])) + 1;
   const fresh: SecretVersion = { number, fingerprint: input.fingerprint, storedAt: at, command, retiredAt: null };
   const ledger = [
     ...dir.ledger.map(e => e.reference === input.reference && e.state === "current" ? { ...e, state: "retired" as const } : e),
@@ -434,7 +435,7 @@ export function revokeSecret(dir: SecretDirectory, reference: string, actor: Act
   if (s.status === "revoked" || !s.current) return refuse("revoked");
   const version = s.current.number;
   const secret: Secret = { ...s, status: "revoked", current: null, versions: s.versions.map(v => v.retiredAt === null ? { ...v, retiredAt: at } : v) };
-  const ledger = dir.ledger.map(e => e.reference === reference && e.version === version ? { ...e, state: "revoked" as const } : e);
+  const ledger = dir.ledger.map(e => e.reference === reference && e.state === "current" ? { ...e, state: "revoked" as const } : e);
   return ok(withSecret(dir, secret, [{ type: "SecretRevoked", reference, version, at, command }], ledger));
 }
 
