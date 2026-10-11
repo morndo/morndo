@@ -256,6 +256,13 @@ describe("the caps on a recording, a run and its text (TX6)", () => {
     expect(plain.text).toBe("a".repeat(100));
   });
 
+  it("words that fit the cap are kept whole: no room is set aside for the mark before a cut is needed", () => {
+    const fits = makeText({ language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "a".repeat(MAX_TEXT_BYTES) }] }, "local", "small");
+    expect(fits.text).toBe("a".repeat(MAX_TEXT_BYTES));
+    const oneOver = makeText({ language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "a".repeat(MAX_TEXT_BYTES + 1) }] }, "local", "small");
+    expect(oneOver.text.endsWith("[truncated]")).toBe(true);
+  });
+
   it("a run's timeout is 120 s plus six times the duration, unless the config names one", () => {
     expect(transcriptionTimeoutMs(10_000, null)).toBe(120_000 + 60_000);
     expect(transcriptionTimeoutMs(10_000, 30)).toBe(30_000);
