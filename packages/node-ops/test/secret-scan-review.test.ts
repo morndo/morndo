@@ -26,3 +26,35 @@ describe("round 7, point 3: a retired version can't be revived by adding it agai
     expect(scan(text(`x ${"sample-value-to-retire"} y`), liveEntries(index, T + 30 * DAY + 1), keyed)).toEqual([]);
   });
 });
+
+describe("round 7, points 4 and 5: the forms other writers use are found (checked against them, 2026-10-12)", () => {
+  // DEL, a non-ASCII letter, a space, "+", "~", "*" and "!": the characters the writers below treat differently.
+  const VALUE = "ab\u007fcd é~*!()+ x/y";
+  const bytes = text(VALUE);
+  const entries = () => entriesOf(bytes);
+  const found = (form: string) => {
+    const out = text(`k=${form}&next`);
+    return scan(out, entries(), keyed).some(r => r.start <= 2 && r.end >= 2 + text(form).length);
+  };
+  const lower = (s: string) => s.replace(/%[0-9A-F]{2}/g, m => m.toLowerCase());
+  // Python 3.12.3: json.dumps(VALUE), urllib.parse.quote(VALUE, safe=""), urllib.parse.quote_plus(VALUE).
+  const PY_JSON = String.raw`ab\u007fcd é~*!()+ x/y`;
+  const PY_QUOTE = "ab%7Fcd%20%C3%A9~%2A%21%28%29%2B%20x%2Fy";
+  const PY_QUOTE_PLUS = "ab%7Fcd+%C3%A9~%2A%21%28%29%2B+x%2Fy";
+
+  it("JSON written ASCII-only, as Python's json.dumps does, DEL as \\u007f included", () => {
+    expect(found(PY_JSON)).toBe(true);
+  });
+  it("percent-encoding as encodeURIComponent, Python's quote and quote_plus, and URLSearchParams write it", () => {
+    const whatwg = new URLSearchParams({ a: VALUE }).toString().slice(2);
+    for (const form of [encodeURIComponent(VALUE), PY_QUOTE, PY_QUOTE_PLUS, whatwg]) expect(found(form), form).toBe(true);
+  });
+  it("the same with lower-case escapes, which RFC 3986 treats as equal", () => {
+    const whatwg = new URLSearchParams({ a: VALUE }).toString().slice(2);
+    for (const form of [encodeURIComponent(VALUE), PY_QUOTE, PY_QUOTE_PLUS, whatwg].map(lower)) expect(found(form), form).toBe(true);
+  });
+  it("hex in upper case as well as lower", () => {
+    expect(found(Buffer.from(bytes).toString("hex"))).toBe(true);
+    expect(found(Buffer.from(bytes).toString("hex").toUpperCase())).toBe(true);
+  });
+});

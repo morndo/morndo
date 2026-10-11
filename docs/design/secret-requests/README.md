@@ -410,8 +410,16 @@ For each encoding it keeps the length and HMAC-SHA-256 under the index key. To f
 Values under 8 bytes are not indexed (5.2 warns). Vault's audit devices take the same approach: they write "a keyed hash (HMAC-SHA256) of most string values", so a log can be checked without holding them [S10].
 
 As built in PR 2a (T-88, `packages/node-ops/src/secret-scan.ts`):
-- **Percent** is indexed twice: strictly (only RFC 3986's unreserved characters kept), and as `encodeURIComponent` leaves it (also `! ' ( ) *`).
-- **JSON**, for a UTF-8 value, is indexed as `JSON.stringify` writes it and ASCII-only (`\uXXXX` above 0x7f, as Python's `json.dumps` writes by default).
+- **Hex** is indexed in lower and upper case, contiguous. A dump with separators or line breaks (`xxd`'s default) is not matched.
+- **Percent** is indexed with four safe sets, each with upper- and lower-case escapes (RFC 3986 treats them as equal):
+  - strict, RFC 3986's unreserved characters only (Python's `quote(s, safe="")`);
+  - as `encodeURIComponent` leaves it (also `! ' ( ) *`);
+  - the WHATWG form encoding (`URLSearchParams`: `* - . _` kept, a space as `+`);
+  - Python's `quote_plus` (`_ . - ~` kept, a space as `+`).
+
+  Another safe set, such as a URL path that keeps `/`, is not matched.
+- **JSON**, for a UTF-8 value, is indexed as `JSON.stringify` writes it, and ASCII-only with every code unit from 0x7f up as `\uXXXX`, as Python's `json.dumps` writes by default (DEL included). A writer that escapes `/` as `\/` is not matched.
+- Every form above was checked against the writer it names, with Python 3.12.3 and Node 22.23.3 on 2026-10-12 (T-88).
 - **Base64** gets one core per alignment and alphabet: alignment *a* drops 0, 2 or 3 leading characters, and drops the last one unless the value ends on a 3-byte boundary.
   - Padding carries no bits, so one core serves padded and unpadded text.
   - A hit's range also takes the one character on each side that carries bits of both the value and a neighbour, plus up to two `=`. Redacting it leaves no bit of the value.
