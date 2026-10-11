@@ -173,9 +173,9 @@ describe("file.put", () => {
   });
   it("refuses an executable and text that isn't UTF-8, and keeps a markdown file the lane can open", async () => {
     expect(await h.call("file.put", chunk("upload-exe", 0, Buffer.from("MZ"), true, "run.exe"), { key: "hub:exe" }))
-      .toMatchObject({ ok: false, error: { code: "bad_args", executed: "no", message: expect.stringMatching(/allowed/) } });
+      .toMatchObject({ ok: false, error: { code: "not_allowed", executed: "no", message: expect.stringMatching(/allowed/) } });
     expect(await h.call("file.put", chunk("upload-bad", 0, Buffer.from([0xff, 0xfe, 0x61]), true, "notes.md"), { key: "hub:bad" }))
-      .toMatchObject({ ok: false, error: { code: "bad_args", message: expect.stringMatching(/UTF-8/) } });
+      .toMatchObject({ ok: false, error: { code: "not_allowed", message: expect.stringMatching(/UTF-8/) } });
     const done = await h.call("file.put", chunk("upload-md", 0, Buffer.from("# Hi\n"), true, "notes.md"), { key: "hub:md" });
     if (!done.ok) throw new Error(done.error.message);
     const path = (done.result as { path: string }).path;

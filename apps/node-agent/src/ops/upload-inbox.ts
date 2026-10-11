@@ -76,9 +76,9 @@ export class UploadInbox {
       const accepted = acceptNamedUpload(Buffer.concat([prior, bytes]), a.name);
       if (!accepted.ok) {
         this.#forget(a.upload, partial);
-        const message = accepted.error === "too_big" ? "this kind of file is over its size limit"
-          : accepted.error === "not_utf8" ? "a text file has to be UTF-8" : "this file isn't an allowed attachment";
-        return fail("bad_args", message);
+        if (accepted.error === "too_big") return fail("too_large", "this kind of file is over its size limit");
+        const message = accepted.error === "not_utf8" ? "a text file has to be UTF-8" : "this file isn't an allowed attachment";
+        return fail("not_allowed", message);
       }
     }
     const late = ctx.ready();

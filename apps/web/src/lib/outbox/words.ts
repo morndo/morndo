@@ -19,6 +19,7 @@ const PROBLEMS: Record<string, string> = {
   too_many: "can take at most 6 files per message.",
   // Fleet core §3.1: an attached file is put on the worker's machine before anything is typed.
   too_large: "can't take that file: it's too big for its machine, so nothing was typed. Attach a smaller one.",
+  not_allowed: "can't take that file: it isn't an allowed attachment, so nothing was typed.",
   node_offline: "is on a machine that isn't answering right now, so nothing was typed. Try again once it's back.",
   // The node or the fleet refused it saying nothing ran (fleet core §5.3; the fix wave releases the send on any refusal
   // with executed "no"), so these come back as Not sent. Nothing was typed.
