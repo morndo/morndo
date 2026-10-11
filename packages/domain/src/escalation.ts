@@ -236,11 +236,15 @@ export class Escalations {
     }
     if (s.source.kind === "unreadable") return;          // keep the status we had
     if (s.source.kind === "missing" && e.tracking === "hub") {
-      // E14: a missing sighting is not a withdrawal, but time still ends an ask that is open: unanswered, it expires
-      // at its due's TTL, as the sweep and refusal() already say, so the card never looks answerable past the
-      // refusal. An ask already withdrawn or settled stays as its asker left it (as the sweep's own hub branch does).
+      // E14: a missing sighting is not a withdrawal, but time still ends an ask that is open and undecided: it
+      // expires at its due's TTL, as the sweep and refusal() already say, so the card never looks answerable past
+      // the refusal. A Decision — restored after a restart, or seen at the asker's end earlier in this same
+      // sighting — answers it before time can: answered stays answered, the status the end of #sight would derive,
+      // and the sweep keeps it as any decided hub ask. An ask already withdrawn or settled stays as its asker left
+      // it (as the sweep's own hub branch does).
       const ttl = (e.deadline ?? e.askedAt) + HUB_TTL_MS;
-      if (e.status === "open" && now >= ttl) { e.status = "expired"; e.settledAt = ttl; }
+      if (e.status === "open" && !e.decision && now >= ttl) { e.status = "expired"; e.settledAt = ttl; }
+      else if (e.status === "open" && e.decision) e.status = "answered";
       return;
     }
     if (s.source.kind === "missing" && e.tracking !== "ledger") { e.status = "settled"; e.settledAt ??= now; return; }
