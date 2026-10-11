@@ -23,10 +23,10 @@ export type CatalogPrice = { at: string; model: string; input: number; output: n
 type Tokens = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type Price = { input: number; output: number; cacheRead?: number };
 
-export function catalogTokenCost(stdout: string, prices: readonly CatalogPrice[], model: string): number | null {
+export function catalogTokenCost(stdout: string, prices: readonly CatalogPrice[], model: string, asOf = todayUtc()): number | null {
   const body = lastResult(stdout);
   if (!body) return null;
-  const table = priceTable(prices);
+  const table = priceTable(prices, asOf);
   const rows = modelRows(body);
   if (rows === null) return null;
   if (rows.length === 0) {
@@ -63,8 +63,13 @@ function roundDollars(amount: number): number {
   return Math.round(amount * 1_000_000) / 1_000_000;
 }
 
-function priceTable(prices: readonly CatalogPrice[]): Map<string, Price> {
-  const sorted = [...prices].sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
+function todayUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function priceTable(prices: readonly CatalogPrice[], asOf: string): Map<string, Price> {
+  // A row dated later than the run is a planned price, not today's.
+  const sorted = [...prices].filter(row => row.at <= asOf).sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
   const table = new Map<string, Price>();
   for (const row of sorted) {
     table.set(row.model, row.cacheRead === undefined

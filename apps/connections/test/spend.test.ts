@@ -96,4 +96,17 @@ describe("spend", () => {
     ].join("\n");
     expect(catalogTokenCost(stdout, glm, "glm-5.3")).toBe(1.4);
   });
+
+  it("ignores a price row dated after the day of the run", () => {
+    const prices = [
+      { at: "2026-10-10", model: "glm-5.3", input: 1.4, output: 4.4 },
+      { at: "2026-11-01", model: "glm-5.3", input: 9, output: 9 },
+    ];
+    const stdout = JSON.stringify({
+      type: "result",
+      modelUsage: { "glm-5.3": { inputTokens: 1_000_000, outputTokens: 0 } },
+    });
+    expect(catalogTokenCost(stdout, prices, "glm-5.3", "2026-10-11")).toBe(1.4);
+    expect(catalogTokenCost(stdout, prices, "glm-5.3", "2026-11-01")).toBe(9);
+  });
 });
