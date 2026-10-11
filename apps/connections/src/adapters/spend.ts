@@ -18,7 +18,7 @@ export function costFromOutput(stdout: string): number | null {
 // instead of charging the whole reservation. A priced model with no token counts stays null.
 // https://code.claude.com/docs/en/agent-sdk/typescript and https://code.claude.com/docs/en/headless
 // — checked 2026-10-11.
-export type CatalogPrice = { at: string; model: string; input: number; output: number; cacheRead?: number };
+export type CatalogPrice = { at: string; model: string; input: number; output: number; cacheRead?: number | undefined };
 
 type Tokens = { input: number; output: number; cacheRead: number; cacheWrite: number };
 type Price = { input: number; output: number; cacheRead?: number };
