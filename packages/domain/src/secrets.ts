@@ -275,9 +275,13 @@ export type SecretDirectory = { held: readonly Secret[]; ledger: readonly Ledger
 export type SecretProblem = UseRefusalReason | "principal" | "bad_reference" | "bad_fingerprint" | "bad_grant"
   | "bad_destination" | "bad_shape" | "bad_node" | "expiry" | "earlier" | "same" | "renew_expiry";
 export type SecretRefusal = { problem: SecretProblem; directory?: SecretDirectory };
-// `shape`: the new value's shape id, null when it matches none, left out when the store doesn't say (a Rotation keeps it).
+// A store states the new value's shape: its shape id, null when it matches none (which clears the old one), or KEEP_SHAPE
+// to keep the Secret's (a first store then has none). Nothing hangs on whether a key is present: a store without a shape is
+// refused, never taken as keep (T-83).
+export const KEEP_SHAPE = { keep: true } as const;
+export type ShapeInput = string | null | typeof KEEP_SHAPE;
 export type StoreInput = {
-  reference: string; fingerprint: string; shape?: string | null; grants: readonly SecretGrant[];
+  reference: string; fingerprint: string; shape: ShapeInput; grants: readonly SecretGrant[];
   expiry: number | null; destinations: readonly string[];
 };
 
@@ -301,10 +305,14 @@ export function checkFingerprint(ledger: readonly LedgerEntry[], reference: stri
 export const hostsOk = (hosts: readonly string[]) =>
   hosts.length <= DESTINATIONS_MAX && eachOnce(hosts) && hosts.every(h => DESTINATION_HOST.test(h));
 
+const keepsShape = (s: ShapeInput): s is typeof KEEP_SHAPE => typeof s === "object" && s !== null && s.keep;
+// Checked as it comes off the wire or an adapter, so anything but the three forms, undefined included, is refused.
+const shapeOk = (s: ShapeInput) => s === null || (typeof s === "string" ? SHAPE_ID.test(s) : keepsShape(s));
+
 function inputProblem(input: StoreInput): SecretProblem | null {
   if (parseReference(input.reference) === null) return "bad_reference";
   if (!KEYED_FINGERPRINT.test(input.fingerprint)) return "bad_fingerprint";
-  if (typeof input.shape === "string" && !SHAPE_ID.test(input.shape)) return "bad_shape";
+  if (!shapeOk(input.shape)) return "bad_shape";
   if (!input.grants.every(grantOk)) return "bad_grant";
   if (!hostsOk(input.destinations)) return "bad_destination";
   if (input.expiry !== null && !Number.isFinite(input.expiry)) return "expiry";
@@ -319,8 +327,8 @@ const clearsWarnings = (before: number | null, after: number | null) => before !
 
 // A store under a new Reference creates the Secret; under an existing one it is a Rotation, which keeps its Grants and
 // Destinations, and its Expiry unless it names one (docs/domain.md, "Expiry on a Rotation or a transfer"). A named Expiry
-// replaces the old one and clears the warnings only when later; a store never removes one. A named shape, none included,
-// replaces the old one, so nothing looks for a format the value no longer has. The ledger decides first.
+// replaces the old one and clears the warnings only when later; a store never removes one. A stated shape, none included,
+// replaces the old one, so nothing looks for a format the value no longer has; KEEP_SHAPE keeps it. The ledger decides first.
 function place(dir: SecretDirectory, input: StoreInput, command: string, at: number): Result<Placed, SecretRefusal> {
   const p = inputProblem(input);
   if (p) return refuse(p);
@@ -339,14 +347,14 @@ function place(dir: SecretDirectory, input: StoreInput, command: string, at: num
   const secret: Secret = before
     ? {
         ...before, status: before.status === "revoked" ? "active" : before.status, current: fresh,
-        shape: input.shape === undefined ? before.shape : input.shape,
+        shape: keepsShape(input.shape) ? before.shape : input.shape,
         expiry: input.expiry ?? before.expiry,
         warned: clearsWarnings(before.expiry, input.expiry ?? before.expiry) ? [] : before.warned,
         versions: [...before.versions.map(v => v.retiredAt === null ? { ...v, retiredAt: at } : v), fresh],
       }
     : {
         reference: input.reference, status: "active", current: fresh, versions: [fresh], grants: [...input.grants],
-        destinations: [...input.destinations], expiry: input.expiry, shape: input.shape ?? null, warned: [],
+        destinations: [...input.destinations], expiry: input.expiry, shape: keepsShape(input.shape) ? null : input.shape, warned: [],
       };
   const expiryChanged = before !== null && input.expiry !== null && input.expiry !== before.expiry;
   return ok({ secret, ledger, version: number, sameAs: check.sameAs, expiryChanged });
