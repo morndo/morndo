@@ -15,13 +15,16 @@ const B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_
 const HEX = "0123456789abcdef";
 // The characters each percent writer leaves alone (design §8.1, checked against each on 2026-10-12): RFC 3986's
 // unreserved ones (Python's quote with safe=""); encodeURIComponent, which also keeps ! ' ( ) *; the WHATWG form encoding
-// (URLSearchParams), which keeps * - . _ and writes a space as "+"; and Python's quote_plus, which keeps _ . - ~ and
-// writes a space as "+".
+// (URLSearchParams), which keeps * - . _ and writes a space as "+"; Python's quote_plus, which keeps _ . - ~ and writes a
+// space as "+"; Python's quote with its default safe "/", which keeps "/" too; and encodeURI, which keeps
+// ; / ? : @ & = + $ , # as well (T-94).
 const PERCENT_WRITERS = [
   { safe: /^[A-Za-z0-9\-._~]$/, plus: false },
   { safe: /^[A-Za-z0-9\-._~!'()*]$/, plus: false },
   { safe: /^[A-Za-z0-9*\-._]$/, plus: true },
   { safe: /^[A-Za-z0-9_.\-~]$/, plus: true },
+  { safe: /^[A-Za-z0-9_.\-~/]$/, plus: false },
+  { safe: /^[A-Za-z0-9\-_.!~*'();/?:@&=+$,#]$/, plus: false },
 ] as const;
 // At alignment a, the first LEAD[a] characters also depend on the bytes before the value.
 const LEAD = [0, 2, 3] as const;

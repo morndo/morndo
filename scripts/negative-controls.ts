@@ -1226,6 +1226,12 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-pruned-mark", task: "secrets-pr2b", file: "packages/node-ops/src/secret-scan.ts",
     find: "if (!kept(v, now)) through.set(", replace: "if (false) through.set(",
     run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "to deeply equal" },
+  { id: "sp2b-percent-quote-default", task: "secrets-pr2b", file: "packages/node-ops/src/secret-scan.ts",
+    find: "  { safe: /^[A-Za-z0-9_.\\-~/]$/, plus: false },\n", replace: "",
+    run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "quote(value)" },
+  { id: "sp2b-percent-encodeuri", task: "secrets-pr2b", file: "packages/node-ops/src/secret-scan.ts",
+    find: "  { safe: /^[A-Za-z0-9\\-_.!~*'();/?:@&=+$,#]$/, plus: false },\n", replace: "",
+    run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "encodeURI" },
 ];
 
 // ---- the runner
