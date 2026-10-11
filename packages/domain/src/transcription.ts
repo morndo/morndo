@@ -146,9 +146,12 @@ export function requestTranscription(
   capability: TranscriptionCapability,
 ): Result<Transcription, RequestProblem> {
   if (!capabilityReady(capability)) return err("no_capability");
-  if (!TX_ID.test(body.id)) return err("bad_id");
+  // The pattern is for strings only: `test` would read a missing id as "undefined" and a number as its digits, and
+  // a row keyed by such an id would answer for every other (TX5's queue is keyed by id).
+  if (typeof body.id !== "string" || !TX_ID.test(body.id)) return err("bad_id");
   const recording = body.recording;
-  if (!recording || (recording.kind !== "upload" && recording.kind !== "attachment") || !TX_ID.test(recording.id ?? "")) {
+  if (!recording || (recording.kind !== "upload" && recording.kind !== "attachment")
+    || typeof recording.id !== "string" || !TX_ID.test(recording.id)) {
     return err("bad_recording");
   }
   if (!LANGUAGE.test(body.language)) return err("bad_language");
