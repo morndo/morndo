@@ -538,8 +538,9 @@ describe("without MORNDO_ENGINES", () => {
     const off = await startInProcessHub();
     try {
       const cookie = await off.cookie();
-      const me = await (await fetch(`${off.base}/api/me`, { headers: { cookie: `__Host-morndo=${cookie}` } })).json() as { engines?: boolean };
+      const me = await (await fetch(`${off.base}/api/me`, { headers: { cookie: `__Host-morndo=${cookie}` } })).json() as { engines?: boolean; connections?: boolean };
       expect(me.engines).toBe(false);
+      expect(me.connections).toBe(false);
     } finally { await off.close(); }
     const on = await startInProcessHub({ engines: { bin: FAKE, env } });
     try {

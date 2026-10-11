@@ -867,8 +867,21 @@ export class JobSupervisor {
   async #stopChild(id: string, starts?: ReadonlyMap<number, number | null>): Promise<void> {
     const child = this.#recorded(id, "child");
     if (!child || !(await sameProcess(child.pid, child.recorded, starts))) return;
+    // SIGKILL leaves a zombie, and kill(pid, 0) still succeeds until it is reaped
+    // (man 2 kill, read 2026-10-11). The helper waits for that; a sweep must too,
+    // or it records the job lost while the command still answers.
+    let group = true;
     try { process.kill(-child.pid, "SIGKILL"); }
-    catch { try { process.kill(child.pid, "SIGKILL"); } catch { /* already gone */ } }
+    catch {
+      group = false;
+      try { process.kill(child.pid, "SIGKILL"); } catch { return; }
+    }
+    const gone = (): boolean => {
+      if (!group) return !processAlive(child.pid);
+      try { process.kill(-child.pid, 0); return false; }
+      catch (e) { return (e as NodeJS.ErrnoException).code === "ESRCH"; }
+    };
+    await until(gone, 1000);
   }
 
   // A settle that loses because the job already ended answers with that outcome, not an unknown signal.

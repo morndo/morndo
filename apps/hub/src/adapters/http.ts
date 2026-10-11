@@ -341,6 +341,7 @@ export function startHttp(p: {
         desktop: remote.desktop() !== null,
         // The links follow the probe, not merely whether MORNDO_ENGINES is set: a missing or too-old CLI hides them.
         engines: p.engines ? (await p.engines.ready().then(why => why === null, () => false)) : false,
+        connections: p.connections != null,
       });
     }
     if (path === "/api/logout" && method === "POST") {
