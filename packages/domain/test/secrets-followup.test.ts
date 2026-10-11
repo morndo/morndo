@@ -2,7 +2,8 @@
 // before its fix. Names, nodes and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  REQUEST_LIMITS, admitRequest, answerStored, emptySecretDirectory, findSecret, joinRequest, openRequest, storeSecret,
+  REQUEST_LIMITS, admitRequest, answerStored, emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer,
+  storeSecret,
   type Actor, type RequestAsk, type Secret, type SecretDirectory, type SecretGrant, type SecretRequest, type SecretVersion,
 } from "../src/index.ts";
 
@@ -98,5 +99,25 @@ describe("follow-up 5: a renew is Stored only when its store names an Expiry lat
   it("the other kinds that store need no Expiry", () => {
     expect(problem(answerStored(renew("new"), answer(), T + 1))).toBe("ok");
     expect(problem(answerStored(renew("rotate"), answer(null), T + 1))).toBe("ok");
+  });
+});
+
+describe("follow-up 8: a Rotation keeps the shape unless it names one, as it keeps the Expiry", () => {
+  const put = (dir: SecretDirectory, fingerprint: string, shape: string | null, at: number) =>
+    value(storeSecret(dir, { reference: REF, fingerprint, shape, grants: [nodeGrant], expiry: null, destinations: [] }, who(), at));
+  it("a store that names no shape keeps the one there", () => {
+    let dir = put(emptySecretDirectory(), "0000000000a1", "shape-a", T);
+    dir = put(dir, "0000000000a2", null, T + 1);
+    expect(findSecret(dir, REF)?.shape).toBe("shape-a");
+  });
+  it("a store that names one replaces it", () => {
+    let dir = put(emptySecretDirectory(), "0000000000a1", "shape-a", T);
+    dir = put(dir, "0000000000a2", "shape-b", T + 1);
+    expect(findSecret(dir, REF)?.shape).toBe("shape-b");
+  });
+  it("a transfer onto the Reference keeps it too", () => {
+    let dir = put(emptySecretDirectory(), "0000000000a1", "shape-a", T);
+    dir = value(receiveTransfer(dir, { reference: REF, fingerprint: "0000000000a2", shape: null, grants: [], expiry: null, destinations: [], from: "node-b" }, who(), T + 1));
+    expect(findSecret(dir, REF)?.shape).toBe("shape-a");
   });
 });
