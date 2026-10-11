@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore, type NoticeHandoff } from "../src/ops/job-store.ts";
-import { probeUserManager, showUnit, unitOf, type ProbeResult } from "../src/ops/job-systemd.ts";
+import { namesFromEnvironmentExport, probeUserManager, showUnit, unitOf, unsetNameOrder, type ProbeResult } from "../src/ops/job-systemd.ts";
 import { openJobRuntime } from "../src/ops/job-runtime.ts";
 import { JobSupervisor, openJobSupervisor, type JobStart } from "../src/ops/job-supervisor.ts";
 import { agentPaths } from "../src/paths.ts";
@@ -415,6 +415,22 @@ function failingSystemctl(home: string): NodeJS.ProcessEnv {
 const KEPT_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "MORNDO_JOB_ID", "MORNDO_LANE"];
 
 describe("systemd environment", () => {
+  it("lists a prefix before the longer name systemd would replace", () => {
+    expect(unsetNameOrder(["JAVA_HOME_8_X64", "JAVA_HOME_11_X64", "JAVA_HOME"])).toEqual([
+      "JAVA_HOME", "JAVA_HOME_8_X64", "JAVA_HOME_11_X64",
+    ]);
+  });
+
+  it("takes JDK paths from the service environment export", () => {
+    expect(namesFromEnvironmentExport([
+      "# comment",
+      "JAVA_HOME_8_X64=/usr/lib/jvm/temurin-8-jdk-amd64",
+      "not a line",
+      "BAD-NAME=1",
+      "",
+    ].join("\n"))).toEqual(["JAVA_HOME_8_X64"]);
+  });
+
   it("refuses to start when the user manager environment cannot be read, and does not try again", async () => {
     const h = tempHome();
     const log = join(h.home, "env.log");
@@ -451,6 +467,52 @@ exit 0
     const text = readFileSync(log, "utf8");
     expect(text).not.toContain("systemd-run");
     expect(text.split("\n").filter(line => line.includes("show-environment"))).toHaveLength(1);
+  });
+
+  it("unsets a name the process holds when the manager listing omitted it, and execs the job command", async () => {
+    const h = tempHome();
+    const log = join(h.home, "run.log");
+    const env = fakeTools(h.home, `#!/bin/sh
+if [ "$2" = "show-environment" ]; then printf 'PATH=/usr/bin\\n'; exit 0; fi
+if [ "$2" = "show" ]; then printf '%s\\n' LoadState=not-found; exit 0; fi
+exit 0
+`, `#!/bin/sh\nprintf '%s\\n' "$@" >> '${log}'\nexit 0\n`);
+    env.MORNDO_LATE_INJECT = "from-the-process";
+    env.JAVA_HOME_8_X64 = "jdk8";
+    env.JAVA_HOME = "jdk";
+    const adb = openAgentDb(join(h.home, "agent.db"));
+    const dir = join(h.home, "job-logs");
+    const work = join(h.home, "work");
+    mkdirSync(work, { recursive: true });
+    const store = new JobStore(adb.db, dir, () => Date.now(), { home: h.home });
+    const paths = agentPaths(h.home);
+    const sup = new JobSupervisor(store, {
+      home: h.home, stateDir: paths.stateDir, socketPath: paths.jobSock,
+      systemd: { slice: "morndofake.slice", toolEnv: env },
+    });
+    open.push({ adb, cleanup: h.cleanup, dir, sup });
+    const decided = await sup.start({
+      id: track(jobId()), lane: "builder", name: "pack", jobClass: "default",
+      notify: { kind: "lane", name: "builder" }, cwd: work, command: ["/bin/true"],
+    });
+    if (!decided.ok) throw new Error(decided.error);
+    const lines = readFileSync(log, "utf8").split("\n");
+    expect(lines).toContain("--property=Type=exec");
+    expect(lines).toContain("--property=UnsetEnvironment=MORNDO_LATE_INJECT");
+    const prefix = lines.indexOf("--property=UnsetEnvironment=JAVA_HOME");
+    const longer = lines.indexOf("--property=UnsetEnvironment=JAVA_HOME_8_X64");
+    expect(prefix).toBeGreaterThanOrEqual(0);
+    expect(longer).toBeGreaterThan(prefix);
+    let image = "";
+    try { image = readFileSync("/etc/environment", "utf8"); } catch { /* the generator is the other source */ }
+    for (const key of namesFromEnvironmentExport(image)) {
+      if (KEPT_ENV.includes(key)) continue;
+      expect(lines).toContain(`--property=UnsetEnvironment=${key}`);
+    }
+    expect(lines).not.toContain("/usr/bin/env");
+    expect(lines).not.toContain("-i");
+    const dash = lines.indexOf("--");
+    expect(lines[dash + 1]).toBe("/bin/true");
   });
 });
 

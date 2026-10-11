@@ -196,13 +196,13 @@ else process.exit(Number(code));
     const runtime = new CodexRuntime({
       bin, profilePath: profile, configDir: login, command: "helper", args: [], baseUrl: "", parent: {},
     });
-    const plan = (code: string): RunPlan => ({
+    const plan = (): RunPlan => ({
       lease: "l1", connection: "seat", ref: null, configDir: login, model: "m", effort: "high",
       workspace: dir, deny: ["/tmp/vault"], reservation: 0, probe: false, subscription: true,
     });
     const homeAfter = async (code: string): Promise<string> => {
       rmSync(note, { force: true });
-      const pending = runtime.execute(plan(code), [code]);
+      const pending = runtime.execute(plan(), [code]);
       const started = Date.now();
       let recorded: { codex: string; pid: number } | null = null;
       while (recorded === null && Date.now() - started < 2_000) {

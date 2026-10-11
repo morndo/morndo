@@ -1,0 +1,35 @@
+# Exact synthetic matches ignored by the pre-push home, key, and token scan.
+# path<TAB>exact match. A different match in the same file still fails.
+# Not scanned: this file is the list.
+apps/fleet/test/client-api.test.ts	/home/u/
+apps/fleet/test/log.test.ts	-----BEGIN PRIVATE KEY-----
+apps/fleet/test/log.test.ts	/home/owner/
+apps/fleet/test/startup-files.test.ts	-----BEGIN PRIVATE KEY-----
+apps/hub/test/config-fleet.test.ts	/home/o/
+apps/hub/test/local-node.test.ts	/home/me/
+apps/hub/test/log.test.ts	/home/someone/
+apps/hub/test/log.test.ts	/home/someoneelse/
+apps/node-agent/README.md	/home/owner/
+apps/node-agent/test/transcript-file-ops.test.ts	-----BEGIN PRIVATE KEY-----
+docs/design/fleet-clients/plan/04-hub-web.md	/home/o/
+docs/design/fleet-clients/plan/05-tests-docs.md	/home/user/
+docs/design/fleet-core/plan/01-foundation.md	/home/.claude/
+docs/design/fleet-core/plan/01-foundation.md	/home/.local/
+docs/design/fleet-core/plan/01-foundation.md	/home/u/
+docs/design/fleet-core/plan/02-hub-async.md	/home/me/
+docs/design/fleet-core/plan/03-agent.md	-----BEGIN PRIVATE KEY-----
+docs/design/fleet-core/plan/04-fleet.md	-----BEGIN PRIVATE KEY-----
+docs/design/fleet-core/plan/04-fleet.md	/home/owner/
+docs/design/fleet-core/plan/04-fleet.md	/home/u/
+docs/design/fleet-core/plan/05-hub-fleet.md	/home/o/
+docs/design/fleet-core/plan/07-tests-docs-qa.md	/home/<user>/
+docs/design/fleet-core/plan/07-tests-docs-qa.md	/home/owner/
+docs/design/fleet-core/qa.md	/home/<user>/
+docs/design/fleet-core/qa.md	/home/owner/
+packages/domain/test/jobs.test.ts	-----BEGIN PRIVATE KEY-----
+packages/domain/test/jobs.test.ts	-----BEGIN RSA PRIVATE KEY-----
+packages/domain/test/jobs.test.ts	/home/someone/
+packages/domain/test/jobs.test.ts	AKIAIOSFODNN7EXAMPLE
+packages/node-ops/test/fixtures/claude-code-2.1.287/after-turn-ghost-suggestion.ansi	/home/owner/
+packages/protocol/test/fleet.test.ts	/home/u/
+scripts/bench-relay.ts	/home/user/
