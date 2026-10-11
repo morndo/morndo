@@ -5,9 +5,13 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 NAME=morndo-pr0-tmux
-OUT=${1:-"$HOME/manager/reports/morndo-updates/pr0-tmux-check.txt"}
 NODE_VER=v24.21.0
-mkdir -p "$(dirname "$OUT")"
+if [ "${1-}" ]; then
+  OUT=$1
+  mkdir -p "$(dirname "$OUT")"
+else
+  OUT="$(mktemp -d)/pr0-tmux-check.txt"
+fi
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
