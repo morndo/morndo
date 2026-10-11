@@ -10,7 +10,7 @@ import { SCHEMA_VERSION } from "../src/adapters/migrations.ts";
 import { Store } from "../src/adapters/store.ts";
 import { loadOrCreateIdentity } from "../src/adapters/identity.ts";
 import { passkeys } from "../src/adapters/passkeys.ts";
-import { startHttp } from "../src/adapters/http.ts";
+import { healthDetail, startHttp } from "../src/adapters/http.ts";
 import { AccessService } from "../src/application/access-service.ts";
 import { ObservationService } from "../src/application/observation-service.ts";
 import { SteeringService } from "../src/application/steering-service.ts";
@@ -163,5 +163,14 @@ describe("health", () => {
     expect(res.status).toBe(200);
     expect(body).toEqual({ ready: true });
     expect(ReadyOnlyHealth.safeParse(body).success).toBe(true);
+  });
+  it("a loopback socket with no proxy header is the full check, and a tagged or public address is ready only", () => {
+    expect(healthDetail({ remoteAddress: "127.0.0.1", proxyLogin: undefined, authenticated: false })).toBe("full");
+    expect(healthDetail({ remoteAddress: "::1", proxyLogin: undefined, authenticated: false })).toBe("full");
+    expect(healthDetail({ remoteAddress: "::ffff:127.0.0.1", proxyLogin: undefined, authenticated: false })).toBe("full");
+    expect(healthDetail({ remoteAddress: "100.64.0.2", proxyLogin: undefined, authenticated: false })).toBe("ready");
+    expect(healthDetail({ remoteAddress: "203.0.113.10", proxyLogin: undefined, authenticated: false })).toBe("ready");
+    expect(healthDetail({ remoteAddress: undefined, proxyLogin: undefined, authenticated: false })).toBe("ready");
+    expect(healthDetail({ remoteAddress: "203.0.113.10", proxyLogin: undefined, authenticated: true })).toBe("full");
   });
 });

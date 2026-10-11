@@ -155,6 +155,23 @@ export function workerIdFromSegment(segment: string): string | null {
   return id !== null && isWorkerOrLegacyId(id) ? id : null;
 }
 
+// 127.0.0.1, ::1, and IPv4-mapped ::ffff:127.0.0.1. A missing address is not this machine.
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const host = address.split("%")[0] ?? "";
+  if (host === "127.0.0.1" || host === "::1") return true;
+  return host === "::ffff:127.0.0.1";
+}
+
+// Full version, schema and in-flight only for a session, or for this machine before any proxy identity.
+// A missing identity header is not enough: a tagged device or a public request gets ready only.
+export function healthDetail(opts: { remoteAddress: string | undefined; proxyLogin: string | undefined; authenticated: boolean }): "full" | "ready" {
+  if (opts.authenticated) return "full";
+  const viaProxy = typeof opts.proxyLogin === "string" && opts.proxyLogin.length > 0;
+  if (!viaProxy && isLoopbackAddress(opts.remoteAddress)) return "full";
+  return "ready";
+}
+
 export function startHttp(p: {
   config: Config; identity: HubIdentity; access: AccessService; observation: ObservationService; steering: SteeringService; escalations: EscalationService;
   remote: RemoteService; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
@@ -220,12 +237,16 @@ export function startHttp(p: {
   // A check the app makes on its own (a poll, not the principal acting) says so, and doesn't keep the Session from
   // going idle (AC5; review M3).
   const auth = (req: IncomingMessage) => access.authenticate(cookieValue(req, COOKIE), req.headers["x-morndo-background"] !== "1");
-  // Loopback, with no proxy header: version, schema, ready, and what is in flight. Through the proxy, ready only,
-  // unless the request has a session (design section 6.4).
+  // A session gets the full check. So does a request that never passed a proxy and whose socket is loopback.
+  // A missing identity header is not loopback: a tagged device or a public request gets ready only (design section 6.4).
   function health(req: IncomingMessage, res: ServerResponse) {
     const login = req.headers["tailscale-user-login"];
-    const viaProxy = typeof login === "string" && login.length > 0;
-    if (viaProxy && !auth(req)) return json(res, 200, { ready: true });
+    const detail = healthDetail({
+      remoteAddress: req.socket.remoteAddress,
+      proxyLogin: typeof login === "string" ? login : undefined,
+      authenticated: auth(req) !== null,
+    });
+    if (detail === "ready") return json(res, 200, { ready: true });
     return json(res, 200, { version: productVersion(), schema: schemaVersion, ready: true, inFlight: flight.list() });
   }
 
