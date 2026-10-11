@@ -382,6 +382,14 @@ describe("DB7 everywhere a field lands in briefMarkdown (§4.5: an old app rende
     expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).label = "See [the plan](http://example.com/plan)"; }))
       .toEqual(["error bad_link (options[0].label)"]);
   });
+  it("a factor goes through the same check as its cells and the note: no raw HTML, no images, https links", () => {
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).factor = "<b>Outcome</b>"; }))
+      .toEqual(["error bad_markdown (comparison.rows[0].factor)"]);
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).factor = "See [the run](http://example.com/run)"; }))
+      .toEqual(["error bad_link (comparison.rows[0].factor)"]);
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).factor = "![](https://t.example/p.png)"; }))
+      .toEqual(["error bad_markdown (comparison.rows[0].factor)"]);
+  });
   it("an assumption or a limit is one list item: no block of its own inside it, headings included (DB7)", () => {
     expect(lines(d => { (d.why as { assumptions: string[] }).assumptions = ["# APPROVE NOW", "the sample holds."]; }))
       .toEqual(["error bad_markdown (why.assumptions[0])"]);
