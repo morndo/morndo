@@ -30,8 +30,10 @@ export const USE_REFUSED = 77;
 
 export const USE_MODES = ["exec", "file", "helper", "inject"] as const;
 export const REQUEST_KINDS = ["new", "access", "rotate", "renew"] as const;
-// The kinds a store answers: an access request is granted, never stored (SR8).
-export const STORED_KINDS = ["new", "rotate", "renew"] as const;
+// The kinds a store answers: every request kind but access, which is granted, never stored (SR8). `satisfies` ties each
+// entry to REQUEST_KINDS; a type test (secrets-round4.test.ts) checks that none is missing (T-83).
+export const STORED_KINDS = ["new", "rotate", "renew"] as const satisfies readonly Exclude<RequestKind, "access">[];
+export type StoredKind = (typeof STORED_KINDS)[number];
 export const REQUEST_STATES = ["open", "stored", "granted", "rejected", "withdrawn", "expired"] as const;
 export const SECRET_STATUSES = ["active", "disabled", "revoked"] as const;
 export type UseMode = (typeof USE_MODES)[number];

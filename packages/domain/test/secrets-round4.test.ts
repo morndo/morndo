@@ -1,10 +1,10 @@
 // Secrets: review round 4 of PR #25 (board T-80). One block per point, each written failing before its fix. Names, nodes
 // and fingerprints are synthetic.
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
-  answerStored, emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer, renewSecret, secretExpirySweep, storeSecret,
+  REQUEST_KINDS, STORED_KINDS, answerStored, emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer, renewSecret, secretExpirySweep, storeSecret,
   useGate, withdrawRequest,
-  type Actor, type RequestAsk, type SecretDirectory, type SecretGrant,
+  type Actor, type RequestAsk, type RequestKind, type SecretDirectory, type SecretGrant, type StoredKind,
 } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
@@ -153,5 +153,12 @@ describe("round 5, point 7: a store states the shape: an id, none (which clears 
     // @ts-expect-error: the shape is required: an id, null, or { keep: true }.
     const r = storeSecret(first(), { reference: REF, fingerprint: "0000000000d2", grants: [], expiry: null, destinations: [] }, who, T + 1);
     expect(r.ok ? "stored" : r.error.problem).toBe("bad_shape");
+  });
+});
+
+describe("round 5, point 5: the kinds a store answers are every request kind but access (T-83)", () => {
+  it("by type, so a kind added or renamed fails to compile until the list follows, and at run time", () => {
+    expectTypeOf<StoredKind>().toEqualTypeOf<Exclude<RequestKind, "access">>();
+    expect([...STORED_KINDS].sort()).toEqual(REQUEST_KINDS.filter(k => k !== "access").sort());
   });
 });
