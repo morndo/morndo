@@ -53,9 +53,9 @@ describe("round 4, points 1 and 2: secrets.store carries the request it answers,
 
 describe("round 5, point 3: a node confirms a store with its version and its own time of the store (T-83)", () => {
   it("names both, and nothing else", () => {
-    expect(SecretsStoreResult.safeParse({ version: 2, at: 1_700_000_000_000, renewed: false }).success).toBe(true);
-    expect(SecretsStoreResult.safeParse({ version: 2 }).success).toBe(false);
-    expect(SecretsStoreResult.safeParse({ version: 0, at: 1_700_000_000_000, renewed: false }).success).toBe(false);
-    expect(SecretsStoreResult.safeParse({ version: 2, at: 1_700_000_000_000, renewed: false, expiry: 1 }).success).toBe(false);
+    expect(SecretsStoreResult.safeParse({ reference: REF, version: 2, at: 1_700_000_000_000, renewed: false }).success).toBe(true);
+    expect(SecretsStoreResult.safeParse({ reference: REF, version: 2 }).success).toBe(false);
+    expect(SecretsStoreResult.safeParse({ reference: REF, version: 0, at: 1_700_000_000_000, renewed: false }).success).toBe(false);
+    expect(SecretsStoreResult.safeParse({ reference: REF, version: 2, at: 1_700_000_000_000, renewed: false, expiry: 1 }).success).toBe(false);
   });
 });

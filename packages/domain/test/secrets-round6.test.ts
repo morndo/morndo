@@ -68,8 +68,8 @@ describe("round 6, points 1, 2 and 7: a renew is Stored on the requester node's 
   const opened = (kind: RequestKind = "renew") => value(openRequest({
     node: "node-a", reference: REF, kind, waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
   }, "r1", T - DAY)).request;
-  const confirm = (over: Partial<{ node: string; version: number; at: number; renewed: boolean }> = {}) =>
-    ({ node: "node-a", version: 2, at: T, renewed: true, ...over });
+  const confirm = (over: Partial<{ reference: string; node: string; version: number; at: number; renewed: boolean }> = {}) =>
+    ({ reference: REF, node: "node-a", version: 2, at: T, renewed: true, ...over });
   const answer = (kind: RequestKind, confirmation: ReturnType<typeof confirm>, nodes = ["node-a", "node-b"], expiry: number | null = T + 30 * DAY) =>
     answerStored(opened(kind), { seen: 1, command: "c2", reference: REF, nodes, expiry, confirmation }, T + 60_000);
   const state = (r: ReturnType<typeof answer>) => (r.ok ? r.value.request.state : r.error.problem);
