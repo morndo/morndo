@@ -337,7 +337,7 @@ while read -r sel; do
   git rev-list --no-merges $sel > "$plain" || search_failed
   while IFS= read -r c || [ -n "$c" ]; do
     [ -n "$c" ] || continue
-    git diff-tree -p -U0 --root --no-ext-diff --no-color --diff-filter=ACMR "$c" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch" || search_failed
+    git diff-tree -p -U0 --root --no-ext-diff --no-color --diff-filter=ACMRT "$c" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch" || search_failed
     scan_patch "$patch" "$c"
   done < "$plain"
   git rev-list --merges $sel > "$merges" || search_failed
