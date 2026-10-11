@@ -21,7 +21,7 @@
 // https://code.claude.com/docs/en/env-vars
 import { spawn, type SpawnOptions } from "node:child_process";
 import { statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { Isolation } from "@morndo/domain";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
@@ -230,8 +230,13 @@ export function childEnv(parent: NodeJS.ProcessEnv, extra: Readonly<Record<strin
 }
 
 // The keys helper is the stable launcher, not a Version's own path (design: releases, section 5).
-export function keysLauncher(home: string): string {
-  return join(home, ".local", "bin", "morndo-keys");
+// An install writes this absolute path. A relative path is never used, including when HOME is unset.
+const INSTALLED_KEYS = "/usr/local/bin/morndo-keys";
+
+export function keysLauncher(home: string, configured?: string): string {
+  if (configured !== undefined && configured.length > 0 && isAbsolute(configured)) return configured;
+  if (isAbsolute(home)) return join(home, ".local", "bin", "morndo-keys");
+  return INSTALLED_KEYS;
 }
 
 export function helperCommand(launcher: string, lease: string): string {

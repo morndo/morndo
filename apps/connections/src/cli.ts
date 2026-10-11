@@ -170,7 +170,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const row = findConnection(home.store.load().directory, name);
   const lease = row && row.custody === "morndo" ? row.leases.find(item => item.id === granted.id) : undefined;
   if (!lease) return fail(io, "missing");
-  const launcher = keysLauncher(home.env.HOME ?? "");
+  const launcher = keysLauncher(home.env.HOME ?? "", home.env.MORNDO_KEYS);
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
