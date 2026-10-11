@@ -58,6 +58,9 @@ function stringsOf(v: unknown, into: string[] = []): string[] {
   return into;
 }
 
+// A date or a time, named in words: what "Why now" needs. Month names capitalised, so "may" stays a verb.
+const WHEN = /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}:\d{2}\b|\b\d{1,2}\s(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\b|\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s\d{4}\b|\b(?:19|20)\d{2}\b/;
+
 class Lint {
   problems: BriefProblem[] = [];
   error(code: string, where: string, text: string) { this.problems.push({ level: "error", code, where, text }); }
@@ -293,6 +296,26 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   if (size > CAPS.brief) lint.error("too_long", "brief", `the brief is ${size} characters as JSON; the cap is ${CAPS.brief}`);
 
   if (lint.problems.some(p => p.level === "error")) return { brief: null, problems: lint.problems };
+
+  // Warnings (DB10): they come back with the brief, one line each, and never refuse. A refused brief reports its
+  // errors only — warnings about a brief that won't be filed are noise.
+  const warn = (code: string, where: string, text: string) => lint.problems.push({ level: "warning", code, where, text });
+  if (!Array.isArray(draft.evidence) || draft.evidence.length === 0) {
+    warn("no_evidence", "evidence", "no evidence listed; link what backs the numbers");
+  }
+  if (askText !== null && !/\*\*[^*]*\d[^*]*\*\*/.test(askText)) {
+    warn("ask_no_bold_figure", "ask.text", "the ask carries no number in bold; put the key numbers in bold, the principal reads them first");
+  }
+  if (whyNow !== null && !WHEN.test(whyNow)) {
+    warn("why_now_no_date", "whyNow", "\"Why now\" names no date or time; say what forces the decision, and when");
+  }
+  if (changeIf !== null && !/\d/.test(changeIf)) {
+    warn("change_if_vague", "changeIf", "\"What would change\" names no number or date; make it a condition someone can check");
+  }
+  const words = stringsOf(draft).join(" ").split(/\s+/).filter(Boolean).length;
+  if (words / 200 > minutes) {
+    warn("minutes_low", "minutes", `${words} words take about ${Math.ceil(words / 200)} minutes to read at 200 words a minute; minutes says ${minutes}`);
+  }
 
   // No errors: the draft is the brief. The fields lint doesn't type itself (due, minutes) are checked where their
   // rules are (DB3); the optionals default as the wire schema reads them.
