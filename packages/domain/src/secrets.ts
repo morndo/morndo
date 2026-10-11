@@ -396,6 +396,8 @@ export function renewSecret(dir: SecretDirectory, input: StoreInput, actor: Acto
   if (input.expiry === null || !(input.expiry > at)) return refuse("renew_expiry");
   const before = findSecret(dir, input.reference);
   if (!before) return refuse("missing");
+  // A renew never revives a revoked value, and a disabled Secret would be reported renewed while every Use is refused (T-85).
+  if (before.status !== "active") return refuse(before.status);
   if (before.expiry !== null && !(input.expiry > before.expiry)) return refuse("renew_expiry");
   return storeSecret(dir, input, actor, at);
 }
