@@ -340,6 +340,56 @@ describe("DB7: prose in the brief's markdown subset", () => {
   });
 });
 
+describe("DB7 everywhere a field lands in briefMarkdown (§4.5: an old app renders details as markdown)", () => {
+  it("a one-line section the renderer would show as a heading or a link of the asker's own is refused", () => {
+    expect(lines(d => { d.changeIf = "# 5 [x](javascript:alert(1))"; })).toEqual(["error bad_markdown (changeIf)"]);
+    expect(lines(d => { d.changeIf = "See [the quote](http://example.com/q) first."; })).toEqual(["error bad_link (changeIf)"]);
+  });
+  it("the labelled one-line sections and the lists are checked like the prose", () => {
+    expect(lines(d => { (d.risk as { risk: string }).risk = "see [the triage run](http://example.com/run)."; }))
+      .toEqual(["error bad_link (risk.risk)"]);
+    expect(lines(d => { (d.why as { assumptions: string[] }).assumptions = ["the quote is [fixed](http://example.com/q).", "the sample holds."]; }))
+      .toEqual(["error bad_link (why.assumptions[0])"]);
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "up to [the quote](http://example.com/q)."; }))
+      .toEqual(["error bad_link (authorizes.limits[0])"]);
+    expect(lines(d => { (d.comparison as { note: string }).note = "costs are [cash only](http://example.com/cash)."; }))
+      .toEqual(["error bad_link (comparison.note)"]);
+    expect(lines(d => { (d.why as { downside: string }).downside = "we switch to [C](http://example.com/c) at the review point."; }))
+      .toEqual(["error bad_link (why.downside)"]);
+    expect(lines(d => { (d.authorizes as { freshApproval: string }).freshApproval = "a [new vendor](http://example.com/v)."; }))
+      .toEqual(["error bad_link (authorizes.freshApproval)"]);
+  });
+  it("ifNoAnswer prints as its own section, and is checked like one", () => {
+    expect(lines(d => { d.ifNoAnswer = "we buy [the add-on](http://example.com/addon) instead."; })).toEqual(["error bad_link (ifNoAnswer)"]);
+  });
+  it("the headline becomes the text's title line: its links are checked too", () => {
+    expect(lines(d => { d.headline = "Approve option b: see [the quote](http://example.com/q)"; })).toEqual(["error bad_link (headline)"]);
+  });
+  it("a cell or factor that would break the table's columns is refused, and a cell is one line", () => {
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).cells[0] = "1|2"; }))
+      .toEqual(["error bad_markdown (comparison.rows[0].cells[0])"]);
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).factor = "Cost|effort"; }))
+      .toEqual(["error bad_markdown (comparison.rows[0].factor)"]);
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).cells[0] = "one\ntwo"; }))
+      .toEqual(["error control_char (comparison.rows[0].cells[0])"]);
+  });
+  it("an option label heads a column and names a tap line: no pipes in it, and links stay https", () => {
+    expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).label = "Keep | manual"; }))
+      .toEqual(["error bad_markdown (options[0].label)"]);
+    expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).label = "See [the plan](http://example.com/plan)"; }))
+      .toEqual(["error bad_link (options[0].label)"]);
+  });
+  it("an evidence label can't break out of its link, nor a url carry one in", () => {
+    expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).url = "https://x) [y](http://evil"; }))
+      .toEqual(["error bad_link (evidence[0].url)"]);
+    expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).label = "a] (http://evil"; }))
+      .toEqual(["error bad_markdown (evidence[0].label)"]);
+  });
+  it("an https link in a one-line section is the subset, as in the prose", () => {
+    expect(lines(d => { d.changeIf = "If the [quote](https://example.com/contractor-quote) moves by 10%, choose A."; })).toEqual([]);
+  });
+});
+
 describe("warnings: a weak brief comes back with its brief (DB10)", () => {
   it("no evidence listed is a warning", () => {
     expect(lines(d => { d.evidence = []; })).toEqual(["warning no_evidence (evidence)"]);
