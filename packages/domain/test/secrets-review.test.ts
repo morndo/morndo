@@ -2,8 +2,9 @@
 // per point, each written failing before its fix.
 import { describe, expect, it } from "vitest";
 import {
-  deleteSecret, emptySecretDirectory, findSecret, revokeSecret, secretExpirySweep, storeSecret, useGate,
-  type Actor, type SecretDirectory, type SecretGrant,
+  deleteSecret, emptySecretDirectory, findSecret, joinRequest, openRequest, revokeSecret, secretExpirySweep, storeSecret,
+  useGate, withdrawRequest,
+  type Actor, type RequestAsk, type SecretDirectory, type SecretGrant,
 } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
@@ -62,5 +63,31 @@ describe("review 2: version numbers continue after a Delete, so Revoke hits only
     dir = value(revokeSecret(dir, REF, who, T + 3));
     expect(dir.ledger.map(e => [e.version, e.state])).toEqual([[1, "retired"], [2, "revoked"]]);
     expect(storeSecret(dir, { reference: "secret://shared/other", fingerprint: "0123456789a1", shape: null, grants: [], expiry: null, destinations: [] }, who, T + 4).ok).toBe(true);
+  });
+});
+
+describe("review 3: a waiter with no lane counts once, as a lane does (SR1: a repeat changes nothing)", () => {
+  const ask: RequestAsk = {
+    node: "node-a", reference: REF, kind: "new", waiter: { lane: "lane-a", workspace: null, purpose: "Run the tests" }, proposed: nodeGrant,
+  };
+  it("repeated joins without a lane leave one laneless waiter and one version step", () => {
+    let r = value(openRequest(ask, "r1", T)).request;
+    const first = value(joinRequest(r, { lane: null, workspace: null, purpose: "Nightly job" }, T + 1));
+    r = first.request;
+    for (let i = 2; i <= 4; i++) {
+      const again = value(joinRequest(r, { lane: null, workspace: null, purpose: `Nightly job ${i}` }, T + i));
+      expect(again.events).toEqual([]);
+      r = again.request;
+    }
+    expect(r.waiting.map(w => w.lane)).toEqual(["lane-a", null]);
+    expect(r.version).toBe(2);
+  });
+  it("the laneless waiter withdraws once, and the request is then only lane-a's", () => {
+    let r = value(openRequest(ask, "r1", T)).request;
+    r = value(joinRequest(r, { lane: null, workspace: null, purpose: "Nightly job" }, T + 1)).request;
+    r = value(joinRequest(r, { lane: null, workspace: null, purpose: "Nightly job again" }, T + 2)).request;
+    r = value(withdrawRequest(r, null, T + 3)).request;
+    expect(r.waiting.map(w => w.lane)).toEqual(["lane-a"]);
+    expect(withdrawRequest(r, null, T + 4).ok).toBe(false);
   });
 });
