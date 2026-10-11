@@ -157,6 +157,11 @@ export const capabilityReady = (c: TranscriptionCapability): boolean =>
   c.present === true && Number.isInteger(c.maxSeconds) && c.maxSeconds > 0;
 
 const sameRecording = (a: Recording, b: Recording): boolean => a.kind === b.kind && a.id === b.id;
+// The body a row was accepted on, as a Job's accept compares its own (jobs.ts): the Recording, the size and the
+// language, with the id already held.
+const sameBody = (row: Transcription, body: TranscriptionBody): boolean =>
+  row.id === body.id && sameRecording(row.recording, body.recording)
+  && row.language === body.language && row.sizeBytes === body.sizeBytes;
 const open = (state: TranscriptionState) => state === "queued" || state === "starting" || state === "running";
 
 // TX9 first: with no ready Transcriber nothing runs and nothing is offered, whatever the body. Then the body is
@@ -182,9 +187,11 @@ export function requestTranscription(
   if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0 || body.sizeBytes > MAX_RECORDING_BYTES) return err("bad_size");
   const inFlight = existing.find(row => sameRecording(row.recording, recording) && row.language === body.language && open(row.state));
   if (inFlight) return ok(inFlight);
-  // TX3: asking again after an end makes a new attempt, and only the caller's ids tell the two apart, so an id that
-  // names a finished attempt is a conflict, as a Job's is (jobs.ts). An id may be shared only by attempts in flight.
-  if (existing.some(row => row.id === body.id && terminal(row.state))) return err("id_conflict");
+  // TX3: asking again after an end makes a new attempt, and only the caller's ids tell the two apart. An id that
+  // names a finished attempt is that attempt again for the same body — the stored row, unchanged, as a Job's
+  // accept is (jobs.ts) — and a conflict for a different one. An id may be shared by attempts in flight.
+  const held = existing.find(row => row.id === body.id && terminal(row.state));
+  if (held) return sameBody(held, body) ? ok(held) : err("id_conflict");
   return ok({
     id: body.id, recording, language: body.language, sizeBytes: body.sizeBytes, acceptedAt: at,
     state: "queued", position: null, reason: null, outcome: null, problem: null, text: null, report: null,
