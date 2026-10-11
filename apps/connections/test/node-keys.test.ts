@@ -1,6 +1,6 @@
 // The node's keys (PLAN step 5, criteria 8 and 9; design §6). Values are synthetic; node:crypto is the oracle.
 import { createHmac } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -78,5 +78,18 @@ describe("the keyed fingerprint (criterion 8)", () => {
     const { chmodSync } = await import("node:fs");
     chmodSync(join(dir, "fingerprint.key"), 0o644);
     expect(() => new NodeKeys(dir).fingerprint(value)).toThrow(/looser than a private file/);
+  });
+});
+
+describe("a key file that isn't a key", () => {
+  it("one of another length is refused, not used", () => {
+    const dir = home();
+    const keys = new NodeKeys(dir);
+    keys.fingerprint(value);
+    for (const name of ["fingerprint.key", "index.key"]) {
+      writeFileSync(join(dir, name), new Uint8Array(16).fill(3), { mode: 0o600 });
+    }
+    expect(() => new NodeKeys(dir).fingerprint(value)).toThrow(/is not a 32-byte key/);
+    expect(() => new NodeKeys(dir).index(value)).toThrow(/is not a 32-byte key/);
   });
 });
