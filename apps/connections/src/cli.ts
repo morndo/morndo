@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
-import { findPreset as presetOf } from "./application/catalog.ts";
+import { findPreset as presetOf, firstPartyHost } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
@@ -164,6 +164,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const preset = presetOf(home.catalog, connection.vendor);
   if (!preset) return fail(io, "missing");
   const baseUrl = preset.runtimes.find(item => item.runtime === connection.runtime)?.baseUrl ?? "";
+  const party = firstPartyHost(home.catalog.presets());
   if (connection.kind === "api-key" && connection.runtime === "claude") {
     const problem = baseUrlProblem(baseUrl);
     if (problem) return fail(io, problem);
@@ -213,7 +214,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       }).execute(plan, parsed.rest, hooks)
       : connection.runtime === "cursor"
         ? await new CursorRuntime(saved.MORNDO_CURSOR_BIN ?? "agent", saved).execute(plan, parsed.rest, hooks)
-        : await new ClaudeRuntime(bin, helperCommand(process.execPath, main, lease.id), saved, baseUrl).execute(plan, parsed.rest, hooks);
+        : await new ClaudeRuntime(bin, helperCommand(process.execPath, main, lease.id), saved, baseUrl, party).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
   } catch (error) {
@@ -227,7 +228,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const again = released ? openHome(saved) : home;
     try {
       const outcome = failure !== "" ? failure : status === 0 ? "done" : "failed";
-      const catalogPrices = preset.spend.includes("token-price") && connection.runtime === "claude" && !subscription && isThirdPartyAnthropicBase(baseUrl);
+      const catalogPrices = preset.spend.includes("token-price") && connection.runtime === "claude" && !subscription && isThirdPartyAnthropicBase(baseUrl, party);
       const cost = catalogPrices ? catalogTokenCost(stdout, preset.prices, model) : costFromOutput(stdout);
       again.leases.close(name, lease.id, outcome, cost);
       const seen = modelFromOutput(stdout);

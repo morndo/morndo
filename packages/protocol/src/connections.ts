@@ -107,6 +107,7 @@ const runtime = z.strictObject({
   runtime: text(64),
   dialect: text(64),
   baseUrl: z.nullable(z.url()),
+  firstParty: z.optional(z.literal(true)),
 });
 const models = z.discriminatedUnion("source", [
   z.strictObject({ source: z.literal("endpoint"), url: z.url(), shape: z.enum(["openai-list", "anthropic-list"]) }),

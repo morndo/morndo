@@ -203,20 +203,24 @@ export async function statusOf(bin: string, args: readonly string[], env: NodeJS
 // A stray inherited key beats the subscription. Cloud-provider variables, ANTHROPIC_AUTH_TOKEN and
 // ANTHROPIC_API_KEY come before the signed-in account.
 // https://code.claude.com/docs/en/authentication (checked 2026-10-10).
-const KEPT = new Set([
-  "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+// One list. childEnv keeps these, and anthropicGatewayEnv returns only these.
+export const GATEWAY_ENV_KEYS = [
   "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
   "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
+] as const;
+
+const KEPT = new Set<string>([
+  "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+  ...GATEWAY_ENV_KEYS,
 ]);
 
-// A third-party Anthropic Messages base (secret-store README §8.3). The first-party host is left unset:
-// that preset already speaks Claude Code's default endpoint, and overriding the model there would rename it.
-const FIRST_PARTY_HOST = "api.anthropic.com";
-
-export function isThirdPartyAnthropicBase(baseUrl: string): boolean {
+// A third-party base (secret-store README §8.3). The caller passes the first-party host from the
+// catalog's firstParty flag. URL.host is already lower-case and omits the scheme's default port.
+export function isThirdPartyAnthropicBase(baseUrl: string, firstPartyHost: string): boolean {
   let host = "";
   try { host = new URL(baseUrl).host; } catch { return false; }
-  return host !== "" && host !== FIRST_PARTY_HOST;
+  return host !== "" && host !== firstPartyHost;
 }
 
 export const BASE_URL_PROBLEM = "base URL missing or invalid";
@@ -243,10 +247,10 @@ function namedModel(model: string): string | null {
 // --effort sets the session. CLAUDE_CODE_EFFORT_LEVEL is the same value, and
 // CLAUDE_CODE_ALWAYS_ENABLE_EFFORT sends it for a model id the runtime does not recognise.
 // https://code.claude.com/docs/en/cli-reference and https://code.claude.com/docs/en/env-vars — checked 2026-10-11.
-export function anthropicGatewayEnv(baseUrl: string, model: string, effort = "", small = ""): Record<string, string> {
+export function anthropicGatewayEnv(baseUrl: string, model: string, effort = "", small = "", firstPartyHost = ""): Record<string, string> {
   const problem = baseUrlProblem(baseUrl);
   if (problem) throw new Error(problem);
-  if (!isThirdPartyAnthropicBase(baseUrl)) return {};
+  if (!isThirdPartyAnthropicBase(baseUrl, firstPartyHost)) return {};
   const named = namedModel(model);
   const haiku = namedModel(small) ?? named;
   const env: Record<string, string> = { ANTHROPIC_BASE_URL: baseUrl };
@@ -343,11 +347,13 @@ export class ClaudeRuntime implements Runtime {
   readonly #helper: string;
   readonly #parent: NodeJS.ProcessEnv;
   readonly #baseUrl: string;
-  constructor(bin: string, helper: string, parent: NodeJS.ProcessEnv, baseUrl = "") {
+  readonly #firstPartyHost: string;
+  constructor(bin: string, helper: string, parent: NodeJS.ProcessEnv, baseUrl = "", firstPartyHost = "") {
     this.#bin = bin;
     this.#helper = helper;
     this.#parent = parent;
     this.#baseUrl = baseUrl;
+    this.#firstPartyHost = firstPartyHost;
   }
 
   isolation(): Isolation {
@@ -371,10 +377,10 @@ export class ClaudeRuntime implements Runtime {
     const extraEnv = loginEnv("claude", plan.configDir);
     if (plan.subscription) await assertSubscription(this.#bin, ["auth", "status"], childEnv(this.#parent, extraEnv), "claude");
     else {
-      Object.assign(extraEnv, anthropicGatewayEnv(this.#baseUrl, plan.model, plan.effort, plan.smallModel ?? ""));
+      Object.assign(extraEnv, anthropicGatewayEnv(this.#baseUrl, plan.model, plan.effort, plan.smallModel ?? "", this.#firstPartyHost));
       extraEnv.CLAUDE_CODE_API_KEY_HELPER_TTL_MS = String(HELPER_TTL_MS);
     }
-    const denyWebSearch = !plan.subscription && isThirdPartyAnthropicBase(this.#baseUrl);
+    const denyWebSearch = !plan.subscription && isThirdPartyAnthropicBase(this.#baseUrl, this.#firstPartyHost);
     const flags = plan.subscription
       ? ["-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, null, denyWebSearch), ...extra]
       : claudeArgv(this.#bin, plan, this.#helper, extra, denyWebSearch).slice(1);

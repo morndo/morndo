@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RunPlan } from "../src/application/ports.ts";
-import { anthropicGatewayEnv, baseUrlProblem, childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
+import { anthropicGatewayEnv, baseUrlProblem, childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, GATEWAY_ENV_KEYS, isThirdPartyAnthropicBase, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "../src/adapters/runtime-limits.ts";
 
 const plan: RunPlan = {
@@ -32,7 +32,7 @@ describe("anthropic-compatible base URL", () => {
     expect(flash.CLAUDE_CODE_SUBAGENT_MODEL).toBe("glm-5.3");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(JSON.stringify(env)).not.toContain(key);
-    const first = childEnv({}, anthropicGatewayEnv("https://api.anthropic.com", "sonnet-5.5"));
+    const first = childEnv({}, anthropicGatewayEnv("https://api.anthropic.com", "sonnet-5.5", "", "", "api.anthropic.com"));
     expect(first.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(first.ANTHROPIC_MODEL).toBeUndefined();
   });
@@ -47,6 +47,22 @@ describe("anthropic-compatible base URL", () => {
       expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeUndefined();
       expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
     }
+  });
+});
+
+describe("gateway env keys", () => {
+  it("keeps every gateway variable from one list, and reads the first-party host from the caller", () => {
+    const source = readFileSync(join(import.meta.dirname, "../src/adapters/runtime-claude.ts"), "utf8");
+    expect(source).not.toContain("api.anthropic.com");
+    const host = "api.anthropic.com";
+    expect(isThirdPartyAnthropicBase("https://API.ANTHROPIC.COM", host)).toBe(false);
+    expect(isThirdPartyAnthropicBase("https://api.anthropic.com:443", host)).toBe(false);
+    expect(isThirdPartyAnthropicBase("https://api.anthropic.com:8443", host)).toBe(true);
+    const extra = anthropicGatewayEnv("http://127.0.0.1:9", "glm-5.3", "max", "glm-5.3-flash", host);
+    expect(Object.keys(extra).sort()).toEqual([...GATEWAY_ENV_KEYS].sort());
+    const env = childEnv({ ANTHROPIC_API_KEY: "sk-ant-synthetic-test-key-0001", ANTHROPIC_MODEL: "inherited" }, extra);
+    for (const key of GATEWAY_ENV_KEYS) expect(env[key]).toBe(extra[key]);
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 });
 
@@ -68,7 +84,7 @@ describe("third-party run settings", () => {
     const jobPath = join(dir, "job.json");
     const denyOf = async (baseUrl: string): Promise<string[]> => {
       writeFileSync(jobPath, JSON.stringify({ record, exit: 0 }));
-      const runtime = new ClaudeRuntime(fixture, "helper", {}, baseUrl);
+      const runtime = new ClaudeRuntime(fixture, "helper", {}, baseUrl, "api.anthropic.com");
       const ran = await runtime.execute({ ...plan, workspace: dir }, ["--job", jobPath]);
       expect(ran.status).toBe(0);
       const recorded = JSON.parse(readFileSync(record, "utf8")) as { argv: string[] };

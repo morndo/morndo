@@ -14,3 +14,16 @@ export function floorOf(preset: VendorPreset): Isolation {
 export function dialectOf(preset: VendorPreset, runtime: string): string {
   return preset.runtimes.find(r => r.runtime === runtime)?.dialect ?? "";
 }
+
+export function firstPartyHost(presets: readonly VendorPreset[]): string {
+  for (const preset of presets) {
+    for (const runtime of preset.runtimes) {
+      if (runtime.firstParty !== true || runtime.baseUrl === null) continue;
+      try {
+        const host = new URL(runtime.baseUrl).host;
+        if (host !== "") return host;
+      } catch { /* a flagged row with an unusable base is ignored */ }
+    }
+  }
+  return "";
+}

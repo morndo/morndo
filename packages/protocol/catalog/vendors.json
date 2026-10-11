@@ -4,7 +4,7 @@
     "label": "Anthropic",
     "custody": "morndo",
     "kinds": ["api-key"],
-    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.anthropic.com" }],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.anthropic.com", "firstParty": true }],
     "models": { "source": "endpoint", "url": "https://api.anthropic.com/v1/models", "shape": "anthropic-list" },
     "family": "anthropic",
     "keyShapes": ["sk-ant-"],

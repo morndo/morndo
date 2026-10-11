@@ -117,6 +117,9 @@ describe("vendor catalog", () => {
     // https://docs.z.ai/guides/llm/glm-5.3 and https://docs.z.ai/devpack/latest-model (read 2026-10-10):
     // Anthropic Messages base is https://api.z.ai/api/anthropic. No models route is in the OpenAPI spec
     // (https://docs.z.ai/openapi.json, read 2026-10-10), so the ids are static. Coding uses max effort.
+    const anthropic = catalog.find(p => p.id === "anthropic");
+    expect(anthropic?.runtimes).toEqual([{ runtime: "claude", dialect: "anthropic", baseUrl: "https://api.anthropic.com", firstParty: true }]);
+    expect(catalog.filter(p => p.runtimes.some(r => r.firstParty === true)).map(p => p.id)).toEqual(["anthropic"]);
     const zai = catalog.find(p => p.id === "zai");
     expect(zai?.runtimes).toEqual([{ runtime: "claude", dialect: "anthropic", baseUrl: "https://api.z.ai/api/anthropic" }]);
     expect(zai?.models).toEqual({ source: "static", ids: ["glm-5.3", "glm-5.3-flash"] });
