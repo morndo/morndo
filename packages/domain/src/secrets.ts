@@ -307,7 +307,9 @@ export function checkFingerprint(ledger: readonly LedgerEntry[], reference: stri
 export const hostsOk = (hosts: readonly string[]) =>
   hosts.length <= DESTINATIONS_MAX && eachOnce(hosts) && hosts.every(h => DESTINATION_HOST.test(h));
 
-const keepsShape = (s: ShapeInput): s is typeof KEEP_SHAPE => typeof s === "object" && s !== null && s.keep;
+// Exactly KEEP_SHAPE: keep is true, and no other key rides along (T-85).
+const keepsShape = (s: ShapeInput): s is typeof KEEP_SHAPE =>
+  typeof s === "object" && s !== null && (s.keep as unknown) === true && Object.keys(s).length === 1;
 // Checked as it comes off the wire or an adapter, so anything but the three forms, undefined included, is refused.
 const shapeOk = (s: ShapeInput) => s === null || (typeof s === "string" ? SHAPE_ID.test(s) : keepsShape(s));
 
