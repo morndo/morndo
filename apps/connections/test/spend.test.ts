@@ -83,4 +83,17 @@ describe("spend", () => {
     });
     expect(catalogTokenCost(named, glm, "glm-5.3")).toBe(1.4);
   });
+
+  it("reads a result that is printed across several lines", () => {
+    const stdout = [
+      "{",
+      '  "type": "result",',
+      '  "total_cost_usd": 99,',
+      '  "modelUsage": {',
+      '    "glm-5.3": { "inputTokens": 1000000, "outputTokens": 0 }',
+      "  }",
+      "}",
+    ].join("\n");
+    expect(catalogTokenCost(stdout, glm, "glm-5.3")).toBe(1.4);
+  });
 });

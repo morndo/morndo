@@ -82,13 +82,40 @@ function reportedModel(body: ResultBody): string | null {
 
 function lastResult(stdout: string): ResultBody | null {
   let found: ResultBody | null = null;
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) continue;
+  for (const candidate of jsonObjects(stdout)) {
     try {
-      const body: unknown = JSON.parse(trimmed);
+      const body: unknown = JSON.parse(candidate);
       if (isResult(body)) found = body;
     } catch { /* a status line, not a result */ }
+  }
+  return found;
+}
+
+function jsonObjects(text: string): string[] {
+  const found: string[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === "\"") inString = false;
+      continue;
+    }
+    if (char === "\"") { inString = true; continue; }
+    if (char === "{") {
+      if (depth === 0) start = index;
+      depth += 1;
+    } else if (char === "}" && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        found.push(text.slice(start, index + 1));
+        start = -1;
+      }
+    }
   }
   return found;
 }
