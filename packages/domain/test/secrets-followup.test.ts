@@ -2,8 +2,8 @@
 // before its fix. Names, nodes and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  emptySecretDirectory, findSecret, storeSecret,
-  type Actor, type Secret, type SecretDirectory, type SecretGrant, type SecretVersion,
+  REQUEST_LIMITS, admitRequest, emptySecretDirectory, findSecret, joinRequest, openRequest, storeSecret,
+  type Actor, type RequestAsk, type Secret, type SecretDirectory, type SecretGrant, type SecretRequest, type SecretVersion,
 } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
@@ -39,5 +39,39 @@ describe("follow-up 3: a version number is never given twice, even when the ledg
   it("a first store still starts at 1", () => {
     const dir = value(storeSecret(emptySecretDirectory(), { reference: REF, fingerprint: "0000000000a1", shape: null, grants: [], expiry: null, destinations: [] }, who(), T));
     expect(findSecret(dir, REF)?.current?.number).toBe(1);
+  });
+});
+
+describe("follow-up 4: a request holds at most 20 waiters, lanes and callers without one alike (SR10)", () => {
+  const ask = (lane: string | null, workspace: string | null): RequestAsk => ({
+    node: "node-a", reference: REF, kind: "new", waiter: { lane, workspace, purpose: "Nightly job" }, proposed: nodeGrant,
+  });
+  // One request with `n` waiters: the opener's workspace, then lane-less callers from other workspaces.
+  const withWaiters = (n: number): SecretRequest => {
+    let r = value(openRequest(ask(null, "ws-0"), "r1", T)).request;
+    for (let i = 1; i < n; i++) r = value(joinRequest(r, { lane: null, workspace: `ws-${i}`, purpose: "Nightly job" }, T + i)).request;
+    return r;
+  };
+
+  it("the limit is 20", () => {
+    expect(REQUEST_LIMITS.waiters).toBe(20);
+  });
+  it("admission lets the 20th waiter join and refuses the 21st, with or without a lane", () => {
+    expect(admitRequest([withWaiters(19)], ask(null, "ws-new"), T + 50)).toEqual({ kind: "join", request: "r1" });
+    expect(admitRequest([withWaiters(20)], ask(null, "ws-new"), T + 50)).toEqual({ kind: "refuse", limit: "request-waiters" });
+    expect(admitRequest([withWaiters(20)], ask("lane-a", null), T + 50)).toEqual({ kind: "refuse", limit: "request-waiters" });
+  });
+  it("a waiter already on a full request still joins, which changes nothing", () => {
+    const full = withWaiters(20);
+    expect(admitRequest([full], ask(null, "ws-3"), T + 50)).toEqual({ kind: "join", request: "r1" });
+    const again = value(joinRequest(full, { lane: null, workspace: "ws-3", purpose: "Nightly job" }, T + 50));
+    expect(again.events).toEqual([]);
+    expect(again.request).toEqual(full);
+  });
+  it("the request itself refuses a 21st waiter, so its version stops moving", () => {
+    const full = withWaiters(20);
+    expect(full.version).toBe(20);
+    const j = joinRequest(full, { lane: null, workspace: "ws-new", purpose: "Nightly job" }, T + 50);
+    expect(j.ok ? "ok" : j.error.problem).toBe("full");
   });
 });

@@ -397,7 +397,7 @@ Layer, as in design §3.3: **domain** (decided in `secrets.ts`, proved by a doma
 | SR7 | The value is sealed on the Endpoint to each target node's pinned recipient; the hub and the fleet hold ciphertext in memory only, for one operation. | adapter |
 | SR8 | Stored only when the requester's node confirmed. An `access` request is granted, never stored; any other kind is stored, never granted. | domain + application |
 | SR9 | Answerable only on Morndo's web endpoint; never in a chat adapter, a pane or the manager's inbox. | adapter |
-| SR10 | A lane holds at most 5 open requests and opens 20 a day; a node 20 and 100. | domain service + store |
+| SR10 | A lane holds at most 5 open requests and opens 20 a day; a node 20 and 100. A request holds at most 20 waiters, with or without a lane, so joins can't grow its card or move its version without end; a waiter already on it still joins, which changes nothing. | domain service + store |
 | SR11 | A request grants nothing beyond the Grant stored. | domain |
 | SC1 | No value in the model: no type, event or wire shape has a field one could travel in. | domain + adapter |
 | SC2 | A Reference is unique on a node. A value matching a revoked version anywhere on the node, or an earlier version of the same Reference, is refused; a duplicate of another active Secret is stored with a warning that names it. | domain service + store |
