@@ -105,11 +105,14 @@ const isOpen = (s: EscalationStatus) => s === "open" || s === "answered";
 // What the principal was shown of an Ask, as one short string: when and in which message it was asked, its wording,
 // options and terms. An answer that waited (the phone's 5-second window) carries it, and is refused if the Ask was
 // restated meanwhile (E12; review of PR #7, finding 5). FNV-1a over the fields: pure, with no hashing library.
-// The short form counts as shown when it is given (2026-10-04); without it the version is as before.
-export function askVersion(a: Pick<Ask, "askedAt" | "messageId" | "title" | "context" | "options" | "recommendation" | "ifNoAnswer" | "deadline"> & Partial<Pick<Ask, "shortTitle" | "summary" | "minutes" | "link" | "details">>): string {
+// The short form counts as shown when it is given (2026-10-04); without it the version is as before. A brief's
+// version number joins the hash when there is one (ADR-0023), so a restate counts even if the markdown reads the same.
+export function askVersion(a: Pick<Ask, "askedAt" | "messageId" | "title" | "context" | "options" | "recommendation" | "ifNoAnswer" | "deadline"> & Partial<Pick<Ask, "shortTitle" | "summary" | "minutes" | "link" | "details">> & { briefVersion?: number }): string {
   const form = [a.shortTitle ?? null, a.summary ?? null, a.minutes ?? null, a.link ?? null, a.details ?? null];
   const short = form.some(x => x !== null && x !== "") ? form : [];
-  const s = JSON.stringify([a.askedAt, a.messageId, a.title, a.context, a.options.map(o => [o.key, o.label]), a.recommendation, a.ifNoAnswer, a.deadline, ...short]);
+  const shown = [a.askedAt, a.messageId, a.title, a.context, a.options.map(o => [o.key, o.label]), a.recommendation, a.ifNoAnswer, a.deadline, ...short];
+  if (a.briefVersion !== undefined) shown.push(a.briefVersion);
+  const s = JSON.stringify(shown);
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return `v${h.toString(16).padStart(8, "0")}${s.length.toString(16)}`;

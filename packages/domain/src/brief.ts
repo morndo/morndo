@@ -4,7 +4,8 @@
 // sees exactly what the hub refuses. Warnings never refuse; a brief with errors is not returned and carries only its
 // errors, so a refusal says what to fix and nothing else.
 // The terms (decision brief, version, lint, compact card) and the rules DB1 to DB10 and E14 are in docs/domain.md.
-import type { Ask } from "./escalation.ts";
+import type { Asker, Ask } from "./escalation.ts";
+import { escalationId } from "./escalation.ts";
 
 export type Md = string;              // prose in the brief's markdown subset (DB7)
 
@@ -405,5 +406,55 @@ export function cardOf(item: Ask & { brief: DecisionBrief | null }): CompactCard
     spend: hasMoney(item.title) || (item.summary !== null && hasMoney(item.summary)) || (item.details !== null && hasMoney(item.details)),
     quickAnswers: item.answerBy === "tap" ? item.options.map(o => ({ key: o.key, label: o.label })) : [],
     hasBrief: false,
+  };
+}
+
+// The brief as one text (§4.5): the guide's own headings, in the guide's order, so an old app behind "More" and the
+// CLI's `show` print the case the same way the template writes it. A section the brief leaves out is left out here
+// too. Pure derivation: the value is the source, this is one reading of it.
+export function briefMarkdown(brief: DecisionBrief): string {
+  const table = [
+    `| Factor | ${brief.options.map(o => `${o.key.toUpperCase()} · ${o.label}`).join(" | ")} |`,
+    `|---|${brief.options.map(() => "---").join("|")}|`,
+    ...brief.comparison.rows.map(r => `| ${r.factor} | ${r.cells.join(" | ")} |`),
+  ];
+  const blocks: string[][] = [
+    [`# ${brief.headline}`],
+    ["## The ask", brief.ask.text],
+    [`Alternative: ${brief.ask.alternative}`, `Main uncertainty: ${brief.ask.uncertainty}`],
+    ["## Why now", brief.whyNow],
+    ["## Options compared", ...table],
+    [`Note: ${brief.comparison.note}`],
+    ["## Why the recommendation", brief.why.text],
+    ...(brief.why.assumptions.length > 0 ? [["Assumptions:", ...brief.why.assumptions.map(a => `- ${a}`)]] : []),
+    [`Downside case: ${brief.why.downside}`],
+    ["## What would change the recommendation", brief.changeIf],
+    ["## Main risk and control", `Risk: ${brief.risk.risk}`, `Control: ${brief.risk.control}`],
+    ["## What approval authorizes", "Limits:", ...brief.authorizes.limits.map(l => `- ${l}`)],
+    [`Needs fresh approval: ${brief.authorizes.freshApproval}`, `Review point: ${brief.authorizes.reviewPoint}`],
+    ...(brief.ifNoAnswer !== null ? [["## If no decision by the due date", brief.ifNoAnswer]] : []),
+    ["## Decision", ...brief.options.map(o => `- [${o.key}] ${o.label}`)],
+    ...(brief.evidence.length > 0 ? [["## Evidence", ...brief.evidence.map(e => `- [${e.label}](${e.url})`)]] : []),
+  ];
+  return blocks.map(b => b.join("\n")).join("\n\n");
+}
+
+// The Ask a filed brief becomes (§4.5): everything an app that doesn't know `brief` reads is filled from the brief, so
+// an old phone shows the whole case behind More and an old desktop under "Why the manager asks". The recommended
+// option comes first (the manager's protocol); the hub tracks it (E14). `briefVersion` rides along for the wire.
+export function askFromBrief(id: string, brief: DecisionBrief, asker: Asker, version: number, at: number): Ask & { briefVersion: number } {
+  const recommended = brief.options.find(o => o.key === brief.recommend) ?? brief.options[0]!;
+  const options = [recommended, ...brief.options.filter(o => o !== recommended)]
+    .map(o => ({ key: o.key, label: o.label, detail: null }));
+  return {
+    id: escalationId(id), asker, need: "decision",
+    title: brief.headline, shortTitle: brief.topic, summary: brief.headline,
+    minutes: brief.minutes, link: null, details: briefMarkdown(brief),
+    context: null, contextKind: "markdown",
+    options, answerBy: "tap", recommendation: brief.headline,
+    ifNoAnswer: brief.ifNoAnswer, deadline: brief.due,
+    blocking: brief.blocking, project: brief.project,
+    askedAt: at, messageId: null, tracking: "hub",
+    briefVersion: version,
   };
 }
