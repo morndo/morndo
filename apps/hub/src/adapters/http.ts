@@ -211,6 +211,8 @@ export function startHttp(p: {
     onStale: message => log.warn(message),
   });
   watch.start();
+  let draining = false;
+  const heldNow = () => watch.held || draining;
   const schemaVersion = p.updates?.schema ?? SCHEMA_VERSION;
   // A write, other than a revocation, a narrowing or a sign-in, is refused while hold.json names the hub (RL9).
   const refusesWhenHeld = (method: string, path: string) => {
@@ -610,7 +612,7 @@ export function startHttp(p: {
       if (!path.startsWith("/api/agent/") && !proxyOk(req)) throw new HttpError(403, "not from the principal's network identity");
       if (path.startsWith("/api/")) {
         const method = req.method ?? "GET";
-        if (refusesWhenHeld(method, path) && watch.held) throw new HttpError(503, "updating", { "Retry-After": "1" });
+        if (refusesWhenHeld(method, path) && heldNow()) throw new HttpError(503, "updating", { "Retry-After": "1" });
         const end = refusesWhenHeld(method, path) ? flight.begin({ kind: "http", id: `${method} ${path}` }) : null;
         try { return await api(req, res, path); }
         finally { end?.(); }
@@ -635,7 +637,7 @@ export function startHttp(p: {
     socket.on("error", () => socket.destroy());
     let url: URL;
     try { url = new URL(req.url ?? "/", "http://hub"); } catch { return deny(400, "Bad Request"); }   // e.g. "//[": a throw here would end the hub
-    if ((url.pathname === "/api/terminal" || url.pathname === "/api/desktop") && watch.held) return deny(503, "Service Unavailable");
+    if ((url.pathname === "/api/terminal" || url.pathname === "/api/desktop") && heldNow()) return deny(503, "Service Unavailable");
     if (url.pathname === "/api/terminal" || url.pathname === "/api/desktop") return upgradeRemote(req, socket, head, url, deny);
     if (url.pathname !== "/api/feed") return deny(404, "Not Found");
     if (!proxyOk(req) || !originOk(req)) return deny(403, "Forbidden");
@@ -917,7 +919,7 @@ export function startHttp(p: {
     server,
     ready,
     flight,
-    idle: () => flight.idle(),
+    idle: (timeoutMs = 10_000) => { draining = true; return flight.idle(timeoutMs); },
     close: () => new Promise<void>(resolve => {
       watch.stop();
       clearInterval(sweep); clearInterval(remoteSweep);

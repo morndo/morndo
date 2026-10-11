@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, syml
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS, NodeStatusHealth } from "@morndo/protocol";
+import { Flight } from "@morndo/service-kit";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
 import { agentPaths } from "../src/paths.ts";
 import { openAgentDb } from "../src/db/open.ts";
@@ -39,6 +40,25 @@ afterEach(async () => {
 const of = (type: string, from = 0) => fleet.received.slice(from).filter(r => r.msg.t === type).map(r => r.msg);
 
 describe("over the connection", () => {
+  it("a stop holds new work, then returns while an op is still running", async () => {
+    const flight = new Flight();
+    const stuck = flight.begin({ kind: "pane.send", id: "stuck" });
+    const { agent } = await runAgent(config, { flight, stopWaitMs: 400 });
+    let stopping: Promise<void> | null = null;
+    stops.push(() => { stopping ??= agent.stop(); return stopping; });
+    await fleet.waitFor(m => m.t === "ev.inventory");
+    const started = Date.now();
+    stopping = agent.stop();
+    fleet.send({
+      t: "req", id: "late", op: "pane.send", timeoutMs: 5000, key: "hub:late",
+      args: { workerId: "pc.0a1b2c3d.4", text: "hi", expect: { server: "0a1b2c3d", window: "api" } },
+    });
+    expect(await fleet.waitFor(m => m.t === "res" && m.id === "late", 2000)).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
+    await stopping;
+    expect(Date.now() - started).toBeLessThan(2000);
+    stuck();
+  });
+
   it("sends the full inventory and health after welcome, then inventory again when tmux changes", async () => {
     t.tmux("new-session", "-d", "-s", "main", "-n", "api", "sleep 600");
     const { agent } = await runAgent(config);

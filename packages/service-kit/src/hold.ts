@@ -63,9 +63,25 @@ export class Flight {
 
   list(): InFlight[] { return [...this.#items.values()]; }
 
-  idle(): Promise<void> {
+  idle(timeoutMs?: number): Promise<void> {
     if (this.#items.size === 0) return Promise.resolve();
-    return new Promise(resolve => { this.#waiters.push(resolve); });
+    return new Promise(resolve => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const wake = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        const at = this.#waiters.indexOf(wake);
+        if (at >= 0) this.#waiters.splice(at, 1);
+        resolve();
+      };
+      this.#waiters.push(wake);
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(wake, timeoutMs);
+        timer.unref?.();
+      }
+    });
   }
 }
 

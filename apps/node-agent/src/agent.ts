@@ -62,6 +62,8 @@ export type AgentOptions = {
   healthMs?: number;
   statusMs?: number;
   diskBudgetBytes?: number;                                // LIMITS.spoolMaxBytes; a test sets a smaller one
+  flight?: Flight;                                        // a test holds one item so stop's wait can be seen
+  stopWaitMs?: number;                                    // how long stop waits for in-flight work; default 10s
 };
 export type RunningAgent = {
   instanceId: string;
@@ -94,15 +96,16 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   const budget = o.diskBudgetBytes ?? LIMITS.spoolMaxBytes;
   const held = (): number => files.bytes() + ops.inbox.bytes();
   const room = (): number => budget - spool.bytes() - held();
-  const flight = new Flight();
+  const flight = o.flight ?? new Flight();
   const watch = new HoldWatch({
     path: holdFile(config.home),
     service: "node",
     onStale: message => log.warn(message),
   });
   watch.start();
+  let draining = false;
   const ops = createOpsRuntime({
-    config, db: adb.db, log, hooks, room: () => room(), held: () => watch.held, flight,
+    config, db: adb.db, log, hooks, room: () => room(), held: () => watch.held || draining, flight,
     ...(hooks.dropAfterStarted !== undefined ? { afterStarted: dropOnce(hooks.dropAfterStarted, () => conn?.drop()) } : {}),
   });
   const spool: Spool = new Spool(adb.db, streamId, { failWrites: hooks.spoolFail === true, maxBytes: budget, held: cachedFor(1000, held) });
@@ -281,7 +284,8 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   return {
     instanceId, get streamId() { return streamId; }, relayPort: relay.port, inventory: ops.inventory, spool, status,
     stop: async () => {
-      await flight.idle();
+      draining = true;
+      await flight.idle(o.stopWaitMs ?? 10_000);
       watch.stop();
       for (const t of timers) clearInterval(t);
       events.stop();
