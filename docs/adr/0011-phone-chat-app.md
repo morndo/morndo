@@ -56,6 +56,13 @@ Before this, the phone had Today, Catch up (a decision card per open Ask and an 
   - Away is judged from attending reports: a device that reports nothing (an old app version) counts as not used.
   - Not verified on a real iPhone: the keyboard behaviour is checked by emulating the visual viewport in Chromium, the insets with CDP `Emulation.setSafeAreaInsetsOverride`. The owner's checklist is in a private QA record, not in this tree.
 
+## Amended 2026-10-11: on the fleet's delivery queue
+
+The fleet clients work (ADR-0014; reconciliation ruling 81) removed ADR-0010's inbox: a message to the manager goes through the fleet's delivery queue, the one queue for it (`docs/design/fleet-clients/README.md` §9.1). What this ADR says of the inbox now reads:
+- **Where it stands** is the queue's word, pushed to the app as it changes (the hub's `deliveries` frames): Queued, with why it waits; Delivered; May have been delivered (typed, never seen taken); or Not delivered, with why. Nothing is judged from the clock, so the 60-minute "late" bubble and its Check are gone.
+- **Cancel** withdraws a message still queued and not typed (ruling 83).
+- **Send again** repeats the same request id, flagged. The hub queues the text once more only when the queue gave the first up, as the second attempt under that id (`hub:<endpoint>:<request>~2`), after the same checks as a first send. One request is at most two messages, and never two that can both arrive. A body that can't be built again is `cannot_resend`, and the bubble then offers Write it again. A plain repeat, the app's status read included, never queues anything.
+
 ## Sources (read 2026-10-05)
 
 - Slack, Catch up: https://slack.com/help/articles/226410907 ; Activity: https://slack.com/help/articles/19693583638803 ; AI recaps: https://slack.com/help/articles/25076892548883 . Only the interaction ideas were taken.

@@ -14,6 +14,8 @@
 // Each op's own module calls `ctx.ready()` immediately before its side effect: the deadline's last check.
 // `afterStarted` runs right after a keyed op's `started` is committed (the test hook dropAfterStarted cuts the connection
 // there); when it answers true, the op runs on and its reply says `discarded`, for agent.ts never to send.
+// `afterEffect` runs right after a keyed op acted, before its `done` is written (the test hook killAfterEffect kills the
+// agent there: a typing whose key stays `started`, fleet clients Task 16's drill).
 import { ERROR_EXECUTED, KEYED_OPS, type ErrorCode, type OpArgs, type OpError, type OpName, type OpResult } from "@morndo/protocol";
 import { Flight } from "@morndo/service-kit";
 import { isOpName } from "../config.ts";
@@ -25,7 +27,9 @@ import { SerialQueue } from "./serial-queue.ts";
 
 export type Failure = { ok: false; error: OpError };
 export type Outcome<O extends OpName> = { ok: true; result: OpResult[O] } | Failure;
-export type EffectContext = { ready(): OpError | null; remainingMs(): number };
+// `key`: the op's done key, for a keyed op. lane.start makes its first prompt's delivery id from it (promptId,
+// RECONCILIATION.md ruling 7), and lane.stop types /exit under `<key>:exit` (fleet clients spec §5).
+export type EffectContext = { ready(): OpError | null; remainingMs(): number; key?: string };
 export type ReadOp<O extends OpName> = { kind: "read"; run(args: OpArgs[O]): Promise<Outcome<O>> };
 export type EffectOp<O extends OpName> = { kind: "effect"; queue(args: OpArgs[O]): string; run(args: OpArgs[O], ctx: EffectContext): Promise<Outcome<O>> };
 export type OpTable = { [O in OpName]?: ReadOp<O> | EffectOp<O> };
@@ -39,7 +43,7 @@ export const effect = <O extends OpName>(queue: (args: OpArgs[O]) => string, run
   ({ kind: "effect", queue, run });
 
 // These reduce what a caller can do. A hold still lets them through.
-const ALLOWED_WHILE_HELD = new Set<OpName>(["connections.revoke", "connections.narrow", "lane.stop", "job.cancel"]);
+const ALLOWED_WHILE_HELD = new Set<OpName>(["connections.revoke", "connections.narrow", "lane.stop", "job.cancel", "delivery.cancel"]);
 
 type AnyOutcome = { ok: true; result: unknown } | Failure;
 type Answered = AnyOutcome & { discarded?: true };
@@ -56,6 +60,7 @@ export type ExecutorDeps = {
   afterStarted?: (key: string) => boolean;
   held?: () => boolean;
   flight?: Flight;
+  afterEffect?: (key: string) => void;
 };
 
 export class OpExecutor {
@@ -116,6 +121,7 @@ export class OpExecutor {
         const ctx: EffectContext = {
           ready: () => (deadline.expired() ? fail("timeout", "the deadline passed before the side effect").error : null),
           remainingMs: () => deadline.remainingMs(),
+          ...(key !== undefined ? { key } : {}),
         };
         let out: AnyOutcome;
         try { out = await entry.run(args, ctx); }
@@ -123,6 +129,7 @@ export class OpExecutor {
           this.#d.log.error(`op ${op} failed while acting`, e);
           out = fail("internal", "the node failed while running the op; it may have acted");    // "maybe": the key stays started
         }
+        if (key !== undefined && out.ok) this.#d.afterEffect?.(key);
         if (key !== undefined) {
           if (out.ok) keys.finish(key, out.result);
           else if (out.error.executed === "no") keys.release(key);

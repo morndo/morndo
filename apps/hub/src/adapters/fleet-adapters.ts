@@ -17,7 +17,7 @@ import {
   SEND_REFUSALS, SendInDoubt, SourceUnavailable,
   type HubPorts, type NodeStates, type RemoteFiles, type SendOutcome, type SendRefused, type SendStatus, type Sessions, type Terminal, type Tmux, type TranscriptSource, type UploadSink,
 } from "../application/ports.ts";
-import { FleetOpFailed, FleetUnavailable, type FleetClient, type FleetEvent, type FleetLane, type NodeStatus, type OpAnswer } from "./fleet-client.ts";
+import { FleetOpFailed, FleetUnavailable, type FleetClient, type FleetEvent, type FleetLane, type NodeStatus, type OpAnswer } from "@morndo/fleet-client";
 import { log } from "./log.ts";
 import { stagedUploadName } from "./uploads.ts";
 import { perKeyLimit } from "./per-key-limit.ts";
@@ -315,7 +315,7 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
       for (const p of view.all()) {
         if (p.sessionId === undefined) continue;
         // The session's name from Claude Code's registry, as legacy shows it: never the pane's terminal title ("✳ <task>").
-        out.set(p.workerId, { sessionId: p.sessionId, name: p.sessionName ?? null, pane: p.workerId, cwd: p.cwd, version: p.claudeVersion ?? null, pid: 0 });
+        out.set(p.workerId, { sessionId: p.sessionId, name: p.sessionName ?? null, pane: p.workerId, cwd: p.cwd, version: p.claudeVersion ?? null, pid: 0, status: p.status ?? null });
       }
       return out;
     },

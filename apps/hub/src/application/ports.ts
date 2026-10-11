@@ -3,7 +3,7 @@
 // MORNDO_FLEET_SOCKET. Worker IDs are opaque here: "%N" locally, "<node>.<server>.<pane>" in a fleet.
 import type { Upload } from "@morndo/domain";
 import type { Frame, SendProblem, SessionInfo, Terminal as PaneTerminal } from "@morndo/node-ops";
-import type { ErrorCode } from "@morndo/protocol";
+import type { Delivery, ErrorCode } from "@morndo/protocol";
 
 // `typedAt`: when the node typed it, on the node's own clock, which that node's transcript times are on (echo matching).
 // "node_offline": the fleet refused it before anything was typed (fleet core §5.3, §7; never from this machine's tmux).
@@ -90,4 +90,24 @@ export type Terminal = Omit<PaneTerminal, "keys" | "frame"> & {
 export type HubPorts = {
   tmux: Tmux; terminal: Terminal; sessions: Sessions | null; transcripts: TranscriptSource | null;
   files: RemoteFiles; uploads: UploadSink; sendStatus: SendStatus | null; nodeStates: NodeStates | null;
+};
+
+// The fleet's delivery queue (fleet-clients §4, §8; ADR-0014), as the hub uses it for the manager (§9.1). Fleet only.
+// `refused`: nothing was queued (the fleet's or the node's code, executed "no"; "node_offline" when the request never
+// reached the fleet, §10). `inDoubt`: the fleet took the request and never answered, so it may have been queued.
+export type DeliverAnswer = { ok: true; delivery: Delivery } | { ok: false; refused: ErrorCode } | { ok: false; inDoubt: true };
+// A cancel's answer, or `unknown`: the fleet has no delivery of that id (404 no_such_delivery; ruling 56).
+export type CancelAnswer = DeliverAnswer | { ok: false; unknown: true };
+export type Deliveries = {
+  // ttlMs: how long it may wait to be typed (the fleet's own 24 hours when absent, LIMITS.deliveryTtlMs).
+  deliver(d: { id: string; lane: string; text: string; ttlMs?: number }): Promise<DeliverAnswer>;
+  cancel(id: string): Promise<CancelAnswer>;
+  // null: the fleet knows no such delivery; "unreadable": its answer about this one doesn't read (a mismatch: the other
+  // deliveries may still be asked about); "unavailable": the fleet can't be asked now.
+  get(id: string): Promise<Delivery | null | "unreadable" | "unavailable">;
+  subscribe(on: (d: Delivery) => void, onOpen: () => void): () => void;
+  stickyLanes(): Promise<string[] | null>;                              // null: the fleet can't be asked now
+  // True when `lane`'s node is online (its replay after the welcome would have mirrored a delivery it stored).
+  // False when that node is not online. null when the fleet can't be asked, or the lane isn't listed.
+  laneNodeOnline(lane: string): Promise<boolean | null>;
 };

@@ -85,7 +85,11 @@ describe("no service keeps a copy", () => {
       expect(text, p).not.toMatch(/SQLITE_NOTADB/);
       expect(text, p).not.toMatch(/class DatabaseUnreadable/);
     }
-    expect(src("apps/fleet/src/adapters/db.ts")).toContain('synchronous: "FULL"');
+    // fleet.db: NORMAL, with synchronous=FULL for each commit that must outlive the machine (synced(): fleet clients §6,
+    // issue #21), and F_FULLFSYNC on macOS.
+    expect(src("apps/fleet/src/adapters/db.ts")).toContain('synchronous: "NORMAL"');
+    expect(src("apps/fleet/src/adapters/db.ts")).toContain('pragma("fullfsync = ON")');
+    expect(src("apps/fleet/src/adapters/db.ts")).toContain("export function synced<T>");
     expect(src("apps/connections/src/adapters/store-sqlite.ts")).toContain('synchronous: "NORMAL"');
     const age = src("apps/connections/src/adapters/vault-age.ts");
     const file = src("apps/connections/src/adapters/vault-file.ts");

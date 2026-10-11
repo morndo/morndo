@@ -38,7 +38,7 @@ function transcript() {
 }
 
 function watched(source: TranscriptSource) {
-  const sessions: Sessions = { byPane: async () => new Map([["%1", { sessionId: "s1", name: null, pane: "%1", cwd: "/w", version: null, pid: 1 }]]) };
+  const sessions: Sessions = { byPane: async () => new Map([["%1", { sessionId: "s1", name: null, pane: "%1", cwd: "/w", version: null, pid: 1, status: null }]]) };
   const svc = new ObservationService(
     { listWorkers: async () => [{ id: "%1", name: "builder", location: "w", node: "local", offline: false }], captureMany: async ids => new Map(ids.map(id => [id, "❯ "])) },
     60_000, Date.now, { sessions, transcripts: source },

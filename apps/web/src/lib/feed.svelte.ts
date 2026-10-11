@@ -2,7 +2,7 @@
 // Screens arrive only for the watched worker, latest state only (O3).
 // Every frame is decoded with the shared protocol (ADR-0008, A2): a malformed one is dropped, an unknown type ignored.
 import { unreachable, type FeedEvent, type Message, type RosterEntry } from "@morndo/domain";
-import { ServerFeedFrames, decode, decodeEvent, onDropped, type CatchUpConversationWire, type ChatRowWire, type ServerFeedFrame, type SessionInfoWire } from "@morndo/protocol";
+import { ServerFeedFrames, decode, decodeEvent, onDropped, type CatchUpConversationWire, type ChatRowWire, type QueuedCommand, type ServerFeedFrame, type SessionInfoWire } from "@morndo/protocol";
 import type { DecisionItem, LedgerState } from "./desktop/decisions.ts";
 import { decodeTasks, type Task } from "./desktop/board.ts";
 import { decodeJobs, type JobCount, type ShownJob } from "./desktop/jobs.ts";
@@ -71,6 +71,9 @@ export class LiveFeed {
   // Fleet core §7: whether the hub can reach the fleet service, as it last said. A hub that never says (one from before
   // the fleet) is available.
   fleetAvailable = $state(true);
+  // Fleet-clients §9.1: where this device's messages to the manager stand in the fleet's queue, by request id, as the
+  // hub last said (every one of the last day after a hello, then each change). The outbox applies them.
+  deliveries = $state<QueuedCommand[]>([]);
   // Catch-up (ADR-0009): what each unmuted conversation brought since its Read mark (C5), by conversation name, as the
   // hub last said (`catchupAt`: when the whole list last came); and when he last finished a run (C7).
   catchup = $state<Record<string, CatchUpConversationWire>>({});
@@ -465,6 +468,11 @@ export class LiveFeed {
       case "fleet":
         this.fleetAvailable = m.available;
         break;
+      case "deliveries": {
+        const named = new Set(m.items.map(i => i.requestId));
+        this.deliveries = [...this.deliveries.filter(d => !named.has(d.requestId)), ...m.items].slice(-500);
+        break;
+      }
       case "older": {
         if (m.worker !== this.#watching) break;
         // An answer for another view of this conversation (the list changed meanwhile): not loading any more (L2).

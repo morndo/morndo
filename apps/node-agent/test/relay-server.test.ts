@@ -29,7 +29,7 @@ beforeEach(async () => {
   spool = new Spool(adb.db, adb.streamId, { now: () => now });
   files = new RelayFiles({ dir: paths.relayFilesDir, db: adb.db, open: nodeOpener({ home: home.home, stateDir: paths.stateDir, configDir: paths.configDir }), now: () => now });
   const windows = new Map([["%3", "api lane"], ["%7", "web"]]);
-  const sessions = new Map([["%7", { sessionId: "sess-web", name: null, pane: "%7", cwd: "/w", version: null, pid: 1 }]]);
+  const sessions = new Map([["%7", { sessionId: "sess-web", name: null, pane: "%7", cwd: "/w", version: null, pid: 1, status: null }]]);
   relay = await startRelay({
     port: 0, spool, files, log: captureLog().log, onAppended: () => { kicks++; }, now: () => now,
     windowOf: windowResolver({ windowOfPane: p => windows.get(p) ?? null, sessions: () => sessions }),

@@ -29,6 +29,7 @@
   import { MAY_HAVE_GONE, againLabel, endsDoubt } from "../catchup/answer.ts";
   import Avatar from "./Avatar.svelte";
   import { ago, deliveryLine, dueLabel, REFUSALS, urgency, type DecisionItem } from "./decisions.ts";
+  import { DELIVERED, MAY_HAVE_BEEN, QUEUED } from "../queue-words.ts";
   import { clock } from "./grouping.ts";
 
   let { item, variant, now, verifiedFresh, onAnswer, onOpenScreen, onOpenChat }: {
@@ -136,10 +137,13 @@
           {:else}You answered in words{/if}
           <span class="t">· {clock(d.at)}</span>
         </p>
+        <!-- The manager's queue (fleet-clients §9.1, E13): where the answer stands until it is in the conversation. -->
         {#if dl?.state === "queued"}
-          <p class="sub">Queued, it will be delivered{#if dl.why}: {dl.why}{/if}.</p>
+          <p class="sub" data-delivery="queued">{QUEUED}{#if dl.why}: {dl.why}{/if}.</p>
         {:else if dl?.state === "delivered"}
-          <p class="sub">Delivered{#if dl.at !== null} <span class="t">· {clock(dl.at)}</span>{/if}. The manager closes this when it's done.</p>
+          <p class="sub" data-delivery="delivered">{DELIVERED}{#if dl.at !== null} <span class="t">· {clock(dl.at)}</span>{/if}. The manager closes this when it's done.</p>
+        {:else if dl?.state === "uncertain"}
+          <p class="sub" data-delivery="uncertain">{MAY_HAVE_BEEN}: it was typed, but never seen in the manager's conversation. It stays answered; look at the manager's screen to be sure.</p>
         {:else}
           <p class="sub">{item.asker.kind === "manager" ? "The manager has it and closes this when it's done." : "Sent."}</p>
         {/if}

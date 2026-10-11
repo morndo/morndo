@@ -3,14 +3,15 @@
 // minutes, resumed after a reload, and ended by their echo in the conversation. No Svelte and no globals: the store,
 // the transport and the timers come in, so a test can reload it, take the network away and run the clock.
 // Design reference, not code: Signal-Desktop ts/jobs/JobQueue.std.ts and conversationJobQueue.preload.ts.
-import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, INBOX_GIVEN_UP, advance, canRetry, inboxPlace, matchEchoes, retryDelay, type Echo, type OutboxRecord } from "./state.ts";
+import type { QueuedCommand } from "@morndo/protocol";
+import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, advance, canCancel, canRetry, matchEchoes, retryDelay, type CommandDelivery, type Echo, type OutboxRecord } from "./state.ts";
 import type { OutboxStore } from "./store.ts";
 
 // What one POST came to. "typed": ok, or "duplicate" (typed before), with the typing machine's time of it when it says;
 // "wait": a 429 with its Retry-After; "unanswered": no answer of the hub's own (a network error, a proxy's page, or no
 // answer within the attempt's time); "refused": the hub's definite no, by its code.
 export type PostOutcome =
-  | { kind: "typed"; at?: number; queued?: true; inbox?: OutboxRecord["inbox"]; reason?: string | null }   // queued: in the manager's inbox; inbox: where the spool says it stands
+  | { kind: "typed"; at?: number; delivery?: CommandDelivery }   // delivery: the manager's queue has it (fleet-clients §9.1)
   | { kind: "uncertain" }
   | { kind: "refused"; code: string; status?: number }   // status: the hub's HTTP status, when it answered one
   | { kind: "wait"; ms: number }
@@ -27,23 +28,22 @@ const byStatus = (o: Extract<PostOutcome, { kind: "refused" }>) =>
   o.status === 409 || (o.status === 404 && o.code === "no_pane") || (o.status === 403 && o.code === "step_up");
 export const definiteRefusal = (o: Extract<PostOutcome, { kind: "refused" }>) => byStatus(o) && !afterPaste(o);
 
-// Still waiting to be typed: the spool has not said otherwise. Those are the ones a later ask can find expired.
-const spoolWaiting = (inbox: OutboxRecord["inbox"]) => inbox === undefined || inbox === "queued" || inbox === "held";
-
-// A sent record, with the spool's word when the hub reported one, and without the owner's Retry flag.
+// A sent record, with where the manager's queue has it when the hub says so (fleet-clients §9.1).
 function sentRecord(r: OutboxRecord, o: Extract<PostOutcome, { kind: "typed" }>, sentAt: number): OutboxRecord {
-  const next: OutboxRecord = { ...r, state: "sent", sentAt, typedAt: o.at ?? null, error: null };
-  delete next.revive;
-  delete next.again;                                             // a later status check is a read, not another Send again
-  if (o.queued) next.queued = true;
-  else { delete next.queued; delete next.inbox; delete next.inboxReason; }   // delivered: Sent, not still queued as lost (round 3.4)
-  // A fresh queue (a successful Retry) names no spool word: the old "expired" must not stay (round 3.2).
-  if (o.queued && o.inbox) { next.inbox = o.inbox; next.inboxReason = o.reason ?? null; }
-  else if (o.queued) { delete next.inbox; delete next.inboxReason; }
-  const place = inboxPlace(next.inbox, next.inboxReason);
-  if (r.again && o.queued && !(place && INBOX_GIVEN_UP.has(place.status))) next.resent = true;
+  const next: OutboxRecord = { ...r, state: advance(r.state, "sent"), sentAt, typedAt: o.at ?? null, error: null, ...(o.delivery ? { delivery: o.delivery } : {}) };
+  // Send again (ADR-0011): the attempt the hub queued once more is "resent", so a later given-up is final. One the hub
+  // typed directly instead (the queue switched off) keeps no word from the queue. A later status read is never Send again.
+  if (r.again && o.delivery && o.delivery.state !== "given_up") next.resent = true;
+  if (r.again && o.delivery?.state === "given_up") next.resendFailed = true;       // still given up: no copy was queued
+  if (r.again && !o.delivery) delete next.delivery;
+  delete next.again;
   return next;
 }
+
+// What the hub said to a Cancel (ruling 83): withdrawn, with where it stands now (given up: cancelled); too late (typed
+// meanwhile), with where it stands when the hub says; or no answer of the hub's own (Cancel can be pressed again).
+// `unknown`: the hub has no such delivery (its 404): nothing to cancel, and nothing says it was typed; the record stays.
+export type CancelOutcome = { kind: "cancelled"; delivery: CommandDelivery } | { kind: "too_late"; delivery: CommandDelivery | null } | { kind: "unknown" } | { kind: "unanswered" };
 
 export type Timers = { now(): number; setTimeout(fn: () => void, ms: number): unknown; clearTimeout(id: unknown): void };
 
@@ -55,6 +55,7 @@ const ECHOES_KEPT = 2000;                          // echoes already spent, reme
 export class Outbox {
   #store: OutboxStore;
   #post: (r: OutboxRecord, signal: AbortSignal) => Promise<PostOutcome>;
+  #cancel: ((r: OutboxRecord) => Promise<CancelOutcome>) | null;
   #timers: Timers;
   #connected: () => boolean;
   #onChange: (records: OutboxRecord[]) => void;
@@ -64,7 +65,6 @@ export class Outbox {
   #waiters = new Set<() => void>();                // runners waiting for the connection, a timer, or a change
   #inFlight = new Map<string, AbortController>();  // the POST of each record being sent
   #spent = new Set<string>();                      // echoes that already ended an entry
-  #spoolWait = new Map<string, unknown>();         // when to ask where a queued command stands
   #echoing: Promise<void> = Promise.resolve();     // echo matching runs one call at a time
   #disk: Promise<void> = Promise.resolve();        // writes for a record stay in order
   #stopped = false;
@@ -72,12 +72,14 @@ export class Outbox {
 
   constructor(d: {
     store: OutboxStore; post: (r: OutboxRecord, signal: AbortSignal) => Promise<PostOutcome>; timers: Timers; connected: () => boolean;
+    cancel?: (r: OutboxRecord) => Promise<CancelOutcome>;               // the hub's cancel of a message the manager's queue holds
     onChange: (records: OutboxRecord[]) => void; newId?: () => string;
     // false: another tab sends; this one only writes down and shows (activate() when it takes over; review M5).
     active?: boolean;
   }) {
     this.#store = d.store;
     this.#post = d.post;
+    this.#cancel = d.cancel ?? null;
     this.#timers = d.timers;
     this.#connected = d.connected;
     this.#onChange = d.onChange;
@@ -108,17 +110,11 @@ export class Outbox {
     this.#records = fresh;
     this.#changed();
     this.#kickAll();
-    for (const id of fresh.keys()) this.#armSpool(id);
   }
 
   activate() { this.#active = true; void this.refresh(true); }
 
-  stop() {
-    this.#stopped = true;
-    for (const id of this.#spoolWait.keys()) this.#clearSpool(id);
-    for (const c of this.#inFlight.values()) c.abort();
-    this.#wakeAll();
-  }
+  stop() { this.#stopped = true; for (const c of this.#inFlight.values()) c.abort(); this.#wakeAll(); }
 
   // S4: written down before the first attempt; returns once it is (and throws if it couldn't be, so the caller keeps
   // the draft: review M6). `held`: written down Not sent with that reason and not posted (a passkey check that failed
@@ -142,21 +138,7 @@ export class Outbox {
     const r = this.#records.get(id);
     if (!r || !canRetry(r, this.#timers.now())) return;
     if (r.state === "uncertain") return this.#check(id);
-    const now = this.#timers.now();
-    // The owner's Retry of a command the spool expired. The flag is what lets the hub ask the deliverer again;
-    // a plain repeat of the request id must not carry it.
-    const reviving = r.inbox === "expired" || r.inbox === "lost" || r.inbox === "cancelled" ? { revive: true as const } : {};
-    if (r.queued && r.state === "sent") {
-      const again: OutboxRecord = { ...r, state: "queued", error: null, budgetFrom: now, ...reviving };
-      delete again.queued;
-      delete again.again;
-      delete again.resent;
-      delete again.resendFailed;
-      if (!(await this.#save(again))) return;
-      this.#kick(r.worker);
-      return;
-    }
-    const renewed: OutboxRecord = { ...r, state: advance(r.state, "queued", true), error: null, budgetFrom: now, ...reviving };
+    const renewed: OutboxRecord = { ...r, state: advance(r.state, "queued", true), error: null, budgetFrom: this.#timers.now() };
     delete renewed.again;
     delete renewed.resent;
     delete renewed.resendFailed;
@@ -180,29 +162,48 @@ export class Outbox {
     }
     if (outcome.kind !== "typed") return;
     if (!(await this.#save(sentRecord(r, outcome, this.#timers.now())))) return;
-    this.#armSpool(r.id);
     this.#kick(r.worker);                                             // what was written after it goes now
   }
 
-  // Where a Sent command stands. A read: the same request id, no Send-again flag, and the record stays Sent.
-  async check(id: string) {
-    const r = this.#records.get(id);
-    if (!r || r.state !== "sent" || r.queued !== true) return;
-    this.#clearSpool(id);
-    await this.#askSpool(id);
+  // Where this device's messages to the manager stand in the fleet's queue (the hub's `deliveries` frame, by request id;
+  // fleet-clients §9.1): each record it names takes the hub's latest word. One Uncertain (the hub couldn't say it was
+  // queued) is Sent once the hub says it has it. A record ends as before: by its echo, or Dismiss.
+  async deliveries(items: readonly QueuedCommand[]) {
+    for (const item of items) {
+      const r = this.#records.get(item.requestId);
+      if (!r || (r.state !== "sent" && r.state !== "uncertain")) continue;
+      const delivery: CommandDelivery = { state: item.state, waiting: item.waiting, why: item.why };
+      if (r.state === "sent" && JSON.stringify(r.delivery) === JSON.stringify(delivery)) continue;
+      const sent = r.state === "uncertain" ? { state: advance(r.state, "sent"), sentAt: this.#timers.now(), error: null } : {};
+      if (await this.#save({ ...r, ...sent, delivery })) this.#kick(r.worker);
+    }
   }
 
-  // Send again on the phone (ADR-0011): a Command Sent into the manager's inbox goes again with the same request id,
-  // and without the owner's Retry flag, so the hub queues it once more only if the inbox gave the first up.
+  // The principal's Cancel of a message the manager's queue still holds, not typed yet (ruling 83): the hub withdraws it
+  // there, and the record says where it stands (Not delivered: cancelled). Too late: it was typed meanwhile, and says so.
+  async cancel(id: string): Promise<CancelOutcome["kind"] | null> {
+    const r = this.#records.get(id);
+    if (!r || !canCancel(r) || !this.#cancel) return null;
+    const c = await this.#cancel(r);
+    const now = this.#records.get(id);
+    if (now && c.kind === "cancelled") await this.#save({ ...now, delivery: c.delivery });
+    // A frame during the cancel may already have said delivered or given up. That stands: the 409's delivery, or the
+    // typed fallback, must not put the card back to Queued.
+    const stood = now?.delivery?.state;
+    if (now && c.kind === "too_late" && stood !== "delivered" && stood !== "uncertain" && stood !== "given_up") {
+      await this.#save({ ...now, delivery: c.delivery ?? { state: "queued", waiting: "typed", why: null } });
+    }
+    return c.kind;
+  }
+
+  // Send again on the phone (ADR-0011): a message to the manager the queue gave up goes again under the same request id,
+  // flagged, so the hub queues it once more as the next attempt (steering-service #sendAgain). Once: a second copy given
+  // up is final. A plain repeat of the request id is a status read and never queues anything.
   async again(id: string) {
     const r = this.#records.get(id);
-    if (!r || r.state !== "sent" || !r.queued) return;
+    if (!r || r.state !== "sent" || r.delivery?.state !== "given_up" || r.resent || r.resendFailed) return;
     const next: OutboxRecord = { ...r, state: "queued", error: null, budgetFrom: this.#timers.now(), sentAt: null, typedAt: null, again: true };
-    delete next.queued;
-    delete next.revive;
     delete next.hubAt;
-    delete next.resendFailed;
-    delete next.resent;
     if (!(await this.#save(next))) return;
     this.#kick(r.worker);
   }
@@ -212,7 +213,6 @@ export class Outbox {
     const r = this.#records.get(id);
     if (!r) return;
     this.#records.delete(id);
-    this.#clearSpool(id);
     this.#inFlight.get(id)?.abort();
     await this.#store.delete(id);
     this.#changed();
@@ -233,7 +233,6 @@ export class Outbox {
       for (const [id, echo] of matched) {
         this.#spent.add(echo);
         this.#records.delete(id);
-        this.#clearSpool(id);
         drop.push(id);
       }
       if (this.#spent.size > ECHOES_KEPT) this.#spent = new Set([...this.#spent].slice(-ECHOES_KEPT / 2));
@@ -334,22 +333,15 @@ export class Outbox {
       if (!now) return;                                               // discarded meanwhile
       switch (outcome.kind) {
         case "typed": {
-          const before = inboxPlace(now.inbox, now.inboxReason);
-          const saved = sentRecord(now, outcome, this.#timers.now());
-          this.#noteResend(saved, before);
-          await this.#save(saved);
-          this.#armSpool(id);
+          await this.#save(sentRecord(now, outcome, this.#timers.now()));
           return;
         }
         case "uncertain": await this.#save({ ...now, state: advance(now.state, "uncertain"), error: "uncertain" }); return;
         case "refused": {
-          // A Send again the hub will never queue (expired uploads, empty or too-long body) is final: dead now,
-          // not a failure the budget keeps retrying, and not a 503 the client would ask again.
+          // A Send again the hub will never queue (expired uploads, empty or too-long body) is final: Sent and given up as
+          // it stood, with no Send again left, not a failure the budget keeps retrying.
           if (outcome.code === "cannot_resend") {
-            const saved: OutboxRecord = {
-              ...now, state: "sent", queued: true, resendFailed: true, error: null,
-              sentAt: now.sentAt ?? this.#timers.now(), inbox: now.inbox ?? "gone",
-            };
+            const saved: OutboxRecord = { ...now, state: "sent", resendFailed: true, error: null, sentAt: now.sentAt ?? this.#timers.now() };
             delete saved.again;
             delete saved.resent;
             await this.#save(saved);
@@ -371,51 +363,6 @@ export class Outbox {
           continue;
       }
     }
-  }
-
-  #clearSpool(id: string) {
-    const t = this.#spoolWait.get(id);
-    if (t === undefined) return;
-    this.#timers.clearTimeout(t);
-    this.#spoolWait.delete(id);
-  }
-
-  // A command the inbox took is Sent, so nothing posts it again. Ask once its two minutes are up, and again while the
-  // spool still says it is waiting, so an expiry is not left as "Queued" (round 3.1). Not a Retry: no revive flag.
-  #armSpool(id: string) {
-    if (this.#spoolWait.has(id) || this.#stopped || !this.#active) return;
-    const r = this.#records.get(id);
-    if (!r || r.state !== "sent" || r.queued !== true || !spoolWaiting(r.inbox)) return;
-    const until = r.budgetFrom + BUDGET_MS;
-    const now = this.#timers.now();
-    const delay = now < until ? until - now : 5_000;
-    const timer = this.#timers.setTimeout(() => { this.#spoolWait.delete(id); void this.#askSpool(id); }, delay);
-    this.#spoolWait.set(id, timer);
-  }
-
-  async #askSpool(id: string) {
-    const r = this.#records.get(id);
-    if (!r || this.#stopped || r.state !== "sent" || r.queued !== true || !spoolWaiting(r.inbox) || this.#inFlight.has(id)) return;
-    if (!this.#connected()) { this.#armSpool(id); return; }
-    const outcome = await this.#attempt(id, ATTEMPT_TIMEOUT_MS);
-    const now = this.#records.get(id);
-    if (!now) return;
-    if (outcome.kind !== "typed") { this.#armSpool(id); return; }
-    // A status ask is not a new send: keep the time the hub first took it, so "not delivered after 60 min" still comes.
-    const before = inboxPlace(now.inbox, now.inboxReason);
-    const saved = sentRecord(now, outcome, now.sentAt ?? this.#timers.now());
-    this.#noteResend(saved, before);
-    if (!(await this.#save(saved))) return;
-    this.#armSpool(id);
-  }
-
-  // The same rule on every inbox word, a send and a status check alike: given up before and still given up, or a
-  // second copy (resent) that the inbox has now given up. A waiting word clears it.
-  #noteResend(saved: OutboxRecord, before: { status: string; reason: string | null } | null) {
-    const after = inboxPlace(saved.inbox, saved.inboxReason);
-    const up = (p: { status: string } | null) => p !== null && INBOX_GIVEN_UP.has(p.status);
-    if ((up(before) && up(after)) || (saved.resent === true && up(after))) saved.resendFailed = true;
-    else delete saved.resendFailed;
   }
 
   // One POST, given up after `ms` (a stalled connection never answers; review H3) or when the record is discarded.

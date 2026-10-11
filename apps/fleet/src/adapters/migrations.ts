@@ -196,6 +196,33 @@ export const MIGRATIONS: readonly Migration[] = [
     name: "the notice the node has already confirmed, so a welcome does not send it again",
     up: db => { db.exec("ALTER TABLE jobs ADD COLUMN node_notice TEXT"); },
   },
+  {
+    version: 15,
+    name: "fleet clients: the deliveries' mirror, sticky lane names, lane events (fleet clients spec §4.6, §7)",
+    up: db => db.exec(`
+      -- The latest state of each delivery its node reported (ev.delivery, or the answer to lane.deliver and
+      -- delivery.cancel): never its text. target: {"lane":…} or {"workerId":…} as JSON; body: the Delivery as JSON.
+      -- alerted: how many of LIMITS.deliveryAlertMs's thresholds raised delivery_waiting for it (0 to 3).
+      -- Not synced (spec §6). Named lane_deliveries: the hook bus's own table is deliveries (migration 1).
+      CREATE TABLE IF NOT EXISTS lane_deliveries (
+        id TEXT PRIMARY KEY, node TEXT NOT NULL, target TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL,
+        updated_at INTEGER NOT NULL, alerted INTEGER NOT NULL DEFAULT 0);
+      CREATE INDEX IF NOT EXISTS lane_deliveries_by_updated ON lane_deliveries (updated_at);
+      -- The node that last reported a window of each sticky lane name (stickyLanes). Not synced.
+      CREATE TABLE IF NOT EXISTS sticky_lanes (name TEXT PRIMARY KEY, node TEXT NOT NULL, at INTEGER NOT NULL);
+      -- Lane events (spec §7), written in the synced intake with the hooks they come from. at: the hook's time on its
+      -- node; body: the event's own fields as JSON. to_manager: 0 waiting for the manager, 1 in a delivery its node
+      -- stored, NULL not for the manager. delivery_id: the delivery that carries it while to_manager is 1.
+      CREATE TABLE IF NOT EXISTS lane_events (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, node TEXT NOT NULL, window TEXT, lane TEXT, session_id TEXT, event TEXT NOT NULL,
+        at INTEGER NOT NULL, body TEXT NOT NULL, to_manager INTEGER CHECK (to_manager IN (0, 1)), delivery_id TEXT);
+      CREATE INDEX IF NOT EXISTS lane_events_waiting ON lane_events (seq) WHERE to_manager = 0;
+      CREATE INDEX IF NOT EXISTS lane_events_by_delivery ON lane_events (delivery_id) WHERE delivery_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS lane_events_by_at ON lane_events (at);
+      -- A session's latest lane event (a needs_input repeated after an agent restart is dropped).
+      CREATE INDEX IF NOT EXISTS lane_events_by_session ON lane_events (session_id, seq) WHERE session_id IS NOT NULL;
+    `),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

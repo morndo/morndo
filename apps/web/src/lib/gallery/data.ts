@@ -73,7 +73,8 @@ export function sends(now: number): Outgoing[] {
     send("menu", now - 2 * MIN, "Not sent: the worker shows a menu.", { state: "failed", error: "menu_open", attempts: 1 }),
     send("uncertain", now - 1 * MIN, "May have been sent: the hub stopped while typing.", { state: "uncertain", error: "uncertain", attempts: 1 }),
     send("held", now - 30_000, "Waiting for the message above.", {}),
-    send("inbox", now - 20_000, "Queued in the manager's inbox: it will be delivered.", { state: "sent", sentAt: now - 20_000, attempts: 1, queued: true }),
+    // The manager's queue (fleet-clients §9.1): waiting, with why and its Cancel (ruling 83).
+    send("queue", now - 20_000, "Queued for the manager: it will be delivered.", { state: "sent", sentAt: now - 20_000, attempts: 1, delivery: { state: "queued", waiting: "busy", why: null } }),
   ];
 }
 
@@ -87,7 +88,7 @@ export function decisions(now: number): { label: string; item: DecisionItem }[] 
     options: [{ key: "a", label: "Ship Friday", detail: "Before the demo" }, { key: "b", label: "Wait a week", detail: null }],
     answerBy: "tap", recommendation: "Ship Friday: the change is small and reviewed.", ifNoAnswer: "It waits; nothing ships.",
     deadline: null, blocking: false, project: "Search", askedAt: now - 40 * MIN, messageId: null, tracking: "ledger",
-    status: "open", source: "open", decision: null, resolution: null, settledAt: null, askedAgain: false, answerable: null, version: `v-${id}`, inbox: null, ...over,
+    status: "open", source: "open", decision: null, resolution: null, settledAt: null, askedAgain: false, answerable: null, version: `v-${id}`, ...over,
   });
   return [
     { label: "Blocking", item: d("blocking", { blocking: true, title: "Use the new billing provider's sandbox keys?" }) },
@@ -98,8 +99,11 @@ export function decisions(now: number): { label: string; item: DecisionItem }[] 
     { label: "A worker's question, answered on its screen", item: d("screen", { asker: { kind: "worker", name: "billing", workerId: `${MARK}-billing` }, answerBy: "screen", contextKind: "screen", context: "? Overwrite the existing export? (y/N)", options: [], tracking: "age", recommendation: null, ifNoAnswer: null }) },
     { label: "Answers paused (list unreadable)", item: d("paused", { source: "unreadable", answerable: "cant_check" }) },
     { label: "Answered here", item: d("answered", { status: "answered", decision: { choice: { kind: "option", key: "a", label: "Ship Friday" }, at: now - 5 * MIN, via: "here", endpointId: null, sessionId: null } }) },
-    { label: "Answered, queued in the manager's inbox (its box has someone's text)", item: d("queued", { status: "answered", decision: { choice: { kind: "option", key: "a", label: "Ship Friday" }, at: now - 2 * MIN, via: "here", endpointId: null, sessionId: null, delivery: { state: "queued", at: null } }, inbox: { status: "held", reason: "foreign_text" } }) },
-    { label: "Answered, delivered to the manager", item: d("delivered", { status: "answered", decision: { choice: { kind: "option", key: "a", label: "Ship Friday" }, at: now - 9 * MIN, via: "here", endpointId: null, sessionId: null, delivery: { state: "delivered", at: now - 8 * MIN } } }) },
+    // The manager's queue (fleet-clients §9.1, E13): queued with why it waits, delivered, and may have been delivered.
+    { label: "Answered, queued for the manager (its input box has someone's text)", item: d("queued", { status: "answered", answerable: "already_answered", waiting: "draft_present", decision: { choice: { kind: "option", key: "a", label: "Ship Friday" }, at: now - 2 * MIN, via: "here", endpointId: null, sessionId: null, delivery: { state: "queued", at: null } } }) },
+    { label: "Answered, delivered to the manager", item: d("delivered", { status: "answered", answerable: "already_answered", decision: { choice: { kind: "option", key: "a", label: "Ship Friday" }, at: now - 9 * MIN, via: "here", endpointId: null, sessionId: null, delivery: { state: "delivered", at: now - 8 * MIN } } }) },
+    { label: "Open again: the answer never reached the manager", item: d("notice", { notice: "Not delivered: the answer never reached the manager. Answer again." }) },
+    { label: "Answered, may have been delivered", item: d("uncertain", { status: "answered", answerable: "already_answered", decision: { choice: { kind: "option", key: "b", label: "Wait a week" }, at: now - 3 * HOUR, via: "here", endpointId: null, sessionId: null, delivery: { state: "uncertain", at: null } } }) },
     { label: "Settled", item: d("settled", { status: "settled", decision: { choice: { kind: "option", key: "b", label: "Wait a week" }, at: now - 2 * HOUR, via: "elsewhere", endpointId: null, sessionId: null }, resolution: "Moved to next week.", settledAt: now - HOUR }) },
   ];
 }

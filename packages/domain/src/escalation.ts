@@ -61,10 +61,10 @@ export type Sighting = { ask: Ask; source: SourceState; answered: SeenAnswer | n
 export type Choice = { kind: "option"; key: string } | { kind: "words"; text: string };
 export type DecidedChoice = { kind: "option"; key: string; label: string } | { kind: "words" };
 
-// A Decision for the manager goes through its inbox (the box's queue for its terminal, ADR-0010): "queued" until the
-// inbox reports it in the manager's conversation, then "delivered". Absent: it reached the asker when it was taken
-// (typed directly, or seen at the asker's end).
-export type Delivery = { state: "queued" | "delivered"; at: number | null };
+// A Decision for the manager goes through the fleet's delivery queue (E13; fleet-clients §9.1, ADR-0014): "queued" until
+// the queue reports it in the manager's conversation, then "delivered"; "uncertain" once it was typed and never seen
+// taken. Absent: it reached the asker when it was taken (typed directly, or seen at the asker's end).
+export type Delivery = { state: "queued" | "delivered" | "uncertain"; at: number | null };
 
 export type Decision = {
   choice: DecidedChoice;
@@ -253,14 +253,14 @@ export class Escalations {
     return ok(answered(e.id, e.decision!));
   }
 
-  // E13: the Decision handed to the manager's inbox. It counts as given at once (E8: a second answer is refused and shows
-  // it), but is recorded, as EscalationAnswered, only once the inbox reports it at the asker (`delivered`).
+  // E13: the Decision handed to the manager's queue. It counts as given at once (E8: a second answer is refused and shows
+  // it), but is recorded, as EscalationAnswered, only once the queue reports it at the asker (`delivered`).
   queue(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId }, now: number): Result<Decision, AnswerRefusal> {
     const c = this.#take(id, choice, by, now, { state: "queued", at: null });
     return c.ok ? ok(c.value.decision!) : c;
   }
 
-  // The inbox has it in the manager's conversation: the queued Decision is delivered, and recorded from now on. Null
+  // The queue has it in the manager's conversation: the queued Decision is delivered, and recorded from now on. Null
   // when this ask holds no longer that queued Decision (asked again, answered otherwise meanwhile: the caller records the
   // one it queued, and leaves the newer one alone; code review B3).
   delivered(id: string, expected: Decision, at: number): EscalationAnswered | null {
@@ -277,8 +277,18 @@ export class Escalations {
     return answered(e.id, d);
   }
 
-  // The inbox gave the queued Decision up (it expired, or was cancelled by hand): the ask is open again. Only that
-  // Decision: a newer one given meanwhile stays (code review B3).
+  // Typed and never seen taken: the queued Decision stays given, is never asked again, and is not recorded (it may not
+  // have reached the manager; E13). Only that Decision, restored after a restart included (code review B3, B5).
+  uncertain(id: string, expected: Decision): boolean {
+    const e = this.#items.get(id as EscalationId);
+    const d = e ? e.decision : this.#restored.get(id as EscalationId) ?? null;
+    if (!d || d.delivery?.state !== "queued" || !sameDecision(d, expected)) return false;
+    d.delivery = { state: "uncertain", at: null };
+    return true;
+  }
+
+  // The queue gave the queued Decision up, never typed (it expired, was cancelled, or its lane went): the ask is open
+  // again. Only that Decision: a newer one given meanwhile stays (code review B3).
   withdraw(id: string, expected: Decision): boolean {
     const e = this.#items.get(id as EscalationId);
     if (!e) {                                          // restored after a restart, not sighted yet (code review B5)

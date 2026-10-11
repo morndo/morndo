@@ -35,7 +35,8 @@ export const WIDE: BucketConfig = { capacity: 100_000, refillPerSecond: 100_000 
 export function testConfig(dir: string, over: Partial<FleetConfig> = {}): FleetConfig {
   return {
     listen: { host: "127.0.0.1", port: 0 }, socketPath: join(dir, "s", "f.sock"), dbPath: join(dir, "fleet.db"),
-    keyPath: join(dir, "key.pem"), publicUrl: "ws://127.0.0.1:8791/agent", subscribers: [], ...over,
+    keyPath: join(dir, "key.pem"), publicUrl: "ws://127.0.0.1:8791/agent", subscribers: [], stickyLanes: ["manager"],
+    laneEvents: { deliverTo: null, header: "[lane-event] Lane events (handle them as your instructions say):", ignore: [], batchMs: 3000 }, ...over,
   };
 }
 

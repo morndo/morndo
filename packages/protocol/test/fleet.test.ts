@@ -43,7 +43,7 @@ describe("errors and keys", () => {
   it("only uncertain and internal may have run", () => {
     const maybe = Object.entries(ERROR_EXECUTED).filter(([, e]) => e === "maybe").map(([c]) => c);
     expect(maybe.sort()).toEqual(["internal", "uncertain"]);
-    expect(Object.keys(ERROR_EXECUTED)).toHaveLength(17);
+    expect(Object.keys(ERROR_EXECUTED)).toHaveLength(20);
   });
   it("the side-effecting ops carry keys, keystrokes don't", () => {
     expect([...KEYED_OPS].sort()).toEqual([
@@ -52,7 +52,7 @@ describe("errors and keys", () => {
     ]);
     expect(KEYED_OPS.has("pane.keys")).toBe(false);
     expect(KEYED_OPS.has("job.cancel")).toBe(false);
-    expect(OP_NAMES).toHaveLength(23);
+    expect(OP_NAMES).toHaveLength(26);
     expect(Object.keys(OP_ARGS).sort()).toEqual([...OP_NAMES].sort());
     expect(Object.keys(OP_RESULTS).sort()).toEqual([...OP_NAMES].sort());
   });
@@ -207,6 +207,9 @@ describe("op results (what a node reports: shape)", () => {
       "transcript.size": { size: null }, "transcript.read": { bytes: "", eof: true }, "transcript.locate": { offset: 12 },
       "file.stat": { size: 1, mtime: 1 }, "file.get": { bytes: "AAAA", size: 3, eof: true }, "file.put": { path: "/inbox/a.png" },
       "lane.start": { workerId: W }, "lane.stop": { ok: true }, "worktree.list": { worktrees: [{ path: "/w", branch: null }] }, "worktree.add": { path: "/w/x" },
+      "pane.capture": { text: "$ ", truncated: false },
+      "lane.deliver": { delivery: { id: "hub:k1", node: "pc", target: { lane: "manager" }, state: "queued", queuedAt: 1, notAfter: 2 } },
+      "delivery.cancel": { delivery: { id: "hub:k1", node: "pc", target: { lane: "manager" }, state: "given_up", queuedAt: 1, notAfter: 2, why: "cancelled" } },
       "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
       "connections.priority": { ok: true }, "connections.role": { ok: true }, "connections.revoke": { ok: true }, "connections.narrow": { ok: true },
     };
@@ -293,7 +296,8 @@ describe("the join string", () => {
 
 describe("error codes", () => {
   it("cover the spec's table", () => {
-    const codes: ErrorCode[] = ["bad_args", "unknown_op", "denied", "no_pane", "menu_open", "no_input_box", "draft_present", "busy", "name_taken", "lane_conflict", "too_large", "timeout", "node_offline", "uncertain", "internal", "updating", "not_allowed"];
+    const codes: ErrorCode[] = ["bad_args", "unknown_op", "denied", "no_pane", "menu_open", "no_input_box", "draft_present", "busy", "name_taken", "lane_conflict", "too_large", "timeout", "node_offline", "uncertain", "internal", "updating", "not_allowed",
+      "id_conflict", "no_session", "already_typed"];
     expect(Object.keys(ERROR_EXECUTED).sort()).toEqual([...codes].sort());
   });
 });

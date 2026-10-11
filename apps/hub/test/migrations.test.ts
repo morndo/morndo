@@ -164,7 +164,7 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
   it("migration 17 remembers which board results the fleet has not acknowledged", () => {
     const db = new Database(join(tempDir(), "morndo.db"));
     migrate(db, MIGRATIONS.slice(0, 16));
-    expect(migrate(db)).toEqual({ from: 16, to: 17 });
+    expect(migrate(db, MIGRATIONS.slice(0, 17))).toEqual({ from: 16, to: 17 });
     expect(columns(db, "job_notices")).toEqual(["id", "result", "acked"]);
     expect(() => MIGRATIONS[16]?.up(db)).not.toThrow();
   });

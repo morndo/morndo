@@ -25,6 +25,8 @@ describe("fleet config", () => {
       keyPath: join(home, ".local/share/morndo-fleet/fleet-key.pem"),
       publicUrl: "ws://127.0.0.1:8791/agent",
       subscribers: [],
+      stickyLanes: ["manager"],
+      laneEvents: { deliverTo: "manager", header: "[lane-event] Lane events (handle them as your instructions say):", ignore: [], batchMs: 3000 },
     });
   });
 
@@ -60,6 +62,21 @@ describe("fleet config", () => {
     }
   });
 
+  it("takes the sticky lane names from the file, each once; none at all is allowed", () => {
+    for (const [stickyLanes, expected] of [[["manager", "ops lead", "manager"], ["manager", "ops lead"]], [[], []]] as const) {
+      const { home, env } = withFile({ stickyLanes });
+      expect(loadConfig({ env, home }).stickyLanes).toEqual(expected);
+    }
+  });
+
+  it("takes laneEvents' settings one by one over their defaults; the owner's header and globs as they are", () => {
+    const header = "[lane-event] Lane events from kira (handle them as the Dispatching work section says):";
+    const { home, env } = withFile({ laneEvents: { header, ignore: ["pooltest*", "pool-probe*"] } });
+    expect(loadConfig({ env, home }).laneEvents).toEqual({ deliverTo: "manager", header, ignore: ["pooltest*", "pool-probe*"], batchMs: 3000 });
+    const off = withFile({ laneEvents: { deliverTo: null, batchMs: 100 } });
+    expect(loadConfig(off).laneEvents).toMatchObject({ deliverTo: null, batchMs: 100 });
+  });
+
   it("refuses a file that doesn't fit, naming the setting", () => {
     const cases: [unknown, RegExp][] = [
       ["{not json", /not valid JSON/],
@@ -80,6 +97,15 @@ describe("fleet config", () => {
       [{ subscribers: [{ name: "kira", url: "http://x/", paths: ["/everything"] }] }, /"\/everything" is not one of/],
       [{ subscribers: [{ name: "kira", url: "http://x/", paths: ["/cc"], secret: "x" }] }, /unknown settings: secret/],
       [{ subscribers: [{ name: "a", url: "http://x/", paths: ["/cc"] }, { name: "a", url: "http://y/", paths: ["/cc"] }] }, /used twice/],
+      [{ stickyLanes: "manager" }, /stickyLanes must be a list of lane names/],
+      [{ stickyLanes: [""] }, /stickyLanes must be a list of lane names/],
+      [{ stickyLanes: ["man\nager"] }, /stickyLanes must be a list of lane names/],
+      [{ laneEvents: [] }, /laneEvents must be an object/],
+      [{ laneEvents: { deliver: "manager" } }, /laneEvents has unknown settings: deliver/],
+      [{ laneEvents: { deliverTo: "" } }, /laneEvents.deliverTo must be a lane name, or null/],
+      [{ laneEvents: { header: "two\nlines" } }, /laneEvents.header must be one line/],
+      [{ laneEvents: { ignore: "pooltest*" } }, /laneEvents.ignore must be a list of lane names/],
+      [{ laneEvents: { batchMs: 10 } }, /laneEvents.batchMs must be a whole number of milliseconds from 100 to 60000/],
     ];
     for (const [content, message] of cases) {
       const { home, env } = withFile(content);

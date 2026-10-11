@@ -225,6 +225,8 @@
   });
   // Waiting sends try at once when the feed is live again (S7).
   $effect(() => { if (feed.status === "live") outbox?.connected(); });
+  // Messages to the manager in the fleet's queue move on as the hub says (fleet-clients §9.1).
+  $effect(() => { const items = feed.deliveries; if (items.length) void outboxReady.then(o => o.deliveries(items)); });
 
   function open(id: string) { view = "home"; selected = id; }
   // Resolves once the message is written down on this device; throws if it couldn't be, so the composer keeps the draft
@@ -245,6 +247,8 @@
   }
   async function onRetry(id: string) { await outbox?.retry(id); }
   async function onDiscard(id: string) { forget(id); await outbox?.discard(id); }
+  // Cancel: the hub withdraws a message the manager's queue still holds (ruling 83); its entry then says Not delivered.
+  async function onCancel(id: string) { await outbox?.cancel(id); }
   // "Not sent: verify": the passkey check, then the same request id again (AC7 is judged when it arrives).
   async function onVerify(id: string) {
     try { verifiedAt = await stepUp(); } catch { return; }
@@ -361,7 +365,7 @@
           {:else if current}
             <ChannelView worker={current} displayName={nameOf(current)} {feed} {verifiedAt} panel={rightShown}
               outgoing={outgoing.filter(r => r.worker === current?.id).map((r): Outgoing => ({ ...r, images: previews.get(r.id) ?? [], files: sentFiles.get(r.id) ?? [] }))}
-              {onQueue} {onRetry} {onDiscard} {onVerify} {onEdit} {editRequest} {onEdited}
+              {onQueue} {onRetry} {onDiscard} {onCancel} {onVerify} {onEdit} {editRequest} {onEdited}
               prefs={prefsOf(current.name)} onDetails={() => current && openDetails(current.id)}
               dividerMark={opened?.worker === current.id ? opened.mark : undefined} onAtBottom={(value, worker) => (atBottom = { worker, value })}
               {stepUpMs} onSecurity={() => (preferences = "security")}

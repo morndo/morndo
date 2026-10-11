@@ -5,18 +5,18 @@
 // adapters, read through Observation; nothing is decided from them, O4).
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_POLICY, Escalations, answered, askVersion, escalationId, mayCommand, refusal, sameDecision,
+  DEFAULT_POLICY, Escalations, answered, askVersion, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId,
   type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type Escalation, type Message, type Sighting,
 } from "@morndo/domain";
 import { menuEscalationId } from "@morndo/protocol";
 import type { LedgerItem, LedgerRead } from "../adapters/ledger.ts";
 import { isLedgerId, parseAnswer, parseTap, tapLine, wordsLine, type ButtonOption } from "../adapters/manager-protocol.ts";
-import type { SendRow, Store } from "../adapters/store.ts";
+import type { ManagerDeliveryRow, SendRow, Store } from "../adapters/store.ts";
 import { menuIdentity, menuOnScreen, type SendProblem } from "@morndo/node-ops";
-import { cleanText, managerInbox, type InboxReason, type InboxState, type InboxStatus, type ManagerInbox } from "../adapters/manager-inbox.ts";
 import type { Authenticated } from "./access-service.ts";
 import { SendInDoubt, type SendOutcome, type SendRefused } from "./ports.ts";
-import { keepInDoubt, settleOutcome, type SendResult } from "./steering-service.ts";
+import { cleanText, keepInDoubt, settleOutcome, type SendResult } from "./steering-service.ts";
+import type { ManagerQueue, QueueView } from "./manager-queue.ts";
 import { log } from "../adapters/log.ts";
 
 // What the service reads from Observation: who runs where, their conversations and screens.
@@ -28,25 +28,14 @@ export type Watch = {
   screen(id: string): string | undefined;
 };
 
-// inbox: while a Decision for the manager waits in its inbox (ADR-0010), where it stands there; null otherwise.
-export type InboxView = { status: InboxStatus; reason: InboxReason | null };
-// One queued answer, by inbox key. The same shape is what the constructor restores, what a new answer stores, and what
-// #giveUp withdraws (review #29.9).
-type QueuedAnswer = {
-  escalationId: string; decision: Decision; words: { length?: number; digest?: string }; state: InboxView; dir: string | null;
-  line?: string; cancel?: boolean; late?: boolean; missed?: boolean; notice?: string; version?: string; unreadableSince?: number; sendKey?: string;
-};
-// What a pending row stores: the queued answer without the fields only the running hub keeps, plus settledAt once withdrawn.
-type RestoredAnswer = Partial<Omit<QueuedAnswer, "escalationId" | "decision" | "words" | "state">> & {
-  decision: Decision; words?: QueuedAnswer["words"]; settledAt?: number;
-};
-export type EscalationView = Escalation & { answerable: AnswerRefusal | null; version: string; inbox: InboxView | null; notice: string | null };
+// `waiting`: while a Decision for the manager waits in the fleet's queue, why (a WaitingReason, or "typed", "held").
+// `notice`: a sentence on an open card: its answer through the queue never reached the manager, or reached it late.
+export type EscalationView = Escalation & { answerable: AnswerRefusal | null; version: string; waiting?: string; notice?: string };
 type ButtonMessage = { message: Message; body: string; options: ButtonOption[] };
 export type Board = { items: EscalationView[]; ledger: { configured: boolean; ok: boolean; at: number | null } };
 // `duplicate`: a repeat of an answer in doubt that its node had typed after all; `at` is when, on that node's clock.
-// `queued`: the answer is in the inbox and not typed yet. That is not delivered, and `at` is not the enqueue time.
 export type AnswerResult =
-  | { ok: true; item: EscalationView | null; duplicate?: true; at?: number; queued?: true }
+  | { ok: true; item: EscalationView | null; duplicate?: true; at?: number }
   | { ok: false; problem: AnswerRefusal | SendProblem | SendRefused | "node_offline" | "lane_conflict" | "step_up" | "in_progress" | "too_long" | "changed" | "uncertain" | "answer_in_doubt" | "not_delivered"; item: EscalationView | null };
 // How a row in doubt is settled with its node: SteeringService's settle (a duplicate, uncertain, or null: the node never
 // started it, so it is judged anew). Without a fleet nobody else knows: uncertain.
@@ -55,14 +44,27 @@ export type SettleInDoubt = (key: string, workerId: string) => Promise<SendResul
 const MAX_WORDS = 4000;
 const SCREEN_LINES = 14;
 const REQUEST_TTL_MS = 10 * 60_000;
+const ECHO_SLACK_MS = 5000;                           // an echo is no older than its answer's queueing, less this (clocks)
 const SETTLED_LEDGER_MS = 3 * 24 * 3_600_000;        // closed list items shown under "Decided" for three days
-const ECHO_KEEP_MS = 24 * 3_600_000;                  // how long a withdrawn answer's echo is ignored (B1)
-const UNREADABLE_GIVE_UP_MS = 15 * 60_000;            // an inbox that can't be read this long counts as gone (H3)
+const NOT_DELIVERED = "Not delivered: the answer never reached the manager. Answer again.";
 const LATE_ANSWER = "This reached the manager late, as an answer to the earlier version of the question.";
-const MISSED_ANSWER = "The answer did not reach the manager. Answer again.";
-const TYPED = new Set<InboxStatus>(["typing", "sent", "stuck", "accepted"]);
 
 const digest = (words: string) => createHash("sha256").update(words.trim()).digest("hex").slice(0, 16);
+// An answer's choice in its queue row (manager_deliveries.choice): its option as decided, or its words' length and digest
+// (E9: never the words).
+type StoredChoice = { kind: "option"; key: string; label: string; version?: string } | { kind: "words"; length: number; digest: string; version?: string };
+// The Decision an answer's row was queued as (A1: who answered, when, with what): what the queue's word on it moves.
+function decisionOf(row: ManagerDeliveryRow): Decision {
+  const c = JSON.parse(row.choice ?? "{}") as StoredChoice;
+  return {
+    choice: c.kind === "option" ? { kind: "option", key: c.key, label: c.label } : { kind: "words" }, at: row.queuedAt, via: "here",
+    endpointId: endpointId(row.endpointId), sessionId: sessionId(row.sessionId), delivery: { state: "queued", at: null },
+  };
+}
+const wordsOf = (row: ManagerDeliveryRow) => {
+  const c = JSON.parse(row.choice ?? "{}") as StoredChoice;
+  return c.kind === "words" ? { length: c.length, digest: c.digest } : {};
+};
 // The key an answer carries to the asker's node (fleet core §3.1): one choice for one ask is one key, so a repeat after a
 // dropped connection gets the node's outcome of the first instead of the line typed again. The ask is the message that
 // asked it (its time when it has none): the same choice for a question asked again is a new answer, typed again. Words
@@ -99,35 +101,19 @@ export class EscalationService {
   #listeners = new Set<(b: Board) => void>();
   #firstSeen = new Map<string, number>();
   #inFlight = new Set<string>();
+  #held: { row: ManagerDeliveryRow; view: QueueView }[] = [];   // queue words that arrived while that answer was being given
   #seen = new Map<string, number>();
   #lastLedger: LedgerRead | null = null;
   #filed = new Map<string, LedgerItem>();              // the last readable list's items: wording while it can't be read
   #buttons = new Map<string, ButtonMessage>();         // each id's last button message: its options once it scrolls out
+  #echoed = new Map<string, string>();                 // delivery id → the message taken as its echo, so a later tap is not it
   // A menu on a worker's screen by escalation id: the menu itself (its question and choices, menuIdentity), what its
   // version is made of instead of the screen's last lines, which a redraw or a spinner changes (Stage-4 review, 2).
   #menus = new Map<string, string>();
   #timer: NodeJS.Timeout | null = null;
-  // Decisions handed to the manager's inbox and not delivered yet, by escalation id: the inbox key, the Decision as
-  // queued (recorded with its provenance once delivered, even if the ask was asked again meanwhile), the words' length
-  // and hash for the record, and the inbox's latest word on it.
-  #inbox: ManagerInbox | null;
-  // By inbox key (code review B7): two answers to one ask, the ask asked again between them, are two messages, each
-  // recorded once it arrives. The store keeps the same, one pending_answers row per message.
-  // dir: the inbox the message went to; read until it settles there, even when the hub runs without an inbox now (B6).
-  // line: what was queued; cancel: withdrawn while still untyped (the ask changed); late: already typed, so it is
-  // waited for and, if the ask moved on, recorded as an answer to the earlier version. version: the ask as queued (E12).
-  // missed: lost or unconfirmed, so a cancel was asked; Answer again waits until the spool says cancelled (review #29.1).
-  // unreadableSince: since then its inbox couldn't be read (H3).
-  #queued = new Map<string, QueuedAnswer>();
-  // Lines that may still reach the manager after the ask moved on. For 24 hours the first message with that line is
-  // not an answer to the new ask (B1, H1). Once that message is known, a later one with the same line is (review #3).
-  #echoes = new Map<string, { line: string; after: number; messageId: string | null }[]>();
-  // A sentence on an open card: a late delivery, or an answer the inbox lost (decisions 2 and 3). Kept on the settled
-  // pending row so a restart still shows it, and cleared when he answers (inbox or typed) or the ask is gone (review #29.8).
-  #notices = new Map<string, string>();
-  #readers = new Map<string, ManagerInbox>();
-  #prunedAt = 0;                                        // settled pending rows are dropped on a coarse timer, not every poll
-  static readonly #pruneEveryMs = 60 * 60_000;
+  // The fleet's delivery queue for the manager (fleet-clients §9.1), null without a fleet; `on` from MORNDO_MANAGER_QUEUE.
+  #queue: ManagerQueue | null;
+  #cancelling = new Set<string>();                    // deliveries being withdrawn (#withdrawStale), once each
 
   constructor(p: {
     watch: Watch; ledger: (() => LedgerRead) | null; store: Store; managerName: string;
@@ -136,49 +122,35 @@ export class EscalationService {
     // How an answer in doubt is settled with its node (SteeringService.settleInDoubt). Absent: the legacy hub, which has
     // no node to ask, so an answer in doubt there (a throw while typing it) stays uncertain.
     settle?: SettleInDoubt;
-    inbox?: ManagerInbox | null;
+    // The manager's queue (spec §9.1). Off or absent: answers to the manager are typed directly; one queued before the
+    // switch went off is still followed (and was cancelled at start if it hadn't been typed).
+    queue?: ManagerQueue | null;
   }) {
-    this.#inbox = p.inbox ?? null;
+    this.#queue = p.queue ?? null;
+    this.#queue?.subscribe(c => this.#onDelivery(c.row, c.view));
     this.#watch = p.watch;
     this.#ledger = p.ledger;
     this.#store = p.store;
-    this.#store.recoverQueuedAnswers();
     this.#send = p.send;
     this.#settle = p.settle ?? (async () => ({ ok: false, problem: "uncertain" }));
     this.#managerName = p.managerName;
     this.#now = p.now ?? Date.now;
     this.#policy = p.policy ?? (() => DEFAULT_POLICY);
     this.#firstSeen = this.#store.askFirstSeen();
-    // The stored row may also carry the inbox key and the words' hash: they are the service's, never the Decision's, so
-    // they never reach the board (code review B8).
+    // A row kept by the manager's inbox (PR #29, removed) may also carry its key and the words' hash: they were the
+    // service's, never the Decision's, so they never reach the board (code review B8).
     const saved = this.#store.decisions().map(d => {
-      const { inbox, words, ...decision } = d.decision as Decision & { inbox?: string; words?: { length?: number; digest?: string } };
-      return { id: d.id, decision: decision as Decision, inbox, words };
+      const { inbox: _key, words: _words, ...decision } = d.decision as Decision & { inbox?: string; words?: unknown };
+      return { id: d.id, decision: decision as Decision };
     });
     this.#x.restore(saved.map(d => ({ id: escalationId(d.id), decision: d.decision })));
-    // Queued before a restart: still waiting in the inbox, one row per message.
-    for (const r of this.#store.pendingAnswers()) {
-      const b = r.body as RestoredAnswer;
-      if (b.settledAt !== undefined) {                 // a withdrawn answer kept for its echo (B1), and its card's notice
-        if (this.#now() - b.settledAt > ECHO_KEEP_MS) this.#store.dropPending(r.key);
-        else {
-          if (b.line) this.#echo(r.escalationId, b.line, b.decision.at);
-          if (typeof b.notice === "string") this.#notices.set(r.escalationId, b.notice);
-        }
-        continue;
-      }
-      this.#queued.set(r.key, this.#open({ escalationId: r.escalationId, decision: b.decision, dir: b.dir ?? null,
-        ...(b.words !== undefined ? { words: b.words } : {}), ...(b.line !== undefined ? { line: b.line } : {}),
-        ...(b.cancel ? { cancel: true } : {}), ...(b.late ? { late: true } : {}), ...(b.missed ? { missed: true } : {}),
-        ...(b.version !== undefined ? { version: b.version } : {}), ...(b.sendKey !== undefined ? { sendKey: b.sendKey } : {}) }));
-      if (b.cancel && b.line) this.#echo(r.escalationId, b.line, b.decision.at);
-    }
-    for (const d of saved) {                             // a row from before pending_answers: moved there
-      if (d.decision.delivery?.state === "queued" && typeof d.inbox === "string" && !this.#queued.has(d.inbox)) {
-        const dir = this.#inbox?.dir ?? null;
-        this.#store.savePending(d.inbox, d.id, { decision: d.decision, words: d.words ?? {}, ...(dir ? { dir } : {}) });
-        this.#queued.set(d.inbox, this.#open({ escalationId: d.id, decision: d.decision, dir, ...(d.words !== undefined ? { words: d.words } : {}) }));
-      }
+    // A Decision #29's manager inbox left queued has no delivery row here: that inbox may still type it, so it may have
+    // been delivered. It stays given and is never asked again (E13, ruling 82), and the hub never types it.
+    for (const d of saved) {
+      if (d.decision.delivery?.state !== "queued" || this.#store.answerDelivery(d.id, d.decision.at)) continue;
+      this.#x.uncertain(d.id, d.decision);
+      this.#store.replaceDecisionIf(d.id, d.decision.at, { ...d.decision, delivery: { state: "uncertain", at: null } });
+      log.warn(`answer to ${d.id} was queued before the fleet's queue and isn't followed here: it may have been delivered`);
     }
   }
 
@@ -188,137 +160,34 @@ export class EscalationService {
     const now = this.#now();
     const l = this.#lastLedger;
     return {
-      items: this.#x.list().map(e => ({ ...e, answerable: refusal(e, now), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null })),
+      items: this.#x.list().map(e => ({ ...e, answerable: refusal(e, now), version: this.#version(e), ...this.#waiting(e), ...this.#notice(e) })),
       ledger: { configured: this.#ledger !== null, ok: l?.ok ?? false, at: l?.at ?? null },
     };
   }
   #view(id: string): EscalationView | null {
     const e = this.#x.get(id);
-    return e ? { ...e, answerable: refusal(e, this.#now()), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null } : null;
+    return e ? { ...e, answerable: refusal(e, this.#now()), version: this.#version(e), ...this.#waiting(e), ...this.#notice(e) } : null;
   }
-  // A queued answer whose ask was asked again or settled meanwhile answers a question the principal no longer has
-  // (E11, E12): withdrawn from the inbox, once, and its echo ignored should the cancel come too late (code review B1).
-  #withdrawStale(spool: Map<string, InboxState | null>) {
-    for (const [key, q] of this.#queued) {
-      if (q.cancel || q.late) continue;
-      const e = this.#x.get(q.escalationId);
-      if (!e) continue;
-      // Settled or expired meanwhile: withdrawn even though the ask still holds this Decision (code review H2).
-      // Restated in place (same addedAt, new wording): the version changed while this Decision still stands (review #8).
-      const closed = e.status === "settled" || e.status === "expired";
-      const restated = q.version !== undefined && this.#version(e) !== q.version;
-      if (!closed && !restated && (sameDecision(e.decision, q.decision) || !(e.askedAt > q.decision.at))) continue;
-      const reader = this.#reader(q.dir);
-      if (!reader) continue;
-      const s = spool.get(key) ?? null;
-      // Still untyped (no state file reads as queued, attempts 0): withdraw. Once typed, never cancel (decision 2):
-      // wait for delivered, and if the ask moved on, record it then as a late answer to the old version.
-      if (!s || this.#mayHaveTyped(s)) {
-        if (s && this.#mayHaveTyped(s)) {
-          q.late = true;
-          if (q.line) this.#echo(q.escalationId, q.line, q.decision.at);
-          this.#store.savePending(key, q.escalationId, this.#pendingBody(q));
-        }
-        continue;
-      }
-      if (s.status !== "queued" && s.status !== "held") continue;   // delivered, lost, gone, cancelled: #deliveries
-      try { reader.cancel(key); } catch (err) { log.error(`answer to ${q.escalationId}: the withdrawal can't be written`, err); continue; }
-      q.cancel = true;
-      this.#store.savePending(key, q.escalationId, this.#pendingBody(q));
-      if (q.line) this.#echo(q.escalationId, q.line, q.decision.at);
-      log.info(`answer to ${q.escalationId} withdrawn from the manager's inbox: the ask changed since`);
-    }
+  // A sentence on an open card (E13), from the latest answer to it through the queue: given up for this ask (never typed,
+  // so it reached no one) says Not delivered; delivered after the ask was asked anew, for the earlier one, says so. Read
+  // from the rows, so a restart still says it; it goes once he answers again or the ask closes (#29's notices).
+  #notice(e: Escalation): { notice?: string } {
+    if (!this.#queue || e.status !== "open" || e.asker.kind !== "manager") return {};
+    const last = this.#queue.answersTo(e.id).at(-1);
+    if (!last) return {};
+    const ask = e.messageId ?? `t${e.askedAt}`;
+    if (last.state === "given_up" && last.ask === ask) return { notice: NOT_DELIVERED };
+    if (last.state === "delivered" && last.ask !== ask && last.updatedAt >= e.askedAt) return { notice: LATE_ANSWER };
+    return {};
   }
-  // Typed, or a cancel that arrived after a paste: an echo of it may still show up (decision 2).
-  #mayHaveTyped(s: InboxState): boolean {
-    return TYPED.has(s.status) || (s.attempts ?? 0) >= 1;
-  }
-  #echo(id: string, line: string, after: number) {
-    const list = this.#echoes.get(id) ?? [];
-    if (list.some(e => e.line === line && e.after === after)) return;
-    list.push({ line, after, messageId: null });
-    this.#echoes.set(id, list);
-  }
-  #unecho(id: string, line: string, after: number) {
-    const list = (this.#echoes.get(id) ?? []).filter(e => e.line !== line || e.after !== after);
-    if (list.length) this.#echoes.set(id, list); else this.#echoes.delete(id);
-  }
-  #open(p: Omit<QueuedAnswer, "state" | "words" | "unreadableSince" | "notice"> & { words?: QueuedAnswer["words"] }): QueuedAnswer {
-    return { escalationId: p.escalationId, decision: p.decision, words: p.words ?? {}, state: { status: "queued", reason: null }, dir: p.dir,
-      ...(p.line ? { line: p.line } : {}), ...(p.cancel ? { cancel: true } : {}), ...(p.late ? { late: true } : {}), ...(p.missed ? { missed: true } : {}), ...(p.version ? { version: p.version } : {}), ...(p.sendKey ? { sendKey: p.sendKey } : {}) };
-  }
-  #pendingBody(q: QueuedAnswer, settledAt?: number) {
-    return { decision: q.decision, words: q.words, ...(q.dir ? { dir: q.dir } : {}), ...(q.line ? { line: q.line } : {}), ...(q.cancel ? { cancel: true } : {}),
-      ...(q.late ? { late: true } : {}), ...(q.missed ? { missed: true } : {}), ...(q.notice ? { notice: q.notice } : {}), ...(q.version ? { version: q.version } : {}), ...(q.sendKey ? { sendKey: q.sendKey } : {}), ...(settledAt !== undefined ? { settledAt } : {}) };
-  }
-  // The answer did not stand (withdrawn, expired, gone): its sends row must not block the next one (E8).
-  #releaseSend(q: { sendKey?: string }) { if (q.sendKey) this.#store.dropSend(q.sendKey); }
-  // One withdraw: the Decision, its send, and the queued row. keepEcho holds a paste that may still show up; notice is
-  // the card's sentence, stored on the row so a restart still shows it (review #29.9).
-  #giveUp(key: string, q: QueuedAnswer, o: { now?: number; keepEcho?: boolean; notice?: string } = {}) {
-    const id = q.escalationId;
-    this.#x.withdraw(id, q.decision);
-    this.#store.dropDecisionIf(id, q.decision.at);       // only this answer's row: a newer one stays (B3)
-    this.#releaseSend(q);
-    if (o.notice) q.notice = o.notice;
-    if (o.keepEcho || o.notice) {
-      if (q.line) this.#echo(id, q.line, q.decision.at);
-      this.#store.savePending(key, id, this.#pendingBody(q, o.now));
-    } else {
-      this.#store.dropPending(key);
-      if (q.cancel && q.line) this.#unecho(id, q.line, q.decision.at);
-    }
-    this.#queued.delete(key);
-    if (o.notice) this.#notices.set(id, o.notice);
-  }
-  #forgetEchoes(now: number, rows: { key: string; escalationId: string; body: unknown }[], prune: boolean) {
-    for (const [id, list] of this.#echoes) {
-      const kept = list.filter(e => now - e.after < ECHO_KEEP_MS);
-      if (kept.length) this.#echoes.set(id, kept); else this.#echoes.delete(id);
-    }
-    // Settled rows are only dropped in the constructor otherwise, so a long-running hub keeps every one (review #29.7).
-    // Once an hour is enough: a poll that jumps past the keep window still drops them (round 2.8).
-    if (!prune) return;
-    for (const r of rows) {
-      const body = r.body as { settledAt?: number; notice?: string };
-      if (body.settledAt === undefined || now - body.settledAt <= ECHO_KEEP_MS) continue;
-      this.#store.dropPending(r.key);
-      if (typeof body.notice === "string" && this.#notices.get(r.escalationId) === body.notice) this.#notices.delete(r.escalationId);
-    }
-  }
-  // The sentence leaves with the answer that caused it: a new answer, or the ask itself (review #29.8). An echo row
-  // stays, without the sentence, so a later paste of the same line is still ignored. `rows` is the poll's one read.
-  #clearNotice(id: string, rows: { key: string; escalationId: string; body: unknown }[] = this.#store.pendingAnswers()) {
-    this.#notices.delete(id);
-    for (const r of rows) {
-      if (r.escalationId !== id) continue;
-      const b = r.body as { notice?: string; line?: string };
-      if (typeof b.notice !== "string") continue;
-      if (b.line) {
-        const rest = { ...b };
-        delete rest.notice;
-        this.#store.savePending(r.key, id, rest);
-      } else this.#store.dropPending(r.key);
-    }
-  }
-  #forgetNotices(rows: { key: string; escalationId: string; body: unknown }[]) {
-    for (const id of [...this.#notices.keys()]) if (!this.#x.get(id)) this.#clearNotice(id, rows);
-  }
-
-  // The inbox a queued answer went to: the configured one, or, read-only, the one it named when it was queued (B6:
-  // a restart without MORNDO_MANAGER_INBOX still sees it through, so it is recorded exactly once).
-  #reader(dir: string | null): ManagerInbox | null {
-    if (!dir) return this.#inbox;
-    if (this.#inbox?.dir === dir) return this.#inbox;
-    let r = this.#readers.get(dir);
-    if (!r) { r = managerInbox(dir, this.#now); this.#readers.set(dir, r); }
-    return r;
-  }
-
-  #inboxView(e: Escalation): InboxView | null {
-    if (e.decision?.delivery?.state !== "queued") return null;
-    for (const q of this.#queued.values()) if (q.escalationId === e.id && q.decision.at === e.decision.at) return q.state;
-    return { status: "queued", reason: null };
+  // Why a Decision queued for the manager still waits, as the queue says it (fleet-clients §9.1): its reason while queued,
+  // "typed" or "held" once typed.
+  #waiting(e: Escalation): { waiting?: string } {
+    if (!this.#queue || e.decision?.delivery?.state !== "queued") return {};
+    const row = this.#queue.answerRow(e.id, e.decision.at);
+    const v = row ? this.#queue.view(row.deliveryId) : null;
+    const w = v?.state === "queued" ? v.reason : v?.state === "typed" || v?.state === "held" ? v.state : null;
+    return w ? { waiting: w } : {};
   }
   // What the principal was shown of an ask, as one string (E12): for a menu on a screen, the menu, not the screen around it.
   #version(e: Escalation): string {
@@ -343,89 +212,74 @@ export class EscalationService {
     const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now)];
     const changed = this.#x.reconcile(sightings, now, ledger?.ok ?? true);
     for (const id of this.#buttons.keys()) if (!this.#x.get(id)) this.#buttons.delete(id);   // kept as long as its ask
-    const pending = this.#store.pendingAnswers();       // one read per poll, shared by the notice and the echo prune
-    this.#forgetNotices(pending);
-    const prune = now - this.#prunedAt >= EscalationService.#pruneEveryMs;
-    if (prune) this.#prunedAt = now;
-    this.#forgetEchoes(now, pending, prune);
-    // One read of each queued message per poll, shared by the withdrawal and the delivery step (review #29.10).
-    const spool = new Map<string, InboxState | null>();
-    for (const [key, q] of this.#queued) spool.set(key, this.#reader(q.dir)?.state(key) ?? null);
-    this.#withdrawStale(spool);
-    const delivered = this.#deliveries(now, spool);
-    if (changed || delivered) this.#notify();
+    this.#withdrawStale();
+    if (changed) this.#notify();
   }
 
-  // Decisions in the manager's inbox: delivered ones are recorded (A1: with the endpoint, session and the time they
-  // reached the manager), given-up ones (expired, cancelled by hand) open their ask again. Returns whether any changed.
-  #deliveries(now: number, spool: Map<string, InboxState | null>): boolean {
-    let changed = false;
-    for (const [key, q] of this.#queued) {
-      const id = q.escalationId;
-      // No inbox to read: queued before migration 8 and migrated while none was configured, so where it went is
-      // unknown (H4); like an inbox that can't be read.
-      const reader = this.#reader(q.dir);
-      let s = spool.get(key) ?? null;
-      if (!s) {                                          // the inbox can't be read now: next round (code review B2),
-        q.unreadableSince ??= now;                       // unless it stays so: moved or deleted (H3)
-        if (now - q.unreadableSince < UNREADABLE_GIVE_UP_MS) continue;
-        // The directory is still there (msg/ went, the inbox didn't): withdraw the message too (review #7).
-        // cancel itself does nothing when the directory is gone, so a removed inbox is not recreated (review #12).
-        try { reader?.cancel(key); } catch (err) { log.error(`answer to ${id}: the withdrawal can't be written`, err); }
-      } else delete q.unreadableSince;
-      if (!s || s.status === "gone") {                   // nothing can deliver it any more: the ask is open again (B2)
-        this.#giveUp(key, q);
-        log.warn(`answer to ${id}: ${s ? "its message is gone from the manager's inbox" : `its inbox (${q.dir ?? this.#inbox?.dir ?? "not known"}) can't be read for ${UNREADABLE_GIVE_UP_MS / 60_000} min`}; the ask is open again`);
-        changed = true;
-        continue;
-      }
-      // lost is not terminal, and a cleared line goes back to sent and is typed again (deliverer #receipt). unconfirmed
-      // is the same. Cancel first. Answer again only once the spool says cancelled, so one answer is never typed twice
-      // (review #29.1). Until that confirmation the Decision stays and the card does not say to answer again.
-      if (s.status === "lost" || s.reason === "unconfirmed") {
-        // A state this far along was read from a reader, so there is one. Once per state change: the deliverer
-        // confirms cancel on its own loop, and the next poll's spool read sees it.
-        if (!q.missed && reader) {
-          let wrote = false;
-          try { wrote = reader.cancel(key); }
-          catch (err) { log.error(`answer to ${id}: the withdrawal can't be written`, err); continue; }
-          if (!wrote) continue;                        // the file is not there: the next poll tries again (round 3.3)
-          q.missed = true;
-          this.#store.savePending(key, id, this.#pendingBody(q));
-        }
-        continue;
-      }
-      if (s.status === "delivered") {
-        // Recorded from this message's own Decision (A1: who answered, and when it reached the manager).
-        const at = s.deliveredAt ?? now;
-        const delivered = { ...q.decision, delivery: { state: "delivered" as const, at } };
-        const applied = this.#x.delivered(id, q.decision, at);
-        const event = applied ?? answered(escalationId(id), delivered);   // superseded: still his answer, to the old version
-        if (applied) this.#store.replaceDecisionIf(id, q.decision.at, delivered);   // B3
-        else q.notice = LATE_ANSWER;
-        // The ask moved on (same message, new version). The done row would block every later answer (round 2.1).
-        // Applied and current: the row becomes typed, so a repeat says delivered (round 3.7). A late one is released.
-        if (applied && !q.late && q.sendKey) this.#store.finishSend(q.sendKey, at);
-        if (!applied || q.late) this.#releaseSend(q);
-        this.#store.record([{ ...event, ...q.words }]);
-        if (q.cancel || q.late || q.notice) this.#store.savePending(key, id, this.#pendingBody(q, now));   // its echo is ignored (B1)
-        else this.#store.dropPending(key);
-        if (q.notice) this.#notices.set(id, q.notice);
-        this.#queued.delete(key);
-        log.info(`answer to ${id} delivered to the manager${applied ? "" : " late, for the earlier version"}`);
-        changed = true;
-      } else if (s.status === "expired" || s.status === "cancelled") {
-        // A paste may have happened (attempts ≥ 1, or our own cancel that didn't say attempts 0): keep the echo (B1, decision 2).
-        const keepEcho = (s.attempts ?? 0) >= 1 || (q.cancel === true && s.attempts !== 0);
-        this.#giveUp(key, q, { now, keepEcho, ...(q.missed ? { notice: MISSED_ANSWER } : {}) });
-        log.warn(`answer to ${id} not delivered: the manager's inbox ${s.status === "expired" ? "let it expire" : "had it cancelled"}${q.missed ? "; it had been lost or unconfirmed" : ""}`);
-        changed = true;
-      } else if (s.status !== q.state.status || s.reason !== q.state.reason) {
-        q.state = { status: s.status, reason: s.reason };
-        changed = true;
-      }
+  // A queued answer whose ask closed (settled, expired) or was asked again meanwhile answers a question the principal no
+  // longer has (E11, E12; ADR-0010 B1, H2): its delivery is withdrawn, once. One typed already can't be: it is followed
+  // to its end, and its record (once delivered) keeps its own Decision.
+  #withdrawStale() {
+    if (!this.#queue) return;
+    for (const row of this.#queue.openAnswers()) {
+      const id = row.escalationId;
+      if (id === null || row.state !== "queued" || this.#inFlight.has(id) || this.#cancelling.has(row.deliveryId)) continue;
+      const e = this.#x.get(id);
+      if (!e) continue;                                  // not sighted since a restart: nothing to judge it by yet
+      const closed = e.status === "settled" || e.status === "expired";
+      const stored = JSON.parse(row.choice ?? "{}") as StoredChoice;
+      const restated = stored.version !== undefined && stored.version !== this.#version(e);
+      if (!closed && !restated && sameDecision(e.decision, decisionOf(row))) continue;
+      this.#cancelling.add(row.deliveryId);
+      log.info(`answer to ${id} withdrawn from the manager's queue: the ask ${closed ? "closed" : "changed"} since`);
+      void this.#queue.cancel(row.deliveryId).finally(() => this.#cancelling.delete(row.deliveryId));
     }
-    return changed;
+  }
+
+  // The queue's word on an answer (fleet-clients §9.1, E13). While an answer to this ask is still being given, the word
+  // is kept and applied once that answer returns (#queueAnswer), so an older delivery is recorded even when this ask
+  // holds that Decision no more.
+  #onDelivery(row: ManagerDeliveryRow, view: QueueView) {
+    if (row.kind !== "answer" || row.escalationId === null) return;
+    if (this.#inFlight.has(row.escalationId)) { this.#held.push({ row, view }); return; }
+    this.#applyDelivery(row, view);
+    this.#notify();
+  }
+  // Delivered: recorded (EscalationAnswered at the time it reached the manager, with the row's own provenance, A1), even
+  // when the ask holds that Decision no more (asked again since: the manager has the answer all the same). Uncertain: it
+  // stays given, never opened again, not recorded. Given up: nothing reached the manager, so the ask is open again. The
+  // decisions row follows, only while it is still that Decision.
+  #applyDelivery(row: ManagerDeliveryRow, view: QueueView) {
+    const id = row.escalationId;
+    if (id === null || row.choice === null) return;
+    const expected = decisionOf(row);
+    // A put that went in doubt took no Decision (the row stayed "sending"). The queue's later word is that answer:
+    // typed or held, it counts as given; delivered, it is recorded; uncertain, it stays given. A second choice is not queued.
+    if (view.state === "delivered" || view.state === "typed" || view.state === "held" || view.state === "uncertain") this.#takeInDoubt(id, row, expected);
+    if (view.state === "delivered") {
+      const at = view.at ?? this.#now();
+      const event = this.#x.delivered(id, expected, at) ?? answered(escalationId(id), { ...expected, delivery: { state: "delivered", at } });
+      this.#store.replaceDecisionIf(id, expected.at, { ...expected, delivery: { state: "delivered", at } });
+      this.#store.record([{ ...event, ...wordsOf(row) }]);
+      log.info(`answer to ${id} delivered to the manager`);
+    } else if (view.state === "uncertain") {
+      this.#x.uncertain(id, expected);
+      this.#store.replaceDecisionIf(id, expected.at, { ...expected, delivery: { state: "uncertain", at: null } });
+      log.warn(`answer to ${id} may have reached the manager (typed, never seen taken): it stays answered and is never typed again`);
+    } else if (view.state === "given_up") {
+      this.#x.withdraw(id, expected);
+      this.#store.dropDecisionIf(id, expected.at);
+      log.warn(`answer to ${id} not delivered (${view.why ?? "given up"}): the ask is open again`);
+    }
+  }
+  // The ask is still the one this row was queued for, and it holds no Decision: take this one, at the row's own time.
+  #takeInDoubt(id: string, row: ManagerDeliveryRow, expected: Decision) {
+    const e = this.#x.get(id);
+    if (!e || e.decision || (e.messageId ?? `t${e.askedAt}`) !== row.ask) return;
+    const c = JSON.parse(row.choice ?? "{}") as StoredChoice;
+    const choice: Choice = c.kind === "option" ? { kind: "option", key: c.key } : { kind: "words", text: "x" };
+    const q = this.#x.queue(id, choice, { endpointId: endpointId(row.endpointId), sessionId: sessionId(row.sessionId) }, expected.at);
+    if (q.ok) this.#store.saveDecision(id, q.value);
   }
   #notify() { const b = this.board(); for (const l of this.#listeners) l(b); }
 
@@ -444,20 +298,18 @@ export class EscalationService {
     const messages = manager ? this.#watch.history(manager.id) : [];
     const buttons = new Map<string, ButtonMessage>();
     const taps = new Map<string, { key: string; label: string; at: number }>();
-    const echoes = new Set<string>();                    // the messages that are withdrawn answers' echoes (B1, H1)
-    for (const list of this.#echoes.values()) for (const e of list) {
-      if (e.messageId) { if (messages.some(m => m.id === e.messageId)) echoes.add(e.messageId); continue; }
-      const m = messages.find(m => m.author.kind === "principal" && m.at >= e.after && m.text.trim() === e.line && !echoes.has(m.id));
-      if (m) { e.messageId = m.id; echoes.add(m.id); }
-    }
     for (const m of messages) {
-      if (m.author.kind === "agent" && m.kind === "text") {
-        const a = parseAnswer(m.text);
-        if (a.buttons) buttons.set(a.buttons.id, { message: m, body: a.body, options: a.buttons.options });   // the latest wins
-      } else if (m.author.kind === "principal") {
-        const t = parseTap(m.text);
-        if (t && !echoes.has(m.id)) taps.set(t.id, { key: t.key, label: t.label, at: m.at });   // not a withdrawn answer's echo (B1)
-      }
+      if (m.author.kind !== "agent" || m.kind !== "text") continue;
+      const a = parseAnswer(m.text);
+      if (a.buttons) buttons.set(a.buttons.id, { message: m, body: a.body, options: a.buttons.options });   // the latest wins
+    }
+    // ADR-0010 H1 (reconciliation ruling 27): an answer queued for an older ask of the same id, typed before its
+    // withdrawal could stop it, answers that ask: its echo is never a tap on the newer one.
+    const echoes = this.#echoesOfOlderAsks(messages, buttons);
+    for (const m of messages) {
+      if (m.author.kind !== "principal" || echoes.has(m.id)) continue;
+      const t = parseTap(m.text);
+      if (t) taps.set(t.id, { key: t.key, label: t.label, at: m.at });
     }
     const items = new Map<string, LedgerItem>((ledger?.ok ? ledger.items : []).map(i => [i.id, i]));
     if (ledger?.ok) this.#filed = items;
@@ -511,6 +363,27 @@ export class EscalationService {
         : !l ? { kind: "missing" }
         : l.open ? { kind: "open" } : { kind: "settled", resolution: l.resolution, at: l.closedAt };
       out.push({ ask, source, answered: taps.get(id) ?? null });
+    }
+    return out;
+  }
+
+  // The echoes of answers queued for an ask asked again since (their row's ask isn't the id's newest button message),
+  // unless given up: each takes one, the first of its own tap line from its queueing on (ADR-0010 H1: another tap with
+  // the same line is a new answer). An answer in words is no tap, so it has no echo to take.
+  #echoesOfOlderAsks(messages: readonly Message[], buttons: ReadonlyMap<string, ButtonMessage>): Set<string> {
+    const out = new Set<string>();
+    if (!this.#queue) return out;
+    for (const [id, b] of buttons) {
+      for (const row of this.#queue.answersTo(id)) {
+        if (row.ask === b.message.id || row.state === "given_up" || row.choice === null) continue;
+        const taken = this.#echoed.get(row.deliveryId);
+        if (taken !== undefined) { if (messages.some(m => m.id === taken)) out.add(taken); continue; }
+        const c = JSON.parse(row.choice) as StoredChoice;
+        if (c.kind !== "option") continue;
+        const line = tapLine(id, { key: c.key, label: c.label });
+        const echo = messages.find(m => m.author.kind === "principal" && !out.has(m.id) && m.at >= row.queuedAt - ECHO_SLACK_MS && m.text.trim() === line);
+        if (echo) { out.add(echo.id); this.#echoed.set(row.deliveryId, echo.id); }
+      }
     }
     return out;
   }
@@ -582,6 +455,10 @@ export class EscalationService {
     const now = this.#now();
     for (const [k, t] of this.#seen) if (now - t > REQUEST_TTL_MS) this.#seen.delete(k);
     const key = `${a.session.id}:${requestId}`;
+    // A repeat of an answer the queue gave up, never typed: it reached no one, and its ask is open again (E13). Answering
+    // again is a new request (#29's not_delivered; ruling 82).
+    const givenUp = this.#queue?.byRequest(a.endpoint.id, requestId) ?? null;
+    if (givenUp?.kind === "answer" && givenUp.escalationId === id && givenUp.state === "given_up") return { ok: false, problem: "not_delivered", item: this.#view(id) };
     if (this.#seen.has(key)) return { ok: true, item: this.#view(id) };
     if (this.#inFlight.has(id)) return { ok: false, problem: "in_progress", item: this.#view(id) };
     this.#inFlight.add(id);
@@ -595,71 +472,30 @@ export class EscalationService {
         if (settled) return settled;
       }
       this.poll();                                       // the list may have closed it a moment ago
+      // A repeat of this request's answer through the manager's queue (spec §9.1): it reached the manager, may have, or
+      // is queued as this ask's Decision: so it is, whatever the switch says now. Anything else (in doubt, given up, or
+      // queued while its Decision was never taken: the fleet's event came, its answer didn't) is judged again below.
+      const queued = this.#queue?.byRequest(a.endpoint.id, requestId) ?? null;
+      if (queued?.kind === "answer" && queued.escalationId === id) {
+        const held = sameDecision(this.#x.get(id)?.decision, decisionOf(queued));
+        if (queued.state === "delivered" || queued.state === "uncertain" || (held && queued.state !== "sending" && queued.state !== "given_up")) {
+          this.#seen.set(key, this.#now());
+          return { ok: true, item: this.#view(id) };
+        }
+        // Still in doubt while the switch is off: it may be queued, so it is never typed by hand (ruling 49).
+        if (queued.state === "sending" && this.#queue && !this.#queue.on) return { ok: false, problem: "uncertain", item: this.#view(id) };
+      }
       const c = this.#x.check(id, choice, this.#now());
       if (!c.ok) return { ok: false, problem: c.error, item: this.#view(id) };
       const e = c.value;
       if (seen !== undefined && seen !== this.#version(e)) return { ok: false, problem: "changed", item: this.#view(id) };
-      const option = choice.kind === "option" ? e.options.find(o => o.key === choice.key) : undefined;
-      const line = option ? tapLine(e.id, option) : wordsLine(e.id, choice.kind === "words" ? choice.text : "");
-      const words = choice.kind === "words" ? { length: choice.text.trim().length, digest: digest(choice.text) } : {};
-      // The manager's answers go through its inbox (ADR-0010): queued now, delivered exactly once, recorded then.
-      // The inbox switched off (`manager-inbox disable`) or not configured: typed directly, as before.
-      // A manager that isn't running right now is fine: the inbox types it once it is back.
-      let queued: { key: string; duplicate: boolean } | null = null;
-      const k = answerKey(e.id, e, choice);
-      if (e.asker.kind === "manager" && this.#inbox) {
-        // The same in-doubt checks as the typed path, before anything is queued (E8, review #29.2): an earlier answer
-        // this hub may have typed must block a second one, or the manager can be given both.
-        const earlierSend = this.#store.send(k);
-        if (earlierSend) {
-          const settled = await this.#settleAnswer(a, id, choice, earlierSend, key);
-          if (settled) return settled;
-        }
-        const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);
-        if (other) return other;
-        try { queued = this.#inbox.enqueue({ id: `answer:${key}`, kind: option ? "tap" : "answer", text: line, meta: { escalation: e.id } }); }
-        catch (err) { log.error(`answer to ${e.id}: the manager's inbox can't be written; typing directly`, err); }
-      }
-      if (queued) {
-        if (queued.duplicate) {
-          const st = this.#inbox?.state(queued.key) ?? null;
-          if (st && (st.status === "cancelled" || st.status === "expired" || st.status === "gone")) {
-            const pending = this.#queued.get(queued.key);
-            if (pending) this.#giveUp(queued.key, pending);
-            log.warn(`answer to ${e.id} not delivered: the same message is already ${st.status} in the manager's inbox`);
-            return { ok: false, problem: "not_delivered", item: this.#view(id) };
-          }
-          // delivered, lost or accepted: nothing new was typed. Queuing again would make the next poll mark that
-          // fresh Decision delivered (review #29.5).
-          if (st && (st.status === "delivered" || st.status === "lost" || st.status === "accepted")) {
-            log.warn(`answer to ${e.id} not delivered: the same message is already ${st.status} in the manager's inbox`);
-            return { ok: false, problem: "not_delivered", item: this.#view(id) };
-          }
-        }
-        const q = this.#x.queue(id, choice, { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
-        if (!q.ok) {
-          if (!queued.duplicate) { try { this.#inbox?.cancel(queued.key); } catch (err) { log.error(`answer to ${e.id}: the withdrawal can't be written`, err); } }
-          return { ok: false, problem: q.error, item: this.#view(id) };
-        }
-        this.#clearNotice(id);
-        const dir = this.#inbox?.dir ?? null;
-        const entry = this.#open({ escalationId: id, decision: q.value, words, dir, line, version: this.#version(e), sendKey: k });
-        this.#queued.set(queued.key, entry);
-        this.#store.savePending(queued.key, id, this.#pendingBody(entry));
-        this.#store.saveDecision(id, q.value);
-        // The same request after the seen window, or a restart, is a duplicate (review #29.4), as a typed answer's
-        // done row is. Without the row, check() refuses it as already_answered.
-        if (this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request })) this.#store.finishQueued(k);
-        this.#seen.set(key, now);
-        log.info(`answer to ${e.id} queued for the manager${queued.duplicate ? " (already in its inbox)" : ""}`);
-        this.#notify();
-        return { ok: true, item: this.#view(id) };
-      }
+      if (this.#queue?.on && e.asker.kind === "manager") return await this.#queueAnswer(a, e, choice, requestId, key);
       if (!e.asker.workerId) {
         const conflict = e.asker.kind === "manager" && this.#watch.workers().some(w => w.name === this.#managerName && w.conflict);
         return { ok: false, problem: conflict ? "lane_conflict" : "no_pane", item: this.#view(id) };
       }
-      // ... or of the same answer from another request. The inbox path ran these already (review #29.2).
+      const k = answerKey(e.id, e, choice);
+      // ... or of the same answer from another request.
       const inDoubt = this.#store.send(k);
       if (inDoubt) {
         const settled = await this.#settleAnswer(a, id, choice, inDoubt, key);
@@ -668,6 +504,13 @@ export class EscalationService {
       // Then another answer to this ask, with another choice (E8: one Decision per ask; ADR-0012 7).
       const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);
       if (other) return other;
+      // ... and one queued for the manager before the switch went off, still in doubt: it may be queued (E8, ruling 49).
+      if (this.#queue?.sendingOf(`hub:${askPrefix(e.id, e)}`).length) {
+        log.warn(`answer to ${id} refused: an answer to it through the manager's queue is in doubt; nothing is typed directly`);
+        return { ok: false, problem: "answer_in_doubt", item: this.#view(id) };
+      }
+      const option = choice.kind === "option" ? e.options.find(o => o.key === choice.key) : undefined;
+      const line = option ? tapLine(e.id, option) : wordsLine(e.id, choice.kind === "words" ? choice.text : "");
       // Written before the first await, as a send's is: a hub that stops while this is typed leaves it "started".
       if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request })) return { ok: false, problem: "uncertain", item: this.#view(id) };
       let outcome: SendOutcome;
@@ -693,7 +536,66 @@ export class EscalationService {
       return this.#delivered(a, id, choice, key);
     } finally {
       this.#inFlight.delete(id);
+      const held = this.#held.filter(c => c.row.escalationId === id);
+      if (held.length > 0) this.#held = this.#held.filter(c => c.row.escalationId !== id);
+      for (const c of held) this.#applyDelivery(c.row, c.view);
+      if (held.length > 0) this.#notify();
     }
+  }
+
+  // The manager's answer through the fleet's queue (spec §9.1, E13): queued, it counts as given (E8) and the card says
+  // so, with why it waits; the queue's later word moves it on (#onDelivery). Its id is its key (`hub:<key>`), so the
+  // switch never types it twice. A manager mid-restart is no refusal: its sticky name waits on its node (spec §4.6).
+  async #queueAnswer(a: Authenticated, e: Escalation, choice: Choice, requestId: string, key: string): Promise<AnswerResult> {
+    const queue = this.#queue as ManagerQueue;
+    const id = e.id as string;
+    const k = answerKey(e.id, e, choice);
+    // An answer typed directly before the queue was on, still in doubt, is settled with its node first, as below.
+    const inDoubt = this.#store.send(k);
+    if (inDoubt) {
+      const settled = await this.#settleAnswer(a, id, choice, inDoubt, key);
+      if (settled) return settled;
+    }
+    const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);
+    if (other) return other;
+    // Another answer to this ask whose delivery is in doubt (the fleet took it and never answered) may be queued (E8).
+    const deliveryId = queue.idFor(k);
+    if (queue.sendingOf(`hub:${askPrefix(e.id, e)}`).some(r => r.deliveryId !== deliveryId)) {
+      log.warn(`answer to ${id} refused: another answer to it may be queued for the manager (its delivery is in doubt)`);
+      return { ok: false, problem: "answer_in_doubt", item: this.#view(id) };
+    }
+    const option = choice.kind === "option" ? e.options.find(o => o.key === choice.key) : undefined;
+    const line = option ? tapLine(e.id, option) : wordsLine(e.id, choice.kind === "words" ? choice.text : "");
+    const version = this.#version(e);
+    const stored: StoredChoice = option ? { kind: "option", key: option.key, label: option.label, version }
+      : { kind: "words", length: choice.kind === "words" ? choice.text.trim().length : 0, digest: digest(choice.kind === "words" ? choice.text : ""), version };
+    const r = await queue.put({
+      deliveryId, kind: "answer", escalationId: id, ask: e.messageId ?? `t${e.askedAt}`, choice: JSON.stringify(stored),
+      endpointId: a.endpoint.id, sessionId: a.session.id, requestId, queuedAt: this.#now(),
+    }, line);
+    if (!r.ok) {
+      log.warn(`answer to ${id} not queued for the manager: ${r.problem}`);
+      return { ok: false, problem: r.problem === "timeout" ? "busy" : r.problem, item: this.#view(id) };
+    }
+    const nowAsk = this.#x.get(id);
+    if (!nowAsk || nowAsk.messageId !== e.messageId || this.#version(nowAsk) !== version) {
+      log.warn(`answer to ${id} was queued for an ask that was restated meanwhile; its delivery is withdrawn`);
+      void queue.cancel(r.row.deliveryId);
+      return { ok: false, problem: "changed", item: this.#view(id) };
+    }
+    // The Decision as its row has it: a repeat in doubt keeps its first attempt's time and provenance.
+    const expected = decisionOf(r.row);
+    const q = this.#x.queue(id, choice, { endpointId: endpointId(r.row.endpointId), sessionId: sessionId(r.row.sessionId) }, expected.at);
+    if (!q.ok) {                       // closed or asked again while it was queued: the next poll withdraws it
+      log.warn(`answer to ${id} queued, but its ask no longer takes it (${q.error}); its delivery is withdrawn`);
+      return { ok: false, problem: q.error, item: this.#view(id) };
+    }
+    this.#store.saveDecision(id, q.value);
+    this.#seen.set(key, this.#now());
+    log.info(`answer to ${id} queued for the manager`);
+    this.#applyDelivery(r.row, queue.view(deliveryId) ?? r.view);   // the latest word: a repeat may find it delivered already
+    this.#notify();
+    return { ok: true, item: this.#view(id) };
   }
 
   // An answer in doubt, settled with the node it went to (SteeringService's settle, on its row): typed there → delivered,
@@ -702,8 +604,6 @@ export class EscalationService {
   async #settleAnswer(a: Authenticated, id: string, choice: Choice, row: SendRow, key: string): Promise<AnswerResult | null> {
     if (row.state === "done") {
       this.#seen.set(key, this.#now());
-      // Queued in the inbox, not typed: still queued. The enqueue time is not when it was delivered (round 2.7).
-      if (row.outcome === "queued") return { ok: true, item: this.#view(id), queued: true };
       return { ok: true, item: this.#view(id), duplicate: true, at: row.typedAt ?? row.at };
     }
     const settled = row.workerId === null ? { ok: false as const, problem: "uncertain" as const } : await this.#settle(row.key, row.workerId);
@@ -746,14 +646,12 @@ export class EscalationService {
     if (!r.ok) { log.warn(`answer to ${id} found typed but not recorded: ${r.error}`); return; }
     const decision = this.#x.get(id)?.decision;
     if (decision) this.#store.saveDecision(id, decision);
-    this.#clearNotice(id);
     this.#store.record([{ ...r.value, ...(option === null ? { digest: part.slice("words:".length) } : {}) }]);
     this.#notify();
   }
 
   // The answer arrived: recorded as his Decision (E8), once. `at`: a duplicate's time on the node that typed it.
   #delivered(a: Authenticated, id: string, choice: Choice, key: string, at?: number): AnswerResult {
-    this.#clearNotice(id);
     this.#seen.set(key, this.#now());
     const r = this.#x.record(id, choice, { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
     if (r.ok) {

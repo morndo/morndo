@@ -3,6 +3,11 @@
 // (the owner's to edit; written with the defaults at join). Both are JSON under ~/.config/morndo-node/. A value that
 // doesn't fit is an error naming the file and the field, never a silent default: a typo in the policy must not widen
 // what the fleet may do.
+// Fleet clients (spec §5; plan Contracts, Config):
+// - `launch` is the command a lane starts with, and how. `{account}` in it stands for the op's account. "shell" types the
+//   command into the user's shell once its prompt shows; "direct" runs it as the pane's own program.
+// - `protected` lists the lane names lane.stop refuses.
+// An op can't add a word to the command (spec §11): only `{account}` and `--resume <session>`, both of fixed formats.
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { JOB_CLASS } from "@morndo/domain";
@@ -10,6 +15,7 @@ import { NODE_NAME, OP_NAMES, fleetUrlOk, type OpName } from "@morndo/protocol";
 import { MAX_TIMER_MS } from "./ops/job-limits.ts";
 import { agentPaths } from "./paths.ts";
 
+export type Launch = { command: string[]; via: "shell" | "direct" };
 export type JobClassPolicy = { limit: number; timeoutSec?: number };
 export type JobGuardPolicy = { load1?: number; memAvailableMiB?: number };
 export type JobsPolicy = { enabled: boolean; classes: Record<string, JobClassPolicy>; guard?: JobGuardPolicy };
@@ -20,6 +26,8 @@ export type Policy = {
   fileRoots?: string[];
   lockedPanes: Record<string, string>;
   tmuxSocket: string | null;
+  launch: Launch;
+  protected: string[];
   jobs: JobsPolicy;
   jobsWarning?: string;
 };
@@ -34,11 +42,21 @@ export const isOpName = (s: unknown): s is OpName => typeof s === "string" && (A
 
 export const RELAY_PORT = 8787;
 // Every op on (pane.keys too: the hub's terminal view needs it; spec §8 lists turning it off as the owner's mitigation),
-// the tmux session "main", no repositories for worktrees until the owner names them, files under today's rules.
+// the tmux session "main", no repositories for worktrees until the owner names them, files under today's rules, lanes
+// started as `claude` from the user's shell, and the manager protected from lane.stop.
 // Shipped jobs: one class, limit 2, and no guard. A policy file that omits `jobs` keeps this. A file that sets
 // `jobs` without `guard` still reads nothing (design §5).
 export const DEFAULT_JOBS: JobsPolicy = { enabled: true, classes: { default: { limit: 2 } } };
-export const DEFAULT_POLICY: Policy = { ops: [...ALL_OPS], session: "main", repoRoots: [], lockedPanes: {}, tmuxSocket: null, jobs: DEFAULT_JOBS };
+export const DEFAULT_POLICY: Policy = {
+  ops: [...ALL_OPS], session: "main", repoRoots: [], lockedPanes: {}, tmuxSocket: null,
+  launch: { command: ["claude"], via: "shell" }, protected: ["manager"], jobs: DEFAULT_JOBS,
+};
+// The defaults as a copy that a parse may change, never DEFAULT_POLICY itself.
+const defaults = (): Policy => ({
+  ...DEFAULT_POLICY, ops: [...DEFAULT_POLICY.ops], repoRoots: [], lockedPanes: {},
+  launch: { command: [...DEFAULT_POLICY.launch.command], via: DEFAULT_POLICY.launch.via }, protected: [...DEFAULT_POLICY.protected],
+  jobs: copyJobs(DEFAULT_JOBS),
+});
 
 const CLASS_LIMIT_MAX = 1000;
 const TIMEOUT_SEC_MAX = Math.floor(MAX_TIMER_MS / 1000);
@@ -50,6 +68,9 @@ export class ConfigError extends Error {
 type Obj = Record<string, unknown>;
 const SESSION_NAME = /^[A-Za-z0-9_-]{1,64}$/;
 const SOCKET_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
+// A launcher's word and a lane's name hold no control character (a window name may hold anything else, spec §4).
+const WORD = /^[^\p{Cc}]{1,4096}$/u;
+const LANE_NAME = /^[^\p{Cc}]{1,200}$/u;
 
 function readJson(path: string): Obj {
   let value: unknown;
@@ -60,6 +81,22 @@ function readJson(path: string): Obj {
 }
 
 const absolutePaths = (v: unknown): v is string[] => Array.isArray(v) && v.every(p => typeof p === "string" && isAbsolute(p));
+
+// `launch`: a field it doesn't set keeps its default. The program comes first and is never an option.
+function parseLaunch(v: unknown, where: string): Launch {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: launch must be an object { command, via }`);
+  const o = v as Obj;
+  const unknown = Object.keys(o).filter(k => k !== "command" && k !== "via");
+  if (unknown.length) throw new ConfigError(`${where}: launch has an unknown field ${unknown.join(", ")} (known: command, via)`);
+  const command = o.command ?? DEFAULT_POLICY.launch.command;
+  if (!Array.isArray(command) || command.length < 1 || command.length > 32 || !command.every(w => typeof w === "string" && WORD.test(w))
+    || String(command[0]).startsWith("-")) {
+    throw new ConfigError(`${where}: launch.command must be 1 to 32 words without control characters, the program first (not an option)`);
+  }
+  const via = o.via ?? DEFAULT_POLICY.launch.via;
+  if (via !== "shell" && via !== "direct") throw new ConfigError(`${where}: launch.via must be "shell" or "direct"`);
+  return { command: command.map(String), via };
+}
 
 function copyJobs(jobs: JobsPolicy): JobsPolicy {
   const classes: JobsPolicy["classes"] = {};
@@ -165,10 +202,10 @@ export function jobTimeouts(jobs: JobsPolicy): Record<string, number> {
 }
 
 export function parsePolicy(value: Obj, where: string): Policy {
-  const known = ["ops", "session", "repoRoots", "fileRoots", "lockedPanes", "tmuxSocket", "jobs"];
+  const known = ["ops", "session", "repoRoots", "fileRoots", "lockedPanes", "tmuxSocket", "launch", "protected", "jobs"];
   const unknown = Object.keys(value).filter(k => !known.includes(k));
   if (unknown.length) throw new ConfigError(`${where}: unknown field ${unknown.join(", ")} (known: ${known.join(", ")})`);
-  const policy: Policy = { ...DEFAULT_POLICY, ops: [...DEFAULT_POLICY.ops], repoRoots: [], lockedPanes: {}, jobs: copyJobs(DEFAULT_JOBS) };
+  const policy: Policy = defaults();
   if (value.ops !== undefined) {
     if (!Array.isArray(value.ops) || !value.ops.every(isOpName)) throw new ConfigError(`${where}: ops must be a list of op names (${ALL_OPS.join(", ")})`);
     policy.ops = [...new Set(value.ops)];
@@ -198,6 +235,13 @@ export function parsePolicy(value: Obj, where: string): Policy {
     }
     policy.tmuxSocket = value.tmuxSocket;
   }
+  if (value.launch !== undefined) policy.launch = parseLaunch(value.launch, where);
+  if (value.protected !== undefined) {
+    if (!Array.isArray(value.protected) || !value.protected.every(n => typeof n === "string" && LANE_NAME.test(n))) {
+      throw new ConfigError(`${where}: protected must be a list of lane names (window names without control characters)`);
+    }
+    policy.protected = [...new Set(value.protected as string[])];
+  }
   if (value.jobs !== undefined) {
     try { policy.jobs = parseJobs(value.jobs, where); }
     catch (e) {
@@ -210,7 +254,7 @@ export function parsePolicy(value: Obj, where: string): Policy {
 }
 
 export function loadPolicy(path: string): Policy {
-  return existsSync(path) ? parsePolicy(readJson(path), path) : { ...DEFAULT_POLICY, ops: [...DEFAULT_POLICY.ops], repoRoots: [], lockedPanes: {}, jobs: copyJobs(DEFAULT_JOBS) };
+  return existsSync(path) ? parsePolicy(readJson(path), path) : defaults();
 }
 
 // The fields of config.json, as `join` writes them.

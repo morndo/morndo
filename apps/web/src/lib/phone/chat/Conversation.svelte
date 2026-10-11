@@ -20,20 +20,20 @@
   import type { DecisionItem } from "../../desktop/decisions.ts";
   import { renderMarkdown } from "../../markdown.ts";
   import { present, withoutFileNotes } from "../../desktop/present.ts";
-  import { canRetry, type OutboxRecord } from "../../outbox/state.ts";
+  import { canCancel, canRetry, type OutboxRecord } from "../../outbox/state.ts";
   import { heldBehind, sendReason } from "../../outbox/words.ts";
   import { attachmentKey, bubbles, isLong, shortened } from "./bubbles.ts";
-  import { deadReason, deliveryLabel, deliveryOf, lateReason, lostReason } from "./delivery.ts";
+  import { deadReason, deliveryLabel, deliveryOf, lostReason, maybeReason } from "./delivery.ts";
   import { displayName, status } from "./rows.ts";
   import { followKeyboard } from "./keyboard.ts";
   import { bindWatch, pinnedToEnd } from "./watch.ts";
   import { deviceDrafts } from "../../drafts.ts";
 
-  let { feed, worker, outgoing, pendingFiles = {}, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCheck, onEchoes, screen = false }: {
+  let { feed, worker, outgoing, pendingFiles = {}, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCancel, onEchoes, screen = false }: {
     feed: LiveFeed; worker: RosterEntry; outgoing: OutboxRecord[]; pendingFiles?: Record<string, SentFile[]>; now: number; verifiedFresh: boolean; verify: () => Promise<boolean>;
     onBack: () => void; onDecide: (id: string) => void;
     onQueue: (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string; files: SentFile[] }) => Promise<void>;
-    onRetry: (id: string) => void; onDiscard: (id: string) => void; onAgain: (id: string) => void; onCheck: (id: string) => void;
+    onRetry: (id: string) => void; onDiscard: (id: string) => void; onAgain: (id: string) => void; onCancel: (id: string) => void;
     onEchoes: (worker: string, echoes: { id: string; at: number; text: string }[]) => void;
     screen?: boolean;
   } = $props();
@@ -208,7 +208,7 @@
         {#each mine as o (o.id)}
           {@const d = deliveryOf(o, now)}
           <li class="b mine first last pending" data-outbox={o.id} data-delivery={d}>
-            <div class="bubble" class:failed={d === "failed" || d === "uncertain" || d === "lost" || d === "unseen" || d === "late" || d === "dead"}>
+            <div class="bubble" class:failed={d === "failed" || d === "uncertain" || d === "lost" || d === "unseen" || d === "maybe" || d === "dead"}>
               {#if o.text.trim()}<div class="md"><p>{o.text}</p></div>{/if}
               {#if pendingFiles[o.id]?.length}
                 <div class="files">
@@ -229,7 +229,7 @@
                 <button class="pbtn small" onclick={() => onDiscard(o.id)}>Discard</button>
               </div>
             {:else if d === "lost"}
-              <p class="why">{lostReason()}</p>
+              <p class="why">{lostReason(o)}</p>
               <div class="acts">
                 <button class="pbtn small" onclick={() => onAgain(o.id)}>Send again</button>
                 <button class="pbtn small" onclick={() => onDiscard(o.id)}>Discard</button>
@@ -238,14 +238,17 @@
               <div class="acts"><button class="pbtn small" onclick={() => onDiscard(o.id)}>Dismiss</button></div>
             {:else if d === "dead"}
               <!-- The hub can't queue it again: no button that would only ask for the passkey and do nothing. -->
-              <p class="why">{deadReason()}</p>
+              <p class="why">{deadReason(o)}</p>
               <div class="acts">
                 <button class="pbtn small" onclick={() => { text = text.trim() ? `${text}\n\n${o.text}` : o.text; onDiscard(o.id); input?.focus(); }}>Write it again</button>
                 <button class="pbtn small" onclick={() => onDiscard(o.id)}>Discard</button>
               </div>
-            {:else if d === "late"}
-              <p class="why">{lateReason()}</p>
-              <div class="acts"><button class="pbtn small" onclick={() => onCheck(o.id)}>Check</button></div>
+            {:else if d === "maybe"}
+              <p class="why">{maybeReason()}</p>
+              <div class="acts"><button class="pbtn small" onclick={() => onDiscard(o.id)}>Dismiss</button></div>
+            {:else if canCancel(o)}
+              <!-- In the manager's queue and not typed yet (ruling 83): it can still be withdrawn. -->
+              <div class="acts"><button class="pbtn small" onclick={() => onCancel(o.id)}>Cancel</button></div>
             {:else if d === "unseen"}
               <div class="acts"><button class="pbtn small" onclick={() => onDiscard(o.id)}>Dismiss</button></div>
             {:else if heldBehind(o, outgoing)}

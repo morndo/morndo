@@ -13,6 +13,7 @@ import type { Socket } from "node:net";
 import type { HookEvent } from "@morndo/protocol";
 import { HANDSHAKES, startAgentEndpoint } from "../src/adapters/agent-endpoint.ts";
 import { CLOSE_GRACE_MS } from "../src/adapters/agent-session.ts";
+import type { HookSink } from "../src/application/hook-sink.ts";
 import { FakeAgent, newKey, parseFrame } from "./helpers/fake-agent.ts";
 import { quiet, startTestFleet, WIDE } from "./helpers/fleet.ts";
 import { until } from "./helpers/until.ts";
@@ -257,10 +258,13 @@ describe("a session the fleet closed", () => {
   it("takes nothing more from a revoked node that withholds its close frame, and the socket is terminated after the grace", async () => {
     const fleet = await startTestFleet();
     const stored: HookEvent[] = [];
-    const hooks = { known: () => ({ seq: 0, known: false }), accept: (_n: string, _s: string, events: HookEvent[]) => { stored.push(...events); return events.at(-1)?.seq ?? 0; } };
+    const hooks: HookSink = {
+      known: () => ({ seq: 0, known: false }),
+      open: conn => ({ add: (e: HookEvent) => { stored.push(e); setImmediate(() => conn.acked(e.seq)); }, cancel: () => {} }),
+    };
     const endpoint = startAgentEndpoint({
       host: "127.0.0.1", port: 0, handshakeLimits: WIDE,
-      deps: { connections: fleet.connections, nodes: fleet.nodes, audit: fleet.audit, fleetKey: fleet.key, hooks, jobs: fleet.jobs, log: quiet },
+      deps: { connections: fleet.connections, nodes: fleet.nodes, audit: fleet.audit, fleetKey: fleet.key, hooks, deliveries: fleet.deliveries, jobs: fleet.jobs, log: quiet },
     });
     await endpoint.ready;
     const terminate = vi.spyOn(WebSocket.prototype, "terminate");

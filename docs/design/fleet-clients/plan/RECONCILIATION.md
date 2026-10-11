@@ -261,3 +261,70 @@ Fixed in the plan, each checked again on that tree:
     - Task 15's run takes about 25 s.
     
     **Left as they are:** three expected messages worded differently from what vitest prints (03:388, 1703, 3084; same meaning), and a load flake in the existing `lane-worktree-ops` (it passed on rerun).
+
+## Refresh on main after #32, #34, #29, #38 and #39 (2026-10-09)
+
+After the plan merged, main gained:
+- #32, the board (hub migration 13);
+- #34, Home with usage (14);
+- #29, the manager's answers through kira's inbox, ADR-0010 rebuilt (15);
+- #38, the board redesign;
+- #39, the two red checks after #34.
+
+A drift map against `feat/fleet-clients` (main 662e688) found:
+- parts 02 and 03 apply as written;
+- parts 01 and 05 need anchors and counts;
+- Task 12, Task 13 and the rollout part (outside this tree) need rework.
+
+The owner decided the design questions on 2026-10-09.
+
+81. **The fleet's delivery queue is the only queue for the manager's answers and messages** (the owner: "Fleet queue only").
+    - **Removed by Tasks 12–13:**
+      - `apps/hub/src/adapters/manager-inbox.ts` and its switch `MORNDO_MANAGER_INBOX`;
+      - the inbox branches in `escalation-service.ts` and `steering-service.ts`, and `withdrawOverdue`;
+      - the outbox's inbox fields and labels;
+      - `e2e/inbox.e2e.ts` and its CI job.
+    - **Kept from #29:** these are the plan's own design, and Tasks 12–13 build on them instead of adding twins.
+      - the domain functions (`queue`, `delivered`, `withdraw`, `sameDecision`, `answered`), with `uncertain` added;
+      - `replaceDecisionIf` and `dropDecisionIf`;
+      - the decision cards' delivery line, the notices, `not_delivered` and `createdAt`.
+    - **Tests:** #29's 16 inbox test files go. The cases the plan's tests don't cover are ported to the queue: B3, B5, B7, B8, B9, B10 and the notices.
+    - **The table:** migration 15's `pending_answers` stays, unused. Dropping a table would be a migration of its own, and nothing needs it.
+    - **R** ADR-0014 supersedes ADR-0010 as rebuilt by #29. Its domain rules stay: an answer counts as given once queued, and is recorded once it reached the manager.
+82. **An answer typed and never seen taken stays given:** "May have been delivered", never reopened (the owner). An answer never typed (expired, cancelled, its lane gone) is "Not delivered", and the ask opens again. #29's "Answer again" for a typed answer goes.
+83. **A message to a busy manager waits up to 24 h,** with its waiting reason shown and a cancel (the owner). #29's 2-minute deadline and Retry for commands go.
+84. **The hub's migration is 16** (`manager_deliveries`); 13–15 are taken. The plan's "schema 12 → 13" becomes "→ 16" everywhere.
+85. **Tasks 12 and 13 are rewritten against main as it is now.** They quote today's `main.ts`, `config.ts`, `http.ts`, `store.ts`, the escalation and steering services, `feed.ts`, the decision cards and the outbox, and they say what they remove.
+    - Task 14's first `main.ts` edit is anchored on `import { fileStore }`, so it doesn't depend on Task 12's import.
+    - The drift map ran Steps 12.21–12.31 (the queue's core) and Task 14 green on 8c97099, so they stay.
+86. **Part 07 follows how the PC deploys now:**
+    - The hub ships from `.worktrees/live-ship-<sha>` through the drop-in `ship.conf`, with backups in `morndo-backups/<date>-ship-<sha>`. Fleet and node stay on `live-fleet` until the rollout moves them.
+    - Step 0 ("Task 11 alone on live-fleet") goes: Task 11 reaches the PC with the release before step 1.
+    - Step 1 migrates from whatever schema the hub then runs (15 once main is shipped) to 16.
+    - Step 5's search for anything typing through kira's inbox now covers the hub's code too.
+87. **Spec and plan.md:**
+    - §1, §3, §9.1 and §9.5 say #29 is on main (not "open PR #10");
+    - E13 and S5 in `docs/domain.md` say queue, not inbox;
+    - `plan.md`'s Databases table says hub migration 16.
+88. **`POST /api/manager/cancel { requestId }`** (part 04, for ruling 83's cancel) is accepted. It answers 200 `{ ok, delivery }`, 409 `{ error }` (e.g. `already_typed`) or 404 `{ error: "unknown" }`. It asks for no fresh passkey, because cancelling types nothing.
+89. **No answer is left in kira's inbox at the upgrade on the owner's PC.** #29's inbox was never on there: `MORNDO_MANAGER_INBOX` unset, `pending_answers` 0 rows on 2026-10-09 23:48. Part 07's step 1 refuses to run with that variable set. A Decision restored as queued, without a delivery row, reads "May have been delivered" and is neither re-asked nor typed.
+90. **Notices last as long as their delivery rows** (7 days).
+91. **`qa/` records stay as written.** ADR-0010 gains a "Superseded by ADR-0014" status line in the Task 12 step that removes the inbox.
+
+**Run of the refreshed plan (2026-10-10).** Every task, 1–17, plus Task 21's repo part, was applied in order on `feat/fleet-clients` e56fa70: 61 commits.
+- **Replaces:** every one found its text exactly once.
+- **Expected outputs:** every count matched, apart from the wording nits below.
+- **Controls:** every part's ran after its commit and bit with its text.
+- **Fleet project:** 18 files and 208 tests, none skipped. That includes `drills-manager-queue` (8 cases) and `drills-lanes-cli`.
+
+The owner stopped the run before its last stage (the non-fleet projects, and the bite runs of all controls together).
+
+92. **Task 17 Step 19's citation check gets `maxBuffer: 64 MiB`** on its `git` calls. Without it the script threw ENOBUFS before checking anything: the diff from main is about 1.1 MB, over the 1 MiB default.
+    - With the buffer: 17 cited, 0 undated, exit 0.
+    - With an undated probe: exit 1, so the check still bites.
+
+    *05.*
+93. **Nits left as they are.** Each quoted message means what vitest prints, but its words differ:
+    - Task 1 Step 9's bundle sizes (+0.5 KB on Node 24.21);
+    - 03:388, 2272, 3084, 4030;
+    - 04:4530.

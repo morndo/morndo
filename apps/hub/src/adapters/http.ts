@@ -21,6 +21,7 @@ import type { EscalationService } from "../application/escalation-service.ts";
 import type { RemoteService, Viewer } from "../application/remote-service.ts";
 import type { ReadingService } from "../application/reading-service.ts";
 import type { NotificationService } from "../application/notification-service.ts";
+import { queuedCommand, type ManagerQueue } from "../application/manager-queue.ts";
 import type { EnginesService } from "../application/engines-service.ts";
 import type { ConnectionsPageService } from "../application/connections-page.ts";
 import type { BoardService } from "../application/board-service.ts";
@@ -32,7 +33,9 @@ import { servingHeaders, type Files } from "./files.ts";
 import type { Inbox } from "./uploads.ts";
 import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
-  AnswerBody, BoardActionBody, BoardCreateBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, UsageReportBody, IdentityProveBody, LinkDecisionBody, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PushSubscriptionBody, SendBody, UPLOAD_NAME_HEADER,
+  AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
+  LinkDecisionBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
+  RevokeCommand, RoleCommand, SendBody, UPLOAD_NAME_HEADER, UsageReportBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -193,6 +196,7 @@ export function startHttp(p: {
   connections?: ConnectionsPageService | null;                              // ADR-0018: LLM connections; null: no home set
   board?: { service: BoardService; agents: AgentAccess } | null;            // ADR-0015: the board; null: off
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
+  queue?: ManagerQueue | null;                                              // the manager's delivery queue (fleet-clients §9.1); null without a fleet
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
 }) {
   const { config, identity, access, observation, steering, escalations, remote } = p;
@@ -472,11 +476,22 @@ export function startHttp(p: {
     if (sendTo !== null && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody);
-      const r = await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.retry === true, body.again === true);
+      const r = await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true);
       if (r.ok) return json(res, 200, r);
-      if (r.problem === "unavailable") return json(res, 503, { error: r.problem });
-      if (r.problem === "duplicate") return json(res, 200, { error: "duplicate", ok: true, at: r.at, ...(r.queued ? { queued: true } : {}), ...(r.inbox !== undefined ? { inbox: r.inbox, reason: r.reason ?? null } : {}) });
+      if (r.problem === "duplicate") return json(res, 200, { error: "duplicate", ok: true, at: r.at, ...(r.delivery ? { delivery: r.delivery } : {}) });
       return json(res, r.problem === "step_up" ? 403 : r.problem === "no_pane" ? 404 : 409, { error: r.problem });
+    }
+    // The principal's cancel of one of his messages to the manager still waiting in the fleet's queue (ruling 83; spec
+    // §9.1): 200 with where it stands now (given up, cancelled), 409 only when it is too late (already typed), 404 for
+    // no such message of his. A refusal that is not too late (the node offline, a timeout, busy) is 503: the app keeps
+    // Cancel, and a later try can still withdraw it.
+    if (path === "/api/manager/cancel" && method === "POST") {
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, CancelBody);
+      const r = await steering.cancel(a, body.requestId);
+      if (r.ok) return json(res, 200, r);
+      const status = r.problem === "unknown" ? 404 : r.problem === "already_typed" ? 409 : 503;
+      return json(res, status, { error: r.problem });
     }
     // A file an agent sent or the principal attached: the hub's copy, by id only (files.ts), never as a page of this origin.
     const file = /^\/api\/files\/([0-9a-f]{32})$/.exec(path);
@@ -676,6 +691,11 @@ export function startHttp(p: {
       const unsubscribeBoard = escalations.subscribe(board => send({ t: "decisions", ...board }));
       const unsubscribeTasks = p.board?.service.subscribe(b => send({ t: "board", ...b })) ?? (() => false);
       const unsubscribeUsage = p.usage?.subscribe(v => send({ t: "usage", ...v })) ?? (() => false);
+      // Where this device's messages to the manager stand in the fleet's queue (fleet-clients §9.1): each change, by
+      // request id; never another device's.
+      const unsubscribeQueue = p.queue?.subscribe(c => {
+        if (c.row.kind === "command" && c.row.endpointId === conn.auth.endpoint.id) send({ t: "deliveries", items: [queuedCommand(c.row, c.view)] });
+      }) ?? (() => false);
       const unsubscribeJobs = p.jobs?.subscribe(v => send({ t: "jobs", ...v })) ?? (() => false);
       // Older pages, one at a time per connection (fleet core §3.1): each waits for the one before it.
       let olderDone: Promise<void> = Promise.resolve();
@@ -685,7 +705,7 @@ export function startHttp(p: {
       // without a listener that emit would end the hub. Logged without the payload.
       ws.on("error", e => log.warn(`feed socket: ${e.message}`));
       ws.on("pong", () => { conn.alive = true; });
-      ws.on("close", () => { conns.delete(conn); unsubscribe(); unsubscribeBoard(); unsubscribeTasks(); unsubscribeUsage(); unsubscribeJobs(); unsubscribeReading(); p.push?.notifications.left(conn.id); p.presence?.left(conn.id); });
+      ws.on("close", () => { conns.delete(conn); unsubscribe(); unsubscribeBoard(); unsubscribeTasks(); unsubscribeUsage(); unsubscribeJobs(); unsubscribeQueue(); unsubscribeReading(); p.push?.notifications.left(conn.id); p.presence?.left(conn.id); });
       // Every frame is decoded (ADR-0008, A2): malformed closes with 1003, a type this hub doesn't know is ignored.
       ws.on("message", raw => {
         if (!buckets.feedFrames.take(conn.id).ok) return ws.close(1008, "too many messages");
@@ -715,6 +735,7 @@ export function startHttp(p: {
             send({ t: "decisions", ...escalations.board() });
             if (p.board) send({ t: "board", ...p.board.service.view() });   // ADR-0015: whole, after every hello
             if (p.usage) send({ t: "usage", ...p.usage.view() });           // ADR-0016: every account, after every hello
+            if (p.queue) send({ t: "deliveries", items: p.queue.commandsOf(conn.auth.endpoint.id) });   // all of the last day
             if (p.jobs) send({ t: "jobs", ...p.jobs.view() });               // the fleet mirror, after every hello
             if (p.reading) send(p.reading.state());           // all marks and mutes: they may have moved while away
             if (p.reading) send({ t: "caught_up", at: p.reading.caughtUpAt() });   // ADR-0009, C7

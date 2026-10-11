@@ -76,6 +76,8 @@
   });
   void device$.ready.then(o => { outbox = o; });
   $effect(() => { if (feed.status === "live") outbox?.connected(); });
+  // Messages to the manager in the fleet's queue move on as the hub says (fleet-clients §9.1).
+  $effect(() => { const items = feed.deliveries; if (items.length) void device$.ready.then(o => o.deliveries(items)); });
 
   // Where he is. A push's click opens the app with ?view=decisions (the decision cards) or ?view=activity (the chats,
   // where a lane that needs him says so). The address is cleaned either way.
@@ -211,7 +213,7 @@
 <div class="phone" class:full={deciding || chat !== null || away.open}>
   {#if deciding}
     <CatchUp {feed} {session} {quick} {outgoing} {verifiedFresh} {verify} onBack={stopDeciding} onDay={() => { session.finish(); stopDeciding(); }}
-      onQueue={queue} onRetry={id => void outbox?.retry(id)} onDiscard={id => void outbox?.discard(id)}
+      onQueue={queue} onRetry={id => void outbox?.retry(id)} onDiscard={id => void outbox?.discard(id)} onCancel={id => void outbox?.cancel(id)}
       onEchoes={(worker, e) => void outbox?.echoes(worker, e)}
       onScreen={id => { stopDeciding(); openChat(id, true); }} />
   {:else if tab === "chats"}
@@ -237,7 +239,7 @@
     {#key chatWorker.id}
       <Conversation {feed} worker={chatWorker} {outgoing} {pendingFiles} {now} {verifiedFresh} {verify} screen={chatScreen} onBack={closeChat} onDecide={id => decide({ decision: id })}
         onQueue={queue} onRetry={id => void again(id, "retry")} onDiscard={id => void outbox?.discard(id)}
-        onAgain={id => void again(id, "again")} onCheck={id => void outbox?.check(id)} onEchoes={echoes} />
+        onAgain={id => void again(id, "again")} onCancel={id => void outbox?.cancel(id)} onEchoes={echoes} />
     {/key}
   {/if}
   {#if away.open && away.pending}

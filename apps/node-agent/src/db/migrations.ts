@@ -117,6 +117,32 @@ export const MIGRATIONS: readonly Migration[] = [
     name: "a job keeps the notice text it showed, so a later notice change still has it",
     up: db => { db.exec("ALTER TABLE jobs ADD COLUMN notice_text TEXT"); },
   },
+  {
+    version: 7,
+    name: "deliveries: the delivery queue (fleet clients spec §4; plan Contracts, Databases; agent.db migration 7, after the jobs' 3 to 6)",
+    // One row per delivery, the text included (the fleet's mirror never holds it, spec §4.6). Storing a row is synced to
+    // the disk (deliveries/store.ts, fleet core §16.4); every later change is an ordinary commit. rowid is the order
+    // stored, so the table keeps SQLite's rowid (not WITHOUT ROWID).
+    up: db => {
+      db.exec(`
+        CREATE TABLE deliveries (
+          id TEXT PRIMARY KEY,
+          target_lane TEXT, target_worker TEXT, sticky INTEGER NOT NULL CHECK (sticky IN (0, 1)), bound_session TEXT,
+          text TEXT NOT NULL,
+          state TEXT NOT NULL CHECK (state IN ('queued', 'typed', 'held', 'delivered', 'uncertain', 'given_up')),
+          waiting_reason TEXT CHECK (waiting_reason IN ('menu_open', 'draft_present', 'no_input_box', 'busy', 'no_pane', 'no_session', 'earlier', 'unavailable')),
+          waiting_since INTEGER, queued_at INTEGER NOT NULL, not_after INTEGER NOT NULL,
+          typed_at INTEGER, typed_session TEXT, delivered_at INTEGER,
+          why TEXT CHECK (why IN ('expired', 'cancelled', 'gone', 'refused')), note TEXT,
+          retyped INTEGER NOT NULL DEFAULT 0 CHECK (retyped IN (0, 1)),
+          updated_at INTEGER NOT NULL,
+          CHECK ((target_lane IS NULL) <> (target_worker IS NULL)));
+        CREATE INDEX deliveries_by_state ON deliveries (state, updated_at);
+        CREATE INDEX deliveries_by_lane ON deliveries (target_lane) WHERE target_lane IS NOT NULL;
+        CREATE INDEX deliveries_by_worker ON deliveries (target_worker) WHERE target_worker IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 export function migrate(db: Database.Database, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {

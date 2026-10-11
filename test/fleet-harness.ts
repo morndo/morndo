@@ -22,14 +22,15 @@ import { WebSocket } from "ws";
 import { endpointId, pairingTokenId, sessionId } from "@morndo/domain";
 import { Store } from "../apps/hub/src/adapters/store.ts";
 import { hashSecret } from "../apps/hub/src/application/access-service.ts";
-import { FleetClient } from "../apps/hub/src/adapters/fleet-client.ts";
+import { FleetClient } from "../packages/fleet-client/src/index.ts";
+import type { Control } from "./fixtures/fake-claude-pane.ts";
 import { loadConfig, type AgentConfig } from "../apps/node-agent/src/config.ts";
 import { agentPaths } from "../apps/node-agent/src/paths.ts";
 import type { TestHooks } from "../apps/node-agent/src/test-hooks.ts";
 import type { FleetConfig } from "../apps/fleet/src/config.ts";
 import { exactSession, tmuxArgv, tmuxLiteral } from "../packages/node-ops/src/tmux-cli.ts";
 import { isolatedTmux } from "../packages/node-ops/test/isolated-tmux.ts";
-import { OP_NAMES, type Expect, type HookEvent, type OpName, type Pane } from "../packages/protocol/src/fleet.ts";
+import { OP_NAMES, type Delivery as DrillDelivery, type Expect, type HookEvent, type OpName, type Pane } from "../packages/protocol/src/fleet.ts";
 import { parseWorkerId } from "../packages/protocol/src/worker-id.ts";
 
 export { sleep };
@@ -47,7 +48,7 @@ const servers = new Map<string, () => Promise<void>>();   // tmux socket name �
 const dirs = new Set<string>();
 const closers: (() => void | Promise<void>)[] = [];
 
-function tempDir(prefix: string, base = tmpdir()): string {
+export function tempDir(prefix: string, base = tmpdir()): string {
   const d = mkdtempSync(join(base, prefix));
   dirs.add(d);
   return d;
@@ -174,10 +175,29 @@ function openWindow(t: TmuxServer, session: string, window: string, cwd: string,
 export type Lane = {
   window: string; paneId: string; dir: string; sessionId: string | null; transcript: string | null;
   submitted(): string[]; screen(): string; draft(text: string): void; clear(): void;
+  control(c: Control): Promise<void>;          // what Claude Code does next (test/fixtures/fake-claude-pane.ts, Control)
+  entries(): Record<string, unknown>[];         // its transcript's lines, parsed
+  enters(): number;                             // Enter presses since the last bracketed paste ended
 };
-// A lane: one window running the fixture. With `claudeHome` (an agent's HOME), the fixture writes its session file and
-// transcript into <claudeHome>/.claude, so the agent reports its session and serves its transcript.
-export async function fakeLane(t: TmuxServer, o: { window: string; session?: string; prose?: string; claudeHome?: string; offsetMs?: number }): Promise<Lane> {
+// The box whose state dir is `dir` applies `c` (and every command before it) before this returns. A lane's state dir is its
+// window's working directory, so a lane that lane.start opened is reached by the directory it was started in.
+export async function controlAt(dir: string, c: Control): Promise<void> {
+  const file = join(dir, "control.jsonl");
+  const n = (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).length : 0) + 1;
+  appendFileSync(file, `${JSON.stringify(c)}\n`);
+  const done = join(dir, "applied");
+  await until(`the box in ${dir} to apply ${JSON.stringify(c)}`, () => existsSync(done) && Number(readFileSync(done, "utf8")) >= n, 5000, 20);
+}
+export const submittedAt = (dir: string): string[] => {
+  const file = join(dir, "submitted.jsonl");
+  return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : [];
+};
+// A lane: one window running the fake input box. With `claudeHome` (an agent's HOME), the box writes its session file and
+// transcript into <claudeHome>/.claude, so the agent reports its session and status and serves its transcript.
+// `startDelayMs`: the box shows Claude Code starting for that long; `wait: false` returns before the box is drawn.
+export async function fakeLane(t: TmuxServer, o: {
+  window: string; session?: string; prose?: string; claudeHome?: string; offsetMs?: number; startDelayMs?: number; wait?: boolean;
+}): Promise<Lane> {
   const session = o.session ?? "qa";
   const dir = tempDir("morndo-lane-");
   if (o.prose) writeFileSync(join(dir, "prose.txt"), o.prose);
@@ -185,17 +205,24 @@ export async function fakeLane(t: TmuxServer, o: { window: string; session?: str
   const claude = o.claudeHome ? join(o.claudeHome, ".claude") : null;
   const paneId = openWindow(t, session, o.window, dir, [process.execPath, "--no-warnings", FAKE_CLAUDE, dir,
     ...(claude && sessionId ? [`--claude=${claude}`, `--session=${sessionId}`, `--tmux-session=${session}`] : []),
-    ...(o.offsetMs ? [`--offset=${o.offsetMs}`] : [])]);
+    ...(o.offsetMs ? [`--offset=${o.offsetMs}`] : []), ...(o.startDelayMs ? [`--start-delay=${o.startDelayMs}`] : [])]);
   const screen = () => t.run("capture-pane", "-p", "-t", paneId);
-  await until(`${o.window}'s input box`, () => screen().includes("❯"));
-  const file = join(dir, "submitted.jsonl");
+  if (o.wait !== false) await until(`${o.window}'s input box`, () => screen().includes("❯"), 10_000 + (o.startDelayMs ?? 0));
+  const transcript = claude && sessionId ? join(claude, "projects", "-qa", `${sessionId}.jsonl`) : null;
   return {
-    window: o.window, paneId, dir, sessionId,
-    transcript: claude && sessionId ? join(claude, "projects", "-qa", `${sessionId}.jsonl`) : null,
-    submitted: () => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []),
+    window: o.window, paneId, dir, sessionId, transcript,
+    submitted: () => submittedAt(dir),
     screen,
     draft: text => { t.run("send-keys", "-t", paneId, "-l", text); },
     clear: () => { t.run("send-keys", "-t", paneId, "C-u"); },
+    control: c => controlAt(dir, c),
+    entries: () => (transcript && existsSync(transcript)
+      ? readFileSync(transcript, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l) as Record<string, unknown>) : []),
+    enters: () => {
+      const raw = existsSync(join(dir, "raw.bin")) ? readFileSync(join(dir, "raw.bin")).toString("latin1") : "";
+      const end = raw.lastIndexOf("\x1b[201~");
+      return end === -1 ? 0 : raw.slice(end).split("\r").length - 1;
+    },
   };
 }
 // A plain shell window; `split` adds a second pane (a window with two panes is no lane, spec §4).
@@ -213,7 +240,9 @@ export type Fleet = {
   // Stops the service (SIGKILL by default), runs `whileDown` while nothing listens, then serves again on the same database.
   restart(signal?: NodeJS.Signals, whileDown?: () => Promise<void>): Promise<void>;
 };
-export async function startFleet(o: { subscribers?: FleetConfig["subscribers"] } = {}): Promise<Fleet> {
+export async function startFleet(o: {
+  subscribers?: FleetConfig["subscribers"]; stickyLanes?: string[]; laneEvents?: Partial<FleetConfig["laneEvents"]>;
+} = {}): Promise<Fleet> {
   const home = tempDir("morndo-fleet-");
   // The client socket's path must fit sockaddr_un.sun_path: 103 bytes on macOS, 107 on Linux
   // (https://nodejs.org/docs/latest-v24.x/api/net.html#identifying-paths-for-ipc-connections, read 2026-10-06). A temp
@@ -226,6 +255,10 @@ export async function startFleet(o: { subscribers?: FleetConfig["subscribers"] }
     listen: { host: "127.0.0.1", port }, socketPath: join(sockDir, "fleet.sock"),
     dbPath: join(home, ".local/share/morndo-fleet/fleet.db"), keyPath: join(home, ".local/share/morndo-fleet/fleet-key.pem"),
     publicUrl: `ws://127.0.0.1:${port}/agent`, subscribers: o.subscribers ?? [],
+    stickyLanes: o.stickyLanes ?? ["manager"],
+    // Off unless a test turns it on: a lane-event batch typed into a lane named "manager" would land in drills that count
+    // what that lane received (the fleet core's retry drills have one).
+    laneEvents: { deliverTo: null, header: "[lane-event] Lane events (handle them as your instructions say):", ignore: [], batchMs: 3000, ...o.laneEvents },
   };
   mkdirSync(join(home, ".config/morndo-fleet"), { recursive: true });
   writeFileSync(join(home, ".config/morndo-fleet/config.json"), JSON.stringify(config, null, 2));
@@ -266,7 +299,7 @@ export async function startFleet(o: { subscribers?: FleetConfig["subscribers"] }
 export type Agent = {
   node: string; home: string; configPath: string; readonly relayPort: number;
   config(): AgentConfig; proc(): Proc | null;
-  run(hooks?: TestHooks): Promise<void>; stop(signal?: NodeJS.Signals): Promise<void>;
+  run(hooks?: TestHooks, o?: { env?: Record<string, string> }): Promise<void>; stop(signal?: NodeJS.Signals): Promise<void>;
   waitOnline(ms?: number): Promise<void>; waitOffline(ms?: number): Promise<void>;
   resetDatabase(hooks?: TestHooks): Promise<void>; clone(): Promise<Agent>;
   copyDatabase(hooks?: TestHooks): Promise<string>; putBackDatabase(copy: string, hooks?: TestHooks, whileStopped?: () => Promise<void>): Promise<void>;
@@ -301,9 +334,9 @@ function agentAt(fleet: Fleet, node: string, home: string): Agent {
     node, home, configPath, config,
     get relayPort() { return config().relayPort; },
     proc: () => proc,
-    async run(hooks) {
-      // The agent refuses test hooks unless NODE_ENV is "test" and its HOME isn't the account's own (Task 8).
-      const extra: Record<string, string> = hooks ? { MORNDO_NODE_TEST_HOOKS: JSON.stringify(hooks), NODE_ENV: "test" } : {};
+    async run(hooks, o = {}) {
+      // The agent refuses test hooks unless NODE_ENV is "test" and its HOME isn't the account's own (Task 8 of the fleet core).
+      const extra: Record<string, string> = { ...(hooks ? { MORNDO_NODE_TEST_HOOKS: JSON.stringify(hooks), NODE_ENV: "test" } : {}), ...o.env };
       proc = startProc(`agent ${node} (${home})`, [AGENT_MAIN, "run"], cleanEnv(home, extra), join(home, "agent.log"));
     },
     async stop(signal = "SIGTERM") { await proc?.stop(signal); proc = null; },
@@ -373,6 +406,13 @@ function agentAt(fleet: Fleet, node: string, home: string): Agent {
   };
   return a;
 }
+// The agent's policy.json with these fields changed, before run() (the agent reads it at start). A policy the agent would
+// refuse fails here, with the setting named, not in the agent's log.
+export function updatePolicy(agent: Agent, patch: Partial<AgentConfig["policy"]>): void {
+  const file = agentPaths(agent.home).policyFile;
+  writeFileSync(file, JSON.stringify({ ...(JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>), ...patch }, null, 2), { mode: 0o600 });
+  loadConfig(agent.home);
+}
 
 // Every status flip of one node from now on ("online" | "stale" | "offline"), from the fleet's events. A new events
 // subscription first replays each registered node's current status (Contracts, `WS /v1/events`): that frame is not a
@@ -413,25 +453,58 @@ export const keyParts = (key: string) => {
   const [node = "", streamId = "", seq = "0"] = key.split(":");
   return { node, streamId, seq: Number(seq) };
 };
-export type Delivery = { key: string; event: HookEvent; got: number };
+export type Delivery = { key: string; event: HookEvent; got: number; path: string; headers: Record<string, string> };
 export type Subscriber = { url: string; received: Delivery[]; unique(): Map<string, Delivery> };
-// Records each delivery before it answers (after `delayMs`), so a fleet killed mid-request redelivers it: at least once.
-export async function subscriber(o: { delayMs?: number } = {}): Promise<Subscriber> {
+// Records each request before it answers, after `delayMs`, so a fleet killed mid-request redelivers it (at least once).
+// `answer` picks each answer's status (default 200): a subscriber that refuses, as kira did while Telegram blocked it.
+// `path`: the URL's path, "/hook" by default (the doc test uses kira's, "/fleet/hook").
+export async function subscriber(o: { delayMs?: number; path?: string; answer?: (d: Delivery) => number } = {}): Promise<Subscriber> {
   const received: Delivery[] = [];
   const server = createHttpServer((req, res) => {
     const parts: Buffer[] = [];
     req.on("data", (d: Buffer) => parts.push(d));
     req.on("end", () => {
-      received.push({ key: String(req.headers["idempotency-key"] ?? ""), event: JSON.parse(Buffer.concat(parts).toString()) as HookEvent, got: performance.now() });
-      setTimeout(() => res.writeHead(200).end(), o.delayMs ?? 0);
+      const headers = Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(", ") : String(v ?? "")]));
+      const d: Delivery = {
+        key: headers["idempotency-key"] ?? "", event: JSON.parse(Buffer.concat(parts).toString()) as HookEvent, got: performance.now(),
+        path: (req.url ?? "/").split("?")[0] ?? "/", headers,
+      };
+      received.push(d);
+      setTimeout(() => res.writeHead(o.answer?.(d) ?? 200).end(), o.delayMs ?? 0);
     });
   });
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   closers.push(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
   return {
-    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/hook`,
+    url: `http://127.0.0.1:${(server.address() as AddressInfo).port}${o.path ?? "/hook"}`,
     received,
     unique: () => { const m = new Map<string, Delivery>(); for (const d of received) if (!m.has(d.key)) m.set(d.key, d); return m; },
+  };
+}
+
+// Deliveries as the fleet publishes them (`delivery` events) and mirrors them (GET /v1/deliveries/<id>). `states` keeps
+// every state an id went through, so a drill can tell it waited for a menu after it has moved on; `until` polls the mirror
+// and also accepts a state already published.
+export type DeliveryWatch = {
+  states(id: string): (DrillDelivery & { stale: boolean })[];
+  until(id: string, what: (d: DrillDelivery) => boolean, ms?: number): Promise<DrillDelivery>;
+};
+export async function watchDeliveries(fleet: Fleet): Promise<DeliveryWatch> {
+  const seen = new Map<string, (DrillDelivery & { stale: boolean })[]>();
+  let open = false;
+  closers.push(fleet.client.events(e => {
+    if (e.t !== "delivery") return;
+    const d = e.body as DrillDelivery & { stale: boolean };
+    seen.set(d.id, [...(seen.get(d.id) ?? []), d]);
+  }, { onOpen: () => { open = true; } }));
+  await until("the fleet's events subscription", () => open);
+  return {
+    states: id => seen.get(id) ?? [],
+    until: (id, what, ms = 30_000) => until(`delivery ${id}: ${what.toString().slice(0, 100)}`, async () => {
+      const now = await fleet.client.delivery(id);
+      if (now && what(now)) return now;
+      return seen.get(id)?.find(what) ?? null;
+    }, ms, 200),
   };
 }
 
@@ -449,6 +522,11 @@ export type Hub = {
   send(workerId: string, text: string, requestId?: string): Promise<Reply>;
   answer(id: string, key: string, requestId?: string): Promise<Reply>;
   feed(): Promise<FeedWatch>; audit(): string; pairUrl(): string; stop(): Promise<void>;
+  get(path: string): Promise<Reply>;                      // a GET with the seeded session's cookie
+  log(): string;                                          // the hub's log so far, every start included
+  // Stops the hub (SIGTERM by default), runs `whileStopped`, and serves again on the same HOME, port and database, with the
+  // manager queue switched as asked (unchanged when not given); resolves once it listens again.
+  restart(o?: { signal?: NodeJS.Signals; managerQueue?: boolean; whileStopped?: () => Promise<void> }): Promise<void>;
 };
 
 // A device and a verified session written straight into the hub's database before it starts, as e2e/qa-session.ts
@@ -469,7 +547,7 @@ function seedSession(home: string): string {
   return secret;
 }
 
-export async function startHub(fleet: Fleet, o: { pollMs?: number; web?: "stub" | "build"; ledger?: unknown; vnc?: string } = {}): Promise<Hub> {
+export async function startHub(fleet: Fleet, o: { pollMs?: number; web?: "stub" | "build"; ledger?: unknown; vnc?: string; managerQueue?: boolean } = {}): Promise<Hub> {
   const home = tempDir("morndo-hub-");
   const port = await freePort();
   const origin = `http://localhost:${port}`;
@@ -485,6 +563,8 @@ export async function startHub(fleet: Fleet, o: { pollMs?: number; web?: "stub" 
     MORNDO_POLL_MS: String(o.pollMs ?? 400), MORNDO_QUIET_AFTER_MS: "2000", MORNDO_WEB_DIR: web, MORNDO_INBOX: join(home, "inbox"),
   };
   if (o.vnc !== undefined) extra.MORNDO_VNC = o.vnc;
+  // The hub as it ships: with a fleet, the manager's queue (MORNDO_MANAGER_QUEUE) is on unless a drill turns it off.
+  if (o.managerQueue === false) extra.MORNDO_MANAGER_QUEUE = "off";
   if (o.ledger !== undefined) {
     const ledger = join(home, "ledger.json");
     writeFileSync(ledger, JSON.stringify(o.ledger));
@@ -493,25 +573,50 @@ export async function startHub(fleet: Fleet, o: { pollMs?: number; web?: "stub" 
   const env = cleanEnv(home, extra);
   const secret = seedSession(home);
   const log = join(home, "hub.log");
-  const proc = startProc("hub", [HUB_MAIN, "serve"], env, log);
-  await until("the hub listening", () => {
-    if (!proc.alive()) throw new Fatal(`the hub exited during startup (${proc.child.exitCode ?? proc.child.signalCode})\n${proc.tail(15)}`);
-    return existsSync(log) && readFileSync(log, "utf8").includes("morndo hub on");
-  }, 30_000);
+  const logText = () => (existsSync(log) ? readFileSync(log, "utf8") : "");
+  const starts = () => logText().split("morndo hub on").length - 1;
+  let current = env;
+  let proc: Proc | null = null;
+  // The hub on this HOME, port and database; listening once its log says "morndo hub on" once more than before.
+  const serve = async (e: NodeJS.ProcessEnv) => {
+    const before = starts();
+    const p = startProc("hub", [HUB_MAIN, "serve"], e, log);
+    proc = p;
+    await until("the hub listening", () => {
+      if (!p.alive()) throw new Fatal(`the hub exited during startup (${p.child.exitCode ?? p.child.signalCode})\n${p.tail(15)}`);
+      return starts() > before;
+    }, 30_000);
+  };
+  await serve(env);
   const headers = { origin, "content-type": "application/json", cookie: `__Host-morndo=${secret}` };
   const post = async (path: string, body: unknown): Promise<Reply> => {
     const r = await fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) });
     return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, unknown> };
   };
-  const cli = (...args: string[]) => spawnSync(process.execPath, ["--no-warnings", HUB_MAIN, ...args], { env, encoding: "utf8", timeout: 30_000 }).stdout ?? "";
+  const get = async (path: string): Promise<Reply> => {
+    const r = await fetch(base + path, { headers });
+    return { status: r.status, body: (await r.json().catch(() => ({}))) as Record<string, unknown> };
+  };
+  const cli = (...args: string[]) => spawnSync(process.execPath, ["--no-warnings", HUB_MAIN, ...args], { env: current, encoding: "utf8", timeout: 30_000 }).stdout ?? "";
   return {
-    base, origin, port, home, env, cookie: secret, post,
+    base, origin, port, home, env, cookie: secret, post, get,
     send: (workerId, text, requestId = randomUUID()) => post(`/api/workers/${encodeURIComponent(workerId)}/send`, { text, requestId, seen: "none" }),
     answer: (id, key, requestId = randomUUID()) => post(`/api/escalations/${encodeURIComponent(id)}/answer`, { key, requestId }),
     feed: () => openFeed(base, origin, secret),
     audit: () => cli("audit", "200"),
     pairUrl: () => cli("pair").split("\n").find(l => l.includes("/pair#t="))?.trim() ?? "",
-    stop: () => proc.stop(),
+    log: logText,
+    stop: async () => { await proc?.stop(); },
+    async restart(o = {}) {
+      await proc?.stop(o.signal ?? "SIGTERM");
+      await o.whileStopped?.();
+      if (o.managerQueue !== undefined) {
+        // On is the hub's own default with a fleet (Task 12): the setting is left out; off is "off".
+        const { MORNDO_MANAGER_QUEUE: _, ...rest } = current;
+        current = o.managerQueue ? rest : { ...rest, MORNDO_MANAGER_QUEUE: "off" };
+      }
+      await serve(current);
+    },
   };
 }
 

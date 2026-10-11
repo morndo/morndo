@@ -25,7 +25,7 @@
   const loadDesktop = () => import("./DesktopView.svelte");
   const loadTerminal = () => import("./TerminalView.svelte");
 
-  let { worker, displayName, feed, outgoing, verifiedAt, stepUpMs, panel, prefs, onDetails, onSecurity, onPanel, onQueue, onRetry, onDiscard,
+  let { worker, displayName, feed, outgoing, verifiedAt, stepUpMs, panel, prefs, onDetails, onSecurity, onPanel, onQueue, onRetry, onDiscard, onCancel = () => {},
     onVerify, onEdit, editRequest, onEdited, onVerified, dividerMark = undefined, onAtBottom = () => {}, decisions, decisionsOpen, onDecisions, screenRequest, decisionOf, card, focus, desktop,
     task = null, onOpenTask = () => {}, composerEl = $bindable(null) }: {
     worker: RosterEntry; displayName: string; feed: LiveFeed; outgoing: Outgoing[]; verifiedAt: number | null; stepUpMs: number | null;
@@ -36,6 +36,7 @@
     decisionOf: (messageId: string) => DecisionItem | undefined; card: Snippet<[DecisionItem]>; focus: { id: string; n: number } | null;
     onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; files: SentFile[]; seen: string; held?: string }) => Promise<void>;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onVerify: (id: string) => void; onEdit: (id: string) => void;
+    onCancel?: (id: string) => void;                    // a message the manager's queue still holds (ruling 83)
     editRequest: { worker: string; text: string; n: number } | null; onEdited: () => void; onVerified: (at: number) => void;
     dividerMark?: number | null | undefined; onAtBottom?: (atBottom: boolean, worker: string) => void;
     task?: Task | null; onOpenTask?: (key: string) => void;   // ADR-0015: the task this lane has in progress, by the board
@@ -79,7 +80,7 @@
   </div>
   {#if tab === "messages"}
     <MessageList {worker} {prefs} messages={feed.historyFor === worker.id ? feed.messages : []} loading={feed.historyFor !== worker.id} {outgoing} {displayName} {decisionOf} {card} {focus}
-      {onRetry} {onDiscard} {onVerify} {onEdit} {dividerMark} {onAtBottom}
+      {onRetry} {onDiscard} {onVerify} {onEdit} {onCancel} {dividerMark} {onAtBottom}
       older={feed.older} olderPages={feed.olderPages} onOlder={() => feed.loadOlder()} detached={feed.detached} newWhileDetached={feed.newWhileDetached} onLatest={() => feed.latest()} />
     <!-- One composer per conversation: a draft and its images never carry over to another (a switch drops them). -->
     {#key worker.id}<Composer target={worker.id} targetName={displayName} conversation={worker.name} working={worker.state === "active"} waitingOn={worker.waitingOn} {verifiedAt} {stepUpMs} {onSecurity}

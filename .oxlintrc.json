@@ -28,6 +28,7 @@
     {
       "files": [
         "packages/node-ops/src/tmux.ts",
+        "packages/node-ops/src/menu.ts",
         "packages/domain/src/board.ts",
         "packages/node-ops/test/tmux*.ts",
         "apps/hub/src/adapters/manager-protocol.ts",
@@ -44,6 +45,7 @@
       "files": [
         "apps/hub/src/**",
         "packages/node-ops/src/**",
+        "packages/fleet-client/src/**",
         "apps/node-agent/src/**",
         "apps/fleet/src/**"
       ],

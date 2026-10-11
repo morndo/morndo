@@ -24,10 +24,11 @@
   import type { QuickAnswers } from "./quick.svelte.ts";
   import { tookLabel } from "./words.ts";
 
-  let { feed, session, quick, outgoing, verifiedFresh, verify, onBack, onDay, onQueue, onRetry, onDiscard, onEchoes, onScreen }: {
+  let { feed, session, quick, outgoing, verifiedFresh, verify, onBack, onDay, onQueue, onRetry, onDiscard, onCancel = () => {}, onEchoes, onScreen }: {
     feed: LiveFeed; session: CatchUpSession; quick: QuickAnswers; outgoing: OutboxRecord[]; verifiedFresh: boolean; verify: () => Promise<boolean>;
     onBack: () => void; onDay: () => void; onQueue: (c: NewCommand) => Promise<void>; onRetry: (id: string) => void; onDiscard: (id: string) => void;
     onEchoes: (worker: string, echoes: Echo[]) => void; onScreen: (workerId: string) => void;
+    onCancel?: (id: string) => void;                    // a message the manager's queue still holds (ruling 83)
   } = $props();
 
   const run = $derived(session.run);
@@ -213,7 +214,7 @@
           {:else}
             <UpdateCard worker={feed.workers.find(w => w.id === top.worker) ?? null} name={top.conversation} {view} mark={view?.mark ?? feed.reads[top.conversation] ?? null}
               {now} outgoing={outgoing.filter(o => o.worker === top.worker)} loading={online} {note}
-              onReply={reply} onOpen={id => openChat(top.worker, top.conversation, id)} {onRetry} {onDiscard}
+              onReply={reply} onOpen={id => openChat(top.worker, top.conversation, id)} {onRetry} {onDiscard} {onCancel}
               onVerify={id => void verify().then(ok => { if (ok) onRetry(id); })} />
           {/if}
         </article>

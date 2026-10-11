@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { assertLocalDisk } from "@morndo/service-kit";
 import { migrate } from "./migrations.ts";
+import type { DeliveryState } from "@morndo/protocol";
 import {
   endpointId, pairingTokenId, sessionId,
   type AccessEvent, type AccountUsage, type BoardChanged, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
@@ -23,16 +24,36 @@ type Row = Record<string, unknown>;
 // A sends row, its state first (as Store.send returned it before `workerId` and `key` were added, so a failed assertion on
 // one still prints its state).
 export type SendRow = {
-  state: "started" | "done"; at: number; outcome: string | null; typedAt: number | null; store: string | null; storeSeq: number | null; workerId: string | null; key: string;
+  state: "started" | "done"; at: number; typedAt: number | null; store: string | null; storeSeq: number | null; workerId: string | null; key: string;
 };
 type SendRowSql = {
-  key: string; state: "started" | "done"; at: number; outcome: string | null; typed_at: number | null; node_store: string | null; node_store_seq: number | null; worker_id: string | null;
+  key: string; state: "started" | "done"; at: number; typed_at: number | null; node_store: string | null; node_store_seq: number | null; worker_id: string | null;
 };
 const sendRow = (r: SendRowSql): SendRow =>
-  ({ state: r.state, at: r.at, outcome: r.outcome, typedAt: r.typed_at, store: r.node_store, storeSeq: r.node_store_seq, workerId: r.worker_id, key: r.key });
-const SEND_COLUMNS = "key, state, at, outcome, typed_at, node_store, node_store_seq, worker_id";
+  ({ state: r.state, at: r.at, typedAt: r.typed_at, store: r.node_store, storeSeq: r.node_store_seq, workerId: r.worker_id, key: r.key });
+const SEND_COLUMNS = "key, state, at, typed_at, node_store, node_store_seq, worker_id";
 
 export const READ_MARKS_KEPT = 500;
+
+// One delivery of an answer or a message to the manager through the fleet's queue (fleet-clients §9.1; migration 18).
+// `state` "sending": the fleet was asked and hasn't answered yet (or never did); otherwise the delivery's own state as the
+// hub last heard it. An answer's `choice` is JSON (escalation-service.ts StoredChoice: its option, or its words' length
+// and digest, never the words); `ask` the ask it answered (its message, or its time); `queuedAt` the hub's time, which
+// is the queued Decision's own. A message's are null. Never the text.
+export type ManagerDeliveryState = "sending" | DeliveryState;
+export type ManagerDeliveryRow = {
+  deliveryId: string; kind: "answer" | "command"; escalationId: string | null; ask: string | null; choice: string | null;
+  endpointId: string; sessionId: string; requestId: string; queuedAt: number; state: ManagerDeliveryState; updatedAt: number;
+};
+type ManagerDeliverySql = {
+  delivery_id: string; kind: "answer" | "command"; escalation_id: string | null; ask: string | null; choice: string | null;
+  endpoint_id: string; session_id: string; request_id: string; queued_at: number; state: ManagerDeliveryState; updated_at: number;
+};
+const managerDeliveryRow = (r: ManagerDeliverySql): ManagerDeliveryRow => ({
+  deliveryId: r.delivery_id, kind: r.kind, escalationId: r.escalation_id, ask: r.ask, choice: r.choice, endpointId: r.endpoint_id,
+  sessionId: r.session_id, requestId: r.request_id, queuedAt: r.queued_at, state: r.state, updatedAt: r.updated_at,
+});
+const OPEN_STATES = "('sending', 'queued', 'typed', 'held')";
 
 const linkFrom = (r: Row): LinkRequest => ({
   id: r.id as string, secretHash: r.secret_hash as string, tokenSecretHash: r.token_secret_hash as string, code: r.code as string,
@@ -89,17 +110,6 @@ export class Store {
     this.db.prepare("INSERT INTO decisions (escalation_id, at, body) VALUES (?, ?, ?) ON CONFLICT(escalation_id) DO UPDATE SET at = excluded.at, body = excluded.body")
       .run(id, Date.now(), JSON.stringify(decision));
   }
-  // ADR-0010: the answers handed to the manager's inbox and not settled yet, one row per inbox message (its key), so two
-  // answers to one ask (asked again in between) are each recorded when they arrive (code review B7).
-  savePending(key: string, escalationId: string, body: unknown) {
-    this.db.prepare("INSERT INTO pending_answers (key, escalation_id, body, at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET body = excluded.body")
-      .run(key, escalationId, JSON.stringify(body), Date.now());
-  }
-  pendingAnswers(): { key: string; escalationId: string; body: unknown }[] {
-    return (this.db.prepare("SELECT key, escalation_id, body FROM pending_answers ORDER BY at").all() as Row[])
-      .map(r => ({ key: r.key as string, escalationId: r.escalation_id as string, body: JSON.parse(r.body as string) as unknown }));
-  }
-  dropPending(key: string) { this.db.prepare("DELETE FROM pending_answers WHERE key = ?").run(key); }
   // Only while the stored Decision is still this one (the time it was taken): a newer answer's row is left alone (B3).
   replaceDecisionIf(id: string, at: number, decision: unknown) {
     this.db.prepare("UPDATE decisions SET body = ? WHERE escalation_id = ? AND json_extract(body, '$.at') = ?").run(JSON.stringify(decision), id, at);
@@ -107,9 +117,75 @@ export class Store {
   dropDecisionIf(id: string, at: number) {
     this.db.prepare("DELETE FROM decisions WHERE escalation_id = ? AND json_extract(body, '$.at') = ?").run(id, at);
   }
-  decisions(sinceMs = 7 * 24 * 3_600_000): { id: string; decision: unknown }[] {
-    return (this.db.prepare("SELECT escalation_id, body FROM decisions WHERE at >= ?").all(Date.now() - sinceMs) as Row[])
+  // The Decisions a hub start restores (E8): every one whatever its age, since an ask can stay open far longer than a
+  // week (the manager's list keeps an answered item open while it works on it; issue #20). The domain applies one only
+  // to its own ask, sighted again and not asked again since (Escalations.restore). A menu on a screen (`menu-…`,
+  // menuEscalationId) keeps the 7-day window: its id names a pane, and a legacy pane id comes back on a later pane, whose
+  // new menu an old answer must not answer (fleet core §4: old `menu-N` rows drop out of view). SQLite's substr, not
+  // LIKE, whose `_` would match any character.
+  decisions(menuWindowMs = 7 * 24 * 3_600_000): { id: string; decision: unknown }[] {
+    return (this.db.prepare("SELECT escalation_id, body FROM decisions WHERE substr(escalation_id, 1, 5) <> 'menu-' OR at >= ?").all(Date.now() - menuWindowMs) as Row[])
       .map(r => ({ id: r.escalation_id as string, decision: JSON.parse(r.body as string) as unknown }));
+  }
+
+  // The manager's deliveries (fleet-clients §9.1, migration 18), written before the fleet is asked, so a hub that stops
+  // then still follows what it may have queued. NORMAL like every hub table (plan.md, Databases): a row a power loss
+  // takes back is a delivery the hub stops following, which the node still delivers once. A second write of an id
+  // changes nothing: the row of its first attempt stands.
+  saveManagerDelivery(r: ManagerDeliveryRow) {
+    // ON CONFLICT, not OR IGNORE: that would also swallow a CHECK on a kind or a state this table doesn't know.
+    this.db.prepare(`INSERT INTO manager_deliveries (delivery_id, kind, escalation_id, ask, choice, endpoint_id, session_id, request_id, queued_at, state, updated_at)
+      VALUES (@deliveryId, @kind, @escalationId, @ask, @choice, @endpointId, @sessionId, @requestId, @queuedAt, @state, @updatedAt)
+      ON CONFLICT(delivery_id) DO NOTHING`).run(r);
+  }
+  managerDelivery(id: string): ManagerDeliveryRow | null {
+    const r = this.db.prepare("SELECT * FROM manager_deliveries WHERE delivery_id = ?").get(id) as ManagerDeliverySql | undefined;
+    return r ? managerDeliveryRow(r) : null;
+  }
+  // The latest delivery a request made (an answer, or a message).
+  managerDeliveryOfRequest(endpointId: string, requestId: string): ManagerDeliveryRow | null {
+    const r = this.db.prepare("SELECT * FROM manager_deliveries WHERE endpoint_id = ? AND request_id = ? ORDER BY queued_at DESC, length(delivery_id) DESC, delivery_id DESC LIMIT 1")
+      .get(endpointId, requestId) as ManagerDeliverySql | undefined;
+    return r ? managerDeliveryRow(r) : null;
+  }
+  // The delivery of the answer whose Decision was taken at `queuedAt`.
+  answerDelivery(escalationId: string, queuedAt: number): ManagerDeliveryRow | null {
+    // The latest attempt: of ids that share a key, the longer suffix is the higher number ("~10" after "~9"; review #12).
+    const r = this.db.prepare("SELECT * FROM manager_deliveries WHERE kind = 'answer' AND escalation_id = ? AND queued_at = ? ORDER BY length(delivery_id) DESC, delivery_id DESC LIMIT 1")
+      .get(escalationId, queuedAt) as ManagerDeliverySql | undefined;
+    return r ? managerDeliveryRow(r) : null;
+  }
+  // Every delivery under one key: the key itself, then "<key>~2", "<key>~3" … (manager-queue.ts idFor), oldest first.
+  // SQLite's substr counts characters, so the prefix is counted in code points.
+  managerDeliveryAttempts(base: string): ManagerDeliveryRow[] {
+    const again = `${base}~`;
+    return (this.db.prepare("SELECT * FROM manager_deliveries WHERE delivery_id = ? OR substr(delivery_id, 1, ?) = ? ORDER BY queued_at, delivery_id")
+      // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: SQLite's substr counts them (above)
+      .all(base, [...again].length, again) as ManagerDeliverySql[]).map(managerDeliveryRow);
+  }
+  // Every delivery whose id starts with `prefix` (the answers to one ask: "hub:answer:<id>:<ask>:"), oldest first.
+  managerDeliveriesWithPrefix(prefix: string): ManagerDeliveryRow[] {
+    return (this.db.prepare("SELECT * FROM manager_deliveries WHERE substr(delivery_id, 1, ?) = ? ORDER BY queued_at, delivery_id")
+      // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: SQLite's substr counts them (above)
+      .all([...prefix].length, prefix) as ManagerDeliverySql[]).map(managerDeliveryRow);
+  }
+  // The deliveries not final yet: still to be followed.
+  openManagerDeliveries(): ManagerDeliveryRow[] {
+    return (this.db.prepare(`SELECT * FROM manager_deliveries WHERE state IN ${OPEN_STATES} ORDER BY queued_at, delivery_id`).all() as ManagerDeliverySql[])
+      .map(managerDeliveryRow);
+  }
+  // One device's messages to the manager changed since `since`, oldest first.
+  commandDeliveriesOf(endpointId: string, since: number): ManagerDeliveryRow[] {
+    return (this.db.prepare("SELECT * FROM manager_deliveries WHERE kind = 'command' AND endpoint_id = ? AND updated_at >= ? ORDER BY queued_at, delivery_id")
+      .all(endpointId, since) as ManagerDeliverySql[]).map(managerDeliveryRow);
+  }
+  setManagerDeliveryState(id: string, state: ManagerDeliveryState, at: number) {
+    this.db.prepare("UPDATE manager_deliveries SET state = ?, updated_at = ? WHERE delivery_id = ?").run(state, at, id);
+  }
+  dropManagerDelivery(id: string) { this.db.prepare("DELETE FROM manager_deliveries WHERE delivery_id = ?").run(id); }
+  // Rows last changed before `before` (the node keeps a final delivery 7 days, spec §4.3; the hub keeps its row as long).
+  pruneManagerDeliveries(before: number): number {
+    return this.db.prepare("DELETE FROM manager_deliveries WHERE updated_at < ?").run(before).changes;
   }
 
   // Retention (ADR-0008, A8; the policy is in application/retention.ts): pairing tokens expired or redeemed before
@@ -124,10 +200,8 @@ export class Store {
   }
 
   // S5: a request id's record, written "started" before typing and "done" after; kept 24 hours. `typedAt`: the node's
-  // own time of the typing (fleet core §3.1), null for a row from before it was kept. `outcome`: "typed", "queued"
-  // (handed to the manager's inbox, ADR-0010), or "requeued" (queued once more after the inbox gave the first up,
-  // ADR-0011); null while started. `workerId`: the worker an answer went to (null for a
-  // send, whose repeat names its worker itself).
+  // own time of the typing (fleet core §3.1), null for a row from before it was kept. `workerId`: the worker an answer
+  // went to (null for a send, whose repeat names its worker itself).
   send(key: string): SendRow | null {
     const r = this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE key = ?`).get(key) as SendRowSql | undefined;
     return r ? sendRow(r) : null;
@@ -164,21 +238,6 @@ export class Store {
     return this.db.prepare("INSERT OR IGNORE INTO sends (key, state, at) VALUES (?, 'started', ?)").run(key, at).changes === 1;
   }
   finishSend(key: string, typedAt: number) { this.db.prepare("UPDATE sends SET state = 'done', outcome = 'typed', typed_at = ? WHERE key = ?").run(typedAt, key); }
-  // Handed to the manager's inbox (ADR-0010): done, with no typedAt, because the deliverer types it.
-  finishQueued(key: string) { this.db.prepare("UPDATE sends SET state = 'done', outcome = 'queued' WHERE key = ?").run(key); }
-  // Queued once more after the inbox gave the first up (ADR-0011): the row remembers it, so a further repeat adds nothing.
-  finishRequeued(key: string) { this.db.prepare("UPDATE sends SET state = 'done', outcome = 'requeued' WHERE key = ?").run(key); }
-  // Commands handed to the inbox (outcome queued, no answer request). Answers carry a request and are not these.
-  queuedCommands(): string[] {
-    return (this.db.prepare("SELECT key FROM sends WHERE state = 'done' AND outcome = 'queued' AND request IS NULL").all() as { key: string }[])
-      .map(r => r.key);
-  }
-  // A crash between startAnswer and finishQueued, for a manager that is not running (no worker). The message is
-  // already in the inbox. Left started, every repeat is refused as uncertain (round 3.8).
-  recoverQueuedAnswers(): number {
-    return this.db.prepare(`UPDATE sends SET state = 'done', outcome = 'queued'
-      WHERE state = 'started' AND worker_id IS NULL AND substr(key, 1, 7) = 'answer:'`).run().changes;
-  }
   dropSend(key: string) { this.db.prepare("DELETE FROM sends WHERE key = ?").run(key); }
   pruneSends(now: number, keepMs = 24 * 3_600_000): number {
     return this.db.prepare("DELETE FROM sends WHERE at < ?").run(now - keepMs).changes;

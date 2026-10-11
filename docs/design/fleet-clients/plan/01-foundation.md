@@ -88,7 +88,7 @@ The rulings add three things here:
 - [ ] **Step 1: Record the suite before anything changes**
 
 Run: `npx vitest run --project units packages apps/hub apps/node-agent apps/fleet`
-Expected: everything passes but, on macOS, `pane-lock.test.ts`'s 2 tests and `process-start.test.ts`'s 2 (they read `/proc`). Note `Test Files` and `Tests`; Step 9 compares. At `12c2811` on 2026-10-09: 202 files, 1469 tests (2 skipped without `flock` on `PATH`, 1 with it).
+Expected: everything passes but, on macOS, `pane-lock.test.ts`'s 2 tests and `process-start.test.ts`'s 2 (they read `/proc`). Note `Test Files` and `Tests`; Step 9 compares. On main 53d7a22 (`feat/fleet-clients` at e56fa70) on 2026-10-09: 224 files, 1691 tests (2 skipped without `flock` on `PATH`, 1 with it).
 
 - [ ] **Step 2: Write the failing test**
 
@@ -1005,8 +1005,8 @@ After line 108 (`...(s ? { sessionId: s.sessionId } : {}), ...(s?.name ? { sessi
 Run each in turn, from the repo root:
 - `npm run check`. Expected: exit 0; svelte-check ends with `0 ERRORS 0 WARNINGS`.
 - `npm run lint`. Expected: no problems reported.
-- `npx vitest run --project units packages apps/hub apps/node-agent apps/fleet`. Expected: Step 1's `Test Files` + 1 and `Tests` + 27, with the same failures as Step 1. At `12c2811` on 2026-10-09: 203 files, 1496 tests.
-- `npm run build`, then `npm run check:build`. Expected: three `PASS` lines. Measured on 2026-10-08: all client JS went from 303.2 KB to 303.6 KB gzipped (+10.4% against the recorded 275.0 KB; the limit is +15%).
+- `npx vitest run --project units packages apps/hub apps/node-agent apps/fleet`. Expected: Step 1's `Test Files` + 1 and `Tests` + 27, with the same failures as Step 1. On main 53d7a22, on 2026-10-09: 225 files, 1718 tests.
+- `npm run build`, then `npm run check:build`. Expected: three `PASS` lines. Measured on main 53d7a22, on 2026-10-09: all client JS went from 327.1 KB to 327.5 KB gzipped (+4.7% against the recorded 312.8 KB; the limit is +15%).
 
 - [ ] **Step 10: The negative controls, as data**
 
@@ -2321,7 +2321,7 @@ Run each in turn:
 - `node scripts/negative-controls.ts --check | grep -v '^ok'`. Expected: no output.
 - `npm run check`. Expected: exit 0; `0 ERRORS 0 WARNINGS`.
 - `npm run lint`. Expected: no problems reported.
-- `npx vitest run --project units packages apps/hub apps/node-agent apps/fleet scripts`. Expected: everything passes but, on macOS, `pane-lock.test.ts`'s 2 and `process-start.test.ts`'s 2. At `12c2811` on 2026-10-09: 207 files.
+- `npx vitest run --project units packages apps/hub apps/node-agent apps/fleet scripts`. Expected: everything passes but, on macOS, `pane-lock.test.ts`'s 2 and `process-start.test.ts`'s 2. On main 53d7a22, on 2026-10-09: 229 files, 1775 tests.
 
 ```bash
 git add scripts/negative-controls.ts
@@ -2365,7 +2365,7 @@ The package imports `ws`, besides the protocol and `node:*`, as ruling 9 allows 
   - `apps/hub/test/fleet-unknown-error-code.test.ts` → `packages/fleet-client/test/unknown-error-code.test.ts` (imports only).
 - Create (Step 4): a new `apps/hub/src/adapters/fleet-client.ts` that re-exports `@morndo/fleet-client`.
 - Modify:
-  - `apps/hub/src/main.ts:31,240`, `apps/hub/src/adapters/fleet-adapters.ts:18`, `apps/hub/package.json:10`;
+  - `apps/hub/src/main.ts:32,297`, `apps/hub/src/adapters/fleet-adapters.ts:18`, `apps/hub/package.json:10`;
   - `package.json:14` (`check`), `package-lock.json` (by `npm install`), `.oxlintrc.json` (after `"packages/node-ops/src/**",`: `no-console` for the package's source);
   - `test/fleet-harness.ts:25`, `e2e/fleet-qa.ts:19`, `test/fleet/upload-retry-expired.test.ts:9`.
 - Modify `scripts/negative-controls.ts`:
@@ -2393,7 +2393,7 @@ The package imports `ws`, besides the protocol and `node:*`, as ruling 9 allows 
 - [ ] **Step 1: Record the suite before anything moves**
 
 Run: `npx vitest run --project units packages apps/hub`
-Expected: everything passes but, on macOS, `pane-lock.test.ts`'s 2 and `process-start.test.ts`'s 2. Note the totals; Step 7 compares. At `12c2811` on 2026-10-09, after Task 2: 140 files, 1161 tests (1 skipped).
+Expected: everything passes but, on macOS, `pane-lock.test.ts`'s 2 and `process-start.test.ts`'s 2. Note the totals; Step 7 compares. On main 53d7a22, on 2026-10-09, after Task 2: 162 files, 1383 tests (1 skipped).
 
 - [ ] **Step 2: Write the failing architecture test**
 
@@ -2661,7 +2661,7 @@ No external package is added.
 
 `apps/hub/src/main.ts`. The hub passes its own logger:
 
-Replace line 31:
+Replace line 32:
 
 ```ts
 import { FleetClient, checkFleet } from "./adapters/fleet-client.ts";
@@ -2673,7 +2673,7 @@ with:
 import { FleetClient, checkFleet } from "@morndo/fleet-client";
 ```
 
-Replace line 240:
+Replace line 297:
 
 ```ts
   const client = new FleetClient(socket);
@@ -2739,23 +2739,23 @@ import { FleetClient } from "../../packages/fleet-client/src/index.ts";
 
 - [ ] **Step 6: Wire the package into the checks**
 
-`package.json`, the `check` script:
+`package.json`, the `check` script, as #32 left it (with `tsc -p apps/board-cli`); `tsc -p packages/fleet-client` goes after `tsc -p packages/service-kit`:
 
 Replace line 14:
 
 ```json
-    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/brand && tsc -p apps/hub && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && npm run check -w @morndo/web",
+    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/brand && tsc -p apps/hub && tsc -p apps/board-cli && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && npm run check -w @morndo/web",
 ```
 
 with:
 
 ```json
-    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/fleet-client && tsc -p packages/brand && tsc -p apps/hub && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && npm run check -w @morndo/web",
+    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/fleet-client && tsc -p packages/brand && tsc -p apps/hub && tsc -p apps/board-cli && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && npm run check -w @morndo/web",
 ```
 
 `.oxlintrc.json`, the second override's `"files"` (the package logs through its `FleetLog`, never `console`):
 
-After line 46 (`"packages/node-ops/src/**",`), insert:
+After line 47 (`"packages/node-ops/src/**",`; one line lower than before #32, which added `packages/domain/src/board.ts` to the first override), insert:
 
 ```json
         "packages/fleet-client/src/**",
@@ -2767,7 +2767,7 @@ Run: `npm run check`, then `npm run lint`
 Expected: exit 0, `0 ERRORS 0 WARNINGS`; no lint problems.
 
 Run: `npx vitest run --project units packages apps/hub`
-Expected: `Test Files` = Step 1's + 1 and `Tests` = Step 1's + 2, with the same failures as Step 1. The +1 file and the +2 tests are the architecture test's; the moved files only changed folders. At `12c2811` on 2026-10-09: 141 files, 1163 tests.
+Expected: `Test Files` = Step 1's + 1 and `Tests` = Step 1's + 2, with the same failures as Step 1. The +1 file and the +2 tests are the architecture test's; the moved files only changed folders. On main 53d7a22, on 2026-10-09: 163 files, 1385 tests.
 
 - [ ] **Step 8: Point the moved client's negative controls at its new files**
 
@@ -3525,8 +3525,8 @@ Expected: no output. Before `op()` used `#outcome`, `t14a-op-non-json-in-doubt` 
 Run each in turn, from the repo root:
 - `npm run check`. Expected: exit 0; `0 ERRORS 0 WARNINGS`.
 - `npm run lint`. Expected: no problems reported.
-- `npx vitest run --project units packages apps/hub apps/node-agent apps/fleet scripts`. Expected: everything passes but, on macOS, `pane-lock.test.ts`'s 2 and `process-start.test.ts`'s 2. At `12c2811` on 2026-10-09: 209 files.
-- `npx vitest run --project fleet`. Expected: the drills pass. They import the client from the package. On 2026-10-08: 9 files, 48 tests. The run had a parallel test run next to it, and one retry drill failed with `op.status on n1: node_offline` right after a fleet restart. That file then passed alone twice, 18 of 18.
+- `npx vitest run --project units packages apps/hub apps/node-agent apps/fleet scripts`. Expected: everything passes but, on macOS, `pane-lock.test.ts`'s 2 and `process-start.test.ts`'s 2. On main 53d7a22, on 2026-10-09: 231 files, 1798 tests; with only `packages apps/hub`, 164 files, 1406 tests.
+- `npx vitest run --project fleet`. Expected: the drills pass. They import the client from the package. On main 53d7a22, on 2026-10-09: 9 files, 48 tests, all passed. On 2026-10-08, with a parallel test run next to it, one retry drill failed once with `op.status on n1: node_offline` right after a fleet restart (the harness gap ruling 37 fixes); that file then passed alone twice.
 
 ```bash
 git add packages/fleet-client/src/fleet-client.ts packages/fleet-client/test/deliveries.test.ts packages/fleet-client/test/fleet-client.test.ts scripts/negative-controls.ts

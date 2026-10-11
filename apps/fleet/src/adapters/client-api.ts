@@ -1,6 +1,6 @@
 // The client API (spec 5.6): HTTP and WebSocket on a Unix socket only, for the hub, kira and `lanes`. Every route is
 // under /v<N>/ with N the current or the previous API version; GET /v1/caps lists them.
-//   GET  /v1/caps                      { api: number[] }
+//   GET  /v1/caps                      { api: number[], stickyLanes: string[] }
 //   GET  /v1/nodes                     [{ name, status, health, agent }]
 //   POST /v1/nodes/<name>/revoke       closes the node's connection, drops its lanes (the console's `node revoke`)
 //   GET  /v1/lanes                     [{ name, node, workerId, conflict }]
@@ -13,8 +13,19 @@
 //                                      storeSeq } (store and storeSeq null when nothing was sent; storeSeq null from an
 //                                      agent that sends none; 415: not JSON). The client names itself in
 //                                      x-morndo-client (a-z, at most 16), for the audit of side-effecting ops.
+//                                      lane.deliver and delivery.cancel are refused here (400 bad_args): a delivery goes
+//                                      through /v1/deliveries, which routes sticky names and keeps the mirror.
 //   GET  /v1/files/<node>/<ref|path>   the file, streamed; the ref or path URL-encoded as one path segment
-//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "job", node, body }; a
+//   POST /v1/deliveries                { id, lane | workerId, text, ttlMs? } → { ok: true, delivery } or { ok: false, error }:
+//                                      200 for every outcome, a refusal included, as /v1/op; 400 (bad_args) for a body
+//                                      that doesn't fit, lane.deliver's own rules included; 415 not JSON, 413 over the
+//                                      limit (fleet clients spec §8; reconciliation ruling 3)
+//   GET  /v1/deliveries/<id>           { delivery, stale } from the mirror, or 404; the id URL-encoded as one segment
+//   GET  /v1/deliveries?lane=&state=   { deliveries: (Delivery & { stale })[] }: the newest 1000 of the last 7 days, oldest first
+//   POST /v1/deliveries/<id>/cancel    { ok: true, delivery } or { ok: false, error }; 404 { error: "no_such_delivery" } for
+//                                      an id the fleet doesn't know
+//   GET  /v1/lane-events?since=<seq>   { events: LaneEvent[] }: after seq (0 when absent), oldest first, at most 1000
+//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job", node, body }; a
 //                                      client more than eventsBufferBytes behind is closed with 1013 (it reconnects
 //                                      and gets the current state first)
 // The path is split on "/" before any segment is decoded, so a name or path holding "/" (as %2F) stays one segment
@@ -24,15 +35,18 @@ import { chmodSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type JobView, type JobsQuery } from "@morndo/protocol";
+import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery } from "@morndo/protocol";
 import { Flight, productVersion } from "@morndo/service-kit";
 import type { Connections } from "../application/connections.ts";
+import type { Deliveries } from "../application/deliveries.ts";
+import type { LaneEvents } from "../application/lane-events.ts";
 import type { EventHub, FleetEvent } from "../application/events.ts";
 import type { JobMirror } from "../application/job-mirror.ts";
 import type { LaneRegistry } from "../application/lane-registry.ts";
 import { SIDE_EFFECT_OPS, opError, type Outcome } from "../application/requests.ts";
 import type { Router } from "../application/router.ts";
 import type { Audit } from "./audit.ts";
+import { parseDeliveryBody } from "./delivery-body.ts";
 import { streamFile } from "./files-route.ts";
 import type { Logger } from "./log.ts";
 import type { NodesStore } from "./nodes-store.ts";
@@ -52,6 +66,7 @@ class HttpError extends Error {
 
 export type ClientApiDeps = {
   router: Router; connections: Connections; lanes: LaneRegistry; nodes: NodesStore; audit: Audit; events: EventHub; jobs: JobMirror; log: Logger;
+  deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
 };
@@ -63,6 +78,10 @@ const clientOf = (req: IncomingMessage): string => {
   const h = req.headers["x-morndo-client"];
   return typeof h === "string" && CLIENT.test(h) ? h : "unknown";
 };
+
+const STATES: ReadonlySet<string> = new Set<DeliveryState>(["queued", "typed", "held", "delivered", "uncertain", "given_up"]);
+// The query of a request's URL (after "?"), decoded.
+const queryOf = (url: string | undefined): URLSearchParams => new URL(url ?? "/", "http://fleet").searchParams;
 
 const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...headers });
@@ -160,7 +179,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     if (method === "GET" && s.length === 1 && first === "health") {
       return json(res, 200, { version: productVersion(), schema, ready: true, inFlight: flight.list() });
     }
-    if (method === "GET" && s.length === 1 && first === "caps") return json(res, 200, { api: API_VERSIONS });
+    if (method === "GET" && s.length === 1 && first === "caps") return json(res, 200, { api: API_VERSIONS, stickyLanes: d.deliveries.stickyLanes });
     if (method === "GET" && s.length === 1 && first === "nodes") return json(res, 200, d.connections.list());
     if (method === "POST" && s.length === 3 && first === "nodes" && third === "revoke") {
       const name = second ?? "";
@@ -198,6 +217,9 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const parsed = parseOpBody(body);
       if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message), store: null, storeSeq: null });
       const b = parsed.body;
+      if (b.op === "lane.deliver" || b.op === "delivery.cancel") {
+        return json(res, 400, { ok: false, error: opError("bad_args", `${b.op} is not sent as an op: use /v1/deliveries`), store: null, storeSeq: null });
+      }
       // Cancel follows the job, not the node the caller named. The token stays in the args the owning node checks.
       if (b.op === "job.noticeResult") {
         const id = typeof b.args.id === "string" ? b.args.id : "";
@@ -227,6 +249,37 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       }));
     }
     if (method === "GET" && s.length === 3 && first === "files") return streamFile(res, d.router, second ?? "", third ?? "");
+    if (method === "GET" && s.length === 1 && first === "lane-events") {
+      const since = queryOf(req.url).get("since") ?? "0";
+      if (!/^\d{1,15}$/.test(since)) throw new HttpError(400, "since must be a lane event's seq (a whole number, 0 for the oldest kept)");
+      return json(res, 200, { events: d.laneEvents.since(Number(since)) });
+    }
+    if (method === "POST" && s.length === 1 && first === "deliveries") {
+      let body: unknown;
+      try { body = await readJson(req); }
+      catch (e) {
+        if (!(e instanceof HttpError)) throw e;
+        return json(res, e.status, { ok: false, error: opError(e.status === 413 ? "too_large" : "bad_args", e.message) });
+      }
+      const parsed = parseDeliveryBody(body);
+      if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message) });
+      return json(res, 200, await d.deliveries.post(parsed.body, clientOf(req)));
+    }
+    if (method === "GET" && s.length === 1 && first === "deliveries") {
+      const q = queryOf(req.url);
+      const lane = q.get("lane") || undefined;
+      const state = q.get("state") || undefined;
+      if (state !== undefined && !STATES.has(state)) throw new HttpError(400, `state must be one of ${[...STATES].join(", ")}`);
+      return json(res, 200, { deliveries: d.deliveries.list({ ...(lane === undefined ? {} : { lane }), ...(state === undefined ? {} : { state: state as DeliveryState }) }) });
+    }
+    if (method === "GET" && s.length === 2 && first === "deliveries") {
+      const one = d.deliveries.get(second ?? "");
+      return one ? json(res, 200, one) : json(res, 404, { error: "no_such_delivery" });
+    }
+    if (method === "POST" && s.length === 3 && first === "deliveries" && third === "cancel") {
+      const answer = await d.deliveries.cancel(second ?? "", clientOf(req));
+      return answer ? json(res, 200, answer) : json(res, 404, { error: "no_such_delivery" });
+    }
     throw new HttpError(404, "no such route");
   }
 

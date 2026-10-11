@@ -8,17 +8,22 @@
 //   deliver  from a hook's answer to its arrival at the subscriber: what kira would see as lag
 //   fsync    one 512-byte write and fsync in the temporary directory: the disk itself
 // The temporary directories go where TMPDIR points (os.tmpdir()), so point it at the disk you want to measure.
-//   node scripts/bench-relay.ts [--hooks 300] [--rate 5] [--sends 10]
+//   node scripts/bench-relay.ts [--hooks 300] [--rate 5] [--sends 10] [--gate]
+// --gate: also judge the run by the hook swap's gate (scripts/bench-gate.ts; fleet clients spec §6). The rate is then 2
+// hooks a second unless --rate says otherwise, and the gate refuses a lower one. The output ends with the measured numbers
+// and a last line, `gate: PASS` or `gate: FAIL (<which bound>)` (plan/RECONCILIATION.md ruling 38); the exit is 0 or 1.
+// Run it on the disk the fleet uses: TMPDIR points there.
 import { closeSync, fsyncSync, mkdtempSync, openSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { expectOf, fakeLane, hook, joinAgent, paneOf, startFleet, stopAll, subscriber, tmuxServer, until } from "../test/fleet-harness.ts";
+import { gate, nearestRank } from "./bench-gate.ts";
 
-const { values } = parseArgs({ options: { hooks: { type: "string", default: "300" }, rate: { type: "string", default: "5" }, sends: { type: "string", default: "10" } } });
-const HOOKS = Number(values.hooks), RATE = Number(values.rate), SENDS = Number(values.sends);
+const { values } = parseArgs({ options: { hooks: { type: "string", default: "300" }, rate: { type: "string" }, sends: { type: "string", default: "10" }, gate: { type: "boolean", default: false } } });
+const HOOKS = Number(values.hooks), RATE = Number(values.rate ?? (values.gate ? "2" : "5")), SENDS = Number(values.sends);
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-const pct = (xs: number[], p: number) => { const s = [...xs].sort((a, b) => a - b); return s.length ? s[Math.min(s.length - 1, Math.floor((p / 100) * s.length))] ?? 0 : 0; };
+const pct = (xs: number[], p: number) => nearestRank(xs, p) ?? 0;
 const line = (name: string, xs: number[]) =>
   console.log(`${name.padEnd(8)} n=${String(xs.length).padStart(4)}  p50 ${pct(xs, 50).toFixed(1).padStart(7)} ms  p95 ${pct(xs, 95).toFixed(1).padStart(7)} ms  max ${Math.max(0, ...xs).toFixed(1).padStart(7)} ms`);
 
@@ -39,6 +44,7 @@ const body = (i: number) => ({
   tool_input: { command: `echo step ${i}`, description: "x".repeat(1200) }, transcript_path: "/home/user/.claude/projects/p/s.jsonl",
 });
 
+let code = 0;
 try {
   console.log(`node ${process.version}, temp dirs in ${tmpdir()}; ${HOOKS} hooks at ${RATE}/s, ${SENDS} sends`);
   line("fsync", fsyncProbe());
@@ -99,7 +105,12 @@ try {
   line("deliver", lag);
   line("fsync", fsyncProbe());
   console.log(`hooks answered ${hooks.length}/${HOOKS}, delivered ${sub.unique().size}; failed or timed out: ${hookFailures} hooks, ${opFailures} ops, ${sendFailures} sends`);
+  if (values.gate) {
+    const verdict = gate({ rate: RATE, hooks: HOOKS, answered: answeredAt.size, delivered: lag.length, hookFailures, opFailures, deliver: lag, op: ops });
+    for (const l of verdict.lines) console.log(l);
+    if (!verdict.pass) code = 1;
+  }
 } finally {
   await stopAll();
 }
-process.exit(0);
+process.exit(code);

@@ -3,9 +3,13 @@
 // rule, Review Focus 4). Only its SHA-256 is stored. A join names its node, and a code redeems only for the name it was
 // issued for. A join is matched by comparing the hash against every stored one with timingSafeEqual, without stopping
 // at the first match.
+// A join and a revocation (the node's key, given or taken) and the next connection epoch (a fencing token: it only grows)
+// are synced to the disk (db.ts `synced`, spec §6): each must outlive the machine. Issuing a code, `seen` and the source
+// are not: a lost code is issued again, and the others are refreshed on the next connection.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type Database from "better-sqlite3";
 import { LIMITS, NODE_NAME } from "@morndo/protocol";
+import { synced } from "./db.ts";
 import { parsePublicKey } from "./keys.ts";
 
 export type NodeRow = {
@@ -61,7 +65,7 @@ export class NodesStore {
     if (bytes.length !== CODE_BYTES || bytes.toString("base64url") !== code) return { ok: false, refused: "unknown" };
     if (!parsePublicKey(publicKey)) return { ok: false, refused: "bad_key" };
     const hash = hashOf(bytes);
-    return this.#db.transaction((): Redeemed => {
+    return synced(this.#db, () => this.#db.transaction((): Redeemed => {
       const now = this.#now();
       const rows = this.#db.prepare("SELECT hash, node, expires_at, used_at FROM join_codes").all() as CodeRow[];
       const matches = rows.filter(row => timingSafeEqual(Buffer.from(row.hash, "hex"), hash));   // every row compared
@@ -75,7 +79,7 @@ export class NodesStore {
       this.#db.prepare(`INSERT INTO nodes (name, public_key, created_at) VALUES (?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET public_key = excluded.public_key, revoked_at = NULL, last_source = NULL`).run(match.node, publicKey, now);
       return { ok: true, node: match.node };
-    }).immediate();
+    }).immediate());
   }
 
   node(name: string): NodeRow | null {
@@ -94,16 +98,16 @@ export class NodesStore {
 
   // Revokes a registered node and withdraws its unused codes. False when there was no active node of that name.
   revoke(name: string): boolean {
-    return this.#db.transaction(() => {
+    return synced(this.#db, () => this.#db.transaction(() => {
       const changed = this.#db.prepare("UPDATE nodes SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL").run(this.#now(), name).changes > 0;
       this.#db.prepare("DELETE FROM join_codes WHERE node = ? AND used_at IS NULL").run(name);
       return changed;
-    })();
+    }).immediate());
   }
 
   // The next connection epoch of a node (a fencing token: it only grows, across restarts too).
   nextEpoch(name: string): number {
-    const r = this.#db.prepare("UPDATE nodes SET conn_epoch = conn_epoch + 1 WHERE name = ? RETURNING conn_epoch").get(name) as { conn_epoch: number } | undefined;
+    const r = synced(this.#db, () => this.#db.prepare("UPDATE nodes SET conn_epoch = conn_epoch + 1 WHERE name = ? RETURNING conn_epoch").get(name)) as { conn_epoch: number } | undefined;
     if (!r) throw new Error(`no node ${name}`);
     return r.conn_epoch;
   }

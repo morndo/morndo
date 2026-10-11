@@ -1,0 +1,2 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-08T12:03:00.000Z","sessionId":"5e1f0c2a-7b3d-4e8f-9a6b-0c1d2e3f4a5b","content":"[fixture] handed to the agent"}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-10-08T12:03:02.000Z","sessionId":"5e1f0c2a-7b3d-4e8f-9a6b-0c1d2e3f4a5b","content":"[fixture] handed to the agent","reason":"delivered_to_agent"}

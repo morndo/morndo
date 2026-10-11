@@ -1,0 +1,2 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-08T12:05:00.000Z","sessionId":"5e1f0c2a-7b3d-4e8f-9a6b-0c1d2e3f4a5b","content":"[fixture] removed for a reason not known here"}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-10-08T12:05:01.000Z","sessionId":"5e1f0c2a-7b3d-4e8f-9a6b-0c1d2e3f4a5b","content":"[fixture] removed for a reason not known here","reason":"moved_elsewhere","commandUuid":"0f1c000d-2d3e-4f5a-8b6c-00000000000d","deliveryId":"0f1c000e-2d3e-4f5a-8b6c-00000000000e"}

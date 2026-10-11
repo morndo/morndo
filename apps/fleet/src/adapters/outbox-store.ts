@@ -39,12 +39,15 @@ export class OutboxStore {
   // rises to the last one. Seqs may skip (the agent coalesces progress events); an event at or below the mark is a
   // duplicate. A subscriber at `cap` pending deliveries loses its oldest pending progress event; with none to lose,
   // the new event goes straight to its dead letters (reason backlog_full). An event no subscriber takes is stored for no
-  // one and counted per path in hook_unrouted, in the same transaction.
+  // one and counted per path in hook_unrouted, in the same transaction, unless the fleet takes it itself (`o.taken`, called
+  // once for each event above the mark: a lane event's source, fleet clients spec §7; true for a node's own /lane).
   // Each subscriber's backlog is counted once per batch, then kept by hand, and each search for its oldest pending
   // progress event goes on from where the last one stopped: no pending row at or below `after` is a progress event,
   // and rows only come above it. Per event, a count and a sort of the whole backlog made one 256-event window at the
   // 50,000 cap take 4 to 8 s inside this IMMEDIATE transaction (B6 EF3).
-  accept(node: string, streamId: string, events: HookEvent[], route: (e: HookEvent) => string[], o: { now: number; cap: number }): Accepted {
+  accept(
+    node: string, streamId: string, events: HookEvent[], route: (e: HookEvent) => string[], o: { now: number; cap: number; taken?: (e: HookEvent) => boolean },
+  ): Accepted {
     return this.#db.transaction((): Accepted => {
       let seq = this.hwm(node, streamId).seq;
       let stored = 0;
@@ -62,8 +65,9 @@ export class OutboxStore {
       for (const e of events) {
         if (e.seq <= seq) { duplicates++; continue; }
         seq = e.seq;
+        const own = o.taken?.(e) ?? false;
         const subscribers = route(e);
-        if (subscribers.length === 0) { unrouted.set(e.path, (unrouted.get(e.path) ?? 0) + 1); continue; }
+        if (subscribers.length === 0) { if (!own) unrouted.set(e.path, (unrouted.get(e.path) ?? 0) + 1); continue; }
         const body = JSON.stringify(e);
         const id = Number(insertOutbox.run(node, streamId, e.seq, e.path, body, o.now).lastInsertRowid);
         for (const s of subscribers) {
@@ -93,6 +97,20 @@ export class OutboxStore {
       for (const [path, n] of unrouted) count.run(path, n, o.now);
       return { seq, stored, duplicates, overflow, unrouted };
     }).immediate();
+  }
+
+  // The subscriber's oldest pending delivery (deliveries_pending: its first row in outbox order), with when it was stored.
+  oldestPending(subscriber: string): { node: string; streamId: string; seq: number; path: string; createdAt: number } | null {
+    const r = this.#db.prepare(`SELECT o.node, o.stream_id, o.seq, o.path, o.created_at FROM deliveries d INDEXED BY deliveries_pending
+      JOIN outbox o ON o.id = d.outbox_id WHERE d.subscriber = ? AND d.state = 'pending' ORDER BY d.outbox_id LIMIT 1`)
+      .get(subscriber) as { node: string; stream_id: string; seq: number; path: string; created_at: number } | undefined;
+    return r ? { node: r.node, streamId: r.stream_id, seq: r.seq, path: r.path, createdAt: r.created_at } : null;
+  }
+
+  // How many streams have an event still to deliver to the subscriber.
+  pendingStreams(subscriber: string): number {
+    return (this.#db.prepare(`SELECT COUNT(*) AS n FROM (SELECT DISTINCT o.node, o.stream_id FROM deliveries d INDEXED BY deliveries_pending
+      JOIN outbox o ON o.id = d.outbox_id WHERE d.subscriber = ? AND d.state = 'pending')`).get(subscriber) as { n: number }).n;
   }
 
   pendingCount(subscriber: string): number {

@@ -29,7 +29,7 @@ Every path derives from `HOME`.
 | Path | What |
 |---|---|
 | `~/.config/morndo-fleet/config.json` | The config (below), or the file `MORNDO_FLEET_CONFIG` names; a missing field takes its default. |
-| `~/.local/share/morndo-fleet/fleet.db` | Nodes, public keys, join-code hashes, accepted `seq` per `(node, streamId)`, the highest store sequence per `(node, store)` (raised only when an answer shows a higher one), lane names, outbox, dead letters, the count per path of hook events no subscriber takes, alerts, audit (kept 90 days, alerts included). Numbered migrations; a database from a newer fleet is refused before anything is written to it. It and its `-wal` and `-shm` are mode 0600, set explicitly whatever the directory's mode. |
+| `~/.local/share/morndo-fleet/fleet.db` | Nodes, public keys, join-code hashes, accepted `seq` per `(node, streamId)`, the highest store sequence per `(node, store)` (raised only when an answer shows a higher one), lane names, outbox, dead letters, the count per path of hook events no subscriber takes, alerts, audit (kept 90 days, alerts included), the latest state of each delivery (`lane_deliveries`, never its text), the node that last had each sticky lane name, and lane events (kept 7 days, each marked once the manager has had it). Commits are synced to the disk only where what they guard must outlive the machine: the intake of hook and lane events, before the node is told they are stored, and joins, revocations and keys. Delivered marks, deliveries, the audit and alerts are not (`synchronous=NORMAL`): a mark lost to a power cut means one more delivery, which its receiver skips by its key or id. Events that arrive within 25 ms share one intake commit, and on macOS the database is opened with `fullfsync`. Numbered migrations; a database from a newer fleet is refused before anything is written to it. It and its `-wal` and `-shm` are mode 0600, set explicitly whatever the directory's mode. |
 | the config's `keyPath` | The fleet's Ed25519 private key. Its public half goes into every join string, and every agent pins it. |
 | `~/.local/state/morndo-fleet/fleet.sock` | The client API, mode 0600. The fleet refuses to start unless the socket's directory is a real directory that belongs to its user and has mode 0700. |
 
@@ -43,6 +43,8 @@ Every path derives from `HOME`.
 | `keyPath` | `~/.local/share/morndo-fleet/fleet-key.pem` | Made on first use, mode 0600, written whole or not at all (a temporary file, flushed, then linked into place; a key another process made first is never replaced). |
 | `publicUrl` | `ws://127.0.0.1:8791/agent` | What join strings tell agents to dial: `wss://…`, or `ws://` to a loopback host only. Anything else is refused at start. |
 | `subscribers` | `[]` | `[{ "name", "url", "paths": ["/hook/stop", …] }]`: who gets which hook events. |
+| `stickyLanes` | `["manager"]` | Lane names a delivery follows across a restart: while no window has the name, a delivery to it goes to the node that last had it and waits there (`no_pane`). Any other name binds a delivery to the session it had when queued. |
+| `laneEvents` | `{ "deliverTo": "manager", "header": "[lane-event] Lane events (handle them as your instructions say):", "ignore": [], "batchMs": 3000 }` | Lane events delivered to a lane: batched for `batchMs`, one delivery per batch (split at 8000 characters), the `header` line, then one JSON line per event. `deliverTo: null` turns delivery off; the events are still published and kept. `ignore`: globs of lane names that raise none. |
 
 ## Agent endpoint
 
@@ -73,7 +75,7 @@ Liveness: the fleet pings every 15 s and terminates a connection that missed a p
 
 | Route | What |
 |---|---|
-| `GET /v1/caps` | `{ api: [1] }` |
+| `GET /v1/caps` | `{ api: [1], stickyLanes }`: the API versions served, and the lane names deliveries follow across a restart |
 | `GET /v1/nodes` | `{ name, status, health, agent }[]` |
 | `GET /v1/lanes` | `{ name, node, workerId, conflict }[]` |
 | `GET /v1/lanes/<name>` | one lane (`conflict: true` while two windows claim it; `workerId: null` when two windows on its owner do), or 404 `{ error: "no_such_lane" }` |
@@ -81,13 +83,49 @@ Liveness: the fleet pings every 15 s and terminates a connection that missed a p
 | `POST /v1/nodes/<name>/revoke` | `{ ok: true, revoked }`; closes the node's connection (4403) and drops its lanes, as `node revoke` does |
 | `POST /v1/op` | `{ node? \| workerId? \| lane?, op, args, key?, timeoutMs? }`, with `expect` inside `args`. Sent to the node, which answers `{ ok: true, result, invVersion, store, storeSeq }` or `{ ok: false, error: { code, executed, message }, store, storeSeq }`. `store` names the node's database the answer came from (a caller that sees it change knows the node's keys may be gone); `storeSeq` is that database's store sequence (keyed ops started, never lowered: lower than before, the database was put back from an older copy), the agent's own on its answers, the highest this service saw from that store on its own answers after sending (a dropped connection, a deadline), `null` from an agent that sends none. Both are `null` when nothing was sent: `node_offline` (not executed) when the node isn't online, `lane_conflict` when two windows claim the lane named, `name_taken` for a `lane.start` of a name registered or being started, `busy` when 8 bulk ops already wait. Every side-effecting op is audited (`op.<name>`: the target, the key's namespace, the outcome and the client from the `x-morndo-client` header; never the text, keys typed or file bytes). |
 | `GET /v1/files/<node>/<ref\|path>` | a file, chunked, with its size in `x-file-size`; a refusal before the first byte is `{ ok: false, error }` (400 bad args, 403 denied, 413 too large, 503 node offline, 504 timeout, 502 uncertain or internal, else 404). A download that ends short of `x-file-size`, or runs past it, is destroyed, so the client sees an error and never a clean short body. |
-| `WS /v1/events` | `status`, `inventory`, `health`, `conflict`, `alert`, the current state first. A client more than 8 MiB of events behind is closed with 1013; on reconnecting it gets the current state first. |
+| `POST /v1/deliveries` | `{ id, lane \| workerId, text, ttlMs? }`: a delivery, queued on the lane's node; 200 `{ ok: true, delivery }`. A refusal is 200 `{ ok: false, error }`, as `/v1/op` answers an op's refusal; a body that doesn't fit is 400 `{ ok: false, error }` (`bad_args`; 415 not JSON, 413 over 1 MiB, in the same shape). The same id with the same content is the same delivery. |
+| `GET /v1/deliveries/<id>` | `{ delivery, stale }`, or 404 `{ error: "no_such_delivery" }` |
+| `GET /v1/deliveries?lane=&state=` | `{ deliveries }`: the newest 1000 of the last 7 days, oldest first, each with `stale` (true while its node is offline) |
+| `POST /v1/deliveries/<id>/cancel` | `{ ok: true, delivery }` for one still `queued`; 200 `{ ok: false, error }` (`already_typed`) past that; 404 `{ error: "no_such_delivery" }` for an id it doesn't know |
+| `GET /v1/lane-events?since=<seq>` | `{ events }`: lane events after `seq`, at most 1000, oldest first, from the last 7 days |
+| `WS /v1/events` | `status`, `inventory`, `health`, `conflict`, `alert`, `delivery` (a delivery's new state) and `lane` (a lane event); the current status, inventory and health first. A client more than 8 MiB of events behind is closed with 1013; on reconnecting it gets the current state first. |
 
 A body that isn't JSON is 415 and one over 1 MiB 413, and an unknown API version is 404 `{ error: "unsupported_api" }`; an op body is answered in the op's own shape even then. From a shell: `curl --unix-socket ~/.local/state/morndo-fleet/fleet.sock http://fleet/v1/nodes`.
+
+The full reference, with every route, op, event and error code, and an example of each that runs as a test against a real fleet: [`docs/fleet-api.md`](../../docs/fleet-api.md).
 
 ## Lane registry
 
 A name belongs to the node that reported it first. Two nodes, or two windows on one node, with the same name stop routing by that name (`lane_conflict`, not executed), and the conflict shows until the owner renames one; each window stays listed, and an op by worker ID still reaches its pane. `lane.start` refuses a name registered anywhere in the fleet, or one whose `lane.start` is still under way (`name_taken`): the name is reserved from the request until the registry holds it, at most 10 s after the node's answer, and at once released when the start was refused before anything ran (`executed: "no"`). A revoked node's lanes are dropped.
+
+## Deliveries
+
+A delivery is a message for one lane running Claude Code. It is queued on the lane's node, typed once when the lane can take it, and confirmed from the lane's transcript (design: [fleet clients](../../docs/design/fleet-clients/README.md) §4; reference: [`docs/fleet-api.md`](../../docs/fleet-api.md) §6). This service:
+- routes `POST /v1/deliveries` and its cancel to the lane's node, as `lane.deliver` and `delivery.cancel`: a name in `stickyLanes` to the node that last had it while no window has it, any other name to its owner;
+- refuses a new delivery to an offline node (`node_offline`), so nothing is queued where it can't be stored;
+- refuses `lane.deliver` and `delivery.cancel` on `POST /v1/op` (400 `bad_args`): a delivery goes through its route, where the fleet resolves its target and keeps its mirror;
+- keeps each delivery's latest state from the node's `ev.delivery` in `fleet.db` (never the text), serves it at `GET /v1/deliveries`, marked `stale` while the node is offline, and publishes each change on `/v1/events`;
+- raises `delivery_waiting` for a delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes;
+- audits each delivery and its outcome with its client and target, never its text.
+
+## Lane events
+
+Built per node and window, from two sources:
+- the hooks: `finished` from `/hook/stop`, `stop_failure` from `/hook/failure`. Either Claude Code's own body or the owner's older script body is read: `docs/fleet-api.md` §11.3.
+- the session states the node reports: `needs_input` and `answered`, which the node sends through its hook stream as `/lane`.
+
+Each is stored in the same synced intake commit as the hooks, kept 7 days, served at `GET /v1/lane-events?since=` and published on `/v1/events`.
+
+`laneEvents` delivers them to a lane, the manager:
+- batched for `batchMs`, one delivery per batch (split at 8000 characters);
+- the `header` line, then one JSON line per event in the shape `lane-events-push` used: `{ ts, lane, sessionId, event, status, firstLine, bg, crons }`;
+- the delivery id is `fleet:lane-events:<node>:<first event's time, ms>`, with `-1`, `-2` … for a batch split over 8000 characters, and `.2`, `.3` … for a batch queued again after its delivery was given up.
+
+What is not delivered:
+- `answered`;
+- anything from the manager's own lane, or from lanes matching `ignore`, which raise none.
+
+A batch whose delivery is given up is queued again with the next one. After a restart, the events the manager hasn't had are sent. Events stored while `deliverTo` is `null` are never delivered later, so turning delivery on doesn't flood the manager. A Stop or StopFailure hook the relay couldn't place in a window makes no lane event.
 
 ## Hook bus
 
@@ -97,6 +135,13 @@ A name belongs to the node that reported it first. Two nodes, or two windows on 
 - Each subscriber's backlog is capped at 50,000 events; coalesced events (`/cc`, `/sl`) are dropped first, then an alert is raised.
 - Rows are deleted 24 h after delivery, dead letters 24 h after they died, and a subscriber removed from the config loses its rows.
 - An event whose path no subscriber takes is acknowledged to its node all the same (the relay already told the hook script "queued"), stored for no one, and counted per path (`status`), so it is never lost silently (ADR-0012 decision 8). At startup `serve` logs a warning for each script path no subscriber takes (`/hook/stop`, `/hook/failure`, `/notify`, `/file`; with the default `subscribers: []`, all four), and the first such event of each script path raises an `unrouted_hook` alert, once per path while the service runs. Progress paths (`/cc`, `/sl`) are counted only.
+
+**The subscriber contract** ([`docs/fleet-api.md`](../../docs/fleet-api.md) §13):
+- A subscriber answers 2xx once it has an event, and never refuses one for a reason of its own downstream (a chat service that blocks it, a failed handler). It keeps what it can't act on yet, and acts later.
+- An event it keeps refusing holds up every later event of its stream.
+- `subscriber_lagging` is raised when a subscriber's oldest undelivered event is older than 60 s.
+- Delivered marks are not synced: after a power cut a subscriber may get an event once more, and skips it by its `Idempotency-Key`.
+- `/lane` (the node's lane state events) is the node's own path: never a subscriber's, and never counted as an unrouted hook.
 
 ## Alerts
 
@@ -114,6 +159,8 @@ The audit also holds `op.<name>` for every side-effecting op (actor `client`; `{
 | `source_changed` | A node's tailnet source address changed: possibly a stolen node key. |
 | `rate_limited` | A node sent more than its rate allows (inventory and health: 60 at once, 2 a second; hook events are exempt); its connection was closed (1008). |
 | `lane_conflict` | A lane name got a second claimant. |
+| `delivery_waiting` | A delivery is still `queued`, `typed` or `held` 2, 15 and 60 minutes after it was queued, once each; `detail` `{ id, lane, state, reason, minutes }`. |
+| `subscriber_lagging` | A subscriber's oldest undelivered event is older than 60 s; `detail` `{ subscriber, oldestAgeMs, streams }`. |
 
 ## Security model
 
@@ -128,6 +175,8 @@ The audit also holds `op.<name>` for every side-effecting op (actor `client`; `{
 npx vitest run --project units apps/fleet          # the fleet's own tests
 npx vitest run --project fleet                     # real fleet + real agents (+ the hub), isolated tmux servers
 node e2e/fleet-two-node.e2e.ts                     # after npm run build: two nodes, the hub in fleet mode
+npx vitest run --project fleet test/fleet/api-doc.test.ts   # docs/fleet-api.md: every example against a real fleet
+node scripts/bench-relay.ts --rate 2 --gate                 # the hook swap's gate on the disk TMPDIR points at; exit 1 when it fails
 ```
 
 ## Sources (each entry says whether it was re-checked; re-check when upgrading)
