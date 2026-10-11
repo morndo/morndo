@@ -205,6 +205,10 @@ describe("DB3: a due time after filing, and the minutes to read and decide", () 
     expect(lines(d => { d.due = NOW - 1; }, NOW)).toEqual(["error due_past (due)"]);
     expect(lines(d => { d.due = NOW; }, NOW)).toEqual(["error due_past (due)"]);
   });
+  it("a finite due outside Date's range is refused as a problem line, never a thrown error (DB10)", () => {
+    expect(lines(d => { d.due = -1e300; })).toEqual(["error bad_due (due)"]);
+    expect(lines(d => { d.due = 1e300; })).toEqual(["error bad_due (due)"]);
+  });
   it("the minutes are refused when missing, not whole, or outside 1 to 30", () => {
     expect(lines(d => { delete d.minutes; })).toEqual(["error bad_minutes (minutes)"]);
     expect(lines(d => { d.minutes = 4.5; })).toEqual(["error bad_minutes (minutes)"]);
