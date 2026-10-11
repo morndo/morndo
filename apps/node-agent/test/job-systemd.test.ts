@@ -414,6 +414,25 @@ function failingSystemctl(home: string): NodeJS.ProcessEnv {
 
 const KEPT_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "MORNDO_JOB_ID", "MORNDO_LANE"];
 
+// Temporary: property values stay off the log. A token without "=" on Environment is a value fragment.
+function unitPropertyNames(text: string): string[] {
+  const names: string[] = [];
+  for (const line of text.split("\n")) {
+    const at = line.indexOf("=");
+    if (at <= 0) continue;
+    const prop = line.slice(0, at);
+    if (prop !== "Environment" && prop !== "UnsetEnvironment" && prop !== "PassEnvironment") continue;
+    for (const token of line.slice(at + 1).split(/\s+/)) {
+      if (token === "") continue;
+      const eq = token.indexOf("=");
+      if (prop === "Environment" && eq <= 0) continue;
+      const name = eq < 0 ? token : token.slice(0, eq);
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) names.push(`${prop}:${name}`);
+    }
+  }
+  return names;
+}
+
 describe("systemd environment", () => {
   it("takes JDK paths from the service environment export", () => {
     expect(namesFromEnvironmentExport([
@@ -515,6 +534,15 @@ describe.skipIf(!bus.ok)("systemd environment", () => {
     ]);
     expect(await until(() => existsSync(marker))).toBe(true);
     const env = JSON.parse(readFileSync(marker, "utf8")) as Record<string, string>;
+    console.log("job-env-names", Object.keys(env).sort().join(" "));
+    try {
+      const shown = execFileSync("systemctl", [
+        "--user", "show", unitOf(id), "-p", "Environment", "-p", "UnsetEnvironment", "-p", "PassEnvironment",
+      ], { encoding: "utf8" });
+      console.log("unit-property-names", unitPropertyNames(shown).join(" "));
+    } catch {
+      console.log("unit-property-names", "unavailable");
+    }
     expect(env.MORNDO_JOB_ID).toBe(id);
     expect(env.MORNDO_LANE).toBe("builder");
     expect(env.PATH).toBe(process.env.PATH);

@@ -1,0 +1,61 @@
+# Temporary. Names only: the runner may hold tokens. Push to debug/ci-env only.
+name: Debug environment
+
+on:
+  push:
+    branches: [debug/ci-env]
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json # engines.node
+          cache: npm
+
+      - run: npm ci
+
+      - name: Environment names
+        run: |
+          set -u
+          names_in() {
+            file=$1
+            [ -f "$file" ] || return 0
+            awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$file"
+          }
+          echo "user-manager:"
+          systemctl --user is-system-running || true
+          echo "show-environment-names:"
+          systemctl --user show-environment | awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' || true
+          echo "etc-environment-names:"
+          names_in /etc/environment
+          echo "etc-environment-d-names:"
+          found=0
+          for file in /etc/environment.d/*.conf; do
+            [ -f "$file" ] || continue
+            found=1
+            echo "file $(basename "$file")"
+            names_in "$file"
+          done
+          [ "$found" = 1 ] || echo none
+          echo "home-environment-d-names:"
+          found=0
+          for file in "$HOME"/.config/environment.d/*.conf; do
+            [ -f "$file" ] || continue
+            found=1
+            echo "file $(basename "$file")"
+            names_in "$file"
+          done
+          [ "$found" = 1 ] || echo none
+
+      - name: Failing test
+        run: npx vitest run apps/node-agent/test/job-systemd.test.ts -t "starts the job with the kept names only"
