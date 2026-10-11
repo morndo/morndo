@@ -1258,6 +1258,21 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-file-vault-refuses", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-file.ts",
     find: "    return { ok: false, problem: \"plaintext_vault\" };", replace: "    writePrivate(this.#path(_ref), _sealed, this.#uid);\n    return { ok: true, fingerprint: \"000000000000\" };",
     run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "plaintext_vault" },
+  { id: "sp2b-store-refused-removes", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "    if (!outcome.ok) {\n      vault.remove(ref);\n", replace: "    if (!outcome.ok) {\n",
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "criterion 19" },
+  { id: "sp2b-store-failure-removes", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "    } catch (error) {\n      vault.remove(ref);\n", replace: "    } catch (error) {\n",
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "leaves no new vault file" },
+  { id: "sp2b-store-index-first", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "        index.write({\n", replace: "        void ({\n",
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "criterion 19" },
+  { id: "sp2b-store-old-file", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "    if (replaced !== null) vault.remove(replaced);\n", replace: "",
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "removes version 1's file" },
+  { id: "sp2b-store-renew-rule", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "(request.renew ? renewSecret : storeSecret)", replace: "storeSecret",
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "renew_expiry" },
 ];
 
 // ---- the runner

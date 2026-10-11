@@ -221,7 +221,7 @@ export class MemoryRoots implements WorkspaceRoots {
   readonly repos = new Map<string, string>();
   commonDir(path: string): string | null {
     let best: string | null = null;
-    for (const [root, dir] of this.repos) if ((path === root || path.startsWith(`${root}/`)) && (best === null || root.length > best.length)) best = root;
+    for (const root of this.repos.keys()) if ((path === root || path.startsWith(`${root}/`)) && (best === null || root.length > best.length)) best = root;
     return best === null ? null : this.repos.get(best) ?? null;
   }
 }
