@@ -258,6 +258,11 @@ describe("the caps on a recording, a run and its text (TX6)", () => {
     expect(threadsFor(4)).toBe(2);
   });
 
+  it("one core still gets one thread: the engine is never started with none", () => {
+    expect(threadsFor(1)).toBe(1);
+    expect(threadsFor(2)).toBe(1);
+  });
+
   it("the effective cap is the lower of the setting and what the plugin offered", () => {
     expect(effectiveMaxSeconds(600, 300)).toBe(300);
     expect(effectiveMaxSeconds(300, 600)).toBe(300);
