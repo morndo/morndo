@@ -220,8 +220,10 @@ export function scan(bytes: Uint8Array, entries: readonly IndexEntry[], keyed: K
 // A retired version stays indexed this long after its rotation or revocation.
 export const RETIRED_KEPT_MS = 30 * 86_400_000;
 export type IndexedVersion = { reference: string; version: number; retiredAt: number | null; entries: readonly IndexEntry[] };
-export type SecretIndex = { format: 1; versions: readonly IndexedVersion[] };
-export const emptySecretIndex = (): SecretIndex => ({ format: 1, versions: [] });
+// The highest version of a Reference that pruning dropped. Versions are never reused, so one at or under it is a replay.
+export type PrunedThrough = { reference: string; through: number };
+export type SecretIndex = { format: 1; versions: readonly IndexedVersion[]; pruned: readonly PrunedThrough[] };
+export const emptySecretIndex = (): SecretIndex => ({ format: 1, versions: [], pruned: [] });
 
 const sameVersion = (v: IndexedVersion, reference: string, version: number) => v.reference === reference && v.version === version;
 
@@ -229,12 +231,12 @@ const sameVersion = (v: IndexedVersion, reference: string, version: number) => v
 // its first time, so adding it again can't restart its 30 days (T-88).
 export function withVersion(index: SecretIndex, reference: string, version: number, entries: readonly IndexEntry[]): SecretIndex {
   const retiredAt = index.versions.find(v => sameVersion(v, reference, version))?.retiredAt ?? null;
-  return { format: 1, versions: [...index.versions.filter(v => !sameVersion(v, reference, version)), { reference, version, retiredAt, entries: [...entries] }] };
+  return { ...index, versions: [...index.versions.filter(v => !sameVersion(v, reference, version)), { reference, version, retiredAt, entries: [...entries] }] };
 }
 
 // Retiring again keeps the first time, so the 30 days can't be stretched.
 export function retireVersion(index: SecretIndex, reference: string, version: number, at: number): SecretIndex {
-  return { format: 1, versions: index.versions.map(v => sameVersion(v, reference, version) && v.retiredAt === null ? { ...v, retiredAt: at } : v) };
+  return { ...index, versions: index.versions.map(v => sameVersion(v, reference, version) && v.retiredAt === null ? { ...v, retiredAt: at } : v) };
 }
 
 const kept = (v: IndexedVersion, now: number) => v.retiredAt === null || now - v.retiredAt <= RETIRED_KEPT_MS;
@@ -242,7 +244,7 @@ const kept = (v: IndexedVersion, now: number) => v.retiredAt === null || now - v
 // What the scanner looks for now: every live version, and every retired one for 30 days.
 export const liveEntries = (index: SecretIndex, now: number): IndexEntry[] => index.versions.filter(v => kept(v, now)).flatMap(v => v.entries);
 
-export const pruneIndex = (index: SecretIndex, now: number): SecretIndex => ({ format: 1, versions: index.versions.filter(v => kept(v, now)) });
+export const pruneIndex = (index: SecretIndex, now: number): SecretIndex => ({ ...index, versions: index.versions.filter(v => kept(v, now)) });
 
 // The file's text: References, versions, times and keyed hashes, never a form.
 export const serializeIndex = (index: SecretIndex): string => `${JSON.stringify(index)}\n`;
@@ -274,11 +276,23 @@ function versionOf(x: unknown): IndexedVersion | null {
   return parsed.every(e => e !== null) ? { reference, version: version as number, retiredAt, entries: parsed as IndexEntry[] } : null;
 }
 
+function prunedOf(x: unknown): PrunedThrough | null {
+  if (!isRecord(x) || !keysAre(x, ["reference", "through"])) return null;
+  const { reference, through } = x;
+  if (typeof reference !== "string" || parseReference(reference) === null || !count(through, 1, Number.MAX_SAFE_INTEGER)) return null;
+  return { reference, through: through as number };
+}
+
 // The file's text back, or null: anything it doesn't expect, an unknown key included, refuses the whole file.
 export function parseIndex(text: string): SecretIndex | null {
   let doc: unknown;
   try { doc = JSON.parse(text); } catch { return null; }
-  if (!isRecord(doc) || !keysAre(doc, ["format", "versions"]) || doc.format !== 1 || !Array.isArray(doc.versions)) return null;
+  if (!isRecord(doc) || !keysAre(doc, ["format", "versions", "pruned"]) || doc.format !== 1) return null;
+  if (!Array.isArray(doc.versions) || !Array.isArray(doc.pruned)) return null;
   const versions = doc.versions.map(versionOf);
-  return versions.every(v => v !== null) ? { format: 1, versions: versions as IndexedVersion[] } : null;
+  const pruned = doc.pruned.map(prunedOf);
+  if (!versions.every(v => v !== null) || !pruned.every(p => p !== null)) return null;
+  // Each Reference once: two marks for one would leave which one holds to the reader.
+  if (new Set(pruned.map(p => (p as PrunedThrough).reference)).size !== pruned.length) return null;
+  return { format: 1, versions: versions as IndexedVersion[], pruned: pruned as PrunedThrough[] };
 }
