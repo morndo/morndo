@@ -190,7 +190,10 @@ export async function startJobUnit(job: {
     if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) drop.add(key);
   }
   for (const key of await serviceEnvironmentNames()) drop.add(key);
-  for (const key of drop) {
+  // A later UnsetEnvironment name replaces an earlier one when it is a prefix of that name.
+  // systemd 255, observed 2026-10-11: JAVA_HOME after JAVA_HOME_8_X64 leaves only JAVA_HOME,
+  // and the longer name stays in the job. Shorter names go first.
+  for (const key of unsetNameOrder(drop)) {
     if (key in job.env) continue;
     args.push(`--property=UnsetEnvironment=${key}`);
   }
@@ -241,6 +244,11 @@ const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SERVICE_ENV_GENERATOR = "/usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator";
 
 // Keys from an environment.d export: KEY=VALUE lines. Comments and other lines are skipped.
+// Shorter names first, so a prefix is not applied after the longer name it would replace.
+export function unsetNameOrder(names: Iterable<string>): string[] {
+  return [...names].sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
+}
+
 export function namesFromEnvironmentExport(text: string): string[] {
   const names: string[] = [];
   for (const line of text.split("\n")) {

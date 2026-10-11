@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore, type NoticeHandoff } from "../src/ops/job-store.ts";
-import { namesFromEnvironmentExport, probeUserManager, showUnit, unitOf, type ProbeResult } from "../src/ops/job-systemd.ts";
+import { namesFromEnvironmentExport, probeUserManager, showUnit, unitOf, unsetNameOrder, type ProbeResult } from "../src/ops/job-systemd.ts";
 import { openJobRuntime } from "../src/ops/job-runtime.ts";
 import { JobSupervisor, openJobSupervisor, type JobStart } from "../src/ops/job-supervisor.ts";
 import { agentPaths } from "../src/paths.ts";
@@ -415,6 +415,12 @@ function failingSystemctl(home: string): NodeJS.ProcessEnv {
 const KEPT_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "MORNDO_JOB_ID", "MORNDO_LANE"];
 
 describe("systemd environment", () => {
+  it("lists a prefix before the longer name systemd would replace", () => {
+    expect(unsetNameOrder(["JAVA_HOME_8_X64", "JAVA_HOME_11_X64", "JAVA_HOME"])).toEqual([
+      "JAVA_HOME", "JAVA_HOME_8_X64", "JAVA_HOME_11_X64",
+    ]);
+  });
+
   it("takes JDK paths from the service environment export", () => {
     expect(namesFromEnvironmentExport([
       "# comment",
@@ -472,6 +478,8 @@ if [ "$2" = "show" ]; then printf '%s\\n' LoadState=not-found; exit 0; fi
 exit 0
 `, `#!/bin/sh\nprintf '%s\\n' "$@" >> '${log}'\nexit 0\n`);
     env.MORNDO_LATE_INJECT = "from-the-process";
+    env.JAVA_HOME_8_X64 = "jdk8";
+    env.JAVA_HOME = "jdk";
     const adb = openAgentDb(join(h.home, "agent.db"));
     const dir = join(h.home, "job-logs");
     const work = join(h.home, "work");
@@ -491,6 +499,10 @@ exit 0
     const lines = readFileSync(log, "utf8").split("\n");
     expect(lines).toContain("--property=Type=exec");
     expect(lines).toContain("--property=UnsetEnvironment=MORNDO_LATE_INJECT");
+    const prefix = lines.indexOf("--property=UnsetEnvironment=JAVA_HOME");
+    const longer = lines.indexOf("--property=UnsetEnvironment=JAVA_HOME_8_X64");
+    expect(prefix).toBeGreaterThanOrEqual(0);
+    expect(longer).toBeGreaterThan(prefix);
     let image = "";
     try { image = readFileSync("/etc/environment", "utf8"); } catch { /* the generator is the other source */ }
     for (const key of namesFromEnvironmentExport(image)) {
