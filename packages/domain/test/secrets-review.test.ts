@@ -91,3 +91,18 @@ describe("review 3: a waiter with no lane counts once, as a lane does (SR1: a re
     expect(withdrawRequest(r, null, T + 4).ok).toBe(false);
   });
 });
+
+describe("review 5: a bad workspace is refused as a bad workspace, not a bad Grant", () => {
+  const ask: RequestAsk = {
+    node: "node-a", reference: REF, kind: "new", waiter: { lane: "lane-a", workspace: "Bad Repo", purpose: "Run the tests" }, proposed: nodeGrant,
+  };
+  it("on open", () => {
+    const r = openRequest(ask, "r1", T);
+    expect(r.ok ? "ok" : r.error.problem).toBe("bad_workspace");
+  });
+  it("on join", () => {
+    const r1 = value(openRequest({ ...ask, waiter: { ...ask.waiter, workspace: "example-app" } }, "r1", T)).request;
+    const j = joinRequest(r1, { lane: "lane-b", workspace: "Bad Repo", purpose: "Deploy" }, T + 1);
+    expect(j.ok ? "ok" : j.error.problem).toBe("bad_workspace");
+  });
+});
