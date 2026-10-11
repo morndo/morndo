@@ -158,8 +158,10 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
         if (sub !== "key" && sub !== "label") lint.error("unknown_section", `options[${i}].${sub}`, `an option has no "${sub}" part; check the template`);
       }
       const { key, label } = o;
-      if (!isText(key) || !KEY.test(key) || !isText(label) || blank(label) || CONTROL.test(label)) {
-        lint.error("bad_option", `options[${i}]`, "a key of letters, digits, - and _ (at most 16) and a label of 1 to 40 characters");
+      // A label is one line: it heads a comparison column and names a tap button, and CONTROL keeps a newline as
+      // prose on purpose (the multi-line fields), so the line break is refused here (DB1).
+      if (!isText(key) || !KEY.test(key) || !isText(label) || blank(label) || CONTROL.test(label) || label.includes("\n")) {
+        lint.error("bad_option", `options[${i}]`, "a key of letters, digits, - and _ (at most 16) and a one-line label of 1 to 40 characters");
         optionsBroken = true;
         continue;
       }
