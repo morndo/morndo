@@ -13,7 +13,7 @@
     id: "%builder" as RosterEntry["id"], name: "builder", location: "box", node: "local", offline: false,
     title: null, lastMessageAt: now, needsYou: false, waitingOn: null, state: "quiet" as const, changedAt: now,
   };
-  const file = (name: string, kind: "image" | "text" | "pdf" | "file", size: number, id: string | null = name): Message["attachments"][number] =>
+  const file = (name: string, kind: "image" | "text" | "pdf" | "file", size: number, id: string | null = name): NonNullable<Message["attachments"]>[number] =>
     ({ id, name, mime: "application/octet-stream", kind, size, caption: null });
   const msg = (id: string, author: Message["author"], text: string, attachments: Message["attachments"]): Message =>
     ({ id, at: now - 60_000, author, kind: "text", text, attachments });

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { TEXT_MAX_BYTES } from "@morndo/domain";
 import { beginAttachments } from "../src/lib/attach.ts";
 
-const file = (name: string, size: number): File => ({ name, size, arrayBuffer: async () => { throw new Error("read"); } }) as File;
+const file = (name: string, size: number): File => ({ name, size, arrayBuffer: async () => { throw new Error("read"); } }) as unknown as File;
 
 describe("beginAttachments", () => {
   it("refuses an executable and an oversized text file without reading them", () => {
