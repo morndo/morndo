@@ -6,8 +6,8 @@
 # remote being pushed to: a line one commit adds and a later one removes
 # fails, a merge of the pushed-to remote's main passes, a commit only a
 # second remote holds still fails, a push to a URL checks everything, a
-# symlink replaced by a regular file is scanned, and a home path in a
-# conflict resolution fails.
+# symlink replaced by a regular file is scanned, a pure rename adds no
+# lines, and a home path in a conflict resolution fails.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
@@ -692,6 +692,26 @@ printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$roo
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "a home path behind a type change should exit 1, got $code"
+cd "$root"
+
+# A pure rename is not a full add: moving a file whose home-path line the
+# allowlist covers by path passes; the line was checked when it was added.
+ren=$scratch/ren
+git init -q --initial-branch=main "$ren"
+cp "$root/.gitleaks.toml" "$ren/.gitleaks.toml"
+cd "$ren"
+mkdir -p apps/fleet/test
+printf 'see /%s/%s/notes\n' home u > apps/fleet/test/client-api.test.ts
+git add apps/fleet/test/client-api.test.ts .gitleaks.toml
+commit_ok -m 'ren base'
+git mv apps/fleet/test/client-api.test.ts apps/fleet/test/renamed.test.ts
+commit_ok -m 'rename the file'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a pure rename of an allowlisted file should exit 0, got $code"
 cd "$root"
 
 echo "pre-push proof ok"
