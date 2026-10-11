@@ -108,7 +108,7 @@ RTF is wall time over audio length. The same German text as ogg/opus gave the sa
 - Its bytes must match its container:
   - `OggS` for Ogg;
   - the EBML magic `1A 45 DF A3` for WebM — the magic is all the sniff reads of one, so a WebM of video passes it and the engine's own decoding is the second gate;
-  - `ftyp` at offset 4 for MP4/M4A, and the major brand `M4A`: a photo (`heic`, `avif`) or movie (`isom`) brand is not audio;
+  - `ftyp` at offset 4 for MP4/M4A, and the major brand one of `M4A `, `isom`, `iso2`, `iso5`, `iso6`, `mp41`, `mp42` — the brands a recorder writes (Chromium's MediaRecorder muxer writes `isom`). An image brand (`heic`, `heix`, `avif`, `mif1`, `msf1`) or any other brand is not audio. A video file passes the gate and the engine reads its audio track, which is acceptable;
   - `ID3` or an MPEG frame sync for MP3;
   - `RIFF…WAVE` for WAV.
 - It is at most 10 MiB.
