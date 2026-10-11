@@ -42,6 +42,16 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 commit_ok() { git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q "$@"; }
 
+# The published claim in the docs is exactly what the hook guarantees, and
+# nothing broader.
+claim='commits already on the remote you push to (its remote-tracking refs; fetch first) are not checked again'
+for doc in "$root/CONTRIBUTING.md" "$root/docs/public-repo.md"; do
+  grep -F -q "$claim" "$doc" || fail "$doc must state the published claim exactly"
+  if grep -q 'no remote-tracking ref contains' "$doc"; then
+    fail "$doc must not claim any remote-tracking ref publishes"
+  fi
+done
+
 sh "$hook" </dev/null || fail "hook should exit 0 on the current tree"
 
 # Built at runtime so this script does not itself contain a home path.
