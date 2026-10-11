@@ -41,6 +41,10 @@ const CAPS = {
 // A control character (C0 or DEL, minus tab and newline): refused everywhere a string is read (§4.3). A newline is
 // prose and allowed in the multi-line fields; the one-line fields refuse it as one.
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000D-\u001F\u007F]/;
+// A block that opens where a list item's own content starts (up to three leading spaces still leave it one): an ATX
+// heading, a block quote, a code fence, or a thematic break as the whole item (CommonMark; marked 18.0.14 renders
+// each as a block inside the <li>, checked 2026-10-11).
+const ITEM_BLOCK = /^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isText = (v: unknown): v is string => typeof v === "string";
 const blank = (s: string) => s.trim() === "";
@@ -88,6 +92,18 @@ class Lint {
   // line, a list item, a table cell (§4.5: an old app renders `details` as markdown). Links must be https, no raw HTML,
   // no images; a heading can't form there, so the one rule that can't bite isn't checked.
   inline(where: string, s: string) { this.#subset(where, s); }
+
+  // DB7 for a field that lands as a whole list item of its own (`- ${item}` in briefMarkdown): the item's content
+  // starts the line, so a heading, a quote, a fence or a rule that begins it opens a block inside the item — marked
+  // renders `<li><h1>APPROVE NOW</h1></li>` for `- # APPROVE NOW` (checked against marked 18.0.14, 2026-10-11), and a
+  // fence swallows the items after it. The format owns the outline, and an item is one line of prose.
+  listItem(where: string, s: string) {
+    if (ITEM_BLOCK.test(s)) {
+      this.error("bad_markdown", where, "no heading, quote, fence or rule of your own; an item is one line of prose");
+      return;
+    }
+    this.#subset(where, s);
+  }
 
   #subset(where: string, s: string) {
     if (/!\[[^\]]*\]\([^)]*\)/.test(s)) { this.error("bad_markdown", where, "no images; link the evidence instead"); return; }
@@ -231,7 +247,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   if (whyText !== null) lint.markdown("why.text", whyText);
   // Assumptions may be empty when no money appears (DB5); limits are the asker's commitment, at least one.
   const assumptions = lint.strings("why.assumptions", why.assumptions, CAPS.item, 0, CAPS.list);
-  for (const [i, a] of (assumptions ?? []).entries()) lint.inline(`why.assumptions[${i}]`, a);
+  for (const [i, a] of (assumptions ?? []).entries()) lint.listItem(`why.assumptions[${i}]`, a);
   let downside: string | null = null;
   if (!isText(why.downside) || blank(why.downside)) {
     lint.error("no_downside", "why.downside", "state what happens if the assumptions are wrong; every brief has a downside case");
@@ -254,7 +270,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   if (control !== null) lint.inline("risk.control", control);
   const authorizes = isObj(draft.authorizes) ? draft.authorizes : {};
   const limits = lint.strings("authorizes.limits", authorizes.limits, CAPS.item, 1, CAPS.list);
-  for (const [i, l] of (limits ?? []).entries()) lint.inline(`authorizes.limits[${i}]`, l);
+  for (const [i, l] of (limits ?? []).entries()) lint.listItem(`authorizes.limits[${i}]`, l);
   const freshApproval = lint.string("authorizes.freshApproval", authorizes.freshApproval, CAPS.line);
   if (freshApproval !== null) lint.inline("authorizes.freshApproval", freshApproval);
   const reviewPoint = lint.string("authorizes.reviewPoint", authorizes.reviewPoint, CAPS.line);
