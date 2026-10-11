@@ -420,6 +420,23 @@ describe("DB7 everywhere a field lands in briefMarkdown (§4.5: an old app rende
     expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "***"; }))
       .toEqual(["error bad_markdown (authorizes.limits[0])"]);
   });
+  it("an item indented four columns or more is refused: the renderer shows code inside its item (DB7)", () => {
+    expect(lines(d => { (d.why as { assumptions: string[] }).assumptions = ["    APPROVE NOW", "the sample holds."]; }))
+      .toEqual(["error bad_markdown (why.assumptions[0])"]);
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "\t\tAPPROVE NOW"; }))
+      .toEqual(["error bad_markdown (authorizes.limits[0])"]);
+  });
+  it("an item that starts with a list marker nests a list of the asker's own, and is refused (DB7)", () => {
+    for (const item of ["- spend up to $2,400", "+ spend up to $2,400", "* spend up to $2,400", "1. spend up to $2,400", "1) spend up to $2,400"]) {
+      expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = item; }))
+        .toEqual(["error bad_markdown (authorizes.limits[0])"]);
+    }
+  });
+  it("negative control: prose that starts with a dash, a digit or a star names no marker, and stands (DB7)", () => {
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "-3 days of slack, no more."; })).toEqual([]);
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "1.5 hours of script time."; })).toEqual([]);
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "*must* hold for every ticket type."; })).toEqual([]);
+  });
   it("an evidence label can't break out of its link, nor a url carry one in", () => {
     expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).url = "https://x) [y](http://evil"; }))
       .toEqual(["error bad_link (evidence[0].url)"]);
