@@ -2,7 +2,7 @@
 // example (docs/agents/decision-requests.md), so a lint that stops refusing fails here (the design's mutation table,
 // §7). The example itself is the fixture; every mutation is one rule broken.
 import { describe, expect, it } from "vitest";
-import { lintBrief, type BriefProblem } from "../src/index.ts";
+import { hasMoney, lintBrief, type BriefProblem } from "../src/index.ts";
 
 // The guide's example is dated: `now` is fixed at 2026-10-01, its due is the end of 2026-10-14 (a date alone is the end
 // of its day, as the template adapter will read it).
@@ -242,4 +242,48 @@ describe("DB4: one column per option, three to ten factor rows, a note", () => {
     expect(lines(d => { delete (d.comparison as { note?: string }).note; })).toEqual(["error no_table_note (comparison.note)"]);
     expect(lines(d => { (d.comparison as { note: string }).note = "  "; })).toEqual(["error no_table_note (comparison.note)"]);
   });
+});
+
+describe("DB5: money needs its assumptions, every brief a downside case", () => {
+  it("money anywhere with no stated assumption is refused", () => {
+    expect(lines(d => { (d.why as { assumptions: string[] }).assumptions = []; }))
+      .toEqual(["error money_without_assumption (why.assumptions)"]);
+  });
+  it("money in one cell alone is enough to require the assumptions", () => {
+    expect(lines(d => {
+      (d.why as { assumptions: string[] }).assumptions = [];
+      ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[1]!).cells[0] = "from $0 to $900";
+    })).toEqual(["error money_without_assumption (why.assumptions)"]);
+  });
+  it("a missing downside case is refused", () => {
+    expect(lines(d => { delete (d.why as { downside?: string }).downside; })).toEqual(["error no_downside (why.downside)"]);
+    expect(lines(d => { (d.why as { downside: string }).downside = " "; })).toEqual(["error no_downside (why.downside)"]);
+  });
+  it("assumptions may be empty when no money appears", () => {
+    expect(lines(d => {
+      (d.why as { assumptions: string[] }).assumptions = [];
+      (d.ask as { text: string; alternative: string }).text = "Approve **6 agent-days** to extend the in-house triage script. It pays back in about **3 weeks**.";
+      (d.ask as { text: string; alternative: string }).alternative = "buy the hosted add-on (C); it starts faster and costs more from month 14.";
+      ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[1]!).cells = ["none", "6 agent-days", "a subscription"];
+      ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[2]!).cells = ["5 staff hours a week", "About 1 agent-day a quarter", "a subscription"];
+      (d.why as { text: string }).text = "B keeps ticket text in our own systems. A is right only if the backlog shrinks by itself, and nothing in the last month points to that.";
+      (d.why as { assumptions: string[] }).assumptions = [];
+      (d.authorizes as { limits: string[] }).limits = ["Up to 6 agent-days on the script and its tests."];
+      (d.authorizes as { freshApproval: string }).freshApproval = "a new vendor, or sending ticket text outside our systems.";
+      (d.why as { downside: string }).downside = "if the saving is only 2 hours a week, B still beats A; we would stop at the review point.";
+    })).toEqual([]);
+  });
+});
+
+describe("the money pattern (design §4.2)", () => {
+  // The pattern is exported for the compact card (cardOf): one place decides what counts as spend.
+  const money = (text: string) => hasMoney(text);
+  it.each([
+    ["$2,400", true], ["€180", true], ["£30", true], ["¥9,000", true], ["₹4 lakh in $ terms", true],
+    ["2.4k EUR", true], ["$0", true], ["$2,400.", true], ["up to $900", true], ["2400$", true], ["180 EUR", true], ["about 2.4k USD", true],
+  ])("%s is money", (text, want) => expect(money(text)).toBe(want));
+  it.each([
+    ["3 weeks", false], ["6 agent-days", false], ["5 staff hours a week", false], ["60% of tickets", false],
+    ["from 9 to 23 a week", false], ["month 14", false], ["EUR without a number", false], ["the k factor", false], ["5 min", false],
+  ])("%s is not money", (text, want) => expect(money(text)).toBe(want));
 });
