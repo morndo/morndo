@@ -232,9 +232,10 @@ export function transcriptionTimeoutMs(durationMs: number, timeoutSec: number | 
   return typeof timeoutSec === "number" && timeoutSec > 0 ? timeoutSec * 1000 : 120_000 + 6 * durationMs;
 }
 
-// 9: half the cores, at most eight, so the agents keep the other half.
+// 9: half the cores, at most eight, so the agents keep the other half — and never fewer than one, for a run needs
+// a thread however small the machine.
 export function threadsFor(cores: number): number {
-  return Math.min(8, Math.floor(cores / 2));
+  return Math.max(1, Math.min(8, Math.floor(cores / 2)));
 }
 
 // 9: the probe can lower the cap; the setting cannot raise it past what the plugin offered.
