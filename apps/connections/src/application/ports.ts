@@ -1,6 +1,6 @@
 // Ports for the connections application (ADR-0018). No secret bytes cross a port: a vault answers
 // whether a ref exists and what its fingerprint is, and nothing else.
-import type { Directory, Holder, Isolation, Policy } from "@morndo/domain";
+import type { Directory, Holder, Isolation, Policy, SecretDirectory } from "@morndo/domain";
 import type { VendorPreset } from "@morndo/protocol";
 
 export type Clock = { now(): number };
@@ -122,3 +122,50 @@ export type LeaseRequest = {
   margin: number;
   probe: boolean;
 };
+
+// ---- Secrets on the node (ADR-0022; design §6, §14). No port returns a value: a vault answers with keyed fingerprints,
+// the index with keyed hashes, the store with metadata.
+
+// Fresh ids: vault refs (`s-<random>`) and the Command id of a typed confirmation at the machine.
+export type Ids = { next(prefix: string): string };
+
+// Why a sealed value was refused before anything was written: not an age file, a header with other than one recipient
+// stanza, a file this node's identity doesn't open, or a vault that would keep it as plaintext (decided on T-85).
+export type SealedProblem = "not_age" | "stanzas" | "foreign" | "plaintext_vault";
+export type SealedStore = {
+  // Checks the age file and writes it as received under `ref`, by temp file and rename. Returns the value's keyed
+  // fingerprint (HMAC-SHA-256 under the node's fingerprint key, 12 hex), never the value.
+  storeSealed(ref: string, sealed: Uint8Array): Promise<{ ok: true; fingerprint: string } | { ok: false; problem: SealedProblem }>;
+  // Opens nothing.
+  has(ref: string): boolean;
+  keyedFingerprint(ref: string): Promise<string | null>;
+  remove(ref: string): void;
+};
+
+// A value's index entries, computed once from its vault file (keyed hashes only); `short` when it is under 8 bytes and
+// so not indexed. What else it holds is the adapter's.
+export type PreparedIndex = { readonly short: boolean };
+export type IndexChange = {
+  add: { reference: string; version: number; prepared: PreparedIndex } | null;
+  retire: readonly { reference: string; version: number }[];
+  at: number;
+};
+export type IndexWriter = {
+  prepare(ref: string): Promise<PreparedIndex>;
+  // One atomic write of the index file: the new version added, the retired ones marked, what 30 days no longer cover pruned.
+  write(change: IndexChange): void;
+};
+
+// Where each version's sealed file lives (null once removed), and the registered workspaces (design §6).
+export type VaultRefRow = { reference: string; version: number; ref: string | null };
+export type WorkspaceRow = { name: string; root: string; at: number; command: string };
+export type SecretsState = { directory: SecretDirectory; vaults: readonly VaultRefRow[]; workspaces: readonly WorkspaceRow[] };
+export type SecretsDirectory = {
+  load(): SecretsState;
+  // One BEGIN IMMEDIATE transaction: `change` reads the state as committed now; a `next` it returns is saved before the
+  // commit, and a throw rolls everything back. So the ledger check and the insert are one write (SC2).
+  write<T>(change: (state: SecretsState) => { next: SecretsState | null; result: T }): T;
+};
+
+// The repository a path belongs to: its git common directory, absolute, or null outside a repository (design §6).
+export type WorkspaceRoots = { commonDir(path: string): string | null };
