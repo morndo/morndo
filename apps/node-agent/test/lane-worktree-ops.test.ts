@@ -110,22 +110,29 @@ describe("lane.start", () => {
   });
   it("starts in exactly the directory asked for, whatever tmux formats it holds: never expanded, never run", async () => {
     // tmux expands formats in -c as in -n (seen on tmux 3.6a: a directory a#{session_name}b started the pane in amainb),
-    // and #(…) is a format that runs a shell command; tmuxLiteral doubles every #.
-    t.tmux("new-session", "-d", "-s", "main", "-n", "base", "sleep 600");
-    const dirs = ["#{session_name}", "#(touch m)", "a#Sb ##x"].map(n => { const d = join(work, n); mkdirSync(d); return d; });
-    for (const [i, cwd] of dirs.entries()) {
-      const name = `odd dir ${i} #(touch n)`;
-      const r = await h.call("lane.start", { name, cwd }, { key: `hub:dir${i}` });
-      if (!r.ok) throw new Error(r.error.message);
-      const pane = `%${(r.result as { workerId: string }).workerId.replace(/^.*\./, "")}`;
-      expect(t.tmux("display-message", "-p", "-t", pane, "#{pane_start_path}").replace(/\n$/, ""), cwd).toBe(realpathSync(cwd));
-      expect(t.tmux("display-message", "-p", "-t", pane, "#{window_name}").replace(/\n$/, "")).toBe(name);
-      expect(h.inventory.last().panes.find(p => p.window === name)).toMatchObject({ cwd: realpathSync(cwd) });
-    }
-    await wait(500);                                                        // time for a #(…) job, had one started
-    for (const where of [work, ...dirs, home.home, process.cwd()]) {
-      expect(readdirSync(where).filter(f => f === "m" || f === "n"), where).toEqual([]);
-    }
+    // and #(…) is a format that runs a shell command; tmuxLiteral doubles every #. A #(…) job runs in the working
+    // directory of the tmux client whose command expanded it — not the server's, not HOME (seen on tmux 3.4) — and
+    // lane.start's client is this process. Run from the throwaway HOME, so a job, had one escaped wrongly, lands
+    // there: this test never looks at the directory the suite runs in, whatever stray files sit in it.
+    const back = process.cwd();
+    process.chdir(home.home);
+    try {
+      t.tmux("new-session", "-d", "-s", "main", "-n", "base", "sleep 600");
+      const dirs = ["#{session_name}", "#(touch m)", "a#Sb ##x"].map(n => { const d = join(work, n); mkdirSync(d); return d; });
+      for (const [i, cwd] of dirs.entries()) {
+        const name = `odd dir ${i} #(touch n)`;
+        const r = await h.call("lane.start", { name, cwd }, { key: `hub:dir${i}` });
+        if (!r.ok) throw new Error(r.error.message);
+        const pane = `%${(r.result as { workerId: string }).workerId.replace(/^.*\./, "")}`;
+        expect(t.tmux("display-message", "-p", "-t", pane, "#{pane_start_path}").replace(/\n$/, ""), cwd).toBe(realpathSync(cwd));
+        expect(t.tmux("display-message", "-p", "-t", pane, "#{window_name}").replace(/\n$/, "")).toBe(name);
+        expect(h.inventory.last().panes.find(p => p.window === name)).toMatchObject({ cwd: realpathSync(cwd) });
+      }
+      await wait(500);                                                        // time for a #(…) job, had one started
+      for (const where of [work, ...dirs, home.home]) {
+        expect(readdirSync(where).filter(f => f === "m" || f === "n"), where).toEqual([]);
+      }
+    } finally { process.chdir(back); }
   });
 });
 

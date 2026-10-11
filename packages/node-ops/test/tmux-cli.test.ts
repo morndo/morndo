@@ -59,27 +59,39 @@ describe("tmuxLiteral", () => {
     t.tmux("rename-window", "-t", w, "r#{session_name}");
     expect(nameOf(w)).toBe("rmain");
   });
-  it("a directory arrives as asked for, and a #(…) in it runs nothing; unescaped, tmux expands it (negative control)", () => {
+  it("a directory arrives as asked for, and a #(…) in it runs nothing; unescaped, tmux expands it and its job lands here (negative control)", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "morndo-literal-")));
-    const odd = [join(dir, "a#{session_name}b"), join(dir, "#(touch m)")];
-    for (const d of odd) mkdirSync(d);
+    // A #(…) job runs in the working directory of the tmux client whose command expanded it (seen on tmux 3.4); the
+    // server's cwd and its HOME are the candidates another version could pick instead. All of them are pinned to
+    // dir: this test's client runs from dir, and the server — started by the first command below — inherits HOME=dir,
+    // so the unescaped control's touch lands in dir whatever picks the directory, never the one the suite runs in.
+    const back = process.cwd();
     const home = process.env.HOME;
+    process.chdir(dir);
+    process.env.HOME = dir;
     try {
-      process.env.HOME = dir;                                           // the server's HOME: where a #(…) job would run
+      const odd = [join(dir, "a#{session_name}b"), join(dir, "#(touch m)")];
+      for (const d of odd) mkdirSync(d);
       t.tmux("new-session", "-d", "-s", "main", "-n", "base", "-c", dir, "sleep 600");
-      if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
       const startIn = (cwd: string) => {
         const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-c", cwd, "sleep 600").trim();
         return t.tmux("display-message", "-p", "-t", pane, "#{pane_start_path}").replace(/\n$/, "");
       };
+      const m = join(dir, "m");
+      const settle = (ms: number) => {
+        for (let i = 0; i < ms / 50 && !existsSync(m); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      };
       for (const d of odd) expect(startIn(tmuxLiteral(d)), d).toBe(d);
+      settle(500);
+      expect(existsSync(m)).toBe(false);                               // escaped, no job ran, though one would land here
       expect(startIn(odd[0] ?? "")).toBe(join(dir, "amainb"));
-      expect(startIn(odd[1] ?? "")).not.toBe(odd[1]);
-      for (let i = 0; i < 10 && !existsSync(join(dir, "m")); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-      expect(existsSync(join(dir, "m"))).toBe(false);
+      expect(startIn(odd[1] ?? "")).not.toBe(odd[1]);                  // unescaped, tmux expands it
+      settle(5000);
+      expect(existsSync(m)).toBe(true);                                // and its job really ran, in dir: the absent m above means something
     } finally {
+      process.chdir(back);
       if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });                   // after the job has landed: nothing races this removal
     }
   });
   it("a directory ending in ; arrives as asked for", () => {
