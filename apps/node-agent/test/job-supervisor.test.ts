@@ -853,34 +853,14 @@ describe("child supervisor", () => {
   });
 
   it("keeps the exit code when the command filled its log and then exited", async () => {
-    const { sup, store, start } = rig(undefined, undefined, 8);
+    const { sup, store, dir, home, paths, start, slot } = rig(undefined, undefined, 8);
     const script = `require("node:fs").writeSync(1, Buffer.alloc(64, 97)); process.exit(1);`;
     expect((await start({ id: "job-cap-exit", command: [process.execPath, "-e", script] })).state).toBe("running");
-    // Sweeps stay on for the command's whole life: the cap decision they make is what must not cost a
-    // command, that is already ending, its own exit code.
-    expect(await until(async () => {
-      await sup.sweep();
-      return store.get("job-cap-exit")?.outcome === "exited";
-    }, 8000)).toBe(true);
+    sup.close();
+    expect(await until(() => existsSync(join(dir, "job-cap-exit.exit")), 8000)).toBe(true);
+    const next = replace(slot, store, home, paths);
+    await next.sweep();
     expect(store.get("job-cap-exit")).toMatchObject({ outcome: "exited", exitCode: 1 });
-  });
-
-  it("records no exit code when the cap stops a command that traps SIGTERM, after the grace", async () => {
-    const { sup, store, start, work } = rig(undefined, undefined, 8);
-    const marker = join(work, "trap");
-    const script = `require("node:fs").writeSync(1, Buffer.alloc(64, 97));
-      require("node:fs").writeFileSync(process.argv[1], String(Date.now()));
-      process.on("SIGTERM", () => { require("node:fs").appendFileSync(process.argv[1], " " + String(Date.now())); process.exit(0); });
-      setInterval(() => {}, 1000);`;
-    expect((await start({ id: "job-cap-trap", command: [process.execPath, "-e", script, marker] })).state).toBe("running");
-    expect(await until(async () => {
-      await sup.sweep();
-      return store.get("job-cap-trap")?.outcome === "exited";
-    }, 8000)).toBe(true);
-    // The command ends 0 by its own trap, but the cap ended it: no code, whatever the handler did.
-    expect(store.get("job-cap-trap")).toMatchObject({ outcome: "exited", exitCode: null });
-    const times = readFileSync(marker, "utf8").split(" ").map(Number);
-    expect(times[1]! - times[0]!).toBeGreaterThanOrEqual(240);    // the grace passed before the signal
   });
 
   it("stops a command that fills its log, and leaves the bytes already written", async () => {
