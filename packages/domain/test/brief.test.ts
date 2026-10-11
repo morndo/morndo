@@ -158,6 +158,10 @@ describe("DB1: two to six options, in the manager protocol's grammar", () => {
     expect(lines(d => { ((d.options as { key: string; label: string }[])[2]!).key = "a"; }))
       .toEqual(["error duplicate_option (options[2])"]);
   });
+  it("a key that differs only in case is the same key twice: the headline names an option in any case (DB2)", () => {
+    expect(lines(d => { d.options = [{ key: "a", label: "Lower case" }, { key: "A", label: "Upper case" }, { key: "b", label: "Extend the triage script" }]; }))
+      .toEqual(["error duplicate_option (options[1])"]);
+  });
   it("an empty label is refused", () => {
     expect(lines(d => { relabel(d, 0, ""); })).toEqual(["error bad_option (options[0])"]);
   });
