@@ -1,0 +1,119 @@
+// The Secrets service's store flow (PLAN step 10, criteria 12, 19 and 20; design §6, D2), over in-memory ports and the
+// fake sealed store. Values, References and fingerprints are synthetic.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { type Actor, type SecretGrant } from "@morndo/domain";
+import { CountingIds, ManualClock, MemoryIndex, MemoryRoots, MemorySecrets } from "../src/application/fakes.ts";
+import { SecretsService, type StoreRequest } from "../src/application/secrets-service.ts";
+import { MemorySealedStore } from "./sealed-store-fake.ts";
+
+const T = 1_700_000_000_000;
+const REF = "secret://example-app/payments-test";
+const OTHER = "secret://example-app/other-token";
+const principal: Actor = { kind: "principal", command: "c1" };
+const nodeGrant: SecretGrant = { subject: { kind: "node" }, modes: ["exec"], until: { kind: "open" } };
+const text = (s: string) => new TextEncoder().encode(s);
+
+function world() {
+  const vault = new MemorySealedStore("fake1-node");
+  const index = new MemoryIndex(async ref => (await vault.open(ref)).bytes().length < 8);
+  const secrets = new MemorySecrets();
+  const clock = new ManualClock(T);
+  const service = new SecretsService({ clock, ids: new CountingIds(), vault, index, secrets, roots: new MemoryRoots() });
+  const request = (value: string, over: Partial<StoreRequest> = {}): StoreRequest => ({
+    reference: REF, sealed: MemorySealedStore.seal(["fake1-node"], text(value)), shape: null, grants: [nodeGrant], expiry: null,
+    destinations: [], renew: false, ...over,
+  });
+  return { vault, index, secrets, clock, service, request };
+}
+
+describe("a store: seal under a fresh ref, then the check, the index and the save in one transaction (D2)", () => {
+  it("stores version 1, with its vault ref recorded and its index entries written before it returns (criterion 19)", async () => {
+    const w = world();
+    const r = await w.service.store(w.request("synthetic-value-one"), principal);
+    expect(r).toEqual({ ok: true, value: { reference: REF, version: 1, at: T, sameAs: [], indexed: true, renewed: false } });
+    expect([...w.vault.files.keys()]).toEqual(["s-0001"]);
+    expect(w.secrets.state.vaults).toEqual([{ reference: REF, version: 1, ref: "s-0001" }]);
+    expect(w.index.changes).toEqual([{ add: { reference: REF, version: 1, prepared: { short: false } }, retire: [], at: T }]);
+    expect(w.secrets.state.directory.events.map(e => e.type)).toEqual(["SecretStored"]);
+  });
+  it("a refused store leaves no new vault file and writes no index entry (criterion 19)", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    const again = await w.service.store(w.request("synthetic-value-one"), principal);
+    expect(again).toEqual({ ok: false, error: { problem: "earlier" } });
+    const agent = await w.service.store(w.request("synthetic-value-two"), { kind: "operator" });
+    expect(agent).toEqual({ ok: false, error: { problem: "principal" } });
+    expect([...w.vault.files.keys()]).toEqual(["s-0001"]);
+    expect(w.index.changes).toHaveLength(1);
+    expect(w.secrets.state.directory.events).toHaveLength(1);
+  });
+  it("a sealed value the vault refuses stores nothing and names why", async () => {
+    const w = world();
+    const r = await w.service.store(w.request("x", { sealed: MemorySealedStore.seal(["fake1-other"], text("synthetic-value-one")) }), principal);
+    expect(r).toEqual({ ok: false, error: { problem: "foreign" } });
+    expect(w.vault.files.size).toBe(0);
+    expect(w.index.changes).toEqual([]);
+    expect(w.secrets.writes).toBe(0);
+  });
+  it("a rotation adds version 2, retires version 1 in the index, and removes version 1's file after the save", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    w.clock.at = T + 5;
+    const r = await w.service.store(w.request("synthetic-value-two", { shape: { keep: true } }), principal);
+    expect(r.ok && r.value.version).toBe(2);
+    expect(w.index.changes.at(-1)).toEqual({ add: { reference: REF, version: 2, prepared: { short: false } }, retire: [{ reference: REF, version: 1 }], at: T + 5 });
+    expect([...w.vault.files.keys()]).toEqual(["s-0002"]);
+    expect(w.secrets.state.vaults).toEqual([{ reference: REF, version: 1, ref: null }, { reference: REF, version: 2, ref: "s-0002" }]);
+  });
+  it("a value under 8 bytes is stored, not indexed, and says so", async () => {
+    const w = world();
+    const r = await w.service.store(w.request("short"), principal);
+    expect(r.ok && r.value.indexed).toBe(false);
+    expect(w.index.changes[0]?.add?.prepared).toEqual({ short: true });
+  });
+  it("a failure while preparing the index or saving leaves no new vault file", async () => {
+    const w = world();
+    w.index.prepare = () => Promise.reject(new Error("index unreadable"));
+    await expect(w.service.store(w.request("synthetic-value-one"), principal)).rejects.toThrow(/index unreadable/);
+    expect(w.vault.files.size).toBe(0);
+    const v = world();
+    v.index.write = () => { throw new Error("disk full"); };
+    await expect(v.service.store(v.request("synthetic-value-one"), principal)).rejects.toThrow(/disk full/);
+    expect(v.vault.files.size).toBe(0);
+    expect(v.secrets.writes).toBe(0);
+  });
+  it("a renew is held to the renew rule, and says it renewed", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one", { expiry: T + 10 }), principal);
+    const late = await w.service.store(w.request("synthetic-value-two", { renew: true, expiry: T + 5 }), principal);
+    expect(late).toEqual({ ok: false, error: { problem: "renew_expiry" } });
+    const r = await w.service.store(w.request("synthetic-value-two", { renew: true, expiry: T + 100, shape: { keep: true } }), principal);
+    expect(r.ok && r.value).toMatchObject({ version: 2, renewed: true });
+    expect([...w.vault.files.keys()]).toEqual(["s-0003"]);
+  });
+});
+
+describe("criterion 12: a revoked fingerprint is refused under any Reference on the node", () => {
+  it("through the service: a value revoked under one Reference can't be stored under another", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    const s = w.secrets.state;
+    w.secrets.state = { ...s, directory: { ...s.directory, ledger: s.directory.ledger.map(e => ({ ...e, state: "revoked" as const })) } };
+    const r = await w.service.store(w.request("synthetic-value-one", { reference: OTHER }), principal);
+    expect(r).toEqual({ ok: false, error: { problem: "revoked" } });
+    expect([...w.vault.files.keys()]).toEqual(["s-0001"]);
+  });
+});
+
+describe("criterion 20: the Secrets service is application code", () => {
+  const code = readFileSync(join(import.meta.dirname, "../src/application/secrets-service.ts"), "utf8");
+  it("imports only the domain, the protocol and its siblings; no node agent, no plaintext type, no Node global", () => {
+    const specs = [...code.matchAll(/(?:import|export)\s[^'"]*?from\s*["']([^"']+)["']/g)].map(m => m[1] ?? "");
+    expect(specs.length).toBeGreaterThan(0);
+    expect(specs.filter(s => !(/^\.\/[\w-]+\.ts$/.test(s) || s === "@morndo/domain" || s === "@morndo/protocol"))).toEqual([]);
+    expect(code).not.toMatch(/node-agent|secret-material|SecretMaterial/);
+    expect(code).not.toMatch(/\b(?:Buffer|process|require|crypto|fetch)\b|Date\.now|new Date\(/);
+  });
+});
