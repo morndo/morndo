@@ -28,9 +28,14 @@ type ExitBody = {
 const capRequest = (exitPath: string): string =>
   exitPath.endsWith(".exit") ? `${exitPath.slice(0, -5)}.cap` : `${exitPath}.cap`;
 
+// How long a log stays over its cap before the helper stops the command (the store's own .cap request acts at once).
+const FULL_LOG_GRACE_MS = 100;
+
 const gone = (pid: number): boolean => {
   try { process.kill(-pid, 0); return false; } catch { return true; }
 };
+
+const wait = (ms: number): Promise<void> => new Promise(resolve => { setTimeout(resolve, ms); });
 
 function killGroup(pid: number): Promise<void> {
   return new Promise(resolve => {
@@ -57,6 +62,7 @@ async function main(): Promise<void> {
   const started = Date.now();
   let wrote = false;
   let stopping: "cancelled" | "timed_out" | "capped" | null = null;
+  let fullSince: number | null = null;
   const write = (body: ExitBody) => {
     if (wrote) return;
     wrote = true;
@@ -96,9 +102,16 @@ async function main(): Promise<void> {
     if (stopping || wrote) return;
     stopping = kind;
     if (child.pid !== undefined) await killGroup(child.pid);
+    if (kind === "capped") {
+      // Backstop for the race the grace above narrows: a command can end on its own in the very moment the stop
+      // lands, the kill above then reaching a command that is already gone. Its own exit code — the one the exit
+      // event carries — is the truth, not the cap's null; a null code means a signal (ours) ended it. killGroup has
+      // waited the group out, so the event is a beat away.
+      for (let i = 0; i < 50 && !childExited && !wrote; i++) await wait(20);
+    }
     const durationMs = Math.max(0, Date.now() - started);
     write(kind === "capped"
-      ? { outcome: "exited", exitCode: null, durationMs }
+      ? { outcome: "exited", exitCode: childExited ? ownCode : null, durationMs }
       : { outcome: kind, exitCode: 137, durationMs });
     process.exit(0);
   };
@@ -108,11 +121,12 @@ async function main(): Promise<void> {
     process.exit(0);
   });
   let childCode: number | null = null;
+  let ownCode: number | null = null;
   let childExited = false;
   child.on("exit", (code, signal) => {
-    if (stopping || wrote) return;
     childExited = true;
     childCode = code !== null ? code : signal === "SIGKILL" ? 137 : signal === "SIGTERM" ? 143 : null;
+    ownCode = code;
   });
   const linger = setInterval(() => {
     if (stopping || wrote) return;
@@ -126,7 +140,18 @@ async function main(): Promise<void> {
     if (spec.logBytes > 0) {
       let size = 0;
       try { size = statSync(spec.logPath).size; } catch { /* a missing log is not over the cap */ }
-      if (size >= spec.logBytes) { void stop?.("capped"); return; }
+      if (size >= spec.logBytes) {
+        // A command that has stopped writing ends on its own moments later, and its own exit code is the truth: a
+        // full log alone is no fault. Only a command whose log has been full this long — still running, whatever it
+        // is doing — is stopped, so the cap can never cut off one that was already done. Under load a command sits
+        // a good while between its last write and its exit; a command that keeps writing adds a bounded burst
+        // (about 45 MB/s measured for a tight writeSync loop) to a log the store truncates on read anyway.
+        if (fullSince === null) { fullSince = Date.now(); return; }
+        if (Date.now() - fullSince < FULL_LOG_GRACE_MS) return;
+        void stop?.("capped");
+        return;
+      }
+      fullSince = null;    // under the cap again (the store truncates a pool-full log): the wait starts over
     }
   }, 30);
   if (spec.timeoutMs !== null && spec.timeoutMs > 0 && spec.timeoutMs <= MAX_TIMER_MS) {
