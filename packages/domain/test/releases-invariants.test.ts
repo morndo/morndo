@@ -158,6 +158,22 @@ describe("RL3 trust moves forward loudly", () => {
     const staleNewest = [chain[0]!, offered(keySet(3, ["root-a"], { expiresAt: NOW - DAY }), ["root-a"])];
     expect(acceptKeySets(keySet(1), staleNewest, NOW)).toEqual({ ok: false, error: "expired" });
   });
+  it("a machine with no Key set gains trust only from the pinned root (§10.1: root signs the Key set, once at the start)", () => {
+    // The anchor is out-of-band: the root the install pinned (§5's trust/, or the principal's word). A first walk
+    // from it is the same rule as any walk: v1 signed by that root, and both sides on a change of root.
+    expect(acceptKeySets(null, [offered(keySet(1), ["root-a"])], NOW, ["root-a"])).toEqual({ ok: true, value: keySet(1) });
+    const grew = keySet(1, ["root-a", "root-b"]);
+    expect(acceptKeySets(null, [offered(grew, ["root-a", "root-b"])], NOW, ["root-a"])).toEqual({ ok: true, value: grew });
+  });
+  it("negative control: with no Key set and no pinned root, nothing gains trust", () => {
+    expect(acceptKeySets(null, [offered(keySet(1), ["root-a"])], NOW)).toEqual({ ok: false, error: "unsigned_by_root" });
+    expect(acceptKeySets(null, [offered(keySet(1), ["root-a"])], NOW, [])).toEqual({ ok: false, error: "unsigned_by_root" });
+  });
+  it("negative control: a first Key set signed by another key than the pinned root, or one side of a root change, is refused", () => {
+    expect(acceptKeySets(null, [offered(keySet(1), ["root-x"])], NOW, ["root-a"])).toEqual({ ok: false, error: "unsigned_by_root" });
+    expect(acceptKeySets(null, [offered(keySet(1, ["root-b"]), ["root-a"])], NOW, ["root-a"]))
+      .toEqual({ ok: false, error: "root_change_one_side" });
+  });
 });
 
 describe("RL4 one Update at a time, each step recorded before it runs", () => {

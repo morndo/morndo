@@ -97,24 +97,27 @@ export type OfferedKeySet = { set: KeySet; signedBy: string[] };
 // The walk (§5): one version at a time from the trusted one, each signed by a root of the set before it, and a
 // change of root signed by a root of the new set too. An expired set may vouch for the next; the newest must be
 // unexpired. Anything else is refused loudly (KeysExpired, or the caller's Alert), never taken on trust anyway.
-export function acceptKeySets(have: KeySet | null, offered: OfferedKeySet[], now: number):
+// A machine with no Key set of its own (a first install, a lost trust/) anchors on the pinned root (§10.1: root
+// signs the Key set, once at the start) — the caller's out-of-band fact, never a key the download offered. Without
+// one, nothing gains trust: an empty anchor refuses every step as unsigned_by_root.
+export function acceptKeySets(have: KeySet | null, offered: OfferedKeySet[], now: number, pinnedRoot: readonly string[] = []):
   Result<KeySet, "empty" | "gap" | "older" | "unsigned_by_root" | "root_change_one_side" | "expired"> {
   if (offered.length === 0) return err("empty");
   const at = have?.version ?? 0;
   for (let i = 0; i < offered.length; i++) {
     const step = offered[i]!;
-    const prevRoots = i === 0 ? (have?.root ?? []) : offered[i - 1]!.set.root;
+    const prevRoots = i === 0 ? (have?.root ?? pinnedRoot) : offered[i - 1]!.set.root;
     if (step.set.version <= at) return err("older");                        // never rolls back, even within a list
     if (step.set.version !== at + i + 1) return err("gap");                 // one version at a time, no jumps
     if (!step.signedBy.some(k => prevRoots.includes(k))) return err("unsigned_by_root");
-    const rootsChanged = have !== null || i > 0 ? !sameKeys(prevRoots, step.set.root) : false;
+    const rootsChanged = have !== null || i > 0 || pinnedRoot.length > 0 ? !sameKeys(prevRoots, step.set.root) : false;
     if (rootsChanged && !step.signedBy.some(k => step.set.root.includes(k))) return err("root_change_one_side");
   }
   const newest = offered[offered.length - 1]!.set;
   if (now >= newest.expiresAt) return err("expired");
   return ok(newest);
 }
-const sameKeys = (a: string[], b: string[]): boolean => a.length === b.length && a.every(k => b.includes(k));
+const sameKeys = (a: readonly string[], b: readonly string[]): boolean => a.length === b.length && a.every(k => b.includes(k));
 
 export type FeedEntry = { version: string; manifest: string; manifestSize: number; manifestSha256: string };
 export type ChannelFeed = {
