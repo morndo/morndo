@@ -92,13 +92,25 @@ export function draftOnScreen(screen: string): string | null {
   const line = screen.split("\n").slice(-12).reverse().find(l => /^[\s│]*❯/.test(l.replace(SGR, "")));
   if (!line) return null;
   const after = line.slice(line.indexOf("❯") + 1);
-  // The cursor is drawn in reverse video (SGR 7) on the first character of a dim placeholder or suggestion, so that
-  // one character is not dim. Reverse-video text is the cursor, not a draft.
+  // Claude Code draws the cursor as reverse video on one cell. On a dim placeholder or suggestion that cell is the
+  // first character and is not itself dim, so it would look typed. A one-character reverse run takes the dim state
+  // of the text after it (nothing after it counts as typed: a one-character draft, or the cursor at the end). A
+  // longer reverse run is the text itself — a selection or a pasted chip — and is kept.
   const style = { dim: false, rev: false };
-  let typed = "";
+  const runs: { text: string; dim: boolean; rev: boolean }[] = [];
   for (const m of after.matchAll(/\x1b\[([0-9;]*)m|([^\x1b]+)/g)) {
     if (m[1] !== undefined) applySgr(m[1], style);
-    else if (!style.dim && !style.rev) typed += m[2];
+    else if (m[2] !== undefined) runs.push({ text: m[2], dim: style.dim, rev: style.rev });
+  }
+  let typed = "";
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    if (!run || run.dim) continue;
+    if (run.rev && [...run.text].length === 1) {
+      const follow = runs.slice(i + 1).find(r => r.text !== "");
+      if (follow?.dim) continue;
+    }
+    typed += run.text;
   }
   const draft = typed.replace(/\s*│\s*$/, "").trim();
   // 'Try "…"' is the empty box's placeholder. Claude Code draws it dim, so with colors the dim check has already left it

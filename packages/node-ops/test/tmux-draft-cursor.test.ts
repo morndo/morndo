@@ -17,7 +17,16 @@ describe("draftOnScreen with a reverse-video cursor", () => {
     expect(draftOnScreen(box(`hallo welt${E}[7m ${E}[0m`))).toBe("hallo welt");
   });
   it("still reads a typed draft, cursor inside it", () => {
-    expect(draftOnScreen(box(`hal${E}[7ml${E}[27mo`))).toBe("halo");
+    expect(draftOnScreen(box(`hal${E}[7ml${E}[27mo`))).toBe("hallo");
+  });
+  it("reads a one-character draft when the cursor sits on it", () => {
+    expect(draftOnScreen(box(`${E}[7my${E}[0m`))).toBe("y");
+  });
+  it("keeps a reverse-video chip instead of dropping it", () => {
+    expect(draftOnScreen(box(`${E}[7m[Pasted text #1]${E}[0m`))).toBe("[Pasted text #1]");
+  });
+  it("keeps a reverse-video selection inside a draft", () => {
+    expect(draftOnScreen(box(`ab${E}[7mcd${E}[27mef`))).toBe("abcdef");
   });
 });
 
