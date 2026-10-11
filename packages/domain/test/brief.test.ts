@@ -410,6 +410,15 @@ describe("DB7 everywhere a field lands in briefMarkdown (§4.5: an old app rende
     expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).label = "a] (http://evil"; }))
       .toEqual(["error bad_markdown (evidence[0].label)"]);
   });
+  it("an evidence label or url ending in a backslash is refused: it escapes the bracket that closes the link", () => {
+    expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).label = "Quote of the job \\"; }))
+      .toEqual(["error bad_markdown (evidence[0].label)"]);
+    expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).url = "https://example.com/q\\"; }))
+      .toEqual(["error bad_link (evidence[0].url)"]);
+    // An even run is an escaped backslash: the link still closes, so it stands.
+    expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).label = "Path C:\\\\"; })).toEqual([]);
+    expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).url = "https://example.com/q\\\\"; })).toEqual([]);
+  });
   it("an https link in a one-line section is the subset, as in the prose", () => {
     expect(lines(d => { d.changeIf = "If the [quote](https://example.com/contractor-quote) moves by 10%, choose A."; })).toEqual([]);
   });
