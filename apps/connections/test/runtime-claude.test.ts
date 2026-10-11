@@ -32,6 +32,28 @@ describe("anthropic-compatible base URL", () => {
   });
 });
 
+describe("third-party run settings", () => {
+  it("denies WebSearch behind a third-party base and leaves it on the first-party host", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-websearch-"));
+    const fixture = join(import.meta.dirname, "fixtures/fake-runtime.mjs");
+    const record = join(dir, "record.json");
+    const jobPath = join(dir, "job.json");
+    const denyOf = async (baseUrl: string): Promise<string[]> => {
+      writeFileSync(jobPath, JSON.stringify({ record, exit: 0 }));
+      const runtime = new ClaudeRuntime(fixture, "helper", {}, baseUrl);
+      const ran = await runtime.execute({ ...plan, workspace: dir }, ["--job", jobPath]);
+      expect(ran.status).toBe(0);
+      const recorded = JSON.parse(readFileSync(record, "utf8")) as { argv: string[] };
+      const settings = JSON.parse(recorded.argv[recorded.argv.indexOf("--settings") + 1] ?? "{}") as { permissions: { deny: string[] } };
+      return settings.permissions.deny;
+    };
+    try {
+      expect(await denyOf("http://127.0.0.1:9")).toContain("WebSearch");
+      expect(await denyOf("https://api.anthropic.com")).not.toContain("WebSearch");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+
 describe("runtime flags", () => {
   it("passes the helper, the reservation and a denied path", () => {
     const argv = claudeArgv("claude", plan, "morndo-keys helper --lease l1", ["--job", "job.json"]);

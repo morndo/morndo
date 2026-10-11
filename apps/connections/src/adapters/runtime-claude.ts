@@ -273,9 +273,12 @@ function readRule(path: string): string[] {
   }
 }
 
-export function claudeSettings(plan: RunPlan, helper: string | null): string {
+// A bare tool name in permissions.deny removes that tool. WebSearch uses the first-party
+// backend, so a third-party base denies it (design 8.3).
+// https://code.claude.com/docs/en/permissions — checked 2026-10-11.
+export function claudeSettings(plan: RunPlan, helper: string | null, denyWebSearch = false): string {
   const body: Record<string, unknown> = {
-    permissions: { deny: plan.deny.flatMap(readRule) },
+    permissions: { deny: [...plan.deny.flatMap(readRule), ...(denyWebSearch ? ["WebSearch"] : [])] },
     sandbox: {
       ...SANDBOX,
       credentials: { envVars: DENIED_NAMES.map(name => ({ name, mode: "deny" })) },
@@ -295,8 +298,8 @@ export function claudeIsolation(settings: string): Isolation {
   return sandboxReady(body.sandbox ?? {}) && denies.length > 0 ? "os" : "rules";
 }
 
-export function claudeArgv(bin: string, plan: RunPlan, helper: string, extra: readonly string[]): string[] {
-  return [bin, "-p", "--output-format", "json", "--settings", claudeSettings(plan, helper), "--max-budget-usd", plan.reservation.toFixed(2), ...extra];
+export function claudeArgv(bin: string, plan: RunPlan, helper: string, extra: readonly string[], denyWebSearch = false): string[] {
+  return [bin, "-p", "--output-format", "json", "--settings", claudeSettings(plan, helper, denyWebSearch), "--max-budget-usd", plan.reservation.toFixed(2), ...extra];
 }
 
 export class ClaudeRuntime implements Runtime {
@@ -335,9 +338,10 @@ export class ClaudeRuntime implements Runtime {
       Object.assign(extraEnv, anthropicGatewayEnv(this.#baseUrl, plan.model));
       extraEnv.CLAUDE_CODE_API_KEY_HELPER_TTL_MS = String(HELPER_TTL_MS);
     }
+    const denyWebSearch = !plan.subscription && isThirdPartyAnthropicBase(this.#baseUrl);
     const flags = plan.subscription
-      ? ["-p", "--output-format", "json", "--settings", claudeSettings(plan, null), ...extra]
-      : claudeArgv(this.#bin, plan, this.#helper, extra).slice(1);
+      ? ["-p", "--output-format", "json", "--settings", claudeSettings(plan, null, denyWebSearch), ...extra]
+      : claudeArgv(this.#bin, plan, this.#helper, extra, denyWebSearch).slice(1);
     return runChild(script ? process.execPath : this.#bin, script ? [this.#bin, ...flags] : flags, {
       env: childEnv(this.#parent, extraEnv),
       cwd: plan.workspace,
