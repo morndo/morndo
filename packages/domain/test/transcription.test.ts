@@ -262,6 +262,14 @@ describe("scheduling transcriptions", () => {
     expect(out[0]).toMatchObject({ state: "done", outcome: "done", endedAt: AT + 30 });
     expect(out[1]).toMatchObject({ state: "starting", position: null });
   });
+
+  it("two waiting rows that share an id each get their own slot: the key is the Recording and the Language (TX2, TX5)", () => {
+    const att = live({ id: "tx-1", recording: { kind: "attachment", id: "file-1" } });
+    const upl = live({ id: "tx-1", acceptedAt: AT + 1, recording: { kind: "upload", id: "file-1" } });
+    const out = scheduleTranscriptions([att, upl], 1, "off");
+    expect(out[0]).toMatchObject({ state: "starting", position: null, reason: null });
+    expect(out[1]).toMatchObject({ state: "queued", position: 1, reason: "class" });
+  });
 });
 
 describe("the caps on a recording, a run and its text (TX6)", () => {
