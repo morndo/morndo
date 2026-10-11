@@ -34,6 +34,10 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     expect(acceptNamedUpload(text("a: 1\n"), "cfg.yaml")).toEqual({ ok: true, value: { kind: "text", mime: "application/yaml", name: "cfg.yaml" } });
     expect(acceptNamedUpload(text("a: 1\n"), "cfg.yml")).toEqual({ ok: true, value: { kind: "text", mime: "application/yaml", name: "cfg.yml" } });
     expect(acceptNamedUpload(text("line\n"), "run.log")).toEqual({ ok: true, value: { kind: "text", mime: "text/plain", name: "run.log" } });
+    expect(acceptNamedUpload(text("MZ,Mozambique\n"), "countries.csv")).toMatchObject({ ok: true, value: { kind: "text" } });
+    expect(acceptNamedUpload(text("RIFF....WAVE\n"), "notes.txt")).toMatchObject({ ok: true });
+    expect(acceptNamedUpload(text("GIF8 is a note\n"), "note.log")).toMatchObject({ ok: true });
+    expect(acceptNamedUpload(text("Rar! not an archive\n"), "note.md")).toMatchObject({ ok: true });
   });
   it("accepts a PDF by its magic bytes and an image only when the extension matches the bytes", () => {
     expect(acceptNamedUpload(text("%PDF-1.7\n"), "spec.pdf")).toEqual({ ok: true, value: { kind: "pdf", mime: "application/pdf", name: "spec.pdf" } });
@@ -65,7 +69,8 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     expect(acceptNamedUpload(text("<!doctype html><script>"), "page.html")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'/>"), "pic.svg")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'/>"), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
-    expect(acceptNamedUpload(png(), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "notes.md")).toEqual({ ok: false, error: "not_utf8" });
+    expect(acceptNamedUpload(new Uint8Array([0x61, 0x00, 0x62]), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(text("not a picture"), "shot.png")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(text("not a pdf"), "spec.pdf")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(new Uint8Array([0xff, 0xfe, 0x61]), "notes.md")).toEqual({ ok: false, error: "not_utf8" });

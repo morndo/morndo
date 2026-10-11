@@ -50,12 +50,6 @@ export type AcceptedUpload =
   | { kind: "text"; mime: TextMime; name: string };
 
 const starts = (b: Uint8Array, ...bytes: number[]) => b.length >= bytes.length && bytes.every((x, i) => b[i] === x);
-// Containers and programs whose first bytes can still be valid UTF-8 (ZIP, MZ) or that must never ride in as a note.
-const BINARY_MAGIC = [
-  [0x89, 0x50, 0x4e, 0x47], [0xff, 0xd8, 0xff], [0x47, 0x49, 0x46, 0x38], [0x25, 0x50, 0x44, 0x46, 0x2d],
-  [0x50, 0x4b, 0x03, 0x04], [0x50, 0x4b, 0x05, 0x06], [0x1f, 0x8b], [0x7f, 0x45, 0x4c, 0x46], [0x4d, 0x5a],
-  [0x52, 0x61, 0x72, 0x21], [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c], [0x52, 0x49, 0x46, 0x46],
-];
 
 function extensionOf(name: string): string {
   const base = name.replace(/\\/g, "/").split("/").pop() ?? "";
@@ -78,7 +72,7 @@ export function safeUploadName(name: string): string | null {
 }
 
 function textProblem(b: Uint8Array): "not_allowed" | "not_utf8" | null {
-  if (b.includes(0) || BINARY_MAGIC.some(m => starts(b, ...m))) return "not_allowed";
+  if (b.includes(0)) return "not_allowed";
   let text: string;
   try { text = new TextDecoder("utf-8", { fatal: true }).decode(b); }
   catch { return "not_utf8"; }
