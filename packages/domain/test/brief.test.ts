@@ -287,3 +287,39 @@ describe("the money pattern (design §4.2)", () => {
     ["from 9 to 23 a week", false], ["month 14", false], ["EUR without a number", false], ["the k factor", false], ["5 min", false],
   ])("%s is not money", (text, want) => expect(money(text)).toBe(want));
 });
+
+describe("DB7: prose in the brief's markdown subset", () => {
+  it("a heading of the asker's own is refused: the format owns the outline", () => {
+    expect(lines(d => { d.whyNow = `## The backlog\n- Tickets waiting more than a day rose from 9 to 23 a week.`; }))
+      .toEqual(["error bad_markdown (whyNow)"]);
+  });
+  it("raw HTML is refused", () => {
+    expect(lines(d => { (d.ask as { text: string }).text = "Approve <b>$2,400</b> of contractor time."; }))
+      .toEqual(["error bad_markdown (ask.text)"]);
+  });
+  it("an image is refused", () => {
+    expect(lines(d => { (d.why as { text: string }).text = "B gets most of C's benefit. ![chart](https://example.com/chart.png)"; }))
+      .toEqual(["error bad_markdown (why.text)"]);
+  });
+  it("a link that is not https is refused", () => {
+    expect(lines(d => { (d.ask as { text: string }).text = "Approve [the quote](http://example.com/quote) money."; }))
+      .toEqual(["error bad_link (ask.text)"]);
+  });
+  it("an https link, bold, a list, a quote and a fenced block are the subset", () => {
+    expect(lines(d => {
+      (d.why as { text: string }).text = [
+        "B gets most of C's benefit, as the [sample](https://example.com/triage-sample) shows.",
+        "",
+        "> Costs less than C from month 14.",
+        "",
+        "```",
+        "tag-rate 0.62",
+        "```",
+      ].join("\n");
+    })).toEqual([]);
+  });
+  it("an evidence url that is not https is refused", () => {
+    expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).url = "http://example.com/triage-sample"; }))
+      .toEqual(["error bad_link (evidence[0].url)"]);
+  });
+});
