@@ -30,17 +30,25 @@ const refuse = m => { process.stderr.write(`engines: ${m}\n`); process.exit(2); 
 const save = () => { s._written = true; mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, JSON.stringify(s, null, 2)); };
 const failOn = (process.env.FAKE_ENGINES_FAIL_ON ?? "").split(",");
 const reread = failOn.includes("read-after-write") && s._written && (args[0] === "get" || args[0] === "providers" || args[0] === "option" || args[0] === "resolve");
-// "resolve:ROLE" crashes that one role's resolve only.
+// "resolve:ROLE" crashes that one role's resolve only. FAKE_ENGINES_FAIL_AFTER_STARTS=n holds the crash until n held runs
+// have stamped their start (at most 5 s), so they are surely running when it comes.
 if (failOn.includes(args[0]) || failOn.includes(`${args[0]}:${args[1]}`) || reread) {
+  const starts = Number(process.env.FAKE_ENGINES_FAIL_AFTER_STARTS || 0), stamp = process.env.FAKE_ENGINES_STAMP;
+  for (let waited = 0; starts > 0 && stamp && waited < 5000; waited += 10) {
+    const n = existsSync(stamp) ? readFileSync(stamp, "utf8").split("\n").filter(l => l.split(" ")[1] === "start").length : 0;
+    if (n >= starts) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  }
   process.stderr.write(`Traceback (most recent call last):\n  ${args[0]} failed\n`);
   process.exit(1);
 }
-// FAKE_ENGINES_PAUSE_ON=cmd[,cmd…] holds those commands FAKE_ENGINES_PAUSE_MS before they answer, stamped as resolve is.
+// FAKE_ENGINES_PAUSE_ON=cmd[,cmd…] holds those commands FAKE_ENGINES_PAUSE_MS before they answer, stamped as resolve is
+// ("<ms> start|end <what> <pid>").
 if ((process.env.FAKE_ENGINES_PAUSE_ON ?? "").split(",").includes(args[0])) {
   const stamp = process.env.FAKE_ENGINES_STAMP;
-  if (stamp) appendFileSync(stamp, `${Date.now()} start ${args[0]}\n`);
+  if (stamp) appendFileSync(stamp, `${Date.now()} start ${args[0]} ${process.pid}\n`);
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.FAKE_ENGINES_PAUSE_MS || 0));
-  if (stamp) appendFileSync(stamp, `${Date.now()} end ${args[0]}\n`);
+  if (stamp) appendFileSync(stamp, `${Date.now()} end ${args[0]} ${process.pid}\n`);
 }
 const out = v => process.stdout.write(`${JSON.stringify(v, null, 2)}\n`);
 // Same split as the CLI's parse_chain: a comma inside a model's [options] is part of that entry.
@@ -73,9 +81,9 @@ switch (args[0]) {
     if (!s.roles[args[1]]) refuse(`unknown role '${args[1]}'`);
     const pause = Number(process.env.FAKE_ENGINES_PAUSE_RESOLVE || 0);
     const stamp = process.env.FAKE_ENGINES_STAMP;
-    if (stamp) appendFileSync(stamp, `${Date.now()} start ${args[1]}\n`);
+    if (stamp) appendFileSync(stamp, `${Date.now()} start ${args[1]} ${process.pid}\n`);
     if (pause > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pause);
-    if (stamp) appendFileSync(stamp, `${Date.now()} end ${args[1]}\n`);
+    if (stamp) appendFileSync(stamp, `${Date.now()} end ${args[1]} ${process.pid}\n`);
     // As the resolver checks, in its order: off, not installed, not signed in, a mark on the provider or the model.
     const why = entry => {
       const [provider, rest = ""] = entry.split(":");

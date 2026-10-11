@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto";
 import { availabilityOf, chainArg, parseEngine, type Engine, type EngineProvider, type RoleEngines } from "@morndo/domain";
 import { EnginesError, enginesText, runEngines } from "@morndo/node-ops";
+import { allEnded, mapLimit } from "@morndo/service-kit";
 import type { EnginesNow, EnginesView } from "@morndo/protocol";
 
 export { EnginesError };
@@ -39,43 +40,19 @@ export type EnginesCli = {
 // all at the same moment (a loaded box was timing the whole look out).
 export const RESOLVE_AT_ONCE = 4;
 
-// Like Promise.all, but a failure is thrown only once every run has ended, so no CLI run outlives the answer (one that
-// crashes at once would otherwise leave the others running after it). The first failure in the list's order is thrown.
-async function allEnded<T extends readonly unknown[] | []>(runs: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }> {
-  const settled = await Promise.allSettled(runs as readonly unknown[]);
-  for (const s of settled) if (s.status === "rejected") throw s.reason;
-  return settled.map(s => (s as PromiseFulfilledResult<unknown>).value) as { -readonly [P in keyof T]: Awaited<T[P]> };
-}
-
-// After a failure no further item starts; the ones already running end before it is thrown.
-async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length);
-  let next = 0;
-  let failed = false;
-  const run = async () => {
-    while (!failed) {
-      const i = next++;
-      if (i >= items.length) return;
-      try { out[i] = await fn(items[i] as T, i); } catch (e) { failed = true; throw e; }
-    }
-  };
-  const workers = Math.min(Math.max(limit, 1), items.length);
-  await allEnded(Array.from({ length: workers }, () => run()));
-  return out;
-}
-
 export function enginesCli(program: string, env: NodeJS.ProcessEnv = process.env): EnginesCli {
   // Exit 0 (or one of `ok`) and its output, else the CLI's own reason. Exit 2 is a refusal ("engines: <why>"), except
   // argparse's usage errors, which are also exit 2: those mean the CLI's arguments changed, not that this change was
   // refused (argparse docs: it exits 2 and prints usage; read with the engines CLI, 2026-10-09).
-  const call = async (args: string[], okCodes: number[] = [0]) => enginesText(await runEngines(program, args, env), okCodes);
+  const call = async (args: string[], okCodes: number[] = [0], signal?: AbortSignal) => enginesText(await runEngines(program, args, env, signal), okCodes);
   const json = (text: string, what: string): unknown => {
     try { return JSON.parse(text); } catch { throw new EnginesError("unavailable", `engines ${what} didn't answer in JSON`); }
   };
 
   // Two CLI runs: the roles (hashed for the version) and the providers.
   const settings = async (): Promise<EnginesSettings> => {
-    const [rolesOut, providersOut] = await allEnded([call(["get", "--json"]), call(["providers", "--json"])]);
+    const stop = new AbortController();
+    const [rolesOut, providersOut] = await allEnded([call(["get", "--json"], [0], stop.signal), call(["providers", "--json"], [0], stop.signal)], () => stop.abort());
     return { version: createHash("sha256").update(rolesOut).digest("hex"), roles: rolesFrom(json(rolesOut, "get")), providers: providersFrom(json(providersOut, "providers")) };
   };
 
@@ -89,12 +66,14 @@ export function enginesCli(program: string, env: NodeJS.ProcessEnv = process.env
     // The page's look: the roles, the providers (unless the caller already has them), the kill switch, and what the
     // resolver would run now for each role, a few resolves at a time.
     async read(reuse) {
-      const rolesOutP = call(["get", "--json"]);
-      const providersOutP = reuse ? Promise.resolve<string | null>(null) : call(["providers", "--json"]);
-      const [rolesOut, providersOut, enabledOut] = await allEnded([rolesOutP, providersOutP, call(["option", "enabled"])]);
+      // A run that fails stops the others (allEnded, runEngines' signal): the answer comes at once, after they have exited.
+      const stop = new AbortController();
+      const rolesOutP = call(["get", "--json"], [0], stop.signal);
+      const providersOutP = reuse ? Promise.resolve<string | null>(null) : call(["providers", "--json"], [0], stop.signal);
+      const [rolesOut, providersOut, enabledOut] = await allEnded([rolesOutP, providersOutP, call(["option", "enabled"], [0], stop.signal)], () => stop.abort());
       const roles = rolesFrom(json(rolesOut, "get"));
       const providers = reuse ? reuse.providers : providersFrom(json(providersOut ?? "", "providers"));
-      const now = await mapLimit(roles, RESOLVE_AT_ONCE, async r => nowFrom(json(await call(["resolve", r.role, "--json"], [0, 3]), "resolve")));
+      const now = await mapLimit(roles, RESOLVE_AT_ONCE, async (r, signal) => nowFrom(json(await call(["resolve", r.role, "--json"], [0, 3], signal), "resolve")));
       return {
         version: createHash("sha256").update(rolesOut).digest("hex"), providers,
         enabled: json(enabledOut, "option") === true,
