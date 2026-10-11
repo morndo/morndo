@@ -65,4 +65,22 @@ describe("spend", () => {
     });
     expect(catalogTokenCost(readOnly, noCachePrice, "glm-5.3")).toBe(1.4);
   });
+
+  it("prices aggregate usage by the reported model when the launch model is empty or an alias, and rounds it", () => {
+    const stdout = JSON.stringify({
+      type: "result",
+      total_cost_usd: 99,
+      model: "glm-5.3",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    });
+    expect(catalogTokenCost(stdout, glm, "")).toBe(0.000006);
+    expect(catalogTokenCost(stdout, glm, "openrouter/auto")).toBe(0.000006);
+    const named = JSON.stringify({
+      type: "result",
+      total_cost_usd: 99,
+      model: "glm-5.3-flash",
+      usage: { input_tokens: 1_000_000, output_tokens: 0 },
+    });
+    expect(catalogTokenCost(named, glm, "glm-5.3")).toBe(1.4);
+  });
 });

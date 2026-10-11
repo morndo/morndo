@@ -31,10 +31,11 @@ export function catalogTokenCost(stdout: string, prices: readonly CatalogPrice[]
   if (rows === null) return null;
   if (rows.length === 0) {
     const aggregate = loopUsage(body);
-    if (!aggregate) return table.has(model) ? null : costFromOutput(stdout);
-    const price = table.get(model);
+    const price = table.get(model) ?? table.get(reportedModel(body) ?? "");
+    if (!aggregate) return price ? null : costFromOutput(stdout);
     if (!price) return costFromOutput(stdout);
-    return charge(aggregate, price);
+    const part = charge(aggregate, price);
+    return part === null ? null : roundDollars(part);
   }
   let total = 0;
   for (const row of rows) {
@@ -73,7 +74,11 @@ function priceTable(prices: readonly CatalogPrice[]): Map<string, Price> {
   return table;
 }
 
-type ResultBody = { modelUsage?: unknown; usage?: unknown };
+type ResultBody = { modelUsage?: unknown; usage?: unknown; model?: unknown };
+
+function reportedModel(body: ResultBody): string | null {
+  return typeof body.model === "string" && body.model !== "" ? body.model : null;
+}
 
 function lastResult(stdout: string): ResultBody | null {
   let found: ResultBody | null = null;
