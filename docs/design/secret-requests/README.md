@@ -409,6 +409,22 @@ For each encoding it keeps the length and HMAC-SHA-256 under the index key. To f
 
 Values under 8 bytes are not indexed (5.2 warns). Vault's audit devices take the same approach: they write "a keyed hash (HMAC-SHA256) of most string values", so a log can be checked without holding them [S10].
 
+As built in PR 2a (T-88, `packages/node-ops/src/secret-scan.ts`):
+- **Percent** is indexed twice: strictly (only RFC 3986's unreserved characters kept), and as `encodeURIComponent` leaves it (also `! ' ( ) *`).
+- **JSON**, for a UTF-8 value, is indexed as `JSON.stringify` writes it and ASCII-only (`\uXXXX` above 0x7f, as Python's `json.dumps` writes by default).
+- **Base64** gets one core per alignment and alphabet: alignment *a* drops 0, 2 or 3 leading characters, and drops the last one unless the value ends on a 3-byte boundary.
+  - Padding carries no bits, so one core serves padded and unpadded text.
+  - A hit's range also takes the one character on each side that carries bits of both the value and a neighbour, plus up to two `=`. Redacting it leaves no bit of the value.
+- Identical forms are kept once.
+- **The streaming scanner** holds back the bytes from the first position it hasn't checked. It checks a position once the longest match from it could have arrived, and checks every position left at the end of the stream. Each step says up to where the bytes are settled.
+- **A retired version** is kept while now minus its retirement is at most 30 days. Retiring it again keeps the first time.
+- **The index file** is JSON: References, versions, retirement times and keyed hashes, parsed strictly, with an unknown key refusing the whole file.
+  - `secret-index-file.ts` opens it without following a link. On that one descriptor it refuses anything but a regular file this user owns, at 0600 or tighter.
+  - No file reads as an empty index; the writer creates it before the first store confirms (PR 2b).
+- **Cost, measured** on the build box (Node 22.23.3, 2026-10-12): about 0.3 MiB/s.
+  - One HMAC per byte of output takes about 2.6 s per MiB, and the scanner itself 0.8 s.
+  - That is enough for panes and job tails, not for multi-megabyte transcript reads. A cheaper keyed candidate filter is to be settled before PR 6 applies the index there.
+
 The scanner and the index file are two files in `packages/node-ops`: `secret-scan.ts`, a pure function over bytes and an index with the HMAC passed in, and `secret-index-file.ts`, the adapter that reads the index file the Secrets service writes and checks its mode and owner. The index is applied:
 - in `run`, which holds the values it resolved and also matches them exactly with `streamRedactor`;
 - in the node agent's `transcript.read`, `pane.captureMany` and `pane.frame` operations, before any byte leaves the node;
