@@ -561,6 +561,17 @@ describe("E14: an ask the hub tracks is answerable until the hub withdraws or se
     expect(x.get("d-1")?.status).toBe("settled");
     expect(refusal(x.get("d-1"), NOW + MIN)).toBe("settled");
   });
+  it("a withdrawn ask stays settled when a sighting goes missing: time ends only an ask that is still open (E14)", () => {
+    const x = new Escalations();
+    x.reconcile([seen(hubAsk())], NOW, true);
+    x.reconcile([seen(hubAsk(), { kind: "settled", resolution: "Withdrawn: the question went away", at: NOW + MIN })], NOW + MIN, true);
+    expect(x.get("d-1")?.status).toBe("settled");
+    x.reconcile([seen(hubAsk(), { kind: "missing" })], DUE + HUB_TTL_MS + 1, true);
+    expect(x.get("d-1")?.status).toBe("settled");          // the withdrawal ended it; the TTL doesn't reopen it as expired
+    expect(x.get("d-1")?.settledAt).toBe(NOW + MIN);
+    expect(x.get("d-1")?.resolution).toBe("Withdrawn: the question went away");
+    expect(refusal(x.get("d-1"), DUE + HUB_TTL_MS + 1)).toBe("settled");
+  });
   it("an ask no round of sightings reports still ends by its due, not by the day of its message", () => {
     const x = new Escalations();
     x.reconcile([seen(hubAsk())], NOW, true);
