@@ -282,11 +282,11 @@ function inputProblem(input: StoreInput): SecretProblem | null {
   return null;
 }
 
-type Placed = { secret: Secret; ledger: readonly LedgerEntry[]; version: number; sameAs: readonly string[] };
+type Placed = { secret: Secret; ledger: readonly LedgerEntry[]; version: number; sameAs: readonly string[]; expiryChanged: boolean };
 
-// A store under a new Reference creates the Secret; under an existing one it is a Rotation, which keeps its Grants and
-// Destinations and takes the new value's Expiry, clearing the old warnings (§10: renewing an expired Secret is a
-// Rotation). Either way the ledger decides first.
+// A store under a new Reference creates the Secret; under an existing one it is a Rotation, which keeps its Grants,
+// Destinations and Expiry unless it names an Expiry (docs/domain.md, "Expiry on a Rotation or a transfer"). A named
+// Expiry replaces the old one and clears the warnings only when later; a store never removes one. The ledger decides first.
 function place(dir: SecretDirectory, input: StoreInput, command: string, at: number): Result<Placed, SecretRefusal> {
   const p = inputProblem(input);
   if (p) return refuse(p);
@@ -303,14 +303,16 @@ function place(dir: SecretDirectory, input: StoreInput, command: string, at: num
   const secret: Secret = before
     ? {
         ...before, status: before.status === "revoked" ? "active" : before.status, current: fresh, shape: input.shape,
-        expiry: input.expiry, warned: [],
+        expiry: input.expiry ?? before.expiry,
+        warned: input.expiry !== null && before.expiry !== null && input.expiry > before.expiry ? [] : before.warned,
         versions: [...before.versions.map(v => v.retiredAt === null ? { ...v, retiredAt: at } : v), fresh],
       }
     : {
         reference: input.reference, status: "active", current: fresh, versions: [fresh], grants: [...input.grants],
         destinations: [...input.destinations], expiry: input.expiry, shape: input.shape, warned: [],
       };
-  return ok({ secret, ledger, version: number, sameAs: check.sameAs });
+  const expiryChanged = before !== null && input.expiry !== null && input.expiry !== before.expiry;
+  return ok({ secret, ledger, version: number, sameAs: check.sameAs, expiryChanged });
 }
 
 function withSecret(dir: SecretDirectory, secret: Secret, events: readonly SecretEvent[], ledger = dir.ledger): SecretDirectory {
@@ -321,15 +323,18 @@ function withSecret(dir: SecretDirectory, secret: Secret, events: readonly Secre
   };
 }
 
+const expiryEvent = (changed: boolean, reference: string, at: number, command: string): SecretEvent[] =>
+  changed ? [{ type: "ExpiryChanged", reference, at, command }] : [];
+
 export function storeSecret(dir: SecretDirectory, input: StoreInput, actor: Actor, at: number): Result<SecretDirectory, SecretRefusal> {
   const command = commandOf(actor);
   if (!command) return refuse("principal");
   const rotation = findSecret(dir, input.reference) !== null;
   const placed = place(dir, input, command, at);
   if (!placed.ok) return placed;
-  const { secret, ledger, version, sameAs } = placed.value;
+  const { secret, ledger, version, sameAs, expiryChanged } = placed.value;
   const event: SecretEvent = { type: rotation ? "SecretRotated" : "SecretStored", reference: input.reference, version, at, command, sameAs };
-  return ok(withSecret(dir, secret, [event], ledger));
+  return ok(withSecret(dir, secret, [event, ...expiryEvent(expiryChanged, input.reference, at, command)], ledger));
 }
 
 // SC11: the target stores a transferred value as its own Secret, through its own ledger.
@@ -339,8 +344,9 @@ export function receiveTransfer(dir: SecretDirectory, input: StoreInput & { from
   if (!NODE_LABEL.test(input.from)) return refuse("bad_node");
   const placed = place(dir, input, command, at);
   if (!placed.ok) return placed;
-  const { secret, ledger, version, sameAs } = placed.value;
-  return ok(withSecret(dir, secret, [{ type: "SecretTransferred", reference: input.reference, version, at, command, from: input.from, sameAs }], ledger));
+  const { secret, ledger, version, sameAs, expiryChanged } = placed.value;
+  const event: SecretEvent = { type: "SecretTransferred", reference: input.reference, version, at, command, from: input.from, sameAs };
+  return ok(withSecret(dir, secret, [event, ...expiryEvent(expiryChanged, input.reference, at, command)], ledger));
 }
 
 // SC11: a transfer starts from a Secret that could be used now, and carries the Grants that haven't ended.
