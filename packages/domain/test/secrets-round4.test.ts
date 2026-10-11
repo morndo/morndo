@@ -2,8 +2,8 @@
 // and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  emptySecretDirectory, findSecret, receiveTransfer, storeSecret,
-  type Actor, type SecretDirectory, type SecretGrant,
+  emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer, storeSecret, withdrawRequest,
+  type Actor, type RequestAsk, type SecretDirectory, type SecretGrant,
 } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
@@ -31,5 +31,24 @@ describe("round 4, point 4: a store names the new value's shape, or none, which 
   it("a first store that leaves the shape out has none", () => {
     const dir = value(storeSecret(emptySecretDirectory(), { reference: REF, fingerprint: "0000000000a1", grants: [], expiry: null, destinations: [] }, who, T));
     expect(findSecret(dir, REF)?.shape).toBeNull();
+  });
+});
+
+describe("round 4, point 5: the withdrawal that ends a request names its waiter, as a Left does", () => {
+  const ask = (lane: string | null, workspace: string | null): RequestAsk => ({
+    node: "node-a", reference: REF, kind: "new", waiter: { lane, workspace, purpose: "Nightly job" }, proposed: nodeGrant,
+  });
+  it("of two callers without a lane, the audit shows which one ended it", () => {
+    let r = value(openRequest(ask(null, "app-a"), "r1", T)).request;
+    r = value(joinRequest(r, { lane: null, workspace: "app-b", purpose: "Deploy" }, T + 1)).request;
+    r = value(withdrawRequest(r, { lane: null, workspace: "app-a" }, T + 2)).request;
+    const ended = value(withdrawRequest(r, { lane: null, workspace: "app-b" }, T + 3));
+    expect(ended.request.state).toBe("withdrawn");
+    expect(ended.events).toEqual([{ type: "SecretRequestWithdrawn", request: "r1", lane: null, workspace: "app-b", at: T + 3 }]);
+  });
+  it("a lane is named with the workspace the request recorded for it", () => {
+    const r = value(openRequest(ask("lane-a", "example-app"), "r1", T)).request;
+    const ended = value(withdrawRequest(r, { lane: "lane-a", workspace: null }, T + 1));
+    expect(ended.events).toEqual([{ type: "SecretRequestWithdrawn", request: "r1", lane: "lane-a", workspace: "example-app", at: T + 1 }]);
   });
 });
