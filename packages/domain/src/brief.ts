@@ -317,6 +317,8 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     const factor = lint.string(`comparison.rows[${i}].factor`, row.factor, CAPS.factor);
     if (factor !== null && factor.includes("|")) {
       lint.error("bad_markdown", `comparison.rows[${i}].factor`, "a factor can't hold \"|\"; it would break the table's columns");
+    } else if (factor !== null && endsInBareBackslash(factor)) {
+      lint.error("bad_markdown", `comparison.rows[${i}].factor`, "no backslash at the end of a factor; it escapes the \"|\" that closes its cell");
     } else if (factor !== null) {
       lint.inline(`comparison.rows[${i}].factor`, factor);   // it lands in the table like its cells (§4.5)
     }
@@ -334,8 +336,10 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
         if (cell.length > CAPS.cell) { lint.error("too_long", `comparison.rows[${i}].cells[${j}]`, `${cell.length} characters; the cap is ${CAPS.cell}`); continue; }
         if (CONTROL.test(cell) || cell.includes("\n")) { lint.error("control_char", `comparison.rows[${i}].cells[${j}]`, "control characters, or a line break in a one-line field"); continue; }
         // A cell sits between the row's pipes in briefMarkdown: "|" in it would add a column, a second line would
-        // leave the table (DB7).
+        // leave the table, and a trailing backslash would escape the "|" that closes it — the same escape the
+        // evidence label refuses (DB7).
         if (cell.includes("|")) { lint.error("bad_markdown", `comparison.rows[${i}].cells[${j}]`, "a cell can't hold \"|\"; it would break the table's columns"); continue; }
+        if (endsInBareBackslash(cell)) { lint.error("bad_markdown", `comparison.rows[${i}].cells[${j}]`, "no backslash at the end of a cell; it escapes the \"|\" that closes its column"); continue; }
         lint.inline(`comparison.rows[${i}].cells[${j}]`, cell);
         kept.push(cell);
       }
