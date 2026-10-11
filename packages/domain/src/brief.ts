@@ -43,6 +43,21 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object
 const isText = (v: unknown): v is string => typeof v === "string";
 const blank = (s: string) => s.trim() === "";
 
+// Money, one pattern for the whole product (DB5 and the compact card): a currency sign before a digit, or a number
+// (with k, m or bn) before a sign or an ISO code from a short list. "3 weeks" and "6 agent-days" are not money;
+// "$2,400", "2.4k EUR" and "€180" are. One place, so a brief the lint passes and a card that says "includes spend"
+// cannot disagree.
+const MONEY = /[$€£¥₹]\s?\d|\d[\d.,]*(?:\s?(?:k|m|bn))?\s?(?:[$€£¥₹]|(?:USD|EUR|GBP|CHF|JPY|INR|CAD|AUD)\b)/;
+export function hasMoney(text: string): boolean { return MONEY.test(text); }
+
+// Every string value in the draft, keys apart: where a money figure can appear (DB5: anywhere in the brief).
+function stringsOf(v: unknown, into: string[] = []): string[] {
+  if (isText(v)) into.push(v);
+  else if (Array.isArray(v)) for (const x of v) stringsOf(x, into);
+  else if (isObj(v)) for (const x of Object.values(v)) stringsOf(x, into);
+  return into;
+}
+
 class Lint {
   problems: BriefProblem[] = [];
   error(code: string, where: string, text: string) { this.problems.push({ level: "error", code, where, text }); }
@@ -170,6 +185,16 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   const whyText = lint.string("why.text", why.text, CAPS.whyText, true);
   // Assumptions may be empty when no money appears (DB5); limits are the asker's commitment, at least one.
   const assumptions = lint.strings("why.assumptions", why.assumptions, CAPS.item, 0, CAPS.list);
+  let downside: string | null = null;
+  if (!isText(why.downside) || blank(why.downside)) {
+    lint.error("no_downside", "why.downside", "state what happens if the assumptions are wrong; every brief has a downside case");
+  } else if (why.downside.length > CAPS.line) {
+    lint.error("too_long", "why.downside", `${why.downside.length} characters; the cap is ${CAPS.line}`);
+  } else if (CONTROL.test(why.downside) || why.downside.includes("\n")) {
+    lint.error("control_char", "why.downside", "control characters, or a line break in a one-line field");
+  } else {
+    downside = why.downside;
+  }
   const changeIf = lint.string("changeIf", draft.changeIf, CAPS.line);
   const risk = isObj(draft.risk) ? draft.risk : {};
   const riskText = lint.string("risk.risk", risk.risk, CAPS.line);
@@ -235,6 +260,12 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     if (label !== null && url !== null) evidence.push({ label, url });
   }
 
+  // DB5: a money figure anywhere in the brief needs at least one stated assumption. When the assumptions are missing
+  // outright, that is named where they belong; this fires when they are there and empty.
+  if (assumptions !== null && assumptions.length === 0 && stringsOf(draft).some(hasMoney)) {
+    lint.error("money_without_assumption", "why.assumptions", "money appears in the brief; state at least one assumption behind the numbers");
+  }
+
   // The whole brief, as JSON: one bound, so a brief can't be a page in disguise (§4.3).
   let size = 0;
   try { size = JSON.stringify(draft)?.length ?? 0; } catch { size = Infinity; }
@@ -252,7 +283,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     whyNow: whyNow!,
     options,
     comparison: { rows, note: note! },
-    why: { text: whyText!, assumptions: assumptions ?? [], downside: isText(why.downside) ? why.downside : "" },
+    why: { text: whyText!, assumptions: assumptions ?? [], downside: downside! },
     changeIf: changeIf!,
     risk: { risk: riskText!, control: control! },
     authorizes: { limits: limits ?? [], freshApproval: freshApproval!, reviewPoint: reviewPoint! },
