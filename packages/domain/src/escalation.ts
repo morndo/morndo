@@ -198,14 +198,22 @@ export class Escalations {
     if (!known) {
       e = { ...s.ask, status: "open", source: s.source.kind, decision: null, resolution: null, settledAt: null, askedAgain: false };
       // A sighting without a message (a list item without buttons) has no time of its own, only when the hub first saw
-      // it: it is never a newer ask, so a Decision restored after a restart still answers it (E8, E11).
+      // it: it is never a newer ask, so a Decision restored after a restart still answers it (E8, E11). A hub-tracked
+      // ask also has no message, but its askedAt is its version's own time (a restate files the next version later,
+      // DB9): a Decision older than that no longer answers the new version.
       const restored = this.#restored.get(s.ask.id);
-      if (restored && (s.ask.messageId === null || restored.at >= s.ask.askedAt)) e.decision = restored;
+      if (restored) {
+        const stillAnswers = s.ask.tracking === "hub"
+          ? restored.at >= s.ask.askedAt
+          : s.ask.messageId === null || restored.at >= s.ask.askedAt;
+        if (stillAnswers) e.decision = restored;
+      }
       this.#items.set(e.id, e);
     } else {
       e = known;
-      const newer = s.ask.messageId !== null && s.ask.askedAt > e.askedAt;
-      // E1: asked again (a newer message for the same id) is the same Escalation with the newest wording and options.
+      const newer = s.ask.askedAt > e.askedAt && (s.ask.messageId !== null || s.ask.tracking === "hub");
+      // E1: asked again (a newer message for the same id, or a hub-tracked brief restated as the next version, DB9) is
+      // the same Escalation with the newest wording and options.
       // An answer given before the new ask doesn't answer it (the asker asked again on purpose).
       const reopened = newer && (e.decision !== null || e.status === "settled" || e.status === "expired") && s.source.kind !== "settled";
       Object.assign(e, s.ask);
