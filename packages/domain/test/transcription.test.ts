@@ -4,7 +4,7 @@
 // the text it produced. No engine name, no file, no clock of its own.
 import { describe, expect, it } from "vitest";
 import { afterRestart, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
-  editText, type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
+  composerText, editText, type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
 
 const bytes = (head: number[], ...rest: number[]) => new Uint8Array([...head, ...rest]);
 const AT = 1_700_000_000_000;
@@ -259,5 +259,30 @@ describe("editing the text of a done transcription (TX7)", () => {
   it("words identical to the engine's are no edit", () => {
     const row = done();
     expect(value(editText(row, "guten Morgen"))).toBe(row);
+  });
+});
+
+describe("the words a done transcription offers the composer (TX8)", () => {
+  const done = (over: Partial<Transcription> = {}): Transcription => value(endTranscription(
+    { ...live(), state: "running", startedAt: AT + 10, ...over },
+    { outcome: "done", at: AT + 40, engine: heard("guten Morgen"), engineName: "local", model: "small" }));
+
+  it("offers the engine's words, and the principal's edit in their place", () => {
+    expect(composerText(done())).toBe("guten Morgen");
+    const edited = value(editText(done(), "guten Abend"));
+    expect(composerText(edited)).toBe("guten Abend");
+  });
+
+  it("offers nothing until the attempt is done", () => {
+    expect(composerText(live())).toBeNull();
+    const failed = value(endTranscription({ ...live(), state: "running" }, { outcome: "failed", at: AT + 20, problem: "engine" }));
+    expect(composerText(failed)).toBeNull();
+    expect(composerText({ ...live(), state: "lost", outcome: "lost" })).toBeNull();
+  });
+
+  it("an agent's recording is the agent's content: never offered as the principal's Command", () => {
+    const heardAttachment = done({ recording: { kind: "attachment", id: "file-9" } });
+    expect(heardAttachment.state).toBe("done");
+    expect(composerText(heardAttachment)).toBeNull();
   });
 });
