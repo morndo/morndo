@@ -220,15 +220,15 @@ export function answerGranted(req: SecretRequest, a: Answer, now: number): Resul
 }
 
 // SR8: Stored only once the requester's node confirmed; `version` is the Secret's version there, `expiry` the Expiry the
-// store named. A renew is answered only by a store that names a later Expiry, since a Rotation keeps one that has passed.
+// store sent (null: none), always named. The node refuses a renew that doesn't extend its Expiry before it stores anything
+// (renewSecret); here, a renew whose store named none, or one already passed, is never marked Stored.
 export function answerStored(
-  req: SecretRequest, a: Answer & { reference: string; version: number; nodes: readonly string[]; expiry?: number | null }, now: number,
+  req: SecretRequest, a: Answer & { reference: string; version: number; nodes: readonly string[]; expiry: number | null }, now: number,
 ): Result<RequestChange, RequestRefusal> {
   const p = checkAnswer(req, a.seen, a.command, now);
   if (p) return refuseRequest(p);
   if (req.kind === "access") return refuseRequest("kind");
-  const renews = a.expiry !== undefined && a.expiry !== null && Number.isFinite(a.expiry) && a.expiry > now;
-  if (req.kind === "renew" && !renews) return refuseRequest("expiry");
+  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > now)) return refuseRequest("expiry");
   if (parseReference(a.reference) === null) return refuseRequest("bad_reference");
   if (!a.nodes.includes(req.node) || !Number.isSafeInteger(a.version) || a.version < 1) return refuseRequest("node");
   const request: SecretRequest = { ...req, state: "stored", answer: { kind: "stored", at: now, command: a.command, reason: null } };
