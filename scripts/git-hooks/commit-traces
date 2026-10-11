@@ -88,7 +88,9 @@ case "$mode" in
   message)
     [ "$#" -eq 1 ] || fail "usage: commit-traces message FILE"
     [ -f "$1" ] || fail "no message file: $1"
-    check_message "$(cat "$1")"
+    # The editor file still has git's comment block and, with -v, the scissors
+    # diff. Those are not part of the message.
+    check_message "$(awk '/^# -+ >8 -+/ { exit } /^#/ { next } { print }' "$1")"
     ;;
   range)
     walk check_commit "$@"

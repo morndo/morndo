@@ -28,6 +28,11 @@ bad_line() {
   [ "$code" -eq 1 ] || fail "$label should exit 1, got $code"
 }
 
+printf '%s\n#\tnew file: runtime-codex.ts\n' 'fix: tweak runtime' > "$msg"
+sh "$checker" message "$msg" || fail "a comment line should be ignored"
+printf '%s\n# ------------------------ >8 ------------------------\n+runtime-codex\n' 'fix: tweak runtime' > "$msg"
+sh "$checker" message "$msg" || fail "text after the scissors line should be ignored"
+
 bad_line "generated with" "$(printf '%s\n\n%s %s %s\n' 'fix: clean note' Generated with Example)"
 bad_line "robot emoji" "$(printf 'fix: clean note %s\n' "$(printf '\360\237\244\226')")"
 bad_line "assistant word" "fix: adjust the cursor blink"
