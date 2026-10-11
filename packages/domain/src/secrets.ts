@@ -466,11 +466,11 @@ export function deleteSecret(dir: SecretDirectory, reference: string, actor: Act
   });
 }
 
-// A lane's "until the lane ends" Grants end when the node sees its pane close. One pass, one new directory.
-export function endLaneGrants(dir: SecretDirectory, lane: string, at: number): SecretDirectory {
+// Grants that end: removed, each with one GrantEnded. One pass, one new directory.
+function endGrants(dir: SecretDirectory, ends: (g: SecretGrant) => boolean, at: number): SecretDirectory {
   const events: SecretEvent[] = [];
   const held = dir.held.map(s => {
-    const gone = s.grants.filter(g => g.subject.kind === "lane" && g.subject.lane === lane && g.until.kind === "lane-end");
+    const gone = s.grants.filter(ends);
     if (gone.length === 0) return s;
     for (const g of gone) events.push({ type: "GrantEnded", reference: s.reference, at, subject: g.subject });
     return { ...s, grants: s.grants.filter(g => !gone.includes(g)) };
@@ -478,18 +478,13 @@ export function endLaneGrants(dir: SecretDirectory, lane: string, at: number): S
   return events.length === 0 ? dir : { ...dir, held, events: [...dir.events, ...events] };
 }
 
-// A Grant with an end time ends once that time has come: removed, with one GrantEnded. The gate already refuses it
-// (SC3); this keeps the list and the audit true. One pass, one new directory.
-export function endTimedGrants(dir: SecretDirectory, now: number): SecretDirectory {
-  const events: SecretEvent[] = [];
-  const held = dir.held.map(s => {
-    const gone = s.grants.filter(g => ended(g.until, now));
-    if (gone.length === 0) return s;
-    for (const g of gone) events.push({ type: "GrantEnded", reference: s.reference, at: now, subject: g.subject });
-    return { ...s, grants: s.grants.filter(g => !gone.includes(g)) };
-  });
-  return events.length === 0 ? dir : { ...dir, held, events: [...dir.events, ...events] };
-}
+// A lane's "until the lane ends" Grants end when the node sees its pane close.
+export const endLaneGrants = (dir: SecretDirectory, lane: string, at: number): SecretDirectory =>
+  endGrants(dir, g => g.subject.kind === "lane" && g.subject.lane === lane && g.until.kind === "lane-end", at);
+
+// A Grant with an end time ends once that time has come. The gate already refuses it (SC3); this keeps the list and the
+// audit true. The node's timer runs it with the expiry sweep (design §16, PR 6).
+export const endTimedGrants = (dir: SecretDirectory, now: number): SecretDirectory => endGrants(dir, g => ended(g.until, now), now);
 
 // ---- The use gate (SC3)
 
