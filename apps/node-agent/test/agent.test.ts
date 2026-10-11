@@ -8,7 +8,8 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS } from "@morndo/protocol";
+import { LIMITS, NodeStatusHealth } from "@morndo/protocol";
+import { Flight } from "@morndo/service-kit";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
 import { agentPaths } from "../src/paths.ts";
 import { openAgentDb } from "../src/db/open.ts";
@@ -39,6 +40,25 @@ afterEach(async () => {
 const of = (type: string, from = 0) => fleet.received.slice(from).filter(r => r.msg.t === type).map(r => r.msg);
 
 describe("over the connection", () => {
+  it("a stop holds new work, then returns while an op is still running", async () => {
+    const flight = new Flight();
+    const stuck = flight.begin({ kind: "pane.send", id: "stuck" });
+    const { agent } = await runAgent(config, { flight, stopWaitMs: 400 });
+    let stopping: Promise<void> | null = null;
+    stops.push(() => { stopping ??= agent.stop(); return stopping; });
+    await fleet.waitFor(m => m.t === "ev.inventory");
+    const started = Date.now();
+    stopping = agent.stop();
+    fleet.send({
+      t: "req", id: "late", op: "pane.send", timeoutMs: 5000, key: "hub:late",
+      args: { workerId: "pc.0a1b2c3d.4", text: "hi", expect: { server: "0a1b2c3d", window: "api" } },
+    });
+    expect(await fleet.waitFor(m => m.t === "res" && m.id === "late", 2000)).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
+    await stopping;
+    expect(Date.now() - started).toBeLessThan(8000);
+    stuck();
+  });
+
   it("sends the full inventory and health after welcome, then inventory again when tmux changes", async () => {
     t.tmux("new-session", "-d", "-s", "main", "-n", "api", "sleep 600");
     const { agent } = await runAgent(config);
@@ -66,6 +86,18 @@ describe("over the connection", () => {
     expect(agent.status().jobs).toMatch(/disabled by config error/);
     const health = await fleet.waitFor(m => m.t === "ev.health");
     expect((health as { health: { jobs?: string } }).health.jobs).toMatch(/disabled by config error/);
+  });
+
+  it("writes the product version, ready, and the fleet state into status.json", async () => {
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    expect(await until(() => agent.status().state === "online")).toBe(true);
+    const body = JSON.parse(readFileSync(agentPaths(home.home).statusFile, "utf8")) as { version?: string; ready?: boolean; state?: string };
+    expect(NodeStatusHealth.safeParse(body).success).toBe(true);
+    const root = JSON.parse(readFileSync(join(import.meta.dirname, "../../../package.json"), "utf8")) as { version: string };
+    expect(body.version).toBe(root.version);
+    expect(body.ready).toBe(true);
+    expect(body.state).toBe("online");
   });
 
   it("asks the policy's tmux server for health (tmuxOk), not the default one", async () => {

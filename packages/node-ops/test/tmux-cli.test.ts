@@ -128,7 +128,8 @@ describe("tmuxFailure", () => {
     Object.assign(new Error("tmux failed"), { code, killed: false, signal: null, stderr, ...extra });
   it("is absent only for exit 1 with tmux's own words for no server, no session, no pane", () => {
     for (const stderr of ["can't find window: main\n", "can't find session: main\n", "can't find pane: %9\n",
-      "no server running on /tmp/tmux-501/x\n", "error connecting to /tmp/tmux-501/x (No such file or directory)\n",
+      "no server running on /tmp/tmux-501/x\n", "no current target\n",
+      "error connecting to /tmp/tmux-501/x (No such file or directory)\n",
       "error connecting to /tmp/tmux-501/x (Connection refused)\n"]) {
       expect(tmuxFailure(exit(1, stderr)), stderr).toBe("absent");
     }

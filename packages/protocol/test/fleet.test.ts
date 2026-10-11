@@ -43,7 +43,7 @@ describe("errors and keys", () => {
   it("only uncertain and internal may have run", () => {
     const maybe = Object.entries(ERROR_EXECUTED).filter(([, e]) => e === "maybe").map(([c]) => c);
     expect(maybe.sort()).toEqual(["internal", "uncertain"]);
-    expect(Object.keys(ERROR_EXECUTED)).toHaveLength(16);
+    expect(Object.keys(ERROR_EXECUTED)).toHaveLength(17);
   });
   it("the side-effecting ops carry keys, keystrokes don't", () => {
     expect([...KEYED_OPS].sort()).toEqual([
@@ -293,7 +293,7 @@ describe("the join string", () => {
 
 describe("error codes", () => {
   it("cover the spec's table", () => {
-    const codes: ErrorCode[] = ["bad_args", "unknown_op", "denied", "no_pane", "menu_open", "no_input_box", "draft_present", "busy", "name_taken", "lane_conflict", "too_large", "timeout", "node_offline", "uncertain", "internal", "not_allowed"];
+    const codes: ErrorCode[] = ["bad_args", "unknown_op", "denied", "no_pane", "menu_open", "no_input_box", "draft_present", "busy", "name_taken", "lane_conflict", "too_large", "timeout", "node_offline", "uncertain", "internal", "updating", "not_allowed"];
     expect(Object.keys(ERROR_EXECUTED).sort()).toEqual([...codes].sort());
   });
 });

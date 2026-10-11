@@ -7,6 +7,7 @@ export * from "./sessions.ts";
 export * from "./pane-lock.ts";
 export * from "./file-rules.ts";
 export * from "./tmux-cli.ts";
+export * from "./tmux-host.ts";
 export * from "./stamp.ts";
 export * from "./health.ts";
 export * from "./engines-spawn.ts";
