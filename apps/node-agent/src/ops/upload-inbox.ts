@@ -4,8 +4,9 @@
 // untouched for 10 minutes is deleted. Files are 0600 in a 0700 directory. What the inbox holds counts toward the
 // node's disk budget (LIMITS.spoolMaxBytes, with the hook spool and the relay's copies; Task 9): `room` says how much
 // is still free, and a chunk that doesn't fit is refused before anything is written.
-import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { acceptNamedUpload } from "@morndo/domain";
 import { LIMITS, type OpArgs } from "@morndo/protocol";
 import { fail, ok, type EffectContext, type Outcome } from "./executor.ts";
 
@@ -70,6 +71,16 @@ export class UploadInbox {
     const target = join(this.dir, `${a.upload}-${safeName(a.name)}`);
     if (a.final && existsSync(target)) return fail("bad_args", "this upload already finished");
     if (bytes.length > this.#room()) return fail("too_large", "this node's disk budget for uploads and hooks is full");
+    if (a.final) {
+      const prior = existsSync(partial) ? readFileSync(partial) : Buffer.alloc(0);
+      const accepted = acceptNamedUpload(Buffer.concat([prior, bytes]), a.name);
+      if (!accepted.ok) {
+        this.#forget(a.upload, partial);
+        const message = accepted.error === "too_big" ? "this kind of file is over its size limit"
+          : accepted.error === "not_utf8" ? "a text file has to be UTF-8" : "this file isn't an allowed attachment";
+        return fail("bad_args", message);
+      }
+    }
     const late = ctx.ready();
     if (late) return { ok: false, error: late };
     appendFileSync(partial, bytes, { mode: 0o600 });

@@ -138,7 +138,8 @@ describe("file.put", () => {
     ({ upload, offset, bytes: bytes.toString("base64"), final, name });
 
   it("stages chunks in order and moves the upload into the inbox on the final one; a repeated chunk key appends nothing", async () => {
-    const a = randomBytes(1000), b = randomBytes(500);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const a = Buffer.concat([png, randomBytes(1000 - png.length)]), b = randomBytes(500);
     expect(await h.call("file.put", chunk("upload-0001", 0, a, false), { key: "hub:up1:0" })).toMatchObject({ ok: true, result: { path: null } });
     expect(await h.call("file.put", chunk("upload-0001", 0, a, false), { key: "hub:up1:0" })).toMatchObject({ ok: true, result: { path: null } });
     expect(await h.call("file.put", chunk("upload-0001", 1000, b, true, "../Photo 1.png"), { key: "hub:up1:1000" }))
@@ -162,12 +163,24 @@ describe("file.put", () => {
   it("refuses a chunk the node's disk budget can't hold (too_large, not executed), and frees the key", async () => {
     h.close();
     h = opsHarness({ home: home.home, socket: t.socket, room: () => 1000 - h.inbox.bytes() });   // 1000 bytes, less what the inbox holds
-    expect(await h.call("file.put", chunk("upload-0005", 0, randomBytes(800), false), { key: "hub:up5:0" })).toMatchObject({ ok: true, result: { path: null } });
+    const ascii = (n: number) => Buffer.alloc(n, 0x61);
+    expect(await h.call("file.put", chunk("upload-0005", 0, ascii(800), false, "notes.txt"), { key: "hub:up5:0" })).toMatchObject({ ok: true, result: { path: null } });
     expect(h.inbox.bytes()).toBe(800);
-    expect(await h.call("file.put", chunk("upload-0005", 800, randomBytes(300), true), { key: "hub:up5:800" }))
+    expect(await h.call("file.put", chunk("upload-0005", 800, ascii(300), true, "notes.txt"), { key: "hub:up5:800" }))
       .toMatchObject({ ok: false, error: { code: "too_large", executed: "no", message: expect.stringMatching(/disk budget/) } });
     expect(h.doneKeys.status("hub:up5:800")).toEqual({ state: "unknown" });
-    expect(await h.call("file.put", chunk("upload-0005", 800, randomBytes(150), true), { key: "hub:up5:800" })).toMatchObject({ ok: true });   // what fits
+    expect(await h.call("file.put", chunk("upload-0005", 800, ascii(150), true, "notes.txt"), { key: "hub:up5:800" })).toMatchObject({ ok: true });   // what fits
+  });
+  it("refuses an executable and text that isn't UTF-8, and keeps a markdown file the lane can open", async () => {
+    expect(await h.call("file.put", chunk("upload-exe", 0, Buffer.from("MZ"), true, "run.exe"), { key: "hub:exe" }))
+      .toMatchObject({ ok: false, error: { code: "bad_args", executed: "no", message: expect.stringMatching(/allowed/) } });
+    expect(await h.call("file.put", chunk("upload-bad", 0, Buffer.from([0xff, 0xfe, 0x61]), true, "notes.md"), { key: "hub:bad" }))
+      .toMatchObject({ ok: false, error: { code: "bad_args", message: expect.stringMatching(/UTF-8/) } });
+    const done = await h.call("file.put", chunk("upload-md", 0, Buffer.from("# Hi\n"), true, "notes.md"), { key: "hub:md" });
+    if (!done.ok) throw new Error(done.error.message);
+    const path = (done.result as { path: string }).path;
+    expect(path.endsWith("notes.md")).toBe(true);
+    expect(readFileSync(path).toString("utf8")).toBe("# Hi\n");
   });
   it("forgets a partial upload untouched for 10 minutes", async () => {
     await h.call("file.put", chunk("upload-0004", 0, randomBytes(10), false), { key: "hub:up4:0" });

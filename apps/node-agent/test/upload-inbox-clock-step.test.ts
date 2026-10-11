@@ -18,7 +18,9 @@ afterEach(() => { vi.useRealTimers(); h.close(); home.cleanup(); });
 
 describe("UploadInbox partial TTL is not on the wall clock", () => {
   it("a +15 min step between chunk 3 and chunk 4 does not delete the active partial", async () => {
-    const U = "upload-v45"; const C = LIMITS.chunkBytes; const image = randomBytes(4 * C + 1000);
+    const U = "upload-v45"; const C = LIMITS.chunkBytes;
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const image = Buffer.concat([png, randomBytes(4 * C + 1000 - png.length)]);
     const args = (i: number) => ({ upload: U, offset: i * C, bytes: image.subarray(i * C, i * C + C).toString("base64"), final: i === 4, name: "shot.png" });
     for (let i = 0; i < 4; i++) expect(await h.call("file.put", args(i), { key: `hub:upload:${U}:${i}` })).toMatchObject({ ok: true });
     vi.setSystemTime(realStart + 15 * 60_000);
