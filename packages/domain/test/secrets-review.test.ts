@@ -2,7 +2,7 @@
 // per point, each written failing before its fix.
 import { describe, expect, it } from "vitest";
 import {
-  emptySecretDirectory, findSecret, secretExpirySweep, storeSecret, useGate,
+  deleteSecret, emptySecretDirectory, findSecret, revokeSecret, secretExpirySweep, storeSecret, useGate,
   type Actor, type SecretDirectory, type SecretGrant,
 } from "../src/index.ts";
 
@@ -41,5 +41,26 @@ describe("review 1: a Rotation takes the new value's Expiry (design §10: only G
     let dir = store(emptySecretDirectory(), "0123456789a1", null, T);
     dir = value(storeSecret(dir, { reference: REF, fingerprint: "0123456789a2", shape: null, grants: [], expiry: null, destinations: [] }, who, T + 1));
     expect(findSecret(dir, REF)?.grants).toEqual([nodeGrant]);
+  });
+});
+
+describe("review 2: version numbers continue after a Delete, so Revoke hits only the current value (SC2, SC8)", () => {
+  it("a Reference stored again after a Delete starts at the next version, not at 1", () => {
+    let dir = store(emptySecretDirectory(), "0123456789a1", null, T);
+    dir = value(deleteSecret(dir, REF, who, T + 1));
+    dir = store(dir, "0123456789a2", null, T + 2);
+    expect(findSecret(dir, REF)?.current?.number).toBe(2);
+    expect(dir.ledger).toEqual([
+      { reference: REF, version: 1, fingerprint: "0123456789a1", state: "retired" },
+      { reference: REF, version: 2, fingerprint: "0123456789a2", state: "current" },
+    ]);
+  });
+  it("revoking it marks only its own value revoked; the deleted earlier value stays usable under another Reference", () => {
+    let dir = store(emptySecretDirectory(), "0123456789a1", null, T);
+    dir = value(deleteSecret(dir, REF, who, T + 1));
+    dir = store(dir, "0123456789a2", null, T + 2);
+    dir = value(revokeSecret(dir, REF, who, T + 3));
+    expect(dir.ledger.map(e => [e.version, e.state])).toEqual([[1, "retired"], [2, "revoked"]]);
+    expect(storeSecret(dir, { reference: "secret://shared/other", fingerprint: "0123456789a1", shape: null, grants: [], expiry: null, destinations: [] }, who, T + 4).ok).toBe(true);
   });
 });
