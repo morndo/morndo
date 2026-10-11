@@ -193,9 +193,13 @@
                 {#if m.kind === "question"}<span class="kicker">Asks you</span>{/if}
                 {#if m.text}<div class="md">{@html renderMarkdown(long ? shortened(m.text) : it.mine ? withoutFileNotes(m.text) : m.text)}</div>{/if}
                 {#if long}<button class="tlink more" onclick={() => (expanded = { ...expanded, [m.id]: true })}>Show more</button>{/if}
-                {#each m.attachments ?? [] as a, i (attachmentKey(m.id, i))}
-                  {#if a.id}<a class="file" href="/api/files/{a.id}" target="_blank" rel="noopener"><span>{a.name}</span><small>{fileType(a.name, a.kind)}{a.size != null ? ` · ${fileSize(a.size)}` : ""}</small></a>{:else}<span class="file gone">{a.name}: not available</span>{/if}
-                {/each}
+                {#if m.attachments?.length}
+                  <div class="files">
+                    {#each m.attachments as a, i (attachmentKey(m.id, i))}
+                      {#if a.id}<a class="file" href="/api/files/{a.id}" target="_blank" rel="noopener"><span>{a.name}</span><small>{fileType(a.name, a.kind)}{a.size != null ? ` · ${fileSize(a.size)}` : ""}</small></a>{:else}<span class="file gone"><span>{a.name}</span><small>not available</small></span>{/if}
+                    {/each}
+                  </div>
+                {/if}
                 <span class="meta"><time>{clock(m.at)}</time>{#if it.mine && m.kind !== "event"}<CheckCheck size={14} aria-label="Delivered" />{/if}</span>
               </div>
             </li>
@@ -206,9 +210,13 @@
           <li class="b mine first last pending" data-outbox={o.id} data-delivery={d}>
             <div class="bubble" class:failed={d === "failed" || d === "uncertain" || d === "lost" || d === "unseen" || d === "late" || d === "dead"}>
               {#if o.text.trim()}<div class="md"><p>{o.text}</p></div>{/if}
-              {#each pendingFiles[o.id] ?? [] as f (`${f.name}:${f.size}`)}
-                <span class="file"><span>{f.name}</span><small>{fileType(f.name, f.kind)} · {fileSize(f.size)}</small></span>
-              {/each}
+              {#if pendingFiles[o.id]?.length}
+                <div class="files">
+                  {#each pendingFiles[o.id] ?? [] as f (`${f.name}:${f.size}`)}
+                    <span class="file"><span>{f.name}</span><small>{fileType(f.name, f.kind)} · {fileSize(f.size)}</small></span>
+                  {/each}
+                </div>
+              {/if}
               <span class="meta">
                 {#if d === "delivered" || d === "arrived"}<CheckCheck size={14} />{:else if d === "sending"}<Check size={14} />{:else if d === "queued"}<Clock size={14} />{:else}<CircleAlert size={14} />{/if}
                 <span class="state" role="status">{deliveryLabel(o, outgoing, online, now)}</span>
@@ -335,8 +343,15 @@
   .mine .meta { color: var(--ink-fg); }
   .bubble.failed .meta { color: var(--bad-text); }
   .more { min-height: 36px; padding: 0; color: inherit; }
-  .file { display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; min-height: 40px; color: inherit; font-weight: 700; text-decoration: none; }
-  .file small { font-weight: 400; font-size: 12px; }
+  .files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-width: 100%; }
+  .file {
+    display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; box-sizing: border-box;
+    height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg);
+    font: 700 13px/18px var(--body); text-decoration: none;
+  }
+  .file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file small { flex: none; font: 400 12px/16px var(--body); color: var(--muted); }
+  .file.gone { color: var(--muted); }
   .why { margin: 4px 4px 0; font: 400 13px/18px var(--body); color: var(--bad-text); text-align: right; }
   .acts { display: flex; gap: 8px; margin-top: 6px; }
   .screen {
