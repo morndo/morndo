@@ -8,7 +8,7 @@ import { findPreset as presetOf } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
-import { fetchModelIds, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
+import { fetchModelIds, launchChoice, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
 import { baseUrlProblem, ClaudeRuntime, helperCommand, isStatusRefusal, isThirdPartyAnthropicBase } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
@@ -168,8 +168,8 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const problem = baseUrlProblem(baseUrl);
     if (problem) return fail(io, problem);
   }
-  const picked = wantedModel(preset.defaultPicks["*"]);
-  const model = picked === null || picked === "default" || picked === "ask" ? "" : picked;
+  const choice = launchChoice(preset.defaultPicks, parsed.get("role") ?? "run");
+  const model = choice.model;
   const reserve = Number(parsed.get("reserve") ?? "5");
   const granted = ask(home, name, parsed, false, reserve);
   if (!granted.ok) return fail(io, granted.problem, granted.exit);
@@ -181,7 +181,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
     lease: lease.id, connection: name, ref: connection.kind === "api-key" ? connection.ref : null,
-    configDir, model, effort: "high", workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
+    configDir, model, effort: choice.effort, workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
     deny: [home.vaultDir, home.db, home.identity, ...(connection.repo?.deny ?? [])],
     reservation: lease.reservation, probe: false, subscription,
   };
@@ -479,7 +479,8 @@ function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, re
   home.runtime.current = gateRuntime(home, connection.runtime);
   const workspace = parsed.get("workspace") ?? home.env.PWD ?? process.cwd();
   const granted = home.leases.lease(name, {
-    role: parsed.get("role") ?? "run", entry: wantedModel(presetOf(home.catalog, connection.vendor)?.defaultPicks["*"]) ?? "default",
+    role: parsed.get("role") ?? "run",
+    entry: launchChoice(presetOf(home.catalog, connection.vendor)?.defaultPicks ?? {}, parsed.get("role") ?? "run").model || "unspecified",
     holder, workspacePath: workspace, limit: LEASES, reserve, margin: 0, probe: probeLease,
   });
   if (!granted.ok) return { ok: false, problem: granted.error.problem, ...(granted.error.exit === undefined ? {} : { exit: granted.error.exit }) };

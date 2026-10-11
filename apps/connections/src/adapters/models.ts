@@ -32,6 +32,16 @@ export function wantedModel(pick: string | undefined): string | null {
   return model && model !== "" ? model : null;
 }
 
+const PLACEHOLDER_MODELS = new Set(["default", "ask"]);
+
+export function launchChoice(picks: Readonly<Record<string, string>>, role: string): { model: string; effort: string } {
+  const pick = picks[role] ?? picks["*"];
+  const named = wantedModel(pick);
+  const model = named === null || PLACEHOLDER_MODELS.has(named) ? "" : named;
+  const effort = pick?.split("@")[1];
+  return { model, effort: effort && effort !== "" ? effort : "high" };
+}
+
 export function sameModel(alias: string, reported: string, patterns: Readonly<Record<string, string>> = {}): boolean {
   if (reported === alias) return true;
   const pattern = patterns[alias];

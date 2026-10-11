@@ -86,6 +86,26 @@ describe("keys run", () => {
     expect((await cli(["log", "work"], env)).stdout).not.toContain("LeaseGranted");
   }, 20_000);
 
+  it("honours the implement role's model and effort", async () => {
+    const dir = homeDir();
+    const env = envOf(dir);
+    expect((await cli(["add", "glm", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "20"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "glm", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "glm", "--role", "implement", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { exit: 0 })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    const recorded = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { argv: string[]; env: Record<string, string> };
+    expect(recorded.env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(recorded.argv[recorded.argv.indexOf("--effort") + 1]).toBe("max");
+    expect(recorded.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("max");
+    expect(recorded.env.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT).toBe("1");
+    const other = await cli(["run", "--connection", "glm", "--role", "review", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { exit: 0 })], env);
+    expect(other.code, other.stderr).toBe(0);
+    const again = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { argv: string[]; env: Record<string, string> };
+    expect(again.env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(again.argv[again.argv.indexOf("--effort") + 1]).toBe("high");
+    expect(again.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("high");
+  }, 20_000);
+
   it("sends a Z.ai key only as the helper header to the catalog base URL", async () => {
     const dir = homeDir();
     const hits: { url?: string | undefined; authorization?: string | undefined; apiKey?: string | undefined }[] = [];

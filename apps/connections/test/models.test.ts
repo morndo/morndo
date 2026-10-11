@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fetchModelIds, modelMissing, sameModel } from "../src/adapters/models.ts";
+import { fetchModelIds, launchChoice, modelMissing, sameModel } from "../src/adapters/models.ts";
 
 const catalog = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 
@@ -62,5 +62,12 @@ describe("model lists", () => {
     expect(ids).toEqual(["glm-5.3", "glm-5.3-flash"]);
     expect(modelMissing(ids, "glm-5.3@max")).toBe(false);
     expect(modelMissing(ids, "glm-4.7@high")).toBe(true);
+  });
+
+  it("uses the role's pick and effort, and the star pick for any other role", () => {
+    const picks = { implement: "glm-5.3@max", "*": "glm-5.3@high" };
+    expect(launchChoice(picks, "implement")).toEqual({ model: "glm-5.3", effort: "max" });
+    expect(launchChoice(picks, "review")).toEqual({ model: "glm-5.3", effort: "high" });
+    expect(launchChoice({ "*": "ask" }, "run")).toEqual({ model: "", effort: "high" });
   });
 });
