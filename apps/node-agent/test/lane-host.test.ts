@@ -12,7 +12,7 @@ import type { Inventory } from "../src/ops/inventory.ts";
 import { captureLog, isolatedTmux, tempHome, type TestTmux } from "./helpers.ts";
 
 const open: { adb: AgentDb; cleanup: () => void; tmux: TestTmux }[] = [];
-afterEach(() => { for (const o of open.splice(0)) { o.adb.close(); o.tmux.kill(); o.cleanup(); } });
+afterEach(async () => { for (const o of open.splice(0)) { o.adb.close(); await o.tmux.kill(); o.cleanup(); } });
 
 const emptyInventory = { refresh: async () => ({ invVersion: 1, stamp: null, panes: [], lanes: [], rows: [] }) } as unknown as Inventory;
 
