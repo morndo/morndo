@@ -341,7 +341,7 @@ describe("the disk budget: the spool, the relay's copies and the upload inbox to
     expect((await post("/file", { path: join(home.home, "work", "b.bin") })).status).toBe(503);   // 700 held + 400 > 1000
     fleet.send({ t: "req", id: "up", op: "file.put", args: { upload: "u1", offset: 0, bytes: Buffer.alloc(400).toString("base64"), final: true, name: "x.bin" }, timeoutMs: 5000, key: "hub:up" });
     expect(await fleet.waitFor(m => m.t === "res" && m.id === "up")).toMatchObject({ ok: false, error: { code: "too_large", executed: "no" } });
-    fleet.send({ t: "req", id: "up2", op: "file.put", args: { upload: "u2", offset: 0, bytes: Buffer.alloc(50).toString("base64"), final: true, name: "y.bin" }, timeoutMs: 5000, key: "hub:up2" });
+    fleet.send({ t: "req", id: "up2", op: "file.put", args: { upload: "u2", offset: 0, bytes: Buffer.alloc(50, 0x61).toString("base64"), final: true, name: "note.txt" }, timeoutMs: 5000, key: "hub:up2" });
     expect(await fleet.waitFor(m => m.t === "res" && m.id === "up2")).toMatchObject({ ok: true });   // negative control: what fits
   });
 });

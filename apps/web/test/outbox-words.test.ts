@@ -24,6 +24,9 @@ describe("outbox words", () => {
       expect(why, code).not.toContain(code);
     }
     expect(sendReason(rec("x", { state: "failed", error: "bad_args" }), "builder")).toBe("builder couldn't be reached: the fleet refused the message as malformed, so nothing was typed. If its window name has a tab or another control character in it, rename the window, then try again.");
+    const refused = sendReason(rec("x", { state: "failed", error: "not_allowed" }), "builder");
+    expect(refused).toMatch(/isn't an allowed attachment/);
+    expect(refused).not.toMatch(/no longer running/);
   });
   it("an Uncertain send says it may have gone, and what Check again does (fleet core §7)", () => {
     const r = rec("u", { state: "uncertain", error: "uncertain" });

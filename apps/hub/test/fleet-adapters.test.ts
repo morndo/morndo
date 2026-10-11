@@ -391,6 +391,16 @@ describe("images and files", () => {
     expect(await ports.uploads.stage(upload, PC1)).toEqual({ ok: false, problem: "node_offline" });
   });
 
+  it("a content refusal on the final chunk is sent once and is not reported as a missing pane", async () => {
+    const path = join(dir, "pasted-20261011-032515-abcdef-notes.md");
+    writeFileSync(path, Buffer.from("# Notes\n"));
+    const upload = { id: "u-md", endpointId: endpointId("ep1"), path, mime: "text/markdown" as const, size: 8, at: 0 };
+    const { ports, fleet } = await start();
+    fleet.intercept("file.put", async () => ({ ok: false, error: { code: "not_allowed" as const, executed: "no" as const, message: "this file isn't an allowed attachment" } }));
+    expect(await ports.uploads.stage(upload, PC1)).toEqual({ ok: false, problem: "not_allowed" });
+    expect(fleet.calls.filter(c => c.op === "file.put")).toHaveLength(1);
+  });
+
   it("copies a worker's file into the hub's store once, streamed from its node; one the node refuses is no copy", async () => {
     const store = fileStore({ dir: join(dir, "files"), deny: [] });
     const { ports, fleet } = await start({ files: store });

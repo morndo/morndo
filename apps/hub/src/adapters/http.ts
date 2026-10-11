@@ -32,7 +32,7 @@ import { servingHeaders, type Files } from "./files.ts";
 import type { Inbox } from "./uploads.ts";
 import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
-  AnswerBody, BoardActionBody, BoardCreateBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, UsageReportBody, IdentityProveBody, LinkDecisionBody, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PushSubscriptionBody, SendBody,
+  AnswerBody, BoardActionBody, BoardCreateBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, UsageReportBody, IdentityProveBody, LinkDecisionBody, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PushSubscriptionBody, SendBody, UPLOAD_NAME_HEADER,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -89,7 +89,17 @@ function cookieValue(req: IncomingMessage, name: string): string | undefined {
   return undefined;
 }
 
-// A raw body up to `max` bytes (an image the principal pastes); more is refused while it streams.
+// The file's own name, percent-encoded so a quote or a newline in it can't become another header. Empty when the
+// client didn't send one (an image paste): the inbox then accepts an image by its bytes alone.
+function uploadName(req: IncomingMessage): string {
+  const raw = req.headers[UPLOAD_NAME_HEADER];
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  if (!v) return "";
+  try { return decodeURIComponent(v).slice(0, 200); }
+  catch { return ""; }
+}
+
+// A raw body up to `max` bytes (a file the principal pastes); more is refused while it streams.
 async function readRaw(req: IncomingMessage, max: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -483,7 +493,7 @@ export function startHttp(p: {
     if (path === "/api/uploads" && method === "POST") {
       if (!inbox) throw new HttpError(404, "no such route");
       limited(buckets.uploads.take(a.endpoint.id));
-      const r = inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id);
+      const r = inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req));
       if (!r.ok) return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
       return json(res, 200, { id: r.value.id, name: r.value.path.split("/").pop(), size: r.value.size, mime: r.value.mime });
     }
