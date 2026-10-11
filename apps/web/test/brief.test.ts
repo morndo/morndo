@@ -2,6 +2,7 @@
 // a short title on one line, one plain sentence, a meta line, the rest behind "More"; and which buttons it gets.
 // Synthetic items only.
 import { describe, expect, it } from "vitest";
+import { clause as domainClause } from "@morndo/domain";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
 import { actions, brief, clause } from "../src/lib/phone/brief.ts";
 
@@ -15,6 +16,9 @@ const item = (o: Partial<DecisionItem> = {}): DecisionItem => ({
 } as DecisionItem);
 
 describe("a title from a long text (no title given)", () => {
+  it("is the domain's own clause, moved there for the compact card, not a second copy (ADR-0023 §4.4)", () => {
+    expect(clause).toBe(domainClause);
+  });
   it("is its first clause: up to a full stop, a colon, a semicolon or a bracket; the rest goes behind More", () => {
     expect(clause("#42 is ready. Your garden check (~5 min, after lunch): open www.example.com/garden, then water the beds.")).toEqual({
       title: "#42 is ready", rest: "Your garden check (~5 min, after lunch): open www.example.com/garden, then water the beds.",

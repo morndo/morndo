@@ -500,6 +500,10 @@ describe("the compact card, derived for every Ask (§4.4)", () => {
     expect(card.spend).toBe(true);
     expect(card.quickAnswers).toEqual([]);
   });
+  it("an empty short form is no short form: the title's first clause takes over, as on the phone (§4.4)", () => {
+    const a = ask({ title: "Pick the send day: Tuesday or Thursday for the newsletter?", shortTitle: "", summary: "" });
+    expect(cardOf({ ...a, brief: null })).toMatchObject({ topic: "Pick the send day", headline: "Tuesday or Thursday for the newsletter?" });
+  });
   it("an ask answered in words has no quick answers and no recommendation", () => {
     const a = ask({ answerBy: "words", title: "Where should the demo point?" });
     const card = cardOf({ ...a, brief: null });
