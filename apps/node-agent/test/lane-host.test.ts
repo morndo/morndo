@@ -12,7 +12,17 @@ import type { Inventory } from "../src/ops/inventory.ts";
 import { captureLog, isolatedTmux, tempHome, type TestTmux } from "./helpers.ts";
 
 const open: { adb: AgentDb; cleanup: () => void; tmux: TestTmux }[] = [];
-afterEach(async () => { for (const o of open.splice(0)) { o.adb.close(); await o.tmux.kill(); o.cleanup(); } });
+// Every step of every entry runs even when one throws, so a failure leaks no server or home; the failures follow.
+afterEach(async () => {
+  const failures: unknown[] = [];
+  for (const o of open.splice(0)) {
+    const steps: (() => void | Promise<void>)[] = [() => o.adb.close(), () => o.tmux.kill(), () => o.cleanup()];
+    for (const step of steps) {
+      try { await step(); } catch (e) { failures.push(e); }
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, "lane host cleanup failed");
+});
 
 const emptyInventory = { refresh: async () => ({ invVersion: 1, stamp: null, panes: [], lanes: [], rows: [] }) } as unknown as Inventory;
 
