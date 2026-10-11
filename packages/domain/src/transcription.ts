@@ -66,23 +66,24 @@ const utf8Bytes = (ch: string): number => {
 };
 
 // The engine's segments become one text: trimmed words joined by a space, capped to MAX_TEXT_BYTES. Words that fit
-// are kept whole; only a cut sets room aside for the mark that names it.
+// are kept whole; only a cut sets room aside for the mark that names it. One walk counts the bytes as the words are
+// joined: the moment a code point would pass the cap, the cut falls where the mark still fits.
 export function makeText(engine: EngineText, engineName: string, model: string): TranscriptionText {
   const joined = engine.segments.map(seg => seg.text.trim()).filter(word => word !== "").join(" ");
-  if (utf8Len(joined) <= MAX_TEXT_BYTES) {
-    return { language: engine.language, text: joined, edit: null, edited: false, engine: engineName, model };
-  }
   const room = MAX_TEXT_BYTES - TEXT_MARK.length;
   let out = "";
   let bytes = 0;
-  let cut = false;
+  let roomy = 0;   // code points of `out` that still leave room for the mark
   for (const ch of joined) {
     const b = utf8Bytes(ch);
-    if (bytes + b > room) { cut = true; break; }
+    if (bytes + b > MAX_TEXT_BYTES) {
+      return { language: engine.language, text: out.slice(0, roomy) + TEXT_MARK, edit: null, edited: false, engine: engineName, model };
+    }
     out += ch;
     bytes += b;
+    if (bytes <= room) roomy = out.length;
   }
-  return { language: engine.language, text: cut ? out + TEXT_MARK : joined, edit: null, edited: false, engine: engineName, model };
+  return { language: engine.language, text: out, edit: null, edited: false, engine: engineName, model };
 }
 
 // The states of one attempt (3.4): queued behind others, starting, running, or terminal once. `lost` is a run the
