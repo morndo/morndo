@@ -19,20 +19,31 @@ fail() {
   exit 1
 }
 
-# 0 when the text must be rejected.
-bad_text() {
+# 0 when an identity (a name, an address, or a trailer) attributes the change.
+bad_ident() {
   text=$1
-  printf '%s' "$text" | grep -E -i -q 'generated[[:space:]]+with' && return 0
-  printf '%s' "$text" | grep -F -q "$robot" && return 0
   printf '%s' "$text" | grep -E -i -q "(^|[^A-Za-z0-9])($names)([^A-Za-z0-9]|$)" && return 0
+  printf '%s' "$text" | grep -E -i -q '[^[:space:]<>@]+@(anthropic\.com|cursor\.(com|sh)|openai\.com)' && return 0
   stripped=$(printf '%s' "$text" | sed 's/dependabot\[bot\]//g')
   printf '%s' "$stripped" | grep -F -q '[bot]' && return 0
   return 1
 }
 
+# A subject or body may name a product. Only attribution does not.
+bad_message() {
+  text=$1
+  printf '%s' "$text" | grep -E -i -q 'generated[[:space:]]+(with|by)' && return 0
+  printf '%s' "$text" | grep -F -q "$robot" && return 0
+  printf '%s' "$text" | grep -E -i -q 'https?://[^[:space:]]*(claude\.ai|chatgpt\.com|chat\.openai\.com|cursor\.(com|sh))' && return 0
+  printf '%s' "$text" | grep -E -i -q '[^[:space:]<>@]+@(anthropic\.com|cursor\.(com|sh)|openai\.com)' && return 0
+  trailers=$(printf '%s\n' "$text" | grep -E -i '^(Co-authored-by|Signed-off-by):' || true)
+  [ -n "$trailers" ] || return 1
+  bad_ident "$trailers"
+}
+
 check_message() {
-  if bad_text "$1"; then
-    fail "message names an assistant, a generated-with line, a robot emoji, or a bot other than dependabot[bot]"
+  if bad_message "$1"; then
+    fail "message attributes the change to an assistant"
   fi
 }
 
@@ -60,11 +71,11 @@ check_mails() {
 check_commit() {
   sha=$1
   msg=$(git log -1 --format='%B' "$sha")
-  if bad_text "$msg"; then
-    fail "$sha message names an assistant, a generated-with line, a robot emoji, or a bot other than dependabot[bot]"
+  if bad_message "$msg"; then
+    fail "$sha message attributes the change to an assistant"
   fi
   ident=$(git log -1 --format='%an%n%ae%n%cn%n%ce' "$sha")
-  if bad_text "$ident"; then
+  if bad_ident "$ident"; then
     fail "$sha author or committer names an assistant or a bot other than dependabot[bot]"
   fi
   check_mails "$sha"

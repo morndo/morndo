@@ -1,6 +1,7 @@
 # Every commit on a pull request, and every push to main, must be free of
-# assistant attribution in the message, author, and committer, and both
-# addresses must be @users.noreply.github.com.
+# assistant attribution (trailers, generated-by lines, session links, vendor
+# addresses, and the author and committer names). The author address is
+# @users.noreply.github.com. The committer may also be noreply@github.com.
 # actions/checkout v7.0.1, same pin as ci.yml.
 name: Commit traces
 
