@@ -401,7 +401,7 @@ Layer, as in design §3.3: **domain** (decided in `secrets.ts`, proved by a doma
 | SR11 | A request grants nothing beyond the Grant stored. | domain |
 | SC1 | No value in the model: no type, event or wire shape has a field one could travel in. | domain + adapter |
 | SC2 | A Reference is unique on a node. A value matching a revoked version anywhere on the node, or an earlier version of the same Reference, is refused; a duplicate of another active Secret is stored with a warning that names it. | domain service + store |
-| SC3 | Default deny. The use gate, in order: status active, a current version, before Expiry, a live Grant admits the caller, the Grant allows the mode. The first failure is the refusal. | domain |
+| SC3 | Default deny. The use gate, in order: status active, a current version, before Expiry, a live Grant admits the caller, the Grant allows the mode. The first failure is the refusal. A Grant whose end time has come is removed, with GrantEnded, as one that ends with its lane is. | domain |
 | SC4 | A Use is recorded before the vault opens the value; refusals are recorded too. | application |
 | SC5 | A value reaches a program only through the use modes; no command prints one. | application + adapter |
 | SC6 | Every output path on the node passes the exact filter before it leaves. | adapter |

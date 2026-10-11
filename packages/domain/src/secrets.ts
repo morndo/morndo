@@ -464,6 +464,19 @@ export function endLaneGrants(dir: SecretDirectory, lane: string, at: number): S
   return next;
 }
 
+// A Grant with an end time ends once that time has come: removed, with one GrantEnded. The gate already refuses it
+// (SC3); this keeps the list and the audit true. One pass, one new directory.
+export function endTimedGrants(dir: SecretDirectory, now: number): SecretDirectory {
+  const events: SecretEvent[] = [];
+  const held = dir.held.map(s => {
+    const gone = s.grants.filter(g => ended(g.until, now));
+    if (gone.length === 0) return s;
+    for (const g of gone) events.push({ type: "GrantEnded", reference: s.reference, at: now, subject: g.subject });
+    return { ...s, grants: s.grants.filter(g => !gone.includes(g)) };
+  });
+  return events.length === 0 ? dir : { ...dir, held, events: [...dir.events, ...events] };
+}
+
 // ---- The use gate (SC3)
 
 function statusProblem(secret: Secret | null, now: number): UseRefusalReason | null {
