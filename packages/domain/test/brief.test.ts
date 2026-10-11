@@ -370,7 +370,7 @@ describe("the compact card, derived for every Ask (§4.4)", () => {
     };
   };
   const ask = (over: Partial<Ask> = {}): Ask => ({
-    id: "d-1", asker: { kind: "manager", name: "Manager", workerId: null }, need: "decision",
+    id: escalationId("d-1"), asker: { kind: "manager", name: "Manager", workerId: null }, need: "decision",
     title: "Pick the weekday for the newsletter", shortTitle: null, summary: null, minutes: null, link: null, details: null,
     context: null, contextKind: "markdown", options: [], answerBy: "tap", recommendation: null, ifNoAnswer: null,
     deadline: null, blocking: false, project: null, askedAt: NOW, messageId: null, tracking: "age", ...over,
@@ -561,7 +561,7 @@ describe("askVersion: a restated brief changes it, with or without the markdown 
   it("an ask without a brief hashes as before, digit for digit", () => {
     const v = askVersion({
       askedAt: 1_790_736_000_000, messageId: "m-1", title: "Question ny-1", context: "Some context.",
-      options: [{ key: "ship", label: "Ship it" }, { key: "hold", label: "Hold" }],
+      options: [{ key: "ship", label: "Ship it", detail: null }, { key: "hold", label: "Hold", detail: null }],
       recommendation: null, ifNoAnswer: "hold", deadline: null,
       shortTitle: "Short", summary: "One sentence.", minutes: 2, link: null, details: "The long text.",
     });
