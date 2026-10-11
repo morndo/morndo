@@ -97,7 +97,7 @@ describe("round 4, points 2 and 6: the hub's answer always names the Expiry its 
     // @ts-expect-error: the Expiry is required, null when the store named none.
     const left = answerStored(renew, { seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"] }, T + 1);
     expect(left.ok ? "ok" : left.error.problem).toBe("expiry");
-    const none = answerStored(renew, { seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], expiry: null }, T + 1);
+    const none = answerStored(renew, { seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], expiry: null, storedAt: T + 1 }, T + 1);
     expect(none.ok ? "ok" : none.error.problem).toBe("expiry");
   });
 });
@@ -116,5 +116,20 @@ describe("round 5, point 4: a renew's input is checked as a store's is, before t
   it("an Expiry that is no time at all is refused the same way, NaN or Infinity", () => {
     expect(renew({ expiry: Number.NaN })).toBe("expiry");
     expect(renew({ expiry: Number.POSITIVE_INFINITY })).toBe("expiry");
+  });
+});
+
+describe("round 5, point 3: the hub judges a renew's Expiry by the node's time of the store, so the two never disagree", () => {
+  const renew = () => value(openRequest({
+    node: "node-a", reference: REF, kind: "renew", waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
+  }, "r1", T - 1)).request;
+  const answer = (expiry: number, storedAt: number) => ({ seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], expiry, storedAt });
+  const state = <X>(r: R<X & { request: { state: string } }>) => (r.ok ? r.value.request.state : r.error.problem);
+  it("a renew the node stored by its clock is Stored, though the hub's clock has passed that Expiry", () => {
+    expect(state(answerStored(renew(), answer(T + 10, T), T + 20))).toBe("stored");
+  });
+  it("an Expiry not later than the node's time of the store is refused, whatever the hub's clock says", () => {
+    expect(state(answerStored(renew(), answer(T, T), T - 100))).toBe("expiry");
+    expect(state(answerStored(renew(), answer(T - 50, T), T - 100))).toBe("expiry");
   });
 });

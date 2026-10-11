@@ -1,6 +1,6 @@
 // Secrets on the wire: review round 4 of PR #25 (board T-80). Each block written failing before its fix.
 import { describe, expect, it } from "vitest";
-import { SecretsStoreArgs, StoreSecretBody } from "../src/index.ts";
+import { SecretsStoreArgs, SecretsStoreResult, StoreSecretBody } from "../src/index.ts";
 
 const REF = "secret://example-app/payments-test";
 const sealed = Buffer.from("age-encryption.org/v1\n-> X25519 c29tZQ\nYWJj\n--- bWFj\n").toString("base64");
@@ -48,5 +48,14 @@ describe("round 4, points 1 and 2: secrets.store carries the request it answers,
     expect(SecretsStoreArgs.safeParse({ ...args, request: { id: "q1" } }).success).toBe(false);
     expect(SecretsStoreArgs.safeParse({ ...args, request: { id: "q1", kind: "access" } }).success).toBe(false);
     expect(SecretsStoreArgs.safeParse(args).success).toBe(false);
+  });
+});
+
+describe("round 5, point 3: a node confirms a store with its version and its own time of the store (T-83)", () => {
+  it("names both, and nothing else", () => {
+    expect(SecretsStoreResult.safeParse({ version: 2, at: 1_700_000_000_000 }).success).toBe(true);
+    expect(SecretsStoreResult.safeParse({ version: 2 }).success).toBe(false);
+    expect(SecretsStoreResult.safeParse({ version: 0, at: 1_700_000_000_000 }).success).toBe(false);
+    expect(SecretsStoreResult.safeParse({ version: 2, at: 1_700_000_000_000, expiry: 1 }).success).toBe(false);
   });
 });
