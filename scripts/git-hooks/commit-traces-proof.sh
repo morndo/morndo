@@ -114,6 +114,19 @@ code=$?
 set -e
 [ "$code" -eq 1 ] || fail "web-flow author should exit 1, got $code"
 
+# The pre-push hook calls "mails <local sha> --not --remotes": only commits
+# that no remote-tracking ref contains are checked. The published side is a
+# fabricated remote-tracking ref on this throwaway repo.
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'fix: clean note'
+tip=$(git rev-parse HEAD)
+git update-ref refs/remotes/origin/main HEAD~
+sh "$checker" mails "$tip" --not --remotes || fail "mails over commits no remote holds should exit 0"
+set +e
+sh "$checker" mails "$tip"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "mails without --not --remotes re-checks the published commit, got $code"
+
 cd "$root"
 set +e
 out=$(sh "$checker" range deadbeef..HEAD 2>&1)

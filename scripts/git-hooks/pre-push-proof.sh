@@ -2,6 +2,10 @@
 # Proves the pre-push hook: a clean tree passes; a made-up home path fails;
 # a marker this script writes into its own leak-patterns file fails; a
 # committed home path fails in a throwaway clone, and a clean commit passes.
+# Every commit no remote-tracking ref contains is checked on its own, against
+# a fake remote for the published side: a line one commit adds and a later
+# one removes fails, a merge of published main passes, and a home path in a
+# conflict resolution fails.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
@@ -347,7 +351,7 @@ cd "$root"
 # throwaway and its origin/main is fabricated: one published commit with a
 # personal author address, carrying a synthetic key that only gitleaks flags.
 # The remote-tip range of the push fails the plain range check, while the
-# hook, limited to commits that are not on the remote pushed to, passes it.
+# hook, limited to commits that no remote-tracking ref contains, passes it.
 # A new home path, a personal author address, or an unpublished synthetic
 # key on the merged branch still fails.
 git init -q "$scratch/merged"
@@ -416,8 +420,7 @@ set -e
 cd "$root"
 
 # A merge commit can carry lines neither parent has, so the combined diff of
-# every merge in the push is scanned beside the net difference. A line added
-# and removed inside the push is not in the net difference and must pass.
+# every merge in the push is scanned beside the patches of its commits.
 evil=$scratch/evil
 git init -q --initial-branch=main "$evil"
 cp "$root/.gitleaks.toml" "$evil/.gitleaks.toml"
@@ -446,22 +449,11 @@ printf '%s %s %s %s\n' refs/heads/main "$merge_tip" refs/heads/main "$remote_tip
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "a smuggled line inside a merge should exit 1, got $code"
-git reset -q --hard "$remote_tip"
-printf '/%s/%s/notes\n' home example-user > churn.txt
-git add churn.txt
-commit_ok -m 'add the churn file'
-git rm -q churn.txt
-commit_ok -m 'remove the churn file'
-tip=$(git rev-parse HEAD)
-set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$remote_tip" | sh "$root/$hook" origin
-code=$?
-set -e
-[ "$code" -eq 0 ] || fail "a line added then removed inside the push should exit 0, got $code"
 cd "$root"
 
-# Only the remote being pushed to spares published commits: a commit that
-# sits on a second remote is still checked when pushed to the first.
+# Any remote-tracking ref marks a commit published: a commit that sits on a
+# second remote is never re-checked, and the same commit is checked once no
+# remote-tracking ref holds it.
 cross=$scratch/cross
 git init -q --initial-branch=main "$cross"
 cp "$root/.gitleaks.toml" "$cross/.gitleaks.toml"
@@ -483,13 +475,142 @@ set +e
 printf '%s %s %s %s\n' refs/heads/main "$remote_tip" refs/heads/main "$base" | sh "$root/$hook" origin >/dev/null 2>&1
 code=$?
 set -e
-[ "$code" -eq 1 ] || fail "a commit published only on a second remote should exit 1, got $code"
-git update-ref refs/remotes/origin/main "$carry"
+[ "$code" -eq 0 ] || fail "a commit published on a second remote should exit 0, got $code"
+git update-ref -d refs/remotes/mirror/main
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$remote_tip" refs/heads/main "$carry" | sh "$root/$hook" origin >/dev/null 2>&1
+printf '%s %s %s %s\n' refs/heads/main "$remote_tip" refs/heads/main "$base" | sh "$root/$hook" origin >/dev/null 2>&1
 code=$?
 set -e
-[ "$code" -eq 0 ] || fail "a commit published on the remote pushed to should exit 0, got $code"
+[ "$code" -eq 1 ] || fail "a commit no remote-tracking ref holds should exit 1, got $code"
+cd "$root"
+
+# Each commit is checked on its own: a line one commit adds and a later
+# commit of the same push removes is caught in the commit that added it.
+churnr=$scratch/churnr
+git init -q --bare "$scratch/churnr-remote.git"
+git init -q --initial-branch=main "$churnr"
+cp "$root/.gitleaks.toml" "$churnr/.gitleaks.toml"
+cd "$churnr"
+git remote add origin "$scratch/churnr-remote.git"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'churnr base'
+git push -q origin main
+printf '/%s/%s/notes\n' home example-user > churn.txt
+git add churn.txt
+commit_ok -m 'add the churn file'
+git rm -q churn.txt
+commit_ok -m 'remove the churn file'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a home path added then removed inside the push should exit 1, got $code"
+cd "$root"
+
+# The hook reads the commits with its own diff flags: an external diff tool
+# and forced color in the repository change nothing.
+extr=$scratch/extr
+git init -q --bare "$scratch/extr-remote.git"
+git init -q --initial-branch=main "$extr"
+cp "$root/.gitleaks.toml" "$extr/.gitleaks.toml"
+cd "$extr"
+git remote add origin "$scratch/extr-remote.git"
+git config diff.external false
+git config color.ui always
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'extr base'
+git push -q origin main
+token=$(printf '%s%s' ghp_ 0123456789abcdef0123)
+printf 'export const session = "%s";\n' "$token" > session.ts
+git add session.ts
+commit_ok -m 'token in source'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a token with an external diff and color set should exit 1, got $code"
+cd "$root"
+
+# Published commits are never re-checked: the remote's main carries a commit
+# with a personal author address and a home-path line, and a branch that
+# merges that main and adds a clean commit pushes. The branch's own commits
+# are still checked: a new branch with a personal author address fails.
+webm=$scratch/webm
+git init -q --bare "$scratch/webm-remote.git"
+git init -q --initial-branch=main "$webm"
+cp "$root/.gitleaks.toml" "$webm/.gitleaks.toml"
+cd "$webm"
+git remote add origin "$scratch/webm-remote.git"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'webm base'
+git push -q origin main
+printf '/%s/%s/notes\n' home example-user > published-note.txt
+git add published-note.txt
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q -m 'published home path'
+git push -q origin main
+git checkout -q -b topic
+printf 'topic\n' > topic.txt
+git add topic.txt
+commit_ok -m 'topic work'
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com merge -q --no-edit origin/main
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/topic "$tip" refs/heads/topic "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a branch that merges published main should exit 0, got $code"
+git checkout -q -b fresh origin/main
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'fresh work'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/fresh "$tip" refs/heads/fresh "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a new branch with a personal author address should exit 1, got $code"
+cd "$root"
+
+# A merge is read through its combined diff, which holds only the conflict
+# resolution: a home path written into the resolution fails, with both
+# parents already published.
+resol=$scratch/resol
+git init -q --bare "$scratch/resol-remote.git"
+git init -q --initial-branch=main "$resol"
+cp "$root/.gitleaks.toml" "$resol/.gitleaks.toml"
+cd "$resol"
+git remote add origin "$scratch/resol-remote.git"
+printf 'base\n' > file.txt
+git add file.txt .gitleaks.toml
+commit_ok -m 'resol base'
+git push -q origin main
+git checkout -q -b side
+printf 'side\n' > file.txt
+git add file.txt
+commit_ok -m 'side edit'
+git push -q origin side
+git checkout -q main
+printf 'main\n' > file.txt
+git add file.txt
+commit_ok -m 'main edit'
+git push -q origin main
+remote_tip=$(git rev-parse HEAD)
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com merge --no-commit --no-ff -q origin/side >/dev/null 2>&1 || true
+printf 'resolved\n/%s/%s/notes\n' home example-user > file.txt
+git add file.txt
+commit_ok -m 'merge the side branch'
+tip=$(git rev-parse HEAD)
+git show "$tip:file.txt" | grep -q example-user || fail "the merge resolution should carry the added line"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$remote_tip" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a home path in a merge resolution should exit 1, got $code"
 cd "$root"
 
 echo "pre-push proof ok"
