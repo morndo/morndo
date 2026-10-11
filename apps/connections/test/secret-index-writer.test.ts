@@ -84,7 +84,7 @@ describe("SecretIndexWriter", () => {
     expect(readSecretIndex(path, UID).versions).toHaveLength(1);
     const bytes = new Uint8Array(readFileSync(path));
     const forms = encodedForms(value);
-    expect(forms.length).toBeGreaterThan(20);
+    expect(new Set(forms.map(f => f.encoding))).toEqual(new Set(["raw", "hex", "percent", "json", "base64", "base64url"]));
     expect(forms.filter(f => contains(bytes, f.bytes)).map(f => `${f.encoding}/${String(f.alignment)}`)).toEqual([]);
   });
 
