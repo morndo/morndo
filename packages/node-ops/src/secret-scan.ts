@@ -13,9 +13,16 @@ export type EncodedForm = { encoding: SecretEncoding; alignment: 0 | 1 | 2 | nul
 const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 const B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 const HEX = "0123456789abcdef";
-// RFC 3986 unreserved characters stay as they are; encodeURIComponent also leaves ! ' ( ) * alone.
-const UNRESERVED = /^[A-Za-z0-9\-._~]$/;
-const COMPONENT_SAFE = /^[A-Za-z0-9\-._~!'()*]$/;
+// The characters each percent writer leaves alone (design §8.1, checked against each on 2026-10-12): RFC 3986's
+// unreserved ones (Python's quote with safe=""); encodeURIComponent, which also keeps ! ' ( ) *; the WHATWG form encoding
+// (URLSearchParams), which keeps * - . _ and writes a space as "+"; and Python's quote_plus, which keeps _ . - ~ and
+// writes a space as "+".
+const PERCENT_WRITERS = [
+  { safe: /^[A-Za-z0-9\-._~]$/, plus: false },
+  { safe: /^[A-Za-z0-9\-._~!'()*]$/, plus: false },
+  { safe: /^[A-Za-z0-9*\-._]$/, plus: true },
+  { safe: /^[A-Za-z0-9_.\-~]$/, plus: true },
+] as const;
 // At alignment a, the first LEAD[a] characters also depend on the bytes before the value.
 const LEAD = [0, 2, 3] as const;
 const ALIGNMENTS = [0, 1, 2] as const;
@@ -41,11 +48,13 @@ function base64(bytes: Uint8Array, alphabet: string): string {
   return out;
 }
 
-function percent(bytes: Uint8Array, safe: RegExp): string {
+// Escapes in upper case unless `lower`: RFC 3986 treats both as equal, and writers differ.
+function percent(bytes: Uint8Array, safe: RegExp, plus: boolean, lower: boolean): string {
   let out = "";
   for (const b of bytes) {
     const c = String.fromCharCode(b);
-    out += safe.test(c) ? c : `%${HEX.charAt(b >> 4).toUpperCase()}${HEX.charAt(b & 15).toUpperCase()}`;
+    const escape = `%${HEX.charAt(b >> 4)}${HEX.charAt(b & 15)}`;
+    out += safe.test(c) ? c : plus && b === 0x20 ? "+" : lower ? escape : escape.toUpperCase();
   }
   return out;
 }
@@ -55,13 +64,13 @@ function utf8(bytes: Uint8Array): string | null {
 }
 
 // As JSON.stringify writes the string, and as an ASCII-only writer does (Python's json.dumps by default): every code
-// unit above 0x7f as \uXXXX.
+// unit from 0x7f up, DEL included, as \uXXXX.
 function jsonForms(text: string): string[] {
   const plain = JSON.stringify(text).slice(1, -1);
   let only = "";
   for (let i = 0; i < plain.length; i++) {
     const n = plain.charCodeAt(i);
-    only += n > 0x7f ? `\\u${n.toString(16).padStart(4, "0")}` : plain.charAt(i);
+    only += n >= 0x7f ? `\\u${n.toString(16).padStart(4, "0")}` : plain.charAt(i);
   }
   return [plain, only];
 }
@@ -77,8 +86,9 @@ function base64Core(value: Uint8Array, a: 0 | 1 | 2, alphabet: string): { text: 
   return { text: encoded.slice(LEAD[a], partial ? -1 : undefined), before: a === 0 ? 0 : 1, after: partial ? 1 : 0 };
 }
 
-// Every form of a value, each once: raw, lower-case hex, percent-encoded (strict, and as encodeURIComponent leaves it),
-// JSON-escaped (as is, and ASCII-only) when the value is UTF-8, and base64 and base64url at each of the three alignments.
+// Every form of a value, each once: raw; hex in lower and upper case; percent-encoded as each writer above does it, with
+// upper- and lower-case escapes; JSON-escaped (as is, and ASCII-only) when the value is UTF-8; and base64 and base64url
+// at each of the three alignments.
 export function encodedForms(value: Uint8Array): EncodedForm[] {
   const forms: EncodedForm[] = [];
   const seen = new Set<string>();
@@ -90,8 +100,8 @@ export function encodedForms(value: Uint8Array): EncodedForm[] {
   };
   add("raw", null, value);
   add("hex", null, ascii(hexOf(value)));
-  add("percent", null, ascii(percent(value, UNRESERVED)));
-  add("percent", null, ascii(percent(value, COMPONENT_SAFE)));
+  add("hex", null, ascii(hexOf(value).toUpperCase()));
+  for (const w of PERCENT_WRITERS) for (const lower of [false, true]) add("percent", null, ascii(percent(value, w.safe, w.plus, lower)));
   const text = utf8(value);
   if (text !== null) for (const j of jsonForms(text)) add("json", null, new TextEncoder().encode(j));
   for (const [encoding, alphabet] of [["base64", B64], ["base64url", B64URL]] as const) {
