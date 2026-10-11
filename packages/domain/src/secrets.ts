@@ -79,6 +79,8 @@ const ended = (u: GrantEnd, now: number) => u.kind === "at" && now >= u.at;
 // ---- Secret requests (hub; §3.3)
 
 export type Waiter = { lane: string | null; workspace: string | null; purpose: string; at: number };
+// Who a waiter is: its lane, or without one its workspace. Both are named, so a call can't fall back to "no workspace".
+export type WaiterKey = { lane: string | null; workspace: string | null };
 export type RequestAnswer = { kind: "stored" | "granted" | "rejected"; at: number; command: string; reason: string | null };
 export type SecretRequest = {
   id: string; node: string; reference: string; kind: RequestKind; state: RequestState; openedAt: number;
@@ -115,7 +117,7 @@ function waiterProblem(w: Omit<Waiter, "at">): RequestProblem | null {
 }
 
 // A waiter is its lane; a caller without a lane is its workspace, and no workspace counts as one (docs/domain.md).
-const sameWaiter = (w: Omit<Waiter, "at" | "purpose">, lane: string | null, workspace: string | null) =>
+const sameWaiter = (w: WaiterKey, lane: string | null, workspace: string | null) =>
   lane !== null ? w.lane === lane : w.lane === null && w.workspace === workspace;
 // SR10: a request holds at most `waiters` waiters, so joins can't grow its card or move its version without end.
 const full = (req: SecretRequest) => req.waiting.length >= REQUEST_LIMITS.waiters;
@@ -166,8 +168,9 @@ export function joinRequest(req: SecretRequest, waiter: Omit<Waiter, "at">, now:
 }
 
 // A withdrawal names its waiter: a lane, or for a caller without one, its workspace.
-export function withdrawRequest(req: SecretRequest, lane: string | null, now: number, workspace: string | null = null): Result<RequestChange, RequestRefusal> {
+export function withdrawRequest(req: SecretRequest, waiter: WaiterKey, now: number): Result<RequestChange, RequestRefusal> {
   if (req.state !== "open") return refuseRequest("answered");
+  const { lane, workspace } = waiter;
   const at = req.waiting.findIndex(w => sameWaiter(w, lane, workspace));
   if (at < 0) return refuseRequest("not_waiting");
   if (req.waiting.length > 1) {
