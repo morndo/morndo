@@ -38,3 +38,11 @@ describe("endedBeforeStop", () => {
     expect(endedBeforeStop(5_001, 5_000n)).toBe(false);
   });
 });
+
+describe("endedBeforeStop with the last time the unit was seen running", () => {
+  it("does not take an exit recorded before systemd last said the unit was running", () => {
+    expect(endedBeforeStop(4_000, 5_000n, 4_500n)).toBe(false);
+    expect(endedBeforeStop(4_600, 5_000n, 4_500n)).toBe(true);
+    expect(endedBeforeStop(4_500, 5_000n, 4_500n)).toBe(true);
+  });
+});

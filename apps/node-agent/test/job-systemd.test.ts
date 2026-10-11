@@ -4,7 +4,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore, type NoticeHandoff } from "../src/ops/job-store.ts";
 import { namesFromEnvironmentExport, probeUserManager, showUnit, unitOf, unsetNameOrder, type ProbeResult } from "../src/ops/job-systemd.ts";
@@ -1092,7 +1092,7 @@ describe.skipIf(!bus.ok)("the log cap rule on the systemd backend", () => {
     const id = await start([process.execPath, "-e", STAY, marker]);
     expect(await until(() => existsSync(marker))).toBe(true);
     writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
-    const late = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: endedAfterKill(home, 4, 2) } });
+    const late = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: stoppedAfterShow(home, 1, 4) } });
     await late.sweep();
     expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: 4 });
     late.close();
@@ -1118,4 +1118,71 @@ describe.skipIf(!bus.ok)("the log cap rule on the systemd backend", () => {
     await sup.sweep();
     expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: 5 });
   });
+});
+
+// A systemctl, in Node, that shows the unit running until it is killed and then ended with ExecMainCode `code` and
+// ExecMainStatus `status`. The exit time is the CLOCK_MONOTONIC time of the first show (process.hrtime, the same clock
+// systemd uses): after the sweep's own look, before the stop. The job's real unit keeps running; the rig's cleanup stops it.
+function stoppedAfterShow(home: string, code: number, status: number): NodeJS.ProcessEnv {
+  const bin = join(home, "showbin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "systemctl"), `#!${process.execPath}
+const fs = require("node:fs");
+const killed = ${JSON.stringify(join(home, "killed"))};
+const seen = ${JSON.stringify(join(home, "first-show"))};
+const verb = process.argv[3];
+if (verb === "show") {
+  if (!fs.existsSync(seen)) fs.writeFileSync(seen, String(process.hrtime.bigint() / 1000n));
+  const ended = fs.existsSync(killed);
+  const fields = ended
+    ? ["ActiveState=inactive", "SubState=dead", "Result=" + (${code} === 1 ? "exit-code" : "signal"), "ExecMainCode=${code}", "ExecMainStatus=${status}", "MainPID=0", "ExecMainExitTimestampMonotonic=" + fs.readFileSync(seen, "utf8")]
+    : ["ActiveState=active", "SubState=running", "Result=success", "ExecMainCode=0", "ExecMainStatus=0", "MainPID=1", "ExecMainExitTimestampMonotonic=0"];
+  process.stdout.write(["LoadState=loaded", ...fields, "RemainAfterExit=yes", "ExecMainStartTimestampMonotonic=1"].join("\\n") + "\\n");
+}
+if (verb === "kill") fs.writeFileSync(killed, "");
+`, { mode: 0o755 });
+  chmodSync(join(bin, "systemctl"), 0o755);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+}
+
+describe.skipIf(!bus.ok)("the log cap rule on the systemd backend, second round", () => {
+  const filled = (dir: string, id: string) => () => existsSync(join(dir, `${id}.log`)) && readFileSync(join(dir, `${id}.log`)).length >= 64;
+
+  it("keeps 128 plus the signal for a main process killed by someone else just before the stop", async () => {
+    const { store, start, home, opts, drill, dir } = await systemdRig({ logBytes: 8 });
+    const marker = join(home, "stay.json");
+    const id = await start([process.execPath, "-e", STAY, marker]);
+    expect(await until(() => existsSync(marker))).toBe(true);
+    writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
+    const late = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: stoppedAfterShow(home, 2, 9) } });
+    await late.sweep();
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: 137 });
+    late.close();
+  });
+
+  it("lets queued jobs start and a cancel go through while a capped unit is in its grace", async () => {
+    const { store, start, sup, dir } = await systemdRig({ logBytes: 8 });
+    const capped = await start([process.execPath, "-e", `${FILLED} setInterval(() => {}, 1000);`]);
+    const quick = await start([process.execPath, "-e", "setTimeout(() => process.exit(0), 200)"]);
+    const waiting = await start([process.execPath, "-e", "setInterval(() => {}, 1000)"]);
+    expect(store.get(waiting)?.state).toBe("queued");
+    expect(await until(filled(dir, capped), 8000)).toBe(true);
+    expect(await until(() => showValue(unitOf(quick), "ExecMainExitTimestampMonotonic") !== "0", 8000)).toBe(true);
+    const sweeping = sup.sweep();
+    expect(await until(() => store.get(waiting)?.state !== "queued", 900)).toBe(true);
+    const began = Date.now();
+    expect((await sup.cancel(capped)).ok).toBe(true);
+    expect(Date.now() - began).toBeLessThan(900);
+    await sweeping;
+    expect(store.get(capped)?.outcome).toBe("cancelled");
+  });
+
+  it("ends the grace on the monotonic clock while the wall clock stands still", async () => {
+    const { store, start, sup, dir } = await systemdRig({ logBytes: 8 });
+    const id = await start([process.execPath, "-e", `${FILLED} setInterval(() => {}, 1000);`]);
+    expect(await until(filled(dir, id), 8000)).toBe(true);
+    const frozen = vi.spyOn(Date, "now").mockReturnValue(Date.now());
+    try { await sup.sweep(); } finally { frozen.mockRestore(); }
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: null });
+  }, 15_000);
 });
