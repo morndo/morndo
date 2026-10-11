@@ -5,9 +5,12 @@
 // - everything else behind "More": the long text, the details, a link, what happens without an answer.
 // Never the raw text as the headline.
 import type { DecisionItem } from "../desktop/decisions.ts";
+import { clause } from "@morndo/domain";
 import { heroTime } from "./horizon.ts";
 
-export const TITLE_MAX = 60;
+// The clause split is the domain's own rule (ADR-0023 §4.4), moved there for the compact card: one clause, so the
+// phone's row and the hub's card can't disagree. Re-exported here for the callers that took it from this module.
+export { clause };
 
 export type Brief = {
   title: string;
@@ -24,23 +27,6 @@ export type Action =
   | { kind: "words" };                                                // "Answer in my own words"
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
-
-// A title from a long text: its first clause, up to a full stop or "?" or "!" followed by a space, a colon, a
-// semicolon or an opening bracket ("recipes.index" or "www.example.com" don't end it); at most 60 characters, cut at a
-// word. `rest`: what isn't in the title, or the whole text when the title had to be cut.
-export function clause(text: string): { title: string; rest: string | null } {
-  const t = oneLine(text);
-  const m = /^(.+?)(?:([?!])(?:\s|$)|\.(?:\s|$)|:\s|;\s|\s\()/.exec(t);
-  const head = m ? `${m[1] ?? ""}${m[2] ?? ""}`.trim() : t;
-  const restAt = m ? (m[0].endsWith("(") ? m[0].length - 1 : m[0].length) : t.length;
-  if (head.length <= TITLE_MAX) {
-    const rest = t.slice(restAt).trim();
-    return { title: head, rest: rest || null };
-  }
-  const cut = head.slice(0, TITLE_MAX - 1);
-  const word = cut.lastIndexOf(" ");
-  return { title: `${(word > 20 ? cut.slice(0, word) : cut).replace(/[\s,.;:–-]+$/, "")}…`, rest: t };
-}
 
 const httpLink = (s: string | null) => (s && /^https?:\/\//i.test(s) ? s : null);
 
