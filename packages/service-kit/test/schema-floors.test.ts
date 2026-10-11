@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { migrate, openPrivateDb, type Migration } from "../src/index.ts";
 
-const M = (version: number): Migration => ({ version, name: `m${version}`, up: db => { db.exec(`CREATE TABLE t${version} (x)`); } });
+const M = (version: number): Migration => ({ version, name: `m${version}`, compat: "additive", up: db => { db.exec(`CREATE TABLE t${version} (x)`); } });
 const future = (found: number, known: number) => new Error(`future ${found} ${known}`);
 
 // The floor row a newer version's runner leaves behind (§11.1: written in the same transaction as user_version).
@@ -47,7 +47,7 @@ describe("schema floors in the runner", () => {
   it("counts a floor table with no row as floor = the version: the fail-safe refusal", () => {
     const db = new Database(":memory:");
     migrate(db, [M(1), M(2)], future);
-    db.exec("CREATE TABLE _morndo_schema (id INTEGER PRIMARY KEY CHECK (id = 1), floor INTEGER NOT NULL)");
+    db.exec("DELETE FROM _morndo_schema");                 // the row is missing: as if the version before floors wrote it
     db.pragma("user_version = 3");
     expect(() => migrate(db, [M(1), M(2)], future)).toThrow("future 3 2");
   });

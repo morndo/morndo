@@ -1,4 +1,6 @@
 // Schema for the connections directory (with its events) and the routing policy (ADR-0008 A1, design section 5).
+// The store has no service that could be stopped for an update — its helper runs whenever an agent CLI needs a key —
+// so its migrations are additive forever (ADR-0019 §11): the floor stays at 0 and any version's store opens.
 import type Database from "better-sqlite3";
 import { emptyDirectory, emptyPolicy } from "@morndo/domain";
 import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
@@ -18,6 +20,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     name: "connections directory, events and routing policy",
+    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE cas (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL);
