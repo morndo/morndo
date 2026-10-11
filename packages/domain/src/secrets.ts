@@ -23,7 +23,7 @@ function hasControl(t: string): boolean {
 }
 export const PURPOSE_MAX = 300;
 export const REQUEST_TTL_MS = 7 * DAY;
-export const REQUEST_LIMITS = { laneOpen: 5, laneDay: 20, nodeOpen: 20, nodeDay: 100 } as const;
+export const REQUEST_LIMITS = { laneOpen: 5, laneDay: 20, nodeOpen: 20, nodeDay: 100, waiters: 20 } as const;
 export const SECRET_EXPIRY_LEADS = [["7d", 7 * DAY], ["2d", 2 * DAY], ["1d", DAY]] as const;
 export const DESTINATIONS_MAX = 10;
 export const USE_REFUSED = 77;
@@ -97,10 +97,10 @@ export type RequestEvent =
   | { type: "SecretRequestRejected"; request: string; at: number; command: string; reason: string | null }
   | { type: "SecretRequestExpired"; request: string; at: number };
 export type RequestProblem = "bad_reference" | "bad_purpose" | "bad_grant" | "bad_node" | "bad_lane" | "bad_workspace" | "principal"
-  | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open";
+  | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open" | "full";
 export type RequestRefusal = { problem: RequestProblem };
 export type RequestChange = { request: SecretRequest; events: readonly RequestEvent[] };
-export type RequestLimit = "lane-open" | "lane-day" | "node-open" | "node-day";
+export type RequestLimit = "lane-open" | "lane-day" | "node-open" | "node-day" | "request-waiters";
 export type Admission = { kind: "open" } | { kind: "join"; request: string } | { kind: "refuse"; limit: RequestLimit };
 
 const refuseRequest = (problem: RequestProblem): Result<never, RequestRefusal> => err({ problem });
@@ -114,6 +114,12 @@ function waiterProblem(w: Omit<Waiter, "at">): RequestProblem | null {
   return textOk(w.purpose) ? null : "bad_purpose";
 }
 
+// A waiter is its lane; a caller without a lane is its workspace, and no workspace counts as one (docs/domain.md).
+const sameWaiter = (w: Omit<Waiter, "at" | "purpose">, lane: string | null, workspace: string | null) =>
+  lane !== null ? w.lane === lane : w.lane === null && w.workspace === workspace;
+// SR10: a request holds at most `waiters` waiters, so joins can't grow its card or move its version without end.
+const full = (req: SecretRequest) => req.waiting.length >= REQUEST_LIMITS.waiters;
+
 // Request admission (SR1, SR10): over the node's requests, open and those opened in the last day. The store holds a
 // unique index on (node, Reference) over open requests and runs this and the insert in one write transaction.
 export function admitRequest(requests: readonly SecretRequest[], ask: RequestAsk, now: number): Admission {
@@ -124,6 +130,7 @@ export function admitRequest(requests: readonly SecretRequest[], ask: RequestAsk
   const same = open.find(r => r.reference === ask.reference);
   if (same) {
     if (lane !== null && !same.waiting.some(w => w.lane === lane) && holds >= REQUEST_LIMITS.laneOpen) return { kind: "refuse", limit: "lane-open" };
+    if (full(same) && !same.waiting.some(w => sameWaiter(w, lane, ask.waiter.workspace))) return { kind: "refuse", limit: "request-waiters" };
     return { kind: "join", request: same.id };
   }
   const today = (r: SecretRequest) => r.openedAt > now - DAY;
@@ -153,13 +160,10 @@ export function joinRequest(req: SecretRequest, waiter: Omit<Waiter, "at">, now:
   if (w) return refuseRequest(w);
   // A repeat by the same waiter changes nothing (SR1).
   if (req.waiting.some(x => sameWaiter(x, waiter.lane, waiter.workspace))) return ok({ request: req, events: [] });
+  if (full(req)) return refuseRequest("full");
   const request = { ...req, waiting: [...req.waiting, { ...waiter, at: now }], version: req.version + 1 };
   return ok({ request, events: [{ type: "SecretRequestJoined", request: req.id, lane: waiter.lane, at: now }] });
 }
-
-// A waiter is its lane; a caller without a lane is its workspace, and no workspace counts as one (docs/domain.md).
-const sameWaiter = (w: Omit<Waiter, "at" | "purpose">, lane: string | null, workspace: string | null) =>
-  lane !== null ? w.lane === lane : w.lane === null && w.workspace === workspace;
 
 // A withdrawal names its waiter: a lane, or for a caller without one, its workspace.
 export function withdrawRequest(req: SecretRequest, lane: string | null, now: number, workspace: string | null = null): Result<RequestChange, RequestRefusal> {
