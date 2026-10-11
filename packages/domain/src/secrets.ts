@@ -229,7 +229,7 @@ export type UseRefusalReason = (typeof USE_REFUSAL_REASONS)[number];
 export type SecretEvent =
   | { type: "SecretStored"; reference: string; version: number; at: number; command: string; sameAs: readonly string[] }
   | { type: "SecretRotated"; reference: string; version: number; at: number; command: string; sameAs: readonly string[] }
-  | { type: "SecretTransferred"; reference: string; version: number; at: number; command: string; from: string }
+  | { type: "SecretTransferred"; reference: string; version: number; at: number; command: string; from: string; sameAs: readonly string[] }
   | { type: "SecretDisabled"; reference: string; at: number }
   | { type: "SecretEnabled"; reference: string; at: number; command: string }
   | { type: "SecretRevoked"; reference: string; version: number; at: number; command: string }
@@ -339,8 +339,8 @@ export function receiveTransfer(dir: SecretDirectory, input: StoreInput & { from
   if (!NODE_LABEL.test(input.from)) return refuse("bad_node");
   const placed = place(dir, input, command, at);
   if (!placed.ok) return placed;
-  const { secret, ledger, version } = placed.value;
-  return ok(withSecret(dir, secret, [{ type: "SecretTransferred", reference: input.reference, version, at, command, from: input.from }], ledger));
+  const { secret, ledger, version, sameAs } = placed.value;
+  return ok(withSecret(dir, secret, [{ type: "SecretTransferred", reference: input.reference, version, at, command, from: input.from, sameAs }], ledger));
 }
 
 // SC11: a transfer starts from a Secret that could be used now, and carries the Grants that haven't ended.
