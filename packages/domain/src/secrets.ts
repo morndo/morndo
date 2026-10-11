@@ -94,7 +94,7 @@ export type RequestEvent =
   | { type: "SecretRequestGranted"; request: string; at: number; command: string }
   | { type: "SecretRequestRejected"; request: string; at: number; command: string; reason: string | null }
   | { type: "SecretRequestExpired"; request: string; at: number };
-export type RequestProblem = "bad_reference" | "bad_purpose" | "bad_grant" | "bad_node" | "bad_lane" | "principal"
+export type RequestProblem = "bad_reference" | "bad_purpose" | "bad_grant" | "bad_node" | "bad_lane" | "bad_workspace" | "principal"
   | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open";
 export type RequestRefusal = { problem: RequestProblem };
 export type RequestChange = { request: SecretRequest; events: readonly RequestEvent[] };
@@ -106,7 +106,7 @@ const textOk = (t: string) => t.length >= 1 && t.length <= PURPOSE_MAX && !hasCo
 
 function waiterProblem(w: Omit<Waiter, "at">): RequestProblem | null {
   if (w.lane !== null && !LANE_NAME.test(w.lane)) return "bad_lane";
-  if (w.workspace !== null && !WORKSPACE_NAME.test(w.workspace)) return "bad_grant";
+  if (w.workspace !== null && !WORKSPACE_NAME.test(w.workspace)) return "bad_workspace";
   return textOk(w.purpose) ? null : "bad_purpose";
 }
 
