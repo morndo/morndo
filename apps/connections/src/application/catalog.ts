@@ -1,6 +1,6 @@
 // The catalog is data. Callers pass a vendor id; this file names none.
 import type { Isolation } from "@morndo/domain";
-import type { VendorPreset } from "@morndo/protocol";
+import { BUILTIN_FIRST_PARTY_HOST, type VendorPreset } from "@morndo/protocol";
 import type { Catalog } from "./ports.ts";
 
 export function findPreset(catalog: Catalog, vendor: string): VendorPreset | null {
@@ -15,8 +15,7 @@ export function dialectOf(preset: VendorPreset, runtime: string): string {
   return preset.runtimes.find(r => r.runtime === runtime)?.dialect ?? "";
 }
 
-// Used when a catalog has no firstParty row, including a file written before that flag existed.
-export const BUILTIN_FIRST_PARTY_HOST = "api.anthropic.com";
+export { BUILTIN_FIRST_PARTY_HOST };
 
 export function firstPartyHost(presets: readonly VendorPreset[]): string {
   for (const preset of presets) {

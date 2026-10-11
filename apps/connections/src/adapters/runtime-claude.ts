@@ -23,7 +23,7 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import { statSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import type { Isolation } from "@morndo/domain";
-import { BUILTIN_FIRST_PARTY_HOST } from "../application/catalog.ts";
+import { BUILTIN_FIRST_PARTY_HOST } from "@morndo/protocol";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
 import { PLACEHOLDER_MODELS } from "./models.ts";
 import { HELPER_TTL_MS } from "./runtime-limits.ts";

@@ -103,6 +103,9 @@ export const PolicyView = z.strictObject({
   })),
 });
 
+// A catalog written before the firstParty flag still means this host.
+export const BUILTIN_FIRST_PARTY_HOST = "api.anthropic.com";
+
 const runtime = z.strictObject({
   runtime: text(64),
   dialect: text(64),
