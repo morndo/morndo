@@ -44,8 +44,10 @@ const CONTROL = /[\u0000-\u0008\u000B\u000C\u000D-\u001F\u007F]/;
 // A block that opens where a list item's own content starts (up to three leading spaces still leave it one): an ATX
 // heading, a block quote, a code fence, a thematic break as the whole item, or a list marker — bullet or ordered —
 // that would nest a list of the asker's own inside the format's (CommonMark; marked 18.0.14 renders each as a block
-// inside the <li>, checked 2026-10-11).
-const ITEM_BLOCK = /^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
+// inside the <li>, checked 2026-10-11). A backtick fence opens only when the rest of the line holds no backtick —
+// a backtick fence's info string may not contain one (CommonMark), so "```npm test``` passes" is inline code, and
+// refusing it would bounce a valid brief.
+const ITEM_BLOCK = /^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}[^`]*$|~{3,}|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
 // Four columns of indent open an indented code block where an item's own content starts. briefMarkdown writes each
 // item as "- ${item}", so its indent counts from column two, and a tab jumps to the next multiple of four
 // (CommonMark; marked 18.0.14 renders such an item as <li><pre><code>, checked 2026-10-11).
