@@ -183,6 +183,7 @@ export class Escalations {
       if (e.tracking === "hub") {                         // E14: the hub holds it open; time alone ends it, past its due
         const ttl = (e.deadline ?? e.askedAt) + HUB_TTL_MS;
         if (e.status === "open" && now >= ttl) { e.status = "expired"; e.settledAt = ttl; }
+        else if (e.status === "answered" && now - ttl > KEEP_SETTLED_MS) this.#items.delete(e.id);   // decided: listed that long past the TTL, as the age branch keeps its own
         else if (!isOpen(e.status) && now - (e.settledAt ?? e.askedAt) > KEEP_SETTLED_MS) this.#items.delete(e.id);
         continue;
       }
