@@ -1,0 +1,235 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "topic": {
+      "type": "string"
+    },
+    "due": {
+      "type": "number"
+    },
+    "minutes": {
+      "type": "number"
+    },
+    "headline": {
+      "type": "string"
+    },
+    "recommend": {
+      "type": "string"
+    },
+    "ask": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "alternative": {
+          "type": "string"
+        },
+        "uncertainty": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "alternative",
+        "uncertainty"
+      ],
+      "additionalProperties": false
+    },
+    "whyNow": {
+      "type": "string"
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "comparison": {
+      "type": "object",
+      "properties": {
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "factor": {
+                "type": "string"
+              },
+              "cells": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "factor",
+              "cells"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "rows",
+        "note"
+      ],
+      "additionalProperties": false
+    },
+    "why": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "downside": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "assumptions",
+        "downside"
+      ],
+      "additionalProperties": false
+    },
+    "changeIf": {
+      "type": "string"
+    },
+    "risk": {
+      "type": "object",
+      "properties": {
+        "risk": {
+          "type": "string"
+        },
+        "control": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "risk",
+        "control"
+      ],
+      "additionalProperties": false
+    },
+    "authorizes": {
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "freshApproval": {
+          "type": "string"
+        },
+        "reviewPoint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "limits",
+        "freshApproval",
+        "reviewPoint"
+      ],
+      "additionalProperties": false
+    },
+    "ifNoAnswer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "blocking": {
+      "default": false,
+      "type": "boolean"
+    },
+    "project": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ref": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "topic",
+    "due",
+    "minutes",
+    "headline",
+    "recommend",
+    "ask",
+    "whyNow",
+    "options",
+    "comparison",
+    "why",
+    "changeIf",
+    "risk",
+    "authorizes",
+    "ifNoAnswer",
+    "evidence",
+    "blocking",
+    "project",
+    "task",
+    "ref"
+  ],
+  "additionalProperties": false
+}
