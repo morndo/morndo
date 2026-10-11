@@ -59,9 +59,11 @@ function subjectOk(s: GrantSubject): boolean {
   if (s.kind === "workspace") return WORKSPACE_NAME.test(s.workspace);
   return s.kind === "node";
 }
-// A Grant's modes: at least one, each known, each once. The wire refines with this same rule.
+// No item twice. The wire checks lengths and items on their own and refines with this, so a refusal names only what failed.
+export const eachOnce = (items: readonly string[]) => new Set(items).size === items.length;
+// A Grant's modes: at least one, each known, each once.
 export const modesOk = (modes: readonly UseMode[]) =>
-  modes.length > 0 && new Set(modes).size === modes.length && modes.every(m => (USE_MODES as readonly string[]).includes(m));
+  modes.length > 0 && eachOnce(modes) && modes.every(m => (USE_MODES as readonly string[]).includes(m));
 function grantOk(g: SecretGrant): boolean {
   const untilOk = g.until.kind === "open" || g.until.kind === "lane-end" || (g.until.kind === "at" && Number.isFinite(g.until.at));
   return subjectOk(g.subject) && modesOk(g.modes) && untilOk;
@@ -288,9 +290,9 @@ export function checkFingerprint(ledger: readonly LedgerEntry[], reference: stri
   return { kind: "accept", sameAs };
 }
 
-// Destinations: at most ten hosts, each once, each a lower-case host name. The wire refines with this same rule.
+// Destinations: at most ten hosts, each once, each a lower-case host name.
 export const hostsOk = (hosts: readonly string[]) =>
-  hosts.length <= DESTINATIONS_MAX && new Set(hosts).size === hosts.length && hosts.every(h => DESTINATION_HOST.test(h));
+  hosts.length <= DESTINATIONS_MAX && eachOnce(hosts) && hosts.every(h => DESTINATION_HOST.test(h));
 
 function inputProblem(input: StoreInput): SecretProblem | null {
   if (parseReference(input.reference) === null) return "bad_reference";

@@ -4,13 +4,14 @@
 // (catalog/secret-shapes.json), each shape with its source.
 import {
   DESTINATIONS_MAX, DESTINATION_HOST, KEYED_FINGERPRINT, LANE_NAME, NODE_LABEL, PURPOSE_MAX, REQUEST_KINDS, REQUEST_STATES, SECRET_STATUSES,
-  SHAPE_ID, USE_MODES, USE_REFUSAL_REASONS, WORKSPACE_NAME, hostsOk, modesOk, parseReference, plainText,
+  SHAPE_ID, USE_MODES, USE_REFUSAL_REASONS, WORKSPACE_NAME, eachOnce, parseReference, plainText,
 } from "@morndo/domain";
 import { ED25519_SIGNATURE } from "./fleet.ts";
 import * as z from "./z.ts";
 
 // The rules are the domain's (and the fleet's signature), imported, so the wire refuses exactly what the domain does.
-// The length checks come first so a refusal names its limit; the domain's rule decides the rest.
+// The length checks come first so a refusal names its limit; the domain's rule decides the rest. A list checks its length
+// and its items on their own and refines only with the domain's each-once rule, so no refusal names a rule that held.
 const plain = (max: number) => z.string().check(z.minLength(1), z.maxLength(max), z.refine(s => plainText(s, max), "plain text"));
 const id = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{1,64}$/));   // a request or attempt id: the wire's own
 const node = () => z.string().check(z.regex(NODE_LABEL));
@@ -45,14 +46,14 @@ export const WireGrantSubject = z.discriminatedUnion("kind", [
 ]);
 export const WireGrant = z.strictObject({
   subject: WireGrantSubject,
-  modes: z.array(mode()).check(z.minLength(1), z.maxLength(USE_MODES.length), z.refine(modesOk, "each mode once")),
+  modes: z.array(mode()).check(z.minLength(1), z.maxLength(USE_MODES.length), z.refine(eachOnce, "each mode once")),
   until: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("open") }),
     z.strictObject({ kind: z.literal("at"), at: when() }),
     z.strictObject({ kind: z.literal("lane-end") }),
   ]),
 });
-const destinations = () => z.array(host()).check(z.maxLength(DESTINATIONS_MAX), z.refine(hostsOk, "each host once"));
+const destinations = () => z.array(host()).check(z.maxLength(DESTINATIONS_MAX), z.refine(eachOnce, "each host once"));
 
 // Node to hub: a request, as the node saw it (design §4.1). The hub takes it in through NodeRequests.
 export const SecretRequestedEvent = z.strictObject({
