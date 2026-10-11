@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore, type NoticeHandoff } from "../src/ops/job-store.ts";
-import { probeUserManager, showUnit, unitOf, type ProbeResult } from "../src/ops/job-systemd.ts";
+import { namesFromEnvironmentExport, probeUserManager, showUnit, unitOf, type ProbeResult } from "../src/ops/job-systemd.ts";
 import { openJobRuntime } from "../src/ops/job-runtime.ts";
 import { JobSupervisor, openJobSupervisor, type JobStart } from "../src/ops/job-supervisor.ts";
 import { agentPaths } from "../src/paths.ts";
@@ -415,6 +415,16 @@ function failingSystemctl(home: string): NodeJS.ProcessEnv {
 const KEPT_ENV = ["PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "TMPDIR", "MORNDO_JOB_ID", "MORNDO_LANE"];
 
 describe("systemd environment", () => {
+  it("takes JDK paths from the service environment export", () => {
+    expect(namesFromEnvironmentExport([
+      "# comment",
+      "JAVA_HOME_8_X64=/usr/lib/jvm/temurin-8-jdk-amd64",
+      "not a line",
+      "BAD-NAME=1",
+      "",
+    ].join("\n"))).toEqual(["JAVA_HOME_8_X64"]);
+  });
+
   it("refuses to start when the user manager environment cannot be read, and does not try again", async () => {
     const h = tempHome();
     const log = join(h.home, "env.log");
@@ -481,6 +491,12 @@ exit 0
     const lines = readFileSync(log, "utf8").split("\n");
     expect(lines).toContain("--property=Type=exec");
     expect(lines).toContain("--property=UnsetEnvironment=MORNDO_LATE_INJECT");
+    let image = "";
+    try { image = readFileSync("/etc/environment", "utf8"); } catch { /* the generator is the other source */ }
+    for (const key of namesFromEnvironmentExport(image)) {
+      if (KEPT_ENV.includes(key)) continue;
+      expect(lines).toContain(`--property=UnsetEnvironment=${key}`);
+    }
     expect(lines).not.toContain("/usr/bin/env");
     expect(lines).not.toContain("-i");
     const dash = lines.indexOf("--");
