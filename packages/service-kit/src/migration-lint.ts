@@ -1,10 +1,11 @@
 // The additive linter (ADR-0019 §11.2): a migration declared "additive" promises an older service can still read the
 // database it leaves. It is a promise the compiler can't check, so this runs the migration — against a real throwaway
 // in-memory SQLite database, the same way it will really run — and fails on anything not on the additive list: a DROP,
-// a rename, a rebuilt table (CREATE … AS SELECT), a NOT NULL column without a default, a trigger or a view. Running
-// it for real is what makes the lint honest: a condition in up() decides on real rows and a real schema, so the
-// statements it hides are linted too, not just the ones a stub would let pass. A migration may do all of that, but
-// then it says `compat: "breaking"` and raises the floor it owes the services below it.
+// a rename, a rebuilt table (CREATE … AS SELECT), a NOT NULL column without a default, a column with a CHECK, a unique
+// index on a table an older service writes, a foreign key that restricts or cascades its deletes, a trigger or a view.
+// Running it for real is what makes the lint honest: a condition in up() decides on real rows and a real schema, so
+// the statements it hides are linted too, not just the ones a stub would let pass. A migration may do all of that,
+// but then it says `compat: "breaking"` and raises the floor it owes the services below it.
 import Database from "better-sqlite3";
 import type { Migration } from "./migrate.ts";
 
@@ -15,10 +16,16 @@ class Run {
   readonly violations: string[] = [];
   private readonly db: Database.Database;
   private readonly lint: boolean;
+  // What existed when this migration started: the tables an older service — one from before this migration, which is
+  // what "additive" promises about — may still write.
+  private readonly before: ReadonlySet<string>;
 
   constructor(db: Database.Database, lint: boolean) {
     this.db = db;
     this.lint = lint;
+    this.before = new Set(
+      (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(row => row.name),
+    );
   }
 
   exec(sql: string): void {
@@ -44,7 +51,7 @@ class Run {
   }
 
   private judge(statement: string): boolean {
-    const violation = violationsOf(statement);
+    const violation = violationsOf(statement, this.before);
     if (violation === null) return false;
     this.violations.push(violation);
     return true;
@@ -85,6 +92,59 @@ const DATA = /^(INSERT|UPDATE|DELETE|REPLACE|SELECT|WITH|PRAGMA)\b/i;
 const ADD_COLUMN = /^ALTER\s+TABLE\s+(["'`\w.]+)\s+ADD\s+(?:COLUMN\s+)?(.+)$/is;
 const NOT_NULL_WITHOUT_DEFAULT = /\bNOT\s+NULL\b/i;
 const HAS_DEFAULT = /\bDEFAULT\b/i;
+const ON_DELETE_RESTRICT_OR_CASCADE = /\bON\s+DELETE\s+(RESTRICT|CASCADE)\b/i;
+
+// Blanks the contents of string literals, keeping the quotes, so words in data ('DEFAULT', 'NOT NULL') cannot satisfy
+// a keyword test. Double-quoted identifiers are left alone: they name things.
+function withoutLiterals(text: string): string {
+  let out = "", quote: string | null = null;
+  for (const c of text) {
+    if (quote !== null) {
+      out += c === quote ? c : " ";
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === "`") { quote = c; out += c; continue; }
+    out += c;
+  }
+  return out;
+}
+
+// The table a CREATE … INDEX names, unquoted.
+function indexedTable(body: string): string | null {
+  const on = body.match(/\bON\s+([^\s(]+)\s*\(/i);
+  return on?.[1]?.replace(/^["'`\[]+|["'`\]]+$/g, "") ?? null;
+}
+
+// Splits a CREATE TABLE body on the commas that separate columns and constraints, not the ones inside parentheses.
+function topLevelParts(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0, current = "";
+  for (const c of body) {
+    if (c === "(") depth++;
+    if (c === ")") depth--;
+    if (c === "," && depth === 0) { parts.push(current); current = ""; continue; }
+    current += c;
+  }
+  if (current.trim()) parts.push(current);
+  return parts;
+}
+
+// A foreign key in a new table that reaches into a table from before this migration and deletes or rejects its rows:
+// RESTRICT fails an older service's deletes, CASCADE silently removes rows it never named.
+function foreignKeyViolation(body: string, before: ReadonlySet<string>): string | null {
+  for (const part of topLevelParts(withoutLiterals(body))) {
+    const reference = part.match(/\bREFERENCES\s+([^\s(,]+)/i);
+    if (!reference?.[1] || !ON_DELETE_RESTRICT_OR_CASCADE.test(part)) continue;
+    const table = reference[1].replace(/^["'`\[]+|["'`\]]+$/g, "");
+    if (!before.has(table)) continue;
+    const action = part.match(ON_DELETE_RESTRICT_OR_CASCADE)?.[1]?.toUpperCase() ?? "";
+    return action === "CASCADE"
+      ? `points a foreign key at the existing table ${table} with ON DELETE CASCADE: an older service's deletes would silently drop rows`
+      : `points a foreign key at the existing table ${table} with ON DELETE RESTRICT: an older service's deletes would fail`;
+  }
+  return null;
+}
 
 /** The statements a migration runs, in order — what the linter sees, and what a review of it reads. */
 export function migrationStatements(migration: Migration): string[] {
@@ -98,7 +158,7 @@ export function migrationStatements(migration: Migration): string[] {
   }
 }
 
-function violationsOf(statement: string): string | null {
+function violationsOf(statement: string, before: ReadonlySet<string>): string | null {
   if (DATA.test(statement)) return null;
   const create = statement.match(/^CREATE\s+(TABLE|UNIQUE\s+INDEX|INDEX|VIEW|TRIGGER|VIRTUAL\s+TABLE)\b(.*)$/is);
   if (create?.[1] !== undefined && create[2] !== undefined) {
@@ -107,14 +167,25 @@ function violationsOf(statement: string): string | null {
       if (/^\s+(IF\s+NOT\s+EXISTS\s+)?[^\s(]+\s+AS\b/i.test(create[2])) {
         return "rebuilds a table (CREATE TABLE … AS SELECT)";
       }
-      return null;                                                                          // a new table: additive
+      return foreignKeyViolation(create[2], before);                                        // otherwise a new table: additive
     }
-    if (what === "INDEX" || what === "UNIQUE INDEX") return null;                           // a new index: additive
+    if (what === "INDEX") return null;                                                      // a new plain index: additive
+    if (what === "UNIQUE INDEX") {
+      const table = indexedTable(create[2]);
+      if (table !== null && before.has(table)) {
+        return "creates a unique index on an existing table: an older service's inserts could violate it";
+      }
+      return null;                                                                          // on this migration's own table
+    }
     return `creates a ${what.toLowerCase()}, which an older service may not know`;
   }
   const addColumn = statement.match(ADD_COLUMN);
   if (addColumn?.[2] !== undefined) {
-    if (NOT_NULL_WITHOUT_DEFAULT.test(addColumn[2]) && !HAS_DEFAULT.test(addColumn[2])) {
+    const definition = withoutLiterals(addColumn[2]);
+    if (/\bCHECK\b/i.test(definition)) {
+      return "adds a column with a CHECK: an older service's writes could fail it";
+    }
+    if (NOT_NULL_WITHOUT_DEFAULT.test(definition) && !HAS_DEFAULT.test(definition)) {
       return "adds a NOT NULL column with no default: an older service could not insert";
     }
     return null;                                                                            // a nullable or defaulted column: additive

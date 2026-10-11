@@ -9,6 +9,10 @@ import { additiveViolations, lintMigrations, migrationStatements, type Migration
 const M = (up: (db: Database.Database) => void, compat: "additive" | "breaking" = "additive"): Migration =>
   ({ version: 1, name: "m1", compat, up });
 
+// A list with more than one migration in it, numbered the way a service's list is.
+const N = (version: number, up: (db: Database.Database) => void, compat: "additive" | "breaking" = "additive"): Migration =>
+  ({ version, name: `m${version}`, compat, up });
+
 describe("migrationStatements", () => {
   it("records what exec and prepare would run, statements split and comments dropped", () => {
     const m = M(db => {
@@ -108,5 +112,55 @@ describe("the additive linter", () => {
       M(db => db.exec("CREATE TABLE t (x)")),
       M(db => db.exec("INSERT INTO t (x) VALUES (1)")),                 // runs after migration 1, for real
     ])).toEqual([]);
+  });
+
+  it("fails a unique index on a table an older service writes, accepts one on a table this migration creates", () => {
+    expect(lintMigrations([
+      N(1, db => db.exec("CREATE TABLE jobs (lane TEXT)")),
+      N(2, db => db.exec("CREATE UNIQUE INDEX jobs_lane ON jobs (lane)")),
+    ])).toEqual([
+      "migration 2 (m2): creates a unique index on an existing table: an older service's inserts could violate it",
+    ]);
+    expect(lintMigrations([
+      N(1, db => db.exec("CREATE TABLE own (lane TEXT); CREATE UNIQUE INDEX own_lane ON own (lane)")),
+    ])).toEqual([]);
+  });
+
+  it("fails a column with a CHECK, and keeps the words of string literals out of the judgement", () => {
+    expect(lintMigrations([
+      N(1, db => db.exec("CREATE TABLE t (x)")),
+      N(2, db => db.exec("ALTER TABLE t ADD COLUMN y TEXT CHECK (y <> 'x')")),
+    ])).toEqual([
+      "migration 2 (m2): adds a column with a CHECK: an older service's writes could fail it",
+    ]);
+    // 'DEFAULT' in the data used to satisfy the default test and pass this lint.
+    expect(additiveViolations(M(db => db.exec("CREATE TABLE t (x); ALTER TABLE t ADD COLUMN y TEXT NOT NULL CHECK (y <> 'DEFAULT')")))).toEqual([
+      "migration 1 (m1): adds a column with a CHECK: an older service's writes could fail it",
+    ]);
+    expect(additiveViolations(M(db => db.exec("CREATE TABLE t (x); ALTER TABLE t ADD COLUMN y TEXT DEFAULT 'NOT NULL'")))).toEqual([]);  // nullable; the words are data
+    expect(additiveViolations(M(db => db.exec("CREATE TABLE t (x); ALTER TABLE t ADD COLUMN y TEXT NOT NULL DEFAULT 'x'")))).toEqual([]);
+  });
+
+  it("fails a new table whose foreign key restricts or cascades deletes in a table an older service writes", () => {
+    expect(lintMigrations([
+      N(1, db => db.exec("CREATE TABLE nodes (id TEXT PRIMARY KEY)")),
+      N(2, db => db.exec("CREATE TABLE node_tags (node TEXT NOT NULL REFERENCES nodes (id) ON DELETE RESTRICT, tag TEXT NOT NULL)")),
+    ])).toEqual([
+      "migration 2 (m2): points a foreign key at the existing table nodes with ON DELETE RESTRICT: an older service's deletes would fail",
+    ]);
+    expect(lintMigrations([
+      N(1, db => db.exec("CREATE TABLE nodes (id TEXT PRIMARY KEY)")),
+      N(2, db => db.exec(`
+        CREATE TABLE node_tags (
+          tag TEXT NOT NULL,
+          node TEXT NOT NULL,
+          FOREIGN KEY (node) REFERENCES nodes (id) ON DELETE CASCADE
+        )`)),
+    ])).toEqual([
+      "migration 2 (m2): points a foreign key at the existing table nodes with ON DELETE CASCADE: an older service's deletes would silently drop rows",
+    ]);
+    expect(lintMigrations([
+      N(1, db => db.exec("CREATE TABLE nodes (id TEXT PRIMARY KEY); CREATE TABLE node_tags (node TEXT NOT NULL REFERENCES nodes (id) ON DELETE RESTRICT)")),
+    ])).toEqual([]);                    // into a table of this own migration: no older service writes either side
   });
 });
