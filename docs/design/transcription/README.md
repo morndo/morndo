@@ -107,8 +107,8 @@ RTF is wall time over audio length. The same German text as ogg/opus gave the sa
 **S1 change, in Steering:** an audio Upload (`.ogg .oga .opus .webm .m4a .mp3 .wav`) is allowed only while the Capability is present. A Safari recording is named `.m4a`.
 - Its bytes must match its container:
   - `OggS` for Ogg;
-  - the EBML magic `1A 45 DF A3` for WebM;
-  - `ftyp` at offset 4 for MP4/M4A;
+  - the EBML magic `1A 45 DF A3` for WebM — the magic is all the sniff reads of one, so a WebM of video passes it and the engine's own decoding is the second gate;
+  - `ftyp` at offset 4 for MP4/M4A, and the major brand `M4A`: a photo (`heic`, `avif`) or movie (`isom`) brand is not audio;
   - `ID3` or an MPEG frame sync for MP3;
   - `RIFF…WAVE` for WAV.
 - It is at most 10 MiB.
