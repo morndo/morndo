@@ -38,7 +38,7 @@ describe("round 7, points 4 and 5: the forms other writers use are found (checke
   };
   const lower = (s: string) => s.replace(/%[0-9A-F]{2}/g, m => m.toLowerCase());
   // Python 3.12.3: json.dumps(VALUE), urllib.parse.quote(VALUE, safe=""), urllib.parse.quote_plus(VALUE).
-  const PY_JSON = String.raw`ab\u007fcd é~*!()+ x/y`;
+  const PY_JSON = ["ab", "\\u007f", "cd ", "\\u00e9", "~*!()+ x/y"].join("");
   const PY_QUOTE = "ab%7Fcd%20%C3%A9~%2A%21%28%29%2B%20x%2Fy";
   const PY_QUOTE_PLUS = "ab%7Fcd+%C3%A9~%2A%21%28%29%2B+x%2Fy";
 
