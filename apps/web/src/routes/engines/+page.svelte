@@ -107,7 +107,7 @@
     {#if connectionsOn === true}
       <ConnectionsBoard />
     {:else if connectionsOn === false}
-      <section class="block">
+      <section class="connections">
         <h2>{CONNECTION_WORDS.sections.connections}</h2>
         <p>This hub has no connections home.</p>
       </section>
@@ -181,6 +181,9 @@
     width: 100%; max-width: 46rem; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px;
     padding: 16px max(16px, var(--safe-right)) 120px max(16px, var(--safe-left));
   }
+  .connections { display: grid; gap: 12px; margin-top: 16px; }
+  .connections h2 { margin: 0; font: 700 19px/24px var(--display); }
+  .connections p { margin: 0; }
   .kicker { margin-top: 6px; }
   .banner { margin: 0; padding: 12px 14px; border-radius: 14px; background: var(--warn-soft); color: var(--warn-text); font: 400 14px/20px var(--body); }
   .card { display: grid; gap: 8px; padding: 16px; border-radius: 18px; background: var(--surface); box-shadow: var(--card-shadow); }
