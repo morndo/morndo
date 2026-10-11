@@ -1,4 +1,4 @@
-# Secret requests: an agent asks for a named secret, the owner types it into a sealed card, and agents use it by reference (design v1, 2026-10-11)
+# Secret requests: an agent asks for a named secret, the owner types it into a sealed card, and agents use it by reference (design v2, 2026-10-11)
 
 **Phase: design only.** This document and [ADR-0022](../../adr/0022-secret-requests.md). No product code yet.
 
@@ -6,7 +6,15 @@
 
 **Builds on:** ADR-0001 (pure domain, anti-corruption adapters), ADR-0004 (the web endpoint, passkeys, the hub behind the private network's TLS), ADR-0008 (the shared redactor, A4), ADR-0011 (the phone), ADR-0012 (the fleet: typed operations, FL7, FL14), ADR-0015 (agent tokens, and why they can't vouch for a lane), ADR-0017 (lane notices), ADR-0018 (the sealed store this design reuses: the age vault, the plaintext type, process ancestry, the exact-value filter, the widening rule). It does not redo ADR-0018: LLM connections and their keys stay there.
 
-**Review.** A fresh-context security review of the first draft found twelve problems. Each was checked against the code or the docs and folded in:
+**v2, after an independent audit** (sources and DDD; it found every checked source holding and the structure sound, with gaps):
+- Every invariant names its layer (domain, domain service with the store, application, adapter) and what proves it; only domain ones get domain tests (3.3, 3.4, 15.1).
+- SR1, SR10 and SC2 span many aggregates: they belong to two domain services, Request admission and the Fingerprint ledger, with uniqueness held by the store (3.3, 3.4).
+- "Placement" is gone: a Secret is one Reference on one node. "Ask" is defined in `docs/domain.md` as a role two aggregates play. A table separates the words shared with Connections (3.1).
+- New ports: `HubLink` and `NodeRequests` carry requests from node to hub. `CallerIdentity` reads panes through `packages/node-ops`, not the node agent. The scanner is split from the index file adapter (section 14).
+- PR 1 adds the anti-corruption rows to `docs/domain.md`, and the vendor-name test covers `secrets.ts` (section 16).
+- Sources: the socket rules now quote the settings reference; `tlsTerminate` is marked experimental; git-credential(1), unix(7), the age format spec, OWASP's password storage sheet and Kubernetes are cited where they are used; S18's URL is current; NIST 800-63B is used by analogy.
+
+**v1 review.** A fresh-context security review of the first draft found twelve problems. Each was checked against the code or the docs and folded in:
 - A Grant matched git remotes, which any folder can claim; it now matches workspaces the node registered (section 6).
 - "An agent never holds a value" was overstated: `exec`, `file` and `helper` stop accidents, not intent (7.0).
 - Who asks was a header's claim; requests now go through the node, which vouches (4.1).
@@ -68,9 +76,11 @@ Read on `main` at 09ca6de. No secret was opened.
 
 ### 3.1 A Secrets context, and why not more Connections
 
-**Secrets** is a new bounded context: what agents may use for their work, and how the principal provides it. It holds two aggregates:
+**Secrets** is a new bounded context: what agents may use for their work, and how the principal provides it. It holds two aggregates and two domain services:
 - **Secret request** (on the hub): an agent's ask for a value or for access, answered once.
-- **Secret** (on each node): custody, Grants, versions and Uses of one Reference on that node.
+- **Secret** (on each node): one Reference on one node, with its versions, Grants and Uses.
+- **Request admission** (a domain service on the hub): SR1 and SR10, which span every request of a node or lane.
+- **Fingerprint ledger** (a domain service on each node): SC2, which spans every Secret on the node.
 
 The code is `packages/domain/src/secrets.ts`, pure.
 
@@ -82,66 +92,90 @@ The code is `packages/domain/src/secrets.ts`, pure.
 
 **What the two share** is infrastructure, not model: the age vault and the machine identity, the plaintext type, process ancestry, the repo inspector and the exact-value filter. The node-side Secrets services live in the same program, `apps/connections`, as a second command, `morndo-secrets`. ADR-0018 already hosts Engines' routing service there, so no adapter moves and the plaintext type stays in one app.
 
-**Why a request is not an Escalation.** It looks like one: one open item per key, one answer, a card, a fresh check. But its answer must never reach the asker as words (E9 sends words to the asker) and must never be recorded in any form. It follows Escalation's rules where they fit (E1, E8, E12, N1, C1), named in its own invariants, and keeps its own answer path. For Catch-up, Notifications and lane status an open request counts as an Ask waiting for a Decision; PR 1 amends C1, N2 and H3 in `docs/domain.md` to say so, and C6 to say that a card that carries a value has no Undo window (5.3).
+**Words the two contexts share, and how they differ.** They share a program, so a word that means two things would leak across:
+
+| Connections (ADR-0018) | Secrets (this design) | Resolution |
+|---|---|---|
+| "Secret": the bytes of a key ("no secret in the model", CN1) | **Value** is the bytes; **Secret** is the aggregate | Secrets never says "secret" for bytes. Its domain has no type for them; adapters use `SecretMaterial`. |
+| "Secret ref": the opaque id of a vault file | **Vault ref**: the same kind of id, `s-<random>` | Adapter-only: never in the Secrets domain, wire or events. A **Reference** (`secret://…`) is the public name, a different thing. |
+| `SecretVault` port: `has`, `fingerprint`, `remove` | `SealedStore` port: `storeSealed`, `has`, `fingerprint`, `remove` | One adapter class per vault kind (`AgeVault`, `FileVault`) implements both; each context imports only its own port. |
+| `SecretMaterial`: plaintext that never serialises | the same type | Shared, adapter-only, unchanged. |
+| Fingerprint: 12 hex characters of SHA-256 | Keyed fingerprint: 12 hex characters of HMAC-SHA-256 | Different on purpose (3.2), with different field names (`fingerprint`, `keyedFingerprint`). |
+
+**A request and Escalation: what an Ask is.** `docs/domain.md` used "Ask" under Escalation without defining it. v2 adds the definition there (this commit): an **Ask** is a role, not an aggregate. It is anything that waits for the principal's answer and shows as a decision card. Two aggregates play it: an Escalation that is an Ask (E1–E13), and a Secret request (SR1–SR11).
+- Catch-up (C1), Notifications (N2) and lane status (H3) count Asks, whichever aggregate holds them.
+- Escalation's answer rules (E8–E13) stay Escalation's. A Secret request is not an Escalation: its answer never reaches the asker as words (E9 sends words to the asker), and is never recorded in any form. It mirrors E1, E8, E12 and N1 in its own invariants.
+- PR 1 amends C1, N2 and H3 to name both, and C6 to say that a card carrying a value has no Undo window (5.3).
 
 ### 3.2 Ubiquitous language
 
 | Term | Means | Is not |
 |---|---|---|
-| Secret | A value an agent's tools need, held sealed on a node under one Reference: its status, versions, Grants, Destinations and Expiry. | The value; an LLM connection's key (ADR-0018). |
+| Secret | One Reference on one node: its status, versions, Grants, Destinations and Expiry, with the value sealed in that node's vault. The same Reference on two nodes is two Secrets, each with its own versions and Grants. Each node is the system of record for its Secrets; the hub's read model groups them by Reference. | The value; an LLM connection's key (ADR-0018); a replica the hub owns. |
 | Value | The bytes the principal entered. Exists only on the Endpoint while typed, sealed in a node's vault, and in a process a Use started. | Anything the domain, the hub, the fleet, an event, a log or a prompt holds. |
-| Reference | The name agents and configs use instead of the value: `secret://<scope>/<name>`, such as `secret://example-app/payments-test`. Safe to commit, log and show. | A path, a URL anyone can fetch, a permission. |
+| Reference | The name agents and configs use instead of the value: `secret://<scope>/<name>`, such as `secret://example-app/payments-test`. Safe to commit, log and show. | A path, a URL anyone can fetch, a permission, a vault ref. |
 | Scope | The Reference's first part: a namespace. The card proposes the requesting repository's name; `shared` is the convention for secrets many repositories use. | A Grant. A scope admits nobody. |
-| Version | One value of a Secret over time: a number, its keyed fingerprint, when and by which Command it was stored. One version is current. | A copy on another node (that is a Placement). |
-| Keyed fingerprint | 12 hex characters of HMAC-SHA-256 over the value, under a key that stays on the node. Used for dedupe and audit. | A plain hash: a low-entropy value would fall to a dictionary attack (12.6). |
-| Placement | The Secret's copy on one node. Each node is the system of record for its Placements and their Grants. | A replica the hub owns. |
-| Grant | Who may resolve a Reference on a node: a subject (one lane, a repository through the workspaces the node registered for it, or every lane on the node), the use modes allowed, and an end (when revoked, at an instant, or when the lane ends). | An agent token; a Mandate. |
-| Use | One resolution of a Reference for one process: the caller (node, lane as the process tree shows it, workspace's repository), the mode, the Grant that admitted it, the time, the outcome. | Reading the value into a prompt. |
+| Version | One value of a Secret over time: a number, its keyed fingerprint, when and by which Command it was stored. One version is current. | A copy on another node: that is another Secret. |
+| Keyed fingerprint | 12 hex characters of HMAC-SHA-256 over the value, under a key that stays on the node. Used for dedupe and audit. | A plain hash. Fast hashes such as SHA-256 "allow attackers to perform large numbers of guesses quickly" [S25], so a short value's plain hash could be guessed; a key kept on the node is the HMAC "pepper" that stops guesses off it [S25] (12.6). |
+| Workspace | A repository root the principal registered on a node, and every git worktree that shares its git directory. | A folder that merely has a matching git remote. |
+| Grant | Who may resolve a Reference on a node: a subject (one lane, a workspace, or every lane on the node), the use modes allowed, and an end (when revoked, at an instant, or when the lane ends). | An agent token; a Mandate. |
+| Use | One resolution of a Reference for one process: the caller (node, lane as the process tree shows it, workspace), the mode, the Grant that admitted it, the time, the outcome. | Reading the value into a prompt. |
 | Use mode | How a value reaches a process: `exec` (the environment of a child that `run` starts), `file` (a 0600 file whose path the child gets), `helper` (stdout of a credential helper to the tool that called it), `inject` (the agent CLI's sandbox proxy puts it into requests to the Destinations; the command sees a sentinel). | `print`: there is none. |
 | Destinations | Optional hosts the value is meant for. Binding under `inject`; shown on the card and advisory otherwise. | A network policy for the lane. |
-| Secret request | An agent's ask: a Reference, a purpose, a kind, the requester, and a proposed Grant. One answer: Stored, Granted, Rejected; or Withdrawn by its requester; or Expired. | A decision; a chat message. |
+| Ask | (`docs/domain.md`) What waits for the principal's answer as a decision card: an Escalation that is an Ask, or a Secret request. | An aggregate. |
+| Secret request | An agent's ask: a Reference, a purpose, a kind, the requester, and a proposed Grant. One answer: Stored, Granted, Rejected; or Withdrawn by its requester; or Expired. | An Escalation; a chat message. |
 | Request kind | `new` (no value yet), `access` (a value exists, the requester isn't granted), `rotate` (replace the current value), `renew` (it expired). | The answer. |
 | Insert-secret card | The request's card on Morndo's web endpoint: a masked field, the Reference, the Grant, an optional expiry, Store, Reject, Later. | A decision card; a Telegram message. |
-| Recipient | A node's age public key (`age1…`) that Endpoints seal values to. Reported by the node over the fleet, pinned by each Endpoint on first use. | The node's fleet key (FL2); a secret. |
+| Recipient | A node's age public key (`age1…`) that Endpoints seal values to. Reported by the node over the fleet, signed with its node key, and pinned by each Endpoint on first use. | The node's fleet key (FL2); a secret. |
 | Redaction index | Per node: for each value of the last 30 days, the length and a keyed hash of each indexed encoding. Read by every output path on the node. | A list of values. |
 | Shape | A public pattern a value matches (a vendor's token prefix and length), from the shape catalog. Sent to the hub's shared redactor. | The value, or a pattern derived from its private part. |
-| Disable, Revoke, Delete | Disable stops every Use, reversibly (anyone). Revoke destroys the current value on a node (the principal). Delete removes the Reference and its Grants (the principal). | Rotation. |
+| Disable, Revoke, Delete | Disable stops every new Use, reversibly (anyone). Revoke destroys the current value on a node (the principal). Delete removes the Reference and its Grants (the principal). | Rotation. |
 
 ### 3.3 Invariants: Secret requests (hub)
 
-| # | Invariant | Mirrors |
-|---|---|---|
-| SR1 | One open request per (node, Reference). A repeat from any lane joins it: the card lists every lane that waits, and nothing else changes. | E1 |
-| SR2 | A request is not opened when the requester's broker, running the use gate for that caller without opening anything, admits it: it answers `available` at once, and nothing reaches the hub. With a value but no admitting Grant, it opens as `access`, and its card asks for a Grant, never for a value. The hub's read model never decides this: a stale copy would answer `available` while `run` is refused. | E5 |
-| SR3 | A request carries the Reference, a purpose (plain text, at most 300 characters, shown as the agent's words), its kind, the requester as its node saw it (node, lane from the process tree, registered workspace and repository; section 6) and a proposed Grant. No wire shape of a request has a field a value could travel in; a body with a key named like `value`, `secret`, `token`, `password` or `key` is refused whole. | CN1 |
-| SR4 | A request takes one answer: Stored, Granted or Rejected from the principal, Withdrawn when its last waiting lane withdraws (an earlier withdrawal only takes that lane off the list), or Expired 7 days after it opened. A second answer is refused and shows the first. A request that ended can be asked again; that opens a new one. | E8, E10 |
-| SR5 | Store and Grant are Commands that widen (SC7). Each needs a user verification from the last 5 minutes, whatever the step-up policy, as AC8 to AC10 do. Reject and Later need a valid Session only. | AC7 to AC10 |
-| SR6 | An answer names the version of the request it saw: its kind, Reference, the waiting lanes with each one's purpose and repository, and the proposed Grant. If any changed since, a join or a withdrawal included, it is refused as `changed`. Editing the Reference on the card to one that already has a value turns the card into a Rotation, which it says, and asks again. | E12 |
-| SR7 | **Sealed on the Endpoint.** The value is encrypted on the Endpoint to the recipient of each target node that this Endpoint has pinned, before it leaves the page. The hub and the fleet carry the ciphertext in memory only, until the node confirms or the operation times out. They never write it to a database, a log, a queue file, an audit row or a crash report. FL7's record of a `secrets.*` operation keeps a hash of its outcome, never a ciphertext, so a repeat runs again instead of replaying one. Plaintext leaves the Endpoint only inside a target node. | FL14, CN5 |
-| SR8 | A request is Stored only when the requester's node confirms its keyed store operation. Until then it stays open, and a failure (node offline, a recipient that changed, a ciphertext that doesn't open) is shown on the card with nothing kept: the owner enters the value again to retry. Other target nodes are Placements of their own: each one that fails is shown on the Secrets page, to retry by transfer (9.2), and doesn't hold the request open. | E13, FL7 |
-| SR9 | **Only on Morndo's web endpoint.** No chat adapter, `[buttons]` line, needs-you file item, hook event, `/notify` event, manager-inbox message or pane text carries a request as answerable or carries an answer. A Notification counts it as a waiting decision and says nothing else (N1). A link to the card is never pre-authenticated: it opens only in a valid Session, as the MCP spec requires of a URL that collects a credential [S5]. | N1 |
-| SR10 | A lane holds at most 5 open requests and opens at most 20 a day, and a node at most 20 and 100; past that, a request is refused with the limit named. The card shows who asks as the node saw it (node, lane, repository) above the agent's words. | ADR-0008 A6 |
-| SR11 | A request, its answer and its card grant nothing beyond the Grant the principal stored: no Mandate, no Decision for another Ask, no board move. | N5, J7 |
+Each invariant names its layer, as ADR-0018's CN5 splits the model's part from the edges', and what proves it:
+- **domain**: pure code in `packages/domain/src/secrets.ts`, proved by a domain test;
+- **domain service + store**: a rule over many aggregates, decided by a domain service, its uniqueness held by the store (a store test proves it);
+- **application**: a service's order or policy, proved by an application test with fakes;
+- **adapter**: an edge, proved by a contract test or the end-to-end run (15.5).
+
+| # | Invariant | Layer | Proved by | Mirrors |
+|---|---|---|---|---|
+| SR1 | One open request per (node, Reference). A repeat from any lane joins it: the card lists every lane that waits, and nothing else changes. | domain service + store | Request admission's domain test; a store test in which two concurrent opens make one request and one join | E1 |
+| SR2 | A request is not opened when the requester's broker, running the use gate (SC3) for that caller without opening anything, admits it: it answers `available` at once, and nothing reaches the hub. With a value but no admitting Grant, it opens as `access`, and its card asks for a Grant, never for a value. The hub's read model never decides this: a stale copy would answer `available` while `run` is refused. | application | Broker test with a fake vault and caller (15.3) | E5 |
+| SR3 | A request carries the Reference, a purpose (plain text, at most 300 characters, shown as the agent's words), its kind, the requester as its node saw it (node, lane from the process tree, workspace; section 6) and a proposed Grant. No type has a field a value could travel in. The wire refuses whole a body with a key named like `value`, `secret`, `token`, `password` or `key`. | domain + adapter | Shape test (domain); wire test (protocol) | CN1 |
+| SR4 | A request takes one answer: Stored, Granted or Rejected from the principal, Withdrawn when its last waiting lane withdraws (an earlier withdrawal only takes that lane off the list), or Expired 7 days after it opened. A second answer is refused and shows the first. A request that ended can be asked again; that opens a new one. | domain | Domain test | E8, E10 |
+| SR5 | Store and Grant are Commands that widen (SC7). Each needs a user verification from the last 5 minutes, whatever the step-up policy, as AC8 to AC10 do. Reject and Later need a valid Session only. | application, with Access's freshness rule | Application test; the end-to-end run checks the prompt | AC7 to AC10 |
+| SR6 | An answer names the version of the request it saw: its kind, Reference, the waiting lanes with each one's purpose and workspace, and the proposed Grant. If any changed since, a join or a withdrawal included, it is refused as `changed`. Editing the Reference on the card to one that already has a value turns the card into a Rotation, which it says, and asks again. | domain | Domain test | E12 |
+| SR7 | **Sealed on the Endpoint.** The value is encrypted on the Endpoint to the recipient of each target node that this Endpoint has pinned, before it leaves the page. The hub and the fleet carry the ciphertext in memory only, until the node confirms or the operation times out. They never write it to a database, a log, a queue file, an audit row or a crash report. FL7's record of a `secrets.*` operation keeps a hash of its outcome, never a ciphertext, so a repeat runs again instead of replaying one. Plaintext leaves the Endpoint only inside a target node. | adapter (web, hub, fleet, node agent) | Contract tests: the store route and the done-key record hold no ciphertext after the operation; the end-to-end scan (15.5) | FL14, CN5 |
+| SR8 | A request is Stored only when the requester's node confirms its keyed store operation. Until then it stays open, and a failure (node offline, a recipient that changed, a ciphertext that doesn't open) is shown on the card with nothing kept: the owner enters the value again to retry. Other target nodes get Secrets of their own: each one that fails is shown on the Secrets page, to retry by transfer (9.2), and doesn't hold the request open. | domain (the state moves only on that confirmation) + application (the store across nodes) | Domain test; application test with a fake fleet | E13, FL7 |
+| SR9 | **Only on Morndo's web endpoint.** No chat adapter, `[buttons]` line, needs-you file item, hook event a chat bot receives, `/notify` event, manager-inbox message or pane text carries a request as answerable or carries an answer. A Notification counts it as a waiting decision and says nothing else (N1). A link to the card is never pre-authenticated: it opens only in a valid Session, as the MCP spec requires of a URL that collects a credential [S5]. | adapter (routing and links) | Contract test: the fleet routes `/secrets/*` to the hub's subscriber only, and a planted second subscriber fails it; the end-to-end run opens a card link with no Session and lands on sign-in | N1 |
+| SR10 | A lane holds at most 5 open requests and opens at most 20 a day, and a node at most 20 and 100; past that, a request is refused with the limit named. The card shows who asks as the node saw it (node, lane, workspace) above the agent's words. | domain service + store | As SR1: counting and inserting in one write transaction | ADR-0008 A6 |
+| SR11 | A request, its answer and its card grant nothing beyond the Grant the principal stored: no Mandate, no Decision for another Ask, no board move. | domain | Domain test: no event of a request names a Mandate, a Decision or a task status | N5, J7 |
+
+Aggregate **Secret request**: its state (SR4), its version (SR6) and the requester node's confirmation (SR8) are its consistency boundary. SR1 and SR10 span every request of a node or lane, so they are **Request admission**'s: `admit(open requests of the node, the lane's and node's counts, the request)` returns open, join (with the request id) or refuse (with the limit). The store holds a unique index on (node, Reference) over open requests, and runs the counts, the decision and the insert in one write transaction, so two concurrent requests can't both open.
 
 States: **Open**, then **Stored**, **Granted**, **Rejected**, **Withdrawn** or **Expired**. Events: SecretRequested, SecretRequestJoined, SecretRequestStored (Reference, nodes, version, Command id), SecretRequestGranted, SecretRequestRejected (with the principal's reason, if any, which goes back to the requester), SecretRequestWithdrawn, SecretRequestExpired.
 
 ### 3.4 Invariants: Secrets (node)
 
-| # | Invariant | Mirrors |
-|---|---|---|
-| SC1 | **No value in the model.** A Secret holds its Reference, status, versions (number, keyed fingerprint, stored at, Command id), Grants, Destinations, Expiry and Shape id. No domain type, wire shape, event, audit row or log line carries more. | CN1 |
-| SC2 | A Reference is unique on a node and follows the grammar (3.6). At most one version is current. A store under an existing Reference is a Rotation, which is the principal's. A value whose keyed fingerprint matches a revoked version anywhere on the node, or any earlier version of the same Reference, is refused. A match with another active Secret is stored, and the card says "same value as …". Fingerprint keys are per node, so this holds per node; storing a Reference that is revoked on another node gets a warning on the card. | CN2 |
-| SC3 | **Default deny; the use gate.** A Secret with no Grant resolves for nobody. The gate, in order: status active; a current version on this node; now before Expiry; a Grant admits the caller (its lane, its workspace's repository, this node) and has not ended; the Grant allows the mode. The first failure is the refusal: recorded, and `run` exits 77. | CN8 |
-| SC4 | **Recorded before use.** `SecretUsed` is durable before the vault opens the value. Refusals are recorded too. | CN9 |
-| SC5 | **Only the use modes.** A value reaches a process only as the environment or a 0600 file of a child `run` starts, as a helper's stdout to the tool that called it, or through the agent CLI's sandbox proxy (`inject`). Never as an argument, a prompt, a workspace file, the lane's own environment, a hub or fleet message, or the output of a command the agent reads unfiltered. No command prints a value. | CN5 |
-| SC6 | **Output is filtered on the node.** Every output path the node controls passes the exact filter before it leaves the process or the node: the stdout and stderr of a `run` child, pane captures and frames, the terminal stream, transcript reads, job tails, and hook bodies and `/file` copies in the hook relay before they are spooled. The filter knows every version stored or retired in the last 30 days, in every indexed encoding (8.1). The index holds lengths and keyed hashes, never a value, and is updated before a store or rotation is confirmed. | secret-store design §6.2 |
-| SC7 | **Narrowing is anyone's; widening is the principal's, judged by effect.** A change widens when afterwards the Secret may resolve for more lanes, repositories or nodes, in more modes, to more Destinations, for longer, or again after a Disable. Disable is anyone's, an agent's included: one that sees a leak stops every new Use at once (SC8). Enable, Rotation, Revoke, Delete and every widening are the principal's: a Command from the hub with a fresh verification (SR5), or at the machine with a typed confirmation and no `--yes`. | CN13 |
-| SC8 | Disable and Revoke refuse every new Use at once. Revoke also destroys the current value on that node (the vault file removed) and keeps the Reference, its history and its Grants, so a new value under it is a new version. Delete removes the Reference and its Grants. A running child keeps what it already has; an `inject` lane's file is deleted and the lane restarted. A node that is offline gets the Command when it reconnects, and serves until then; the page says "pending on node-b". The audit outlives all of these by 90 days. | CN14 |
-| SC9 | Expiry is optional per Secret. Warnings go once each, 7, 2 and 1 days before. Expired, every Use is refused, and the first refused Use opens a `renew` request (SR1 dedupes). | CN12 |
-| SC10 | **A Secret grants nothing.** A Use is not a Mandate: holding a deploy token never authorizes an irreversible action (A2). A Grant is not an agent token, and an agent token is not a Grant. | CN15, J7 |
-| SC11 | **Moving between nodes is the principal's.** A value goes to another node only by a transfer Command (fresh verification), from a node that holds it to a node the Fleet admitted (FL1). The target's recipient is signed with the target's node key; the source checks that signature against the node key the Fleet admitted at Join (FL1, FL2) before it seals, so a hub alone can't put in a recipient of its own. The hub and the fleet carry ciphertext only (SR7). Grants go with it, each narrowed to the target node. | FL14 |
+| # | Invariant | Layer | Proved by | Mirrors |
+|---|---|---|---|---|
+| SC1 | **No value in the model.** A Secret holds its Reference, status, versions (number, keyed fingerprint, stored at, Command id), Grants, Destinations, Expiry and Shape id. No domain type, wire shape, event, audit row or log line carries more. | domain (+ adapter for logs) | Shape test (allowlist of keys); the end-to-end scan for logs | CN1 |
+| SC2 | A Reference is unique on a node and follows the grammar (3.6). At most one version is current. A store under an existing Reference is a Rotation, which is the principal's. A value whose keyed fingerprint matches a revoked version anywhere on the node, or any earlier version of the same Reference, is refused. A match with another active Secret is stored, and the card says "same value as …". Fingerprint keys are per node, so this holds per node; storing a Reference that is revoked on another node gets a warning on the card. | domain service + store | Fingerprint ledger's domain test; a store test of the unique indexes and the transaction | CN2 |
+| SC3 | **Default deny; the use gate.** A Secret with no Grant resolves for nobody. The gate, in order: status active; a current version on this node; now before Expiry; a Grant admits the caller (its lane, its workspace, this node) and has not ended; the Grant allows the mode. The first failure is the refusal: recorded, and `run` exits 77. | domain | Domain test, one refusal per step, in order | CN8 |
+| SC4 | **Recorded before use.** `SecretUsed` is durable before the vault opens the value. Refusals are recorded too. | application | Broker test: killed between the record and the open, it leaves a record and no value (15.3) | CN9 |
+| SC5 | **Only the use modes.** A value reaches a process only as the environment or a 0600 file of a child `run` starts, as a helper's stdout to the tool that called it, or through the agent CLI's sandbox proxy (`inject`). Never as an argument, a prompt, a workspace file, the lane's own environment, a hub or fleet message, or the output of a command the agent reads unfiltered. No command prints a value. | application + adapter | Architecture test (no command prints a value); broker test (`/proc/<pid>/cmdline`); the end-to-end run | CN5 |
+| SC6 | **Output is filtered on the node.** Every output path the node controls passes the exact filter before it leaves the process or the node: the stdout and stderr of a `run` child, pane captures and frames, the terminal stream, transcript reads, job tails, and hook bodies and `/file` copies in the hook relay before they are spooled. The filter knows every version stored or retired in the last 30 days, in every indexed encoding (8.1). The index holds lengths and keyed hashes, never a value, and is updated before a store or rotation is confirmed. | adapter | Scanner tests (15.4); a contract test per output path; the end-to-end scan | secret-store design §6.2 |
+| SC7 | **Narrowing is anyone's; widening is the principal's, judged by effect.** A change widens when afterwards the Secret may resolve for more lanes, workspaces or nodes, in more modes, to more Destinations, for longer, or again after a Disable. Disable is anyone's, an agent's included: one that sees a leak stops every new Use at once (SC8). Enable, Rotation, Revoke, Delete and every widening are the principal's: a Command from the hub with a fresh verification (SR5), or at the machine with a typed confirmation and no `--yes`. | domain (narrowing or widening) + application (who may command) | Domain table test of changes; application test of who may make them | CN13 |
+| SC8 | Disable and Revoke refuse every new Use at once. Revoke also destroys the current value on that node (the vault file removed) and keeps the Reference, its history and its Grants, so a new value under it is a new version. Delete removes the Reference and its Grants. A running child keeps what it already has; an `inject` lane's file is deleted and the lane restarted. A node that is offline gets the Command when it reconnects, and serves until then; the page says "pending on node-b". The audit outlives all of these by 90 days. | domain (status refuses new Uses) + adapter (vault removal, the lane restart, delivery on reconnect) | Domain test; store-port contract test (15.2); the end-to-end run | CN14 |
+| SC9 | Expiry is optional per Secret. Warnings go once each, 7, 2 and 1 days before. Expired, every Use is refused, and the first refused Use opens a `renew` request (SR1 dedupes). | domain | Domain test with a fake clock | CN12 |
+| SC10 | **A Secret grants nothing.** A Use is not a Mandate: holding a deploy token never authorizes an irreversible action (A2). A Grant is not an agent token, and an agent token is not a Grant. | domain | Domain test: no Secret event names a Mandate | CN15, J7 |
+| SC11 | **Moving between nodes is the principal's.** A value goes to another node only by a transfer Command (fresh verification), from a node that holds it to a node the Fleet admitted (FL1). The target's recipient is signed with the target's node key; the source checks that signature against the node key the Fleet admitted at Join (FL1, FL2) before it seals, so a hub alone can't put in a recipient of its own. The hub and the fleet carry ciphertext only (SR7). Grants go with it, each narrowed to the target node. | domain (Grants narrowed) + adapter (signature check, sealing) | Domain test; contract test in which a wrong signature is refused; the two-node run (PR 6) | FL14 |
 
-Aggregate **Secret**, one per Reference per node, with its versions, Grants and open Uses inside it: the gate and SC2's dedupe are one consistency boundary. A closed Use leaves as an event. The clock is the `now` argument.
+Aggregate **Secret**, one per Reference per node, with its versions, Grants and open Uses inside it: the use gate (SC3), its status and its versions are its consistency boundary. A closed Use leaves as an event. The clock is the `now` argument.
+
+SC2 spans every Secret on the node, so it is the **Fingerprint ledger**'s: `check(the node's ledger, Reference, keyed fingerprint)` returns accept, refuse (revoked), refuse (an earlier version) or accept with a warning (same value as another Reference). The store keeps every version's keyed fingerprint, revoked ones included, in one table. It holds unique indexes on the Reference (the aggregate's identity) and on (Reference, keyed fingerprint), and runs the check and the insert in one write transaction.
 
 Events: SecretStored, SecretRotated, SecretDisabled, SecretEnabled, SecretRevoked, SecretDeleted, SecretExpired, ExpiryWarned, GrantAdded, GrantRemoved, GrantEnded, DestinationsChanged, SecretUsed, UseRefused, UseEnded, SecretTransferred. Widening events carry the Command id.
 
@@ -152,7 +186,7 @@ Events: SecretStored, SecretRotated, SecretDisabled, SecretEnabled, SecretRevoke
 | The Endpoint (browser) | The value while typed; the pinned recipients. | The value after Store or Reject, in any storage. |
 | The hub | Requests, their events, a read model of every node's Secrets (metadata), Alerts. | The value; the ciphertext beyond one operation. |
 | The fleet | Typed operations in flight, the audit of each (no arguments, FL14). | The value; the ciphertext beyond one operation. |
-| The node | The vault file, the Secret's metadata, the redaction index, the Use audit. | The value outside the vault and a Use's process. |
+| The node | The vault file, the Secret's metadata, the fingerprint ledger, the redaction index, the Use audit. | The value outside the vault and a Use's process. |
 | A Use's process | The value, in its environment or a file. It is a process the agent started, so the agent can make it reveal the value (7.0). | Anything the agent's model reads unfiltered, on the normal path (SC5, SC6). |
 
 ### 3.6 References
@@ -166,9 +200,9 @@ Lower case only, so two spellings can't name two secrets. The environment variab
 ### 3.7 Context map additions
 
 - *Access supplies Secrets*: the Session and its fresh verification (SR5).
-- *Secrets supplies Catch-up and Observation with cards*: an open request is a decision card (C1) and an open Ask of its lane, so the lane waits for the principal (H3).
-- *The Fleet carries Secrets' typed operations*, keyed (FL7). FL14 is refined: no plaintext secret and no agent-CLI credential crosses the fleet; a value sealed to one node's recipient may (12.2).
-- *Secrets stands beside Connections*: shared vault, identity and process adapters, no shared model. An LLM key is a Connection; a value a lane's tools need is a Secret.
+- *Secrets supplies Catch-up, Notifications and Observation with Asks*: an open request is a decision card (C1), raises one Notification (N2), and makes its lane wait for the principal (H3).
+- *The Fleet carries Secrets' typed operations*, keyed (FL7), and one node event, `secrets.requested`, routed to the hub only (SR9). FL14 is refined: no plaintext secret and no agent-CLI credential crosses the fleet; a value sealed to one node's recipient may (12.2).
+- *Secrets stands beside Connections*: shared vault, identity and process adapters, no shared model, and the word table in 3.1. An LLM key is a Connection; a value a lane's tools need is a Secret.
 - *Secrets stands beside Authority*: a Use is not a Mandate (SC10).
 - *Board*: a request may name a task. Its answer becomes one comment on it, keyed by the request id, which does not move it (B3, B8, as J3).
 
@@ -235,8 +269,8 @@ It never shows in Telegram or any chat bot (SR9). A device that isn't a paired E
 3. **The purpose**, quoted and labelled "the agent says". It is plain text: no links, no markdown.
 4. **The kind** in words: "New secret", "Access to an existing secret" (no field), "Replace the value", "Renew: the value expired".
 5. **The field** (not for `access`):
-   - `<input type="password">`, with `autocomplete="new-password"`, `autocapitalize="off"`, `autocorrect="off"` and `spellcheck="false"`. `off` "will not prevent a password manager from asking the user if they would like to save"; `new-password` keeps a saved login, such as the hub's own, from being filled in, and is "a hint to browsers; some may not comply" [S17]. Password managers are not blocked: pasting from one is the usual way a value arrives, and NIST says verifiers "SHALL allow the use of password managers" [S7]. `spellcheck` stays off because the Show toggle turns the field into text, where spellcheck applies [S17];
-   - paste allowed, and a Show toggle that reveals it until the next tap. NIST: verifiers "SHOULD permit claimants to use the 'paste' function" and "SHOULD offer an option to display the password" [S7];
+   - `<input type="password">`, with `autocomplete="new-password"`, `autocapitalize="off"`, `autocorrect="off"` and `spellcheck="false"`. `off` "will not prevent a password manager from asking the user if they would like to save"; `new-password` keeps a saved login, such as the hub's own, from being filled in, and is "a hint to browsers; some may not comply" [S17]. Password managers are not blocked: pasting from one is the usual way a value arrives, and NIST says verifiers "SHALL allow the use of password managers" [S7]. NIST's rules are for password verifiers, a different job; this design follows them by analogy, for a field that takes a credential. `spellcheck` stays off because the Show toggle turns the field into text, where spellcheck applies [S17];
+   - paste allowed, and a Show toggle that reveals it until the next tap. By the same analogy: verifiers "SHOULD permit claimants to use the 'paste' function" and "SHOULD offer an option to display the password" [S7];
    - a "multi-line" switch for PEM keys and JSON, which uses a masked text area, and "From a file", read in the browser and never uploaded;
    - at most 16 KiB. A value under 8 bytes is accepted with a warning: it is too short to filter from output (8.1).
 6. **Who may use it**: the Grant picker. "This repository, any lane" is preselected (Q1); "This lane only, until it ends" and "Every lane on this node" are the others; a wider choice than the agent asked for is marked "wider than requested".
@@ -262,15 +296,26 @@ The lane chat's composer checks its text against the shape catalog before sendin
 
 ## 6. Custody on the node
 
-- **Vault.** The ADR-0018 vault and identity: one age file per Placement under the Connections home's `vault/`, under a ref of its own kind (`s-<random>`), encrypted to the node's identity. The adapter gains `storeSealed(ref, ciphertext)`: it opens the file once with the node's identity, refuses one that doesn't open or holds more than one recipient stanza, and writes the ciphertext as received, with ADR-0018's temp file and rename.
-- **Metadata** is in the Connections database, in new tables (`secrets`, `secret_versions`, `secret_grants`, `secret_uses`, `secret_events`), with a numbered migration.
+- **Vault.** The ADR-0018 vault and identity: one age file per Secret under the Connections home's `vault/`, named by a vault ref of its own kind (`s-<random>`), encrypted to the node's identity.
+  - The adapter gains `storeSealed(ref, ciphertext)`. It opens the file once with the node's identity, refuses one that doesn't open, and writes the ciphertext as received, with ADR-0018's temp file and rename.
+  - It also refuses a file whose header has more than one recipient stanza. In age, the header "wraps the file key for one or more recipients" and lists "one or more recipient stanzas" [S26], so the node can count them. Exactly one is Morndo's rule, not age's: it makes each copy readable by one node only (5.3, 9.2). age itself requires the same of passphrase files, where "an scrypt stanza, if present, MUST be the only stanza in the header" [S26].
+- **Metadata** is in the Connections database, in new tables (`secrets`, `secret_versions`, `secret_grants`, `secret_uses`, `secret_events`, `secret_workspaces`), with a numbered migration. `secret_versions` is the fingerprint ledger's table (3.4).
 - **Keys of the node.** Besides the age identity: the fingerprint key and the index key, 32 random bytes each, 0600, beside the identity and excluded from backups with it.
 - **The recipient** (`age1…`) is reported to the fleet by the node agent as node metadata, signed with the node's key (FL2), so other nodes can check it (SC11).
+- **Workspaces.** The principal registers repository roots on a node: `morndo-secrets workspace add PATH` at the machine (typed confirmation), or from the Secrets page. A caller's working directory belongs to a workspace when `git rev-parse --git-common-dir` there resolves to a registered root's git directory, which covers every worktree of that repository. A git remote counts for nothing, since `git remote add` in a scratch folder would claim any repository.
 - **The broker.** `morndo-secrets serve` runs as a user service on each node: a systemd user unit, or a launchd agent on macOS. It owns the gate (SC3), the Use record (SC4) and every vault open. It listens on a Unix socket in a 0700 directory of the user's runtime directory, and answers only callers whose peer credentials have its own uid.
-  - **Caller identity.** The caller's process ancestry is matched to a lane: the pane whose process is an ancestor, from the node agent's pane table, so not the claimed `MORNDO_LANE`. A `morndo job` child is matched through its job's lane. A process with neither has no lane and passes only a node-wide Grant.
-  - **Repository.** A workspace the node registered: a worktree the node agent created or started a lane in (`worktree.add`, `lane.start`), or a path the principal registered. The caller's working directory, resolved, must be inside one, and the repository is the one recorded for it then. Git remotes alone don't count, since `git remote add` in a scratch folder would claim any repository.
-  - **How the broker learns the caller's pid is open.** Node's `net` module has no peer-credential call: on the installed Node 22.23.3 only `_getpeername` matches (`node -e`, 2026-10-11). The candidates are a small native addon for `SO_PEERCRED` (Linux) and `LOCAL_PEERPID` (macOS), or, on Linux only, matching the peer socket's inode through `/proc`. The macOS ancestry source is open too (`pid.ts` reads `/proc`; ADR-0018 left `sysctl` to PR 4). A spike settles both before PR 3 starts.
-  - **Not proof.** All of this runs as one OS user. A process can be started inside another lane's pane (`tmux split-window`) or `cd` into another lane's registered worktree. Ancestry and workspaces stop mistakes and casual misuse, not a same-user attacker (12.10).
+  - **Caller identity** is the `CallerIdentity` port (section 14), and its adapter composes four sources, none of them another app:
+    - the peer's pid (below);
+    - the process ancestry, from the existing `processes` adapter;
+    - the pane table, from `packages/node-ops`' tmux adapter. Both `apps/connections` and the node agent already depend on that package. It gains `panes()`, which lists `#{pane_id}`, `#{pane_pid}` and `#{window_name}`; today's `listWorkers()` reads no pane pid. So no app imports another.
+    - the workspaces in the store.
+  - **The lane** is the window of the pane whose process is an ancestor of the caller, not the claimed `MORNDO_LANE`. A process with no pane among its ancestors, a `morndo job` child for one, has no lane. It passes only a workspace or node-wide Grant.
+  - **How the broker learns the caller's pid is open.** The kernel offers it: `SO_PEERCRED` "returns the credentials of the peer process connected to this socket" on a connected `AF_UNIX` stream socket [S27]. Node's `net` module doesn't expose it: on the installed Node 22.23.3 only `_getpeername` matches (`node -e`, 2026-10-11). The candidates:
+    - a small native addon calling `SO_PEERCRED` on Linux and `LOCAL_PEERPID` on macOS;
+    - on Linux only, matching the peer socket's inode through `/proc`.
+
+    The macOS ancestry source is open too (`pid.ts` reads `/proc`; ADR-0018 left `sysctl` to its PR 4). A spike settles both before PR 3 starts.
+  - **Not proof.** All of this runs as one OS user. A process can be started inside another lane's pane (`tmux split-window`), or `cd` into another lane's worktree. Ancestry and workspaces stop mistakes and casual misuse, not a same-user attacker (12.10).
 
 ## 7. Use without exposure
 
@@ -279,7 +324,7 @@ The lane chat's composer checks its text against the shape catalog before sendin
 | Mode | The agent's conversation sees the value | A process the agent starts holds it | So it stops |
 |---|---|---|---|
 | `exec`, `file` | No, on the normal path: output is filtered | Yes | Accidents: a value echoed, logged or pasted. Not an agent that means to reveal it (by reversing it, writing it to a file it then reads, or calling the broker itself). |
-| `helper` | No, on the normal path | Yes: `git credential fill` prints what a helper returns [S3] | The same as `exec`. |
+| `helper` | No, on the normal path | Yes: with `fill`, "the username and password attributes of the credential description are then printed to stdout" [S28] | The same as `exec`. |
 | `inject` | No | No: commands see a sentinel [S1] | Accidents and intent, for the Destinations only. |
 
 The card's Grant picker shows this in words: "processes this agent starts can read it" for the first three, "the agent's commands never hold it" for `inject`. The default modes are `exec`, `file` and `helper`, because `inject` works only on one vendor's sandbox, on Linux (7.3).
@@ -295,7 +340,7 @@ morndo-secrets run --env-file .env.morndo -- npm run dev
 1. `run` asks the broker for each Reference. The broker runs the gate, records the Use, opens the value, and passes it back over the socket.
 2. `run` starts the child with the value:
    - **`--env`**: in the child's environment only;
-   - **`--file`**: in a 0600 file under a 0700 directory of the runtime directory, created for this Use, with the variable set to its path and the directory removed when the child exits. This follows systemd's credentials, which are files in a per-service directory rather than environment variables [S12];
+   - **`--file`**: in a 0600 file under a 0700 directory of the runtime directory, created for this Use, with the variable set to its path and the directory removed when the child exits. This follows systemd's credentials, which are files in a per-service directory rather than environment variables [S12]. On Linux the runtime directory is a tmpfs (`findmnt` on `/run/user/<uid>` here, 2026-10-11), so the file never reaches durable storage, as Kubernetes keeps mounted secrets on "a tmpfs so that the confidential data is not written to durable storage" [S15]. macOS has no such directory; there the file is on disk for the child's life;
    - **`--env-file`**: a file of `NAME=secret://…` lines, safe to commit, as the reference files of 1Password and Doppler are [S9, S11].
 3. `run` stays the parent and passes the child's stdout and stderr through the exact filter (SC6). Interactive children keep the terminal, and the filter applies to what the node captures.
 4. It exits with the child's code. A refusal exits 77 with one JSON line on stderr (`{"refused":"not_granted","reference":"…","ask":"morndo-secrets request …"}`). A broker that can't be reached exits 75. A child's own 75 or 77 comes out as 1, so neither can be mistaken for `run`'s.
@@ -309,7 +354,7 @@ morndo-secrets run --env-file .env.morndo -- npm run dev
 
 ### 7.2 `helper`: tools that ask for a credential
 
-`morndo-secrets git-credential` is a git credential helper: git runs it with `get`, gives the request on stdin, and reads `username=` and `password=` lines from its stdout [S3]. The value goes from the broker to git, not to the agent's conversation; `git credential fill` would print it, so this mode protects as much as `exec` does (7.0). It is configured per repository (`credential.https://git.example.com.helper`), names the Reference in that config, and records a `helper` Use. Other helper protocols, such as container registries, are later adapters on the same broker.
+`morndo-secrets git-credential` is a git credential helper: git runs it with `get`, gives the request on stdin, and reads `username=` and `password=` lines from its stdout [S3]. The value goes from the broker to git, not to the agent's conversation. But `git credential fill`, which any process can run, prints what the helpers return to stdout [S28], so this mode protects as much as `exec` does (7.0). It is configured per repository (`credential.https://git.example.com.helper`), names the Reference in that config, and records a `helper` Use. Other helper protocols, such as container registries, are later adapters on the same broker.
 
 ### 7.3 `inject`: the command never holds the value
 
@@ -332,13 +377,17 @@ The file is plaintext for the lane's life. The sandbox and the deny rules keep t
 This is the strongest mode: neither the agent nor its commands ever hold the value. It also has limits:
 - Claude Code reads its settings at start, so a Secret granted later reaches the lane at its next start (UNVERIFIED whether settings reload).
 - It is one vendor's feature, so it is an adapter.
-- It needs TLS termination by the proxy, which v1 has not tried here.
+- It needs `sandbox.network.tlsTerminate`, which the settings reference calls "experimental"; "mask credential substitution requires it" [S2]. v1 has not tried it here.
 
 A hosted product does the same for any agent: a proxy that "swaps dummy credentials for real ones" [S24]. It is PR 7, a spike with its own done-check. The mode exists in the model from PR 1, so a Grant can allow it.
 
 ### 7.4 Under `os` isolation
 
-The sandbox denies the vault, the identity and the database to every tool command (the secret-store design's CN5 (c)), so the broker is the only way to a value. On macOS, the runtime adapter adds the broker's socket to `sandbox.network.allowUnixSockets`, a list of "Unix socket paths sandboxed commands can use on macOS" [S2]. On Linux, Unix sockets are blocked only when the optional seccomp filter is installed [S1]. The settings index describes the path list for macOS only [S2], so with that filter only `allowAllUnixSockets`, which "opens every Unix socket", would let the broker's through (UNVERIFIED on Linux until PR 3) [S1]. Morndo never sets it: the docs warn that a socket such as Docker's "effectively grants access to the host system" [S1]. A Linux lane sandboxed with the seccomp filter therefore uses `inject`, and MCP servers started through `run` (the CLI starts them outside the sandbox [S1]), but not `exec`, and not a helper that a sandboxed command calls: git started from the shell tool runs its helper inside the sandbox. `morndo-secrets list` says which modes work in this lane. PR 3 measures both platforms.
+The sandbox denies the vault, the identity and the database to every tool command (the secret-store design's CN5 (c)), so the broker is the only way to a value. Whether a sandboxed command can reach the broker's socket depends on the platform, per the settings reference [S2]:
+- **macOS:** the runtime adapter adds the broker's socket to `sandbox.network.allowUnixSockets`, the list of "Unix socket paths sandboxed commands can connect to on macOS" [S2].
+- **Linux and WSL2:** Claude Code "ignores this list on Linux and WSL2, where the seccomp filter can't inspect socket paths; use allowAllUnixSockets there instead" [S2]. With the seccomp filter present, `allowAllUnixSockets` "is the only way to permit Unix sockets there"; without it, "the sandbox doesn't block Unix-socket calls" [S2]. The filter is optional [S1].
+
+Morndo never sets `allowAllUnixSockets`: it opens every socket, and the docs warn that one such as Docker's "effectively grants access to the host system" [S1]. A Linux or WSL2 lane sandboxed with the seccomp filter therefore uses `inject`, and MCP servers started through `run` (the CLI starts them outside the sandbox [S1]). It can't use `exec`, nor a helper that a sandboxed command calls: git started from the shell tool runs its helper inside the sandbox. `morndo-secrets list` says which modes work in this lane. PR 3 checks both platforms against this.
 
 ### 7.5 What never happens
 
@@ -360,7 +409,7 @@ For each encoding it keeps the length and HMAC-SHA-256 under the index key. To f
 
 Values under 8 bytes are not indexed (5.2 warns). Vault's audit devices take the same approach: they write "a keyed hash (HMAC-SHA256) of most string values", so a log can be checked without holding them [S10].
 
-The index and the scanner are in `packages/node-ops` (`secret-index.ts`): pure functions over bytes and an index, plus a reader for the index file, which the Secrets service writes. The index is applied:
+The scanner and the index file are two files in `packages/node-ops`: `secret-scan.ts`, a pure function over bytes and an index with the HMAC passed in, and `secret-index-file.ts`, the adapter that reads the index file the Secrets service writes and checks its mode and owner. The index is applied:
 - in `run`, which holds the values it resolved and also matches them exactly with `streamRedactor`;
 - in the node agent's `transcript.read`, `pane.captureMany` and `pane.frame` operations, before any byte leaves the node;
 - in the terminal stream the node sends for `/api/terminal`, with a held-back tail as `streamRedactor` keeps one, which today passes nothing;
@@ -388,7 +437,7 @@ A Grant names lanes, repositories or the node, not a session. Every later sessio
 
 ### 9.2 A new machine of the fleet
 
-A Placement is per node. When a lane on a node with no Placement asks (or `run` is refused with `not_here`), the card offers both ways (Q2):
+A Secret is per node. When a lane asks on a node that has no Secret for the Reference while another node has one (or `run` is refused with `not_here`), the card offers both ways (Q2):
 - **Transfer from node-a** (recommended): a Command with a fresh verification (SC11). With the source offline, the card names it and offers another node that holds the value, or entering it again. The hub sends `secrets.transfer` to the source node, naming the target's signed recipient. The source checks the signature against the target's node key from the Fleet (SC11), checks the gate as for a principal's Use, records it, seals the value to that recipient, and returns the ciphertext. The hub sends it to the target as `secrets.store`, and the target confirms as in 5.3. The ciphertext is in the hub's memory for one operation.
 - **Enter it again on this node**: the same card with a field, for an owner who prefers that no node ever seals to another.
 
@@ -431,7 +480,7 @@ The [secret-store design](../secret-store/README.md) §5.3 stands for everything
 | 12.3 | **An agent phishing for a value** | No agent could ask. | The card shows who asks as the node saw it, above the agent's words, and the node, not the agent, says which lane asks (4.1). The Grant defaults to narrow, a wider one is marked, and requests are rate-limited (SR10). No other route can ask for a value (SR9), so a request in chat is itself a warning sign, and the prompt block forbids it. | A prompt-injected agent can still ask with a plausible purpose. The owner decides. |
 | 12.4 | **A granted command sends the value away** | Keys went only to the runtime, through a helper. | `exec` gives the value to a child the agent chose. Narrow Grants, the Use audit with the program's name, Destinations, and `inject` under `os`, where the command never holds the value. | Under `rules`, a granted child can send it anywhere the network allows. The filter sees output, not traffic. It also stops accidents, not intent: a granted agent that means to show a value can reverse it, or talk to the broker's socket with a client of its own that filters nothing. The audit records that Use; only `inject` prevents it. |
 | 12.5 | **Leaks into transcripts, panes, logs** | Key shapes plus an exact filter on `run`. | The node's exact index on every node output path, the terminal stream included; shapes on the hub; the composer guard. | 8.3. |
-| 12.6 | **Low-entropy values and fingerprints** | Plain SHA-256, right for high-entropy keys. | Keyed fingerprints and keyed index hashes. Neither can be checked against a guess off the node. | The keys sit beside the vault: same-user trust. |
+| 12.6 | **Low-entropy values and fingerprints** | Plain SHA-256, right for high-entropy keys. | Keyed fingerprints and keyed index hashes. A fast hash such as SHA-256 lets an attacker "perform large numbers of guesses quickly"; the node's key works as the HMAC "pepper" OWASP describes [S25]. Neither can be checked against a guess off the node. | The keys sit beside the vault: same-user trust. |
 | 12.7 | **A store or transfer repeated** | None. | Keyed operations (FL7), and the request's version (SR6). | none known |
 | 12.8 | **One node reading another's copy** | Keys never left their node. | One ciphertext per node. A transfer is the principal's Command to a Fleet-admitted node (SC11). | A node that was compromised before a transfer receives the value. |
 | 12.9 | **Chat and Telegram** | Only metadata. | Never answerable there. A Notification carries counts only (SR9, N1). | none known |
@@ -454,69 +503,101 @@ The [secret-store design](../secret-store/README.md) §5.3 stands for everything
 | Mask output, and know that transformed values escape. | GitHub: register a transformed secret too; "automatic redaction is not guaranteed" [S14] | The index covers common encodings; limits stated (8.3). |
 | Encrypt values to named recipients; ciphertext is safe to move. | age [S4]; SOPS encrypts values to "one or more age recipients" [S13] | Sealed on the Endpoint, and on transfer, to one node's recipient (SR7, SC11). |
 | Never collect a secret through the agent's own channel. | MCP: "Servers MUST NOT use form mode elicitation to request sensitive information"; URL mode keeps credentials out of "the LLM context, MCP client or any intermediate MCP servers"; no pre-authenticated URL [S5] | The card is Morndo's own page, behind a Session (SR9). |
-| Allow paste and password managers; offer Show. | NIST SP 800-63B-4 §3.1.1.2 [S7] | 5.2. |
+| Allow paste and password managers; offer Show. | NIST SP 800-63B-4 §3.1.1.2 [S7], written for password verifiers and used here by analogy | 5.2. |
 | Keep secrets out of the agent's environment and tool commands. | Claude Code: `env` values "reach every subprocess"; the scrub is by name or shape [S19]. Codex doesn't remove KEY, SECRET or TOKEN names by default [S18]. Claude Code sandbox `credentials` deny and mask [S1] | No value in a lane's environment (SC5); `run` children only; `inject` (7.3). |
 
 ## 14. Layers, ports, and where the code goes
 
 ```
-packages/domain/src/secrets.ts         Reference, SecretRequest, Secret, Grant, the use gate, SR1–SR11, SC1–SC11. Pure.
-packages/protocol/src/secrets.ts       the wire: request bodies, views (metadata only), the fleet operations, the words table.
+packages/domain/src/secrets.ts            Reference, SecretRequest, Secret, Grant, the use gate, Request admission,
+                                          Fingerprint ledger; the invariants tagged domain. Pure.
+packages/protocol/src/secrets.ts          the wire: request and answer shapes, views (metadata only), SealedValue,
+                                          the fleet operations and the node event, the words table.
 packages/protocol/catalog/secret-shapes.json   public token shapes, each with its source.
-packages/node-ops/src/secret-index.ts  the index format and the scanner (pure over bytes), and its file reader.
-apps/connections/src/application/      secrets-service.ts, use-service.ts, ports.ts (new ports below).
-apps/connections/src/adapters/         vault-age (storeSealed), broker-socket, peer-identity, secret-index-writer, git-credential.
-apps/connections/src/secrets-cli.ts    `morndo-secrets`: the agent commands, the machine commands, `serve`, `op` (fleet ops on stdin).
-apps/node-agent/                       the `secrets.*` operation handlers (piping to `morndo-secrets op` on stdin), the recipient report,
-                                       the index on transcript, pane and terminal reads.
-apps/hub/                              secrets-service.ts (requests, the read model), routes, a migration, fleet adapters.
-apps/web/src/lib/secrets/              SecretCard.svelte (desktop and phone), seal.ts (lazy age), pins.ts, SecretsView.svelte.
-docs/agents/secrets.md                 the prompt block.
+packages/node-ops/src/secret-scan.ts      the scanner: pure, bytes and an index in, ranges out; the HMAC is passed in.
+packages/node-ops/src/secret-index-file.ts the index file adapter: reads it, refuses a mode looser than 0600 or a
+                                          foreign owner, hands the scanner its index.
+packages/node-ops/src/tmux.ts             gains panes(): pane id, pane pid, window name (for CallerIdentity).
+apps/connections/src/application/         secrets-service.ts, use-service.ts, ports.ts (the ports below).
+apps/connections/src/adapters/            vault-age and vault-file (storeSealed), broker-socket, caller-identity,
+                                          peer-pid (after the spike), secret-index-writer, git-credential, hub-link-relay.
+apps/connections/src/secrets-cli.ts       `morndo-secrets`: the agent commands, the machine commands, `serve`, `op`
+                                          (fleet operations on stdin).
+apps/node-agent/                          the `secrets.*` operation handlers (piping to `morndo-secrets op` on stdin),
+                                          the recipient report, the `/secrets/requested` relay path, and the scanner on
+                                          transcript, pane, terminal and hook reads.
+apps/fleet/                               routes the `/secrets/*` hook path to the hub's subscriber only (SR9).
+apps/hub/                                 secrets-service.ts (requests, the read model), the principal's routes, a
+                                          migration, the node-request subscriber, the fleet operations.
+apps/web/src/lib/secrets/                 SecretCard.svelte (desktop and phone), seal.ts (lazy age), pins.ts,
+                                          SecretsView.svelte.
+docs/agents/secrets.md                    the prompt block.
 ```
 
-**New ports** in `apps/connections`:
-- `SecretStore`: `storeSealed(ref, ciphertext)`, `has(ref)`, `fingerprint(ref)`, `remove(ref)`. Nothing returns a value; `open` stays on the adapter class.
-- `UseChannel`: hand a value to the `run` client that asked.
-- `CallerIdentity`: peer credentials to pid, lane, repository.
-- `IndexWriter`, `Clock`, `SecretsDirectory`: the store of metadata and events.
+**Ports on the node** (`apps/connections/src/application/ports.ts`):
 
-The hub gains:
-- `SecretsRequests`: its store;
-- `NodeSecrets`: the fleet operations.
+| Port | Application side | Adapters |
+|---|---|---|
+| `SealedStore` | `storeSealed(ref, sealed)`, `has(ref)`, `fingerprint(ref)`, `remove(ref)`. Nothing returns a value; `open` stays on the adapter class. | `AgeVault`, `FileVault`: the same classes that implement Connections' `SecretVault` (3.1). |
+| `UseChannel` | Hand a value to the `run` client that asked, over the broker's socket. | `broker-socket`. |
+| `CallerIdentity` | `identify(connection)`: the caller's pid, its lane (or none) and its workspace (or none). | `caller-identity`, composing `peer-pid`, the `processes` adapter, `node-ops`' `panes()` and the workspace table (section 6). No import of the node agent. |
+| `HubLink` | `requested(request)`: hand one request, as this node saw it, to the hub. Answers come back as `secrets.answered` operations. | `hub-link-relay`: POSTs to the node agent's hook relay on loopback, path `/secrets/requested`. The relay acknowledges only once the event is durable (FL10). The fleet's hook bus delivers it at least once, keyed (FL11), to the hub alone. |
+| `IndexWriter` | Add and retire a version's index entries. | `secret-index-writer`, over the file `secret-index-file.ts` reads. |
+| `SecretsDirectory` | Load and save a Secret, the fingerprint ledger, the workspaces and the Use audit, with their events, in one transaction. | The SQLite store. |
+| `Clock` | `now()`. | The system clock; a fake in tests. |
 
-**The fleet operations**, all typed and keyed (FL7), with no command line:
+**Ports on the hub:**
+
+| Port | Application side | Adapters |
+|---|---|---|
+| `NodeRequests` (inbound) | `secrets.requested` events from nodes, deduplicated on the bus key (FL11), as SecretRequested. | The hub's fleet subscriber endpoint for `/secrets/*`. |
+| `NodeSecrets` (outbound) | The fleet operations below, keyed. | The hub's fleet client. |
+| `SecretsRequests` | Load and save requests with their events; Request admission's index and transaction (3.3). | The hub's SQLite store, one migration. |
+
+**The fleet operations**, all typed and keyed (FL7), with no command line, and FL7's record keeping a hash of each outcome (SR7):
 - `secrets.recipient`;
-- `secrets.store`, carrying ciphertext, Grant, expiry and Destinations;
+- `secrets.store`, carrying a SealedValue, Grant, expiry and Destinations;
 - `secrets.grant` and `secrets.ungrant`;
 - `secrets.disable`, `secrets.enable`, `secrets.revoke` and `secrets.delete`;
-- `secrets.transfer`;
-- `secrets.check`, the gate for a named lane and repository, opening nothing (SR2, when the hub needs it for another node);
+- `secrets.transfer`, whose answer is a SealedValue;
+- `secrets.check`, the gate for a named lane and workspace, opening nothing (for a request about another node);
 - `secrets.answered`, which tells the requester's node how a request ended, for `--wait` and the notice;
 - `secrets.list`, metadata only.
 
-One node event goes the other way: `secrets.requested`, a request as the node saw it (4.1). The audit records an operation's name, key and outcome, never its arguments (FL14).
+One node event goes the other way: `secrets.requested` (4.1). The audit records an operation's name, key and outcome, never its arguments (FL14).
 
 **Architecture tests** (each with a control that must fail):
 1. `packages/domain/test/secrets-shape.test.ts`: the keys of a built Secret, Request and every event match an allowlist exactly. A field named like `value|secret|plaintext|token|password|cipher` fails.
-2. `packages/protocol/test/secrets-wire.test.ts`: the same over every schema, and a request body with a value-like key is refused whole (SR3). The one exception is a `SealedValue` type (an age file, at most 64 KiB), allowed in exactly three schemas: the store body, `secrets.store` and the answer of `secrets.transfer`. The test lists them, and a fourth fails it. The shape catalog validates, and each shape has a source.
-3. `apps/connections/test/architecture.test.ts`, extended: the Secrets application imports no adapter and no Node global, and only listed files import `secret-material.ts`.
-4. `apps/web` unit test: the card's field has the attributes of 5.2, and the value never reaches a store, the outbox, the catch-up run or `console`.
+2. `packages/protocol/test/secrets-wire.test.ts`: the same over every schema, and a request body with a value-like key is refused whole (SR3). The one exception is the `SealedValue` type (an age file, at most 64 KiB), allowed in exactly three schemas: the store body, `secrets.store`, and the answer of `secrets.transfer`. The test lists them, and a fourth fails it. The shape catalog validates, and each shape has a source.
+3. `apps/connections/test/architecture.test.ts`, extended: the Secrets application imports no adapter and no Node global, only listed files import `secret-material.ts`, and nothing under `apps/connections` imports `apps/node-agent`.
+4. `packages/domain/test/no-vendor-names.test.ts`, extended: it also reads `secrets.ts`, and takes names from the shape catalog (`secret-shapes.json`) as well as the vendor catalog. A planted shape id in `secrets.ts` must fail it.
+5. `packages/node-ops`: `secret-scan.ts` imports nothing from `node:fs` or `node:crypto`; a planted import fails the test.
+6. `apps/web` unit test: the card's field has the attributes of 5.2, and the value never reaches a store, the outbox, the catch-up run or `console`.
 
 ## 15. Tests
 
-### 15.1 Domain invariants
+### 15.1 Which test proves which invariant
 
-One test per SR and SC rule, with a fake clock, each with a history that breaks the rule and must be refused. Among them:
-- SR1: a join changes nothing visible.
-- SR2: `available` and `access`.
-- SR4: a second answer is refused; expiry at 7 days.
-- SR6: an answer to a restated request is refused.
-- SR10: the limits.
-- SC2: a revoked fingerprint is refused; a duplicate gets a warning.
+The Layer column of 3.3 and 3.4 decides where each invariant is proved:
+
+| Layer | Invariants | Test |
+|---|---|---|
+| domain | SR3 (shape), SR4, SR6, SR8 (state), SR11, SC1 (shape), SC3, SC7 (classification), SC8 (status), SC9, SC10, SC11 (Grants) | `packages/domain/test/secrets.test.ts`, with a fake clock. One test per invariant, each with a history that breaks it and must be refused. |
+| domain service + store | SR1, SR10 (Request admission); SC2 (Fingerprint ledger) | A domain test of the service, plus a store test: two concurrent opens of one Reference give one request and one join; a revoked fingerprint is refused across Secrets; the unique indexes refuse a direct duplicate insert. |
+| application | SR2, SR5, SR8 (orchestration), SC4, SC5 (no print command), SC7 (who may command) | Application tests with fakes, and the broker tests of 15.3. |
+| adapter | SR3 (wire), SR7, SR9, SC1 (logs), SC5 (argv), SC6, SC8 (vault, lane restart, reconnect), SC11 (signature) | Contract tests (15.2, 15.4, and the routing contract below) and the end-to-end run (15.5). |
+
+Among the domain tests:
+- SR4: a second answer is refused; expiry at 7 days; the last waiting lane's withdrawal ends the request, an earlier one doesn't.
+- SR6: an answer to a request changed by a join, a withdrawal or an edited Reference is refused.
 - SC3: the gate refuses at each step, in order.
 - SC7: a table of changes that widen and narrow, emptying a lane list included.
 - SC9: the first refused Use after expiry opens one `renew` request.
-- SC11: a transfer narrows Grants to the target.
+- SC11: a transfer narrows Grants to the target node.
+
+**The routing contract** (SR9): the fleet's subscriber configuration sends `/secrets/*` to the hub's subscriber and nowhere else. A configuration that adds a second subscriber for that path fails the test.
+
+**The no-replay contract** (SR7): after a `secrets.store` and a `secrets.transfer`, the node agent's done-key record and the hub's database hold a hash of the outcome and no SealedValue. A repeat of the transfer's key runs the gate again and returns a fresh ciphertext.
 
 ### 15.2 Contract tests for the store port
 
@@ -570,13 +651,23 @@ In a private QA record, not in this tree:
 
 | PR | What | Done-check |
 |---|---|---|
-| 1 | Domain and protocol: `secrets.ts` in both packages, the shape catalog, the words table. `docs/domain.md`: a Secrets section, the context map, and the amendments to C1, C6, N2 and H3 (3.1). `docs/agents/secrets.md`. | 15.1 green with a failing control per invariant. The shape and wire allowlists fail on a planted field. Reference grammar table tested. |
-| 2 | Node custody: `SecretStore` with `storeSealed` on both vaults, keyed fingerprints, the index writer and `packages/node-ops` scanner. Machine commands: `put` (stdin, typed confirmation), `list`, `grant`, `disable`, `enable`, `revoke`, `delete`, `log`, `recipient`. | 15.2 on three adapters, and 15.4. |
-| 3 | Starts with the spike of section 6 (peer pid on Linux and macOS, macOS ancestry). Broker and use: `serve`, peer identity, registered workspaces, the gate, the Use record, and requests through the node agent (4.1). `run` with `--env`, `--file` and `--env-file`, and the filter. `git-credential`. The Claude Code runtime adapter allows the socket where the platform can (7.4). | 15.3. A sandboxed Bash command in a scratch session can't read the vault, and `run` works through the socket on macOS; on Linux, the measured answer with and without the seccomp filter is written into 7.4. |
-| 4 | Hub requests: the node event `secrets.requested`, the service, the principal's routes, a migration; agent commands `request`, `status`, `wait`, `withdraw`, `list`, `prompt`; fleet operations and the recipient report; the lane notice; H3; SR9's exclusions. | SR rules through the HTTP routes. A store retried after a dropped connection stores once. Scans of the hub database, logs and spool find no ciphertext after the operation and no plaintext ever. |
+| 1 | Domain and protocol: `secrets.ts` in both packages, with Request admission and the Fingerprint ledger; the shape catalog; the words table. `docs/domain.md`: a Secrets section with the Layer of each invariant, the context map, the amendments to C1, C6, N2 and H3 (3.1), and the anti-corruption rows below. `docs/agents/secrets.md`. `no-vendor-names.test.ts` extended (section 14). | The domain rows of 15.1 green, each with a failing control. The shape and wire allowlists fail on a planted field, and SealedValue in a fourth schema fails. The vendor-name test fails on a planted shape id. Reference grammar table tested. |
+| 2 | Node custody: `SealedStore` with `storeSealed` on both vaults, keyed fingerprints and the fingerprint ledger's store, the index writer, `packages/node-ops`' `secret-scan.ts` and `secret-index-file.ts`. Machine commands: `put` (stdin, typed confirmation), `workspace add`, `list`, `grant`, `disable`, `enable`, `revoke`, `delete`, `log`, `recipient`. | 15.2 on three adapters, and 15.4. |
+| 3 | Starts with the spike of section 6 (peer pid on Linux and macOS, macOS ancestry). Broker and use: `serve`, `CallerIdentity` (peer pid, ancestry, `node-ops`' `panes()`, workspaces), the gate, the Use record, and `HubLink` with the relay's `/secrets/requested` path (4.1). `run` with `--env`, `--file` and `--env-file`, and the filter. `git-credential`. The Claude Code runtime adapter allows the socket where the platform can (7.4). | 15.3. A sandboxed Bash command in a scratch session can't read the vault, and `run` works through the socket on macOS; on Linux, the measured answer with and without the seccomp filter is written into 7.4. |
+| 4 | Hub requests: the `NodeRequests` subscriber, the fleet's `/secrets/*` route to the hub only, Request admission's store, the principal's routes, a migration; `secrets.answered` back to the node for `status`, `wait` and `withdraw`; the other fleet operations and the recipient report; the lane notice; H3; SR9's exclusions. | The store and routing rows of 15.1: two concurrent opens make one request; the routing contract; the no-replay contract. A store retried after a dropped connection stores once. Scans of the hub database, logs and spool find no ciphertext after the operation and no plaintext ever. |
 | 5 | Web: the card on desktop and phone, sealing in the browser, pins, the fresh check; the Secrets page; the composer guard. | 15.5 green with its controls. The bundle budget holds for every page but the card's chunk. Manual QA (15.6). |
 | 6 | Reuse and lifecycle: transfer, `renew` on expiry, `rotate` requests, expiry Alerts; the hub's shapes; the index on transcript, pane and terminal reads. | Two synthetic nodes: a transfer whose recorded fleet frames hold ciphertext only. One `renew` card for many refused Uses. The terminal stream test with a value split across frames. |
 | 7 | Spike: `inject` for Claude Code under `os`, on Linux and WSL2 (7.3). | A sandboxed `cat` of the masked file shows the sentinel. A request to the Destination authenticates against a local fake server; one to another allowed host carries the sentinel. The Read tool is denied the directory. If it fails, `inject` stays off and 7.3 says why. |
+
+**Anti-corruption rows** PR 1 adds to `docs/domain.md`'s adapter table (the domain never sees these payloads):
+
+| Adapter | Translates |
+|---|---|
+| Agent CLI sandbox credentials (Claude Code `sandbox.credentials`, `mask`) | a Grant's `inject` mode and Destinations to a `--settings` entry for the lane; a platform or version without it to "inject unavailable here", never a weaker mode chosen silently |
+| Git credential helper protocol (`git credential-*` with `get`) | git's request on stdin to a Use of the Reference configured for that remote; the value to `password=` on stdout, to git only |
+| Browser age encryption (`age-encryption` in the web app) | the typed bytes and a pinned recipient to a SealedValue; a recipient that differs from the pin to "stop and compare" |
+| Peer credentials and the pane table (`SO_PEERCRED` or `LOCAL_PEERPID`, process ancestry, tmux `#{pane_pid}`, `git rev-parse --git-common-dir`) | a socket connection to a Caller: a lane or none, a workspace or none. The domain never sees a pid, a pane id or a path. |
+| Fleet hook path `/secrets/requested` | a node's request, as the node saw it, to SecretRequested at the hub |
 
 Each PR updates this document where it measured something different.
 
@@ -595,12 +686,12 @@ Each PR updates this document where it measured something different.
 ## 18. Sources (read 2026-10-11 unless marked)
 
 - [S1] Claude Code, sandboxing: what runs outside the sandbox (file tools, MCP servers, hooks, `apiKeyHelper`), `credentials` deny and mask, the sentinel, `injectHosts`, `tlsTerminate`, trusted scopes, Linux seccomp socket blocking, `allowAllUnixSockets` and the Docker socket warning. https://code.claude.com/docs/en/sandboxing
-- [S2] Claude Code, settings reference index: `sandbox.network.allowUnixSockets` ("Unix socket paths sandboxed commands can use on macOS"), `allowAllUnixSockets`, `tlsTerminate`, `sandbox.credentials.envVars|files`. https://code.claude.com/docs/en/settings-reference
+- [S2] Claude Code, settings reference. `sandbox.network.allowUnixSockets`: "List the Unix socket paths sandboxed commands can connect to on macOS. Claude Code ignores this list on Linux and WSL2, where the seccomp filter can't inspect socket paths; use allowAllUnixSockets there instead." `allowAllUnixSockets`: "On Linux and WSL2, the sandbox's seccomp filter blocks socket(AF_UNIX, ...) calls, so this is the only way to permit Unix sockets there. When the filter is missing … the sandbox doesn't block Unix-socket calls." `tlsTerminate`: "This is experimental, and mask credential substitution requires it." Also `sandbox.credentials.envVars|files`, `env`, `apiKeyHelper`. https://code.claude.com/docs/en/settings-reference
 - [S3] Git, gitcredentials(7): `credential.helper`, the `get` operation, attributes on stdin and stdout. https://git-scm.com/docs/gitcredentials
 - [S4] age: https://github.com/FiloSottile/age. typage (npm `age-encryption`): "compatible with Node.js 20+, Bun, Deno, and all recent browsers", "uses the Web Crypto API when available". https://github.com/FiloSottile/typage. Version 0.3.1 is latest (`fresh npm age-encryption`, https://www.npmjs.com/package/age-encryption).
 - [S5] Model Context Protocol, elicitation, protocol version 2026-07-28 (current per https://modelcontextprotocol.io/specification/versioning): "Servers MUST NOT use form mode elicitation to request sensitive information such as passwords, API keys, access tokens, or payment credentials"; "Servers MUST use URL mode for interactions involving such sensitive information"; "sensitive credentials never pass through the LLM context, MCP client or any intermediate MCP servers"; servers "MUST NOT provide a URL which is pre-authenticated" and "MUST verify the identity of the user who opens the URL". URL mode was introduced in 2025-11-25. https://modelcontextprotocol.io/specification/latest/client/elicitation
 - [S6] OWASP Secrets Management Cheat Sheet: §2.2 (the primary secret needs protecting too), §2.3 least privilege, §2.6 audit ("Who requested a secret…"), §2.7 lifecycle, §5.1 environment variables "not recommended unless the other methods are not possible", §8.3 "Never be logged". https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html
-- [S7] NIST SP 800-63B-4 §3.1.1.2 (page dated 2025-08-26): verifiers "SHALL allow the use of password managers and autofill functionality", "SHOULD permit claimants to use the 'paste' function", "SHOULD offer an option to display the password". https://pages.nist.gov/800-63-4/sp800-63b.html
+- [S7] NIST SP 800-63B-4 §3.1.1.2 (page dated 2025-08-26), rules for password verifiers, used here by analogy: verifiers "SHALL allow the use of password managers and autofill functionality", "SHOULD permit claimants to use the 'paste' function", "SHOULD offer an option to display the password". https://pages.nist.gov/800-63-4/sp800-63b.html
 - [S8] NIST SP 800-57 Part 1 Rev. 5: §5.3 cryptoperiod; §2.1 and §7 key states (pre-activation, active, suspended, deactivated, compromised, destroyed); a destroyed key's "previous existence may be recorded (e.g., in metadata or audit logs)". https://doi.org/10.6028/NIST.SP.800-57pt1r5
 - [S9] 1Password CLI (developer.1password.com now redirects to 1password.dev): secret reference syntax `op://<vault>/<item>/[section/]<field>`; `op run` conceals secrets printed to stdout or stderr by default (`--no-masking` turns it off) and makes them environment variables "only for the duration of the process". https://www.1password.dev/cli/secret-reference-syntax/, https://www.1password.dev/cli/reference/commands/run/, https://www.1password.dev/cli/secrets-environment-variables/
 - [S10] HashiCorp Vault: "Policies are deny by default"; audit devices write "a keyed hash (HMAC-SHA256) of most string values"; KV keeps versions. https://developer.hashicorp.com/vault/docs/concepts/policies, https://developer.hashicorp.com/vault/docs/audit, https://developer.hashicorp.com/vault/docs/secrets/kv
@@ -608,16 +699,20 @@ Each PR updates this document where it measured something different.
 - [S12] systemd.exec(5), systemd 262: "environment variables are not suitable for passing secrets… to service processes"; credentials in `$CREDENTIALS_DIRECTORY`; `SetCredential=` is visible over IPC. https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html. "Unlike environment variables the credential data is not propagated down the process tree." https://systemd.io/CREDENTIALS/
 - [S13] SOPS: "keys are stored in cleartext, and values are encrypted"; age recipients. https://getsops.io/docs/security/, https://getsops.io/docs/usage/identities/age/
 - [S14] GitHub Actions: `add-mask` ("Masking a value prevents a string or variable from being printed in the log"); "If your secret is transformed in some way (such as Base64 or URL-encoded), be sure to register the new value as a secret too"; "automatic redaction is not guaranteed". https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands, https://docs.github.com/en/actions/reference/security/secure-use
-- [S15] Kubernetes, good practices for Secrets (restrict list access; don't log secret data), and Secrets on tmpfs. https://kubernetes.io/docs/concepts/security/secrets-good-practices/, https://kubernetes.io/docs/concepts/configuration/secret/
+- [S15] Kubernetes: Secrets good practices (restrict list access; don't log secret data); a mounted Secret is kept in "a tmpfs so that the confidential data is not written to durable storage". https://kubernetes.io/docs/concepts/security/secrets-good-practices/, https://kubernetes.io/docs/concepts/configuration/secret/
 - [S16] proc(5), proc_pid_cmdline(5), proc_pid_environ(5), from the man-pages source (man7.org did not answer): `/proc/pid` is readable by everybody by default (`hidepid=0`); `environ` is guarded by a `PTRACE_MODE_READ_FSCREDS` check and holds the initial environment. https://git.kernel.org/pub/scm/docs/man-pages/man-pages.git/plain/man/man5/proc.5, …/proc_pid_environ.5
 - [S17] MDN, `autocomplete` ("setting autocomplete to 'off' will not prevent a password manager from asking the user if they would like to save") and turning off autocompletion (`new-password`, "a hint to browsers; some may not comply"). https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Attributes/autocomplete, https://developer.mozilla.org/en-US/docs/Web/Security/Practical_implementation_guides/Turning_off_form_autocompletion. WHATWG HTML: spellcheck applies in the Text state. https://html.spec.whatwg.org/multipage/interaction.html
-- [S18] Codex: `shell_environment_policy`, whose `ignore_default_excludes` defaults to true, so names containing KEY, SECRET or TOKEN are not removed by default; `model_providers.<id>.auth.command` "must print the token to stdout". https://developers.openai.com/codex/config-advanced, https://developers.openai.com/codex/config-reference
+- [S18] Codex: `shell_environment_policy`, whose `ignore_default_excludes` defaults to true, so names containing KEY, SECRET or TOKEN are not removed by default; `model_providers.<id>.auth.command` "must print the token to stdout". https://learn.chatgpt.com/docs/config-file/config-advanced, https://learn.chatgpt.com/docs/config-file/config-reference (the old developers.openai.com/codex/… URLs redirect there, checked 2026-10-11)
 - [S19] Claude Code: the settings `env` block's values "reach every subprocess Claude Code starts"; `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` "recognizes a credential by its variable name or by the shape of its value". https://code.claude.com/docs/en/settings-reference, https://code.claude.com/docs/en/env-vars
 - [S20] OWASP Logging Cheat Sheet: access tokens, passwords and "Encryption keys and other primary secrets" are not to be recorded in logs. https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html
 - [S21] OWASP AI Agent Security Cheat Sheet: credentials "inadvertently included in agent context or logs"; "Enforce authorization in the execution component, outside the agent's context." https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html
 - [S22] NIST SP 800-53 Rev. 5, IA-5(7): "Ensure that unencrypted static authenticators are not embedded in applications or other forms of static storage." Read from the OSCAL catalog v5.2.0. https://github.com/usnistgov/oscal-content
 - [S23] GitGuardian, State of Secrets Sprawl 2026 (the vendor's own figures; method not checked here): 28,649,024 new secrets in public GitHub commits in 2025; 24,008 unique secrets in MCP configuration files. https://gitguardian.com/state-of-secrets-sprawl-report-2026
 - [S24] Infisical Agent Proxy, "a credential broker for AI agents" that swaps dummy credentials for real ones: prior art for `inject` (licence not checked; nothing borrowed). https://infisical.com/docs/documentation/platform/agent-proxy/overview
+- [S25] OWASP Password Storage Cheat Sheet: "Fast hashing algorithms such as SHA‑256 are not suitable for password storage because they allow attackers to perform large numbers of guesses quickly"; a pepper used "as the HMAC key". https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+- [S26] age file format (C2SP): the header "wraps the file key for one or more recipients" and has "one or more recipient stanzas"; "An scrypt stanza, if present, MUST be the only stanza in the header." https://github.com/C2SP/C2SP/blob/main/age.md
+- [S27] unix(7), from the man-pages source: `SO_PEERCRED` "returns the credentials of the peer process connected to this socket", for connected `AF_UNIX` stream sockets. https://git.kernel.org/pub/scm/docs/man-pages/man-pages.git/plain/man/man7/unix.7
+- [S28] git-credential(1): with `fill`, "The username and password attributes of the credential description are then printed to stdout". https://git-scm.com/docs/git-credential
 
 ## Open questions for the owner
 

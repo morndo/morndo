@@ -1,10 +1,10 @@
 # ADR-0022: Secret requests: an agent asks for a named secret, the owner seals it from a card, agents use it by reference
 
-- **Status:** Proposed, 2026-10-11. Design: [`docs/design/secret-requests/README.md`](../design/secret-requests/README.md). Design only; no product code.
+- **Status:** Proposed, 2026-10-11; v2 the same day, after an independent audit of sources and DDD. Design: [`docs/design/secret-requests/README.md`](../design/secret-requests/README.md). Design only; no product code.
 - **The request:** an agent asks for a secret the way it asks for a decision. Instead of a decision card, the owner gets an "insert secret" card. The value is stored securely and can be used again by other lanes and in later sessions. Domain rules and current best practice apply, and it ships in the public repo.
 - **Number:** 0019 to 0021 belong to other branches.
 - **Builds on:** ADR-0001 (pure domain, adapters), ADR-0004 (the web endpoint and its passkeys), ADR-0008 (the shared redactor, A4), ADR-0012 (typed fleet operations, FL7, FL14), ADR-0015 (agent tokens), ADR-0017 (lane notices), ADR-0018 (the sealed store: age vault, plaintext type, process ancestry, exact-value filter, widening rule).
-- **Sources:** [S1]–[S24] in the design, section 18, read 2026-10-11.
+- **Sources:** [S1]–[S28] in the design, section 18, read 2026-10-11.
 
 ## Context
 
@@ -19,17 +19,21 @@
 
 1. **A Secrets context**, new, beside Connections (design §3.1).
    - **Secret request:** an aggregate on the hub, with invariants SR1–SR11.
-   - **Secret:** an aggregate per Reference per node, with invariants SC1–SC11.
-   - Both live in `packages/domain/src/secrets.ts`, which is pure.
+   - **Secret:** an aggregate, one per Reference per node, with invariants SC1–SC11.
+   - **Request admission** (SR1, SR10) and the **Fingerprint ledger** (SC2): domain services for the rules that span many aggregates, with uniqueness held by the store (unique indexes, one write transaction).
+   - Every invariant names its layer (domain, domain service with the store, application, adapter) and the test that proves it (design §3.3, §3.4, §15.1).
+   - The domain lives in `packages/domain/src/secrets.ts`, which is pure.
    - LLM keys stay Connections. The two contexts share the vault, the identity and the process adapters, and no model.
    - The node-side services are a second command, `morndo-secrets`, of `apps/connections`.
 2. **The language.**
    - **Reference** (`secret://<scope>/<name>`): the only thing agents, configs, events and the hub hold.
-   - **Grant:** who may resolve a Reference: a lane, a repository pattern or a node; the modes; an end. Nothing resolves by default.
+   - **Secret:** one Reference on one node. The same Reference on two nodes is two Secrets; each node is the system of record for its own, and the hub's read model groups them.
+   - **Value:** the bytes. Connections' "secret" (bytes), "secret ref" (vault id) and `SecretVault` port map to Value, vault ref and `SealedStore`; `SecretMaterial` is shared and adapter-only (design §3.1).
+   - **Grant:** who may resolve a Reference: a lane, a workspace (a repository root the principal registered, with its worktrees) or a node; the modes; an end. Nothing resolves by default.
    - **Use:** one audited resolution for one process.
-   - **Placement:** the copy on one node. Each node is the system of record for its Placements and Grants.
+   - **Ask:** now defined in `docs/domain.md` as a role that an Escalation or a Secret request plays. Catch-up, Notifications and lane status count both; each keeps its own answer rules.
    - **Rotation, Expiry, Disable** (anyone), **Revoke and Delete** (the principal).
-3. **An agent asks with a command, and its node vouches for it.** `morndo-secrets request REF --purpose … [--for repo|lane|node] [--wait]` talks only to the node's broker. The broker adds the lane from the caller's process tree and the registered workspace, and the node agent sends the request to the hub over its proven fleet connection. An agent token can't vouch for a lane: one serves every lane on a machine and names its lane in a header (ADR-0015).
+3. **An agent asks with a command, and its node vouches for it.** `morndo-secrets request REF --purpose … [--for repo|lane|node] [--wait]` talks only to the node's broker. The broker adds the lane from the caller's process tree and the workspace, and hands the request to the node agent through the `HubLink` port. The node agent sends it to the hub over its proven fleet connection, on a hook path the fleet routes to the hub alone, and the hub takes it in through `NodeRequests`. An agent token can't vouch for a lane: one serves every lane on a machine and names its lane in a header (ADR-0015).
    - With no value yet, the hub opens a request.
    - A value the lane is granted answers `available` at once, from the broker.
    - A value it isn't granted opens an access card with no field.
@@ -79,7 +83,7 @@
 | **Values in the lane's environment at start** | Rejected. Every tool command, hook and MCP server inherits them, and one `echo` puts a value in the transcript [S1, S19]. |
 | **A `get` command that prints the value** | Rejected. The agent would run it in its shell tool, and the value would be in the transcript. |
 | **Telegram or chat as an entry path** | Rejected. Neither is Morndo's endpoint, neither can mask a field, and a chat keeps history. |
-| **A hosted secrets manager** (1Password, Vault, Doppler, Infisical) | Not v1: another account and another sign-in per node. Morndo's References follow their pattern [S9, S10, S11], and a credential-swapping agent proxy exists as a product [S24]. A `SecretStore` adapter for one can come later. |
+| **A hosted secrets manager** (1Password, Vault, Doppler, Infisical) | Not v1: another account and another sign-in per node. Morndo's References follow their pattern [S9, S10, S11], and a credential-swapping agent proxy exists as a product [S24]. A `SealedStore` adapter for one can come later. |
 | **systemd credentials as the store** | Not the default, as in ADR-0018: root-only host key on systemd 255, Linux only. Its file-per-credential delivery is what `--file` copies [S12]. |
 | **Requests over HTTP with the agent token, as the board does** | Rejected. The token names its lane in a header, so a lane could ask as another, and the card's "who asks" would be the agent's word. |
 | **The broker starts the child itself, so no client ever gets the value** | Rejected. The broker runs outside the lane's sandbox, so its children would too, and the child is still the agent's choice. `inject` is the way to keep a value from the agent's commands. |
@@ -99,8 +103,8 @@
 
 ## Verification this implies
 
-1. One invariant test per SR and SC rule, with a failing control each.
-2. Shape and wire allowlists that fail on a planted value field. An architecture test for the Secrets application.
+1. A domain test, with a failing control, for each invariant tagged domain, and for each domain service, plus a store test of its uniqueness (two concurrent opens make one request). Invariants tagged application or adapter (SR2, SR5, SR7, SR9, SC4, SC5, SC6, and the edge parts of SR3, SR8, SC1, SC8, SC11) are proved by the application, contract and end-to-end tests their rows name: no pure-domain test can prove them.
+2. Shape and wire allowlists that fail on a planted value field, with `SealedValue` allowed in exactly three schemas. An architecture test for the Secrets application (no adapter, no Node global, no import of the node agent). The vendor-name test extended to `secrets.ts` and the shape catalog. The scanner imports no file system.
 3. One contract suite for the store port, run on `vault-age`, `vault-file` and a fake.
 4. Broker tests: peer credentials, ancestry, record-before-open, exit codes, no value in `/proc/<pid>/cmdline`.
 5. Redaction tests: no value in the index; each encoding found, split across chunks.
