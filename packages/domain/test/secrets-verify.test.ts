@@ -3,8 +3,9 @@
 // warnings only when later; a store or transfer never removes an Expiry. A waiter without a lane is its workspace.
 import { describe, expect, it } from "vitest";
 import {
-  emptySecretDirectory, findSecret, receiveTransfer, secretExpirySweep, storeSecret,
-  type Actor, type SecretDirectory, type SecretGrant,
+  emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer, secretExpirySweep, storeSecret,
+  withdrawRequest,
+  type Actor, type RequestAsk, type SecretDirectory, type SecretGrant,
 } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
@@ -87,5 +88,33 @@ describe("verify 4: only a later Expiry clears the warnings (SC9)", () => {
     const n = dir.events.length;
     dir = secretExpirySweep(dir, T + 2);
     expect(leads(dir, n)).toEqual([]);
+  });
+});
+
+describe("verify 3 and 5: a waiter without a lane is its workspace (SR1, SR6)", () => {
+  const cron: RequestAsk = {
+    node: "node-a", reference: REF, kind: "new", waiter: { lane: null, workspace: "app-a", purpose: "Nightly job" }, proposed: nodeGrant,
+  };
+  const opened = () => value(openRequest(cron, "r1", T)).request;
+  it("a caller without a lane from another workspace is another waiter, with its own purpose", () => {
+    const j = value(joinRequest(opened(), { lane: null, workspace: "app-b", purpose: "Deploy" }, T + 1));
+    expect(j.request.waiting.map(w => [w.lane, w.workspace, w.purpose])).toEqual([[null, "app-a", "Nightly job"], [null, "app-b", "Deploy"]]);
+    expect(j.request.version).toBe(2);
+    expect(j.events).toEqual([{ type: "SecretRequestJoined", request: "r1", lane: null, at: T + 1 }]);
+  });
+  it("the same workspace without a lane again changes nothing, whatever its words", () => {
+    const j = value(joinRequest(opened(), { lane: null, workspace: "app-a", purpose: "Nightly job, again" }, T + 1));
+    expect(j.events).toEqual([]);
+    expect(j.request.version).toBe(1);
+  });
+  it("a withdrawal names its waiter: one workspace leaves, the other still waits", () => {
+    let r = value(joinRequest(opened(), { lane: null, workspace: "app-b", purpose: "Deploy" }, T + 1)).request;
+    const left = value(withdrawRequest(r, null, T + 2, "app-a"));
+    expect(left.request.state).toBe("open");
+    expect(left.request.waiting.map(w => w.workspace)).toEqual(["app-b"]);
+    expect(left.events.map(e => e.type)).toEqual(["SecretRequestLeft"]);
+    r = left.request;
+    expect(withdrawRequest(r, null, T + 3).ok).toBe(false);
+    expect(value(withdrawRequest(r, null, T + 3, "app-b")).request.state).toBe("withdrawn");
   });
 });
