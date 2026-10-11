@@ -186,7 +186,11 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   const topic = lint.string("topic", draft.topic, CAPS.topic);
   const headline = lint.string("headline", draft.headline, CAPS.headline);
   if (recommend && headline !== null) {
-    const named = [...headline.matchAll(/option\s+([A-Za-z0-9_-]{1,16})/gi)].map(m => (m[1] ?? "").toLowerCase());
+    // "option <KEY>" with a word boundary, and only a token that is one of the brief's own keys (any case) names an
+    // option: "adoption" and "the option with less risk" name none, whatever follows "option".
+    const named = [...headline.matchAll(/\boption\s+([A-Za-z0-9_-]{1,16})/gi)]
+      .map(m => (m[1] ?? "").toLowerCase())
+      .filter(k => [...keys].some(x => x.toLowerCase() === k));
     const others = named.filter(k => k !== recommend.toLowerCase());
     if (named.length === 0) {
       lint.error("headline_option", "headline", `the headline names no option; name the one you recommend, as "option ${recommend}"`);
