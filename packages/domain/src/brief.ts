@@ -189,8 +189,9 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
       keys.add(key);
       keysAnyCase.add(key.toLowerCase());
       if (label.length > 40) { lint.error("too_long", `options[${i}].label`, `${label.length} characters; the cap is 40`); options.push({ key, label }); continue; }
-      // A label lands in briefMarkdown's table head and tap lines: no pipe may break the columns (DB7).
-      if (label.includes("|")) { lint.error("bad_markdown", `options[${i}].label`, `a label can't hold "|"; it heads a column of the comparison`); continue; }
+      // A label lands in briefMarkdown's table head and tap lines: no pipe may break the columns (DB7). The option
+      // itself stands, as with a label past its cap, so the checks that follow see the same option set as the keys.
+      if (label.includes("|")) { lint.error("bad_markdown", `options[${i}].label`, `a label can't hold "|"; it heads a column of the comparison`); options.push({ key, label }); continue; }
       lint.inline(`options[${i}].label`, label);
       options.push({ key, label });
     }
