@@ -897,17 +897,14 @@ describe.skipIf(!bus.ok)("systemd start failure", () => {
 });
 
 function timedStop(home: string): NodeJS.ProcessEnv {
-  const count = join(home, "shows");
+  const killed = join(home, "killed");
   return fakeTools(home, `#!/bin/sh
+if [ "$2" = "kill" ]; then touch '${killed}'; exit 0; fi
 if [ "$2" != "show" ]; then exit 0; fi
-n=0
-if [ -f '${count}' ]; then n=$(cat '${count}'); fi
-n=$((n + 1))
-printf '%s' "$n" > '${count}'
-if [ "$n" -eq 1 ]; then
-  printf '%s\\n' LoadState=loaded ActiveState=active SubState=running Result=success ExecMainCode=0 ExecMainStatus=0 MainPID=1 RemainAfterExit=yes ExecMainStartTimestampMonotonic=5000000 ExecMainExitTimestampMonotonic=0 ExecMainStartTimestamp=@1000 ExecMainExitTimestamp=
-else
+if [ -f '${killed}' ]; then
   printf '%s\\n' LoadState=loaded ActiveState=inactive SubState=dead Result=signal ExecMainCode=2 ExecMainStatus=15 MainPID=0 RemainAfterExit=yes ExecMainStartTimestampMonotonic=5000000 ExecMainExitTimestampMonotonic=6500000 ExecMainStartTimestamp=@1000 ExecMainExitTimestamp=@1001.500000
+else
+  printf '%s\\n' LoadState=loaded ActiveState=active SubState=running Result=success ExecMainCode=0 ExecMainStatus=0 MainPID=1 RemainAfterExit=yes ExecMainStartTimestampMonotonic=5000000 ExecMainExitTimestampMonotonic=0 ExecMainStartTimestamp=@1000 ExecMainExitTimestamp=
 fi
 exit 0
 `);

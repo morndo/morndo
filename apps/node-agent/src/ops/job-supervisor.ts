@@ -15,7 +15,7 @@ import {
 import { deniedBy, denyRoots, processAlive, resolvedRoots } from "@morndo/node-ops";
 import { errno } from "@morndo/service-kit";
 import { psStarts, readRecorded, sameProcess, START_RECORD_GRACE_MS, writeProcessFile, type Recorded } from "./job-identity.ts";
-import { MAX_TIMER_MS } from "./job-limits.ts";
+import { FULL_LOG_GRACE_MS, MAX_TIMER_MS } from "./job-limits.ts";
 import { askHub, JobGrants } from "./job-grant.ts";
 import { killJobUnit, managerEnv, probeUserManager, resetJobUnit, runMs, showUnit, spawnFailed, startJobUnit, stopJobUnit, type ProbeResult, type UnitLook, type UnitState } from "./job-systemd.ts";
 import { guardOf, readProc, type MachineSample } from "./job-guard.ts";
@@ -204,6 +204,7 @@ export class JobSupervisor {
   #managerEnv: Promise<string[] | null> | null = null;
   #server: Server | null = null;
   #tails = new Map<string, Promise<void>>();
+  #capSeenAt = new Map<string, number>();
 
   constructor(store: JobStore, opts: {
     home: string;
@@ -314,6 +315,7 @@ export class JobSupervisor {
   async sweep(): Promise<void> {
     // This sweep's reading, or null when nothing was queued so there was nothing to read. A start that arrives
     // while this awaits takes its own reading; it never sees this one.
+    for (const id of this.#capSeenAt.keys()) if (!this.#open(id)) this.#capSeenAt.delete(id);
     const guard = this.#queued() ? this.#measure() : null;
     const pending = this.#starting();
     this.#apply(guard);
@@ -413,7 +415,7 @@ export class JobSupervisor {
     if (!job) return;
     if (live && found) {
       if (job.state === "starting") this.#store.started(id);
-      if (this.#store.watch(id) === "capped") this.#requestCap(id);
+      await this.#decideCap(id);
       return;
     }
     if (found || pending.has(id) || job.state === "running") {
@@ -597,7 +599,7 @@ export class JobSupervisor {
     const view = look.view;
     if (view.active === "activating" || (view.active === "active" && view.sub === "running")) {
       if (job.state === "starting") this.#store.started(id);
-      if (this.#overCap(id)) await this.#stopForCap(id);
+      await this.#decideCap(id);
       return;
     }
     const durationMs = runMs(view, job.startedAt);
@@ -818,9 +820,27 @@ export class JobSupervisor {
     return this.#takeExit(id);
   }
 
+  // Over its log cap right now. The store's watch signal fires only the first time a full log is seen, so
+  // after that it is the file's real size that says — the same size the store itself accounts for.
   #overCap(id: string): boolean {
+    if (existsSync(join(this.#store.dir, `${id}.cap`))) return true;
     if (this.#store.watch(id) === "capped") return true;
-    return existsSync(join(this.#store.dir, `${id}.cap`));
+    try { return statSync(join(this.#store.dir, `${id}.log`)).size >= this.#store.logBytes; } catch { return false; }
+  }
+
+  // The cap decision both backends share (the helper, on its own watch of the log, applies the same grace): a
+  // log that has reached its cap is given the grace before the cap is enforced, so a command that ends on its
+  // own within it settles through its own exit — the exit file, or the unit's state — with its own exit code.
+  // A log still over the cap once the grace has passed is enforced, and the job then records no exit code:
+  // our signal ends the command, whatever its handler does with it. The bytes a command writes during the
+  // grace stay in the log (the store never rewrites one); this size check measures what is really there.
+  async #decideCap(id: string): Promise<void> {
+    if (!this.#overCap(id)) { this.#capSeenAt.delete(id); return; }
+    const seen = this.#capSeenAt.get(id) ?? Date.now();
+    this.#capSeenAt.set(id, seen);
+    if (Date.now() - seen < FULL_LOG_GRACE_MS) return;
+    if (this.#slice) await this.#stopForCap(id);
+    else this.#requestCap(id);
   }
 
   #live(view: UnitState): boolean {
