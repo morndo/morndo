@@ -4,7 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { GitWorkspaceRoots } from "../src/adapters/git-workspaces.ts";
 
@@ -21,6 +21,8 @@ const git = (cwd: string, args: readonly string[]) => {
 let dir = "";
 beforeEach(() => { dir = realpathSync(mkdtempSync(join(tmpdir(), "morndo-git-workspaces-"))); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+// An answer relative to the fixtures' directory, so a failure names the repository it got.
+const under = (common: string | null) => (common === null ? null : relative(dir, common));
 
 // A repository with one commit, so a second worktree can branch from it.
 function repo(name: string): string {
@@ -49,14 +51,14 @@ describe("GitWorkspaceRoots", () => {
     mkdirSync(join(root, "src", "deep"), { recursive: true });
     mkdirSync(join(second, "docs"));
     const roots = new GitWorkspaceRoots();
-    const common = join(root, ".git");
-    expect([root, second, join(root, "src", "deep"), join(second, "docs")].map(p => roots.commonDir(p))).toEqual([common, common, common, common]);
+    const paths = [root, second, join(root, "src", "deep"), join(second, "docs")];
+    expect(paths.map(p => under(roots.commonDir(p)))).toEqual(["app/.git", "app/.git", "app/.git", "app/.git"]);
   });
 
   it("answers with the real path when it is reached through a link", () => {
     const root = repo("app");
     symlinkSync(root, join(dir, "link"));
-    expect(new GitWorkspaceRoots().commonDir(join(dir, "link"))).toBe(join(root, ".git"));
+    expect(under(new GitWorkspaceRoots().commonDir(join(dir, "link")))).toBe("app/.git");
   });
 
   it("gives null for a plain directory and for a missing path", () => {
@@ -75,8 +77,8 @@ describe("GitWorkspaceRoots", () => {
     git(scratch, ["init", "-q"]);
     git(scratch, ["remote", "add", "origin", url]);
     const roots = new GitWorkspaceRoots();
-    expect(roots.commonDir(scratch)).toBe(join(scratch, ".git"));
-    expect(roots.commonDir(app)).toBe(join(app, ".git"));
+    expect(under(roots.commonDir(scratch))).toBe("scratch/.git");
+    expect(under(roots.commonDir(app))).toBe("app/.git");
   });
 
   it("is not redirected by GIT_DIR or GIT_COMMON_DIR in its own environment", () => {
@@ -85,11 +87,11 @@ describe("GitWorkspaceRoots", () => {
     mkdirSync(join(dir, "plain"));
     const roots = new GitWorkspaceRoots();
     withEnv("GIT_DIR", join(app, ".git"), () => {
-      expect(roots.commonDir(other)).toBe(join(other, ".git"));
+      expect(under(roots.commonDir(other))).toBe("other/.git");
       expect(roots.commonDir(join(dir, "plain"))).toBeNull();
     });
     withEnv("GIT_COMMON_DIR", join(app, ".git"), () => {
-      expect(roots.commonDir(other)).toBe(join(other, ".git"));
+      expect(under(roots.commonDir(other))).toBe("other/.git");
     });
   });
 });
