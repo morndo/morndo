@@ -5,15 +5,17 @@
 // checked 2026-10-10. There is no synchronous call, so this awaits the library. Each call is
 // its own promise: a failure cannot wake or stall the next one, and no worker is left behind.
 import { createHash } from "node:crypto";
-import { existsSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { Decrypter, Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { assertPrivate, readPrivate, refuseBareHome, writeNew, writePrivate, writePrivatePair } from "./file-mode.ts";
 import { NodeKeys } from "./node-keys.ts";
-import { fingerprintOf, secretPath } from "./secret-ref.ts";
+import { SECRET_REF, fingerprintOf, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
 import type { SealedProblem, SealedStore } from "../application/ports.ts";
 import type { Vault } from "./vault.ts";
+
+const SUFFIX = ".age";
 
 export class AgeVault implements Vault, SealedStore {
   readonly #dir: string;
@@ -98,8 +100,17 @@ export class AgeVault implements Vault, SealedStore {
     }
   }
 
-  refs(_prefix: string): readonly string[] {
-    return [];
+  // The refs of the files in the vault directory that start with `prefix` (temp files start with a dot, so never match).
+  refs(prefix: string): readonly string[] {
+    if (!existsSync(this.#dir)) return [];
+    assertPrivate(this.#dir, "dir", this.#uid);
+    const out: string[] = [];
+    for (const name of readdirSync(this.#dir)) {
+      if (!name.startsWith(prefix) || !name.endsWith(SUFFIX)) continue;
+      const ref = name.slice(0, name.length - SUFFIX.length);
+      if (SECRET_REF.test(ref)) out.push(ref);
+    }
+    return out.sort();
   }
 
   async keyedFingerprint(ref: string): Promise<string | null> {

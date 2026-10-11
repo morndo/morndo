@@ -127,7 +127,8 @@ describe("the lifecycle (SC7, SC8)", () => {
     if (!r.ok) throw new Error(r.error.problem);
     return w;
   };
-  const laneGrant: SecretGrant = { subject: { kind: "lane", lane: "lane-a" }, modes: ["exec"], until: { kind: "open" } };
+  // Widening by effect (SC7): the node-wide Grant covers exec already, so the lane's Grant adds a mode.
+  const laneGrant: SecretGrant = { subject: { kind: "lane", lane: "lane-a" }, modes: ["file"], until: { kind: "open" } };
 
   it("a store names the other References that hold the same value", async () => {
     const w = await stored();

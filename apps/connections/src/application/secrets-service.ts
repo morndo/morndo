@@ -4,8 +4,9 @@
 // file; entries written before a rolled-back commit can only filter more, never less. No value passes through here: the
 // vault answers with a keyed fingerprint, the index with keyed hashes.
 import {
-  err, findSecret, ok, renewSecret, storeSecret, type Actor, type GrantSubject, type Result, type SecretEvent, type SecretGrant,
-  type SecretProblem, type ShapeInput,
+  WORKSPACE_NAME, deleteSecret, disableSecret, enableSecret, err, findSecret, grantSecret, ok, renewSecret, revokeSecret, storeSecret,
+  ungrantSecret, type Actor, type GrantSubject, type Result, type SecretDirectory, type SecretEvent, type SecretGrant, type SecretProblem,
+  type SecretRefusal, type ShapeInput,
 } from "@morndo/domain";
 import type {
   Clock, Ids, IndexWriter, SealedProblem, SealedStore, SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRoots, WorkspaceRow,
@@ -45,6 +46,7 @@ export class SecretsService {
       const prepared = await index.prepare(ref);
       const at = clock.now();
       outcome = secrets.write<Result<Stored, SecretsRefusal>>(state => {
+        if (!vault.has(ref)) throw new Error(`the vault file ${ref} was swept before its store committed`);
         const before = findSecret(state.directory, request.reference)?.current?.number ?? null;
         const input = {
           reference: request.reference, fingerprint: sealed.fingerprint, shape: request.shape, grants: request.grants,
@@ -78,15 +80,107 @@ export class SecretsService {
     return outcome;
   }
 
-  grant(_reference: string, _grant: SecretGrant, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
-  ungrant(_reference: string, _subject: GrantSubject, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
-  disable(_reference: string, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
-  enable(_reference: string, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
-  revoke(_reference: string, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
-  delete(_reference: string, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
-  list(): SecretView[] { return []; }
-  log(_reference: string | null): SecretEvent[] { return []; }
-  addWorkspace(_path: string, _actor: Actor): Result<WorkspaceRow, SecretsRefusal> { return err({ problem: "missing" }); }
-  workspaces(): readonly WorkspaceRow[] { return []; }
-  sweep(): string[] { return []; }
+  // Grants, Disable and Enable change metadata only; the domain judges widening (SC7).
+  grant(reference: string, grant: SecretGrant, actor: Actor): Result<null, SecretsRefusal> {
+    return this.#change(dir => grantSecret(dir, reference, grant, actor, this.#deps.clock.now()));
+  }
+
+  ungrant(reference: string, subject: GrantSubject, actor: Actor): Result<null, SecretsRefusal> {
+    return this.#change(dir => ungrantSecret(dir, reference, subject, actor, this.#deps.clock.now()));
+  }
+
+  disable(reference: string, actor: Actor): Result<null, SecretsRefusal> {
+    return this.#change(dir => disableSecret(dir, reference, actor, this.#deps.clock.now()));
+  }
+
+  enable(reference: string, actor: Actor): Result<null, SecretsRefusal> {
+    return this.#change(dir => enableSecret(dir, reference, actor, this.#deps.clock.now()));
+  }
+
+  // SC8: Revoke and Delete destroy the current value on this node. Its version is retired in the index (kept 30 days), its
+  // file's ref is cleared in the same transaction, and the file is removed after the commit.
+  revoke(reference: string, actor: Actor): Result<null, SecretsRefusal> {
+    return this.#change(dir => revokeSecret(dir, reference, actor, this.#deps.clock.now()), reference);
+  }
+
+  delete(reference: string, actor: Actor): Result<null, SecretsRefusal> {
+    return this.#change(dir => deleteSecret(dir, reference, actor, this.#deps.clock.now()), reference);
+  }
+
+  list(): SecretView[] {
+    return this.#deps.secrets.load().directory.held.map(s => ({
+      reference: s.reference, status: s.status, version: s.current?.number ?? null, storedAt: s.current?.storedAt ?? null,
+      expiry: s.expiry, shape: s.shape, grants: s.grants, destinations: s.destinations,
+    }));
+  }
+
+  log(reference: string | null): SecretEvent[] {
+    return this.#deps.secrets.load().directory.events.filter(e => reference === null || e.reference === reference);
+  }
+
+  // A workspace is the repository a path belongs to, by its git common directory, so every worktree of it is one
+  // workspace; a remote counts for nothing (design §6). Registering one widens, so it is the principal's.
+  addWorkspace(path: string, actor: Actor): Result<WorkspaceRow, SecretsRefusal> {
+    if (actor.kind !== "principal" || !actor.command) return err({ problem: "principal" });
+    const root = this.#deps.roots.commonDir(path);
+    if (root === null) return err({ problem: "not_repository" });
+    const name = workspaceName(root);
+    if (name === null) return err({ problem: "not_repository" });
+    const at = this.#deps.clock.now();
+    return this.#deps.secrets.write<Result<WorkspaceRow, SecretsRefusal>>(state => {
+      if (state.workspaces.some(w => w.root === root)) return { next: null, result: err({ problem: "same" }) };
+      if (state.workspaces.some(w => w.name === name)) return { next: null, result: err({ problem: "workspace_taken" }) };
+      const row: WorkspaceRow = { name, root, at, command: actor.command };
+      return { next: { ...state, workspaces: [...state.workspaces, row] }, result: ok(row) };
+    });
+  }
+
+  workspaces(): readonly WorkspaceRow[] {
+    return this.#deps.secrets.load().workspaces;
+  }
+
+  // D2: a crash between the vault write and the commit can leave a file no version refers to. The sweep removes those,
+  // inside a write transaction, so no store commits meanwhile; a store checks inside its own transaction that its file
+  // is still there.
+  sweep(): string[] {
+    const { secrets, vault } = this.#deps;
+    return secrets.write(state => {
+      const kept = new Set<string>();
+      for (const v of state.vaults) if (v.ref !== null) kept.add(v.ref);
+      const gone = vault.refs("s-").filter(ref => !kept.has(ref));
+      for (const ref of gone) vault.remove(ref);
+      return { next: null, result: gone };
+    });
+  }
+
+  // One domain change in one transaction. With `dropping`, the Reference's current version (if any) is retired in the
+  // index and its file removed after the commit.
+  #change(run: (dir: SecretDirectory) => Result<SecretDirectory, SecretRefusal>, dropping?: string): Result<null, SecretsRefusal> {
+    const { secrets, index, vault, clock } = this.#deps;
+    let removed: string | null = null;
+    const result = secrets.write<Result<null, SecretsRefusal>>(state => {
+      const r = run(state.directory);
+      if (!r.ok) return { next: null, result: err({ problem: r.error.problem }) };
+      let vaults = state.vaults;
+      const version = dropping === undefined ? null : findSecret(state.directory, dropping)?.current?.number ?? null;
+      if (dropping !== undefined && version !== null) {
+        index.write({ add: null, retire: [{ reference: dropping, version }], at: clock.now() });
+        removed = refOf(vaults, dropping, version);
+        vaults = vaults.map(v => v.reference === dropping && v.version === version ? { ...v, ref: null } : v);
+      }
+      return { next: { ...state, directory: r.value, vaults }, result: ok(null) };
+    });
+    if (result.ok && removed !== null) vault.remove(removed);
+    return result;
+  }
+}
+
+// The workspace's name: the repository directory's own name (the parent of a `.git` common dir), in the domain's
+// grammar, or null when nothing of it fits.
+function workspaceName(commonDir: string): string | null {
+  const parts = commonDir.split("/").filter(p => p !== "");
+  const last = parts.at(-1);
+  const dir = last === ".git" ? parts.at(-2) : last?.replace(/\.git$/, "");
+  const name = (dir ?? "").toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 64);
+  return WORKSPACE_NAME.test(name) ? name : null;
 }
