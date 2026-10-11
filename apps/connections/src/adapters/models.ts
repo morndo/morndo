@@ -32,7 +32,7 @@ export function wantedModel(pick: string | undefined): string | null {
   return model && model !== "" ? model : null;
 }
 
-const PLACEHOLDER_MODELS = new Set(["default", "ask"]);
+export const PLACEHOLDER_MODELS = new Set(["default", "ask"]);
 
 export function smallModel(ids: readonly string[], main: string): string | null {
   return ids.find(id => id !== main && id.endsWith("-flash")) ?? null;

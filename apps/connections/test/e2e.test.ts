@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSyn
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 const KEY = "sk-ant-synthetic-test-key-0001";
 const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
@@ -184,6 +185,35 @@ describe("keys run", () => {
       ? (JSON.parse(readFileSync(enginesPath, "utf8")) as { marks: { reason: string }[] }).marks
       : [];
     expect(marks.some(mark => mark.reason.includes("missing"))).toBe(false);
+  }, 20_000);
+
+  it("records a placeholder lease entry as default", async () => {
+    const dir = homeDir();
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[]; terms: { revision: string; summary: string; sources: string[] } }[];
+    const custom = body.find(row => row.id === "custom-anthropic");
+    if (!custom) throw new Error("preset");
+    custom.terms = { revision: "2026-01-01", summary: "Named by the test.", sources: ["https://example.com/terms"] };
+    const runtime = custom.runtimes[0];
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = "http://127.0.0.1:9";
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "gate", "--vendor", "custom-anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "gate", "--by", "owner"], env)).code).toBe(0);
+    const running = cli(["run", "--connection", "gate", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, {
+      hold: { ready: join(dir, "ready"), release: join(dir, "release") },
+      helperOut: join(dir, "helpers.json"),
+    })], env);
+    while (!existsSync(join(dir, "ready"))) await new Promise(resolve => setTimeout(resolve, 20));
+    const db = new Database(join(dir, "connections.db"), { readonly: true, fileMustExist: true });
+    const stored = db.prepare("SELECT body FROM directory WHERE id = 1").get() as { body: string };
+    db.close();
+    const directory = JSON.parse(stored.body) as { connections: { leases: { entry: string }[] }[] };
+    expect(directory.connections.flatMap(connection => connection.leases).map(lease => lease.entry)).toEqual(["default"]);
+    writeFileSync(join(dir, "release"), "go");
+    const ran = await running;
+    expect(ran.code, ran.stderr).toBe(0);
   }, 20_000);
 
   it("charges a Z.ai lease from catalog token prices, not total_cost_usd", async () => {

@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel } from "../src/adapters/models.ts";
+import { fetchModelIds, launchChoice, modelMissing, PLACEHOLDER_MODELS, sameModel, smallModel } from "../src/adapters/models.ts";
+import { anthropicGatewayEnv } from "../src/adapters/runtime-claude.ts";
 
 const catalog = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 
@@ -69,6 +70,10 @@ describe("model lists", () => {
     expect(launchChoice(picks, "implement")).toEqual({ model: "glm-5.3", effort: "max" });
     expect(launchChoice(picks, "review")).toEqual({ model: "glm-5.3", effort: "high" });
     expect(launchChoice({ "*": "ask" }, "run")).toEqual({ model: "", effort: "high" });
+    for (const name of PLACEHOLDER_MODELS) {
+      expect(launchChoice({ "*": name }, "run").model).toBe("");
+      expect(anthropicGatewayEnv("http://127.0.0.1:9", name).ANTHROPIC_MODEL).toBeUndefined();
+    }
     expect(smallModel(["glm-5.3", "glm-5.3-flash"], "glm-5.3")).toBe("glm-5.3-flash");
     expect(smallModel(["kimi-k3"], "kimi-k3")).toBeNull();
   });

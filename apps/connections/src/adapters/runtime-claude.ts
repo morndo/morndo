@@ -25,6 +25,7 @@ import { StringDecoder } from "node:string_decoder";
 import type { Isolation } from "@morndo/domain";
 import { BUILTIN_FIRST_PARTY_HOST } from "../application/catalog.ts";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
+import { PLACEHOLDER_MODELS } from "./models.ts";
 import { HELPER_TTL_MS } from "./runtime-limits.ts";
 
 const ENV_ALLOW = ["PATH", "HOME", "LANG", "LC_ALL", "TERM", "TMPDIR", "TZ"] as const;
@@ -238,8 +239,6 @@ export function baseUrlProblem(baseUrl: string): string | null {
   return null;
 }
 
-const PLACEHOLDER_MODELS = new Set(["default", "ask"]);
-
 function namedModel(model: string): string | null {
   const trimmed = model.trim();
   if (trimmed === "" || PLACEHOLDER_MODELS.has(trimmed)) return null;
@@ -380,14 +379,15 @@ export class ClaudeRuntime implements Runtime {
   async execute(plan: RunPlan, extra: readonly string[], hooks?: ChildHooks): Promise<ChildResult> {
     const script = this.#bin.endsWith(".mjs") || this.#bin.endsWith(".js");
     const extraEnv = loginEnv("claude", plan.configDir);
+    let denyWebSearch = false;
     if (plan.subscription) await assertSubscription(this.#bin, ["auth", "status"], childEnv(this.#parent, extraEnv), "claude");
     else {
       Object.assign(extraEnv, anthropicGatewayEnv(this.#baseUrl, plan.model, plan.effort, plan.smallModel ?? "", this.#firstPartyHost));
       extraEnv.CLAUDE_CODE_API_KEY_HELPER_TTL_MS = String(HELPER_TTL_MS);
+      denyWebSearch = isThirdPartyAnthropicBase(this.#baseUrl, this.#firstPartyHost);
     }
-    const denyWebSearch = !plan.subscription && isThirdPartyAnthropicBase(this.#baseUrl, this.#firstPartyHost);
     const flags = plan.subscription
-      ? ["-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, null, denyWebSearch), ...extra]
+      ? ["-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, null), ...extra]
       : claudeArgv(this.#bin, plan, this.#helper, extra, denyWebSearch).slice(1);
     return runChild(script ? process.execPath : this.#bin, script ? [this.#bin, ...flags] : flags, {
       env: childEnv(this.#parent, extraEnv),

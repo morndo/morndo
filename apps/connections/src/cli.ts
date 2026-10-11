@@ -174,7 +174,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const listed = preset.models.source === "static" ? preset.models.ids : preset.prices.map(row => row.model);
   const small = smallModel(listed, model) ?? "";
   const reserve = Number(parsed.get("reserve") ?? "5");
-  const granted = ask(home, name, parsed, false, reserve);
+  const granted = ask(home, name, parsed, false, reserve, choice.model || "default");
   if (!granted.ok) return fail(io, granted.problem, granted.exit);
   const row = findConnection(home.store.load().directory, name);
   const lease = row && row.custody === "morndo" ? row.leases.find(item => item.id === granted.id) : undefined;
@@ -473,7 +473,7 @@ async function probe(home: Opened, name: string, io: Io, body: (connection: Conn
   finally { home.leases.close(name, granted.value.id, "done", null); }
 }
 
-function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, reserve: number): { ok: true; id: string } | { ok: false; problem: string; exit?: number } {
+function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, reserve: number, entry?: string): { ok: true; id: string } | { ok: false; problem: string; exit?: number } {
   const connection = findConnection(home.store.load().directory, name);
   if (!connection) return { ok: false, problem: "missing" };
   if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return { ok: false, problem: LOGIN_KEY_REFUSAL };
@@ -481,9 +481,10 @@ function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, re
   if (!holder) return { ok: false, problem: "holder" };
   home.runtime.current = gateRuntime(home, connection.runtime);
   const workspace = parsed.get("workspace") ?? home.env.PWD ?? process.cwd();
+  const recorded = entry ?? (launchChoice(presetOf(home.catalog, connection.vendor)?.defaultPicks ?? {}, parsed.get("role") ?? "run").model || "default");
   const granted = home.leases.lease(name, {
     role: parsed.get("role") ?? "run",
-    entry: launchChoice(presetOf(home.catalog, connection.vendor)?.defaultPicks ?? {}, parsed.get("role") ?? "run").model || "unspecified",
+    entry: recorded,
     holder, workspacePath: workspace, limit: LEASES, reserve, margin: 0, probe: probeLease,
   });
   if (!granted.ok) return { ok: false, problem: granted.error.problem, ...(granted.error.exit === undefined ? {} : { exit: granted.error.exit }) };
