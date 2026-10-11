@@ -90,10 +90,17 @@ describe("the step record (§6.2's marks, RL4)", () => {
     const back = beginStep(u, "rolling_back", { lockHeld: true });
     expect(back.ok && back.value.state).toBe("rolling_back");
     const manual = beginRollback({ machine });
-    expect(manual.state).toBe("rolling_back");
-    expect(manual.mark).toBe("rolling_back");
-    expect(manual.kind).toBe("rollback");
-    expect(manual.target).toEqual(v("0.4.2"));
+    expect(manual.ok).toBe(true);
+    if (manual.ok) {
+      expect(manual.value.state).toBe("rolling_back");
+      expect(manual.value.mark).toBe("rolling_back");
+      expect(manual.value.kind).toBe("rollback");
+      expect(manual.value.target).toEqual(v("0.4.2"));
+    }
+  });
+  it("negative control: with no previous Version there is nothing to roll back to — refused, never a rollback to itself", () => {
+    const fresh = { ...machine, previous: null };
+    expect(beginRollback({ machine: fresh })).toEqual({ ok: false, error: "no_previous" });
   });
 });
 

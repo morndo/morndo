@@ -494,12 +494,15 @@ export function beginUpdate(p: { id?: string; target: Version; machine: Installa
     state: "staged", mark: null, backups: [], migrations: null };
 }
 // The principal's rollback of a committed Version (§8.1): its own Update, whose first recorded mark is
-// `rolling_back`, written before anything stops.
-export function beginRollback(p: { id?: string; machine: Installation }): Update {
-  const previous = p.machine.previous ?? p.machine.current;
-  return { id: p.id ?? "", kind: "rollback", target: previous,
+// `rolling_back`, written before anything stops. With no previous Version (a first commit) there is nothing to
+// roll back to: refused by name — admit's refusal for the same ask is `no_entry` — never a silent Update that
+// stops the services and "restores" the Version already running.
+export function beginRollback(p: { id?: string; machine: Installation }): Result<Update, "no_previous"> {
+  const previous = p.machine.previous;
+  if (previous === null) return err("no_previous");
+  return ok({ id: p.id ?? "", kind: "rollback", target: previous,
     preUpdate: { current: p.machine.current, previous: p.machine.previous },
-    state: "rolling_back", mark: "rolling_back", backups: [], migrations: null };
+    state: "rolling_back", mark: "rolling_back", backups: [], migrations: null });
 }
 
 // The mark each state must stand in before a step may run (the marks are the states of §6.2's steps 3–7; the

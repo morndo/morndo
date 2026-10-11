@@ -1085,6 +1085,11 @@ export const CONTROLS: Control[] = [
     find: "swapping: [\"starting\", \"rolling_back\", \"abandoned\"],   // a crash between the two renames still runs the old Version",
     replace: "swapping: [\"starting\", \"rolling_back\"],",
     run: ["packages/domain/test/releases-state.test.ts"], expect: "swapping -> abandoned" },
+  // The review of 2026-10-11: with no previous Version there is nothing to roll back to — refused, never a self-rollback.
+  { id: "pr1-rollback-no-previous", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "if (previous === null) return err(\"no_previous\");",
+    replace: "if (false) return err(\"no_previous\");",
+    run: ["packages/domain/test/releases-state.test.ts"], expect: "no_previous" },
   { id: "pr1-state-mark-any-order", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (!MARK_NEEDS[mark].includes(u.state)) return err(\"step_out_of_order\");",
     replace: "if (false) return err(\"step_out_of_order\");",
