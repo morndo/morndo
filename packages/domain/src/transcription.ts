@@ -278,3 +278,12 @@ export function scheduleTranscriptions(rows: readonly Transcription[], limit: nu
       : { ...tx, position: slot.position, reason: slot.reason };
   });
 }
+
+// TX8: Text grants nothing. These are the words the composer may show, and only for the principal's own done
+// Upload — an agent's Recording is that agent's content. It becomes part of a Command only when the principal
+// sends it; that decision is Steering's, on send.
+export function composerText(tx: Transcription): string | null {
+  if (tx.state !== "done" || tx.text === null) return null;
+  if (tx.recording.kind !== "upload") return null;
+  return tx.text.edit ?? tx.text.text;
+}
