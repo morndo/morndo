@@ -6,7 +6,7 @@
 import Database from "better-sqlite3";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { HookEvent } from "@morndo/protocol";
+import { LIMITS, type HookEvent } from "@morndo/protocol";
 import { Audit } from "../src/adapters/audit.ts";
 import { openFleetDb } from "../src/adapters/db.ts";
 import { createLogger } from "../src/adapters/log.ts";
@@ -65,20 +65,32 @@ describe("the hook bus's delivery loop", () => {
 });
 
 describe("the liveness sweep", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
   it("a write lock held elsewhere (SQLITE_BUSY) is logged; every node stays online and is still pinged, nothing escapes, and last seen moves on afterwards", async () => {
+    // The sweeps run when the test says, each ping answered before the next, as in liveness.test.ts: on real 50 ms
+    // timers a busy event loop let a sweep run before the last pong was read, and the node went stale.
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const { log, lines } = capture();
-    const fleet = await startTestFleet({ pingMs: 50, log });
+    const fleet = await startTestFleet({ log });
     await fleet.online("pc");
     const mac = await fleet.online("mac");                                           // swept after pc
+    const pongs = vi.spyOn(fleet.connections, "pong");
+    const sweep = async () => {
+      const answered = pongs.mock.calls.length + 2;
+      vi.advanceTimersByTime(LIMITS.pingMs);
+      await until(() => pongs.mock.calls.length === answered);                     // both nodes answered its ping
+    };
     fleet.db.pragma("busy_timeout = 0");                                             // a lock fails at once instead of in 5 s
     const locker = new Database(fleet.config.dbPath);
     locker.exec("BEGIN IMMEDIATE");                                                  // another writer holds fleet.db
     try {
-      await until(() => lines.some(l => l.includes("database is locked")), 3000);
+      await sweep();
+      expect(lines.some(l => l.includes("database is locked"))).toBe(true);
       const before = fleet.nodes.active("pc")?.lastSeenAt ?? 0;
       let macPings = 0;
       mac.ws?.on("ping", () => { macPings++; });
-      await new Promise(r => setTimeout(r, 200));                                    // several sweeps under the lock
+      for (let i = 0; i < 3; i++) await sweep();                                     // several sweeps under the lock
       expect(fleet.connections.status("pc")).toBe("online");
       expect(fleet.connections.status("mac")).toBe("online");
       // pc's last-seen write failing is that node's alone: the sweep goes on to ping mac (the follow-up's control).
@@ -86,7 +98,8 @@ describe("the liveness sweep", () => {
       expect(lines.filter(l => l.includes("liveness sweep failed"))).toEqual([]);
       expect(escaped).toEqual([]);
       locker.exec("ROLLBACK");
-      await until(() => (fleet.nodes.active("pc")?.lastSeenAt ?? 0) > before, 3000);   // the next sweep writes again
+      await sweep();                                                                 // the next sweep writes again
+      expect(fleet.nodes.active("pc")?.lastSeenAt ?? 0).toBeGreaterThan(before);
       expect(fleet.connections.status("pc")).toBe("online");
       expect(escaped).toEqual([]);
     } finally { if (locker.inTransaction) locker.exec("ROLLBACK"); locker.close(); }
