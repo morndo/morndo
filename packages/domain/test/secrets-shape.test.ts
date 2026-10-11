@@ -31,8 +31,8 @@ const LEDGER = ["reference", "version", "fingerprint", "state"];
 const DIRECTORY = ["held", "ledger", "events"];
 const REQUEST_EVENTS: Record<RequestEvent["type"], readonly string[]> = {
   SecretRequested: ["type", "request", "node", "reference", "kind", "at"],
-  SecretRequestJoined: ["type", "request", "lane", "at"],
-  SecretRequestLeft: ["type", "request", "lane", "at"],
+  SecretRequestJoined: ["type", "request", "lane", "workspace", "at"],
+  SecretRequestLeft: ["type", "request", "lane", "workspace", "at"],
   SecretRequestWithdrawn: ["type", "request", "at"],
   SecretRequestStored: ["type", "request", "reference", "nodes", "version", "at", "command"],
   SecretRequestGranted: ["type", "request", "at", "command"],

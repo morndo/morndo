@@ -100,7 +100,7 @@ describe("verify 3 and 5: a waiter without a lane is its workspace (SR1, SR6)", 
     const j = value(joinRequest(opened(), { lane: null, workspace: "app-b", purpose: "Deploy" }, T + 1));
     expect(j.request.waiting.map(w => [w.lane, w.workspace, w.purpose])).toEqual([[null, "app-a", "Nightly job"], [null, "app-b", "Deploy"]]);
     expect(j.request.version).toBe(2);
-    expect(j.events).toEqual([{ type: "SecretRequestJoined", request: "r1", lane: null, at: T + 1 }]);
+    expect(j.events).toEqual([{ type: "SecretRequestJoined", request: "r1", lane: null, workspace: "app-b", at: T + 1 }]);
   });
   it("the same workspace without a lane again changes nothing, whatever its words", () => {
     const j = value(joinRequest(opened(), { lane: null, workspace: "app-a", purpose: "Nightly job, again" }, T + 1));

@@ -141,3 +141,23 @@ describe("follow-up 2: a withdrawal names its waiter by lane and workspace, so i
     expect(left.request.waiting.map(w => w.lane)).toEqual(["lane-b"]);
   });
 });
+
+describe("follow-up 1: Joined and Left name the waiter by lane and workspace, so the audit tells lane-less waiters apart", () => {
+  const ask: RequestAsk = {
+    node: "node-a", reference: REF, kind: "new", waiter: { lane: null, workspace: "app-a", purpose: "Nightly job" }, proposed: nodeGrant,
+  };
+  it("two callers without a lane: the one that leaves is named", () => {
+    let r = value(openRequest(ask, "r1", T)).request;
+    const joined = value(joinRequest(r, { lane: null, workspace: "app-b", purpose: "Deploy" }, T + 1));
+    expect(joined.events).toEqual([{ type: "SecretRequestJoined", request: "r1", lane: null, workspace: "app-b", at: T + 1 }]);
+    r = joined.request;
+    const left = value(withdrawRequest(r, { lane: null, workspace: "app-a" }, T + 2));
+    expect(left.events).toEqual([{ type: "SecretRequestLeft", request: "r1", lane: null, workspace: "app-a", at: T + 2 }]);
+  });
+  it("a lane's events carry the workspace it was seen in", () => {
+    let r = value(openRequest(ask, "r1", T)).request;
+    r = value(joinRequest(r, { lane: "lane-b", workspace: "example-app", purpose: "Deploy" }, T + 1)).request;
+    const left = value(withdrawRequest(r, { lane: "lane-b", workspace: "example-app" }, T + 2));
+    expect(left.events).toEqual([{ type: "SecretRequestLeft", request: "r1", lane: "lane-b", workspace: "example-app", at: T + 2 }]);
+  });
+});
