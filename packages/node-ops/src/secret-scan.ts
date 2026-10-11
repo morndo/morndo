@@ -208,9 +208,11 @@ export const emptySecretIndex = (): SecretIndex => ({ format: 1, versions: [] })
 
 const sameVersion = (v: IndexedVersion, reference: string, version: number) => v.reference === reference && v.version === version;
 
-// A version's entries, live: added, or put in place of the same (Reference, version).
+// A version's entries: added live, or put in place of the same (Reference, version). A retired version stays retired from
+// its first time, so adding it again can't restart its 30 days (T-88).
 export function withVersion(index: SecretIndex, reference: string, version: number, entries: readonly IndexEntry[]): SecretIndex {
-  return { format: 1, versions: [...index.versions.filter(v => !sameVersion(v, reference, version)), { reference, version, retiredAt: null, entries: [...entries] }] };
+  const retiredAt = index.versions.find(v => sameVersion(v, reference, version))?.retiredAt ?? null;
+  return { format: 1, versions: [...index.versions.filter(v => !sameVersion(v, reference, version)), { reference, version, retiredAt, entries: [...entries] }] };
 }
 
 // Retiring again keeps the first time, so the 30 days can't be stretched.
