@@ -474,6 +474,32 @@ One command an agent starts on one node. It keeps running after that turn and re
 
 A queued job has a position and a reason: `class` when the limit is full, `load` or `memory` when the guard is over the line, `guard_unknown` when a configured guard cannot be read. The guard is off unless the policy sets it. It never settles a running job.
 
+## Transcription: voice and audio files become text ([ADR-0021](adr/0021-optional-transcription-plugin.md))
+
+One attempt to turn one Recording into Text, on the hub's own machine, through a Transcriber plugin the default install does not include. Code in `packages/domain/src/transcription.ts`; the queue decision it shares with Jobs is in `packages/domain/src/queue.ts`. The domain decides the states, the caps and the queue. It reads no audio, starts no engine and keeps no clock.
+
+| Term | Means | Is not |
+|---|---|---|
+| Recording | An audio file the principal uploaded or recorded (an audio Upload), or an audio Attachment an agent sent. Known by its upload id or its hub file id. | A Transcript (Observation's word for a session log). |
+| Transcription | One attempt on one Recording, with a state, a queue position and reason, an outcome, and when done its Text. | A Job: no command line, no lane (TX1). |
+| Text | What the engine heard: the language, the segments, the joined words, the engine and model that produced them, and whether the principal edited them. | A Command, until the principal sends it. |
+| Language choice | `auto`, or a language code the engine lists. | A translation target. |
+| Capability | Whether a ready Transcriber is there now. Not a setting: it follows the probe. | A licence or a subscription. |
+
+| # | Invariant |
+|---|---|
+| TX1 | A Transcription runs on the hub's machine, from a file already there. No adapter in this design sends audio or text off that machine. |
+| TX2 | A Recording has at most one Transcription in flight. A repeat request for the same Recording and Language choice returns it. |
+| TX3 | A Transcription becomes terminal once (`done`, `failed`, `timed_out`, `cancelled`, `lost`). It is never re-run on its own. The principal may ask again, which makes a new Transcription. |
+| TX4 | A Transcription whose run is gone with no recorded end (a hub restart) becomes `lost`. The row stays. |
+| TX5 | At most `limit` Transcriptions run at once (default 1). Others wait in the order accepted, each with a visible position. The guard delays a start and never stops a run (as J5). |
+| TX6 | A Recording is at most 10 MiB and at most `maxSeconds` long (default 600). A longer one is `failed: too_long` before decoding the whole file where the engine can tell. Text is at most 64 KiB. |
+| TX7 | Text never replaces its Recording. An edit keeps the engine's text and marks the result `edited`. |
+| TX8 | Text grants nothing. It becomes part of a Command only when the principal sends it (AC7). Text from an agent's Recording is that agent's content and is never offered as the principal's Command. |
+| TX9 | With no Capability, nothing in this context runs or is offered. Audio Uploads are refused as on `main`, and the microphone stays blocked. |
+
+A waiting Transcription carries a position and a reason, the queue's own words as for Jobs (`class`, `load`, `memory`, `guard_unknown`). `failed` names a problem: `unreadable`, `too_long`, `not_ready`, `bad_output` or `engine`. The events are `TranscriptionRequested`, `TranscriptionStarted`, `TranscriptionEnded` (the only one that carries Text, and it is never logged), `TextEdited` and `CapabilityChanged`; none carries audio. An audio file is known by its own bytes as an image is: `sniffAudio` names the container (`OggS`; the EBML magic; `ftyp` at offset 4, which a Safari `.m4a` has; `ID3` or an MPEG frame sync; `RIFF`…`WAVE`). An audio Upload is on Steering's list only while the Capability is there (S1).
+
 ## On the phone: chats, status, and a digest after an absence ([ADR-0011](adr/0011-phone-chat-app.md))
 
 Since ADR-0011 the phone's catch-up holds decision cards only (C2 and C3's update cards are no longer made there). Updates wait in each lane's chat; a digest sums them up only after a real absence.
@@ -508,6 +534,8 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Verification supplies Authority*: a conditional Mandate ("ship when green") references a Verdict, never a Claim.
 - *Board stands beside Observation*: the board says what a lane was asked to do and where it stands; Observation says what the lane is doing on its screen. Neither decides anything for the other, and the board grants nothing (B8). A lane's "in review" is its word, as "says done" is in Catch-up (C5).
 - *Jobs stand beside the board and the fleet*. A task notice is one comment and does not move the task (B3, B8, J7). The fleet stores the job's state and a redacted tail. It never stores the command (J1, FL14). The node decides when a queued job may start (J5).
+- *Jobs supplies Transcription* with the queue decision. This is a shared rule (`packages/domain/src/queue.ts`), not shared rows: one class, at most its limit, FIFO with a visible position, a guard that delays a start and never stops a run (J5, TX5).
+- *Transcription supplies Steering*: a done Transcription's Text can become a Command's text, and only the principal's send makes it one (AC7, TX8); an audio Upload is on Steering's list only while the Capability is there (TX9, S1).
 - *Fleet supplies Observation and Steering* (customer and supplier). Observation reads workers, screens and transcripts through it. A Command (S5) and the delivery of a Decision (E8) reach a pane as keyed operations, so neither is typed twice across a dropped connection (FL7). The Hook bus feeds the chat bot, a subscriber, which turns hook events into Escalations through its own adapter.
 - *Engines is downstream of Connections* (customer and supplier). A connection name is the provider name the routing policy orders. Connections never reads the routing policy, and no spend figure decides anything but the lease gate (CN15).
 - *Connections stands beside Usage*. Usage shows a subscription's windows. It does not grant a lease.
