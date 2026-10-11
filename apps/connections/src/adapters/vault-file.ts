@@ -3,9 +3,10 @@ import { existsSync, unlinkSync } from "node:fs";
 import { assertPrivate, readPrivate, writePrivate } from "./file-mode.ts";
 import { fingerprintOf, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
+import type { SealedProblem, SealedStore } from "../application/ports.ts";
 import type { Vault } from "./vault.ts";
 
-export class FileVault implements Vault {
+export class FileVault implements Vault, SealedStore {
   readonly #dir: string;
   readonly #uid: number;
   constructor(dir: string, uid?: number) {
@@ -32,6 +33,14 @@ export class FileVault implements Vault {
   async fingerprint(ref: string): Promise<string | null> {
     if (!this.has(ref)) return null;
     return fingerprintOf((await this.open(ref)).bytes());
+  }
+
+  async storeSealed(_ref: string, _sealed: Uint8Array): Promise<{ ok: true; fingerprint: string } | { ok: false; problem: SealedProblem }> {
+    return { ok: false, problem: "not_age" };
+  }
+
+  async keyedFingerprint(_ref: string): Promise<string | null> {
+    return null;
   }
 
   remove(ref: string): void {

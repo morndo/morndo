@@ -7,7 +7,10 @@ import { Encrypter, generateX25519Identity, identityToRecipient } from "age-encr
 import { afterEach, describe, expect, it } from "vitest";
 import type { SealedStore } from "../src/application/ports.ts";
 import { FileRefused, durable } from "../src/adapters/file-mode.ts";
+import { SecretMaterial } from "../src/adapters/secret-material.ts";
 import { AgeVault } from "../src/adapters/vault-age.ts";
+import { FileVault } from "../src/adapters/vault-file.ts";
+import { MemorySealedStore } from "./sealed-store-fake.ts";
 
 const value = new TextEncoder().encode("synthetic-sealed-value-0123");
 const other = new TextEncoder().encode("synthetic-sealed-value-4567");
@@ -33,8 +36,10 @@ type Subject = {
   seal(bytes: Uint8Array): Promise<Uint8Array>;
   sealForOthers(bytes: Uint8Array, alsoMine: boolean): Promise<Uint8Array>;
   open(ref: string): Promise<Uint8Array>;
-  // File adapters: the vault directory, the identity file and the node's home; null for the in-memory fake.
-  files: { vault: string; identity: string; home: string; withUid(uid: number): SealedStore } | null;
+  // Puts a value under `ref` the way this adapter keeps one: stored sealed, or, in the plaintext vault, by its own seal.
+  plant(ref: string): Promise<void>;
+  // File adapters: the vault directory, the identity file, a ref's file and another owner's view; null for the fake.
+  files: { vault: string; identity: string; fileOf(ref: string): string; withUid(uid: number): SealedStore } | null;
 };
 type Adapter = { name: string; sealing: boolean; make(home?: string): Promise<Subject> };
 
@@ -57,12 +62,50 @@ const ageVault: Adapter = {
       seal: bytes => sealTo([mine], bytes),
       sealForOthers: async (bytes, alsoMine) => sealTo(alsoMine ? [mine, await stranger()] : [await stranger()], bytes),
       open: async ref => (await store.open(ref)).bytes(),
-      files: { vault, identity, home, withUid: uid => new AgeVault(vault, identity, uid) },
+      plant: async ref => { await store.storeSealed(ref, await sealTo([mine], value)); },
+      files: { vault, identity, fileOf: ref => join(vault, `${ref}.age`), withUid: uid => new AgeVault(vault, identity, uid) },
     };
   },
 };
 
-const ADAPTERS: readonly Adapter[] = [ageVault];
+// The plaintext migration vault takes no sealed value (D1, decided on T-85).
+const fileVault: Adapter = {
+  name: "vault-file",
+  sealing: false,
+  async make(home = node()) {
+    const vault = join(home, "vault");
+    const identity = join(home, "identity");
+    const store = new FileVault(vault);
+    return {
+      store,
+      seal: async bytes => sealTo([await stranger()], bytes),
+      sealForOthers: async (bytes, alsoMine) => sealTo(alsoMine ? [await stranger(), await stranger()] : [await stranger()], bytes),
+      open: async ref => (await store.open(ref)).bytes(),
+      plant: ref => store.seal(ref, new SecretMaterial(value)),
+      files: { vault, identity, fileOf: ref => join(vault, ref), withUid: uid => new FileVault(vault, uid) },
+    };
+  },
+};
+
+const fake: Adapter = {
+  name: "fake",
+  sealing: true,
+  async make(home?: string) {
+    // A node is its key: the same home gives the same key, another home another.
+    const key = new Uint8Array(32).fill(home === undefined ? 11 : home.length % 200);
+    const store = new MemorySealedStore("fake1-node", key);
+    return {
+      store,
+      seal: async bytes => MemorySealedStore.seal(["fake1-node"], bytes),
+      sealForOthers: async (bytes, alsoMine) => MemorySealedStore.seal(alsoMine ? ["fake1-node", "fake1-other"] : ["fake1-other"], bytes),
+      open: async ref => (await store.open(ref)).bytes(),
+      plant: async ref => { await store.storeSealed(ref, MemorySealedStore.seal(["fake1-node"], value)); },
+      files: null,
+    };
+  },
+};
+
+const ADAPTERS: readonly Adapter[] = [ageVault, fileVault, fake];
 
 for (const adapter of ADAPTERS) {
   describe(`the sealed store contract: ${adapter.name}`, () => {
@@ -123,33 +166,38 @@ for (const adapter of ADAPTERS) {
         if (s.files) expect(readdirSync(s.files.vault).filter(n => n.includes(".tmp"))).toEqual([]);
       });
     }
+    if (!adapter.sealing) {
+      it("D1: a sealed value is refused, never kept as plaintext; nothing is written", async () => {
+        const s = await adapter.make();
+        expect(await s.store.storeSealed("s-0013", await s.seal(value))).toEqual({ ok: false, problem: "plaintext_vault" });
+        expect(s.store.has("s-0013")).toBe(false);
+        if (s.files) expect(existsSync(s.files.vault) ? readdirSync(s.files.vault) : []).toEqual([]);
+      });
+    }
     it("criterion 7: has opens nothing: with the identity gone it still answers, and makes none", async () => {
       const s = await adapter.make();
-      if (adapter.sealing) await s.store.storeSealed("s-0010", await s.seal(value));
-      if (!s.files) {
-        expect(s.store.has("s-0010")).toBe(adapter.sealing);
-        return;
-      }
-      rmSync(s.files.identity, { force: true });
-      expect(s.store.has("s-0010")).toBe(adapter.sealing);
-      expect(existsSync(s.files.identity)).toBe(false);
+      await s.plant("s-0010");
+      if (s.files) rmSync(s.files.identity, { force: true });
+      expect(s.store.has("s-0010")).toBe(true);
+      expect(s.store.has("s-0099")).toBe(false);
+      if (s.files) expect(existsSync(s.files.identity)).toBe(false);
     });
   });
 }
 
-for (const adapter of ADAPTERS.filter(a => a.sealing && a.name !== "fake")) {
+for (const adapter of ADAPTERS.filter(a => a.name !== "fake")) {
   describe(`file adapters: ${adapter.name}`, () => {
     it("criterion 5: a 0644 vault file is refused before it is read", async () => {
       const s = await adapter.make();
-      await s.store.storeSealed("s-0011", await s.seal(value));
+      await s.plant("s-0011");
       if (!s.files) throw new Error("a file adapter");
-      chmodSync(join(s.files.vault, "s-0011.age"), 0o644);
+      chmodSync(s.files.fileOf("s-0011"), 0o644);
       expect(() => s.store.has("s-0011")).toThrow(FileRefused);
       await expect(s.store.keyedFingerprint("s-0011")).rejects.toThrow(FileRefused);
     });
     it("criterion 5: a vault file with a foreign owner is refused before it is read", async () => {
       const s = await adapter.make();
-      await s.store.storeSealed("s-0012", await s.seal(value));
+      await s.plant("s-0012");
       if (!s.files) throw new Error("a file adapter");
       const foreign = s.files.withUid(statSync(s.files.vault).uid + 1);
       expect(() => foreign.has("s-0012")).toThrow(/owned by someone else/);
