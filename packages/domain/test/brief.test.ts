@@ -437,6 +437,14 @@ describe("DB7 everywhere a field lands in briefMarkdown (§4.5: an old app rende
     expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "1.5 hours of script time."; })).toEqual([]);
     expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "*must* hold for every ticket type."; })).toEqual([]);
   });
+  it("three leading backticks are refused only when they open a fence: a backtick in the info string is inline code (DB7)", () => {
+    // CommonMark: a backtick fence's info string may not contain a backtick, so the second run closes inline code
+    // instead (marked 18.0.14 renders <code>npm test</code>, checked 2026-10-11).
+    expect(lines(d => { (d.why as { assumptions: string[] }).assumptions = ["```npm test``` passes on main", "the sample holds."]; }))
+      .toEqual([]);
+    expect(lines(d => { (d.authorizes as { limits: string[] }).limits[0] = "```"; }))
+      .toEqual(["error bad_markdown (authorizes.limits[0])"]);
+  });
   it("an evidence label can't break out of its link, nor a url carry one in", () => {
     expect(lines(d => { ((d.evidence as { label: string; url: string }[])[0]!).url = "https://x) [y](http://evil"; }))
       .toEqual(["error bad_link (evidence[0].url)"]);
