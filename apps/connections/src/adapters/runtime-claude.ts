@@ -232,17 +232,28 @@ export function baseUrlProblem(baseUrl: string): string | null {
   return null;
 }
 
+const PLACEHOLDER_MODELS = new Set(["default", "ask"]);
+
+function namedModel(model: string): string | null {
+  const trimmed = model.trim();
+  if (trimmed === "" || PLACEHOLDER_MODELS.has(trimmed)) return null;
+  return trimmed;
+}
+
 export function anthropicGatewayEnv(baseUrl: string, model: string): Record<string, string> {
   const problem = baseUrlProblem(baseUrl);
   if (problem) throw new Error(problem);
   if (!isThirdPartyAnthropicBase(baseUrl)) return {};
+  const named = namedModel(model);
+  const env: Record<string, string> = { ANTHROPIC_BASE_URL: baseUrl };
+  if (!named) return env;
   return {
-    ANTHROPIC_BASE_URL: baseUrl,
-    ANTHROPIC_MODEL: model,
-    ANTHROPIC_DEFAULT_OPUS_MODEL: model,
-    ANTHROPIC_DEFAULT_SONNET_MODEL: model,
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
-    CLAUDE_CODE_SUBAGENT_MODEL: model,
+    ...env,
+    ANTHROPIC_MODEL: named,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: named,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: named,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: named,
+    CLAUDE_CODE_SUBAGENT_MODEL: named,
   };
 }
 

@@ -168,7 +168,8 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const problem = baseUrlProblem(baseUrl);
     if (problem) return fail(io, problem);
   }
-  const model = wantedModel(preset.defaultPicks["*"]) ?? "default";
+  const picked = wantedModel(preset.defaultPicks["*"]);
+  const model = picked === null || picked === "default" || picked === "ask" ? "" : picked;
   const reserve = Number(parsed.get("reserve") ?? "5");
   const granted = ask(home, name, parsed, false, reserve);
   if (!granted.ok) return fail(io, granted.problem, granted.exit);

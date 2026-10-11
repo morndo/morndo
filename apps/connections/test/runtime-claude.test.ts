@@ -30,6 +30,18 @@ describe("anthropic-compatible base URL", () => {
     expect(first.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(first.ANTHROPIC_MODEL).toBeUndefined();
   });
+
+  it("keeps placeholder model names out of the gateway environment", () => {
+    for (const name of ["default", "ask"]) {
+      const env = childEnv({}, anthropicGatewayEnv("http://127.0.0.1:9", name));
+      expect(env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:9");
+      expect(env.ANTHROPIC_MODEL).toBeUndefined();
+      expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
+      expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
+      expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeUndefined();
+      expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
+    }
+  });
 });
 
 describe("base URL", () => {
