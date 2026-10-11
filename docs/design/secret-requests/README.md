@@ -425,8 +425,8 @@ As built in PR 2a (T-88, `packages/node-ops/src/secret-scan.ts`):
   - A hit's range also takes the one character on each side that carries bits of both the value and a neighbour, plus up to two `=`. Redacting it leaves no bit of the value.
 - Identical forms are kept once.
 - **The streaming scanner** holds back the bytes from the first position it hasn't checked. It checks a position once the longest match from it could have arrived, and checks every position left at the end of the stream. Each step says up to where the bytes are settled.
-- **A retired version** is kept while now minus its retirement is at most 30 days. Retiring it again keeps the first time.
-- **The index file** is JSON: References, versions, retirement times and keyed hashes, parsed strictly, with an unknown key refusing the whole file.
+- **A retired version** is kept while now minus its retirement is at most 30 days. Retiring it again keeps the first time. Pruning keeps, per Reference, the highest version it dropped; versions are never reused, so adding one at or under that mark is a replay and indexes nothing (decided on T-94).
+- **The index file** is JSON: References, versions, retirement times, keyed hashes and the pruned marks, parsed strictly, with an unknown key refusing the whole file.
   - `secret-index-file.ts` opens it without following a link. On that one descriptor it refuses anything but a regular file this user owns, at 0600 or tighter.
   - No file reads as an empty index; the writer creates it before the first store confirms (PR 2b).
 - **Cost, measured** on the build box (Node 22.23.3, 2026-10-12): about 0.3 MiB/s.

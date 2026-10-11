@@ -1220,6 +1220,12 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-link-emlink", task: "secrets-pr2b", file: "packages/node-ops/src/secret-index-file.ts",
     find: "[\"ELOOP\", \"EMLINK\", ", replace: "[\"ELOOP\", ",
     run: ["packages/node-ops/test/secret-index-file-check.test.ts"], expect: "EMLINK" },
+  { id: "sp2b-pruned-replay", task: "secrets-pr2b", file: "packages/node-ops/src/secret-scan.ts",
+    find: "  if (index.pruned.some(p => p.reference === reference && version <= p.through)) return index;\n", replace: "",
+    run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "to deeply equal" },
+  { id: "sp2b-pruned-mark", task: "secrets-pr2b", file: "packages/node-ops/src/secret-scan.ts",
+    find: "if (!kept(v, now)) through.set(", replace: "if (false) through.set(",
+    run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "to deeply equal" },
 ];
 
 // ---- the runner

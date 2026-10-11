@@ -228,8 +228,10 @@ export const emptySecretIndex = (): SecretIndex => ({ format: 1, versions: [], p
 const sameVersion = (v: IndexedVersion, reference: string, version: number) => v.reference === reference && v.version === version;
 
 // A version's entries: added live, or put in place of the same (Reference, version). A retired version stays retired from
-// its first time, so adding it again can't restart its 30 days (T-88).
+// its first time, so adding it again can't restart its 30 days (T-88). One at or under the Reference's pruned mark is a
+// replay, since versions are never reused, and changes nothing (T-94).
 export function withVersion(index: SecretIndex, reference: string, version: number, entries: readonly IndexEntry[]): SecretIndex {
+  if (index.pruned.some(p => p.reference === reference && version <= p.through)) return index;
   const retiredAt = index.versions.find(v => sameVersion(v, reference, version))?.retiredAt ?? null;
   return { ...index, versions: [...index.versions.filter(v => !sameVersion(v, reference, version)), { reference, version, retiredAt, entries: [...entries] }] };
 }
@@ -244,7 +246,12 @@ const kept = (v: IndexedVersion, now: number) => v.retiredAt === null || now - v
 // What the scanner looks for now: every live version, and every retired one for 30 days.
 export const liveEntries = (index: SecretIndex, now: number): IndexEntry[] => index.versions.filter(v => kept(v, now)).flatMap(v => v.entries);
 
-export const pruneIndex = (index: SecretIndex, now: number): SecretIndex => ({ ...index, versions: index.versions.filter(v => kept(v, now)) });
+// Drops what the 30 days no longer cover, and raises each such Reference's mark to the highest version dropped.
+export function pruneIndex(index: SecretIndex, now: number): SecretIndex {
+  const through = new Map(index.pruned.map(p => [p.reference, p.through]));
+  for (const v of index.versions) if (!kept(v, now)) through.set(v.reference, Math.max(through.get(v.reference) ?? 0, v.version));
+  return { format: 1, versions: index.versions.filter(v => kept(v, now)), pruned: [...through].map(([reference, n]) => ({ reference, through: n })) };
+}
 
 // The file's text: References, versions, times and keyed hashes, never a form.
 export const serializeIndex = (index: SecretIndex): string => `${JSON.stringify(index)}\n`;
