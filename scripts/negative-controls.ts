@@ -1080,6 +1080,11 @@ export const CONTROLS: Control[] = [
     find: "export const updateCanMove = (from: UpdateState, to: UpdateState): boolean => UPDATE_MOVES[from].includes(to);",
     replace: "export const updateCanMove = (from: UpdateState, to: UpdateState): boolean => from !== to;",
     run: ["packages/domain/test/releases-state.test.ts"], expect: "checked -> draining" },
+  // The review of 2026-10-11: the swapping -> abandoned edge — a crash between the two renames abandons (§4.4, §6.6).
+  { id: "pr1-state-swap-abandoned", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "swapping: [\"starting\", \"rolling_back\", \"abandoned\"],   // a crash between the two renames still runs the old Version",
+    replace: "swapping: [\"starting\", \"rolling_back\"],",
+    run: ["packages/domain/test/releases-state.test.ts"], expect: "swapping -> abandoned" },
   { id: "pr1-state-mark-any-order", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (!MARK_NEEDS[mark].includes(u.state)) return err(\"step_out_of_order\");",
     replace: "if (false) return err(\"step_out_of_order\");",

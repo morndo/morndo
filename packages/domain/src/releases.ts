@@ -467,7 +467,7 @@ const UPDATE_MOVES: Readonly<Record<UpdateState, readonly UpdateState[]>> = {
   draining: ["stopping", "abandoned"],
   stopping: ["backing_up", "abandoned"],
   backing_up: ["swapping", "abandoned"],
-  swapping: ["starting", "rolling_back"],
+  swapping: ["starting", "rolling_back", "abandoned"],   // a crash between the two renames still runs the old Version
   starting: ["probation", "rolling_back"],
   probation: ["committed", "rolling_back"],
   committed: [], skipped: [], abandoned: [], rolled_back: [], rollback_failed: [],

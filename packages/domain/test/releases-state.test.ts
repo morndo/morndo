@@ -16,15 +16,16 @@ const MIN = 60_000;
 const NOW = 1_790_000_000_000;
 
 describe("the Update state table (§4.4's diagram, exactly)", () => {
-  // The diagram's edges. `skipped` only from `checked`; `abandoned` from staged through backing_up (nothing
-  // swapped); `rolling_back` from the swap onward; the terminals admit nothing.
+  // The diagram's edges. `skipped` only from `checked`; `abandoned` from staged through swapping — before the
+  // swap is done nothing moved, and a crash between the two renames still runs the old Version, so it abandons;
+  // `rolling_back` from the swap onward; the terminals admit nothing.
   const EDGES: readonly (readonly [UpdateState, UpdateState])[] = [
     ["checked", "staged"], ["checked", "skipped"],
     ["staged", "draining"], ["staged", "abandoned"],
     ["draining", "stopping"], ["draining", "abandoned"],
     ["stopping", "backing_up"], ["stopping", "abandoned"],
     ["backing_up", "swapping"], ["backing_up", "abandoned"],
-    ["swapping", "starting"], ["swapping", "rolling_back"],
+    ["swapping", "starting"], ["swapping", "rolling_back"], ["swapping", "abandoned"],
     ["starting", "probation"], ["starting", "rolling_back"],
     ["probation", "committed"], ["probation", "rolling_back"],
     ["rolling_back", "rolled_back"], ["rolling_back", "rollback_failed"],
@@ -126,6 +127,25 @@ describe("the recovery table (§6.6, verbatim)", () => {
   it("negative control: without the apply lock, whatever runs next acts on nothing", () => {
     expect(recover({ format: 1, mark: "starting", committed: false, current: v("0.5.0"), preUpdate, target, lockHeld: false }))
       .toEqual({ ok: false, error: "apply_lock" });
+  });
+  it("negative control: every recovery decision is a move the state table allows — the tables agree", () => {
+    // The state each mark stands the Update in (null: staged, nothing started), and the states each act implies
+    // where it has them. A decision the diagram refuses can never be recorded: that is a table disagreeing
+    // with recover(), and the recovery would be stuck with no legal move.
+    const standsIn: Record<string, UpdateState> = { "": "staged", draining: "draining", stopping: "stopping",
+      backing_up: "backing_up", swapping: "swapping", starting: "starting", committing: "probation", rolling_back: "rolling_back" };
+    const implies: Record<string, readonly UpdateState[]> = {
+      abandon: ["abandoned"], continue_apply: ["starting"], judge_health: ["probation", "rolling_back"],
+      continue_rollback: ["rolled_back", "rollback_failed"], finish_commit: ["committed"], nothing: [],
+    };
+    for (const row of ROWS) {
+      const r = recover({ format: row.format ?? 1, mark: row.mark, committed: row.committed ?? false,
+        current: v(row.current ?? "0.4.3"), preUpdate, target, lockHeld: true });
+      expect(r.ok, row.name).toBe(true);
+      if (!r.ok) continue;
+      for (const to of implies[r.value.act] ?? [])
+        expect(updateCanMove(standsIn[row.mark ?? ""], to), `${row.name}: ${standsIn[row.mark ?? ""]} -> ${to}`).toBe(true);
+    }
   });
 });
 
