@@ -3,7 +3,7 @@
 // recording caps, sniffAudio, one attempt per recording, one terminal outcome, the queue via the shared rule, and
 // the text it produced. No engine name, no file, no clock of its own.
 import { describe, expect, it } from "vitest";
-import { NO_CAPABILITY, requestTranscription, sniffAudio, type Transcription, type TranscriptionBody } from "../src/index.ts";
+import { afterRestart, endTranscription, NO_CAPABILITY, requestTranscription, sniffAudio, startTranscription, type Transcription, type TranscriptionBody } from "../src/index.ts";
 
 const bytes = (head: number[], ...rest: number[]) => new Uint8Array([...head, ...rest]);
 const AT = 1_700_000_000_000;
@@ -78,5 +78,63 @@ describe("requesting a transcription", () => {
     const again = value(requestTranscription([done], ask({ id: "tx-9" }), AT + 9, READY));
     expect(again).toMatchObject({ id: "tx-9", state: "queued", acceptedAt: AT + 9 });
     expect(done.state).toBe("failed");
+  });
+});
+
+describe("starting and ending a transcription", () => {
+  const starting = (over: Partial<Transcription> = {}): Transcription => ({ ...live(), state: "starting", ...over });
+  const run = (over: Partial<Transcription> = {}): Transcription => ({ ...live(), state: "running", startedAt: AT + 10, ...over });
+
+  it("a start moves starting to running and stamps when work began; a repeat changes nothing", () => {
+    const begun = value(startTranscription(starting(), AT + 10));
+    expect(begun).toMatchObject({ state: "running", startedAt: AT + 10 });
+    expect(value(startTranscription(begun, AT + 20))).toBe(begun);
+    expect(startTranscription(live(), AT)).toEqual({ ok: false, error: "not_starting" });
+  });
+
+  it("done keeps the engine's words and when it ended, and only a running attempt can finish", () => {
+    const done = value(endTranscription(run(), { outcome: "done", at: AT + 40, durationSec: 30, language: "de", text: "guten Morgen", engine: "local", model: "small" }));
+    expect(done).toMatchObject({
+      state: "done", outcome: "done", endedAt: AT + 40, position: null, reason: null,
+      text: { language: "de", text: "guten Morgen", edited: false, engine: "local", model: "small" },
+    });
+    expect(endTranscription(live(), { outcome: "done", at: AT, durationSec: 1, language: "de", text: "x", engine: "e", model: "m" }))
+      .toEqual({ ok: false, error: "not_running" });
+  });
+
+  it("failed names its problem, even before a start: an engine that is not ready fails a queued attempt", () => {
+    const queuedFail = value(endTranscription(live(), { outcome: "failed", at: AT + 1, durationSec: 0, problem: "not_ready" }));
+    expect(queuedFail).toMatchObject({ state: "failed", outcome: "failed", problem: "not_ready", text: null, endedAt: AT + 1 });
+    const runFail = value(endTranscription(run(), { outcome: "failed", at: AT + 20, durationSec: 5, problem: "engine" }));
+    expect(runFail).toMatchObject({ state: "failed", problem: "engine" });
+  });
+
+  it("a timeout needs a run; a cancel works at any live state, queued ones never ran", () => {
+    expect(endTranscription(live(), { outcome: "timed_out", at: AT + 9, durationSec: 1 })).toEqual({ ok: false, error: "not_running" });
+    const queuedCancel = value(endTranscription(live(), { outcome: "cancelled", at: AT + 2 }));
+    expect(queuedCancel).toMatchObject({ state: "cancelled", outcome: "cancelled", startedAt: null, endedAt: AT + 2 });
+    const runCancel = value(endTranscription(run(), { outcome: "cancelled", at: AT + 30 }));
+    expect(runCancel).toMatchObject({ state: "cancelled", startedAt: AT + 10 });
+  });
+
+  it("terminal once: the same end again is the same row, a different one is refused (TX3)", () => {
+    const done = value(endTranscription(run(), { outcome: "done", at: AT + 40, durationSec: 30, language: "de", text: "guten Morgen", engine: "local", model: "small" }));
+    const same = { outcome: "done", at: AT + 99, durationSec: 30, language: "de", text: "guten Morgen", engine: "local", model: "small" } as const;
+    expect(value(endTranscription(done, same))).toBe(done);
+    expect(endTranscription(done, { outcome: "done", at: AT + 99, durationSec: 30, language: "de", text: "andere Worte", engine: "local", model: "small" }))
+      .toEqual({ ok: false, error: "already_terminal" });
+    expect(endTranscription(done, { outcome: "cancelled", at: AT + 99 })).toEqual({ ok: false, error: "already_terminal" });
+  });
+
+  it("a restart with no recorded end marks the run lost and keeps the row; what never ran waits on (TX4)", () => {
+    const rows = [live({ id: "tx-q" }), starting({ id: "tx-s" }), run({ id: "tx-r" }),
+      value(endTranscription(run({ id: "tx-d" }), { outcome: "done", at: AT + 40, durationSec: 30, language: "de", text: "w", engine: "e", model: "m" }))];
+    const after = afterRestart(rows, AT + 60);
+    expect(after.find(r => r.id === "tx-q")).toMatchObject({ state: "queued" });
+    expect(after.find(r => r.id === "tx-s")).toMatchObject({ state: "lost", outcome: "lost", endedAt: AT + 60, text: null });
+    expect(after.find(r => r.id === "tx-r")).toMatchObject({ state: "lost", outcome: "lost", endedAt: AT + 60 });
+    expect(after.find(r => r.id === "tx-d")).toMatchObject({ state: "done" });
+    expect(after.find(r => r.id === "tx-r")).not.toHaveProperty("position", 1);
+    expect(afterRestart(after, AT + 70).find(r => r.id === "tx-r")).toMatchObject({ state: "lost" });
   });
 });
