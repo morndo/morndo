@@ -3,7 +3,7 @@
 // doesn't name is refused whole. The words table is the one the CLI and the page share; the token shape catalog is data
 // (catalog/secret-shapes.json), each shape with its source.
 import {
-  DESTINATION_HOST, KEYED_FINGERPRINT, LANE_NAME, NODE_LABEL, PURPOSE_MAX, REQUEST_KINDS, REQUEST_STATES, SECRET_STATUSES,
+  DESTINATIONS_MAX, DESTINATION_HOST, KEYED_FINGERPRINT, LANE_NAME, NODE_LABEL, PURPOSE_MAX, REQUEST_KINDS, REQUEST_STATES, SECRET_STATUSES,
   SHAPE_ID, USE_MODES, USE_REFUSAL_REASONS, WORKSPACE_NAME, hostsOk, modesOk, parseReference, plainText,
 } from "@morndo/domain";
 import { ED25519_SIGNATURE } from "./fleet.ts";
@@ -45,14 +45,14 @@ export const WireGrantSubject = z.discriminatedUnion("kind", [
 ]);
 export const WireGrant = z.strictObject({
   subject: WireGrantSubject,
-  modes: z.array(mode()).check(z.refine(modesOk, "at least one mode, each once")),
+  modes: z.array(mode()).check(z.minLength(1), z.maxLength(USE_MODES.length), z.refine(modesOk, "each mode once")),
   until: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("open") }),
     z.strictObject({ kind: z.literal("at"), at: when() }),
     z.strictObject({ kind: z.literal("lane-end") }),
   ]),
 });
-const destinations = () => z.array(host()).check(z.refine(hostsOk, "at most ten hosts, each once"));
+const destinations = () => z.array(host()).check(z.maxLength(DESTINATIONS_MAX), z.refine(hostsOk, "each host once"));
 
 // Node to hub: a request, as the node saw it (design §4.1). The hub takes it in through NodeRequests.
 export const SecretRequestedEvent = z.strictObject({
