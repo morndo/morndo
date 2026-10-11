@@ -160,10 +160,17 @@ function mergeRanges(ranges: readonly ScanRange[]): ScanRange[] {
 // arrived, so the bytes from the first unchecked position on are held back; at the end, every position left is checked
 // with what there is.
 export function createScanner(entries: readonly IndexEntry[], keyed: Keyed): Scanner {
+  // One pass, no argument spread: an index of many versions would overflow the call stack (T-88).
   const heads = new Map<string, IndexEntry[]>();
-  for (const e of entries) heads.set(e.head, [...(heads.get(e.head) ?? []), e]);
-  const maxReach = Math.max(SCAN_WINDOW, ...entries.map(reachOf));
-  const maxBefore = Math.max(0, ...entries.map(e => e.before));
+  let maxReach = SCAN_WINDOW;
+  let maxBefore = 0;
+  for (const e of entries) {
+    const same = heads.get(e.head);
+    if (same) same.push(e);
+    else heads.set(e.head, [e]);
+    maxReach = Math.max(maxReach, reachOf(e));
+    maxBefore = Math.max(maxBefore, e.before);
+  }
   let held = new Uint8Array(0);   // the bytes from `base` on
   let base = 0;
   let next = 0;                   // the first position not yet checked
