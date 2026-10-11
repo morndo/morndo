@@ -36,9 +36,9 @@ beforeEach(() => {
   t = isolatedTmux();
   h = opsHarness({ home: home.home, socket: t.socket, policy: { repoRoots: [join(home.home, "code")] } });
 });
-afterEach(() => {
+afterEach(async () => {
   h.close();
-  t.kill();
+  await t.kill();
   process.env.PATH = savedPath;
   if (savedArgvDir === undefined) delete process.env.MORNDO_TEST_ARGV; else process.env.MORNDO_TEST_ARGV = savedArgvDir;
   home.cleanup();

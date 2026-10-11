@@ -37,7 +37,7 @@ afterEach(async () => {
     await exec("systemctl", ["--user", "reset-failed", unit]).catch(() => {});
   }
   await fleet.close();
-  t.kill();
+  await t.kill();
   home.cleanup();
 });
 

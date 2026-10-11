@@ -26,7 +26,7 @@ beforeEach(() => {
   writeFileSync(transcript, `${lines.join("\n")}\n`);
   h = opsHarness({ home: home.home, socket: t.socket });
 });
-afterEach(() => { h.close(); t.kill(); home.cleanup(); });
+afterEach(async () => { h.close(); await t.kill(); home.cleanup(); });
 
 const bytesOf = (r: { ok: boolean; result?: unknown }) => Buffer.from(((r as { result: { bytes: string } }).result).bytes, "base64");
 
