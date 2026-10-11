@@ -2,11 +2,12 @@
 // before its fix. Names, nodes and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  REQUEST_LIMITS, admitRequest, emptySecretDirectory, findSecret, joinRequest, openRequest, storeSecret,
+  REQUEST_LIMITS, admitRequest, answerStored, emptySecretDirectory, findSecret, joinRequest, openRequest, storeSecret,
   type Actor, type RequestAsk, type Secret, type SecretDirectory, type SecretGrant, type SecretRequest, type SecretVersion,
 } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
+const DAY = 86_400_000;
 const REF = "secret://example-app/payments-test";
 const nodeGrant: SecretGrant = { subject: { kind: "node" }, modes: ["exec"], until: { kind: "open" } };
 const who = (command = "c1"): Actor => ({ kind: "principal", command });
@@ -73,5 +74,29 @@ describe("follow-up 4: a request holds at most 20 waiters, lanes and callers wit
     expect(full.version).toBe(20);
     const j = joinRequest(full, { lane: null, workspace: "ws-new", purpose: "Nightly job" }, T + 50);
     expect(j.ok ? "ok" : j.error.problem).toBe("full");
+  });
+});
+
+describe("follow-up 5: a renew is Stored only when its store names an Expiry later than now (SR8, SC9)", () => {
+  const renew = (kind: RequestAsk["kind"] = "renew") => value(openRequest({
+    node: "node-a", reference: REF, kind, waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
+  }, "r1", T)).request;
+  const answer = (expiry?: number | null) => ({ seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], expiry });
+  const problem = <T>(r: R<T>) => (r.ok ? "ok" : r.error.problem);
+
+  it("a store that names no Expiry, or one that has passed, leaves the renew open", () => {
+    expect(problem(answerStored(renew(), answer(), T + 1))).toBe("expiry");
+    expect(problem(answerStored(renew(), answer(null), T + 1))).toBe("expiry");
+    expect(problem(answerStored(renew(), answer(T + 1), T + 1))).toBe("expiry");
+    expect(problem(answerStored(renew(), answer(T - DAY), T + 1))).toBe("expiry");
+  });
+  it("a later Expiry answers it", () => {
+    const r = value(answerStored(renew(), answer(T + 30 * DAY), T + 1));
+    expect(r.request.state).toBe("stored");
+    expect(r.events.map(e => e.type)).toEqual(["SecretRequestStored"]);
+  });
+  it("the other kinds that store need no Expiry", () => {
+    expect(problem(answerStored(renew("new"), answer(), T + 1))).toBe("ok");
+    expect(problem(answerStored(renew("rotate"), answer(null), T + 1))).toBe("ok");
   });
 });
