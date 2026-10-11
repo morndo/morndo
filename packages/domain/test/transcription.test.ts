@@ -3,7 +3,7 @@
 // recording caps, sniffAudio, one attempt per recording, one terminal outcome, the queue via the shared rule, and
 // the text it produced. No engine name, no file, no clock of its own.
 import { describe, expect, it } from "vitest";
-import { afterRestart, endTranscription, NO_CAPABILITY, requestTranscription, sniffAudio, startTranscription, type Transcription, type TranscriptionBody } from "../src/index.ts";
+import { afterRestart, endTranscription, NO_CAPABILITY, scheduleTranscriptions, requestTranscription, sniffAudio, startTranscription, type Transcription, type TranscriptionBody } from "../src/index.ts";
 
 const bytes = (head: number[], ...rest: number[]) => new Uint8Array([...head, ...rest]);
 const AT = 1_700_000_000_000;
@@ -136,5 +136,47 @@ describe("starting and ending a transcription", () => {
     expect(after.find(r => r.id === "tx-d")).toMatchObject({ state: "done" });
     expect(after.find(r => r.id === "tx-r")).not.toHaveProperty("position", 1);
     expect(afterRestart(after, AT + 70).find(r => r.id === "tx-r")).toMatchObject({ state: "lost" });
+  });
+});
+
+describe("scheduling transcriptions", () => {
+  const askAt = (id: string, acceptedAt: number, recordingId = `up-${id}`): Transcription =>
+    live({ id, acceptedAt, recording: { kind: "upload", id: recordingId } });
+
+  it("runs at most the limit, the rest wait in the order accepted with a visible position", () => {
+    const rows = [askAt("tx-c", AT + 2), askAt("tx-a", AT), askAt("tx-b", AT + 1)];
+    const out = scheduleTranscriptions(rows, 1, "off");
+    expect(out.find(r => r.id === "tx-a")).toMatchObject({ state: "starting", startedAt: null, position: null, reason: null });
+    expect(out.find(r => r.id === "tx-b")).toMatchObject({ state: "queued", position: 1, reason: "class" });
+    expect(out.find(r => r.id === "tx-c")).toMatchObject({ state: "queued", position: 2, reason: "class" });
+  });
+
+  it("what already runs or starts counts against the limit and is not stopped", () => {
+    const rows = [askAt("tx-run", AT), askAt("tx-start", AT + 1), askAt("tx-wait", AT + 2)];
+    rows[0]!.state = "running";
+    rows[1]!.state = "starting";
+    const out = scheduleTranscriptions(rows, 2, "off");
+    expect(out.find(r => r.id === "tx-run")).toMatchObject({ state: "running" });
+    expect(out.find(r => r.id === "tx-start")).toMatchObject({ state: "starting" });
+    expect(out.find(r => r.id === "tx-wait")).toMatchObject({ state: "queued", position: 1, reason: "class" });
+  });
+
+  it("a guard over the line delays every start with its own reason, and stops nothing (TX5)", () => {
+    const rows = [askAt("tx-run", AT), askAt("tx-next", AT + 1)];
+    rows[0]!.state = "running";
+    const out = scheduleTranscriptions(rows, 2, "load");
+    expect(out.find(r => r.id === "tx-run")).toMatchObject({ state: "running" });
+    expect(out.find(r => r.id === "tx-next")).toMatchObject({ state: "queued", position: 1, reason: "load" });
+    expect(scheduleTranscriptions([askAt("tx-m", AT)], 1, "unknown").find(r => r.id === "tx-m"))
+      .toMatchObject({ state: "queued", position: 1, reason: "guard_unknown" });
+  });
+
+  it("a finished attempt is not scheduled again", () => {
+    const rows = [askAt("tx-done", AT), askAt("tx-lost", AT + 1)];
+    rows[0]!.state = "done";
+    rows[1]!.state = "lost";
+    const out = scheduleTranscriptions(rows, 1, "off");
+    expect(out.find(r => r.id === "tx-done")).toMatchObject({ state: "done", position: null });
+    expect(out.find(r => r.id === "tx-lost")).toMatchObject({ state: "lost", position: null });
   });
 });
