@@ -28,7 +28,7 @@ const GRANT = ["subject", "modes", "until"];
 const SECRET = ["reference", "status", "current", "versions", "grants", "destinations", "expiry", "shape", "warned"];
 const VERSION = ["number", "fingerprint", "storedAt", "command", "retiredAt"];
 const LEDGER = ["reference", "version", "fingerprint", "state"];
-const DIRECTORY = ["secrets", "ledger", "events"];
+const DIRECTORY = ["held", "ledger", "events"];
 const REQUEST_EVENTS: Record<RequestEvent["type"], readonly string[]> = {
   SecretRequested: ["type", "request", "node", "reference", "kind", "at"],
   SecretRequestJoined: ["type", "request", "lane", "at"],
@@ -121,7 +121,7 @@ describe("Secrets: the shape of every built thing (SC1)", () => {
   it("a Secret, its versions, its Grants, the ledger and the directory have exactly the allowed keys", () => {
     const dir = value(storeSecret(emptySecretDirectory(), { reference: REF, fingerprint: "0123456789a1", shape: null, grants: [grant], expiry: null, destinations: [] }, who, T));
     expect(keyProblems(dir, DIRECTORY)).toEqual([]);
-    const s = dir.secrets[0];
+    const s = dir.held[0];
     expect(keyProblems(s, SECRET)).toEqual([]);
     expect(keyProblems(s?.current, VERSION)).toEqual([]);
     expect(keyProblems(s?.versions[0], VERSION)).toEqual([]);

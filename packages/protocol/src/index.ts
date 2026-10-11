@@ -15,3 +15,4 @@ export * from "./usage.ts";
 export * from "./connections.ts";
 export * from "./jobs.ts";
 export * from "./uploads.ts";
+export * from "./secrets.ts";
