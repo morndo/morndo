@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { accessSync, constants, readFileSync, readdirSync, statfsSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { defineConfig } from "vitest/config";
@@ -18,6 +18,26 @@ const browserWorkers = Math.min(4, Math.max(1, Math.floor(availableParallelism()
 // Projects in a later groupOrder run after the earlier groups (https://vitest.dev/config/sequence.html, v5.0.3, read
 // 2026-10-06).
 const fleetWorkers = Math.min(4, Math.max(2, Math.floor(availableParallelism() / 2)));
+// Test scratch on RAM. Most tests keep their SQLite databases (WAL, synchronous=FULL: one fsync per commit), sockets and
+// logs under os.tmpdir(). On a disk that other work keeps busy, and at idle IO priority, every fsync waits behind that
+// work: the fleet's audit test (2,300 single-row commits) took 71 s and 219 s on this box's /tmp and failed its 20 s
+// window, and 0.9 s on a tmpfs (2026-10-12). Those tests check the code, not the disk, so on Linux their TMPDIR is the
+// user's runtime directory ($XDG_RUNTIME_DIR, /run/user/<uid>) when it is a tmpfs (TMPFS_MAGIC 0x01021994, statfs(2))
+// we can write with 1 GiB free: the same files and the same fsync calls, which return at once there. Not /dev/shm: the
+// agent refuses a job, lane or file under /dev (denyRoots), as it should. A TMPDIR the caller set is kept, and
+// elsewhere tmpdir() is as before. `env` reaches each test file's process.env before it is imported, and the processes
+// it starts (https://vitest.dev/config/env.html, v5.0.3, read 2026-10-12).
+function ramScratch(): Record<string, string> {
+  const run = process.env.XDG_RUNTIME_DIR;
+  if (process.env.TMPDIR || process.platform !== "linux" || !run) return {};
+  try {
+    const fs = statfsSync(run);
+    if (fs.type !== 0x01021994 || fs.bavail * fs.bsize < 2 ** 30) return {};
+    accessSync(run, constants.W_OK);
+    return { TMPDIR: run };
+  } catch { return {}; }
+}
+const scratch = ramScratch();
 const browserTests = readdirSync(WEB_TESTS)
   .filter(f => f.endsWith(".test.ts") && readFileSync(join(WEB_TESTS, f), "utf8").includes('from "playwright"'))
   .map(f => `${WEB_TESTS}/${f}`);
@@ -35,12 +55,13 @@ export default defineConfig({
           // gives room for the setup; what each test checks keeps its own window (a socket closed within 3 s, say).
           testTimeout: 20_000,
           hookTimeout: 20_000,
+          env: scratch,
           sequence: { groupOrder: 0 },
         },
       },
       // Their hooks start Vite and a browser, or close them: 60 s, not Vitest's 10 (review M2: two timed out at load 17).
-      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, hookTimeout: 60_000, sequence: { groupOrder: 1 } } },
-      { test: { name: "fleet", include: ["test/fleet/**/*.test.ts"], maxWorkers: fleetWorkers, testTimeout: 120_000, hookTimeout: 60_000, sequence: { groupOrder: 2 } } },
+      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, hookTimeout: 60_000, env: scratch, sequence: { groupOrder: 1 } } },
+      { test: { name: "fleet", include: ["test/fleet/**/*.test.ts"], maxWorkers: fleetWorkers, testTimeout: 120_000, hookTimeout: 60_000, env: scratch, sequence: { groupOrder: 2 } } },
     ],
   },
 });
