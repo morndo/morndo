@@ -73,6 +73,11 @@ describe("brief", () => {
   it("the long question isn't repeated behind More when it says what the title and sentence say", () => {
     expect(brief(item({ title: "Sign the lease", shortTitle: "Sign the lease" }), NOW).more.text).toBeNull();
   });
+  it("a short form of whitespace only is none too: no blank row (ADR-0023 §4.4)", () => {
+    const b = brief(item({ title: "Ship the demo tonight? It is green.", shortTitle: "   ", summary: "  " }), NOW);
+    expect(b.title).toBe("Ship the demo tonight?");
+    expect(b.sentence).toBe(null);
+  });
 });
 
 describe("the buttons an item gets", () => {
