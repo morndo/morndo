@@ -36,9 +36,11 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
     if (parsed.cmd === "helper") return await helper(env, parsed, io);
     return await command(env, parsed, io);
   } catch (error) {
-    if (parsed.cmd === "helper") return error instanceof FileRefused || error instanceof DatabaseFromFuture ? 70 : 1;
+    // A store from a newer helper is a configuration the caller must fix, not a crash to retry into: EX_CONFIG (78),
+    // the exit the hub's main gives the same refusal. A file this helper refuses to touch keeps 70.
+    if (parsed.cmd === "helper") return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
     io.stderr(error instanceof Error ? error.message : "failed");
-    return error instanceof FileRefused || error instanceof DatabaseFromFuture ? 70 : 1;
+    return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
   }
 }
 
