@@ -80,9 +80,9 @@ describe("round 4, points 1 and 2: the node renews only with an Expiry later tha
     expect(dir.events.slice(-2).map(e => e.type)).toEqual(["SecretRotated", "ExpiryChanged"]);
     expect(useGate(s, { lane: null, workspace: null }, "exec", T + 2).ok).toBe(true);
   });
-  it("on a node that holds no such Secret yet, a renew still names an Expiry later than now", () => {
+  it("on a node that holds no such Secret, a renew is refused: renewing is a Rotation of a Secret the node holds", () => {
     expect(refusal(renewSecret(emptySecretDirectory(), input(null), who, T))).toEqual({ problem: "renew_expiry" });
-    expect(refusal(renewSecret(emptySecretDirectory(), input(T + DAY), who, T))).toBe("stored");
+    expect(refusal(renewSecret(emptySecretDirectory(), input(T + DAY), who, T))).toEqual({ problem: "missing" });
   });
   it("only the principal renews", () => {
     expect(refusal(renewSecret(held(T - DAY), input(T + DAY), { kind: "operator" }, T))).toEqual({ problem: "principal" });
