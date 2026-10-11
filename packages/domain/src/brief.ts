@@ -448,14 +448,18 @@ export function cardOf(item: Ask & { brief: DecisionBrief | null }): CompactCard
   }
   const own = item.shortTitle !== null ? oneLine(item.shortTitle) : null;
   const split = own === null ? clause(item.title) : null;
+  // Q2's default, also when the brief itself is out of sight — an old app, or the wire's null fallback: an ask with a
+  // money figure in what it shows (a brief the hub filed carries the whole case in `details`) is read and decided, not
+  // tapped, so spend is never approved from a three-line card.
+  const spend = hasMoney(item.title) || (item.summary !== null && hasMoney(item.summary)) || (item.details !== null && hasMoney(item.details));
   return {
     topic: own ?? split!.title,
     headline: item.summary !== null ? oneLine(item.summary) : split!.rest,
     recommended: item.answerBy === "tap" ? item.options[0]?.label ?? null : null,
     due: item.deadline,
     minutes: item.minutes,
-    spend: hasMoney(item.title) || (item.summary !== null && hasMoney(item.summary)) || (item.details !== null && hasMoney(item.details)),
-    quickAnswers: item.answerBy === "tap" ? item.options.map(o => ({ key: o.key, label: o.label })) : [],
+    spend,
+    quickAnswers: item.answerBy === "tap" && !spend ? item.options.map(o => ({ key: o.key, label: o.label })) : [],
     hasBrief: false,
   };
 }
