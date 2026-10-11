@@ -83,6 +83,14 @@ describe("requesting a transcription", () => {
     expect(again).toMatchObject({ id: "tx-9", state: "queued", acceptedAt: AT + 9 });
     expect(done.state).toBe("failed");
   });
+
+  it("refuses an id that already names a finished attempt: the new one needs its own id (TX3)", () => {
+    const done = { ...live(), state: "failed" as const, outcome: "failed" as const, problem: "engine" as const };
+    expect(requestTranscription([done], ask(), AT + 5, READY)).toEqual({ ok: false, error: "id_conflict" });
+    const finished = { ...live({ id: "tx-7" }), state: "done" as const, outcome: "done" as const };
+    expect(requestTranscription([finished], ask({ id: "tx-7", recording: { kind: "upload", id: "up-9" } }), AT + 5, READY))
+      .toEqual({ ok: false, error: "id_conflict" });
+  });
 });
 
 describe("starting and ending a transcription", () => {
@@ -182,6 +190,14 @@ describe("scheduling transcriptions", () => {
     const out = scheduleTranscriptions(rows, 1, "off");
     expect(out.find(r => r.id === "tx-done")).toMatchObject({ state: "done", position: null });
     expect(out.find(r => r.id === "tx-lost")).toMatchObject({ state: "lost", position: null });
+  });
+
+  it("a queue slot never touches a finished row, even one that shares a queued row's id (TX3)", () => {
+    const finished = { ...live({ id: "tx-1" }), state: "done" as const, outcome: "done" as const, endedAt: AT + 30 };
+    const waiting = live({ id: "tx-1", acceptedAt: AT + 1, recording: { kind: "upload", id: "up-2" } });
+    const out = scheduleTranscriptions([finished, waiting], 1, "off");
+    expect(out[0]).toMatchObject({ state: "done", outcome: "done", endedAt: AT + 30 });
+    expect(out[1]).toMatchObject({ state: "starting", position: null });
   });
 });
 
