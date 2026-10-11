@@ -2,8 +2,9 @@
 // before its fix. Names, nodes and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  disableSecret, emptySecretDirectory, findSecret, renewSecret, revokeSecret, storeSecret,
-  type Actor, type SecretGrant,
+  CONFIRMATION_SKEW_MS, answerStored, disableSecret, emptySecretDirectory, findSecret, openRequest, renewSecret, revokeSecret,
+  storeSecret,
+  type Actor, type RequestKind, type SecretGrant,
 } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
@@ -60,5 +61,41 @@ describe("round 6, point 5: only { keep: true } keeps the shape; a near miss is 
   });
   it("exactly { keep: true } keeps it", () => {
     expect(rotate({ keep: true })).toBe("shape-a");
+  });
+});
+
+describe("round 6, points 1, 2 and 7: a renew is Stored on the requester node's own confirmation that the renew rule held", () => {
+  const opened = (kind: RequestKind = "renew") => value(openRequest({
+    node: "node-a", reference: REF, kind, waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
+  }, "r1", T - DAY)).request;
+  const confirm = (over: Partial<{ node: string; version: number; at: number; renewed: boolean }> = {}) =>
+    ({ node: "node-a", version: 2, at: T, renewed: true, ...over });
+  const answer = (kind: RequestKind, confirmation: ReturnType<typeof confirm>, nodes = ["node-a", "node-b"], expiry: number | null = T + 30 * DAY) =>
+    answerStored(opened(kind), { seen: 1, command: "c2", reference: REF, nodes, expiry, confirmation }, T + 60_000);
+  const state = (r: ReturnType<typeof answer>) => (r.ok ? r.value.request.state : r.error.problem);
+
+  it("the requester node's confirmation that it renewed answers the renew, and carries its version", () => {
+    const r = answer("renew", confirm());
+    expect(state(r)).toBe("stored");
+    expect(r.ok && r.value.events[0]).toMatchObject({ type: "SecretRequestStored", version: 2, nodes: ["node-a", "node-b"] });
+  });
+  it("point 1: another node's confirmation never stands in for the requester's", () => {
+    expect(state(answer("renew", confirm({ node: "node-b" })))).toBe("node");
+    expect(state(answer("new", confirm({ node: "node-b", renewed: false })))).toBe("node");
+  });
+  it("point 2: the node's time of the store lies between the request's opening and the hub's now, five minutes either way", () => {
+    expect(CONFIRMATION_SKEW_MS).toBe(5 * 60_000);
+    for (const at of [0, Number.NaN, Number.POSITIVE_INFINITY, T - DAY - CONFIRMATION_SKEW_MS - 1, T + 60_000 + CONFIRMATION_SKEW_MS + 1]) {
+      expect(state(answer("renew", confirm({ at }))), String(at)).toBe("clock");
+    }
+    expect(state(answer("renew", confirm({ at: T - DAY - CONFIRMATION_SKEW_MS })))).toBe("stored");
+    expect(state(answer("renew", confirm({ at: T + 60_000 + CONFIRMATION_SKEW_MS })))).toBe("stored");
+  });
+  it("point 7: a confirmation from a store that skipped the renew rule leaves the renew open", () => {
+    expect(state(answer("renew", confirm({ renewed: false })))).toBe("not_renewed");
+  });
+  it("the other kinds that store need no renew", () => {
+    expect(state(answer("new", confirm({ renewed: false }), ["node-a"], null))).toBe("stored");
+    expect(state(answer("rotate", confirm({ renewed: false }), ["node-a"], null))).toBe("stored");
   });
 });

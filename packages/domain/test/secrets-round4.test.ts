@@ -97,7 +97,7 @@ describe("round 4, points 2 and 6: the hub's answer always names the Expiry its 
     // @ts-expect-error: the Expiry is required, null when the store named none.
     const left = answerStored(renew, { seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"] }, T + 1);
     expect(left.ok ? "ok" : left.error.problem).toBe("expiry");
-    const none = answerStored(renew, { seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], expiry: null, storedAt: T + 1 }, T + 1);
+    const none = answerStored(renew, { seen: 1, command: "c2", reference: REF, nodes: ["node-a"], expiry: null, confirmation: { node: "node-a", version: 2, at: T + 1, renewed: true } }, T + 1);
     expect(none.ok ? "ok" : none.error.problem).toBe("expiry");
   });
 });
@@ -123,7 +123,8 @@ describe("round 5, point 3: the hub judges a renew's Expiry by the node's time o
   const renew = () => value(openRequest({
     node: "node-a", reference: REF, kind: "renew", waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
   }, "r1", T - 1)).request;
-  const answer = (expiry: number, storedAt: number) => ({ seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], expiry, storedAt });
+  const answer = (expiry: number, storedAt: number) =>
+    ({ seen: 1, command: "c2", reference: REF, nodes: ["node-a"], expiry, confirmation: { node: "node-a", version: 2, at: storedAt, renewed: true } });
   const state = <X>(r: R<X & { request: { state: string } }>) => (r.ok ? r.value.request.state : r.error.problem);
   it("a renew the node stored by its clock is Stored, though the hub's clock has passed that Expiry", () => {
     expect(state(answerStored(renew(), answer(T + 10, T), T + 20))).toBe("stored");
