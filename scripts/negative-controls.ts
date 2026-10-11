@@ -1056,6 +1056,23 @@ export const CONTROLS: Control[] = [
   { id: "pr1-rl14-disable-ignored", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (switches.disableUpdates) return err(\"updates_disabled\");", replace: "if (false) return err(\"updates_disabled\");",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "updates_disabled" },
+  // The tables (§4.4, §6.6, §7) with the controls of their own guards, in releases-state.test.ts.
+  { id: "pr1-state-any-move", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "export const updateCanMove = (from: UpdateState, to: UpdateState): boolean => UPDATE_MOVES[from].includes(to);",
+    replace: "export const updateCanMove = (from: UpdateState, to: UpdateState): boolean => from !== to;",
+    run: ["packages/domain/test/releases-state.test.ts"], expect: "checked -> draining" },
+  { id: "pr1-state-mark-any-order", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "if (!MARK_NEEDS[mark].includes(u.state)) return err(\"step_out_of_order\");",
+    replace: "if (false) return err(\"step_out_of_order\");",
+    run: ["packages/domain/test/releases-state.test.ts"], expect: "step_out_of_order" },
+  { id: "pr1-recover-swap-as-abandon", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "if (equalVersions(p.current, p.preUpdate.current)) return ok({ act: \"abandon\" });",
+    replace: "if (false) return ok({ act: \"abandon\" });",
+    run: ["packages/domain/test/releases-state.test.ts"], expect: "abandon" },
+  { id: "pr1-rollout-node-ahead-of-cp", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "if (compareVersions(p.controlPlane, rollout.version) < 0) return err(\"waiting_control_plane\");",
+    replace: "if (false) return err(\"waiting_control_plane\");",
+    run: ["packages/domain/test/releases-state.test.ts"], expect: "waiting_control_plane" },
 ];
 
 // ---- the runner
