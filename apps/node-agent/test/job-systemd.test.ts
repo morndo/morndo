@@ -51,6 +51,15 @@ const alive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; } catch { return false; }
 };
 
+// Fills a log at once, records when, and ends 0 from a SIGTERM trap after recording when the signal came.
+const TRAP = `
+  const fs = require("node:fs");
+  fs.writeSync(1, Buffer.alloc(64, 97));
+  fs.writeFileSync(process.argv[1], String(Date.now()));
+  process.on("SIGTERM", () => { fs.appendFileSync(process.argv[1], " " + String(Date.now())); process.exit(0); });
+  setInterval(() => {}, 1000);
+`;
+
 // A throwaway user scope (--scope) in its own slice (--slice=). --collect unloads it when the sleep ends.
 // systemd-run(1), https://www.freedesktop.org/software/systemd/man/255/systemd-run.html (read 2026-10-10).
 function openDrill(): { slice: string; close: () => void } {
@@ -673,6 +682,25 @@ describe.skipIf(!bus.ok)("systemd log cap", () => {
     expect(readFileSync(join(dir, `${id}.log`)).subarray(0, 4).toString()).toBe("KEEP");
   });
 
+  it("gives a full log the same grace as the helper backend, and a trapped SIGTERM still records no code", async () => {
+    const { store, start, sup, home } = await systemdRig({ logBytes: 8 });
+    const marker = join(home, "trap");
+    const id = await start([process.execPath, "-e", TRAP, marker]);
+    expect(await until(async () => { await sup.sweep(); return store.get(id)?.outcome === "exited"; }, 8000)).toBe(true);
+    // The command ends 0 by its own trap, but the cap ended it: no code, whatever the handler did.
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: null });
+    const times = readFileSync(marker, "utf8").split(" ").map(Number);
+    expect(times[1]! - times[0]!).toBeGreaterThanOrEqual(240);    // the grace passed before the signal
+  });
+
+  it("keeps a command's own exit code when it ends within the grace", async () => {
+    const { store, start, sup, dir } = await systemdRig({ logBytes: 8 });
+    const id = await start([process.execPath, "-e", "require('node:fs').writeSync(1, Buffer.alloc(64, 97)); setTimeout(() => process.exit(1), 120)"]);
+    expect(await until(async () => { await sup.sweep(); return store.get(id)?.outcome === "exited"; }, 8000)).toBe(true);
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: 1 });
+    expect(existsSync(join(dir, `${id}.cap`))).toBe(false);       // its own end came first: the cap never enforced
+  });
+
   it("marks a job truncated when the pool is full and leaves it running under its own cap", async () => {
     const { store, notices, start, sup, home, dir } = await systemdRig({ logBytes: 1_000_000, budget: 32 });
     const marker = join(home, "pid");
@@ -921,7 +949,13 @@ describe("systemd stop duration", () => {
   it("times a cap stop from the unit after the stop, not from the wall clock", async () => {
     const { store, sup, id, dir } = planted(8);
     writeFileSync(join(dir, `${id}.log`), "12345678");
+    // The first sweep only decides the cap; the stop comes on a later sweep, once the grace has passed.
     await sup.sweep();
+    expect(store.get(id)).toMatchObject({ state: "running", outcome: null });
+    expect(await until(async () => {
+      await sup.sweep();
+      return store.get(id)?.outcome === "exited";
+    }, 8000)).toBe(true);
     expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: null, durationMs: 1500 });
   });
 });
