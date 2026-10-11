@@ -1027,6 +1027,11 @@ export const CONTROLS: Control[] = [
     find: "for (const check of checks) if (report.checks[check] !== true) return err({ service, check });",
     replace: "for (const check of checks) if (false) return err({ service, check });",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "/api/health" },
+  // The review of 2026-10-11: RL7's "at the target Version" — a report naming another Version never passes.
+  { id: "pr1-rl7-health-wrong-version", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "if (at === null || !equalVersions(at, p.target)) return err({ service, check: \"wrong_version\" });",
+    replace: "if (false) return err({ service, check: \"wrong_version\" });",
+    run: ["packages/domain/test/releases-invariants.test.ts"], expect: "wrong_version" },
   { id: "pr1-rl8-restore-without-backup", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (!p.backupPresent) return err(\"backup_gone\");", replace: "if (false) return err(\"backup_gone\");",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "backup_gone" },

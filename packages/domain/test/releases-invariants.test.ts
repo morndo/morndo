@@ -233,17 +233,21 @@ describe("RL7 health failures roll back", () => {
     { service: "fleet", version: "0.5.0", checks: { socket: true } },
   ];
   it("what passed before passes after: healthy", () => {
-    expect(judgeHealth({ baseline, after })).toEqual({ ok: true, value: true });
+    expect(judgeHealth({ baseline, after, target: v("0.5.0") })).toEqual({ ok: true, value: true });
   });
   it("negative control: a check that passed before and fails after is named, service and check", () => {
     const broken = [{ ...after[0]!, checks: { "/api/health": false, schema: true } }, after[1]!];
-    expect(judgeHealth({ baseline, after: broken })).toEqual({ ok: false, error: { service: "hub", check: "/api/health" } });
+    expect(judgeHealth({ baseline, after: broken, target: v("0.5.0") })).toEqual({ ok: false, error: { service: "hub", check: "/api/health" } });
   });
   it("negative control: a service that doesn't answer within the deadline fails its health", () => {
-    expect(judgeHealth({ baseline, after: [after[0]!] })).toEqual({ ok: false, error: { service: "fleet", check: "no_report" } });
+    expect(judgeHealth({ baseline, after: [after[0]!], target: v("0.5.0") })).toEqual({ ok: false, error: { service: "fleet", check: "no_report" } });
+  });
+  it("negative control: a service still answering at the old Version never passes — the checks pass at the target", () => {
+    const stale = [{ ...after[0]!, version: "0.4.3" }, after[1]!];
+    expect(judgeHealth({ baseline, after: stale, target: v("0.5.0") })).toEqual({ ok: false, error: { service: "hub", check: "wrong_version" } });
   });
   it("a check that failed before is not held against the target", () => {
-    expect(judgeHealth({ baseline: { hub: ["/api/health"] }, after: [{ service: "hub", version: "0.5.0", checks: { "/api/health": true, disk_space: false } }] }))
+    expect(judgeHealth({ baseline: { hub: ["/api/health"] }, after: [{ service: "hub", version: "0.5.0", checks: { "/api/health": true, disk_space: false } }], target: v("0.5.0") }))
       .toEqual({ ok: true, value: true });
   });
   it("probation: 60 seconds up and no restart", () => {
@@ -463,7 +467,7 @@ describe("a happy history installs", () => {
       expect(step.ok, mark).toBe(true);
       if (step.ok) u = step.value;
     }
-    expect(judgeHealth({ baseline: { hub: ["/api/health"] }, after: [{ service: "hub", version: "0.5.0", checks: { "/api/health": true } }] }).ok).toBe(true);
+    expect(judgeHealth({ baseline: { hub: ["/api/health"] }, after: [{ service: "hub", version: "0.5.0", checks: { "/api/health": true } }], target: v("0.5.0") }).ok).toBe(true);
     const committed = commitInstallation(m, v("0.5.0"));
     expect(formatVersion(committed.current)).toBe("0.5.0");
     expect(formatVersion(committed.previous)).toBe("0.4.3");

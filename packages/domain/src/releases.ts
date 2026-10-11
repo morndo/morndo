@@ -347,16 +347,20 @@ export const HEALTH_DEADLINE_MS = 90_000;   // the services have this long to an
 export const PROBATION_MS = 60_000;         // and this long up, without a restart, before the commit (§6.4)
 export type HealthReport = { service: string; version: string; checks: Record<string, boolean> };
 
-// What passed before must pass after; what failed before is not held against the target. A service that doesn't
-// answer within the deadline fails as `no_report`. A failure names its service and check (HealthFailed) and means
-// rollback. One laptop that went to sleep is the caller's care: its missing report is the fleet's, not this
-// machine's — the caller judges only what this machine runs.
-export function judgeHealth(p: { baseline: Record<string, string[]>; after: HealthReport[] }):
+// What passed before must pass after, at the target Version: a service still running the old binary (a restart
+// that never took, a swap that didn't reach it) fails as `wrong_version`, whatever its checks say. What failed
+// before is not held against the target. A service that doesn't answer within the deadline fails as `no_report`.
+// A failure names its service and check (HealthFailed) and means rollback. One laptop that went to sleep is the
+// caller's care: its missing report is the fleet's, not this machine's — the caller judges only what this
+// machine runs.
+export function judgeHealth(p: { baseline: Record<string, string[]>; after: HealthReport[]; target: Version }):
   Result<true, { service: string; check: string }> {
   const byService = new Map(p.after.map(r => [r.service, r]));
   for (const [service, checks] of Object.entries(p.baseline)) {
     const report = byService.get(service);
     if (!report) return err({ service, check: "no_report" });
+    const at = parseVersion(report.version);
+    if (at === null || !equalVersions(at, p.target)) return err({ service, check: "wrong_version" });
     for (const check of checks) if (report.checks[check] !== true) return err({ service, check });
   }
   return ok(true);
