@@ -1,4 +1,4 @@
-import { accessSync, constants, readFileSync, readdirSync, statfsSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, readdirSync, statfsSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { join } from "node:path";
 import { defineConfig } from "vitest/config";
@@ -6,7 +6,9 @@ import { defineConfig } from "vitest/config";
 // The web tests that drive headless Chromium each start a Vite server and compile the app cold. All of them at once
 // saturate the box and their first page load times out, so at most 4 of those files run at a time, after every other
 // test file has run as before (Vitest runs projects with different worker limits as groups, one after the other). A
-// test file is one of them when it imports playwright. Each needs about two CPUs (its Vite server and its browser), so
+// test file is one of them when it imports playwright, itself or through a helper of this folder (harness.ts: eight
+// files reach Chromium only through it, so they ran as units, beside every other file, with no limit on how many at
+// once). Each needs about two CPUs (its Vite server and its browser), so
 // a smaller machine runs fewer at once: 4 on this 16-CPU box, 1 on GitHub's 2-CPU runner for private repositories
 // (docs.github.com, "GitHub-hosted runners", read 2026-10-02). Even here, 4 at once under a load average of 20 once
 // pushed a first test from 2 s to over 30 s.
@@ -38,8 +40,15 @@ function ramScratch(): Record<string, string> {
   } catch { return {}; }
 }
 const scratch = ramScratch();
+// Follows `from "./x.ts"` imports within the folder; seen guards a cycle.
+const startsChromium = (file: string, seen = new Set<string>()): boolean => {
+  if (seen.has(file) || !existsSync(join(WEB_TESTS, file))) return false;
+  seen.add(file);
+  const source = readFileSync(join(WEB_TESTS, file), "utf8");
+  return source.includes('from "playwright"') || [...source.matchAll(/from "\.\/([^"/]+\.ts)"/g)].some(m => startsChromium(m[1] ?? "", seen));
+};
 const browserTests = readdirSync(WEB_TESTS)
-  .filter(f => f.endsWith(".test.ts") && readFileSync(join(WEB_TESTS, f), "utf8").includes('from "playwright"'))
+  .filter(f => f.endsWith(".test.ts") && startsChromium(f))
   .map(f => `${WEB_TESTS}/${f}`);
 
 export default defineConfig({
@@ -60,7 +69,9 @@ export default defineConfig({
         },
       },
       // Their hooks start Vite and a browser, or close them: 60 s, not Vitest's 10 (review M2: two timed out at load 17).
-      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, hookTimeout: 60_000, env: scratch, sequence: { groupOrder: 1 } } },
+      // A test that loads its page itself compiles the app cold: 4 files at once beside 16 busy CPU loops, those took
+      // 3.8 s (median), 7.4 s (p90), up to 11.9 s (142 tests, 2026-10-12); a third went past Vitest's 5 s. 20 s, as units.
+      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, testTimeout: 20_000, hookTimeout: 60_000, env: scratch, sequence: { groupOrder: 1 } } },
       { test: { name: "fleet", include: ["test/fleet/**/*.test.ts"], maxWorkers: fleetWorkers, testTimeout: 120_000, hookTimeout: 60_000, env: scratch, sequence: { groupOrder: 2 } } },
     ],
   },
