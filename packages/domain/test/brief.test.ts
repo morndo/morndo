@@ -490,6 +490,13 @@ describe("the compact card, derived for every Ask (§4.4)", () => {
     const a = ask({ title: "Spend $2,400 on the contractor", summary: "Approve the quote" });
     expect(cardOf({ ...a, brief: null }).spend).toBe(true);
   });
+  it("a money brief never offers quick answers, not even seen as a plain ask (Q2: spend is never approved from a card)", () => {
+    // An old app, or the wire's null fallback, sees the ask without its brief; its details still carry the money.
+    const filed = askFromBrief("d-1", brief(), { kind: "manager", name: "Manager", workerId: null }, 1, NOW);
+    const card = cardOf({ ...filed, brief: null });
+    expect(card.spend).toBe(true);
+    expect(card.quickAnswers).toEqual([]);
+  });
   it("an ask answered in words has no quick answers and no recommendation", () => {
     const a = ask({ answerBy: "words", title: "Where should the demo point?" });
     const card = cardOf({ ...a, brief: null });
