@@ -54,6 +54,13 @@ describe("requesting a transcription", () => {
     expect(requestTranscription([], ask({ sizeBytes: -1 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
     expect(requestTranscription([], ask({ sizeBytes: 4096.5 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
   });
+
+  it("refuses an id that is missing or not a string, instead of reading it as its own spelling", () => {
+    expect(requestTranscription([], ask({ id: undefined as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
+    expect(requestTranscription([], ask({ id: 42 as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
+    expect(requestTranscription([], ask({ recording: { kind: "upload", id: 7 as unknown as string } }), AT, READY))
+      .toEqual({ ok: false, error: "bad_recording" });
+  });
   it("queues one attempt, waiting for a slot, with no outcome and no text", () => {
     expect(live()).toMatchObject({
       id: "tx-1", recording: { kind: "upload", id: "up-1" }, language: "auto", sizeBytes: 4096,
