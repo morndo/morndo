@@ -1181,7 +1181,7 @@ export const CONTROLS: Control[] = [
     find: "constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK", replace: "constants.O_RDONLY | constants.O_NOFOLLOW",
     run: ["packages/node-ops/test/secret-index-file-review.test.ts"], expect: "killed by the timeout" },
   { id: "sp2a-socket-kind", task: "secrets-pr2a", file: "packages/node-ops/src/secret-index-file.ts",
-    find: "code === \"ELOOP\" || code === \"ENXIO\"", replace: "code === \"ELOOP\"",
+    find: "const WRONG_KIND = [\"ELOOP\", \"EMLINK\", \"ENXIO\", \"EOPNOTSUPP\"];", replace: "const WRONG_KIND = [\"ELOOP\", \"EMLINK\", \"EOPNOTSUPP\"];",
     run: ["packages/node-ops/test/secret-index-file-review.test.ts"], expect: "ENXIO" },
   { id: "sp2a-retired-stands", task: "secrets-pr2a", file: "packages/node-ops/src/secret-scan.ts",
     find: "const retiredAt = index.versions.find(v => sameVersion(v, reference, version))?.retiredAt ?? null;", replace: "const retiredAt = null;",
@@ -1214,6 +1214,12 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-every-clock", task: "secrets-pr2b", file: "packages/domain/src/secrets.ts",
     find: "if (!all.every(x => Number.isFinite(x.at) &&", replace: "if (![c].every(x => Number.isFinite(x.at) &&",
     run: ["packages/domain/test/secrets-round8.test.ts"], expect: "to be 'clock'" },
+  { id: "sp2b-socket-eopnotsupp", task: "secrets-pr2b", file: "packages/node-ops/src/secret-index-file.ts",
+    find: "\"ENXIO\", \"EOPNOTSUPP\"];", replace: "\"ENXIO\"];",
+    run: ["packages/node-ops/test/secret-index-file-check.test.ts"], expect: "EOPNOTSUPP" },
+  { id: "sp2b-link-emlink", task: "secrets-pr2b", file: "packages/node-ops/src/secret-index-file.ts",
+    find: "[\"ELOOP\", \"EMLINK\", ", replace: "[\"ELOOP\", ",
+    run: ["packages/node-ops/test/secret-index-file-check.test.ts"], expect: "EMLINK" },
 ];
 
 // ---- the runner
