@@ -50,6 +50,7 @@ describe("SGR colour arguments never toggle dim or reverse", () => {
     ["background 27 does not clear reverse", `${E}[7;48;5;27mT${E}[0;2mry "note"`, null],
     ["underline 22 does not clear dim", `${E}[2;58;5;22mhidden words`, null],
     ["truecolor 22 does not clear dim", `${E}[2;38;2;22;22;22mhidden words`, null],
+    ["unknown colour selector is not a flag", `${E}[38;3;1;2;3mhallo`, "hallo"],
     ["dim still applies after a colour", `${E}[38;5;244;2mhidden words`, null],
     ["22 after a colour still clears dim", `${E}[2;38;5;244;22mhallo`, "hallo"],
   ])("%s", (_name, line, want) => {

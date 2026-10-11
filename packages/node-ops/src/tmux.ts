@@ -77,8 +77,11 @@ function applySgr(params: string, style: { dim: boolean; rev: boolean }) {
     const code = codes[i] ?? "";
     if (code === "38" || code === "48" || code === "58") {
       const mode = codes[i + 1];
-      i += mode === "5" ? 3 : mode === "2" ? 5 : mode === undefined ? 1 : 2;
-      continue;
+      // Indexed and direct colour have a fixed shape. Any other selector (empty, or 3 and above) introduces
+      // a run of components; those numbers are not dim or reverse.
+      if (mode === "5") { i += 3; continue; }
+      if (mode === "2") { i += 5; continue; }
+      return;
     }
     if (code === "0" || code === "") { style.dim = false; style.rev = false; }
     else if (code === "7") style.rev = true;
