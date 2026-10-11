@@ -380,7 +380,7 @@ A value an agent's tools need, which the principal enters on an insert-secret ca
 | Workspace | A repository root the principal registered on a node, with every worktree that shares its git directory. | A folder with a matching git remote. |
 | Grant | Who may resolve a Reference on a node: a subject (a lane, a workspace, or every lane on the node), the use modes, and an end (none, an instant, or the lane's end). | An agent token; a Mandate. |
 | Use, use mode | One resolution for one program: `exec` (environment), `file` (a 0600 file), `helper` (a credential helper's output to the tool), `inject` (the agent CLI's sandbox puts it into requests; the command sees a placeholder). | Printing the value: no mode does. |
-| Secret request | An agent's ask, as its node saw it: Reference, purpose, kind (`new`, `access`, `rotate`, `renew`), the waiting lanes, a proposed Grant. One answer: Stored, Granted, Rejected; or Withdrawn, or Expired. | An Escalation; a chat message. |
+| Secret request | An agent's ask, as its node saw it: Reference, purpose, kind (`new`, `access`, `rotate`, `renew`), its waiters (lanes, and callers without one by workspace), a proposed Grant. One answer: Stored, Granted, Rejected; or Withdrawn, or Expired. | An Escalation; a chat message. |
 | Request admission | The domain service for SR1 and SR10. | A rate limiter in an adapter. |
 | Fingerprint ledger | The domain service for SC2, over every version's keyed fingerprint on the node, revoked ones included. | The vault. |
 
@@ -391,7 +391,7 @@ Layer, as in design §3.3: **domain** (decided in `secrets.ts`, proved by a doma
 | SR1 | One open request per (node, Reference). A repeat from another lane joins it; the same waiter again changes nothing. A waiter is its lane, or, without a lane, its workspace (below). | domain service + store |
 | SR2 | The requester's broker answers `available` when the use gate admits the caller; with a value but no Grant the request opens as `access`, a card with no field. | application |
 | SR3 | A request carries a purpose (plain text, 1 to 300 characters), a valid Reference and Grant. No type has a field a value could travel in; the wire refuses a value-like key whole. | domain + adapter |
-| SR4 | One answer. Withdrawn only when its last waiting lane withdraws. Expired 7 days after it opened. | domain |
+| SR4 | One answer. Withdrawn only when its last waiter withdraws, a lane or a caller without one; an earlier withdrawal takes only that waiter off. Expired 7 days after it opened. | domain |
 | SR5 | Store and Grant need a user verification from the last 5 minutes. | application |
 | SR6 | An answer names the version it saw; a join or a withdrawal since makes it `changed`. | domain |
 | SR7 | The value is sealed on the Endpoint to each target node's pinned recipient; the hub and the fleet hold ciphertext in memory only, for one operation. | adapter |
