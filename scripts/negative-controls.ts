@@ -999,6 +999,19 @@ export const CONTROLS: Control[] = [
   { id: "v45-inbox-mtime-age-kept", task: "8", file: "apps/node-agent/src/ops/upload-inbox.ts",
     find: "return Math.abs(wallSince - monoSince) > CLOCK_STEP_MS ? monoSince : now - mtimeMs;", replace: "return monoSince;",
     run: ["apps/node-agent/test/transcript-file-ops.test.ts"], expect: "expired" },
+  // ---- ADR-0023 (decision briefs): the lint's key rules and the wire's fallback, each with the test that notices it gone.
+  { id: "adr23-headline-names-option", task: "ADR-0023", file: "packages/domain/src/brief.ts",
+    find: "  if (recommend && headline !== null) {", replace: "  if (false) {",
+    run: ["packages/domain/test/brief.test.ts"], expect: "headline_option" },
+  { id: "adr23-money-pattern", task: "ADR-0023", file: "packages/domain/src/brief.ts",
+    find: "return MONEY.test(text);", replace: "return false;",
+    run: ["packages/domain/test/brief.test.ts"], expect: "money_without_assumption" },
+  { id: "adr23-hub-ttl", task: "ADR-0023", file: "packages/domain/src/escalation.ts",
+    find: "export const HUB_TTL_MS = 7 * 24 * 3_600_000;", replace: "export const HUB_TTL_MS = 0;",
+    run: ["packages/domain/test/brief.test.ts"], expect: "overdue is not expired" },
+  { id: "adr23-wire-brief-null", task: "ADR-0023", file: "packages/protocol/src/feed.ts",
+    find: "  brief: orElse(z.nullable(DecisionBriefSchema), null),", replace: "  brief: z.nullable(DecisionBriefSchema),",
+    run: ["packages/protocol/test/brief.test.ts"], expect: "never a half brief" },
 ];
 
 // ---- the runner
