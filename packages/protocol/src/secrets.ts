@@ -94,9 +94,9 @@ export const SecretsStoreArgs = z.strictObject({
   reference: SecretReferenceText, sealed: SealedValue, grants: z.array(WireGrant), expiry: z.nullable(when()),
   destinations: destinations(), request: z.nullable(z.strictObject({ id: id(), kind: z.enum(STORED_KINDS) })),
 });
-// The node's confirmation of a store: the version it stored, its own time of the store, and whether the renew rule held
-// there. The hub marks a renew Stored only on the requester node's own `renewed` (design §5.3, step 6; T-83, T-85).
-export const SecretsStoreResult = z.strictObject({ version: version(), at: when(), renewed: z.boolean() });
+// The node's confirmation of a store: the Reference it stored under, the version, its own time of the store, and whether
+// the renew rule held there. The hub marks a renew Stored only on the requester node's own `renewed` (design §5.3, step 6; T-83, T-85).
+export const SecretsStoreResult = z.strictObject({ reference: SecretReferenceText, version: version(), at: when(), renewed: z.boolean() });
 export const SecretsTransferArgs = z.strictObject({ reference: SecretReferenceText, target: node(), recipient: AgeRecipient, signature: signature() });
 export const SecretsTransferResult = z.strictObject({ sealed: SealedValue });
 export const SecretsCheckArgs = z.strictObject({ reference: SecretReferenceText, lane: z.nullable(lane()), workspace: z.nullable(workspace()), mode: mode() });

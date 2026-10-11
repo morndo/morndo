@@ -105,7 +105,8 @@ export type RequestEvent =
   | { type: "SecretRequestRejected"; request: string; at: number; command: string; reason: string | null }
   | { type: "SecretRequestExpired"; request: string; at: number };
 export type RequestProblem = "bad_reference" | "bad_purpose" | "bad_grant" | "bad_node" | "bad_lane" | "bad_workspace" | "principal"
-  | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open" | "full" | "expiry" | "clock" | "not_renewed";
+  | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open" | "full" | "expiry" | "clock" | "not_renewed"
+  | "reference";
 export type RequestRefusal = { problem: RequestProblem };
 export type RequestChange = { request: SecretRequest; events: readonly RequestEvent[] };
 export type RequestLimit = "lane-open" | "lane-day" | "node-open" | "node-day" | "request-waiters";
@@ -221,9 +222,9 @@ export function answerGranted(req: SecretRequest, a: Answer, now: number): Resul
   return ok({ request, events: [{ type: "SecretRequestGranted", request: req.id, at: now, command: a.command }] });
 }
 
-// A node's confirmation of a store (SecretsStoreResult, and the node it came from): the version it stored, its time of the
-// store by its own clock, and whether the renew rule held there (renewSecret).
-export type StoreConfirmation = { node: string; version: number; at: number; renewed: boolean };
+// A node's confirmation of a store (SecretsStoreResult, and the node it came from): the Reference it stored under, the
+// version, its time of the store by its own clock, and whether the renew rule held there (renewSecret).
+export type StoreConfirmation = { reference: string; node: string; version: number; at: number; renewed: boolean };
 // How far a node's time of the store may lie outside the hub's window, from the request's opening to the hub's now.
 export const CONFIRMATION_SKEW_MS = 5 * 60_000;
 
@@ -243,6 +244,9 @@ export function answerStored(
   if (parseReference(a.reference) === null) return refuseRequest("bad_reference");
   const c = a.confirmation;
   if (c.node !== req.node || !a.nodes.includes(req.node) || !Number.isSafeInteger(c.version) || c.version < 1) return refuseRequest("node");
+  // The confirmation is for the store this answer made, under the Reference it names. A rotate or renew is about the
+  // request's own Secret; a new one may be stored under the Reference chosen on the card (SR6). T-88.
+  if (c.reference !== a.reference || (req.kind !== "new" && a.reference !== req.reference)) return refuseRequest("reference");
   if (!(Number.isFinite(c.at) && c.at >= req.openedAt - CONFIRMATION_SKEW_MS && c.at <= now + CONFIRMATION_SKEW_MS)) return refuseRequest("clock");
   if (req.kind === "renew" && !c.renewed) return refuseRequest("not_renewed");
   if (req.kind === "renew" && !(typeof a.expiry === "number" && a.expiry > c.at)) return refuseRequest("expiry");
