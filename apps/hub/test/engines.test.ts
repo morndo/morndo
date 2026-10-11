@@ -76,6 +76,24 @@ describe("reading the engines through the CLI", () => {
     await cli.setChain("plan", ["claude:sonnet-5.5@high"], false);
     expect((await cli.read()).version).not.toBe(a);
   });
+  it("a run that fails leaves none of the others running: the read fails once every run it started has ended", async () => {
+    const stamp = join(dir, "stamp.log");
+    const stamped = () => readFileSync(stamp, "utf8").trim().split("\n").map(line => line.split(" ").slice(1).join(" "));
+    // The kill switch's run crashes at once while the roles' run is held.
+    const held = { ...env, FAKE_ENGINES_FAIL_ON: "option", FAKE_ENGINES_PAUSE_ON: "get", FAKE_ENGINES_PAUSE_MS: "300", FAKE_ENGINES_STAMP: stamp };
+    await expect(enginesCli(FAKE, held).read()).rejects.toThrow(/option failed/);
+    expect(stamped()).toEqual(["start get", "end get"]);
+    // One role's resolve crashes while three are held: those end before the read fails, and no further role starts.
+    const s = state();
+    const roles = s.roles as Record<string, { label: string; chain: string[] }>;
+    for (let i = 0; i < 5; i++) roles[`extra-${i}`] = { label: `Extra ${i}`, chain: ["claude:opus-5.5@high"] };
+    writeFileSync(join(dir, "engines.json"), JSON.stringify(s));
+    writeFileSync(stamp, "");
+    const resolving = { ...env, FAKE_ENGINES_FAIL_ON: "resolve:plan", FAKE_ENGINES_PAUSE_RESOLVE: "1000", FAKE_ENGINES_STAMP: stamp };
+    await expect(enginesCli(FAKE, resolving).read()).rejects.toThrow(/resolve failed/);
+    expect(stamped().sort((x, y) => x.localeCompare(y))).toEqual(["end extra-0", "end implement-backend", "end review", "start extra-0", "start implement-backend", "start review"]);
+    expect(calls().filter(c => c[0] === "resolve").map(c => c[1] ?? "").sort((x, y) => x.localeCompare(y))).toEqual(["extra-0", "implement-backend", "plan", "review"]);
+  });
   it("the review rule is what the resolver applies: on when either the role's flag or review_other_provider is on", () => {
     expect(rolesFrom({ review: { chain: ["a:b"], other_provider: false, other_provider_effective: true, review_other_provider: true } })[0]?.otherProvider).toBe(true);
   });

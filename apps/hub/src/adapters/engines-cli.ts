@@ -39,18 +39,28 @@ export type EnginesCli = {
 // all at the same moment (a loaded box was timing the whole look out).
 export const RESOLVE_AT_ONCE = 4;
 
+// Like Promise.all, but a failure is thrown only once every run has ended, so no CLI run outlives the answer (one that
+// crashes at once would otherwise leave the others running after it). The first failure in the list's order is thrown.
+async function allEnded<T extends readonly unknown[] | []>(runs: T): Promise<{ -readonly [P in keyof T]: Awaited<T[P]> }> {
+  const settled = await Promise.allSettled(runs as readonly unknown[]);
+  for (const s of settled) if (s.status === "rejected") throw s.reason;
+  return settled.map(s => (s as PromiseFulfilledResult<unknown>).value) as { -readonly [P in keyof T]: Awaited<T[P]> };
+}
+
+// After a failure no further item starts; the ones already running end before it is thrown.
 async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
+  let failed = false;
   const run = async () => {
-    for (;;) {
+    while (!failed) {
       const i = next++;
       if (i >= items.length) return;
-      out[i] = await fn(items[i] as T, i);
+      try { out[i] = await fn(items[i] as T, i); } catch (e) { failed = true; throw e; }
     }
   };
   const workers = Math.min(Math.max(limit, 1), items.length);
-  await Promise.all(Array.from({ length: workers }, () => run()));
+  await allEnded(Array.from({ length: workers }, () => run()));
   return out;
 }
 
@@ -65,7 +75,7 @@ export function enginesCli(program: string, env: NodeJS.ProcessEnv = process.env
 
   // Two CLI runs: the roles (hashed for the version) and the providers.
   const settings = async (): Promise<EnginesSettings> => {
-    const [rolesOut, providersOut] = await Promise.all([call(["get", "--json"]), call(["providers", "--json"])]);
+    const [rolesOut, providersOut] = await allEnded([call(["get", "--json"]), call(["providers", "--json"])]);
     return { version: createHash("sha256").update(rolesOut).digest("hex"), roles: rolesFrom(json(rolesOut, "get")), providers: providersFrom(json(providersOut, "providers")) };
   };
 
@@ -81,7 +91,7 @@ export function enginesCli(program: string, env: NodeJS.ProcessEnv = process.env
     async read(reuse) {
       const rolesOutP = call(["get", "--json"]);
       const providersOutP = reuse ? Promise.resolve<string | null>(null) : call(["providers", "--json"]);
-      const [rolesOut, providersOut, enabledOut] = await Promise.all([rolesOutP, providersOutP, call(["option", "enabled"])]);
+      const [rolesOut, providersOut, enabledOut] = await allEnded([rolesOutP, providersOutP, call(["option", "enabled"])]);
       const roles = rolesFrom(json(rolesOut, "get"));
       const providers = reuse ? reuse.providers : providersFrom(json(providersOut ?? "", "providers"));
       const now = await mapLimit(roles, RESOLVE_AT_ONCE, async r => nowFrom(json(await call(["resolve", r.role, "--json"], [0, 3]), "resolve")));
