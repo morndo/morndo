@@ -301,8 +301,10 @@ function place(dir: SecretDirectory, input: StoreInput, command: string, at: num
   const check = checkFingerprint(dir.ledger, input.reference, input.fingerprint);
   if (check.kind === "refuse") return refuse(check.reason);
   const before = findSecret(dir, input.reference);
-  // The ledger outlives a Delete, so numbering continues from it: (Reference, version) names one value forever.
-  const number = Math.max(0, ...dir.ledger.filter(e => e.reference === input.reference).map(e => e.version)) + 1;
+  // The ledger outlives a Delete, so numbering continues from it: (Reference, version) names one value forever. The
+  // Secret's own versions count too, so a ledger that lacks them can't make a number come round again.
+  const numbers = [...dir.ledger.filter(e => e.reference === input.reference).map(e => e.version), ...(before?.versions.map(v => v.number) ?? [])];
+  const number = Math.max(0, ...numbers) + 1;
   const fresh: SecretVersion = { number, fingerprint: input.fingerprint, storedAt: at, command, retiredAt: null };
   const ledger = [
     ...dir.ledger.map(e => e.reference === input.reference && e.state === "current" ? { ...e, state: "retired" as const } : e),
