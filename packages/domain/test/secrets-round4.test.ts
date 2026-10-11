@@ -31,8 +31,8 @@ describe("round 4, point 4: a store names the new value's shape, or none, which 
     const dir = value(receiveTransfer(first(), { reference: REF, fingerprint: "0000000000a2", shape: null, grants: [], expiry: null, destinations: [], from: "node-b" }, who, T + 1));
     expect(findSecret(dir, REF)?.shape).toBeNull();
   });
-  it("a first store that leaves the shape out has none", () => {
-    const dir = value(storeSecret(emptySecretDirectory(), { reference: REF, fingerprint: "0000000000a1", grants: [], expiry: null, destinations: [] }, who, T));
+  it("a first store that says to keep the shape has none", () => {
+    const dir = value(storeSecret(emptySecretDirectory(), { reference: REF, fingerprint: "0000000000a1", shape: { keep: true }, grants: [], expiry: null, destinations: [] }, who, T));
     expect(findSecret(dir, REF)?.shape).toBeNull();
   });
 });
@@ -131,5 +131,27 @@ describe("round 5, point 3: the hub judges a renew's Expiry by the node's time o
   it("an Expiry not later than the node's time of the store is refused, whatever the hub's clock says", () => {
     expect(state(answerStored(renew(), answer(T, T), T - 100))).toBe("expiry");
     expect(state(answerStored(renew(), answer(T - 50, T), T - 100))).toBe("expiry");
+  });
+});
+
+describe("round 5, point 7: a store states the shape: an id, none (which clears it), or keep; a missing one is refused (T-83)", () => {
+  const first = () => value(storeSecret(emptySecretDirectory(), { reference: REF, fingerprint: "0000000000d1", shape: "shape-a", grants: [nodeGrant], expiry: null, destinations: [] }, who, T));
+  const rotate = (shape: unknown) => {
+    const r = storeSecret(first(), { reference: REF, fingerprint: "0000000000d2", shape: shape as null, grants: [], expiry: null, destinations: [] }, who, T + 1);
+    return r.ok ? findSecret(r.value, REF)?.shape : r.error.problem;
+  };
+  it("keep keeps it, none clears it, an id replaces it", () => {
+    expect(rotate({ keep: true })).toBe("shape-a");
+    expect(rotate(null)).toBeNull();
+    expect(rotate("shape-b")).toBe("shape-b");
+  });
+  it("a shape an adapter left undefined is refused, so a stale one is never kept by accident", () => {
+    expect(rotate(undefined)).toBe("bad_shape");
+    expect(rotate({ keep: false })).toBe("bad_shape");
+  });
+  it("a store without a shape does not compile", () => {
+    // @ts-expect-error: the shape is required: an id, null, or { keep: true }.
+    const r = storeSecret(first(), { reference: REF, fingerprint: "0000000000d2", grants: [], expiry: null, destinations: [] }, who, T + 1);
+    expect(r.ok ? "stored" : r.error.problem).toBe("bad_shape");
   });
 });

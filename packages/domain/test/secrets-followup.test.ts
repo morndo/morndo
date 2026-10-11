@@ -103,11 +103,11 @@ describe("follow-up 5: a renew is Stored only when its store names an Expiry lat
 });
 
 describe("follow-up 8: a Rotation keeps the shape unless it names one, as it keeps the Expiry", () => {
-  const put = (dir: SecretDirectory, fingerprint: string, shape: string | undefined, at: number) =>
-    value(storeSecret(dir, { reference: REF, fingerprint, ...(shape === undefined ? {} : { shape }), grants: [nodeGrant], expiry: null, destinations: [] }, who(), at));
+  const put = (dir: SecretDirectory, fingerprint: string, shape: string | null | { keep: true }, at: number) =>
+    value(storeSecret(dir, { reference: REF, fingerprint, shape, grants: [nodeGrant], expiry: null, destinations: [] }, who(), at));
   it("a store that names no shape keeps the one there", () => {
     let dir = put(emptySecretDirectory(), "0000000000a1", "shape-a", T);
-    dir = put(dir, "0000000000a2", undefined, T + 1);
+    dir = put(dir, "0000000000a2", { keep: true }, T + 1);
     expect(findSecret(dir, REF)?.shape).toBe("shape-a");
   });
   it("a store that names one replaces it", () => {
@@ -117,7 +117,7 @@ describe("follow-up 8: a Rotation keeps the shape unless it names one, as it kee
   });
   it("a transfer onto the Reference keeps it too", () => {
     let dir = put(emptySecretDirectory(), "0000000000a1", "shape-a", T);
-    dir = value(receiveTransfer(dir, { reference: REF, fingerprint: "0000000000a2", grants: [], expiry: null, destinations: [], from: "node-b" }, who(), T + 1));
+    dir = value(receiveTransfer(dir, { reference: REF, fingerprint: "0000000000a2", shape: { keep: true }, grants: [], expiry: null, destinations: [], from: "node-b" }, who(), T + 1));
     expect(findSecret(dir, REF)?.shape).toBe("shape-a");
   });
 });
