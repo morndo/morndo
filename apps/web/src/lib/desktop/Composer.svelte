@@ -10,7 +10,9 @@
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { onDestroy, untrack } from "svelte";
-  import { ApiError, explain, uploadImage } from "../api.ts";
+  import { acceptNamedUpload, UPLOAD_ACCEPT, type UploadKind, type UploadRefusal } from "@morndo/domain";
+  import { fileSize, fileType, refusalMessage } from "../attach.ts";
+  import { ApiError, explain, uploadFile } from "../api.ts";
   import { stepUp as verify } from "../stepup.ts";
   import { deviceDrafts } from "../drafts.ts";
 
@@ -33,44 +35,51 @@
   // question it answers may have changed while it was written, and the hub must then refuse it.
   let seen = $state<string | null>(restored?.seen ?? null);
   $effect(() => { drafts.typed(target, conversation, text, seen); });
-  type Shot = { key: string; name: string; preview: string; status: "uploading" | "ready" | "error"; id?: string; error?: string };
+  type Shot = { key: string; name: string; kind: UploadKind; size: number; preview: string; status: "uploading" | "ready" | "error"; id?: string; error?: string };
   let shots = $state<Shot[]>([]);
   let dragging = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
-  const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
   const MAX_SHOTS = 6;
   const uploading = $derived(shots.some(s => s.status === "uploading"));
   const readyIds = $derived(shots.filter(s => s.status === "ready" && s.id).map(s => s.id as string));
   const canSend = $derived((text.trim().length > 0 || readyIds.length > 0) && !uploading && !shots.some(s => s.status === "error"));
-  const UPLOAD_PROBLEMS: Record<string, string> = { too_big: "is over 10 MB", not_an_image: "isn't a PNG, JPEG, GIF or WebP image" };
+  const isRefusal = (code: string): code is UploadRefusal =>
+    code === "too_big" || code === "not_allowed" || code === "not_utf8" || code === "bad_name" || code === "not_an_image";
 
-  function addFiles(files: File[]) {
+  async function addFiles(files: File[]) {
     note = null;
-    const images = files.filter(f => IMAGE_TYPES.includes(f.type));
-    const room = Math.max(0, MAX_SHOTS - shots.length);
-    if (images.length < files.length) note = "Only images can be attached (PNG, JPEG, GIF, WebP).";
-    else if (images.length > room) note = `At most ${MAX_SHOTS} images per message.`;
-    for (const file of images.slice(0, room)) {
-      const shot: Shot = { key: crypto.randomUUID(), name: file.name || "pasted image", preview: URL.createObjectURL(file), status: "uploading" };
+    const problems: string[] = [];
+    for (const file of files) {
+      if (shots.length >= MAX_SHOTS) { problems.push(`At most ${MAX_SHOTS} files per message.`); break; }
+      const claimed = file.name || "pasted.png";
+      const accepted = acceptNamedUpload(new Uint8Array(await file.arrayBuffer()), claimed);
+      if (!accepted.ok) { problems.push(refusalMessage(claimed, accepted.error)); continue; }
+      const shot: Shot = {
+        key: crypto.randomUUID(), name: accepted.value.name, kind: accepted.value.kind, size: file.size,
+        preview: accepted.value.kind === "image" ? URL.createObjectURL(file) : "", status: "uploading",
+      };
       shots.push(shot);
-      uploadImage(file)
+      uploadFile(file)
         .then(r => { const s = shots.find(x => x.key === shot.key); if (s) { s.status = "ready"; s.id = r.id; } })
         .catch(e => {
           const s = shots.find(x => x.key === shot.key);
-          if (s) { s.status = "error"; s.error = e instanceof ApiError && e.code !== "rate_limited" ? `This image ${UPLOAD_PROBLEMS[e.code] ?? `couldn't be uploaded (${e.code})`}.` : explain(e); }
+          if (!s) return;
+          s.status = "error";
+          s.error = e instanceof ApiError && isRefusal(e.code) ? refusalMessage(s.name, e.code) : explain(e);
         });
     }
+    if (problems.length) note = problems[0] ?? null;
   }
   function removeShot(key: string) {
     const s = shots.find(x => x.key === key);
-    if (s) URL.revokeObjectURL(s.preview);
+    if (s?.preview) URL.revokeObjectURL(s.preview);
     shots = shots.filter(x => x.key !== key);
   }
   function onPaste(e: ClipboardEvent) {
-    const files = [...(e.clipboardData?.files ?? [])].filter(f => f.type.startsWith("image/"));
+    const files = [...(e.clipboardData?.files ?? [])];
     if (!files.length) return;
-    if (!e.clipboardData?.getData("text/plain")) e.preventDefault();   // a screenshot alone: nothing to paste as text
-    addFiles(files);
+    if (!e.clipboardData?.getData("text/plain")) e.preventDefault();   // a file alone: nothing to paste as text
+    void addFiles(files);
   }
   function onDrop(e: DragEvent) {
     dragging = false;
@@ -125,7 +134,7 @@
     // The worker's own name (its conversation), not the one shown ("Manager"): the hub checks it against the pane (M2).
     const to = target, toName = conversation, written = seen ?? waitingOn ?? "none";
     const uploads = readyIds;
-    const images = shots.filter(s => s.status === "ready").map(s => s.preview);
+    const images = shots.filter(s => s.status === "ready" && s.kind === "image" && s.preview).map(s => s.preview);
     note = null;
     let held: "step_up" | undefined;
     if (!fresh && navigator.onLine !== false) {
@@ -176,13 +185,22 @@
       <span class="scope">{targetName === "Manager" ? "Goes to the manager" : `Goes straight to ${targetName}; the manager won't see it`}</span>
     </div>
     {#if shots.length}
-      <div class="shots" aria-label="Images to send">
+      <div class="shots" aria-label="Files to send">
         {#each shots as s (s.key)}
-          <div class="shot {s.status}" title={s.error ?? s.name}>
-            <img src={s.preview} alt="" />
-            {#if s.status === "uploading"}<span class="spin" aria-label="Uploading"></span>{/if}
-            <button class="rm" onclick={() => removeShot(s.key)} aria-label="Remove {s.name}"><X size={12} /></button>
-          </div>
+          {#if s.kind === "image"}
+            <div class="shot {s.status}" title={s.error ?? s.name}>
+              <img src={s.preview} alt="" />
+              {#if s.status === "uploading"}<span class="spin" aria-label="Uploading"></span>{/if}
+              <button class="rm" onclick={() => removeShot(s.key)} aria-label="Remove {s.name}"><X size={12} /></button>
+            </div>
+          {:else}
+            <div class="filechip {s.status}" title={s.error ?? s.name}>
+              <span class="fn">{s.name}</span>
+              <small>{fileType(s.name, s.kind)} · {fileSize(s.size)}</small>
+              {#if s.status === "uploading"}<span class="spin" aria-label="Uploading"></span>{/if}
+              <button class="rm" onclick={() => removeShot(s.key)} aria-label="Remove {s.name}"><X size={12} /></button>
+            </div>
+          {/if}
         {/each}
       </div>
       {#each shots.filter(s => s.error) as s (s.key)}<p class="shot-err">{s.error}</p>{/each}
@@ -198,8 +216,8 @@
       aria-label="Message {targetName}"
     ></textarea>
     <div class="tools">
-      <button class="attach" onclick={() => fileInput?.click()} aria-label="Attach an image" title="Attach an image (or paste or drop one)"><Paperclip size={16} /></button>
-      <input bind:this={fileInput} type="file" accept={IMAGE_TYPES.join(",")} multiple hidden
+      <button class="attach" onclick={() => fileInput?.click()} aria-label="Attach a file" title="Attach a file (or paste or drop one)"><Paperclip size={16} /></button>
+      <input bind:this={fileInput} type="file" accept={UPLOAD_ACCEPT} multiple hidden
         onchange={e => { addFiles([...((e.currentTarget as HTMLInputElement).files ?? [])]); (e.currentTarget as HTMLInputElement).value = ""; }} />
       <button class="verify" class:fresh onclick={onSecurity} title="Change how often sending asks for your passkey">
         {#if fresh && stepUpMs === null}<ShieldCheck size={16} /> Signed in with your passkey
@@ -255,6 +273,14 @@
   .shot .rm { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; min-height: 20px; padding: 0; border: 0; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: #fff; display: grid; place-items: center; cursor: pointer; }
   .shot .spin { position: absolute; inset: 0; margin: auto; width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.5); border-top-color: #fff; animation: spin 0.9s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .filechip {
+    display: flex; align-items: center; gap: 8px; max-width: 280px; height: 36px; padding: 0 8px 0 10px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--main-bg); min-width: 0;
+  }
+  .filechip .fn { font: 700 13px/18px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .filechip small { flex: none; font: 400 12px/16px var(--font); color: var(--muted); }
+  .filechip.error { border-color: var(--bad-fg); }
+  .filechip .rm { position: static; width: 20px; height: 20px; flex: none; }
   .shot-err { margin: 4px 12px 0; font: 400 12px/16px var(--font); color: var(--bad-fg); }
   .attach { width: 28px; height: 28px; min-height: 28px; margin-right: 4px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
   .attach:hover { background: var(--hover); color: var(--text); }

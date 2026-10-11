@@ -6,12 +6,16 @@
   // terminal, read-only. A lane that waits for his call says so above the composer, with the way to its card.
   import { onMount, tick, untrack } from "svelte";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import Paperclip from "@lucide/svelte/icons/paperclip";
   import SendHorizontal from "@lucide/svelte/icons/send-horizontal";
+  import X from "@lucide/svelte/icons/x";
   import Check from "@lucide/svelte/icons/check";
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import Clock from "@lucide/svelte/icons/clock-3";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
-  import type { Message, RosterEntry } from "@morndo/domain";
+  import { acceptNamedUpload, UPLOAD_ACCEPT, type Message, type RosterEntry, type UploadKind, type UploadRefusal } from "@morndo/domain";
+  import { fileSize, fileType, refusalMessage } from "../../attach.ts";
+  import { ApiError, explain, uploadFile } from "../../api.ts";
   import type { LiveFeed } from "../../feed.svelte.ts";
   import type { DecisionItem } from "../../desktop/decisions.ts";
   import { renderMarkdown } from "../../markdown.ts";
@@ -96,8 +100,36 @@
   let note = $state<string | null>(null);
   let busy = $state(false);
   let input = $state<HTMLTextAreaElement | null>(null);
+  let fileInput = $state<HTMLInputElement | null>(null);
+  let dragging = $state(false);
+  type PendingFile = { key: string; name: string; kind: UploadKind; size: number; status: "uploading" | "ready" | "error"; id?: string };
+  let files = $state<PendingFile[]>([]);
+  const readyIds = $derived(files.filter(f => f.status === "ready" && f.id).map(f => f.id as string));
+  const uploading = $derived(files.some(f => f.status === "uploading"));
+  const isRefusal = (code: string): code is UploadRefusal =>
+    code === "too_big" || code === "not_allowed" || code === "not_utf8" || code === "bad_name" || code === "not_an_image";
+  async function addFiles(list: File[]) {
+    note = null;
+    const problems: string[] = [];
+    for (const file of list) {
+      if (files.length >= 6) { problems.push("At most 6 files per message."); break; }
+      const claimed = file.name || "pasted.png";
+      const accepted = acceptNamedUpload(new Uint8Array(await file.arrayBuffer()), claimed);
+      if (!accepted.ok) { problems.push(refusalMessage(claimed, accepted.error)); continue; }
+      const row: PendingFile = { key: crypto.randomUUID(), name: accepted.value.name, kind: accepted.value.kind, size: file.size, status: "uploading" };
+      files.push(row);
+      uploadFile(file)
+        .then(r => { const s = files.find(x => x.key === row.key); if (s) { s.status = "ready"; s.id = r.id; } })
+        .catch(e => {
+          const s = files.find(x => x.key === row.key);
+          if (s) s.status = "error";
+          note = e instanceof ApiError && isRefusal(e.code) ? refusalMessage(claimed, e.code) : explain(e);
+        });
+    }
+    if (problems.length) note = problems[0] ?? null;
+  }
   $effect(() => {
-    const started = text.trim().length > 0;
+    const started = text.trim().length > 0 || files.length > 0;
     if (started && seen === null) seen = worker.waitingOn ?? "none";
     else if (!started) seen = null;
   });
@@ -109,16 +141,19 @@
   });
   async function send() {
     const body = text.trim();
-    if (!body || busy) return;
+    if ((!body && readyIds.length === 0) || busy || uploading || files.some(f => f.status === "error")) return;
     busy = true;
     note = null;
+    const uploads = readyIds;
+    const sentFiles = files;
     try {
       if (!verifiedFresh && navigator.onLine !== false && !(await verify())) { note = "Not sent: the passkey check didn't finish. Your message is still here."; return; }
       const written = seen ?? worker.waitingOn ?? "none";
       drafts.sent(worker.id);
       text = "";
-      try { await onQueue({ worker: worker.id, workerName: worker.name, text: body, uploads: [], seen: written }); }
-      catch { text = body; note = "Couldn't keep the message on this device. It is back in the box."; return; }
+      files = [];
+      try { await onQueue({ worker: worker.id, workerName: worker.name, text: body, uploads, seen: written }); }
+      catch { text = body; files = sentFiles; note = "Couldn't keep the message on this device. It is back in the box."; return; }
       atBottom = true;
       void tick().then(() => { if (scroller) scroller.scrollTop = scroller.scrollHeight; });
     } finally { busy = false; input?.focus(); }
@@ -170,7 +205,7 @@
                 {#if m.text}<div class="md">{@html renderMarkdown(long ? shortened(m.text) : it.mine ? withoutFileNotes(m.text) : m.text)}</div>{/if}
                 {#if long}<button class="tlink more" onclick={() => (expanded = { ...expanded, [m.id]: true })}>Show more</button>{/if}
                 {#each m.attachments ?? [] as a, i (attachmentKey(m.id, i))}
-                  {#if a.id}<a class="file" href="/api/files/{a.id}" target="_blank" rel="noopener">{a.name}</a>{:else}<span class="file gone">{a.name}: not available</span>{/if}
+                  {#if a.id}<a class="file" href="/api/files/{a.id}" target="_blank" rel="noopener"><span>{a.name}</span><small>{fileType(a.name, a.kind)}{a.size != null ? ` · ${fileSize(a.size)}` : ""}</small></a>{:else}<span class="file gone">{a.name}: not available</span>{/if}
                 {/each}
                 <span class="meta"><time>{clock(m.at)}</time>{#if it.mine && m.kind !== "event"}<CheckCheck size={14} aria-label="Delivered" />{/if}</span>
               </div>
@@ -229,12 +264,27 @@
       <button class="pbtn small primary" onclick={() => asks[0] && onDecide(asks[0].id)}>Decide</button>
     </div>
   {/if}
-  <div class="composer">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="composer" class:dragging
+    ondragover={e => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragging = true; } }}
+    ondragleave={() => (dragging = false)}
+    ondrop={e => { dragging = false; const list = [...(e.dataTransfer?.files ?? [])]; if (!list.length) return; e.preventDefault(); void addFiles(list); }}>
     {#if note}<p class="err">{note}</p>{/if}
+    {#if files.length}
+      <div class="pending" aria-label="Files to send">
+        {#each files as f (f.key)}
+          <span class="chip"><span class="fn">{f.name}</span><small>{fileType(f.name, f.kind)} · {fileSize(f.size)}</small><button type="button" onclick={() => (files = files.filter(x => x.key !== f.key))} aria-label="Remove {f.name}"><X size={14} /></button></span>
+        {/each}
+      </div>
+    {/if}
     <div class="box">
+      <button class="clip" type="button" onclick={() => fileInput?.click()} aria-label="Attach a file"><Paperclip size={20} /></button>
+      <input bind:this={fileInput} type="file" accept={UPLOAD_ACCEPT} multiple hidden
+        onchange={e => { void addFiles([...((e.currentTarget as HTMLInputElement).files ?? [])]); (e.currentTarget as HTMLInputElement).value = ""; }} />
       <textarea bind:this={input} bind:value={text} rows="1" placeholder="Message {name}" aria-label="Message {name}" enterkeyhint="send"
+        onpaste={e => { const list = [...(e.clipboardData?.files ?? [])]; if (!list.length) return; if (!e.clipboardData?.getData("text/plain")) e.preventDefault(); void addFiles(list); }}
         onkeydown={e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); void send(); } }}></textarea>
-      <button class="send" disabled={!text.trim() || busy} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
+      <button class="send" disabled={(!text.trim() && readyIds.length === 0) || busy || uploading} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
     </div>
     <p class="scope note">{worker.name === "manager" ? "Goes to the manager's inbox; it is typed in once its box is free." : `Goes straight to ${name}; the manager won't see it.`}</p>
   </div>
@@ -293,7 +343,8 @@
   .mine .meta { color: var(--ink-fg); }
   .bubble.failed .meta { color: var(--bad-text); }
   .more { min-height: 36px; padding: 0; color: inherit; }
-  .file { display: inline-flex; align-items: center; min-height: 40px; color: inherit; font-weight: 700; }
+  .file { display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; min-height: 40px; color: inherit; font-weight: 700; text-decoration: none; }
+  .file small { font-weight: 400; font-size: 12px; }
   .why { margin: 4px 4px 0; font: 400 13px/18px var(--body); color: var(--bad-text); text-align: right; }
   .acts { display: flex; gap: 8px; margin-top: 6px; }
   .screen {
@@ -310,6 +361,13 @@
     padding: 8px max(10px, var(--safe-right)) max(8px, var(--safe-bottom)) max(10px, var(--safe-left));
   }
   :global(.kb-open) .composer { padding-bottom: 8px; }
+  .composer.dragging { outline: 2px solid var(--ink); }
+  .pending { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 32px; padding: 4px 6px 4px 10px; border: 1px solid var(--edge); border-radius: 10px; background: var(--bg); }
+  .chip .fn { font: 700 13px/18px var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .chip small { flex: none; color: var(--muted); font: 400 12px/16px var(--body); }
+  .chip button { width: 28px; height: 28px; border: 0; border-radius: 14px; background: transparent; color: var(--fg); display: grid; place-items: center; cursor: pointer; }
+  .clip { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 22px; background: transparent; color: var(--fg); cursor: pointer; }
   .box { display: flex; align-items: flex-end; gap: 8px; }
   textarea {
     flex: 1; min-height: 44px; max-height: 132px; resize: none; padding: 10px 14px; border-radius: 22px; border: 1px solid var(--edge);

@@ -1,4 +1,5 @@
 // Same-origin JSON calls to the hub. Cookies are HttpOnly; the browser sends them, this code never sees them.
+import { UPLOAD_NAME_HEADER } from "@morndo/protocol";
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -32,9 +33,11 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown, sig
   return data as T;
 }
 
-// An image the principal pasted or attached (S1): the raw bytes, its type as the browser saw it.
-export async function uploadImage(file: Blob): Promise<{ id: string; name: string; size: number; mime: string }> {
-  const res = await fetch("/api/uploads", { method: "POST", credentials: "same-origin", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
+// A file the principal pasted or attached (S1). The hub decides from the name and the bytes, not from this type.
+export async function uploadFile(file: File): Promise<{ id: string; name: string; size: number; mime: string }> {
+  const headers: Record<string, string> = { "content-type": "application/octet-stream" };
+  if (file.name) headers[UPLOAD_NAME_HEADER] = encodeURIComponent(file.name);
+  const res = await fetch("/api/uploads", { method: "POST", credentials: "same-origin", headers, body: file });
   const data = (await res.json().catch(() => ({}))) as ErrorBody;
   if (!res.ok) throw apiError(res, data);
   return data as { id: string; name: string; size: number; mime: string };

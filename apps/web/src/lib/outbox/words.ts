@@ -13,12 +13,12 @@ const PROBLEMS: Record<string, string> = {
   no_pane: "is no longer running.",
   busy: "is being typed into by something else right now. Try again in a few seconds.",
   too_long: "can't take a message this long (8000 characters at most).",
-  not_yours: "can't take that image: it was uploaded from another device.",
-  unknown_upload: "can't take that image anymore. Attach it again.",
-  expired: "can't take that image anymore: it's over a day old. Attach it again.",
-  too_many: "can take at most 6 images per message.",
-  // Fleet core §3.1: an attached image is put on the worker's machine before anything is typed.
-  too_large: "can't take that image: it's too big for its machine, so nothing was typed. Attach a smaller one.",
+  not_yours: "can't take that file: it was uploaded from another device.",
+  unknown_upload: "can't take that file anymore. Attach it again.",
+  expired: "can't take that file anymore: it's over a day old. Attach it again.",
+  too_many: "can take at most 6 files per message.",
+  // Fleet core §3.1: an attached file is put on the worker's machine before anything is typed.
+  too_large: "can't take that file: it's too big for its machine, so nothing was typed. Attach a smaller one.",
   node_offline: "is on a machine that isn't answering right now, so nothing was typed. Try again once it's back.",
   // The node or the fleet refused it saying nothing ran (fleet core §5.3; the fix wave releases the send on any refusal
   // with executed "no"), so these come back as Not sent. Nothing was typed.

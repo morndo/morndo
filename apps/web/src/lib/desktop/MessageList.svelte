@@ -255,7 +255,7 @@
         <div class="who"><strong>You</strong><time>{label(p)}</time></div>
         {#if p.text.trim()}<div class="md">{@html renderMarkdown(p.text)}</div>{/if}
         {#if p.images.length}<div class="sent-images">{#each p.images as src (src)}<img {src} alt="" />{/each}</div>
-        {:else if p.uploads.length}<p class="meta-line">{p.uploads.length === 1 ? "1 image" : `${p.uploads.length} images`}</p>{/if}
+        {:else if p.uploads.length}<p class="meta-line">{p.uploads.length === 1 ? "1 file" : `${p.uploads.length} files`}</p>{/if}
         {#if stuck}<p class="err">{reason(p)}</p>{/if}
         {#if stuck || p.state === "queued" || p.state === "sending" || (p.state === "sent" && label(p) !== "Sent")}
           <div class="outbox-actions">
