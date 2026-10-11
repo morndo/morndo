@@ -3,10 +3,8 @@
 // still fires while the agent is down. SIGTERM means cancel.
 import { spawn } from "node:child_process";
 import { chmodSync, constants, existsSync, openSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { constants as osConstants } from "node:os";
-import { setTimeout as sleep } from "node:timers/promises";
 import { writeProcessFile } from "./job-identity.ts";
-import { FULL_LOG_GRACE_MS, MAX_TIMER_MS } from "./job-limits.ts";
+import { MAX_TIMER_MS } from "./job-limits.ts";
 import { fileURLToPath } from "node:url";
 
 type Spec = {
@@ -30,21 +28,14 @@ type ExitBody = {
 const capRequest = (exitPath: string): string =>
   exitPath.endsWith(".exit") ? `${exitPath.slice(0, -5)}.cap` : `${exitPath}.cap`;
 
+// How long a log stays over its cap before the helper stops the command (the store's own .cap request acts at once).
+const FULL_LOG_GRACE_MS = 100;
+
 const gone = (pid: number): boolean => {
   try { process.kill(-pid, 0); return false; } catch { return true; }
 };
 
-// One rule for a command's own end, wherever it is written: its exit code, or the conventional 128 plus the
-// signal number when a signal ended it — the same rule the systemd backend reads from ExecMainStatus.
-const signalEnd = (signal: string | null): number | null => {
-  if (signal === null) return null;
-  const n = (osConstants.signals as Record<string, unknown>)[signal];
-  return typeof n === "number" && Number.isInteger(n) && n > 0 && n < 128 ? 128 + n : null;
-};
-
-// Once a cap's group kill has waited the group out, how long the exit event may take to arrive before the
-// record is written anyway.
-const EXIT_SETTLE_MS = 100;
+const wait = (ms: number): Promise<void> => new Promise(resolve => { setTimeout(resolve, ms); });
 
 function killGroup(pid: number): Promise<void> {
   return new Promise(resolve => {
@@ -112,13 +103,15 @@ async function main(): Promise<void> {
     stopping = kind;
     if (child.pid !== undefined) await killGroup(child.pid);
     if (kind === "capped") {
-      // killGroup has waited the group out, so the exit event is a beat away; take it, bounded, rather than
-      // poll for it. The exit code is null either way: our signal ended the command, whatever its handler did.
-      await Promise.race([exitDone, sleep(EXIT_SETTLE_MS)]);
+      // Backstop for the race the grace above narrows: a command can end on its own in the very moment the stop
+      // lands, the kill above then reaching a command that is already gone. Its own exit code — the one the exit
+      // event carries — is the truth, not the cap's null; a null code means a signal (ours) ended it. killGroup has
+      // waited the group out, so the event is a beat away.
+      for (let i = 0; i < 50 && !childExited && !wrote; i++) await wait(20);
     }
     const durationMs = Math.max(0, Date.now() - started);
     write(kind === "capped"
-      ? { outcome: "exited", exitCode: null, durationMs }
+      ? { outcome: "exited", exitCode: childExited ? ownCode : null, durationMs }
       : { outcome: kind, exitCode: 137, durationMs });
     process.exit(0);
   };
@@ -128,13 +121,12 @@ async function main(): Promise<void> {
     process.exit(0);
   });
   let childCode: number | null = null;
+  let ownCode: number | null = null;
   let childExited = false;
-  let sawExit: (() => void) | null = null;
-  const exitDone = new Promise<void>(resolve => { sawExit = resolve; });
   child.on("exit", (code, signal) => {
     childExited = true;
-    childCode = code !== null ? code : signalEnd(signal);
-    sawExit?.();
+    childCode = code !== null ? code : signal === "SIGKILL" ? 137 : signal === "SIGTERM" ? 143 : null;
+    ownCode = code;
   });
   const linger = setInterval(() => {
     if (stopping || wrote) return;
@@ -144,23 +136,22 @@ async function main(): Promise<void> {
       process.exit(0);
       return;
     }
-    // A .cap request comes from the supervisor's sweep, which has already waited the grace itself.
     if (existsSync(capRequest(spec.exitPath))) { void stop?.("capped"); return; }
     if (spec.logBytes > 0) {
       let size = 0;
       try { size = statSync(spec.logPath).size; } catch { /* a missing log is not over the cap */ }
       if (size >= spec.logBytes) {
-        // A full log alone is no fault: a command that has stopped writing ends on its own moments later, and
-        // its own exit code is the truth. Only a log still full after the grace — a command still running,
-        // whatever it is doing — is stopped, and then with no exit code, for our signal ends it. Whatever it
-        // writes in the meantime stays in the log (the store never rewrites one); the next sweep of the log
-        // measures the size that is really there.
+        // A command that has stopped writing ends on its own moments later, and its own exit code is the truth: a
+        // full log alone is no fault. Only a command whose log has been full this long — still running, whatever it
+        // is doing — is stopped, so the cap can never cut off one that was already done. Under load a command sits
+        // a good while between its last write and its exit; a command that keeps writing adds a bounded burst
+        // (about 45 MB/s measured for a tight writeSync loop) to a log the store truncates on read anyway.
         if (fullSince === null) { fullSince = Date.now(); return; }
         if (Date.now() - fullSince < FULL_LOG_GRACE_MS) return;
         void stop?.("capped");
         return;
       }
-      fullSince = null;    // under the cap again: the wait starts over
+      fullSince = null;    // under the cap again (the store truncates a pool-full log): the wait starts over
     }
   }, 30);
   if (spec.timeoutMs !== null && spec.timeoutMs > 0 && spec.timeoutMs <= MAX_TIMER_MS) {
