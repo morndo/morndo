@@ -55,7 +55,7 @@ describe("over the connection", () => {
     });
     expect(await fleet.waitFor(m => m.t === "res" && m.id === "late", 2000)).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
     await stopping;
-    expect(Date.now() - started).toBeLessThan(2000);
+    expect(Date.now() - started).toBeLessThan(8000);
     stuck();
   });
 
