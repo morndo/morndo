@@ -143,10 +143,7 @@ export function draftOnScreen(screen: string): string | null {
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i];
     if (!run || run.dim) continue;
-    if (run.rev && [...run.text].length === 1) {
-      const follow = runs.slice(i + 1).find(r => r.text !== "");
-      if (follow?.dim) continue;
-    }
+    if (run.rev && [...run.text].length === 1 && runs[i + 1]?.dim) continue;
     typed += run.text;
   }
   const draft = typed.replace(/\s*│\s*$/, "").trim();
