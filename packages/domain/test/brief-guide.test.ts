@@ -68,7 +68,9 @@ function guideDraft(): Record<string, unknown> {
     .map(l => /^(\w+):\s*(.*)$/.exec(l)).filter(Boolean).map(m => [(m as RegExpExecArray)[1], (m as RegExpExecArray)[2]]));
   const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(front.due));            // a date alone: the end of that day, UTC
   if (!day) throw new Error("the guide's example has no date-only due");
-  const decision = list(section(markdown, "Decision"), "- [");
+  const items = (lines: readonly string[]) => lines.filter(l => l.startsWith("- ")).map(l => l.slice(2).trim());
+  const decision = items(section(markdown, "Decision"));
+  const evidenceItems = items(section(markdown, "Evidence"));
   return {
     topic: front.topic, due: Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3]), 23, 59, 59, 999),
     minutes: Number(front.minutes), headline: /^# (.+)$/m.exec(markdown)?.[1] ?? "", recommend: front.recommend,
@@ -99,7 +101,7 @@ function guideDraft(): Record<string, unknown> {
       reviewPoint: labelled(section(markdown, "What approval authorizes"), "Review point") ?? "",
     },
     ifNoAnswer: paragraph(section(markdown, "If no decision by the due date")) || null,
-    evidence: list(section(markdown, "Evidence"), "- [").map(l => ({
+    evidence: evidenceItems.map(l => ({
       label: /^\[([^\]]+)\]/.exec(l)?.[1] ?? "", url: /\]\((https:\/\/[^\s)]+)\)$/.exec(l)?.[1] ?? "",
     })),
     blocking: front.blocking === "true", project: front.project ?? null, task: front.task ?? null, ref: front.ref ?? null,

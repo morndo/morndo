@@ -182,26 +182,48 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     ? null
     : lint.string("ifNoAnswer", draft.ifNoAnswer, CAPS.line);
 
-  // The comparison's cells and factors carry the caps here; their shape (one column per option, DB4) is checked below.
+  // DB4: one column per option in their order, three to ten factor rows, no empty cell ("n/a" is a value), and a note
+  // on what the numbers include.
   const comparison = isObj(draft.comparison) ? draft.comparison : {};
-  const rowsIn = Array.isArray(comparison.rows) ? comparison.rows : [];
+  const rowsIn = comparison.rows;
+  if (!Array.isArray(rowsIn)) lint.error("missing_section", "comparison.rows", "the section is missing; every section of the template is required");
+  else if (rowsIn.length < 3 || rowsIn.length > 10) lint.error("table_rows", "comparison.rows", `${rowsIn.length} factor rows; the comparison needs three to ten`);
   const rows: { factor: string; cells: string[] }[] = [];
-  for (let i = 0; i < rowsIn.length; i++) {
+  for (let i = 0; Array.isArray(rowsIn) && i < rowsIn.length; i++) {
     const row = isObj(rowsIn[i]) ? rowsIn[i] : {};
     for (const sub of Object.keys(row)) {
       if (sub !== "factor" && sub !== "cells") lint.error("unknown_section", `comparison.rows[${i}].${sub}`, `a factor row has no "${sub}" part; check the template`);
     }
     const factor = lint.string(`comparison.rows[${i}].factor`, row.factor, CAPS.factor);
-    const cellsIn = Array.isArray(row.cells) ? row.cells : [];
-    const cells: string[] = [];
-    for (let j = 0; j < cellsIn.length; j++) {
-      const cell = lint.string(`comparison.rows[${i}].cells[${j}]`, cellsIn[j], CAPS.cell);
-      if (cell !== null) cells.push(cell);
+    const cellsIn = row.cells;
+    let cells: string[] | null = Array.isArray(cellsIn) ? cellsIn : null;
+    if (cells === null || (!optionsBroken && cells.length !== keys.size)) {
+      lint.error("table_columns", `comparison.rows[${i}]`,
+        `every row has one cell per option, in the order of the Decision list (${keys.size} options)`);
+      cells = null;
+    } else {
+      const kept: string[] = [];
+      for (let j = 0; j < cells.length; j++) {
+        const cell = cells[j]!;
+        if (!isText(cell) || blank(cell)) { lint.error("empty_cell", `comparison.rows[${i}].cells[${j}]`, "no empty cells: write a value, or \"n/a\" when there is none"); continue; }
+        if (cell.length > CAPS.cell) { lint.error("too_long", `comparison.rows[${i}].cells[${j}]`, `${cell.length} characters; the cap is ${CAPS.cell}`); continue; }
+        if (CONTROL.test(cell)) { lint.error("control_char", `comparison.rows[${i}].cells[${j}]`, "control characters, or a line break in a one-line field"); continue; }
+        kept.push(cell);
+      }
+      cells = kept;
     }
-    if (factor !== null) rows.push({ factor, cells });
+    if (factor !== null) rows.push({ factor, cells: cells ?? [] });
   }
-  const note = isText(comparison.note) && !blank(comparison.note) && comparison.note.length <= CAPS.note && !CONTROL.test(comparison.note)
-    ? comparison.note : null;
+  let note: string | null = null;
+  if (!isText(comparison.note) || blank(comparison.note)) {
+    lint.error("no_table_note", "comparison.note", "say under the table what the numbers include and leave out");
+  } else if (comparison.note.length > CAPS.note) {
+    lint.error("too_long", "comparison.note", `${comparison.note.length} characters; the cap is ${CAPS.note}`);
+  } else if (CONTROL.test(comparison.note) || comparison.note.includes("\n")) {
+    lint.error("control_char", "comparison.note", "control characters, or a line break in a one-line field");
+  } else {
+    note = comparison.note;
+  }
 
   const evidenceIn = Array.isArray(draft.evidence) ? draft.evidence : [];
   if (evidenceIn.length > CAPS.evidence) lint.error("too_long", "evidence", `${evidenceIn.length} items; the cap is ${CAPS.evidence}`);
@@ -229,7 +251,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     ask: { text: askText!, alternative: alternative!, uncertainty: uncertainty! },
     whyNow: whyNow!,
     options,
-    comparison: { rows, note: note ?? "" },
+    comparison: { rows, note: note! },
     why: { text: whyText!, assumptions: assumptions ?? [], downside: isText(why.downside) ? why.downside : "" },
     changeIf: changeIf!,
     risk: { risk: riskText!, control: control! },
