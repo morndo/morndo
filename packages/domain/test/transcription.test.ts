@@ -3,7 +3,7 @@
 // recording caps, sniffAudio, one attempt per recording, one terminal outcome, the queue via the shared rule, and
 // the text it produced. No engine name, no file, no clock of its own.
 import { describe, expect, it } from "vitest";
-import { afterRestart, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, MAX_RECORDING_SECONDS, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, TEXT_MAX_BYTES, threadsFor, transcriptionTimeoutMs,
+import { afterRestart, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
   type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
 
 const bytes = (head: number[], ...rest: number[]) => new Uint8Array([...head, ...rest]);
@@ -185,6 +185,8 @@ describe("scheduling transcriptions", () => {
 });
 
 describe("the caps on a recording, a run and its text (TX6)", () => {
+  const run = (): Transcription => ({ ...live(), state: "running", startedAt: AT + 10 });
+
   it("a recording over 10 MiB is refused at the request; one exactly at the line is taken", () => {
     expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES + 1 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
     expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES }), AT, READY).ok).toBe(true);
@@ -206,7 +208,7 @@ describe("the caps on a recording, a run and its text (TX6)", () => {
     expect(words).toEqual({ language: "de", text: "guten Morgen", edited: false, engine: "local", model: "small" });
     const long = makeText({ language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "ä".repeat(40_000) }] }, "local", "small");
     expect(long.text.endsWith("[truncated]")).toBe(true);
-    expect(long.text.length).toBeLessThanOrEqual(TEXT_MAX_BYTES);
+    expect(long.text.length).toBeLessThanOrEqual(MAX_TEXT_BYTES);
     for (let i = 0; i < long.text.length; i++) expect(long.text.codePointAt(i)).toBeTruthy();
     const plain = makeText({ language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "a".repeat(100) }] }, "local", "small");
     expect(plain.text).toBe("a".repeat(100));

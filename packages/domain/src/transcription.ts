@@ -46,6 +46,39 @@ export const NO_CAPABILITY: TranscriptionCapability = { present: false, reason: 
 export type RecordingKind = "upload" | "attachment";
 export type Recording = { kind: RecordingKind; id: string };
 
+// What the engine reports: the language it settled on, how long the audio was, and what it heard, segment by
+// segment. The domain joins and caps the words; this never carries audio (4, EngineText).
+export type Segment = { startMs: number; endMs: number; text: string };
+export type EngineText = { language: string; durationMs: number; segments: readonly Segment[] };
+
+// TX6: a Recording is at most 10 MiB and at most maxSeconds long, and the Text of one attempt is at most 64 KiB
+// of UTF-8. The cut lands on a code point boundary and names itself.
+export const MAX_RECORDING_BYTES = 10 * 1024 * 1024;
+export const MAX_RECORDING_SECONDS = 600;
+export const MAX_TEXT_BYTES = 64 * 1024;
+const TEXT_MARK = "[truncated]";
+
+const utf8Bytes = (ch: string): number => {
+  const c = ch.codePointAt(0) ?? 0;
+  return c <= 0x7f ? 1 : c <= 0x7ff ? 2 : c <= 0xffff ? 3 : 4;
+};
+
+// The engine's segments become one text: trimmed words joined by a space, capped to MAX_TEXT_BYTES.
+export function makeText(engine: EngineText, engineName: string, model: string): TranscriptionText {
+  const joined = engine.segments.map(seg => seg.text.trim()).filter(word => word !== "").join(" ");
+  const room = MAX_TEXT_BYTES - TEXT_MARK.length;
+  let out = "";
+  let bytes = 0;
+  let cut = false;
+  for (const ch of joined) {
+    const b = utf8Bytes(ch);
+    if (bytes + b > room) { cut = true; break; }
+    out += ch;
+    bytes += b;
+  }
+  return { language: engine.language, text: cut ? out + TEXT_MARK : joined, edited: false, engine: engineName, model };
+}
+
 // The states of one attempt (3.4): queued behind others, starting, running, or terminal once. `lost` is a run the
 // hub no longer knows the end of (TX4). The row's `outcome` holds the terminal state it ended in.
 export const TX_TERMINAL = ["done", "failed", "timed_out", "cancelled", "lost"] as const;
@@ -116,7 +149,7 @@ export function requestTranscription(
     return err("bad_recording");
   }
   if (!LANGUAGE.test(body.language)) return err("bad_language");
-  if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0) return err("bad_size");
+  if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0 || body.sizeBytes > MAX_RECORDING_BYTES) return err("bad_size");
   const inFlight = existing.find(row => sameRecording(row.recording, recording) && row.language === body.language && open(row.state));
   if (inFlight) return ok(inFlight);
   return ok({
@@ -139,9 +172,9 @@ export function startTranscription(tx: Transcription, at: number): Result<Transc
 // queued one (an engine that turned out not ready before any start); `timed_out` needs a run; `cancelled` at any
 // live state; `lost` is the hub's own verdict on a run whose end it never recorded (TX4).
 export type TranscriptionEnd =
-  | { outcome: "done"; at: number; durationSec: number; language: string; text: string; engine: string; model: string }
-  | { outcome: "failed"; at: number; durationSec: number; problem: TranscriptionProblem }
-  | { outcome: "timed_out"; at: number; durationSec: number }
+  | { outcome: "done"; at: number; engine: EngineText; engineName: string; model: string }
+  | { outcome: "failed"; at: number; problem: TranscriptionProblem }
+  | { outcome: "timed_out"; at: number }
   | { outcome: "cancelled"; at: number }
   | { outcome: "lost"; at: number };
 
@@ -149,15 +182,20 @@ export type EndProblem = "not_running" | "already_terminal" | "bad_end";
 
 // TX3: terminal once. The same outcome again is the same row; a different one, or different words for a `done`,
 // is refused. Nothing here starts a new attempt: asking again is a new request (requestTranscription).
-export function endTranscription(tx: Transcription, event: TranscriptionEnd): Result<Transcription, EndProblem> {
-  const durationOk = event.outcome !== "cancelled" && event.outcome !== "lost"
-    ? Number.isInteger(event.durationSec) && event.durationSec >= 0
-    : true;
-  const atOk = Number.isInteger(event.at);
-  if (!durationOk || !atOk) return err("bad_end");
+const engineOk = (e: EngineText): boolean =>
+  typeof e === "object" && e !== null && typeof e.language === "string"
+  && Number.isInteger(e.durationMs) && e.durationMs >= 0
+  && Array.isArray(e.segments)
+  && e.segments.every(seg => seg !== null && Number.isInteger(seg.startMs) && Number.isInteger(seg.endMs) && typeof seg.text === "string");
+
+export function endTranscription(tx: Transcription, event: TranscriptionEnd, maxSeconds = MAX_RECORDING_SECONDS): Result<Transcription, EndProblem> {
+  if (!Number.isInteger(event.at)) return err("bad_end");
+  if (event.outcome === "done" && !engineOk(event.engine)) return err("bad_end");
   if (terminal(tx.state)) {
     if (event.outcome !== tx.outcome) return err("already_terminal");
-    if (event.outcome === "done" && tx.text !== null && tx.text.text !== event.text) return err("already_terminal");
+    if (event.outcome === "done" && tx.text !== null && tx.text.text !== makeText(event.engine, event.engineName, event.model).text) {
+      return err("already_terminal");
+    }
     return ok(tx);
   }
   const ran = tx.state === "running";
@@ -165,15 +203,33 @@ export function endTranscription(tx: Transcription, event: TranscriptionEnd): Re
   if (event.outcome === "timed_out" && !ran) return err("not_running");
   if (event.outcome === "lost" && !ran && tx.state !== "starting") return err("not_running");
   if (event.outcome === "done") {
+    if (event.engine.durationMs > maxSeconds * 1000) {
+      return ok({ ...tx, state: "failed", outcome: "failed", problem: "too_long", endedAt: event.at, position: null, reason: null });
+    }
     return ok({
       ...tx, state: "done", outcome: "done", endedAt: event.at, position: null, reason: null,
-      text: { language: event.language, text: event.text, edited: false, engine: event.engine, model: event.model },
+      text: makeText(event.engine, event.engineName, event.model),
     });
   }
   if (event.outcome === "failed") {
     return ok({ ...tx, state: "failed", outcome: "failed", problem: event.problem, endedAt: event.at, position: null, reason: null });
   }
   return ok({ ...tx, state: event.outcome, outcome: event.outcome, endedAt: event.at, position: null, reason: null });
+}
+
+// 9: the timeout is the config's, or 120 s plus six times the duration when it names none.
+export function transcriptionTimeoutMs(durationMs: number, timeoutSec: number | null): number {
+  return typeof timeoutSec === "number" && timeoutSec > 0 ? timeoutSec * 1000 : 120_000 + 6 * durationMs;
+}
+
+// 9: half the cores, at most eight, so the agents keep the other half.
+export function threadsFor(cores: number): number {
+  return Math.min(8, Math.floor(cores / 2));
+}
+
+// 9: the probe can lower the cap; the setting cannot raise it past what the plugin offered.
+export function effectiveMaxSeconds(configured: number, pluginMaxSeconds: number): number {
+  return Math.min(configured, pluginMaxSeconds);
 }
 
 const terminal = (state: TranscriptionState): state is TxOutcome => !open(state);
