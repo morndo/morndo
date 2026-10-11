@@ -10,7 +10,7 @@ import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { ClaudeRuntime, helperCommand, isStatusRefusal, isThirdPartyAnthropicBase } from "./adapters/runtime-claude.ts";
+import { baseUrlProblem, ClaudeRuntime, helperCommand, isStatusRefusal, isThirdPartyAnthropicBase } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
@@ -163,6 +163,11 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return fail(io, LOGIN_KEY_REFUSAL);
   const preset = presetOf(home.catalog, connection.vendor);
   if (!preset) return fail(io, "missing");
+  const baseUrl = preset.runtimes.find(item => item.runtime === connection.runtime)?.baseUrl ?? "";
+  if (connection.kind === "api-key" && connection.runtime === "claude") {
+    const problem = baseUrlProblem(baseUrl);
+    if (problem) return fail(io, problem);
+  }
   const model = wantedModel(preset.defaultPicks["*"]) ?? "default";
   const reserve = Number(parsed.get("reserve") ?? "5");
   const granted = ask(home, name, parsed, false, reserve);
@@ -180,7 +185,6 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     reservation: lease.reservation, probe: false, subscription,
   };
   const bin = connection.runtime === "codex" ? home.env.MORNDO_CODEX_BIN ?? "codex" : home.env.MORNDO_CLAUDE_BIN ?? "claude";
-  const baseUrl = preset.runtimes.find(item => item.runtime === connection.runtime)?.baseUrl ?? "";
   const saved = home.env;
   let released = false;
   let refusal: number | null = null;

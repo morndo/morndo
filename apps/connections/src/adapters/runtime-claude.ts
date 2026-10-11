@@ -219,7 +219,22 @@ export function isThirdPartyAnthropicBase(baseUrl: string): boolean {
   return host !== "" && host !== FIRST_PARTY_HOST;
 }
 
+export const BASE_URL_PROBLEM = "base URL missing or invalid";
+
+export function baseUrlProblem(baseUrl: string): string | null {
+  const trimmed = baseUrl.trim();
+  if (trimmed === "") return BASE_URL_PROBLEM;
+  try {
+    if (new URL(trimmed).host === "") return BASE_URL_PROBLEM;
+  } catch {
+    return BASE_URL_PROBLEM;
+  }
+  return null;
+}
+
 export function anthropicGatewayEnv(baseUrl: string, model: string): Record<string, string> {
+  const problem = baseUrlProblem(baseUrl);
+  if (problem) throw new Error(problem);
   if (!isThirdPartyAnthropicBase(baseUrl)) return {};
   return {
     ANTHROPIC_BASE_URL: baseUrl,

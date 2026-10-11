@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RunPlan } from "../src/application/ports.ts";
-import { anthropicGatewayEnv, childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
+import { anthropicGatewayEnv, baseUrlProblem, childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "../src/adapters/runtime-limits.ts";
 
 const plan: RunPlan = {
@@ -29,6 +29,16 @@ describe("anthropic-compatible base URL", () => {
     const first = childEnv({}, anthropicGatewayEnv("https://api.anthropic.com", "sonnet-5.5"));
     expect(first.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(first.ANTHROPIC_MODEL).toBeUndefined();
+  });
+});
+
+describe("base URL", () => {
+  it("refuses an empty or unparseable base instead of leaving the host unset", () => {
+    expect(baseUrlProblem("")).toBe("base URL missing or invalid");
+    expect(baseUrlProblem("not a url")).toBe("base URL missing or invalid");
+    expect(baseUrlProblem("https://api.z.ai/api/anthropic")).toBeNull();
+    expect(() => anthropicGatewayEnv("", "glm-5.3")).toThrow(/base URL/);
+    expect(() => anthropicGatewayEnv("not a url", "glm-5.3")).toThrow(/base URL/);
   });
 });
 
