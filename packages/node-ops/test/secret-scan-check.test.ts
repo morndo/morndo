@@ -48,3 +48,29 @@ describe("check review, point 3: a version pruning dropped can't come back live"
     }
   });
 });
+
+describe("check review, point 4: a value written by Python's default quote or by encodeURI is found", () => {
+  // The characters these two writers keep and the others escape: "/" (both), and ; ? : @ & = + $ , # (encodeURI).
+  const VALUE = "ab\u007fcd \u00e9~*!()+ x/y;?:@&=$,#";
+  const found = (form: string) => {
+    const out = text(`k=${form}&next`);
+    return scan(out, entriesOf(text(VALUE)), keyed).some(r => r.start <= 2 && r.end >= 2 + text(form).length);
+  };
+  const lower = (s: string) => s.replace(/%[0-9A-F]{2}/g, m => m.toLowerCase());
+  // Python 3.12.3, urllib.parse.quote(VALUE), whose safe is "/" by default (docs.python.org/3/library/urllib.parse.html,
+  // read 2026-10-12).
+  const PY_QUOTE_DEFAULT = "ab%7Fcd%20%C3%A9~%2A%21%28%29%2B%20x/y%3B%3F%3A%40%26%3D%24%2C%23";
+
+  it("the review's case: a '/' kept beside escapes, as quote(value) writes it", () => {
+    expect(found(PY_QUOTE_DEFAULT)).toBe(true);
+    const short = "ab/cd+ef12";
+    expect(scan(text(`x ab/cd%2Bef12 y`), entriesOf(text(short)), keyed)).toEqual([{ start: 2, end: 14 }]);
+  });
+  it("encodeURI, which keeps ; / ? : @ & = + $ , # as well", () => {
+    expect(found(encodeURI(VALUE))).toBe(true);
+  });
+  it("both with lower-case escapes", () => {
+    expect(found(lower(PY_QUOTE_DEFAULT))).toBe(true);
+    expect(found(lower(encodeURI(VALUE)))).toBe(true);
+  });
+});
