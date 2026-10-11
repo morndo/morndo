@@ -4,7 +4,7 @@
 // (catalog/secret-shapes.json), each shape with its source.
 import {
   DESTINATIONS_MAX, DESTINATION_HOST, KEYED_FINGERPRINT, LANE_NAME, NODE_LABEL, PURPOSE_MAX, REQUEST_KINDS, REQUEST_STATES, SECRET_STATUSES,
-  SHAPE_ID, USE_MODES, USE_REFUSAL_REASONS, WORKSPACE_NAME, eachOnce, parseReference, plainText,
+  SHAPE_ID, STORED_KINDS, USE_MODES, USE_REFUSAL_REASONS, WORKSPACE_NAME, eachOnce, parseReference, plainText,
 } from "@morndo/domain";
 import { ED25519_SIGNATURE } from "./fleet.ts";
 import * as z from "./z.ts";
@@ -88,9 +88,11 @@ export const StoreSecretBody = z.strictObject({
 });
 
 // The fleet operations (design §14). Registered with the fleet's operation list when the hub and node use them (PR 4).
+// A store names the request it answers and its kind (none from the Secrets page or the machine), so the node can hold a
+// renew to its rule before it stores anything (design §5.3, step 6; decided on T-80).
 export const SecretsStoreArgs = z.strictObject({
   reference: SecretReferenceText, sealed: SealedValue, grants: z.array(WireGrant), expiry: z.nullable(when()),
-  destinations: destinations(), request: z.nullable(id()),
+  destinations: destinations(), request: z.nullable(z.strictObject({ id: id(), kind: z.enum(STORED_KINDS) })),
 });
 export const SecretsTransferArgs = z.strictObject({ reference: SecretReferenceText, target: node(), recipient: AgeRecipient, signature: signature() });
 export const SecretsTransferResult = z.strictObject({ sealed: SealedValue });

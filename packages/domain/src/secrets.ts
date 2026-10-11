@@ -30,6 +30,8 @@ export const USE_REFUSED = 77;
 
 export const USE_MODES = ["exec", "file", "helper", "inject"] as const;
 export const REQUEST_KINDS = ["new", "access", "rotate", "renew"] as const;
+// The kinds a store answers: an access request is granted, never stored (SR8).
+export const STORED_KINDS = ["new", "rotate", "renew"] as const;
 export const REQUEST_STATES = ["open", "stored", "granted", "rejected", "withdrawn", "expired"] as const;
 export const SECRET_STATUSES = ["active", "disabled", "revoked"] as const;
 export type UseMode = (typeof USE_MODES)[number];
@@ -268,7 +270,7 @@ export type SecretEvent =
   | { type: "UseEnded"; reference: string; at: number; use: string; outcome: UseOutcome };
 export type SecretDirectory = { held: readonly Secret[]; ledger: readonly LedgerEntry[]; events: readonly SecretEvent[] };
 export type SecretProblem = UseRefusalReason | "principal" | "bad_reference" | "bad_fingerprint" | "bad_grant"
-  | "bad_destination" | "bad_shape" | "bad_node" | "expiry" | "earlier" | "same";
+  | "bad_destination" | "bad_shape" | "bad_node" | "expiry" | "earlier" | "same" | "renew_expiry";
 export type SecretRefusal = { problem: SecretProblem; directory?: SecretDirectory };
 // `shape`: the new value's shape id, null when it matches none, left out when the store doesn't say (a Rotation keeps it).
 export type StoreInput = {
@@ -367,6 +369,17 @@ export function storeSecret(dir: SecretDirectory, input: StoreInput, actor: Acto
   const { secret, ledger, version, sameAs, expiryChanged } = placed.value;
   const event: SecretEvent = { type: rotation ? "SecretRotated" : "SecretStored", reference: input.reference, version, at, command, sameAs };
   return ok(withSecret(dir, secret, [event, ...expiryEvent(expiryChanged, input.reference, at, command)], ledger));
+}
+
+// A store that answers a renew request (secrets.store names its kind; design §5.3, step 6). The node holds the Expiry, so
+// it decides here, before anything is stored: a renew names an Expiry later than now and than the current one. Anything
+// else is refused as renew_expiry, and the request stays open (SR8). Decided on T-80 (review round 4).
+export function renewSecret(dir: SecretDirectory, input: StoreInput, actor: Actor, at: number): Result<SecretDirectory, SecretRefusal> {
+  if (!commandOf(actor)) return refuse("principal");
+  const current = findSecret(dir, input.reference)?.expiry ?? null;
+  const later = input.expiry !== null && input.expiry > at && (current === null || input.expiry > current);
+  if (!later) return refuse("renew_expiry");
+  return storeSecret(dir, input, actor, at);
 }
 
 // SC11: the target stores a transferred value as its own Secret, through its own ledger.
