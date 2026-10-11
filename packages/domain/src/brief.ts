@@ -171,9 +171,11 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   }
 
   // DB3: a due time after the moment the brief is filed or restated, and the minutes it takes to read and decide.
+  // A finite number outside Date's own range (±8.64e15 ms, the epoch times ECMA-262's time clip holds) is refused as
+  // a problem, never thrown: the due_past message formats it with a Date, which RangeErrors there (DB10).
   let due = 0;
   if (draft.due === undefined || draft.due === null) lint.error("no_due", "due", "the decision needs a due date after now");
-  else if (typeof draft.due !== "number" || !Number.isFinite(draft.due)) lint.error("bad_due", "due", "a due is a time in ms since the epoch; the template reads a date alone as the end of that day");
+  else if (typeof draft.due !== "number" || !Number.isFinite(draft.due) || Math.abs(draft.due) > 8.64e15) lint.error("bad_due", "due", "a due is a time in ms since the epoch; the template reads a date alone as the end of that day");
   else if (draft.due <= now) lint.error("due_past", "due", `the due time is at ${new Date(draft.due).toISOString()}, not after now; pick one still ahead`);
   else due = draft.due;
   let minutes = 0;
