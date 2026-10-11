@@ -8,10 +8,6 @@ import type { DecisionItem } from "../desktop/decisions.ts";
 import { clause } from "@morndo/domain";
 import { heroTime } from "./horizon.ts";
 
-// The clause split is the domain's own rule (ADR-0023 §4.4), moved there for the compact card: one clause, so the
-// phone's row and the hub's card can't disagree. Re-exported here for the callers that took it from this module.
-export { clause };
-
 export type Brief = {
   title: string;
   sentence: string | null;
