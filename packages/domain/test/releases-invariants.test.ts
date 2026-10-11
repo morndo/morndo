@@ -89,6 +89,14 @@ describe("RL2 never a downgrade unless asked", () => {
     const back = admit({ machine: machine(), switches, ask: { kind: "rollback" }, offered: null, rolloutHalted: false });
     expect(back).toEqual({ ok: true, value: v("0.4.2") });
   });
+  it("negative control: --rollback away from a halted, pinned, withdrawn Version is heard (those guard moving TO one)", () => {
+    const stuck = machine({ current: v("0.5.0"), previous: v("0.4.3"), highestCommitted: v("0.5.0"),
+      settings: { channel: "stable", mode: "apply", pin: v("0.5.0"), window: null } });
+    const r = admit({ machine: stuck, switches, ask: { kind: "rollback" },
+      offered: { version: v("0.5.0"), feed: feed({ releases: [{ ...feed().releases[0]!, version: "0.5.0" }], withdrawn: ["0.4.3"] }) },
+      rolloutHalted: true });
+    expect(r).toEqual({ ok: true, value: v("0.4.3") });
+  });
 });
 
 describe("RL3 trust moves forward loudly", () => {

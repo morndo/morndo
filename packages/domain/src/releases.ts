@@ -171,9 +171,11 @@ export type SkipReason = (typeof SKIP_REASONS)[number];
 export type AdmissionRefusal = "updates_disabled" | "not_our_install" | "downgrade_refused" | "no_entry";
 
 // May this Version be staged here? The switches first (RL14: they win over everything), then the machine's own
-// memory (the pin, the bad Versions, the halted Rollout, RL12), then the order (RL2: automatic only above every
-// committed Version; a lower one only named by the principal, with --allow-downgrade or --rollback). Every path
-// needs an offered ChannelFeed entry (RL1) — including `--to`: the entry's digests are what gets verified.
+// memory (the bad Versions always; the pin, the withdrawn and the halted Rollout, RL12, only for a Version the
+// feed offers or the principal names), then the order (RL2: automatic only above every committed Version; a
+// lower one only named by the principal, with --allow-downgrade or --rollback). Every path but `--rollback`
+// needs an offered ChannelFeed entry (RL1) — including `--to`: the entry's digests are what gets verified; the
+// rollback's target is the Version already on this machine's disk.
 export function admit(p: {
   machine: Installation; switches: EnvSwitches; ask: PrincipalAsk;
   offered: { version: Version; feed: ChannelFeed } | null;      // the best verified entry the machine's channel offers
@@ -186,10 +188,16 @@ export function admit(p: {
 
   const target = ask.kind === "to" ? ask.version : ask.kind === "rollback" ? machine.previous : p.offered?.version ?? null;
   if (target === null) return err(ask.kind === "auto" ? "not_newer" : "no_entry");
-  if (machine.settings.pin !== null && !equalVersions(target, machine.settings.pin)) return err("pinned");
+  // The machine's memory of what failed here (RL7) holds for every move to a Version, a rollback's included.
   if (machine.badVersions.some(bad => equalVersions(bad, target))) return err("bad_here");
-  if (p.offered !== null && p.offered.feed.withdrawn.includes(formatVersion(target))) return err("withdrawn");
-  if (p.rolloutHalted) return err("halted");
+  // The feed's word and the holds — a pin (RL14), a withdrawal, a halt (RL12) — guard moving TO a Version. They
+  // never guard moving away from one: the principal's `--rollback` (§8.1) is the escape from exactly a halted,
+  // pinned or withdrawn Version, back to the one already on disk, and RL12 halts automatic applies only.
+  if (ask.kind !== "rollback") {
+    if (machine.settings.pin !== null && !equalVersions(target, machine.settings.pin)) return err("pinned");
+    if (p.offered !== null && p.offered.feed.withdrawn.includes(formatVersion(target))) return err("withdrawn");
+    if (p.rolloutHalted) return err("halted");
+  }
 
   if (ask.kind === "auto") {
     if (compareVersions(target, machine.highestCommitted) <= 0) return err("not_newer");   // a switch or a lesser feed never moves down

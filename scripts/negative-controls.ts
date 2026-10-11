@@ -1046,6 +1046,10 @@ export const CONTROLS: Control[] = [
   { id: "pr1-rl12-halt-ignored", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (rollout.halted) return err(\"halted\");", replace: "if (false) return err(\"halted\");",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "halted" },
+  // The review of 2026-10-11: the guard that keeps the pin, the withdrawal and the halt off the principal's --rollback.
+  { id: "pr1-rl12-rollback-escape", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "if (ask.kind !== \"rollback\") {", replace: "if (ask.kind !== \"rollback\" || true) {",
+    run: ["packages/domain/test/releases-invariants.test.ts"], expect: "pinned" },
   { id: "pr1-rl13-outside-scope", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (!(UPDATE_SCOPE_SERVICES as readonly string[]).includes(name)) return err({ outside: name });",
     replace: "if (false) return err({ outside: name });",
