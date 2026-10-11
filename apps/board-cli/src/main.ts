@@ -3,10 +3,10 @@
 // fetch, the environment and, inside tmux, the window's name as this lane's name (`tmux display-message -p '#W'`,
 // the name the hub lists the lane under).
 import { execFile } from "node:child_process";
-import { productVersion } from "@morndo/service-kit";
+import { argvWantsVersion, productVersion } from "@morndo/service-kit";
 import { run } from "./cli.ts";
 
-if (process.argv.includes("--version")) {
+if (argvWantsVersion(process.argv)) {
   process.stdout.write(`${productVersion()}\n`);
   process.exit(0);
 }

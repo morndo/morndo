@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { productVersion } from "@morndo/service-kit";
+import { argvWantsVersion, productVersion } from "@morndo/service-kit";
 import { run } from "./cli.ts";
 
-if (process.argv.includes("--version")) {
+if (argvWantsVersion(process.argv)) {
   process.stdout.write(`${productVersion()}\n`);
   process.exit(0);
 }

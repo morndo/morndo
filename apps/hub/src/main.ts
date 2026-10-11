@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { NotLocalDisk, holdFile, productVersion } from "@morndo/service-kit";
+import { NotLocalDisk, argvWantsVersion, holdFile, productVersion } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
 import { startRetention } from "./application/retention.ts";
@@ -66,7 +66,7 @@ machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane re
 MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet) and MORNDO_ENGINES (the engine layer's
 CLI, engine-layer bin/engines: the Engines page).`;
 
-if (process.argv.includes("--version")) {
+if (argvWantsVersion(process.argv)) {
   process.stdout.write(`${productVersion()}\n`);
   process.exit(0);
 }

@@ -23,3 +23,11 @@ export function productVersion(from: string = fileURLToPath(import.meta.url)): s
   }
   throw new Error("the root package.json has no product version");
 }
+
+// `--version` only when it is the first argument, and only in the part before `--`.
+export function argvWantsVersion(argv: readonly string[]): boolean {
+  const args = argv.slice(2);
+  const stop = args.indexOf("--");
+  const head = stop === -1 ? args : args.slice(0, stop);
+  return head[0] === "--version";
+}
