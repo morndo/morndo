@@ -323,3 +323,31 @@ describe("DB7: prose in the brief's markdown subset", () => {
       .toEqual(["error bad_link (evidence[0].url)"]);
   });
 });
+
+describe("warnings: a weak brief comes back with its brief (DB10)", () => {
+  it("no evidence listed is a warning", () => {
+    expect(lines(d => { d.evidence = []; })).toEqual(["warning no_evidence (evidence)"]);
+    expect(lines(d => { delete d.evidence; })).toEqual(["warning no_evidence (evidence)"]);
+  });
+  it("an ask without a number in bold is a warning: the principal reads the numbers first", () => {
+    expect(lines(d => {
+      (d.ask as { text: string }).text = "Approve $2,400 of contractor time and 6 agent-days to extend the triage script.";
+    })).toEqual(["warning ask_no_bold_figure (ask.text)"]);
+  });
+  it("a why-now that names no date or time is a warning", () => {
+    expect(lines(d => { d.whyNow = "- Tickets waiting more than a day rose sharply over the last month."; }))
+      .toEqual(["warning why_now_no_date (whyNow)"]);
+  });
+  it("a change-if with no number or date in it is a warning", () => {
+    expect(lines(d => { d.changeIf = "If the tagging turns out to be poor, stop and choose the add-on."; }))
+      .toEqual(["warning change_if_vague (changeIf)"]);
+  });
+  it("minutes below the reading time are a warning", () => {
+    expect(lines(d => { d.minutes = 2; })).toEqual(["warning minutes_low (minutes)"]);
+  });
+  it("a warning never refuses: the brief still comes back", () => {
+    const r = lint(d => { d.evidence = []; });
+    expect(r.brief).not.toBe(null);
+    expect(r.problems.map(p => p.level)).toEqual(["warning"]);
+  });
+});
