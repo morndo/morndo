@@ -206,7 +206,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       }).execute(plan, parsed.rest, hooks)
       : connection.runtime === "cursor"
         ? await new CursorRuntime(saved.MORNDO_CURSOR_BIN ?? "agent", saved).execute(plan, parsed.rest, hooks)
-        : await new ClaudeRuntime(bin, helperCommand(process.execPath, main, lease.id), saved).execute(plan, parsed.rest, hooks);
+        : await new ClaudeRuntime(bin, helperCommand(process.execPath, main, lease.id), saved, baseUrl).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
   } catch (error) {

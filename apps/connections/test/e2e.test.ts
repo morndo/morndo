@@ -86,6 +86,44 @@ describe("keys run", () => {
     expect((await cli(["log", "work"], env)).stdout).not.toContain("LeaseGranted");
   }, 20_000);
 
+  it("sends a Z.ai key only as the helper header to the catalog base URL", async () => {
+    const dir = homeDir();
+    const hits: { url?: string | undefined; authorization?: string | undefined; apiKey?: string | undefined }[] = [];
+    const server = createServer((req, res) => {
+      hits.push({
+        url: req.url,
+        authorization: req.headers.authorization,
+        apiKey: typeof req.headers["x-api-key"] === "string" ? req.headers["x-api-key"] : undefined,
+      });
+      res.end("{}");
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("port");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[] }[];
+    const zai = body.find(row => row.id === "zai");
+    if (!zai) throw new Error("preset");
+    const runtime = zai.runtimes[0];
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = origin;
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "glm", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "20"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "glm", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "glm", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { base: true, model: "glm-5.3" })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(ran.stdout).not.toContain(KEY);
+    expect(hits).toEqual([{ url: "/v1/messages", authorization: `Bearer ${KEY}`, apiKey: KEY }]);
+    const recorded = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { env: Record<string, string>; bashEnv: string };
+    expect(recorded.env.ANTHROPIC_BASE_URL).toBe(origin);
+    expect(recorded.env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(JSON.stringify(recorded.env)).not.toContain(KEY);
+    expect(recorded.bashEnv).not.toContain(KEY);
+  }, 20_000);
+
   it("sends the key only as the helper header and keeps it out of env", async () => {
     const dir = homeDir();
     await ready(dir);

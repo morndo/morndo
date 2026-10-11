@@ -3,13 +3,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { RunPlan } from "../src/application/ports.ts";
-import { childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
+import { anthropicGatewayEnv, childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "../src/adapters/runtime-limits.ts";
 
 const plan: RunPlan = {
   lease: "l1", connection: "credit", ref: "key-credit", configDir: "/tmp/cfg", model: "sonnet-5.5",
   effort: "high", workspace: "/tmp/work", deny: ["/tmp/vault"], reservation: 2, probe: false,
 };
+
+describe("anthropic-compatible base URL", () => {
+  it("points the child at the third-party base and keeps the key out of the environment", () => {
+    const key = "sk-ant-synthetic-test-key-0001";
+    const env = childEnv(
+      { PATH: "/usr/bin", ANTHROPIC_API_KEY: key, ANTHROPIC_BASE_URL: "https://inherited.example" },
+      anthropicGatewayEnv("http://127.0.0.1:9", "glm-5.3"),
+    );
+    expect(env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:9");
+    expect(env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("glm-5.3");
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("glm-5.3");
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("glm-5.3");
+    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("glm-5.3");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(JSON.stringify(env)).not.toContain(key);
+    const first = childEnv({}, anthropicGatewayEnv("https://api.anthropic.com", "sonnet-5.5"));
+    expect(first.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(first.ANTHROPIC_MODEL).toBeUndefined();
+  });
+});
 
 describe("runtime flags", () => {
   it("passes the helper, the reservation and a denied path", () => {

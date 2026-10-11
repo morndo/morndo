@@ -51,4 +51,16 @@ describe("model lists", () => {
     expect(modelMissing(["claude-sonnet-5-5-20260901"], "sonnet-5.5@high", patterns)).toBe(false);
     expect(modelMissing(["claude-sonnet-5-5-lite"], "sonnet-5.5@high", patterns)).toBe(true);
   });
+
+  it("lists Z.ai's GLM ids from the catalog and does not call the network", async () => {
+    const body = JSON.parse(readFileSync(catalog, "utf8")) as { id: string }[];
+    const preset = body.find(row => row.id === "zai");
+    if (!preset) throw new Error("preset");
+    const ids = await fetchModelIds(preset as never, "synthetic-zai-key", () => {
+      throw new Error("network");
+    });
+    expect(ids).toEqual(["glm-5.3", "glm-5.3-flash"]);
+    expect(modelMissing(ids, "glm-5.3@max")).toBe(false);
+    expect(modelMissing(ids, "glm-4.7@high")).toBe(true);
+  });
 });

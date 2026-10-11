@@ -203,7 +203,27 @@ export async function statusOf(bin: string, args: readonly string[], env: NodeJS
 // A stray inherited key beats the subscription. Cloud-provider variables, ANTHROPIC_AUTH_TOKEN and
 // ANTHROPIC_API_KEY come before the signed-in account.
 // https://code.claude.com/docs/en/authentication (checked 2026-10-10).
-const KEPT = new Set(["CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS"]);
+const KEPT = new Set([
+  "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+  "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+]);
+
+// A third-party Anthropic Messages base (secret-store README §8.3). The first-party host is left unset:
+// that preset already speaks Claude Code's default endpoint, and overriding the model there would rename it.
+export function anthropicGatewayEnv(baseUrl: string, model: string): Record<string, string> {
+  let host = "";
+  try { host = new URL(baseUrl).host; } catch { return {}; }
+  if (host === "" || host === "api.anthropic.com") return {};
+  return {
+    ANTHROPIC_BASE_URL: baseUrl,
+    ANTHROPIC_MODEL: model,
+    ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+    CLAUDE_CODE_SUBAGENT_MODEL: model,
+  };
+}
 
 function stripped(key: string): boolean {
   return key.startsWith("ANTHROPIC_")
@@ -277,10 +297,12 @@ export class ClaudeRuntime implements Runtime {
   readonly #bin: string;
   readonly #helper: string;
   readonly #parent: NodeJS.ProcessEnv;
-  constructor(bin: string, helper: string, parent: NodeJS.ProcessEnv) {
+  readonly #baseUrl: string;
+  constructor(bin: string, helper: string, parent: NodeJS.ProcessEnv, baseUrl = "") {
     this.#bin = bin;
     this.#helper = helper;
     this.#parent = parent;
+    this.#baseUrl = baseUrl;
   }
 
   isolation(): Isolation {
@@ -303,7 +325,10 @@ export class ClaudeRuntime implements Runtime {
     const script = this.#bin.endsWith(".mjs") || this.#bin.endsWith(".js");
     const extraEnv = loginEnv("claude", plan.configDir);
     if (plan.subscription) await assertSubscription(this.#bin, ["auth", "status"], childEnv(this.#parent, extraEnv), "claude");
-    else extraEnv.CLAUDE_CODE_API_KEY_HELPER_TTL_MS = String(HELPER_TTL_MS);
+    else {
+      Object.assign(extraEnv, anthropicGatewayEnv(this.#baseUrl, plan.model));
+      extraEnv.CLAUDE_CODE_API_KEY_HELPER_TTL_MS = String(HELPER_TTL_MS);
+    }
     const flags = plan.subscription
       ? ["-p", "--output-format", "json", "--settings", claudeSettings(plan, null), ...extra]
       : claudeArgv(this.#bin, plan, this.#helper, extra).slice(1);

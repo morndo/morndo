@@ -155,8 +155,9 @@ if (job.calls) {
   process.exit(0);
 }
 const key = call(spec).trim();
-if (job.api) {
-  await post(job.api, { authorization: `Bearer ${key}`, "x-api-key": key }, JSON.stringify({ model: job.model ?? "sonnet-5.5" }));
+if (job.api || job.base) {
+  const url = job.base ? `${process.env.ANTHROPIC_BASE_URL}/v1/messages` : job.api;
+  await post(url, { authorization: `Bearer ${key}`, "x-api-key": key }, JSON.stringify({ model: job.model ?? "sonnet-5.5" }));
 }
 record();
 const result = { type: "result", model: job.model ?? "sonnet-5.5" };

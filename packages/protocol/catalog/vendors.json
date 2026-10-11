@@ -84,6 +84,29 @@
     }
   },
   {
+    "id": "zai",
+    "label": "Z.ai",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.z.ai/api/anthropic" }],
+    "models": { "source": "static", "ids": ["glm-5.3", "glm-5.3-flash"] },
+    "family": "zai",
+    "keyShapes": [],
+    "spend": ["token-price"],
+    "prices": [
+      { "at": "2026-10-10", "model": "glm-5.3", "input": 1.4, "output": 4.4 },
+      { "at": "2026-10-10", "model": "glm-5.3-flash", "input": 0.15, "output": 0.5 }
+    ],
+    "balance": null,
+    "defaultPicks": { "implement": "glm-5.3@max", "*": "glm-5.3@high" },
+    "isolation": "os",
+    "terms": {
+      "revision": "2025-09-29",
+      "summary": "API input is processed in real time and not saved on Z.ai's servers.",
+      "sources": ["https://docs.z.ai/legal-agreement/privacy-policy"]
+    }
+  },
+  {
     "id": "openrouter",
     "label": "OpenRouter",
     "custody": "morndo",
