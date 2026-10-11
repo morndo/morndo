@@ -182,7 +182,12 @@ export async function startJobUnit(job: {
     args.push(`--property=UnsetEnvironment=${key}`);
   }
   for (const [key, value] of Object.entries(job.env)) args.push(`--setenv=${key}=${value}`);
-  args.push("--", ...job.command);
+  // The user manager passes its own environment to the process, and UnsetEnvironment= is applied last
+  // (systemd.exec(5), https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html, read 2026-10-11).
+  // env -i then keeps only the names above: a runner that injects a name after that list was read
+  // (JAVA_HOME_* on a hosted image) cannot reach the job.
+  const assignments = Object.entries(job.env).map(([key, value]) => `${key}=${value}`);
+  args.push("--", "/usr/bin/env", "-i", ...assignments, ...job.command);
   await run("systemd-run", args, 15_000, toolEnv);
 }
 

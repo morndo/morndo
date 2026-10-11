@@ -169,7 +169,8 @@ describe("GET /v1/jobs", () => {
       return nodes.join() === "mac,pc";
     }, fn => fleet.events.subscribe(fn));
     const listed = await api.get("/v1/jobs");
-    const jobs = (listed?.body as { jobs: { id: string; node: string }[] }).jobs.filter(job => job.id === "build");
+    if (!listed?.body) throw new Error("no jobs body");
+    const jobs = (listed.body as { jobs: { id: string; node: string }[] }).jobs.filter(job => job.id === "build");
     expect(jobs.map(job => job.node).sort()).toEqual(["mac", "pc"]);
     expect((await api.get("/v1/jobs/pc/build"))?.body).toMatchObject({ job: { id: "build", node: "pc", tail: "from-pc" } });
     expect((await api.get("/v1/jobs/mac/build"))?.body).toMatchObject({ job: { id: "build", node: "mac", tail: "from-mac" } });
@@ -197,7 +198,8 @@ describe("GET /v1/jobs", () => {
     expect((await mac.connect()).ok).toBe(true);
     await vi.waitFor(() => expect(mac.reqs.filter((r) => r.op === "job.notice")).toHaveLength(1));
     const req = mac.reqs.find((r) => r.op === "job.notice");
-    expect((req?.args as { text: string }).text).toBe("built");
+    if (!req) throw new Error("no notice");
+    expect((req.args as { text: string }).text).toBe("built");
   });
 
   it("backs off a missed notice, audits a state once, and stops after 7 days", async () => {

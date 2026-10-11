@@ -16,6 +16,7 @@
 
   type Page = { kind: "loading" } | { kind: "off" } | { kind: "failed"; message: string } | { kind: "ready" };
   let page = $state<Page>({ kind: "loading" });
+  let connectionsOn = $state<boolean | null>(null);
   let saved = $state<EnginesView | null>(null);
   let draft = $state<RoleEngines[]>([]);
   let saving = $state(false);
@@ -80,7 +81,15 @@
     if (!changes.length) return;
     if (nav.type === "leave" || !confirm("Leave without saving your engine changes?")) nav.cancel();
   });
-  onMount(() => void load());
+  onMount(() => {
+    void load();
+    // A hub with no connections home answers /api/connections with 404. The browser records that as a console
+    // error, so ask /api/me first and skip the board when connections are off.
+    void api.get<{ connections?: boolean }>("/api/me").then(
+      me => { connectionsOn = me.connections === true; },
+      () => { connectionsOn = true; },
+    );
+  });
 </script>
 
 <div class="phone engines">
@@ -95,7 +104,14 @@
   </header>
 
   <main class="body">
-    <ConnectionsBoard />
+    {#if connectionsOn === true}
+      <ConnectionsBoard />
+    {:else if connectionsOn === false}
+      <section class="block">
+        <h2>{CONNECTION_WORDS.sections.connections}</h2>
+        <p>This hub has no connections home.</p>
+      </section>
+    {/if}
     {#if page.kind === "loading"}
       <p class="note">Asking the engines…</p>
     {:else if page.kind === "off"}
