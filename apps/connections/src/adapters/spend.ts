@@ -12,9 +12,10 @@ export function costFromOutput(stdout: string): number | null {
   return Number.isFinite(amount) ? amount : null;
 }
 
-// A third-party Anthropic route is priced from the catalog, per 1M tokens (design 7.1).
-// total_cost_usd is Claude Code's own estimate and is not used here. modelUsage covers the
-// main loop, subagents and auxiliary calls; outputTokens already includes thinking tokens.
+// A third-party route with a catalog price is priced per 1M tokens (design 7.1).
+// modelUsage covers the main loop, subagents and auxiliary calls; outputTokens already includes thinking tokens.
+// When the catalog has no price for the model, the runtime's total_cost_usd is the only figure, so it is used
+// instead of charging the whole reservation. A priced model with no token counts stays null.
 // https://code.claude.com/docs/en/agent-sdk/typescript and https://code.claude.com/docs/en/headless
 // — checked 2026-10-11.
 export type CatalogPrice = { at: string; model: string; input: number; output: number };
@@ -27,12 +28,16 @@ export function catalogTokenCost(stdout: string, prices: readonly CatalogPrice[]
   if (rows === null) return null;
   if (rows.length === 0) {
     const aggregate = loopUsage(body);
-    if (!aggregate) return null;
-    return charge(aggregate.input, aggregate.output, table.get(model));
+    if (!aggregate) return table.has(model) ? null : costFromOutput(stdout);
+    const price = table.get(model);
+    if (!price) return costFromOutput(stdout);
+    return charge(aggregate.input, aggregate.output, price);
   }
   let total = 0;
   for (const row of rows) {
-    const part = charge(row.input, row.output, table.get(row.model));
+    const price = table.get(row.model);
+    if (!price) return costFromOutput(stdout);
+    const part = charge(row.input, row.output, price);
     if (part === null) return null;
     total += part;
   }
