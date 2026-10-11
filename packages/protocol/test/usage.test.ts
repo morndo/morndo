@@ -42,6 +42,21 @@ describe("usage report shape", () => {
     expect(bad?.session_id).toBe("cursor-plan");
     expect(bad?.rate_limits?.spend_limit?.used_percentage).toBe(85);
     expect(bad?.limits).toHaveLength(9);
+    const wrong = parseBody(UsageReportBody, {
+      session_id: "cursor-plan",
+      rate_limits: { spend_limit: { used_percentage: 85 } },
+      limits: [
+        { label: 42, used_percentage: 10 },
+        { used_percentage: "50" },
+        { label: "Kept", used_percentage: 12, resets_on: 20261107 },
+        null,
+      ],
+      on_demand: `on-demand ${"y".repeat(100)}`,
+    });
+    expect(wrong?.session_id).toBe("cursor-plan");
+    expect(wrong?.rate_limits?.spend_limit?.used_percentage).toBe(85);
+    expect(wrong?.on_demand).toBe(`on-demand ${"y".repeat(100)}`);
+    expect(wrong?.limits).toHaveLength(4);
   });
 
   it("an old account frame still parses, and a named one keeps its windows", () => {

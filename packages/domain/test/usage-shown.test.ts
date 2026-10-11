@@ -24,6 +24,12 @@ describe("what Home counts", () => {
     const classic = applyReport(null, report(), NOW);
     expect(shownLevel([named, classic])).toBe("critical");
     expect(tightestShown([named, classic], "fiveHour")).toEqual({ account: "max-1", window: { usedPercentage: 23.5, resetsAt: NOW + 2 * HOUR } });
+    const spend = applyReport(null, report({
+      account: "cursor", fiveHour: null, sevenDay: null,
+      limits: [{ label: "Cursor models", usedPercentage: 10, resetsAt: NOW + HOUR, resetsOn: null }],
+      spend: { usedPercentage: 95, resetsAt: NOW + HOUR, usedUsd: null, limitUsd: null, period: null },
+    }), NOW);
+    expect(shownLevel([spend])).toBe("critical");
   });
 
   it("the on-demand line and the reset date are decided once", () => {

@@ -105,6 +105,37 @@ describe("reports under an agent token (U1)", () => {
     expect((a.limits as Body[]).map(w => w.label)).toEqual(Array.from({ length: 8 }, (_, i) => `W${i}`));
     expect((a.spend as Body).usedPercentage).toBe(85);
     expect((a.sessions as Body[])[0]?.sessionId).toBe("cursor-plan");
+    const junk = { label: "\u0001", used_percentage: 10, resets_at: resets };
+    const kept = Array.from({ length: 9 }, (_, i) => ({ label: `W${i}`, used_percentage: 10 + i, resets_at: resets }));
+    const capped = await post({
+      session_id: "cursor-plan",
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
+      limits: [...Array.from({ length: 8 }, () => junk), ...kept],
+    }, "slots");
+    expect(capped.status).toBe(200);
+    const b = (await json(capped)).account as Body;
+    expect((b.limits as Body[]).map(w => w.label)).toEqual(Array.from({ length: 8 }, (_, i) => `W${i}`));
+  });
+  it("a row of the wrong type and an over-long on-demand line do not reject the report", async () => {
+    const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
+    const phrase = `on-demand ${"y".repeat(100)}`;
+    const posted = await post({
+      session_id: "cursor-plan",
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
+      limits: [
+        { label: 42, used_percentage: 10 },
+        { used_percentage: "50" },
+        { label: "Kept", used_percentage: 12, resets_on: 20261107, resets_at: resets },
+        null,
+      ],
+      on_demand: phrase,
+    }, "cursor");
+    expect(posted.status).toBe(200);
+    const a = (await json(posted)).account as Body;
+    expect((a.limits as Body[]).map(w => w.label)).toEqual(["Kept"]);
+    expect((a.spend as Body).usedPercentage).toBe(85);
+    expect((a.sessions as Body[])[0]?.sessionId).toBe("cursor-plan");
+    expect(a.onDemand).toBe(phrase.slice(0, 80));
   });
   it("once the named windows reset, the account is a normal card and on-demand is gone", async () => {
     const resets = Math.floor((now + 2 * HOUR) / 1000);
