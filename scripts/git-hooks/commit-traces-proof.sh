@@ -109,4 +109,13 @@ code=$?
 set -e
 [ "$code" -eq 1 ] || fail "web-flow author should exit 1, got $code"
 
+cd "$root"
+set +e
+out=$(sh "$checker" range deadbeef..HEAD 2>&1)
+code=$?
+set -e
+[ "$code" -ne 0 ] || fail "a bad range should exit non-zero"
+printf '%s\n' "$out" | grep -q 'unknown revision' || fail "a bad range should report the git error"
+printf '%s\n' "$out" | grep -q 'revision range' || fail "a bad range should fail the check"
+
 echo "commit-traces proof ok"

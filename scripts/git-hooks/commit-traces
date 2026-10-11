@@ -11,6 +11,8 @@ set -eu
 
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
 robot=$(printf '\360\237\244\226')
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
 
 fail() {
   echo "commit-traces: $*" >&2
@@ -72,11 +74,18 @@ walk() {
   action=$1
   shift
   [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
+  # A failing rev-list (a missing sha, a bad range) must not look like a clean check.
+  status=0
+  list=$(git rev-list "$@" 2>"$err") || status=$?
+  if [ "$status" -ne 0 ]; then
+    cat "$err" >&2
+    fail "revision range"
+  fi
   while IFS= read -r sha; do
     [ -n "$sha" ] || continue
     "$action" "$sha"
   done <<EOF
-$(git rev-list "$@")
+$list
 EOF
 }
 
