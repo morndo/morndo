@@ -1,6 +1,6 @@
 // Secrets on the wire: review round 4 of PR #25 (board T-80). Each block written failing before its fix.
 import { describe, expect, it } from "vitest";
-import { StoreSecretBody } from "../src/index.ts";
+import { SecretsStoreArgs, StoreSecretBody } from "../src/index.ts";
 
 const REF = "secret://example-app/payments-test";
 const sealed = Buffer.from("age-encryption.org/v1\n-> X25519 c29tZQ\nYWJj\n--- bWFj\n").toString("base64");
@@ -31,5 +31,22 @@ describe("round 4, point 3: a refused list of modes or Destinations has only the
       .toEqual([["too_big", "grant.modes", ""], ["custom", "grant.modes", "each mode once"]]);
     expect(issues({ destinations: ["api.example.com", "api.example.com"] })).toEqual([["custom", "destinations", "each host once"]]);
     expect(issues({ grant: { ...grant, modes: ["exec", "exec"] } })).toEqual([["custom", "grant.modes", "each mode once"]]);
+  });
+});
+
+describe("round 4, points 1 and 2: secrets.store carries the request it answers, with its kind (decided on T-80)", () => {
+  const args = { reference: REF, sealed, grants: [grant], expiry: null, destinations: [] as string[] };
+  it("a store for a renew request names the request and its kind", () => {
+    expect(SecretsStoreArgs.safeParse({ ...args, expiry: 1_700_000_000_000, request: { id: "q1", kind: "renew" } }).success).toBe(true);
+    expect(SecretsStoreArgs.safeParse({ ...args, request: { id: "q1", kind: "new" } }).success).toBe(true);
+  });
+  it("a store from the Secrets page or the machine names none", () => {
+    expect(SecretsStoreArgs.safeParse({ ...args, request: null }).success).toBe(true);
+  });
+  it("a request without its kind, an access request, or no request key at all is refused", () => {
+    expect(SecretsStoreArgs.safeParse({ ...args, request: "q1" }).success).toBe(false);
+    expect(SecretsStoreArgs.safeParse({ ...args, request: { id: "q1" } }).success).toBe(false);
+    expect(SecretsStoreArgs.safeParse({ ...args, request: { id: "q1", kind: "access" } }).success).toBe(false);
+    expect(SecretsStoreArgs.safeParse(args).success).toBe(false);
   });
 });

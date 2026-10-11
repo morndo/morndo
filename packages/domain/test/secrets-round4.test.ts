@@ -2,11 +2,14 @@
 // and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer, storeSecret, withdrawRequest,
+  emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer, renewSecret, secretExpirySweep, storeSecret,
+  useGate, withdrawRequest,
   type Actor, type RequestAsk, type SecretDirectory, type SecretGrant,
 } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
+const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
 const REF = "secret://example-app/payments-test";
 const nodeGrant: SecretGrant = { subject: { kind: "node" }, modes: ["exec"], until: { kind: "open" } };
 const who: Actor = { kind: "principal", command: "c1" };
@@ -50,5 +53,38 @@ describe("round 4, point 5: the withdrawal that ends a request names its waiter,
     const r = value(openRequest(ask("lane-a", "example-app"), "r1", T)).request;
     const ended = value(withdrawRequest(r, { lane: "lane-a", workspace: null }, T + 1));
     expect(ended.events).toEqual([{ type: "SecretRequestWithdrawn", request: "r1", lane: "lane-a", workspace: "example-app", at: T + 1 }]);
+  });
+});
+
+describe("round 4, points 1 and 2: the node renews only with an Expiry later than now and than the current one (decided on T-80)", () => {
+  const input = (expiry: number | null, fingerprint = "0000000000b2") =>
+    ({ reference: REF, fingerprint, shape: null, grants: [], expiry, destinations: [] });
+  const held = (expiry: number | null) =>
+    value(storeSecret(emptySecretDirectory(), { ...input(expiry, "0000000000b1"), grants: [nodeGrant] }, who, T - 10 * DAY));
+  const refusal = <X>(r: R<X>) => (r.ok ? "stored" : r.error);
+
+  it("a renew that would shorten the Expiry is refused before anything is stored", () => {
+    expect(refusal(renewSecret(held(T + 5 * DAY), input(T + HOUR), who, T))).toEqual({ problem: "renew_expiry" });
+  });
+  it("so is one that names no Expiry, the same one, or one later than the current one that has still passed", () => {
+    const dir = held(T - DAY);
+    expect(refusal(renewSecret(dir, input(null), who, T))).toEqual({ problem: "renew_expiry" });
+    expect(refusal(renewSecret(dir, input(T - DAY), who, T))).toEqual({ problem: "renew_expiry" });
+    expect(refusal(renewSecret(dir, input(T - HOUR), who, T))).toEqual({ problem: "renew_expiry" });
+  });
+  it("a later Expiry renews: a new version, the Expiry recorded, the warnings cleared, usable again", () => {
+    let dir = secretExpirySweep(held(T - DAY), T);
+    dir = value(renewSecret(dir, input(T + 30 * DAY), who, T + 1));
+    const s = findSecret(dir, REF);
+    expect([s?.current?.number, s?.expiry, s?.warned]).toEqual([2, T + 30 * DAY, []]);
+    expect(dir.events.slice(-2).map(e => e.type)).toEqual(["SecretRotated", "ExpiryChanged"]);
+    expect(useGate(s, { lane: null, workspace: null }, "exec", T + 2).ok).toBe(true);
+  });
+  it("on a node that holds no such Secret yet, a renew still names an Expiry later than now", () => {
+    expect(refusal(renewSecret(emptySecretDirectory(), input(null), who, T))).toEqual({ problem: "renew_expiry" });
+    expect(refusal(renewSecret(emptySecretDirectory(), input(T + DAY), who, T))).toBe("stored");
+  });
+  it("only the principal renews", () => {
+    expect(refusal(renewSecret(held(T - DAY), input(T + DAY), { kind: "operator" }, T))).toEqual({ problem: "principal" });
   });
 });
