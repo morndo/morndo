@@ -1,5 +1,7 @@
-// The additive linter (§11.2): what a migration declared "additive" may do, and what fails the lint. The SQL comes
-// from the migration's own up(), through the recorder, so what is linted is what would run.
+// The additive linter (§11.2): what a migration declared "additive" may do, and what fails the lint. The migration
+// really runs, against a throwaway in-memory SQLite database, so what is linted is what would run — conditions and
+// all. The fixtures create what they touch: the throwaway starts empty, and a statement that is only data (an INSERT
+// into a table the migration never made) would fail to run before the lint could say anything about it.
 import type Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { additiveViolations, lintMigrations, migrationStatements, type Migration } from "../src/index.ts";
@@ -20,26 +22,48 @@ describe("migrationStatements", () => {
     expect(migrationStatements(m)).toEqual(["CREATE TABLE a (x)", "CREATE TABLE b (y)", "INSERT INTO a (x) VALUES (1)"]);
   });
   it("does not split on a semicolon inside a string", () => {
-    const m = M(db => db.exec(`INSERT INTO t (v) VALUES ('a;b'); UPDATE t SET v = 'c'`));
-    expect(migrationStatements(m)).toEqual([`INSERT INTO t (v) VALUES ('a;b')`, `UPDATE t SET v = 'c'`]);
+    const m = M(db => db.exec(`CREATE TABLE t (v); INSERT INTO t (v) VALUES ('a;b'); UPDATE t SET v = 'c'`));
+    expect(migrationStatements(m)).toEqual(["CREATE TABLE t (v)", `INSERT INTO t (v) VALUES ('a;b')`, `UPDATE t SET v = 'c'`]);
+  });
+  it("runs the migration, so a statement a condition hides is recorded too", () => {
+    const m = M(db => {
+      db.exec("CREATE TABLE moved (x)");
+      db.exec("INSERT INTO moved (x) VALUES (1)");
+      if (db.prepare("SELECT x FROM moved").get() !== undefined) db.exec("INSERT INTO moved (x) VALUES (2)");
+    });
+    expect(migrationStatements(m)).toContain("INSERT INTO moved (x) VALUES (2)");
   });
 });
 
 describe("the additive linter", () => {
   it("accepts the additive shapes (§11.2): new tables and indexes, columns an older reader can leave alone, data", () => {
     expect(lintMigrations([
-      M(db => db.exec("CREATE TABLE t (x)")),
-      M(db => db.exec("CREATE TABLE IF NOT EXISTS t (x)")),
-      M(db => db.exec("CREATE INDEX t_x ON t (x)")),
-      M(db => db.exec("CREATE UNIQUE INDEX IF NOT EXISTS t_x ON t (x)")),
-      M(db => db.exec("ALTER TABLE t ADD COLUMN y INTEGER")),                 // nullable: an older service reads NULL
-      M(db => db.exec("ALTER TABLE t ADD COLUMN y INTEGER NOT NULL DEFAULT 0")),
-      M(db => db.exec("INSERT INTO t (x) SELECT x FROM other")),
-      M(db => db.exec("UPDATE t SET x = 1")),
-      M(db => db.exec("DELETE FROM t")),
-      M(db => db.exec("WITH moved AS (SELECT x FROM t) INSERT INTO u SELECT x FROM moved")),
-      M(db => db.exec("PRAGMA foreign_keys = ON")),
+      M(db => db.exec(`
+        CREATE TABLE t (x);
+        CREATE TABLE IF NOT EXISTS t (x);
+        CREATE INDEX t_x ON t (x);
+        CREATE TABLE other (x);
+        INSERT INTO t (x) SELECT x FROM other;
+        UPDATE t SET x = 1;
+        DELETE FROM t;
+        ALTER TABLE t ADD COLUMN y INTEGER;                 -- nullable: an older service reads NULL
+        ALTER TABLE t ADD COLUMN z INTEGER NOT NULL DEFAULT 0;
+        CREATE TABLE u (u);
+        CREATE UNIQUE INDEX IF NOT EXISTS u_u ON u (u);
+        WITH moved AS (SELECT x FROM t) INSERT INTO other (x) SELECT x FROM moved;
+        PRAGMA foreign_keys = ON;
+      `)),
     ])).toEqual([]);
+  });
+
+  it("fails a DROP a condition hides: the lint runs against a real database, not a stub that answers undefined", () => {
+    const m = M(db => {
+      db.exec("CREATE TABLE old (x)");
+      if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'old'").get() !== undefined) db.exec("DROP TABLE old");
+    });
+    expect(additiveViolations(m)).toEqual([
+      "migration 1 (m1): DROP TABLE old is not on the additive list (§11.2)",
+    ]);
   });
 
   it("fails a DROP, whatever it drops", () => {
@@ -75,7 +99,14 @@ describe("the additive linter", () => {
   });
 
   it("holds a migration declared breaking to nothing: it owes the floor, not the list", () => {
-    expect(additiveViolations(M(db => db.exec("DROP TABLE t; CREATE TABLE t2 AS SELECT 1"), "breaking"))).toEqual([]);
-    expect(lintMigrations([M(db => db.exec("DROP TABLE t"), "breaking"), M(db => db.exec("CREATE TABLE u (x)"))])).toEqual([]);
+    expect(additiveViolations(M(db => db.exec("CREATE TABLE t (x); DROP TABLE t; CREATE TABLE t2 AS SELECT 1"), "breaking"))).toEqual([]);
+    expect(lintMigrations([M(db => db.exec("CREATE TABLE t (x); DROP TABLE t"), "breaking"), M(db => db.exec("CREATE TABLE u (x)"))])).toEqual([]);
+  });
+
+  it("lints a whole list against one database, each migration meeting what the ones before it left", () => {
+    expect(lintMigrations([
+      M(db => db.exec("CREATE TABLE t (x)")),
+      M(db => db.exec("INSERT INTO t (x) VALUES (1)")),                 // runs after migration 1, for real
+    ])).toEqual([]);
   });
 });

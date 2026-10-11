@@ -1,24 +1,58 @@
 // The additive linter (ADR-0019 §11.2): a migration declared "additive" promises an older service can still read the
-// database it leaves. It is a promise the compiler can't check, so this parses the SQL a migration runs — by running
-// it against a recorder, the same way it will really run — and fails on anything not on the additive list: a DROP, a
-// rename, a rebuilt table (CREATE … AS SELECT), a NOT NULL column without a default, a trigger or view. A migration
-// may do all of that, but then it says `compat: "breaking"` and raises the floor it owes the services below it.
-import type Database from "better-sqlite3";
+// database it leaves. It is a promise the compiler can't check, so this runs the migration — against a real throwaway
+// in-memory SQLite database, the same way it will really run — and fails on anything not on the additive list: a DROP,
+// a rename, a rebuilt table (CREATE … AS SELECT), a NOT NULL column without a default, a trigger or a view. Running
+// it for real is what makes the lint honest: a condition in up() decides on real rows and a real schema, so the
+// statements it hides are linted too, not just the ones a stub would let pass. A migration may do all of that, but
+// then it says `compat: "breaking"` and raises the floor it owes the services below it.
+import Database from "better-sqlite3";
 import type { Migration } from "./migrate.ts";
 
-// Records every statement a migration hands to exec/prepare/pragma, instead of running it.
-class Recorder {
+// Runs a migration against the throwaway database, recording every statement it hands to exec/prepare/pragma as it
+// runs. A statement the lint fails is reported and not executed: the throwaway carries on without it.
+class Run {
   readonly statements: string[] = [];
-  exec(sql: string): void { this.statements.push(...statementsOf(sql)); }
-  prepare(sql: string): { run(): unknown; get(): unknown; all(): unknown[]; pluck(): { get(): unknown } } {
-    this.statements.push(...statementsOf(sql));
-    return { run: () => undefined, get: () => undefined, all: () => [], pluck: () => ({ get: () => undefined }) };
+  readonly violations: string[] = [];
+  private readonly db: Database.Database;
+  private readonly lint: boolean;
+
+  constructor(db: Database.Database, lint: boolean) {
+    this.db = db;
+    this.lint = lint;
   }
-  pragma(what: string): unknown { this.statements.push(`PRAGMA ${what}`); return 0; }
+
+  exec(sql: string): void {
+    for (const statement of statementsOf(sql)) this.statement(statement);
+  }
+
+  prepare(sql: string): Database.Statement {
+    const statements = statementsOf(sql);
+    this.statements.push(...statements);
+    if (this.lint) for (const statement of statements) this.judge(statement);
+    return this.db.prepare(sql);
+  }
+
+  pragma(what: string): unknown {
+    this.statements.push(`PRAGMA ${what}`);
+    return this.db.pragma(what);
+  }
+
+  private statement(statement: string): void {
+    this.statements.push(statement);
+    if (this.lint && this.judge(statement)) return;            // reported, not run
+    this.db.exec(statement);
+  }
+
+  private judge(statement: string): boolean {
+    const violation = violationsOf(statement);
+    if (violation === null) return false;
+    this.violations.push(violation);
+    return true;
+  }
 }
 
 // Splits a multi-statement exec() string on semicolons outside strings and comments, comments stripped first — far
-// enough for linting the migrations this repo writes (no trigger bodies with semicolons inside).
+// enough for linting the migrations this repo writes (no trigger bodies with semicolons outside BEGIN…END).
 function stripComments(sql: string): string {
   let out = "", quote: string | null = null;
   for (let i = 0; i < sql.length; i++) {
@@ -52,11 +86,16 @@ const ADD_COLUMN = /^ALTER\s+TABLE\s+(["'`\w.]+)\s+ADD\s+(?:COLUMN\s+)?(.+)$/is;
 const NOT_NULL_WITHOUT_DEFAULT = /\bNOT\s+NULL\b/i;
 const HAS_DEFAULT = /\bDEFAULT\b/i;
 
-/** The statements a migration would run, in order — what the linter sees, and what a review of it reads. */
+/** The statements a migration runs, in order — what the linter sees, and what a review of it reads. */
 export function migrationStatements(migration: Migration): string[] {
-  const recorder = new Recorder();
-  migration.up(recorder as unknown as Database.Database);
-  return recorder.statements;
+  const db = new Database(":memory:");
+  try {
+    const run = new Run(db, false);
+    migration.up(run as unknown as Database.Database);
+    return run.statements;
+  } finally {
+    db.close();
+  }
 }
 
 function violationsOf(statement: string): string | null {
@@ -85,16 +124,33 @@ function violationsOf(statement: string): string | null {
   return `${head} is not on the additive list (§11.2)`;
 }
 
-/** What a migration declared "additive" does that an older service could not read; a "breaking" one owes nothing. */
-export function additiveViolations(migration: Migration): string[] {
-  if (migration.compat === "breaking") return [];
-  return migrationStatements(migration)
-    .map(violationsOf)
-    .filter((v): v is string => v !== null)
-    .map(violation => `migration ${migration.version} (${migration.name}): ${violation}`);
+function violationsIn(migration: Migration, db: Database.Database): string[] {
+  // A migration declared breaking owes the floor, not the list — but it still runs, so the migrations after it meet
+  // the schema it leaves.
+  const run = new Run(db, migration.compat !== "breaking");
+  migration.up(run as unknown as Database.Database);
+  return run.violations.map(violation => `migration ${migration.version} (${migration.name}): ${violation}`);
 }
 
-/** Lints a service's whole list: empty when every additive migration holds to §11.2. */
+/** What a migration declared "additive" does that an older service could not read; a "breaking" one owes nothing. */
+export function additiveViolations(migration: Migration): string[] {
+  const db = new Database(":memory:");
+  try {
+    return violationsIn(migration, db);
+  } finally {
+    db.close();
+  }
+}
+
+/** Lints a service's whole list the way it will really run — one database, every migration in order, so each meets
+ *  the schema the ones before it left. Empty when every additive migration holds to §11.2. */
 export function lintMigrations(migrations: readonly Migration[]): string[] {
-  return migrations.flatMap(additiveViolations);
+  const db = new Database(":memory:");
+  try {
+    const out: string[] = [];
+    for (const migration of migrations) out.push(...violationsIn(migration, db));
+    return out;
+  } finally {
+    db.close();
+  }
 }
