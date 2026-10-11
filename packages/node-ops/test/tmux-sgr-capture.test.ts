@@ -6,7 +6,7 @@ import { isolatedTmux, type TestTmux } from "./isolated-tmux.ts";
 
 const E = "\x1b";
 let t: TestTmux | undefined;
-afterEach(() => { t?.kill(); t = undefined; });
+afterEach(() => { const done = t?.kill(); t = undefined; return done; });
 
 describe("a real tmux 3.4 capture", () => {
   it("keeps the words of a curly underline and a link, and drops the sequences", () => {

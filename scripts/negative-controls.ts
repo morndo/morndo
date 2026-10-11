@@ -654,8 +654,8 @@ export const CONTROLS: Control[] = [
     replace: "",
     run: ["test/fleet/harness.test.ts"] },
   { id: "t17-stopall-recreated-server", task: "17", file: "test/fleet-harness.ts",
-    find: "    kill: () => { t.kill(); },   // stays registered: a server recreated on this socket is stopped by stopAll too",
-    replace: "    kill: () => { servers.delete(t.socket); t.kill(); },",
+    find: "    kill: () => { return t.kill(); },   // stays registered: a server recreated on this socket is stopped by stopAll too",
+    replace: "    kill: () => { servers.delete(t.socket); return t.kill(); },",
     run: ["test/fleet/drills-nodes.test.ts", "test/fleet/harness.test.ts"] },
   // ---- The final review's fix wave (lanes FA and FB) and its follow-up (final-review.md; fixwave-FA/FB-report.md): one
   // entry per guard it added, each with the test that must notice it gone.

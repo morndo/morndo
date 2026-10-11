@@ -12,7 +12,7 @@ import { isolatedTmux, type TestTmux } from "./isolated-tmux.ts";
 
 let t: TestTmux;
 beforeEach(() => { t = isolatedTmux(); });
-afterEach(() => { t.kill(); });
+afterEach(() => t.kill());
 
 describe("tmuxArgv", () => {
   it("always passes -u, and -L only for a named socket", () => {
@@ -97,13 +97,13 @@ describe("tmuxLiteral", () => {
 });
 
 describe("isolatedTmux (the shared test helper)", () => {
-  it("kill() returns once the server is gone, so a new one starts at once on the same socket, and leaves no socket file", () => {
+  it("kill() returns once the server is gone, so a new one starts at once on the same socket, and leaves no socket file", async () => {
     const file = join(process.env.TMUX_TMPDIR || "/tmp", `tmux-${process.getuid?.() ?? 0}`, t.socket);
     for (let i = 0; i < 5; i++) {
       t.tmux("new-session", "-d", "-s", "main", "sleep 600");
       const pid = Number(t.tmux("display-message", "-p", "-t", "=main", "#{pid}").trim());
       expect(existsSync(file)).toBe(true);
-      t.kill();
+      await t.kill();
       expect(() => process.kill(pid, 0), `server ${pid}`).toThrow();    // the server process itself has exited
       expect(() => execFileSync("tmux", ["-L", t.socket, "list-sessions"], { stdio: "pipe" })).toThrow();
       expect(existsSync(file)).toBe(false);

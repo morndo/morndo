@@ -6,7 +6,7 @@ import { isolatedTmux, type TestTmux } from "./isolated-tmux.ts";
 
 const RULE = "────────────────────────────────";
 let t: TestTmux | undefined;
-afterEach(() => { t?.kill(); t = undefined; });
+afterEach(() => { const done = t?.kill(); t = undefined; return done; });
 
 async function pane(redraw: string) {
   t = isolatedTmux();
