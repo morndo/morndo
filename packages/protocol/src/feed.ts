@@ -136,7 +136,7 @@ export const DecisionItemSchema = z.object({
   project: z.nullable(text()),
   askedAt: z.number(),
   messageId: z.nullable(text()),
-  tracking: z.enum(["ledger", "age", "source"]),
+  tracking: z.enum(["ledger", "age", "source", "hub"]),
   status: z.enum(["open", "answered", "settled", "expired"]),
   source: orElse(z.enum(["open", "settled", "missing", "unreadable"]), "unreadable"),
   decision: z.nullable(z.object({

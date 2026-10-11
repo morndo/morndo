@@ -18,7 +18,7 @@ export type AnswerBy = "tap" | "words" | "screen";
 // How long an ask stays answerable: while the manager's list has it open ("ledger"), for a day after it was asked
 // ("age", button messages whose id isn't on the list), or while its source still shows it ("source", a worker's
 // question or menu).
-export type Tracking = "ledger" | "age" | "source";
+export type Tracking = "ledger" | "age" | "source" | "hub";   // hub: the hub itself holds it open (E14, ADR-0023)
 
 export type Ask = {
   id: EscalationId;
@@ -97,6 +97,7 @@ export type EscalationAnswered = {
 
 export const LEDGER_GRACE_MS = 10 * 60_000;          // E10: the manager may post buttons before it files the item
 export const TAP_TTL_MS = 24 * 3_600_000;            // E10: an id that isn't on the list expires after a day
+export const HUB_TTL_MS = 7 * 24 * 3_600_000;        // E14: a hub-tracked ask expires seven days after its due
 export const KEEP_SETTLED_MS = 3 * 24 * 3_600_000;   // how long decided items stay listed once no source shows them
 
 const isOpen = (s: EscalationStatus) => s === "open" || s === "answered";
@@ -123,6 +124,7 @@ export function refusal(e: Escalation | undefined, now: number): AnswerRefusal |
   if (e.source === "unreadable") return "cant_check";
   if (e.tracking === "ledger" && e.source === "missing") return "not_filed_yet";
   if (e.tracking === "age" && now - e.askedAt >= TAP_TTL_MS) return "expired";
+  if (e.tracking === "hub" && now >= (e.deadline ?? e.askedAt) + HUB_TTL_MS) return "expired";   // E14: overdue is not expired
   if (e.answerBy === "screen") return "on_screen";
   return null;
 }
@@ -175,6 +177,12 @@ export class Escalations {
         else if (e.status === "answered" && now - e.askedAt > TAP_TTL_MS + KEEP_SETTLED_MS) this.#items.delete(e.id);
         continue;
       }
+      if (e.tracking === "hub") {                         // E14: the hub holds it open; time alone ends it, past its due
+        const ttl = (e.deadline ?? e.askedAt) + HUB_TTL_MS;
+        if (e.status === "open" && now >= ttl) { e.status = "expired"; e.settledAt = ttl; }
+        else if (!isOpen(e.status) && now - (e.settledAt ?? e.askedAt) > KEEP_SETTLED_MS) this.#items.delete(e.id);
+        continue;
+      }
       if (isOpen(e.status)) { e.status = "settled"; e.source = "missing"; e.settledAt = now; }
       else if (now - (e.settledAt ?? e.askedAt) > KEEP_SETTLED_MS) this.#items.delete(e.id);
     }
@@ -215,6 +223,7 @@ export class Escalations {
       return;
     }
     if (s.source.kind === "unreadable") return;          // keep the status we had
+    if (s.source.kind === "missing" && e.tracking === "hub") return;   // E14: only a withdrawal or a settle ends it
     if (s.source.kind === "missing" && e.tracking !== "ledger") { e.status = "settled"; e.settledAt ??= now; return; }
     if (s.source.kind === "missing" && now - e.askedAt >= LEDGER_GRACE_MS) {
       if (e.status !== "settled") { e.status = "settled"; e.settledAt = now; }
@@ -223,6 +232,10 @@ export class Escalations {
     if (e.tracking === "age" && now - e.askedAt >= TAP_TTL_MS && !e.decision) {
       if (e.status !== "expired") { e.status = "expired"; e.settledAt = e.askedAt + TAP_TTL_MS; }
       return;
+    }
+    if (e.tracking === "hub" && !e.decision) {           // E14: at most seven days past its due, then it expires
+      const ttl = (e.deadline ?? e.askedAt) + HUB_TTL_MS;
+      if (now >= ttl) { if (e.status !== "expired") { e.status = "expired"; e.settledAt = ttl; } return; }
     }
     if (e.status === "settled" || e.status === "expired") {
       if (e.tracking === "age") return;                  // a day-old ask comes back only when asked again
