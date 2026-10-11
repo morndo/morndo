@@ -1041,7 +1041,8 @@ export const CONTROLS: Control[] = [
     find: 'if (full(req)) return refuseRequest("full");', replace: "",
     run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'full'" },
   { id: "sp1-renew-expiry", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
-    find: 'if (req.kind === "renew" && !renews) return refuseRequest("expiry");', replace: "",
+    find: 'if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > now)) return refuseRequest("expiry");',
+    replace: "",
     run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'expiry'" },
   { id: "sp1-rotation-shape", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
     find: "shape: input.shape === undefined ? before.shape : input.shape,", replace: "shape: input.shape,",
@@ -1070,6 +1071,16 @@ export const CONTROLS: Control[] = [
     find: 'const event: RequestEvent = { type: "SecretRequestWithdrawn", request: req.id, lane: gone.lane, workspace: gone.workspace, at: now };',
     replace: 'const event = { type: "SecretRequestWithdrawn", request: req.id, at: now } as RequestEvent;',
     run: ["packages/domain/test/secrets-round4.test.ts"], expect: "SecretRequestWithdrawn" },
+  // The renew rule on the node and the store's request kind (decided on T-80).
+  { id: "sp1-renew-later-than-current", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: "(current === null || input.expiry > current)", replace: "true",
+    run: ["packages/domain/test/secrets-round4.test.ts"], expect: "renew_expiry" },
+  { id: "sp1-renew-later-than-now", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: "input.expiry !== null && input.expiry > at && ", replace: "input.expiry !== null && ",
+    run: ["packages/domain/test/secrets-round4.test.ts"], expect: "renew_expiry" },
+  { id: "sp1-wire-store-kind", task: "secrets-pr1", file: "packages/protocol/src/secrets.ts",
+    find: "request: z.nullable(z.strictObject({ id: id(), kind: z.enum(STORED_KINDS) })),", replace: "request: z.nullable(id()),",
+    run: ["packages/protocol/test/secrets-wire-round4.test.ts"], expect: "expected" },
 ];
 
 // ---- the runner
