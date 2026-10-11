@@ -13,9 +13,9 @@
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import Clock from "@lucide/svelte/icons/clock-3";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
-  import { acceptNamedUpload, UPLOAD_ACCEPT, type Message, type RosterEntry, type UploadKind, type UploadRefusal } from "@morndo/domain";
-  import { fileSize, fileType, refusalMessage } from "../../attach.ts";
-  import { ApiError, explain, uploadFile } from "../../api.ts";
+  import { UPLOAD_ACCEPT, type Message, type RosterEntry } from "@morndo/domain";
+  import { beginAttachments, fileSize, fileType, removalNote, settleAttachment, type AttachmentRow } from "../../attach.ts";
+  import { uploadFile } from "../../api.ts";
   import type { LiveFeed } from "../../feed.svelte.ts";
   import type { DecisionItem } from "../../desktop/decisions.ts";
   import { renderMarkdown } from "../../markdown.ts";
@@ -102,31 +102,17 @@
   let input = $state<HTMLTextAreaElement | null>(null);
   let fileInput = $state<HTMLInputElement | null>(null);
   let dragging = $state(false);
-  type PendingFile = { key: string; name: string; kind: UploadKind; size: number; status: "uploading" | "ready" | "error"; id?: string };
-  let files = $state<PendingFile[]>([]);
+  let files = $state<AttachmentRow[]>([]);
   const readyIds = $derived(files.filter(f => f.status === "ready" && f.id).map(f => f.id as string));
   const uploading = $derived(files.some(f => f.status === "uploading"));
-  const isRefusal = (code: string): code is UploadRefusal =>
-    code === "too_big" || code === "not_allowed" || code === "not_utf8" || code === "bad_name" || code === "not_an_image";
-  async function addFiles(list: File[]) {
-    note = null;
-    const problems: string[] = [];
-    for (const file of list) {
-      if (files.length >= 6) { problems.push("At most 6 files per message."); break; }
-      const claimed = file.name || "pasted.png";
-      const accepted = acceptNamedUpload(new Uint8Array(await file.arrayBuffer()), claimed);
-      if (!accepted.ok) { problems.push(refusalMessage(claimed, accepted.error)); continue; }
-      const row: PendingFile = { key: crypto.randomUUID(), name: accepted.value.name, kind: accepted.value.kind, size: file.size, status: "uploading" };
+  const failed = $derived(files.some(f => f.status === "error"));
+  function addFiles(list: File[]) {
+    const started = beginAttachments(files.length, list);
+    note = started.note;
+    for (const { file, row } of started.taken) {
       files.push(row);
-      uploadFile(file)
-        .then(r => { const s = files.find(x => x.key === row.key); if (s) { s.status = "ready"; s.id = r.id; } })
-        .catch(e => {
-          const s = files.find(x => x.key === row.key);
-          if (s) s.status = "error";
-          note = e instanceof ApiError && isRefusal(e.code) ? refusalMessage(claimed, e.code) : explain(e);
-        });
+      void settleAttachment(files.find(s => s.key === row.key) ?? row, file, uploadFile);
     }
-    if (problems.length) note = problems[0] ?? null;
   }
   $effect(() => {
     const started = text.trim().length > 0 || files.length > 0;
@@ -140,8 +126,10 @@
     input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
   });
   async function send() {
+    const blocked = removalNote(files);
+    if (blocked) { note = blocked; return; }
     const body = text.trim();
-    if ((!body && readyIds.length === 0) || busy || uploading || files.some(f => f.status === "error")) return;
+    if ((!body && readyIds.length === 0) || busy || uploading) return;
     busy = true;
     note = null;
     const uploads = readyIds;
@@ -273,7 +261,7 @@
     {#if files.length}
       <div class="pending" aria-label="Files to send">
         {#each files as f (f.key)}
-          <span class="chip"><span class="fn">{f.name}</span><small>{fileType(f.name, f.kind)} · {fileSize(f.size)}</small><button type="button" onclick={() => (files = files.filter(x => x.key !== f.key))} aria-label="Remove {f.name}"><X size={14} /></button></span>
+          <span class="chip {f.status}"><span class="fn">{f.name}</span><small>{f.error ?? `${fileType(f.name, f.kind)} · ${fileSize(f.size)}`}</small><button type="button" onclick={() => (files = files.filter(x => x.key !== f.key))} aria-label="Remove {f.name}"><X size={14} /></button></span>
         {/each}
       </div>
     {/if}
@@ -284,7 +272,7 @@
       <textarea bind:this={input} bind:value={text} rows="1" placeholder="Message {name}" aria-label="Message {name}" enterkeyhint="send"
         onpaste={e => { const list = [...(e.clipboardData?.files ?? [])]; if (!list.length) return; if (!e.clipboardData?.getData("text/plain")) e.preventDefault(); void addFiles(list); }}
         onkeydown={e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); void send(); } }}></textarea>
-      <button class="send" disabled={(!text.trim() && readyIds.length === 0) || busy || uploading} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
+      <button class="send" disabled={((!text.trim() && readyIds.length === 0 && !failed) || busy || uploading)} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
     </div>
     <p class="scope note">{worker.name === "manager" ? "Goes to the manager's inbox; it is typed in once its box is free." : `Goes straight to ${name}; the manager won't see it.`}</p>
   </div>
@@ -364,6 +352,8 @@
   .composer.dragging { outline: 2px solid var(--ink); }
   .pending { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 32px; padding: 4px 6px 4px 10px; border: 1px solid var(--edge); border-radius: 10px; background: var(--bg); }
+  .chip.error { border-color: var(--bad); }
+  .chip.error small { color: var(--bad-text); }
   .chip .fn { font: 700 13px/18px var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .chip small { flex: none; color: var(--muted); font: 400 12px/16px var(--body); }
   .chip button { width: 28px; height: 28px; border: 0; border-radius: 14px; background: transparent; color: var(--fg); display: grid; place-items: center; cursor: pointer; }

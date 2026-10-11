@@ -10,9 +10,9 @@
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { onDestroy, untrack } from "svelte";
-  import { acceptNamedUpload, UPLOAD_ACCEPT, type UploadKind, type UploadRefusal } from "@morndo/domain";
-  import { fileSize, fileType, refusalMessage } from "../attach.ts";
-  import { ApiError, explain, uploadFile } from "../api.ts";
+  import { UPLOAD_ACCEPT } from "@morndo/domain";
+  import { beginAttachments, fileSize, fileType, settleAttachment, type AttachmentRow } from "../attach.ts";
+  import { explain, uploadFile } from "../api.ts";
   import { stepUp as verify } from "../stepup.ts";
   import { deviceDrafts } from "../drafts.ts";
 
@@ -35,40 +35,20 @@
   // question it answers may have changed while it was written, and the hub must then refuse it.
   let seen = $state<string | null>(restored?.seen ?? null);
   $effect(() => { drafts.typed(target, conversation, text, seen); });
-  type Shot = { key: string; name: string; kind: UploadKind; size: number; preview: string; status: "uploading" | "ready" | "error"; id?: string; error?: string };
-  let shots = $state<Shot[]>([]);
+  let shots = $state<AttachmentRow[]>([]);
   let dragging = $state(false);
   let fileInput = $state<HTMLInputElement | null>(null);
-  const MAX_SHOTS = 6;
   const uploading = $derived(shots.some(s => s.status === "uploading"));
   const readyIds = $derived(shots.filter(s => s.status === "ready" && s.id).map(s => s.id as string));
   const canSend = $derived((text.trim().length > 0 || readyIds.length > 0) && !uploading && !shots.some(s => s.status === "error"));
-  const isRefusal = (code: string): code is UploadRefusal =>
-    code === "too_big" || code === "not_allowed" || code === "not_utf8" || code === "bad_name" || code === "not_an_image";
 
-  async function addFiles(files: File[]) {
-    note = null;
-    const problems: string[] = [];
-    for (const file of files) {
-      if (shots.length >= MAX_SHOTS) { problems.push(`At most ${MAX_SHOTS} files per message.`); break; }
-      const claimed = file.name || "pasted.png";
-      const accepted = acceptNamedUpload(new Uint8Array(await file.arrayBuffer()), claimed);
-      if (!accepted.ok) { problems.push(refusalMessage(claimed, accepted.error)); continue; }
-      const shot: Shot = {
-        key: crypto.randomUUID(), name: accepted.value.name, kind: accepted.value.kind, size: file.size,
-        preview: accepted.value.kind === "image" ? URL.createObjectURL(file) : "", status: "uploading",
-      };
-      shots.push(shot);
-      uploadFile(file)
-        .then(r => { const s = shots.find(x => x.key === shot.key); if (s) { s.status = "ready"; s.id = r.id; } })
-        .catch(e => {
-          const s = shots.find(x => x.key === shot.key);
-          if (!s) return;
-          s.status = "error";
-          s.error = e instanceof ApiError && isRefusal(e.code) ? refusalMessage(s.name, e.code) : explain(e);
-        });
+  function addFiles(files: File[]) {
+    const started = beginAttachments(shots.length, files);
+    note = started.note;
+    for (const { file, row } of started.taken) {
+      shots.push(row);
+      void settleAttachment(shots.find(s => s.key === row.key) ?? row, file, uploadFile);
     }
-    if (problems.length) note = problems[0] ?? null;
   }
   function removeShot(key: string) {
     const s = shots.find(x => x.key === key);

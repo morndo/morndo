@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, sniffImage, type Upload } from "../src/index.ts";
+import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, screenNamedUpload, sniffImage, type Upload } from "../src/index.ts";
 
 const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(16).fill(0)]);
 const T0 = Date.UTC(2026, 9, 1, 12);
@@ -77,6 +77,14 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     expect(acceptNamedUpload(new Uint8Array(TEXT_MAX_BYTES + 1), "notes.md")).toEqual({ ok: false, error: "too_big" });
     expect(acceptNamedUpload(new Uint8Array(MAX_UPLOAD_BYTES + 1), "spec.pdf")).toEqual({ ok: false, error: "too_big" });
     expect(acceptNamedUpload(text("hi"), "")).toEqual({ ok: false, error: "not_allowed" });
+  });
+});
+
+describe("S1: a file is screened by its name and size before its bytes", () => {
+  it("refuses a movie and an oversized note without looking at the bytes", () => {
+    expect(screenNamedUpload("clip.mov", 3 * 1024 * 1024 * 1024)).toEqual({ ok: false, error: "not_allowed" });
+    expect(screenNamedUpload("big.md", TEXT_MAX_BYTES + 1)).toEqual({ ok: false, error: "too_big" });
+    expect(screenNamedUpload("notes.md", 8)).toMatchObject({ ok: true, value: { kind: "text", name: "notes.md" } });
   });
 });
 

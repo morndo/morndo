@@ -79,7 +79,7 @@ function textProblem(b: Uint8Array): "not_allowed" | "not_utf8" | null {
   return /^(<\?xml|<!doctype\s+html|<html|<svg)\b/i.test(text.replace(/^\uFEFF/, "").trimStart()) ? "not_allowed" : null;
 }
 
-function limitFor(kind: UploadKind): number {
+export function uploadByteLimit(kind: UploadKind): number {
   switch (kind) {
     case "image":
     case "pdf": return MAX_UPLOAD_BYTES;
@@ -88,17 +88,31 @@ function limitFor(kind: UploadKind): number {
   }
 }
 
+function kindOf(name: string): UploadKind | null {
+  const ext = extensionOf(name);
+  if (IMAGE_BY_EXT[ext]) return "image";
+  if (ext === ".pdf") return "pdf";
+  if (TEXT_BY_EXT[ext]) return "text";
+  return null;
+}
+
+// Name and size, before anyone reads the bytes. A 3 GB movie is refused here.
+export function screenNamedUpload(name: string, size: number): Result<{ kind: UploadKind; name: string }, UploadRefusal> {
+  const kind = kindOf(name);
+  if (!kind) return err("not_allowed");
+  if (size > uploadByteLimit(kind)) return err("too_big");
+  const safe = safeUploadName(name);
+  if (!safe || extensionOf(safe) !== extensionOf(name)) return err("bad_name");
+  return ok({ kind, name: safe });
+}
+
 // S1: the extension picks the kind. An image is then whatever image its bytes are. HTML, SVG, executables and archives
 // are not on the list. Text is UTF-8 under 1 MiB; a PDF starts with %PDF- and, like an image, is at most 10 MiB.
 export function acceptNamedUpload(bytes: Uint8Array, name: string): Result<AcceptedUpload, UploadRefusal> {
-  const ext = extensionOf(name);
-  const image = IMAGE_BY_EXT[ext];
-  const text = TEXT_BY_EXT[ext];
-  const kind: UploadKind | null = image ? "image" : ext === ".pdf" ? "pdf" : text ? "text" : null;
-  if (!kind) return err("not_allowed");
-  if (bytes.length > limitFor(kind)) return err("too_big");
-  const safe = safeUploadName(name);
-  if (!safe || extensionOf(safe) !== ext) return err("bad_name");
+  const screened = screenNamedUpload(name, bytes.length);
+  if (!screened.ok) return screened;
+  const { kind, name: safe } = screened.value;
+  const text = TEXT_BY_EXT[extensionOf(name)];
   if (kind === "image") {
     const mime = sniffImage(bytes);
     return mime ? ok({ kind, mime, name: safe }) : err("not_allowed");

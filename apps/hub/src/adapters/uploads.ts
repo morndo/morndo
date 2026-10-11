@@ -75,22 +75,26 @@ export function uploadInbox(opts: { dir: string; now?: () => number; registry?: 
     save(bytes, endpointId, name = "") {
       const at = now();
       const id = randomBytes(12).toString("hex");
+      const id6 = id.slice(0, 6);
+      let pathName: string;
+      let mime: Upload["mime"];
+      let clean: Uint8Array;
       if (name) {
         const accepted = acceptNamedUpload(bytes, name);
         if (!accepted.ok) return accepted;
-        const path = join(opts.dir, `pasted-${stamp(at)}-${id.slice(0, 6)}-${accepted.value.name}`);
-        const clean = accepted.value.kind === "image" ? stripMetadata(bytes, accepted.value.mime) : bytes;
-        writeFileSync(path, clean, { mode: 0o600 });
-        const upload: Upload = { id, endpointId, path, mime: accepted.value.mime, size: clean.length, at };
-        known.saveUpload(upload);
-        return { ok: true, value: upload };
+        pathName = `pasted-${stamp(at)}-${id6}-${accepted.value.name}`;
+        mime = accepted.value.mime;
+        clean = accepted.value.kind === "image" ? stripMetadata(bytes, accepted.value.mime) : bytes;
+      } else {
+        const accepted = acceptUpload(bytes);
+        if (!accepted.ok) return accepted;
+        pathName = `pasted-${stamp(at)}-${id6}.${IMAGE_EXTENSION[accepted.value]}`;
+        mime = accepted.value;
+        clean = stripMetadata(bytes, accepted.value);
       }
-      const accepted = acceptUpload(bytes);
-      if (!accepted.ok) return accepted;
-      const path = join(opts.dir, `pasted-${stamp(at)}-${id.slice(0, 6)}.${IMAGE_EXTENSION[accepted.value]}`);
-      const clean = stripMetadata(bytes, accepted.value);
+      const path = join(opts.dir, pathName);
       writeFileSync(path, clean, { mode: 0o600 });
-      const upload: Upload = { id, endpointId, path, mime: accepted.value, size: clean.length, at };
+      const upload: Upload = { id, endpointId, path, mime, size: clean.length, at };
       known.saveUpload(upload);
       return { ok: true, value: upload };
     },
