@@ -4,18 +4,18 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
-import { findPreset as presetOf } from "./application/catalog.ts";
+import { findPreset as presetOf, firstPartyHost } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
-import { fetchModelIds, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
+import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { ClaudeRuntime, isStatusRefusal, keysProgram } from "./adapters/runtime-claude.ts";
+import { baseUrlProblem, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
-import { costFromOutput, modelFromOutput } from "./adapters/spend.ts";
+import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
@@ -163,9 +163,18 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return fail(io, LOGIN_KEY_REFUSAL);
   const preset = presetOf(home.catalog, connection.vendor);
   if (!preset) return fail(io, "missing");
-  const model = wantedModel(preset.defaultPicks["*"]) ?? "default";
+  const baseUrl = preset.runtimes.find(item => item.runtime === connection.runtime)?.baseUrl ?? "";
+  const party = firstPartyHost(home.catalog.presets());
+  if (connection.kind === "api-key" && connection.runtime === "claude") {
+    const problem = baseUrlProblem(baseUrl);
+    if (problem) return fail(io, problem);
+  }
+  const choice = launchChoice(preset.defaultPicks, parsed.get("role") ?? "run");
+  const model = choice.model;
+  const listed = preset.models.source === "static" ? preset.models.ids : preset.prices.map(row => row.model);
+  const small = smallModel(listed, model) ?? "";
   const reserve = Number(parsed.get("reserve") ?? "5");
-  const granted = ask(home, name, parsed, false, reserve);
+  const granted = ask(home, name, parsed, false, reserve, choice.model || "default");
   if (!granted.ok) return fail(io, granted.problem, granted.exit);
   const row = findConnection(home.store.load().directory, name);
   const lease = row && row.custody === "morndo" ? row.leases.find(item => item.id === granted.id) : undefined;
@@ -179,12 +188,11 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
     lease: lease.id, connection: name, ref: connection.kind === "api-key" ? connection.ref : null,
-    configDir, model, effort: "high", workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
+    configDir, model, effort: choice.effort, smallModel: small, workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
     deny: [home.vaultDir, home.db, home.identity, ...(connection.repo?.deny ?? [])],
     reservation: lease.reservation, probe: false, subscription,
   };
   const bin = connection.runtime === "codex" ? home.env.MORNDO_CODEX_BIN ?? "codex" : home.env.MORNDO_CLAUDE_BIN ?? "claude";
-  const baseUrl = preset.runtimes.find(item => item.runtime === connection.runtime)?.baseUrl ?? "";
   const saved = home.env;
   let released = false;
   let refusal: number | null = null;
@@ -211,7 +219,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       }).execute(plan, parsed.rest, hooks)
       : connection.runtime === "cursor"
         ? await new CursorRuntime(saved.MORNDO_CURSOR_BIN ?? "agent", saved).execute(plan, parsed.rest, hooks)
-        : await new ClaudeRuntime(bin, helperLine, saved).execute(plan, parsed.rest, hooks);
+        : await new ClaudeRuntime(bin, helperLine, saved, baseUrl, party).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
   } catch (error) {
@@ -225,9 +233,11 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const again = released ? openHome(saved) : home;
     try {
       const outcome = failure !== "" ? failure : status === 0 ? "done" : "failed";
-      again.leases.close(name, lease.id, outcome, costFromOutput(stdout));
+      const catalogPrices = preset.spend.includes("token-price") && connection.runtime === "claude" && !subscription && isThirdPartyAnthropicBase(baseUrl, party);
+      const cost = catalogPrices ? catalogTokenCost(stdout, preset.prices, model) : costFromOutput(stdout);
+      again.leases.close(name, lease.id, outcome, cost);
       const seen = modelFromOutput(stdout);
-      if (seen && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
+      if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
     } finally { if (released) again.close(); }
   }
   if (refusal !== null) return refusal;
@@ -468,7 +478,7 @@ async function probe(home: Opened, name: string, io: Io, body: (connection: Conn
   finally { home.leases.close(name, granted.value.id, "done", null); }
 }
 
-function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, reserve: number): { ok: true; id: string } | { ok: false; problem: string; exit?: number } {
+function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, reserve: number, entry?: string): { ok: true; id: string } | { ok: false; problem: string; exit?: number } {
   const connection = findConnection(home.store.load().directory, name);
   if (!connection) return { ok: false, problem: "missing" };
   if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return { ok: false, problem: LOGIN_KEY_REFUSAL };
@@ -476,8 +486,10 @@ function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, re
   if (!holder) return { ok: false, problem: "holder" };
   home.runtime.current = gateRuntime(home, connection.runtime);
   const workspace = parsed.get("workspace") ?? home.env.PWD ?? process.cwd();
+  const recorded = entry ?? (launchChoice(presetOf(home.catalog, connection.vendor)?.defaultPicks ?? {}, parsed.get("role") ?? "run").model || "default");
   const granted = home.leases.lease(name, {
-    role: parsed.get("role") ?? "run", entry: wantedModel(presetOf(home.catalog, connection.vendor)?.defaultPicks["*"]) ?? "default",
+    role: parsed.get("role") ?? "run",
+    entry: recorded,
     holder, workspacePath: workspace, limit: LEASES, reserve, margin: 0, probe: probeLease,
   });
   if (!granted.ok) return { ok: false, problem: granted.error.problem, ...(granted.error.exit === undefined ? {} : { exit: granted.error.exit }) };

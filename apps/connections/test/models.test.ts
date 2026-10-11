@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fetchModelIds, modelMissing, sameModel } from "../src/adapters/models.ts";
+import { fetchModelIds, launchChoice, modelMissing, PLACEHOLDER_MODELS, sameModel, smallModel } from "../src/adapters/models.ts";
+import { anthropicGatewayEnv } from "../src/adapters/runtime-claude.ts";
 
 const catalog = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 
@@ -50,5 +51,30 @@ describe("model lists", () => {
     expect(sameModel("gpt-5", "gpt-5-mini")).toBe(false);
     expect(modelMissing(["claude-sonnet-5-5-20260901"], "sonnet-5.5@high", patterns)).toBe(false);
     expect(modelMissing(["claude-sonnet-5-5-lite"], "sonnet-5.5@high", patterns)).toBe(true);
+  });
+
+  it("lists Z.ai's GLM ids from the catalog and does not call the network", async () => {
+    const body = JSON.parse(readFileSync(catalog, "utf8")) as { id: string }[];
+    const preset = body.find(row => row.id === "zai");
+    if (!preset) throw new Error("preset");
+    const ids = await fetchModelIds(preset as never, "synthetic-zai-key", () => {
+      throw new Error("network");
+    });
+    expect(ids).toEqual(["glm-5.3", "glm-5.3-flash"]);
+    expect(modelMissing(ids, "glm-5.3@max")).toBe(false);
+    expect(modelMissing(ids, "glm-4.7@high")).toBe(true);
+  });
+
+  it("uses the role's pick and effort, and the star pick for any other role", () => {
+    const picks = { implement: "glm-5.3@max", "*": "glm-5.3@high" };
+    expect(launchChoice(picks, "implement")).toEqual({ model: "glm-5.3", effort: "max" });
+    expect(launchChoice(picks, "review")).toEqual({ model: "glm-5.3", effort: "high" });
+    expect(launchChoice({ "*": "ask" }, "run")).toEqual({ model: "", effort: "high" });
+    for (const name of PLACEHOLDER_MODELS) {
+      expect(launchChoice({ "*": name }, "run").model).toBe("");
+      expect(anthropicGatewayEnv("http://127.0.0.1:9", name).ANTHROPIC_MODEL).toBeUndefined();
+    }
+    expect(smallModel(["glm-5.3", "glm-5.3-flash"], "glm-5.3")).toBe("glm-5.3-flash");
+    expect(smallModel(["kimi-k3"], "kimi-k3")).toBeNull();
   });
 });
