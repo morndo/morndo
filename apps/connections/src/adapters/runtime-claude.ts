@@ -243,24 +243,27 @@ function namedModel(model: string): string | null {
 // --effort sets the session. CLAUDE_CODE_EFFORT_LEVEL is the same value, and
 // CLAUDE_CODE_ALWAYS_ENABLE_EFFORT sends it for a model id the runtime does not recognise.
 // https://code.claude.com/docs/en/cli-reference and https://code.claude.com/docs/en/env-vars — checked 2026-10-11.
-export function anthropicGatewayEnv(baseUrl: string, model: string, effort = ""): Record<string, string> {
+export function anthropicGatewayEnv(baseUrl: string, model: string, effort = "", small = ""): Record<string, string> {
   const problem = baseUrlProblem(baseUrl);
   if (problem) throw new Error(problem);
   if (!isThirdPartyAnthropicBase(baseUrl)) return {};
   const named = namedModel(model);
+  const haiku = namedModel(small) ?? named;
   const env: Record<string, string> = { ANTHROPIC_BASE_URL: baseUrl };
   if (effort !== "") {
     env.CLAUDE_CODE_EFFORT_LEVEL = effort;
     env.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT = "1";
   }
-  if (!named) return env;
+  if (!named && !haiku) return env;
   return {
     ...env,
-    ANTHROPIC_MODEL: named,
-    ANTHROPIC_DEFAULT_OPUS_MODEL: named,
-    ANTHROPIC_DEFAULT_SONNET_MODEL: named,
-    ANTHROPIC_DEFAULT_HAIKU_MODEL: named,
-    CLAUDE_CODE_SUBAGENT_MODEL: named,
+    ...(named ? {
+      ANTHROPIC_MODEL: named,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: named,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: named,
+      CLAUDE_CODE_SUBAGENT_MODEL: named,
+    } : {}),
+    ...(haiku ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: haiku } : {}),
   };
 }
 
@@ -368,7 +371,7 @@ export class ClaudeRuntime implements Runtime {
     const extraEnv = loginEnv("claude", plan.configDir);
     if (plan.subscription) await assertSubscription(this.#bin, ["auth", "status"], childEnv(this.#parent, extraEnv), "claude");
     else {
-      Object.assign(extraEnv, anthropicGatewayEnv(this.#baseUrl, plan.model, plan.effort));
+      Object.assign(extraEnv, anthropicGatewayEnv(this.#baseUrl, plan.model, plan.effort, plan.smallModel ?? ""));
       extraEnv.CLAUDE_CODE_API_KEY_HELPER_TTL_MS = String(HELPER_TTL_MS);
     }
     const denyWebSearch = !plan.subscription && isThirdPartyAnthropicBase(this.#baseUrl);

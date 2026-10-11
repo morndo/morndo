@@ -34,6 +34,10 @@ export function wantedModel(pick: string | undefined): string | null {
 
 const PLACEHOLDER_MODELS = new Set(["default", "ask"]);
 
+export function smallModel(ids: readonly string[], main: string): string | null {
+  return ids.find(id => id !== main && id.endsWith("-flash")) ?? null;
+}
+
 export function launchChoice(picks: Readonly<Record<string, string>>, role: string): { model: string; effort: string } {
   const pick = picks[role] ?? picks["*"];
   const named = wantedModel(pick);

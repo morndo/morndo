@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { fetchModelIds, launchChoice, modelMissing, sameModel } from "../src/adapters/models.ts";
+import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel } from "../src/adapters/models.ts";
 
 const catalog = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 
@@ -69,5 +69,7 @@ describe("model lists", () => {
     expect(launchChoice(picks, "implement")).toEqual({ model: "glm-5.3", effort: "max" });
     expect(launchChoice(picks, "review")).toEqual({ model: "glm-5.3", effort: "high" });
     expect(launchChoice({ "*": "ask" }, "run")).toEqual({ model: "", effort: "high" });
+    expect(smallModel(["glm-5.3", "glm-5.3-flash"], "glm-5.3")).toBe("glm-5.3-flash");
+    expect(smallModel(["kimi-k3"], "kimi-k3")).toBeNull();
   });
 });

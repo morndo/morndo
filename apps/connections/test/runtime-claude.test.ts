@@ -24,6 +24,12 @@ describe("anthropic-compatible base URL", () => {
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("glm-5.3");
     expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("glm-5.3");
     expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("glm-5.3");
+    const flash = childEnv({}, anthropicGatewayEnv("http://127.0.0.1:9", "glm-5.3", "max", "glm-5.3-flash"));
+    expect(flash.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(flash.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("glm-5.3");
+    expect(flash.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("glm-5.3");
+    expect(flash.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("glm-5.3-flash");
+    expect(flash.CLAUDE_CODE_SUBAGENT_MODEL).toBe("glm-5.3");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(JSON.stringify(env)).not.toContain(key);
     const first = childEnv({}, anthropicGatewayEnv("https://api.anthropic.com", "sonnet-5.5"));

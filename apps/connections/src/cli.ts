@@ -8,7 +8,7 @@ import { findPreset as presetOf } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
-import { fetchModelIds, launchChoice, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
+import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
 import { baseUrlProblem, ClaudeRuntime, helperCommand, isStatusRefusal, isThirdPartyAnthropicBase } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
@@ -170,6 +170,8 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   }
   const choice = launchChoice(preset.defaultPicks, parsed.get("role") ?? "run");
   const model = choice.model;
+  const listed = preset.models.source === "static" ? preset.models.ids : preset.prices.map(row => row.model);
+  const small = smallModel(listed, model) ?? "";
   const reserve = Number(parsed.get("reserve") ?? "5");
   const granted = ask(home, name, parsed, false, reserve);
   if (!granted.ok) return fail(io, granted.problem, granted.exit);
@@ -181,7 +183,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
     lease: lease.id, connection: name, ref: connection.kind === "api-key" ? connection.ref : null,
-    configDir, model, effort: choice.effort, workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
+    configDir, model, effort: choice.effort, smallModel: small, workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
     deny: [home.vaultDir, home.db, home.identity, ...(connection.repo?.deny ?? [])],
     reservation: lease.reservation, probe: false, subscription,
   };

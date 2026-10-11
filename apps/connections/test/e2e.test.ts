@@ -95,6 +95,7 @@ describe("keys run", () => {
     expect(ran.code, ran.stderr).toBe(0);
     const recorded = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { argv: string[]; env: Record<string, string> };
     expect(recorded.env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(recorded.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("glm-5.3-flash");
     expect(recorded.argv[recorded.argv.indexOf("--effort") + 1]).toBe("max");
     expect(recorded.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("max");
     expect(recorded.env.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT).toBe("1");
