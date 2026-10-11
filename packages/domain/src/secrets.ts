@@ -303,9 +303,10 @@ type Placed = { secret: Secret; ledger: readonly LedgerEntry[]; version: number;
 // Expiry when it names none, so for a store this means one named and later.
 const clearsWarnings = (before: number | null, after: number | null) => before !== null && (after === null || after > before);
 
-// A store under a new Reference creates the Secret; under an existing one it is a Rotation, which keeps its Grants,
-// Destinations and Expiry unless it names an Expiry (docs/domain.md, "Expiry on a Rotation or a transfer"). A named
-// Expiry replaces the old one and clears the warnings only when later; a store never removes one. The ledger decides first.
+// A store under a new Reference creates the Secret; under an existing one it is a Rotation, which keeps its Grants and
+// Destinations, and its Expiry and shape unless it names one (docs/domain.md, "Expiry on a Rotation or a transfer"). A
+// named Expiry replaces the old one and clears the warnings only when later; a store never removes one. The ledger
+// decides first.
 function place(dir: SecretDirectory, input: StoreInput, command: string, at: number): Result<Placed, SecretRefusal> {
   const p = inputProblem(input);
   if (p) return refuse(p);
@@ -323,7 +324,7 @@ function place(dir: SecretDirectory, input: StoreInput, command: string, at: num
   ];
   const secret: Secret = before
     ? {
-        ...before, status: before.status === "revoked" ? "active" : before.status, current: fresh, shape: input.shape,
+        ...before, status: before.status === "revoked" ? "active" : before.status, current: fresh, shape: input.shape ?? before.shape,
         expiry: input.expiry ?? before.expiry,
         warned: clearsWarnings(before.expiry, input.expiry ?? before.expiry) ? [] : before.warned,
         versions: [...before.versions.map(v => v.retiredAt === null ? { ...v, retiredAt: at } : v), fresh],
