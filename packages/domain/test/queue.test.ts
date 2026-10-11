@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { queueDecision, QUEUE_REASONS, type QueueItem } from "../src/queue.ts";
 
 const AT = 1_700_000_000_000;
-const item = (id: string, acceptedAt = AT): QueueItem => ({ id, acceptedAt });
+const item = (id: string, acceptedAt = AT): QueueItem => ({ key: id, acceptedAt });
 const slot = (rows: readonly QueueItem[], running: number, limit: number, guard: "off" | "load" | "memory" | "unknown", id: string) =>
   queueDecision(rows, running, limit, guard).get(id) ?? null;
 
@@ -26,7 +26,7 @@ describe("queue decision", () => {
     expect(decided.get("b")).toEqual({ start: false, position: 1, reason: "class" });
     expect(decided.get("c")).toEqual({ start: false, position: 2, reason: "class" });
   });
-  it("a tie on acceptance is ordered by id", () => {
+  it("a tie on acceptance is ordered by key", () => {
     const decided = queueDecision([item("z"), item("a"), item("m")], 0, 1, "off");
     expect(decided.get("a")).toEqual({ start: true, position: null, reason: null });
     expect(decided.get("m")).toEqual({ start: false, position: 1, reason: "class" });
@@ -40,7 +40,7 @@ describe("queue decision", () => {
       expect(decided.get("b")).toEqual({ start: false, position: 2, reason: guard === "unknown" ? "guard_unknown" : guard });
     }
   });
-  it("answers every queued id, and the reasons it names are the queue's own", () => {
+  it("answers every queued key, and the reasons it names are the queue's own", () => {
     const rows = [item("a"), item("b", AT + 1)];
     const decided = queueDecision(rows, 2, 1, "off");
     expect([...decided.keys()].sort()).toEqual(["a", "b"]);

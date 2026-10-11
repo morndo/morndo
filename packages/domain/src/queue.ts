@@ -13,24 +13,25 @@ export type QueueGuard = "off" | "load" | "memory" | "unknown";
 // What one waiting row gets: a free slot to start, or its place in line and why it waits.
 export type QueueSlot = { start: boolean; position: number | null; reason: QueueReason | null };
 
-// Enough of a row for the order: who it is and when it was accepted.
-export type QueueItem = { id: string; acceptedAt: number };
+// Enough of a row for the order: the key that tells it apart among its own rows — a Job's id, a Transcription's
+// Recording and Language (two rows may share an id) — and when it was accepted.
+export type QueueItem = { key: string; acceptedAt: number };
 
-// The limit's free slots go to the earliest accepted (a tie by id); the rest wait from position 1 with the reason.
+// The limit's free slots go to the earliest accepted (a tie by key); the rest wait from position 1 with the reason.
 // A guard over the line (load, memory, unknown) holds every start, with the guard's own reason rather than `class`.
 export function queueDecision(queued: readonly QueueItem[], running: number, limit: number, guard: QueueGuard): Map<string, QueueSlot> {
   let free = Math.max(0, limit - Math.max(0, running));
   const blocking = guard === "load" || guard === "memory" || guard === "unknown";
   const reason: QueueReason = free === 0 ? "class" : guard === "unknown" ? "guard_unknown" : guard === "off" ? "class" : guard;
-  const order = [...queued].sort((a, b) => a.acceptedAt - b.acceptedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const order = [...queued].sort((a, b) => a.acceptedAt - b.acceptedAt || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   let position = 1;
   const out = new Map<string, QueueSlot>();
   for (const item of order) {
     if (free > 0 && !blocking) {
       free -= 1;
-      out.set(item.id, { start: true, position: null, reason: null });
+      out.set(item.key, { start: true, position: null, reason: null });
     } else {
-      out.set(item.id, { start: false, position: position++, reason });
+      out.set(item.key, { start: false, position: position++, reason });
     }
   }
   return out;

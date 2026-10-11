@@ -331,15 +331,21 @@ export function afterRestart(rows: readonly Transcription[], at: number): Transc
 // limit is the caller's: the config's number, or this default when it names none.
 export const TRANSCRIPTION_LIMIT_DEFAULT = 1;
 
+// The key that tells two rows apart wherever rows are held together, as the queue asks (queue.ts): a Recording and
+// a Language name the one attempt in flight on them (TX2). An id does not: an agent's attachment and the
+// principal's upload may share one and still be two rows. A language code carries no `:`, so the triple is one
+// key and not three.
+const rowKey = (tx: Transcription): string => `${tx.recording.kind}:${tx.recording.id}:${tx.language}`;
+
 export function scheduleTranscriptions(rows: readonly Transcription[], limit: number, guard: QueueGuard): Transcription[] {
   const queued = rows.filter(tx => tx.state === "queued");
   const running = rows.filter(tx => tx.state === "starting" || tx.state === "running").length;
-  const slots = queueDecision(queued, running, limit, guard);
+  const slots = queueDecision(queued.map(tx => ({ key: rowKey(tx), acceptedAt: tx.acceptedAt })), running, limit, guard);
   return rows.map(tx => {
     // TX3: a slot is for a waiting row only, as Jobs' schedule is. A finished row keeps its end whatever its id,
     // so a queued row that shares a finished row's id can never bring it back to life.
     if (tx.state !== "queued") return tx;
-    const slot = slots.get(tx.id);
+    const slot = slots.get(rowKey(tx));
     if (!slot) return tx;
     return slot.start
       ? { ...tx, state: "starting", position: null, reason: null, startedAt: null, endedAt: null }

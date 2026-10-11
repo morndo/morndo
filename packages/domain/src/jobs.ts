@@ -293,7 +293,7 @@ export function schedule(jobs: readonly Job[], limits: Readonly<Record<string, n
       }
       continue;
     }
-    const slots = queueDecision(queued, runningOf.get(jobClass) ?? 0, limit, guard);
+    const slots = queueDecision(queued.map(job => ({ key: job.id, acceptedAt: job.acceptedAt })), runningOf.get(jobClass) ?? 0, limit, guard);
     for (const job of queued) {
       const slot = slots.get(job.id);
       if (!slot) continue;
