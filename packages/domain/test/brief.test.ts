@@ -648,6 +648,25 @@ describe("E14: an ask the hub tracks is answerable until the hub withdraws or se
     expect(x.get("d-1")?.status).toBe("expired");
     expect(refusal(x.get("d-1"), DUE + HUB_TTL_MS + 1)).toBe("expired");
   });
+  it("a Decision restored after a restart keeps the ask answered when a sighting goes missing past its TTL (E14)", () => {
+    const by = { endpointId: endpointId("e1"), sessionId: sessionId("s1") };
+    const x = new Escalations();
+    x.restore([{
+      id: escalationId("d-1"),
+      decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW + MIN, via: "here", ...by },
+    }]);
+    x.reconcile([seen(hubAsk(), { kind: "missing" })], DUE + HUB_TTL_MS + 1, true);
+    expect(x.get("d-1")?.status).toBe("answered");
+    expect(refusal(x.get("d-1"), DUE + HUB_TTL_MS + 1)).toBe("already_answered");
+    x.reconcile([], DUE + HUB_TTL_MS + KEEP_SETTLED_MS, true);
+    expect(x.get("d-1")?.status).toBe("answered");          // the sweep keeps it as any decided hub ask
+  });
+  it("an answer seen at the asker's end in the same missing sighting keeps the ask answered past its TTL (E14)", () => {
+    const x = new Escalations();
+    x.reconcile([{ ask: hubAsk(), source: { kind: "missing" }, answered: { key: "b", label: "Extend the triage script", at: NOW + MIN } }], DUE + HUB_TTL_MS + 1, true);
+    expect(x.get("d-1")?.status).toBe("answered");
+    expect(refusal(x.get("d-1"), DUE + HUB_TTL_MS + 1)).toBe("already_answered");
+  });
 });
 
 describe("DB9: restating a brief makes the next version and a new ask", () => {
