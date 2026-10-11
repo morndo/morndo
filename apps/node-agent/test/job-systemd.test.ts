@@ -1042,3 +1042,80 @@ describe.skipIf(!bus.ok)("systemd end states", () => {
     expect(alive(mark.pid)).toBe(false);
   });
 });
+
+// Design §5, "When a log reaches its cap": on systemd the sweep that sees the cap owns the decision and the grace.
+const FILLED = `require("node:fs").writeSync(1, Buffer.alloc(64, 97));`;
+
+// A systemctl that shows the unit running until it is killed, then ended with ExecMainStatus `status` at monotonic
+// time `exitedUsec`. The job's real unit keeps running; the rig's cleanup stops it.
+function endedAfterKill(home: string, status: number, exitedUsec: number): NodeJS.ProcessEnv {
+  const bin = join(home, "endbin");
+  mkdirSync(bin);
+  const killed = join(home, "killed");
+  writeFileSync(join(bin, "systemctl"), `#!/bin/sh
+if [ "$2" = "show" ]; then
+  if [ -f '${killed}' ]; then
+    printf '%s\\n' LoadState=loaded ActiveState=inactive SubState=dead Result=exit-code ExecMainCode=1 ExecMainStatus=${status} MainPID=0 RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=${exitedUsec}
+  else
+    printf '%s\\n' LoadState=loaded ActiveState=active SubState=running Result=success ExecMainCode=0 ExecMainStatus=0 MainPID=1 RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=0
+  fi
+  exit 0
+fi
+if [ "$2" = "kill" ]; then touch '${killed}'; fi
+exit 0
+`, { mode: 0o755 });
+  chmodSync(join(bin, "systemctl"), 0o755);
+  return { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` };
+}
+
+describe.skipIf(!bus.ok)("the log cap rule on the systemd backend", () => {
+  const filled = (dir: string, id: string) => () => existsSync(join(dir, `${id}.log`)) && readFileSync(join(dir, `${id}.log`)).length >= 64;
+
+  it("keeps the code of a unit that ends within the grace, decided in the one sweep that saw the cap", async () => {
+    const { store, start, sup, dir } = await systemdRig({ logBytes: 8 });
+    const id = await start([process.execPath, "-e", `${FILLED} setTimeout(() => process.exit(1), 300);`]);
+    expect(await until(filled(dir, id), 8000)).toBe(true);
+    await sup.sweep();
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: 1 });
+  });
+
+  it("records no code for a unit still running when the cap stops it, even when its SIGTERM handler exits 0", async () => {
+    const { store, start, sup } = await systemdRig({ logBytes: 8 });
+    const id = await start([process.execPath, "-e", `process.on("SIGTERM", () => process.exit(0)); ${FILLED} setInterval(() => {}, 1000);`]);
+    expect(await until(async () => { await sup.sweep(); return store.get(id)?.outcome != null; }, 10_000)).toBe(true);
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: null });
+  });
+
+  it("keeps the unit's own code when its main process ended before the stop was sent", async () => {
+    const { store, start, home, opts, drill, dir } = await systemdRig({ logBytes: 8 });
+    const marker = join(home, "stay.json");
+    const id = await start([process.execPath, "-e", STAY, marker]);
+    expect(await until(() => existsSync(marker))).toBe(true);
+    writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
+    const late = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: endedAfterKill(home, 4, 2) } });
+    await late.sweep();
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: 4 });
+    late.close();
+  });
+
+  it("records no code when the main process ended after the stop was sent", async () => {
+    const { store, start, home, opts, drill, dir } = await systemdRig({ logBytes: 8 });
+    const marker = join(home, "stay.json");
+    const id = await start([process.execPath, "-e", STAY, marker]);
+    expect(await until(() => existsSync(marker))).toBe(true);
+    writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
+    const late = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: endedAfterKill(home, 0, Number.MAX_SAFE_INTEGER) } });
+    await late.sweep();
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: null });
+    late.close();
+  });
+
+  it("keeps the code of a unit that ended while no sweep ran, with a .cap on disk", async () => {
+    const { store, start, sup, dir } = await systemdRig({ logBytes: 8 });
+    const id = await start([process.execPath, "-e", `${FILLED} process.exit(5);`]);
+    expect(await until(() => showValue(unitOf(id), "ExecMainExitTimestampMonotonic") !== "0", 8000)).toBe(true);
+    writeFileSync(join(dir, `${id}.cap`), "");
+    await sup.sweep();
+    expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: 5 });
+  });
+});

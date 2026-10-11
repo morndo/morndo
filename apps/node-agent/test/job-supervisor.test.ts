@@ -930,3 +930,59 @@ exit 0
     expect(store.get(id)?.outcome).toBe("exited");
   });
 });
+
+// Design §5, "When a log reaches its cap": the helper owns the decision. Sweeps run the whole time, as they do in the
+// agent, so a .cap note from the supervisor is part of every case.
+describe("the log cap rule on the helper backend", () => {
+  const FILLED = `require("node:fs").writeSync(1, Buffer.alloc(64, 97));`;
+  const ended = async (sup: JobSupervisor, store: JobStore, id: string) =>
+    until(async () => { await sup.sweep(); return store.get(id)?.outcome != null; }, 10_000);
+
+  it("keeps the code of a command that ends within the grace", async () => {
+    const { sup, store, start } = rig(undefined, undefined, 8);
+    const script = `${FILLED} setTimeout(() => process.exit(1), 150);`;
+    expect((await start({ id: "job-cap-grace", command: [process.execPath, "-e", script] })).state).toBe("running");
+    expect(await ended(sup, store, "job-cap-grace")).toBe(true);
+    expect(store.get("job-cap-grace")).toMatchObject({ outcome: "exited", exitCode: 1 });
+  });
+
+  it("records no code for a command still running when the cap stops it, even when its SIGTERM handler exits 0", async () => {
+    const { sup, store, start } = rig(undefined, undefined, 8);
+    const script = `process.on("SIGTERM", () => process.exit(0)); ${FILLED} setInterval(() => {}, 1000);`;
+    expect((await start({ id: "job-cap-trap", command: [process.execPath, "-e", script] })).state).toBe("running");
+    expect(await ended(sup, store, "job-cap-trap")).toBe(true);
+    expect(store.get("job-cap-trap")).toMatchObject({ outcome: "exited", exitCode: null });
+  });
+
+  it("records no code for a writer that keeps going past the cap and exits 0 on SIGTERM", async () => {
+    const { sup, store, start } = rig(undefined, undefined, 8);
+    const script = `process.on("SIGTERM", () => process.exit(0)); const b = Buffer.alloc(64, 97); setInterval(() => require("node:fs").writeSync(1, b), 5);`;
+    expect((await start({ id: "job-cap-writer", command: [process.execPath, "-e", script] })).state).toBe("running");
+    expect(await ended(sup, store, "job-cap-writer")).toBe(true);
+    expect(store.get("job-cap-writer")).toMatchObject({ outcome: "exited", exitCode: null });
+  });
+
+  it("keeps the code when the command ended but a process it left behind holds the group, and stops that process", async () => {
+    const { sup, store, start, home } = rig(undefined, undefined, 8);
+    const marker = join(home, "left.pid");
+    const script = `const left = require("node:child_process").spawn("sleep", ["30"], { stdio: "ignore" });
+      require("node:fs").writeFileSync(process.argv[1], String(left.pid)); ${FILLED} process.exit(3);`;
+    expect((await start({ id: "job-cap-left", command: [process.execPath, "-e", script, marker] })).state).toBe("running");
+    expect(await ended(sup, store, "job-cap-left")).toBe(true);
+    expect(store.get("job-cap-left")).toMatchObject({ outcome: "exited", exitCode: 3 });
+    const left = Number(readFileSync(marker, "utf8"));
+    expect(await until(() => !alive(left), 5000)).toBe(true);
+  });
+
+  it("keeps the code across a restart: a .cap on disk does not override what the helper wrote", async () => {
+    const { sup, store, dir, home, paths, start, slot } = rig(undefined, undefined, 8);
+    const script = `${FILLED} setTimeout(() => process.exit(2), 400);`;
+    expect((await start({ id: "job-cap-restart", command: [process.execPath, "-e", script] })).state).toBe("running");
+    expect(await until(async () => { await sup.sweep(); return existsSync(join(dir, "job-cap-restart.cap")); }, 8000)).toBe(true);
+    sup.close();
+    expect(await until(() => existsSync(join(dir, "job-cap-restart.exit")), 8000)).toBe(true);
+    const next = replace(slot, store, home, paths);
+    await next.sweep();
+    expect(store.get("job-cap-restart")).toMatchObject({ outcome: "exited", exitCode: 2 });
+  });
+});
