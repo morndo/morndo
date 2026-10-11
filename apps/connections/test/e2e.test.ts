@@ -198,6 +198,47 @@ describe("keys run", () => {
     expect(spent.spent).toBe(1.4);
   }, 20_000);
 
+  it.each([
+    ["deepseek", "deepseek-v4-pro"],
+    ["moonshot", "kimi-k3"],
+    ["openrouter", "openrouter/auto"],
+  ])("sends a %s key to its catalog base as %s", async (vendor, model) => {
+    const dir = homeDir();
+    const hits: { url?: string | undefined; authorization?: string | undefined; apiKey?: string | undefined }[] = [];
+    const server = createServer((req, res) => {
+      hits.push({
+        url: req.url,
+        authorization: req.headers.authorization,
+        apiKey: typeof req.headers["x-api-key"] === "string" ? req.headers["x-api-key"] : undefined,
+      });
+      res.end("{}");
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("port");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { runtime: string; baseUrl: string | null }[] }[];
+    const row = body.find(item => item.id === vendor);
+    if (!row) throw new Error("preset");
+    const runtime = row.runtimes.find(item => item.runtime === "claude");
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = origin;
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", vendor, "--vendor", vendor, "--runtime", "claude", "--billing", "metered", "--budget", "20"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", vendor, "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", vendor, "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { base: true, model })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(hits).toEqual([{ url: "/v1/messages", authorization: `Bearer ${KEY}`, apiKey: KEY }]);
+    const recorded = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { env: Record<string, string> };
+    expect(recorded.env.ANTHROPIC_BASE_URL).toBe(origin);
+    expect(recorded.env.ANTHROPIC_MODEL).toBe(model);
+    expect(recorded.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(JSON.stringify(recorded.env)).not.toContain(KEY);
+  }, 20_000);
+
   it("sends the key only as the helper header and keeps it out of env", async () => {
     const dir = homeDir();
     await ready(dir);
