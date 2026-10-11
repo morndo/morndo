@@ -69,15 +69,19 @@ export function draftOnScreen(screen: string): string | null {
   const line = screen.split("\n").slice(-12).reverse().find(l => /^[\s│]*❯/.test(l.replace(SGR, "")));
   if (!line) return null;
   const after = line.slice(line.indexOf("❯") + 1);
-  let dim = false, typed = "";
+  // The cursor is drawn in reverse video (SGR 7) on the first character of a dim placeholder or suggestion, so that
+  // one character is not dim. Reverse-video text is the cursor, not a draft.
+  let dim = false, rev = false, typed = "";
   for (const m of after.matchAll(/\x1b\[([0-9;]*)m|([^\x1b]+)/g)) {
     if (m[1] !== undefined) {
       for (const code of (m[1] || "0").split(";")) {
-        if (code === "0" || code === "") dim = false;
+        if (code === "0" || code === "") { dim = false; rev = false; }
+        else if (code === "7") rev = true;
+        else if (code === "27") rev = false;
         else if (code === "2") dim = true;
         else if (code === "22") dim = false;
       }
-    } else if (!dim) {
+    } else if (!dim && !rev) {
       typed += m[2];
     }
   }
