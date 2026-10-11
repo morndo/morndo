@@ -189,3 +189,22 @@ describe("DB2: one recommendation, named in the headline", () => {
     expect(lines(d => { d.headline = "approve option b: extend the in-house triage script"; })).toEqual([]);
   });
 });
+
+describe("DB3: a due time after filing, and the minutes to read and decide", () => {
+  it("a missing due is refused", () => {
+    expect(lines(d => { delete d.due; })).toEqual(["error no_due (due)"]);
+  });
+  it("a due that is not a time is refused", () => {
+    expect(lines(d => { d.due = "2026-10-14"; })).toEqual(["error bad_due (due)"]);
+  });
+  it("a due at or before now is refused", () => {
+    expect(lines(d => { d.due = NOW - 1; }, NOW)).toEqual(["error due_past (due)"]);
+    expect(lines(d => { d.due = NOW; }, NOW)).toEqual(["error due_past (due)"]);
+  });
+  it("the minutes are refused when missing, not whole, or outside 1 to 30", () => {
+    expect(lines(d => { delete d.minutes; })).toEqual(["error bad_minutes (minutes)"]);
+    expect(lines(d => { d.minutes = 4.5; })).toEqual(["error bad_minutes (minutes)"]);
+    expect(lines(d => { d.minutes = 0; })).toEqual(["error bad_minutes (minutes)"]);
+    expect(lines(d => { d.minutes = 31; })).toEqual(["error bad_minutes (minutes)"]);
+  });
+});
