@@ -160,6 +160,22 @@ set -e
 [ "$code" -eq 1 ] || fail "an ancestor beside a listed commit should exit 1, got $code"
 TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$listed^..$listed" || fail "the listed commit alone should exit 0"
 
+# The one parser trims the list: a spaced line with a carriage return still
+# excepts, and a malformed line fails the check loudly.
+spaced=$scratch/spaced
+printf '  %s  \r\n' "$listed" > "$spaced"
+TRACES_PUBLISHED_EXCEPTIONS="$spaced" sh "$checker" range "$listed^..$listed" || fail "a spaced CR-terminated line should still except"
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'clean note'
+clean=$(git rev-parse HEAD)
+malformed=$scratch/malformed
+{ printf '# published before the check, unfixable\n'; printf '%s\n' "zz$listed"; } > "$malformed"
+set +e
+out=$(TRACES_PUBLISHED_EXCEPTIONS="$malformed" sh "$checker" range "$listed..$clean" 2>&1)
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a malformed list line should exit 1, got $code"
+printf '%s\n' "$out" | grep -q malformed || fail "a malformed list line should say malformed"
+
 # A branch cannot list itself: the tree under test adds its own bad commit
 # to the list, and the check still reads the copy from the branch it
 # protects, the way CI does.
