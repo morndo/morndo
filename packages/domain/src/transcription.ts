@@ -21,13 +21,18 @@ const at = (b: Uint8Array, i: number, ...magic: number[]) => magic.every((x, k) 
 
 // S1: an audio file is known by its own bytes, as an image is (steering.ts). `OggS` covers .ogg, .oga and .opus;
 // the EBML magic a webm recording (the magic is all this reads of one: whether a webm holds audio sits deeper in
-// the file than a sniff goes); `ftyp` at offset 4 with the audio major brand `M4A` an mp4 recording (Safari names
-// it .m4a) — the design names only `ftyp`, and the brand is this check's own conservative call, so a photo (heic,
-// avif) or a movie (isom, mp42) brand is not audio; `ID3` or an MPEG frame sync an mp3; `RIFF`…`WAVE` a wav.
+// the file than a sniff goes, and the engine's own decoding is the second gate); `ftyp` at offset 4 with a major
+// brand a recorder writes an mp4 recording — `M4A ` (Safari names the file .m4a) or one of the iso and mp4 brands
+// a browser's MediaRecorder writes (Chromium's muxer writes isom). An image's brand (heic, heix, avif, mif1,
+// msf1) or any other brand is not audio; a movie's brand passes the gate and the engine reads the file's audio
+// track, which is acceptable. `ID3` or an MPEG frame sync an mp3; `RIFF`…`WAVE` a wav.
+const MP4_BRANDS = new Set(["M4A ", "isom", "iso2", "iso5", "iso6", "mp41", "mp42"]);
+
 export function sniffAudio(b: Uint8Array): AudioContainer | null {
   if (b.length >= 4 && at(b, 0, 0x4f, 0x67, 0x67, 0x53)) return "ogg";
   if (b.length >= 4 && at(b, 0, 0x1a, 0x45, 0xdf, 0xa3)) return "webm";
-  if (b.length >= 11 && at(b, 4, 0x66, 0x74, 0x79, 0x70) && at(b, 8, 0x4d, 0x34, 0x41)) return "mp4";
+  if (b.length >= 12 && at(b, 4, 0x66, 0x74, 0x79, 0x70)
+    && MP4_BRANDS.has(String.fromCharCode(b[8]!, b[9]!, b[10]!, b[11]!))) return "mp4";
   if (b.length >= 3 && at(b, 0, 0x49, 0x44, 0x33)) return "mp3";
   if (b.length >= 2 && b[0] === 0xff && (b[1]! & 0xe0) === 0xe0) return "mp3";
   if (b.length >= 12 && at(b, 0, 0x52, 0x49, 0x46, 0x46) && at(b, 8, 0x57, 0x41, 0x56, 0x45)) return "wav";
