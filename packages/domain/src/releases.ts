@@ -251,8 +251,11 @@ export function planMigrations(p: {
     if (target.version < now.floor) return err({ database: db, reason: "target_below_floor" });
     const willMigrate = target.version > now.schema;
     const previousKnows = p.previous === null ? now.schema : p.previous[db].version;
+    // Restore only what a migration changed, and only when the previous Version truly can't open the result: a
+    // database that isn't migrated gets no Backup (RL5 keys both on willMigrate), so it must never be marked for
+    // a restore — that mark would hold writes for nothing (RL9) and refuse the rollback as backup_gone (RL8).
     out[db] = { willMigrate, backupRequired: willMigrate, expectedSchema: now.schema,
-      restoreOnRollback: target.floor > previousKnows };
+      restoreOnRollback: willMigrate && target.floor > previousKnows };
   }
   return ok(out);
 }

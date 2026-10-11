@@ -1035,6 +1035,11 @@ export const CONTROLS: Control[] = [
     find: "if (target.version < now.floor) return err({ database: db, reason: \"target_below_floor\" });",
     replace: "if (false) return err({ database: db, reason: \"target_below_floor\" });",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "target_below_floor" },
+  // The review of 2026-10-11: restoreOnRollback without a migration marks a Backup-less database for a restore.
+  { id: "pr1-rl8-restore-without-migration", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "restoreOnRollback: willMigrate && target.floor > previousKnows };",
+    replace: "restoreOnRollback: target.floor > previousKnows };",
+    run: ["packages/domain/test/releases-invariants.test.ts"], expect: "restoreOnRollback" },
   { id: "pr1-rl9-hold-passes-writes", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "return now - holdSince > HOLD_STALE_MS ? \"allowed\" : \"updating\";", replace: "return \"allowed\";",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "updating" },

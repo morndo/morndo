@@ -282,6 +282,18 @@ describe("RL8 no Version below the floor", () => {
   it("negative control: a rollback below the floor with the Backup gone is refused", () => {
     expect(mayRestore({ database: "hub", restoreOnRollback: true, backupPresent: false })).toEqual({ ok: false, error: "backup_gone" });
   });
+  it("negative control: a database that isn't migrated never needs a restore on rollback — no Backup was taken", () => {
+    const r = planMigrations({
+      databases: { hub: { schema: 5, floor: 5 }, fleet: { schema: 15, floor: 15 }, node: { schema: 6, floor: 3 }, connections: { schema: 1, floor: 1 } },
+      target: { hub: { version: 5, floor: 5 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
+      previous: { hub: { version: 4, floor: 4 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
+    });
+    expect(r.ok && r.value.hub).toMatchObject({ willMigrate: false, backupRequired: false, restoreOnRollback: false });
+    if (r.ok) {
+      expect(holdsWrites(r.value)).toBe(false);          // nothing to lose: no probation hold either
+      expect(maySwap(r.value, []).ok).toBe(true);        // and the swap needs no Backup
+    }
+  });
   it("a database the previous Version still opens is left alone, with everything written since", () => {
     expect(mayRestore({ database: "fleet", restoreOnRollback: false, backupPresent: false })).toEqual({ ok: false, error: "not_required" });
     expect(mayRestore({ database: "hub", restoreOnRollback: true, backupPresent: true })).toEqual({ ok: true, value: true });
