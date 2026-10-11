@@ -153,6 +153,68 @@ code=$?
 set -e
 [ "$code" -eq 0 ] || fail "first push of this tree should exit 0, got $code"
 
+# A later edit of a test must not fail on a key header that was already there.
+# A new header in a test file is a fixture. The same header outside a test,
+# or a home path in a test, still fails. The path is not on the allowlist.
+git init -q "$scratch/touch"
+cp "$root/.gitleaks.toml" "$scratch/touch/.gitleaks.toml"
+cd "$scratch/touch"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'touch base'
+mkdir -p pkg/test
+{
+  printf 'export const label = "old";\n'
+  printf '%s%s%s\n' '-----BEGIN ' 'PRIVATE KEY' '-----'
+} > pkg/test/old-marker.test.ts
+git add pkg/test/old-marker.test.ts
+commit_ok -m 'old marker'
+base=$(git rev-parse HEAD)
+printf '\nexport const touched = true;\n' >> pkg/test/old-marker.test.ts
+git add pkg/test/old-marker.test.ts
+commit_ok -m 'touch the test'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "edit beside an old test header should exit 0, got $code"
+git reset -q --hard "$base"
+{
+  printf 'export const label = "new";\n'
+  printf '%s%s%s\n' '-----BEGIN ' 'PRIVATE KEY' '-----'
+} > pkg/test/fresh.test.ts
+git add pkg/test/fresh.test.ts
+commit_ok -m 'fresh fixture'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "new test header should exit 0, got $code"
+git reset -q --hard "$base"
+mkdir -p pkg/src
+printf '%s%s%s\n' '-----BEGIN ' 'PRIVATE KEY' '-----' > pkg/src/app.ts
+git add pkg/src/app.ts
+commit_ok -m 'source marker'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "header outside a test should exit 1, got $code"
+git reset -q --hard "$base"
+printf '/%s/%s/notes\n' home example-user > pkg/test/home.test.ts
+git add pkg/test/home.test.ts
+commit_ok -m 'home in a test'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "home path in a test should exit 1, got $code"
+cd "$root"
+
 # Author and committer must both be a noreply address. Identity is set on the command.
 git init -q "$scratch/mail"
 cp "$root/.gitleaks.toml" "$scratch/mail/.gitleaks.toml"
