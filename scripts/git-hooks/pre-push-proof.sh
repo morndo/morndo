@@ -2,10 +2,11 @@
 # Proves the pre-push hook: a clean tree passes; a made-up home path fails;
 # a marker this script writes into its own leak-patterns file fails; a
 # committed home path fails in a throwaway clone, and a clean commit passes.
-# Every commit no remote-tracking ref contains is checked on its own, against
-# a fake remote for the published side: a line one commit adds and a later
-# one removes fails, a merge of published main passes, and a home path in a
-# conflict resolution fails.
+# Every commit the push adds is checked on its own, published meaning the
+# remote being pushed to: a line one commit adds and a later one removes
+# fails, a merge of the pushed-to remote's main passes, a commit only a
+# second remote holds still fails, a push to a URL checks everything, and a
+# home path in a conflict resolution fails.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
@@ -361,11 +362,12 @@ cd "$root"
 # throwaway and its origin/main is fabricated: one published commit with a
 # personal author address, carrying a synthetic key that only gitleaks flags.
 # The remote-tip range of the push fails the plain range check, while the
-# hook, limited to commits that no remote-tracking ref contains, passes it.
-# A new home path, a personal author address, or an unpublished synthetic
-# key on the merged branch still fails.
+# hook, limited to commits the pushed-to remote does not already hold,
+# passes it. A new home path, a personal author address, or an unpublished
+# synthetic key on the merged branch still fails.
 git init -q "$scratch/merged"
 cp "$root/.gitleaks.toml" "$scratch/merged/.gitleaks.toml"
+git -C "$scratch/merged" remote add origin "$scratch/merged-remote.git"
 cd "$scratch/merged"
 printf 'ok\n' > readme.txt
 git add readme.txt .gitleaks.toml
@@ -461,13 +463,15 @@ set -e
 [ "$code" -eq 1 ] || fail "a smuggled line inside a merge should exit 1, got $code"
 cd "$root"
 
-# Any remote-tracking ref marks a commit published: a commit that sits on a
-# second remote is never re-checked, and the same commit is checked once no
-# remote-tracking ref holds it.
+# Published means the remote being pushed to. A commit that only a second
+# remote contains is rejected when pushed to the first, and the same commit
+# is spared once the pushed-to remote's own tracking ref holds it.
 cross=$scratch/cross
 git init -q --initial-branch=main "$cross"
 cp "$root/.gitleaks.toml" "$cross/.gitleaks.toml"
 cd "$cross"
+git remote add origin "$scratch/cross-origin.git"
+git remote add mirror "$scratch/cross-mirror.git"
 printf 'ok\n' > readme.txt
 git add readme.txt .gitleaks.toml
 commit_ok -m 'cross base'
@@ -478,20 +482,63 @@ carry=$(git rev-parse HEAD)
 printf 'work\n' > work.txt
 git add work.txt
 commit_ok -m 'cross work'
-remote_tip=$(git rev-parse HEAD)
-git update-ref refs/remotes/mirror/main "$carry"
+tip=$(git rev-parse HEAD)
 git update-ref refs/remotes/origin/main "$base"
+git update-ref refs/remotes/mirror/main "$carry"
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$remote_tip" refs/heads/main "$base" | sh "$root/$hook" origin >/dev/null 2>&1
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin >/dev/null 2>&1
 code=$?
 set -e
-[ "$code" -eq 0 ] || fail "a commit published on a second remote should exit 0, got $code"
-git update-ref -d refs/remotes/mirror/main
+[ "$code" -eq 1 ] || fail "a commit only a second remote holds should exit 1, got $code"
+git update-ref refs/remotes/origin/main "$carry"
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$remote_tip" refs/heads/main "$base" | sh "$root/$hook" origin >/dev/null 2>&1
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin >/dev/null 2>&1
 code=$?
 set -e
-[ "$code" -eq 1 ] || fail "a commit no remote-tracking ref holds should exit 1, got $code"
+[ "$code" -eq 0 ] || fail "a commit the pushed-to remote holds should exit 0, got $code"
+cd "$root"
+
+# A push to a URL, or to a configured remote with no tracking refs, checks
+# everything the remote tip does not already hold: with no tip known, the
+# whole history, including a commit the origin tracking refs spare.
+url=$scratch/url
+git init -q --initial-branch=main "$url"
+cp "$root/.gitleaks.toml" "$url/.gitleaks.toml"
+cd "$url"
+git remote add origin "$scratch/url-origin.git"
+git remote add unfetched "$scratch/url-unfetched.git"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'url base'
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'url carry'
+carry=$(git rev-parse HEAD)
+printf 'work\n' > work.txt
+git add work.txt
+commit_ok -m 'url work'
+tip=$(git rev-parse HEAD)
+git update-ref refs/remotes/origin/main "$carry"
+dest=git@example.invalid:someone/repo.git
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" "$dest" >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a URL push with no known remote tip should exit 1, got $code"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$carry" | sh "$root/$hook" "$dest" >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a URL push past a known remote tip should exit 0, got $code"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" unfetched >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a remote with no tracking refs and no known tip should exit 1, got $code"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$carry" | sh "$root/$hook" unfetched >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a remote with no tracking refs past a known tip should exit 0, got $code"
 cd "$root"
 
 # Each commit is checked on its own: a line one commit adds and a later
