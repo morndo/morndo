@@ -6,7 +6,10 @@
 #   sh commit-traces range <git rev-list args>
 #   sh commit-traces mails <git rev-list args>
 # A dependabot[bot] author, committer, or trailer is allowed. Any other
-# [bot] identity is not. Install the commit-msg hook with scripts/install-git-hooks.sh.
+# [bot] identity is not. A commit whose full sha is a line of
+# traces-published-exceptions (already published, its identity unfixable)
+# skips the mail check and no other. Install the commit-msg hook with
+# scripts/install-git-hooks.sh.
 set -eu
 
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
@@ -17,6 +20,16 @@ trap 'rm -f "$err"' EXIT
 fail() {
   echo "commit-traces: $*" >&2
   exit 1
+}
+
+# Already-published commits whose identity cannot be fixed without rewriting
+# history: one full sha per line, a '#' line says why. Nothing else is excepted.
+# Resolved from this script so a proof can run it against another checkout.
+exceptions=$(dirname "$(readlink -f "$0")")/traces-published-exceptions
+
+published_exception() {
+  [ -f "$exceptions" ] || return 1
+  sed '/^#/d;/^[[:space:]]*$/d' "$exceptions" | grep -F -x -q -- "$1"
 }
 
 # 0 when an identity (a name, an address, or a trailer) attributes the change.
@@ -60,6 +73,7 @@ github_committer() {
 
 check_mails() {
   sha=$1
+  published_exception "$sha" && return 0
   ae=$(git log -1 --format='%ae' "$sha")
   ce=$(git log -1 --format='%ce' "$sha")
   noreply_mail "$ae" || fail "$sha author email is not @users.noreply.github.com"
