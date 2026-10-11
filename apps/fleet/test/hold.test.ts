@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ServiceHealth } from "@morndo/protocol";
 import { SCHEMA_VERSION } from "../src/adapters/migrations.ts";
 import { startTestFleet } from "./helpers/fleet.ts";
@@ -39,5 +39,30 @@ describe("a hold on the fleet", () => {
     });
     expect(agent.reqs).toEqual([]);
     expect((await api.post(`/v1/nodes/pc/revoke`))?.status).toBe(200);
+  });
+  it("does not record a job notice while held", async () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "hold.json"), JSON.stringify({
+      services: ["fleet"], reason: "drain", version: "0.0.0", since: new Date().toISOString(),
+    }));
+    const fleet = await startTestFleet({ dir });
+    const agent = await fleet.online("pc");
+    agent.send({
+      v: 1, t: "job", id: "job-1", node: "pc", lane: "builder", name: "pack", class: "default",
+      state: "exited", outcome: "exited", exit: 0, durationSec: 1, notify: { kind: "lane", name: "builder" },
+      task: null, notice: "pending", at: 1_700_000_000_000, ended: null, tail: "done",
+      position: null, reason: null, error: null,
+    });
+    await vi.waitFor(() => expect(fleet.jobs.get("pc", "job-1")?.notice).toBe("pending"));
+    const api = client(fleet.config.socketPath);
+    const noticed = await api.raw("/v1/op", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ node: "pc", op: "job.noticeResult", args: { id: "job-1", notice: "commented" } }),
+    });
+    expect(noticed.status).toBe(503);
+    expect(JSON.parse(noticed.body.toString("utf8"))).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
+    expect(fleet.jobs.get("pc", "job-1")?.notice).toBe("pending");
+    expect(agent.reqs.filter(req => req.op === "job.noticeResult")).toHaveLength(0);
   });
 });

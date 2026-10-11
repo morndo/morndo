@@ -137,10 +137,15 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   const held = d.updates?.held ?? (() => false);
   const schema = d.updates?.schema ?? SCHEMA_VERSION;
   // A revocation still runs during a hold (RL9). Every other side effect is refused before it is sent.
-  async function runOp(target: Parameters<Router["op"]>[0], op: Parameters<Router["op"]>[1], args: Parameters<Router["op"]>[2], o: Parameters<Router["op"]>[3]): Promise<{ status: number; outcome: Outcome }> {
+  function heldRefusal(op: Parameters<Router["op"]>[1]): { status: number; outcome: Outcome } | null {
     if (held() && SIDE_EFFECT_OPS.has(op) && op !== "connections.revoke") {
       return { status: 503, outcome: { ok: false, error: opError("updating", "the fleet is not taking new work while it updates"), store: null, storeSeq: null } };
     }
+    return null;
+  }
+  async function runOp(target: Parameters<Router["op"]>[0], op: Parameters<Router["op"]>[1], args: Parameters<Router["op"]>[2], o: Parameters<Router["op"]>[3]): Promise<{ status: number; outcome: Outcome }> {
+    const refusal = heldRefusal(op);
+    if (refusal) return refusal;
     const end = SIDE_EFFECT_OPS.has(op) ? flight.begin({ kind: op, id: o?.key ?? op }) : null;
     try { return { status: 200, outcome: await d.router.op(target, op, args, o) }; }
     finally { end?.(); }
@@ -198,6 +203,8 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         const notice = b.args.notice === "commented" || b.args.notice === "given_up" ? b.args.notice : null;
         const node = "node" in b.target ? b.target.node : "";
         if (!notice || !node) return json(res, 200, { ok: false, error: opError("bad_args", "missing"), store: null, storeSeq: null });
+        const refusal = heldRefusal(b.op);
+        if (refusal) return answerOp(res, refusal);
         const stored = d.jobs.report(node, id, notice);
         if (!stored) return json(res, 200, { ok: false, error: opError("denied", "missing"), store: null, storeSeq: null });
         const ran = await runOp({ node: stored.node }, b.op, { id, notice }, {

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
+import { WebSocket } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadOrCreateIdentity } from "../src/adapters/identity.ts";
 import { passkeys } from "../src/adapters/passkeys.ts";
@@ -63,5 +64,18 @@ describe("hold", () => {
     expect(res.status).toBe(503);
     expect(res.headers.get("retry-after")).toBe("1");
     expect(await res.json()).toEqual({ error: "updating" });
+  });
+  it("refuses a terminal or desktop upgrade with 503", async () => {
+    for (const path of ["/api/terminal?pane=%251", "/api/desktop"]) {
+      const code = await new Promise<number>(resolve => {
+        const ws = new WebSocket(base.replace("http", "ws") + path, {
+          headers: { "tailscale-user-login": LOGIN, origin: "https://hub.example.test" },
+        });
+        ws.on("unexpected-response", (_req, res) => resolve(res.statusCode ?? 0));
+        ws.on("open", () => { ws.close(); resolve(101); });
+        ws.on("error", () => {});
+      });
+      expect(code).toBe(503);
+    }
   });
 });

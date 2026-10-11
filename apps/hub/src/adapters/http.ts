@@ -635,6 +635,7 @@ export function startHttp(p: {
     socket.on("error", () => socket.destroy());
     let url: URL;
     try { url = new URL(req.url ?? "/", "http://hub"); } catch { return deny(400, "Bad Request"); }   // e.g. "//[": a throw here would end the hub
+    if ((url.pathname === "/api/terminal" || url.pathname === "/api/desktop") && watch.held) return deny(503, "Service Unavailable");
     if (url.pathname === "/api/terminal" || url.pathname === "/api/desktop") return upgradeRemote(req, socket, head, url, deny);
     if (url.pathname !== "/api/feed") return deny(404, "Not Found");
     if (!proxyOk(req) || !originOk(req)) return deny(403, "Forbidden");
