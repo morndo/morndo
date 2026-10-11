@@ -97,8 +97,59 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   }
   unknownKeys(lint, draft);
 
+  // DB1: two to six options in the manager protocol's grammar, so every answer can be typed back as a tap line.
+  const KEY = /^[A-Za-z0-9_-]{1,16}$/;
+  const optionsIn = draft.options;
+  const options: BriefOption[] = [];
+  const keys = new Set<string>();
+  let optionsBroken = !Array.isArray(optionsIn);
+  if (!Array.isArray(optionsIn)) lint.error("missing_section", "options", "the section is missing; every section of the template is required");
+  else if (optionsIn.length < 2) lint.error("no_options", "options", "a decision needs two to six options; \"do nothing\" counts when it is a real choice");
+  else if (optionsIn.length > 6) lint.error("too_many_options", "options", `${optionsIn.length} options; the cap is six`);
+  if (Array.isArray(optionsIn)) {
+    optionsBroken ||= optionsIn.length < 2 || optionsIn.length > 6;
+    for (let i = 0; i < optionsIn.length; i++) {
+      const o = optionsIn[i]!;
+      if (!isObj(o)) { lint.error("bad_option", `options[${i}]`, "an option is a key and a label"); optionsBroken = true; continue; }
+      for (const sub of Object.keys(o)) {
+        if (sub !== "key" && sub !== "label") lint.error("unknown_section", `options[${i}].${sub}`, `an option has no "${sub}" part; check the template`);
+      }
+      const { key, label } = o;
+      if (!isText(key) || !KEY.test(key) || !isText(label) || blank(label) || CONTROL.test(label)) {
+        lint.error("bad_option", `options[${i}]`, "a key of letters, digits, - and _ (at most 16) and a label of 1 to 40 characters");
+        optionsBroken = true;
+        continue;
+      }
+      if (keys.has(key)) { lint.error("duplicate_option", `options[${i}]`, `option ${key} appears twice; keys must be unique`); optionsBroken = true; continue; }
+      keys.add(key);
+      if (label.length > 40) { lint.error("too_long", `options[${i}].label`, `${label.length} characters; the cap is 40`); options.push({ key, label }); continue; }
+      options.push({ key, label });
+    }
+  }
+
+  // DB2: one recommended option, and the headline names exactly that one, as "option <KEY>" in any case. When the
+  // options themselves are broken there is nothing to recommend against yet: the asker fixes those first.
+  let recommend = "";
+  if (!optionsBroken) {
+    if (!isText(draft.recommend) || !keys.has(draft.recommend)) {
+      lint.error("no_recommendation", "recommend",
+        isText(draft.recommend) ? `"${draft.recommend}" is not one of the option keys (${[...keys].join(", ")})` : "name the key of the option you recommend");
+    } else {
+      recommend = draft.recommend;
+    }
+  }
+
   const topic = lint.string("topic", draft.topic, CAPS.topic);
   const headline = lint.string("headline", draft.headline, CAPS.headline);
+  if (recommend && headline !== null) {
+    const named = [...headline.matchAll(/option\s+([A-Za-z0-9_-]{1,16})/gi)].map(m => (m[1] ?? "").toLowerCase());
+    const others = named.filter(k => k !== recommend.toLowerCase());
+    if (named.length === 0) {
+      lint.error("headline_option", "headline", `the headline names no option; name the one you recommend, as "option ${recommend}"`);
+    } else if (others.length > 0) {
+      lint.error("headline_option", "headline", `the headline names option ${others[0]!.toUpperCase()}, but recommend is ${recommend}; name the option you recommend`);
+    }
+  }
   const ask = isObj(draft.ask) ? draft.ask : {};
   const askText = lint.string("ask.text", ask.text, CAPS.askText, true);
   const alternative = lint.string("ask.alternative", ask.alternative, CAPS.line);
@@ -158,17 +209,16 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
 
   if (lint.problems.some(p => p.level === "error")) return { brief: null, problems: lint.problems };
 
-  // No errors: the draft is the brief. The fields lint doesn't type itself (due, minutes, options, recommend) are
-  // checked where their rules are (DB1 to DB3); the optionals default as the wire schema reads them.
-  const options = Array.isArray(draft.options) ? draft.options : [];
+  // No errors: the draft is the brief. The fields lint doesn't type itself (due, minutes) are checked where their
+  // rules are (DB3); the optionals default as the wire schema reads them.
   const brief: DecisionBrief = {
     topic: topic!, headline: headline!,
     due: typeof draft.due === "number" ? draft.due : 0,
     minutes: typeof draft.minutes === "number" ? draft.minutes : 0,
-    recommend: isText(draft.recommend) ? draft.recommend : "",
+    recommend,
     ask: { text: askText!, alternative: alternative!, uncertainty: uncertainty! },
     whyNow: whyNow!,
-    options: options.flatMap(o => isObj(o) && isText(o.key) && isText(o.label) ? [{ key: o.key, label: o.label }] : []),
+    options,
     comparison: { rows, note: note ?? "" },
     why: { text: whyText!, assumptions: assumptions ?? [], downside: isText(why.downside) ? why.downside : "" },
     changeIf: changeIf!,
