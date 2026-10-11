@@ -1,9 +1,16 @@
 #!/bin/sh
 # Reject a push that adds a secret, a home path, a private key, or a token.
 # Added lines are checked, so a marker already in a file does not fail a later
-# edit. A private-key header in a test or fixture file is a fixture. Only
-# commits that are not on any remote are checked, so a branch that merges main
-# never re-checks published history.
+# edit. A private-key header in a test or fixture file is a fixture. The
+# scanned lines are the net difference between the remote side of the push and
+# the local tip, plus the lines a merge commit in the push adds against every
+# parent, so a line added and removed inside the push is not scanned. gitleaks
+# and the commit-mail checks cover the commits that are not already on the
+# remote being pushed to, so a branch that merges main never re-checks
+# published history. A push to a URL names no remote; then nothing already
+# fetched is spared. A push that creates a ref has no remote side: gitleaks
+# scans the tree, and the other checks scan the whole tree from the empty
+# tree, or the common boundary with that remote's remote-tracking refs.
 # Install with scripts/install-git-hooks.sh. Does not change git config.
 #
 # gitleaks 8.30.1 `protect` scans `git diff` (or `--staged`), not the commits
@@ -57,7 +64,13 @@ scan_push() {
       "$zero")
         scan_dir ;;
       *)
-        gitleaks detect --no-banner --redact --log-opts="${remote_sha}..${local_sha}" ;;
+        # The same unpublished selection the mail checks use: commits that
+        # are not on the remote being pushed to.
+        opts="$local_sha --not $remote_sha"
+        if [ -n "$remote" ]; then
+          opts="$opts --remotes=$remote"
+        fi
+        gitleaks detect --no-banner --redact --log-opts="$opts" ;;
     esac
     scanned=1
   done

@@ -345,10 +345,12 @@ cd "$root"
 
 # A branch that merges main never re-checks published history. The repo is
 # throwaway and its origin/main is fabricated: one published commit with a
-# personal author address that no exception lists.
+# personal author address that no exception lists, carrying a synthetic key
+# that only gitleaks flags.
 # The remote-tip range of the push fails the plain range check, while the
-# hook, limited to commits that are not on any remote, passes it. A new home
-# path or a personal author address on the merged branch still fails.
+# hook, limited to commits that are not on the remote pushed to, passes it.
+# A new home path, a personal author address, or an unpublished synthetic
+# key on the merged branch still fails.
 git init -q "$scratch/merged"
 cp "$root/.gitleaks.toml" "$scratch/merged/.gitleaks.toml"
 cd "$scratch/merged"
@@ -356,8 +358,13 @@ printf 'ok\n' > readme.txt
 git add readme.txt .gitleaks.toml
 commit_ok -m 'merged base'
 base=$(git rev-parse HEAD)
+# The key is assembled at runtime so this proof file stays scanner-clean.
+mkdir -p src
+key=$(printf '%s-%s-%s' 9f8e7d6c5b 4a3f2e1d0c9b 8a7f6e5d4c)
+printf 'export const apiKey = "%s";\n' "$key" > src/config.ts
+git add src/config.ts
 env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
-  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'published main commit'
+  -c user.email=ada@users.noreply.github.com commit -q -m 'published main commit'
 published=$(git rev-parse HEAD)
 git checkout -q -b feature "$base"
 printf 'clean\n' > feature.txt
@@ -397,6 +404,16 @@ printf '%s %s %s %s\n' refs/heads/feature "$tip" refs/heads/feature "$remote_tip
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "a personal author address after the merge should exit 1, got $code"
+git reset -q --hard "$merge_tip"
+printf 'export const apiKey = "%s";\n' "$key" > branch-key.ts
+git add branch-key.ts
+commit_ok -m 'unpublished synthetic key'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/feature "$tip" refs/heads/feature "$remote_tip" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "an unpublished synthetic key should exit 1, got $code"
 cd "$root"
 
 # A merge commit can carry lines neither parent has, so the combined diff of
