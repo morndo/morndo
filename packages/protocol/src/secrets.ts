@@ -94,6 +94,9 @@ export const SecretsStoreArgs = z.strictObject({
   reference: SecretReferenceText, sealed: SealedValue, grants: z.array(WireGrant), expiry: z.nullable(when()),
   destinations: destinations(), request: z.nullable(z.strictObject({ id: id(), kind: z.enum(STORED_KINDS) })),
 });
+// The node's confirmation of a store: the version it stored and its own time of the store, which the hub judges a
+// renew's Expiry against (design §5.3, step 6; T-83).
+export const SecretsStoreResult = z.strictObject({ version: version(), at: when() });
 export const SecretsTransferArgs = z.strictObject({ reference: SecretReferenceText, target: node(), recipient: AgeRecipient, signature: signature() });
 export const SecretsTransferResult = z.strictObject({ sealed: SealedValue });
 export const SecretsCheckArgs = z.strictObject({ reference: SecretReferenceText, lane: z.nullable(lane()), workspace: z.nullable(workspace()), mode: mode() });
@@ -109,7 +112,7 @@ export const SecretsListResult = z.strictObject({ held: z.array(SecretView) });
 
 // Every secrets schema, by name: what the wire test walks.
 export const SECRET_WIRE = {
-  SecretRequestedEvent, SecretAnsweredArgs, SecretRequestView, SecretView, StoreSecretBody, SecretsStoreArgs,
+  SecretRequestedEvent, SecretAnsweredArgs, SecretRequestView, SecretView, StoreSecretBody, SecretsStoreArgs, SecretsStoreResult,
   SecretsTransferArgs, SecretsTransferResult, SecretsCheckArgs, SecretsCheckResult, SecretsGrantArgs, SecretsUngrantArgs,
   SecretsLifecycleArgs, SecretsRecipientResult, SecretsListResult,
 } as const;

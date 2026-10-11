@@ -219,16 +219,19 @@ export function answerGranted(req: SecretRequest, a: Answer, now: number): Resul
   return ok({ request, events: [{ type: "SecretRequestGranted", request: req.id, at: now, command: a.command }] });
 }
 
-// SR8: Stored only once the requester's node confirmed; `version` is the Secret's version there, `expiry` the Expiry the
-// store sent (null: none), always named. The node refuses a renew that doesn't extend its Expiry before it stores anything
-// (renewSecret); here, a renew whose store named none, or one already passed, is never marked Stored.
+// SR8: Stored only once the requester's node confirmed; `version` is the Secret's version there and `storedAt` its time
+// of the store by its own clock, both from that confirmation; `expiry` the Expiry the store sent (null: none). The node
+// refuses a renew that doesn't extend its Expiry before it stores anything (renewSecret); here a renew whose store named
+// none, or one not later than the node's time of the store, is never marked Stored. That is the node's own comparison,
+// so the hub's clock can't leave a renewed request open (T-83); the hub's clock decides only the request's own expiry.
 export function answerStored(
-  req: SecretRequest, a: Answer & { reference: string; version: number; nodes: readonly string[]; expiry: number | null }, now: number,
+  req: SecretRequest, a: Answer & { reference: string; version: number; nodes: readonly string[]; expiry: number | null; storedAt: number },
+  now: number,
 ): Result<RequestChange, RequestRefusal> {
   const p = checkAnswer(req, a.seen, a.command, now);
   if (p) return refuseRequest(p);
   if (req.kind === "access") return refuseRequest("kind");
-  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > now)) return refuseRequest("expiry");
+  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > a.storedAt)) return refuseRequest("expiry");
   if (parseReference(a.reference) === null) return refuseRequest("bad_reference");
   if (!a.nodes.includes(req.node) || !Number.isSafeInteger(a.version) || a.version < 1) return refuseRequest("node");
   const request: SecretRequest = { ...req, state: "stored", answer: { kind: "stored", at: now, command: a.command, reason: null } };
