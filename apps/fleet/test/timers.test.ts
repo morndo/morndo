@@ -79,14 +79,15 @@ describe("the liveness sweep", () => {
     const sweep = async () => {
       const answered = pongs.mock.calls.length + 2;
       vi.advanceTimersByTime(LIMITS.pingMs);
-      await until(() => pongs.mock.calls.length === answered);                     // both nodes answered its ping
+      await until(() => pongs.mock.calls.length >= answered);                      // both nodes answered its ping
     };
     fleet.db.pragma("busy_timeout = 0");                                             // a lock fails at once instead of in 5 s
     const locker = new Database(fleet.config.dbPath);
     locker.exec("BEGIN IMMEDIATE");                                                  // another writer holds fleet.db
     try {
       await sweep();
-      expect(lines.some(l => l.includes("database is locked"))).toBe(true);
+      // The sweep's own last-seen write is what hit the lock (other faked intervals also write to fleet.db).
+      expect(lines.some(l => l.includes("liveness sweep: could not record node pc as seen") && l.includes("database is locked"))).toBe(true);
       const before = fleet.nodes.active("pc")?.lastSeenAt ?? 0;
       let macPings = 0;
       mac.ws?.on("ping", () => { macPings++; });
