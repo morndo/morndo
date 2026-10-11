@@ -1,6 +1,8 @@
 #!/bin/sh
 # Proves commit-traces and the commit-msg hook. Identity is set only on the
-# git command, inside this throwaway repository.
+# git command, inside this throwaway repository. One check runs the pre-push
+# hook itself, so its own selection, not a hand-written rev-list, decides
+# which commits are re-checked.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
@@ -114,18 +116,43 @@ code=$?
 set -e
 [ "$code" -eq 1 ] || fail "web-flow author should exit 1, got $code"
 
-# The pre-push hook calls "mails <local sha> --not --remotes": only commits
-# that no remote-tracking ref contains are checked. The published side is a
-# fabricated remote-tracking ref on this throwaway repo.
-git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'fix: clean note'
+# The pre-push hook's own selection decides what is re-checked. The history
+# is fresh and holds exactly one bad commit, so a failure can only come from
+# it: bare, the range fails; published on a second remote only, the hook
+# still fails it; published on the remote being pushed to, the hook passes.
+zero=0000000000000000000000000000000000000000
+git init -q "$scratch/sel"
+cp "$root/.gitleaks.toml" "$scratch/sel/.gitleaks.toml"
+cd "$scratch/sel"
+git remote add origin "$scratch/sel-origin.git"
+git remote add mirror "$scratch/sel-mirror.git"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q -m 'sel base'
+base=$(git rev-parse HEAD)
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'sel published'
+published=$(git rev-parse HEAD)
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'sel clean'
 tip=$(git rev-parse HEAD)
-git update-ref refs/remotes/origin/main HEAD~
-sh "$checker" mails "$tip" --not --remotes || fail "mails over commits no remote holds should exit 0"
 set +e
 sh "$checker" mails "$tip"
 code=$?
 set -e
-[ "$code" -eq 1 ] || fail "mails without --not --remotes re-checks the published commit, got $code"
+[ "$code" -eq 1 ] || fail "the bare history should fail on its only bad commit, got $code"
+git update-ref refs/remotes/origin/main "$base"
+git update-ref refs/remotes/mirror/main "$published"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/scripts/git-hooks/pre-push" origin >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a bad commit a second remote holds should fail through the hook, got $code"
+git update-ref refs/remotes/origin/main "$published"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/scripts/git-hooks/pre-push" origin >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a bad commit the pushed-to remote holds should pass through the hook, got $code"
 
 cd "$root"
 set +e
