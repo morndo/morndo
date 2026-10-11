@@ -116,6 +116,7 @@ export type Transcription = {
   outcome: TxOutcome | null;
   problem: TranscriptionProblem | null;
   text: TranscriptionText | null;
+  report: EndReport | null;
   startedAt: number | null;
   endedAt: number | null;
 };
@@ -125,6 +126,17 @@ export type TranscriptionBody = {
   recording: Recording;
   sizeBytes: number;
   language: string;
+};
+
+// The report that ended a `done` attempt, whatever verdict the cap gave it: the words as capped, the language, the
+// engine and the model that made them, and the duration they name (TX3). A repeat of it is the same row; a report
+// that differs in any field is refused, whatever the cap now in force.
+export type EndReport = {
+  language: string;
+  durationMs: number;
+  engineName: string;
+  model: string;
+  text: string;
 };
 
 export type RequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size";
@@ -169,7 +181,8 @@ export function requestTranscription(
   if (existing.some(row => row.id === body.id && terminal(row.state))) return err("id_conflict");
   return ok({
     id: body.id, recording, language: body.language, sizeBytes: body.sizeBytes, acceptedAt: at,
-    state: "queued", position: null, reason: null, outcome: null, problem: null, text: null, startedAt: null, endedAt: null,
+    state: "queued", position: null, reason: null, outcome: null, problem: null, text: null, report: null,
+    startedAt: null, endedAt: null,
   });
 }
 
@@ -195,8 +208,10 @@ export type TranscriptionEnd =
 
 export type EndProblem = "not_running" | "already_terminal" | "bad_end";
 
-// TX3: terminal once. The same outcome again is the same row; a different one, or different words for a `done`,
-// is refused. Nothing here starts a new attempt: asking again is a new request (requestTranscription).
+// TX3: terminal once. The same outcome again is the same row; a different one, or a different report for the same
+// outcome, is refused. A `failed` report is its problem; a `done` report is every field of it: the words, the
+// language, the engine, the model and the duration. When it ended never matters. Nothing here starts a new attempt:
+// asking again is a new request (requestTranscription).
 const engineOk = (e: EngineText): boolean =>
   typeof e === "object" && e !== null && typeof e.language === "string"
   && Number.isInteger(e.durationMs) && e.durationMs >= 0
@@ -204,19 +219,26 @@ const engineOk = (e: EngineText): boolean =>
   && e.segments.every(seg => typeof seg === "object" && seg !== null
     && Number.isInteger(seg.startMs) && Number.isInteger(seg.endMs) && typeof seg.text === "string");
 
+const sameReport = (report: EndReport | null, event: { engine: EngineText; engineName: string; model: string }): boolean =>
+  report !== null
+  && report.language === event.engine.language
+  && report.durationMs === event.engine.durationMs
+  && report.engineName === event.engineName
+  && report.model === event.model
+  && report.text === makeText(event.engine, event.engineName, event.model).text;
+
 export function endTranscription(tx: Transcription, event: TranscriptionEnd, maxSeconds = MAX_RECORDING_SECONDS): Result<Transcription, EndProblem> {
   if (!Number.isInteger(event.at)) return err("bad_end");
   if (event.outcome === "done" && !engineOk(event.engine)) return err("bad_end");
   if (terminal(tx.state)) {
-    // A `done` the cap turned into `failed: too_long` is that report's outcome, so the same report again — an
-    // adapter's retry — is the same row. A `done` that now fits the cap is a different report, and is refused.
+    // A `done` the cap turned into `failed: too_long` is that report's outcome, so the done again — an adapter's
+    // retry — is judged on the report it keeps, never on the cap now in force.
     if (event.outcome === "done" && tx.outcome === "failed" && tx.problem === "too_long") {
-      return event.engine.durationMs > maxSeconds * 1000 ? ok(tx) : err("already_terminal");
+      return sameReport(tx.report, event) ? ok(tx) : err("already_terminal");
     }
     if (event.outcome !== tx.outcome) return err("already_terminal");
-    if (event.outcome === "done" && tx.text !== null && tx.text.text !== makeText(event.engine, event.engineName, event.model).text) {
-      return err("already_terminal");
-    }
+    if (event.outcome === "done") return sameReport(tx.report, event) ? ok(tx) : err("already_terminal");
+    if (event.outcome === "failed" && event.problem !== tx.problem) return err("already_terminal");
     return ok(tx);
   }
   const ran = tx.state === "running";
@@ -224,12 +246,17 @@ export function endTranscription(tx: Transcription, event: TranscriptionEnd, max
   if (event.outcome === "timed_out" && !ran) return err("not_running");
   if (event.outcome === "lost" && !ran && tx.state !== "starting") return err("not_running");
   if (event.outcome === "done") {
+    const text = makeText(event.engine, event.engineName, event.model);
+    const report: EndReport = {
+      language: event.engine.language, durationMs: event.engine.durationMs,
+      engineName: event.engineName, model: event.model, text: text.text,
+    };
     if (event.engine.durationMs > maxSeconds * 1000) {
-      return ok({ ...tx, state: "failed", outcome: "failed", problem: "too_long", endedAt: event.at, position: null, reason: null });
+      return ok({ ...tx, state: "failed", outcome: "failed", problem: "too_long", endedAt: event.at, position: null, reason: null, report });
     }
     return ok({
       ...tx, state: "done", outcome: "done", endedAt: event.at, position: null, reason: null,
-      text: makeText(event.engine, event.engineName, event.model),
+      text, report,
     });
   }
   if (event.outcome === "failed") {
