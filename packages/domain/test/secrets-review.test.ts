@@ -2,8 +2,8 @@
 // per point, each written failing before its fix.
 import { describe, expect, it } from "vitest";
 import {
-  deleteSecret, emptySecretDirectory, findSecret, joinRequest, openRequest, revokeSecret, secretExpirySweep, storeSecret,
-  useGate, withdrawRequest,
+  deleteSecret, emptySecretDirectory, endTimedGrants, findSecret, joinRequest, openRequest, revokeSecret, secretExpirySweep,
+  storeSecret, useGate, withdrawRequest,
   type Actor, type RequestAsk, type SecretDirectory, type SecretGrant,
 } from "../src/index.ts";
 
@@ -104,5 +104,24 @@ describe("review 5: a bad workspace is refused as a bad workspace, not a bad Gra
     const r1 = value(openRequest({ ...ask, waiter: { ...ask.waiter, workspace: "example-app" } }, "r1", T)).request;
     const j = joinRequest(r1, { lane: "lane-b", workspace: "Bad Repo", purpose: "Deploy" }, T + 1);
     expect(j.ok ? "ok" : j.error.problem).toBe("bad_workspace");
+  });
+});
+
+describe("review 7: a Grant with an end time ends, and the audit says so (GrantEnded)", () => {
+  const timed: SecretGrant = { subject: { kind: "lane", lane: "lane-a" }, modes: ["exec"], until: { kind: "at", at: T + 100 } };
+  const open: SecretGrant = { subject: { kind: "lane", lane: "lane-b" }, modes: ["exec"], until: { kind: "open" } };
+  const dir0 = () => value(storeSecret(emptySecretDirectory(), { reference: REF, fingerprint: "0123456789a1", shape: null, grants: [timed, open], expiry: null, destinations: [] }, who, T));
+  it("stays before its end", () => {
+    const dir = endTimedGrants(dir0(), T + 99);
+    expect(findSecret(dir, REF)?.grants).toEqual([timed, open]);
+    expect(dir.events.map(e => e.type)).toEqual(["SecretStored"]);
+  });
+  it("is removed at its end with one GrantEnded, and a second sweep adds nothing", () => {
+    let dir = endTimedGrants(dir0(), T + 100);
+    expect(findSecret(dir, REF)?.grants).toEqual([open]);
+    expect(dir.events.at(-1)).toEqual({ type: "GrantEnded", reference: REF, at: T + 100, subject: { kind: "lane", lane: "lane-a" } });
+    const n = dir.events.length;
+    dir = endTimedGrants(dir, T + 200);
+    expect(dir.events.length).toBe(n);
   });
 });
