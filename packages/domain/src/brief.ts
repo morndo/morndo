@@ -161,10 +161,10 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   const KEY = /^[A-Za-z0-9_-]{1,16}$/;
   const optionsIn = draft.options;
   const options: BriefOption[] = [];
-  const keys = new Set<string>();
-  // Keys compare case-blind (the headline names an option "in any case", DB2, and the table heads uppercase them):
-  // two keys that differ only in case are one key twice.
-  const keysAnyCase = new Set<string>();
+  // One map from a lowercased key to the option's own key: every key check compares case-blind the same way (DB2 —
+  // the headline names an option "in any case", the table heads uppercase the keys), and two keys that differ only
+  // in case are one key twice.
+  const keyOf = new Map<string, string>();
   let optionsBroken = !Array.isArray(optionsIn);
   if (!Array.isArray(optionsIn)) lint.error("missing_section", "options", "the section is missing; every section of the template is required");
   else if (optionsIn.length < 2) lint.error("no_options", "options", "a decision needs two to six options; \"do nothing\" counts when it is a real choice");
@@ -185,9 +185,8 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
         optionsBroken = true;
         continue;
       }
-      if (keysAnyCase.has(key.toLowerCase())) { lint.error("duplicate_option", `options[${i}]`, `option ${key} appears twice; keys must be unique, whatever the case`); optionsBroken = true; continue; }
-      keys.add(key);
-      keysAnyCase.add(key.toLowerCase());
+      if (keyOf.has(key.toLowerCase())) { lint.error("duplicate_option", `options[${i}]`, `option ${key} appears twice; keys must be unique, whatever the case`); optionsBroken = true; continue; }
+      keyOf.set(key.toLowerCase(), key);
       if (label.length > 40) { lint.error("too_long", `options[${i}].label`, `${label.length} characters; the cap is 40`); options.push({ key, label }); continue; }
       // A label lands in briefMarkdown's table head and tap lines: no pipe may break the columns (DB7). The option
       // itself stands, as with a label past its cap, so the checks that follow see the same option set as the keys.
@@ -197,15 +196,17 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     }
   }
 
-  // DB2: one recommended option, and the headline names exactly that one, as "option <KEY>" in any case. When the
-  // options themselves are broken there is nothing to recommend against yet: the asker fixes those first.
+  // DB2: one recommended option — named by its key whatever the case, kept as the option's own key — and the headline
+  // names exactly that one, as "option <KEY>" in any case. When the options themselves are broken there is nothing to
+  // recommend against yet: the asker fixes those first.
   let recommend = "";
   if (!optionsBroken) {
-    if (!isText(draft.recommend) || !keys.has(draft.recommend)) {
+    const rec = isText(draft.recommend) ? keyOf.get(draft.recommend.toLowerCase()) : undefined;
+    if (rec === undefined) {
       lint.error("no_recommendation", "recommend",
-        isText(draft.recommend) ? `"${draft.recommend}" is not one of the option keys (${[...keys].join(", ")})` : "name the key of the option you recommend");
+        isText(draft.recommend) ? `"${draft.recommend}" is not one of the option keys (${[...keyOf.values()].join(", ")})` : "name the key of the option you recommend");
     } else {
-      recommend = draft.recommend;
+      recommend = rec;
     }
   }
 
@@ -230,7 +231,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     // option: "adoption" and "the option with less risk" name none, whatever follows "option".
     const named = [...headline.matchAll(/\boption\s+([A-Za-z0-9_-]{1,16})/gi)]
       .map(m => (m[1] ?? "").toLowerCase())
-      .filter(k => keysAnyCase.has(k));
+      .filter(k => keyOf.has(k));
     const others = named.filter(k => k !== recommend.toLowerCase());
     if (named.length === 0) {
       lint.error("headline_option", "headline", `the headline names no option; name the one you recommend, as "option ${recommend}"`);
@@ -305,9 +306,9 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     }
     const cellsIn = row.cells;
     let cells: string[] | null = Array.isArray(cellsIn) ? cellsIn : null;
-    if (cells === null || (!optionsBroken && cells.length !== keys.size)) {
+    if (cells === null || (!optionsBroken && cells.length !== keyOf.size)) {
       lint.error("table_columns", `comparison.rows[${i}]`,
-        `every row has one cell per option, in the order of the Decision list (${keys.size} options)`);
+        `every row has one cell per option, in the order of the Decision list (${keyOf.size} options)`);
       cells = null;
     } else {
       const kept: string[] = [];
