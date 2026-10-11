@@ -2,28 +2,25 @@
 // an age file sealed to one node's recipient, on the Endpoint or on a source node. Every schema is strict, so a key it
 // doesn't name is refused whole. The words table is the one the CLI and the page share; the token shape catalog is data
 // (catalog/secret-shapes.json), each shape with its source.
-import { REQUEST_KINDS, REQUEST_STATES, SECRET_STATUSES, USE_MODES, parseReference } from "@morndo/domain";
+import {
+  DESTINATION_HOST, DESTINATIONS_MAX, KEYED_FINGERPRINT, LANE_NAME, NODE_LABEL, PURPOSE_MAX, REQUEST_KINDS, REQUEST_STATES,
+  SECRET_STATUSES, SHAPE_ID, USE_MODES, USE_REFUSAL_REASONS, WORKSPACE_NAME, parseReference, plainText,
+} from "@morndo/domain";
+import { ED25519_SIGNATURE } from "./fleet.ts";
 import * as z from "./z.ts";
 
-// A C0 or C1 control character, or DEL: plain text has none.
-function hasControl(t: string): boolean {
-  for (let i = 0; i < t.length; i++) {
-    const n = t.charCodeAt(i);   // every control character is one UTF-16 unit
-    if (n < 0x20 || (n >= 0x7f && n <= 0x9f)) return true;
-  }
-  return false;
-}
-const plain = (max: number) => z.string().check(z.minLength(1), z.maxLength(max), z.refine(s => !hasControl(s), "plain text"));
-const id = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{1,64}$/));
-const node = () => z.string().check(z.regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/));
-const lane = () => z.string().check(z.regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/));
-const workspace = () => z.string().check(z.regex(/^[a-z0-9][a-z0-9._-]{0,63}$/));
-const host = () => z.string().check(z.regex(/^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/));
+// The rules are the domain's (and the fleet's signature), imported, so the wire refuses exactly what the domain does.
+const plain = (max: number) => z.string().check(z.refine(s => plainText(s, max), "plain text"));
+const id = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{1,64}$/));   // a request or attempt id: the wire's own
+const node = () => z.string().check(z.regex(NODE_LABEL));
+const lane = () => z.string().check(z.regex(LANE_NAME));
+const workspace = () => z.string().check(z.regex(WORKSPACE_NAME));
+const host = () => z.string().check(z.regex(DESTINATION_HOST));
+const shapeId = () => z.string().check(z.regex(SHAPE_ID));
 const when = () => z.number().check(z.refine(Number.isFinite, "a time"));
 const version = () => z.number().check(z.int(), z.gte(1));
 const mode = () => z.enum(USE_MODES);
-// An Ed25519 signature, base64, as the fleet's handshake carries one (fleet.ts).
-const signature = () => z.string().check(z.regex(/^[A-Za-z0-9+/]{86}==$/));
+const signature = () => z.string().check(z.regex(ED25519_SIGNATURE));
 
 export const SecretReferenceText = z.string().check(z.maxLength(120), z.refine(s => parseReference(s) !== null, "a secret:// Reference"));
 
@@ -54,12 +51,12 @@ export const WireGrant = z.strictObject({
     z.strictObject({ kind: z.literal("lane-end") }),
   ]),
 });
-const destinations = () => z.array(host()).check(z.maxLength(10), z.refine(h => new Set(h).size === h.length, "each host once"));
+const destinations = () => z.array(host()).check(z.maxLength(DESTINATIONS_MAX), z.refine(h => new Set(h).size === h.length, "each host once"));
 
 // Node to hub: a request, as the node saw it (design §4.1). The hub takes it in through NodeRequests.
 export const SecretRequestedEvent = z.strictObject({
   node: node(), reference: SecretReferenceText, kind: z.enum(REQUEST_KINDS), lane: z.nullable(lane()),
-  workspace: z.nullable(workspace()), purpose: plain(300), proposed: WireGrant,
+  workspace: z.nullable(workspace()), purpose: plain(PURPOSE_MAX), proposed: WireGrant,
 });
 
 // Hub to node: how a request ended, for `wait`, `status` and the lane notice.
@@ -77,8 +74,8 @@ export const SecretRequestView = z.strictObject({
 
 export const SecretView = z.strictObject({
   node: node(), reference: SecretReferenceText, status: z.enum(SECRET_STATUSES), version: z.nullable(version()),
-  keyedFingerprint: z.nullable(z.string().check(z.regex(/^[0-9a-f]{12}$/))), grants: z.array(WireGrant),
-  destinations: destinations(), expiry: z.nullable(when()), shape: z.nullable(z.string().check(z.regex(/^[a-z0-9][a-z0-9-]{0,63}$/))), lastUse: z.nullable(when()),
+  keyedFingerprint: z.nullable(z.string().check(z.regex(KEYED_FINGERPRINT))), grants: z.array(WireGrant),
+  destinations: destinations(), expiry: z.nullable(when()), shape: z.nullable(shapeId()), lastUse: z.nullable(when()),
 });
 
 // The card's Store (design §5.3): one SealedValue per target node, each sealed to the recipient this Endpoint pinned.
@@ -98,7 +95,7 @@ export const SecretsTransferResult = z.strictObject({ sealed: SealedValue });
 export const SecretsCheckArgs = z.strictObject({ reference: SecretReferenceText, lane: z.nullable(lane()), workspace: z.nullable(workspace()), mode: mode() });
 export const SecretsCheckResult = z.strictObject({
   admitted: z.boolean(),
-  reason: z.nullable(z.enum(["missing", "disabled", "revoked", "no_value", "expired", "not_granted", "mode"])),
+  reason: z.nullable(z.enum(USE_REFUSAL_REASONS)),
 });
 export const SecretsGrantArgs = z.strictObject({ reference: SecretReferenceText, grant: WireGrant });
 export const SecretsUngrantArgs = z.strictObject({ reference: SecretReferenceText, subject: WireGrantSubject });
@@ -119,7 +116,7 @@ const compiles = (p: string) => {
   try { new RegExp(p); return true; } catch { return false; }
 };
 export const SecretShape = z.strictObject({
-  id: z.string().check(z.regex(/^[a-z0-9][a-z0-9-]{0,63}$/)),
+  id: shapeId(),
   label: plain(80),
   vendor: plain(40),
   prefix: z.string().check(z.regex(/^[A-Za-z0-9_-]{2,20}$/)),

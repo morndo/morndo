@@ -11,8 +11,8 @@ const REFERENCE = /^secret:\/\/([a-z0-9][a-z0-9-]{0,39})\/([a-z0-9][a-z0-9._-]{0
 export const WORKSPACE_NAME = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const NODE_LABEL = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 export const KEYED_FINGERPRINT = /^[0-9a-f]{12}$/;
-const SHAPE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
-const HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
+export const SHAPE_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+export const DESTINATION_HOST = /^(?=.{1,253}$)[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/;
 // A C0 or C1 control character, or DEL: plain text has none.
 function hasControl(t: string): boolean {
   for (let i = 0; i < t.length; i++) {
@@ -102,7 +102,9 @@ export type RequestLimit = "lane-open" | "lane-day" | "node-open" | "node-day";
 export type Admission = { kind: "open" } | { kind: "join"; request: string } | { kind: "refuse"; limit: RequestLimit };
 
 const refuseRequest = (problem: RequestProblem): Result<never, RequestRefusal> => err({ problem });
-const textOk = (t: string) => t.length >= 1 && t.length <= PURPOSE_MAX && !hasControl(t);
+// Plain text: 1 to `max` characters and no control character. The wire uses the same rule.
+export const plainText = (t: string, max: number) => t.length >= 1 && t.length <= max && !hasControl(t);
+const textOk = (t: string) => plainText(t, PURPOSE_MAX);
 
 function waiterProblem(w: Omit<Waiter, "at">): RequestProblem | null {
   if (w.lane !== null && !LANE_NAME.test(w.lane)) return "bad_lane";
@@ -222,7 +224,8 @@ export type Secret = {
 };
 export type LedgerEntry = { reference: string; version: number; fingerprint: string; state: "current" | "retired" | "revoked" };
 export type UseOutcome = "exited" | "failed" | "lost";
-export type UseRefusalReason = "missing" | "disabled" | "revoked" | "no_value" | "expired" | "not_granted" | "mode";
+export const USE_REFUSAL_REASONS = ["missing", "disabled", "revoked", "no_value", "expired", "not_granted", "mode"] as const;
+export type UseRefusalReason = (typeof USE_REFUSAL_REASONS)[number];
 export type SecretEvent =
   | { type: "SecretStored"; reference: string; version: number; at: number; command: string; sameAs: readonly string[] }
   | { type: "SecretRotated"; reference: string; version: number; at: number; command: string; sameAs: readonly string[] }
@@ -267,7 +270,7 @@ export function checkFingerprint(ledger: readonly LedgerEntry[], reference: stri
 }
 
 const hostsOk = (hosts: readonly string[]) =>
-  hosts.length <= DESTINATIONS_MAX && new Set(hosts).size === hosts.length && hosts.every(h => HOST.test(h));
+  hosts.length <= DESTINATIONS_MAX && new Set(hosts).size === hosts.length && hosts.every(h => DESTINATION_HOST.test(h));
 
 function inputProblem(input: StoreInput): SecretProblem | null {
   if (parseReference(input.reference) === null) return "bad_reference";
