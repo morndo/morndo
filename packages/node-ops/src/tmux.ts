@@ -119,6 +119,18 @@ export function draftOnScreen(screen: string): string | null {
   return draft && (colored || !/^Try "/.test(draft)) ? draft : null;
 }
 
+// The read-back can omit the one cell under the cursor. That missing character must not look like the paste left the
+// box: the first 20 code points on screen are the start of what was sent, or that start with exactly one code point
+// removed. A different leftover is not the paste.
+function draftStillWaiting(sent: string, draft: string): boolean {
+  const shown = [...draft].slice(0, 20);
+  const sentPoints = [...sent];
+  if (shown.every((c, i) => c === sentPoints[i])) return true;
+  const window = sentPoints.slice(0, shown.length + 1);
+  if (window.length !== shown.length + 1) return false;
+  return window.some((_, drop) => shown.every((c, i) => c === window[i < drop ? i : i + 1]));
+}
+
 export function tmuxAdapter(opts: { socket: string | null; session: string | null; historyLines?: number }): Tmux {
   const history = opts.historyLines ?? 150;
   const tmux = async (args: string[]) => (await run("tmux", tmuxArgv(opts.socket, args), { timeout: 5000, maxBuffer: 4 << 20 })).stdout;
@@ -174,7 +186,7 @@ export function tmuxAdapter(opts: { socket: string | null; session: string | nul
       await new Promise(r => setTimeout(r, 400));
       const after = await styled(id);
       const draft = after ? draftOnScreen(after) : null;
-      return draft && clean.startsWith(draft.slice(0, 20)) ? "not_submitted" : null;
+      return draft && draftStillWaiting(clean, draft) ? "not_submitted" : null;
     },
     async capture(id) {
       if (!/^%\d+$/.test(id)) return null;
