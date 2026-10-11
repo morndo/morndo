@@ -138,6 +138,15 @@ describe("starting and ending a transcription", () => {
     expect(endTranscription(done, { outcome: "cancelled", at: AT + 99 })).toEqual({ ok: false, error: "already_terminal" });
   });
 
+  it("a segment that is not an object is bad_output to the domain: bad_end, never a crash (3.4)", () => {
+    const broken = (segments: unknown[]): EngineText =>
+      ({ language: "de", durationMs: 1000, segments }) as unknown as EngineText;
+    expect(endTranscription(run(), { outcome: "done", at: AT + 40, engine: broken([undefined]), engineName: "local", model: "small" }))
+      .toEqual({ ok: false, error: "bad_end" });
+    expect(endTranscription(run(), { outcome: "done", at: AT + 40, engine: broken([42]), engineName: "local", model: "small" }).ok).toBe(false);
+    expect(endTranscription(run(), { outcome: "done", at: AT + 40, engine: broken(["ein Wort"]), engineName: "local", model: "small" }).ok).toBe(false);
+  });
+
   it("a restart with no recorded end marks the run lost and keeps the row; what never ran waits on (TX4)", () => {
     const rows = [live({ id: "tx-q" }), starting({ id: "tx-s" }), run({ id: "tx-r" }),
       value(endTranscription(run({ id: "tx-d" }), { outcome: "done", at: AT + 40, engine: heard("w"), engineName: "e", model: "m" }))];
