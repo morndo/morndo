@@ -386,6 +386,14 @@ describe("DB7 everywhere a field lands in briefMarkdown (§4.5: an old app rende
     expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).cells[0] = "one\ntwo"; }))
       .toEqual(["error control_char (comparison.rows[0].cells[0])"]);
   });
+  it("a cell or a factor ending in a backslash is refused: it escapes the \"|\" that closes its column", () => {
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).cells[0] = "The backlog keeps growing at today's rate\\"; }))
+      .toEqual(["error bad_markdown (comparison.rows[0].cells[0])"]);
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).factor = "Expected outcome\\"; }))
+      .toEqual(["error bad_markdown (comparison.rows[0].factor)"]);
+    // An even run is an escaped backslash: the cell still closes, as an evidence label's does.
+    expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).cells[0] = "Rate C:\\\\"; })).toEqual([]);
+  });
   it("an option label heads a column and names a tap line: no pipes in it, and links stay https", () => {
     expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).label = "Keep | manual"; }))
       .toEqual(["error bad_markdown (options[0].label)"]);
