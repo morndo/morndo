@@ -71,7 +71,7 @@ describe("base URL", () => {
     expect(baseUrlProblem("")).toBe("base URL missing or invalid");
     expect(baseUrlProblem("not a url")).toBe("base URL missing or invalid");
     expect(baseUrlProblem("https://api.z.ai/api/anthropic")).toBeNull();
-    expect(() => anthropicGatewayEnv("", "glm-5.3")).toThrow(/base URL/);
+    expect(anthropicGatewayEnv("", "glm-5.3")).toEqual({});
     expect(() => anthropicGatewayEnv("not a url", "glm-5.3")).toThrow(/base URL/);
   });
 });

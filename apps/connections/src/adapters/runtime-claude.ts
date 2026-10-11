@@ -248,8 +248,11 @@ function namedModel(model: string): string | null {
 // CLAUDE_CODE_ALWAYS_ENABLE_EFFORT sends it for a model id the runtime does not recognise.
 // https://code.claude.com/docs/en/cli-reference and https://code.claude.com/docs/en/env-vars — checked 2026-10-11.
 export function anthropicGatewayEnv(baseUrl: string, model: string, effort = "", small = "", firstPartyHost = ""): Record<string, string> {
-  const problem = baseUrlProblem(baseUrl);
-  if (problem) throw new Error(problem);
+  // Empty means this runtime was given no base. A non-URL throws so a typo cannot be ignored.
+  if (baseUrl.trim() !== "") {
+    const problem = baseUrlProblem(baseUrl);
+    if (problem) throw new Error(problem);
+  }
   if (!isThirdPartyAnthropicBase(baseUrl, firstPartyHost)) return {};
   const named = namedModel(model);
   const haiku = namedModel(small) ?? named;
