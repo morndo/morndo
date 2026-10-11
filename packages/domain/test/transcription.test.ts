@@ -205,7 +205,7 @@ describe("the caps on a recording, a run and its text (TX6)", () => {
     const words = makeText({ language: "de", durationMs: 1000, segments: [
       { startMs: 0, endMs: 400, text: "  guten " }, { startMs: 400, endMs: 900, text: "Morgen  " }, { startMs: 900, endMs: 1000, text: "" },
     ] }, "local", "small");
-    expect(words).toEqual({ language: "de", text: "guten Morgen", edited: false, engine: "local", model: "small" });
+    expect(words).toEqual({ language: "de", text: "guten Morgen", edit: null, edited: false, engine: "local", model: "small" });
     const long = makeText({ language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "ä".repeat(40_000) }] }, "local", "small");
     expect(long.text.endsWith("[truncated]")).toBe(true);
     expect(long.text.length).toBeLessThanOrEqual(MAX_TEXT_BYTES);

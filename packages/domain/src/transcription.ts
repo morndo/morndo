@@ -76,7 +76,7 @@ export function makeText(engine: EngineText, engineName: string, model: string):
     out += ch;
     bytes += b;
   }
-  return { language: engine.language, text: cut ? out + TEXT_MARK : joined, edited: false, engine: engineName, model };
+  return { language: engine.language, text: cut ? out + TEXT_MARK : joined, edit: null, edited: false, engine: engineName, model };
 }
 
 // The states of one attempt (3.4): queued behind others, starting, running, or terminal once. `lost` is a run the
@@ -92,6 +92,7 @@ export type TranscriptionProblem = "unreadable" | "too_long" | "not_ready" | "ba
 export type TranscriptionText = {
   language: string;
   text: string;
+  edit: string | null;
   edited: boolean;
   engine: string;
   model: string;
@@ -230,6 +231,24 @@ export function threadsFor(cores: number): number {
 // 9: the probe can lower the cap; the setting cannot raise it past what the plugin offered.
 export function effectiveMaxSeconds(configured: number, pluginMaxSeconds: number): number {
   return Math.min(configured, pluginMaxSeconds);
+}
+
+const utf8Len = (s: string): number => {
+  let n = 0;
+  for (const ch of s) n += utf8Bytes(ch);
+  return n;
+};
+
+// TX7, TextEdited (3.5): the engine's words are never overwritten. An edit is kept beside them, trimmed and within
+// the Text cap, and the result is marked `edited`. The Recording stays; the Text grants nothing (TX8).
+export type EditProblem = "not_done" | "bad_text";
+
+export function editText(tx: Transcription, text: string): Result<Transcription, EditProblem> {
+  if (tx.state !== "done" || tx.text === null) return err("not_done");
+  const clean = text.trim();
+  if (clean === "" || utf8Len(clean) > MAX_TEXT_BYTES) return err("bad_text");
+  if (clean === tx.text.text) return ok(tx);
+  return ok({ ...tx, text: { ...tx.text, edit: clean, edited: true } });
 }
 
 const terminal = (state: TranscriptionState): state is TxOutcome => !open(state);
