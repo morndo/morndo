@@ -101,3 +101,20 @@ describe("round 4, points 2 and 6: the hub's answer always names the Expiry its 
     expect(none.ok ? "ok" : none.error.problem).toBe("expiry");
   });
 });
+
+describe("round 5, point 4: a renew's input is checked as a store's is, before the renew rule", () => {
+  const held = () =>
+    value(storeSecret(emptySecretDirectory(), { reference: REF, fingerprint: "0000000000c1", shape: null, grants: [nodeGrant], expiry: T - DAY, destinations: [] }, who, T - 10 * DAY));
+  const renew = (over: Record<string, unknown>) => {
+    const r = renewSecret(held(), { reference: REF, fingerprint: "0000000000c2", shape: null, grants: [], expiry: null, destinations: [], ...over }, who, T);
+    return r.ok ? "stored" : r.error.problem;
+  };
+  it("a bad Reference or fingerprint is named as such, not as a renew's Expiry", () => {
+    expect(renew({ reference: "secret://Bad/x" })).toBe("bad_reference");
+    expect(renew({ fingerprint: "nope" })).toBe("bad_fingerprint");
+  });
+  it("an Expiry that is no time at all is refused the same way, NaN or Infinity", () => {
+    expect(renew({ expiry: Number.NaN })).toBe("expiry");
+    expect(renew({ expiry: Number.POSITIVE_INFINITY })).toBe("expiry");
+  });
+});
