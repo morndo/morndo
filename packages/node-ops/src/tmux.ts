@@ -68,7 +68,8 @@ export function menuIdentity(screen: string): string | null {
 //
 // 38/48/58 take colour arguments (indexed 5;n or direct 2;r;g;b). Those numbers are not the dim/reverse flags, even
 // when a component is 2, 7, 22 or 27. xterm ctlseqs (ISO-8613-6; semicolon form from konsole) and kitty's underline
-// colour, which uses the same shape as 38 and 48.
+// colour, which uses the same shape as 38 and 48. Colon-form parameters (ECMA-48, `4:3` for a curly underline) and
+// OSC 8 hyperlinks are the same kind of styling: tmux 3.4 `capture-pane -e` emits both, and neither is typed text.
 function applySgr(params: string, style: { dim: boolean; rev: boolean }) {
   const codes = (params === "" ? "0" : params).split(";");
   let i = 0;
@@ -88,6 +89,29 @@ function applySgr(params: string, style: { dim: boolean; rev: boolean }) {
   }
 }
 
+// CSI ends at its final byte (0x40-0x7e). A final `m` is SGR; anything else is skipped. OSC ends at BEL or ST.
+function takeCsi(text: string, i: number, style: { dim: boolean; rev: boolean }): number {
+  const start = i;
+  while (i < text.length) {
+    const d = text.charCodeAt(i);
+    if (d >= 0x40 && d <= 0x7e) {
+      if (d === 0x6d) applySgr(text.slice(start, i), style);
+      return i + 1;
+    }
+    i++;
+  }
+  return text.length;
+}
+function takeOsc(text: string, i: number): number {
+  while (i < text.length) {
+    const d = text.charCodeAt(i);
+    if (d === 0x07 || d === 0x9c) return i + 1;
+    if (d === 0x1b && text.charCodeAt(i + 1) === 0x5c) return i + 2;
+    i++;
+  }
+  return text.length;
+}
+
 export function draftOnScreen(screen: string): string | null {
   const line = screen.split("\n").slice(-12).reverse().find(l => /^[\s│]*❯/.test(l.replace(SGR, "")));
   if (!line) return null;
@@ -98,10 +122,20 @@ export function draftOnScreen(screen: string): string | null {
   // longer reverse run is the text itself — a selection or a pasted chip — and is kept.
   const style = { dim: false, rev: false };
   const runs: { text: string; dim: boolean; rev: boolean }[] = [];
-  for (const m of after.matchAll(/\x1b\[([0-9;]*)m|([^\x1b]+)/g)) {
-    if (m[1] !== undefined) applySgr(m[1], style);
-    else if (m[2] !== undefined) runs.push({ text: m[2], dim: style.dim, rev: style.rev });
+  let buf = "";
+  const flush = () => { if (buf) runs.push({ text: buf, dim: style.dim, rev: style.rev }); buf = ""; };
+  for (let i = 0; i < after.length;) {
+    const c = after.charCodeAt(i);
+    if (c !== 0x1b && c !== 0x9b && c !== 0x9d) { buf += after[i]; i++; continue; }
+    flush();
+    if (c === 0x9b) { i = takeCsi(after, i + 1, style); continue; }
+    if (c === 0x9d) { i = takeOsc(after, i + 1); continue; }
+    const next = after.charCodeAt(i + 1);
+    if (next === 0x5b) i = takeCsi(after, i + 2, style);
+    else if (next === 0x5d) i = takeOsc(after, i + 2);
+    else i += next >= 0x40 && next <= 0x5f ? 2 : 1;
   }
+  flush();
   let typed = "";
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i];
