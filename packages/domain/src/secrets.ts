@@ -280,8 +280,9 @@ function inputProblem(input: StoreInput): SecretProblem | null {
 
 type Placed = { secret: Secret; ledger: readonly LedgerEntry[]; version: number; sameAs: readonly string[] };
 
-// A store under a new Reference creates the Secret; under an existing one it is a Rotation, which keeps its Grants,
-// Destinations and Expiry (§10). Either way the ledger decides first.
+// A store under a new Reference creates the Secret; under an existing one it is a Rotation, which keeps its Grants and
+// Destinations and takes the new value's Expiry, clearing the old warnings (§10: renewing an expired Secret is a
+// Rotation). Either way the ledger decides first.
 function place(dir: SecretDirectory, input: StoreInput, command: string, at: number): Result<Placed, SecretRefusal> {
   const p = inputProblem(input);
   if (p) return refuse(p);
@@ -297,6 +298,7 @@ function place(dir: SecretDirectory, input: StoreInput, command: string, at: num
   const secret: Secret = before
     ? {
         ...before, status: before.status === "revoked" ? "active" : before.status, current: fresh, shape: input.shape,
+        expiry: input.expiry, warned: [],
         versions: [...before.versions.map(v => v.retiredAt === null ? { ...v, retiredAt: at } : v), fresh],
       }
     : {
