@@ -11,7 +11,7 @@ const slot = (rows: readonly QueueItem[], running: number, limit: number, guard:
 describe("queue decision", () => {
   it("starts as many as the limit leaves free, in the order accepted; the rest wait with a position", () => {
     const rows = [item("c", AT + 2), item("a"), item("b", AT + 1)];
-    const decided = queueDecision(rows, 1, 2, "off");
+    const decided = queueDecision(rows, 0, 2, "off");
     expect(decided.get("a")).toEqual({ start: true, position: null, reason: null });
     expect(decided.get("b")).toEqual({ start: true, position: null, reason: null });
     expect(decided.get("c")).toEqual({ start: false, position: 1, reason: "class" });

@@ -1,4 +1,5 @@
 export * from "./shared.ts";
+export * from "./queue.ts";
 export * from "./access.ts";
 export * from "./observation.ts";
 export * from "./conversation.ts";
