@@ -211,10 +211,16 @@ const KEPT = new Set([
 
 // A third-party Anthropic Messages base (secret-store README §8.3). The first-party host is left unset:
 // that preset already speaks Claude Code's default endpoint, and overriding the model there would rename it.
-export function anthropicGatewayEnv(baseUrl: string, model: string): Record<string, string> {
+const FIRST_PARTY_HOST = "api.anthropic.com";
+
+export function isThirdPartyAnthropicBase(baseUrl: string): boolean {
   let host = "";
-  try { host = new URL(baseUrl).host; } catch { return {}; }
-  if (host === "" || host === "api.anthropic.com") return {};
+  try { host = new URL(baseUrl).host; } catch { return false; }
+  return host !== "" && host !== FIRST_PARTY_HOST;
+}
+
+export function anthropicGatewayEnv(baseUrl: string, model: string): Record<string, string> {
+  if (!isThirdPartyAnthropicBase(baseUrl)) return {};
   return {
     ANTHROPIC_BASE_URL: baseUrl,
     ANTHROPIC_MODEL: model,

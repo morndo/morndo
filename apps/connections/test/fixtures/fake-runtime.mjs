@@ -162,4 +162,6 @@ if (job.api || job.base) {
 record();
 const result = { type: "result", model: job.model ?? "sonnet-5.5" };
 if (!job.omitCost) result.total_cost_usd = job.cost ?? 0.25;
+if (job.modelUsage) result.modelUsage = job.modelUsage;
+if (job.usage) result.usage = job.usage;
 process.stdout.write(`${JSON.stringify(result)}\n`);

@@ -10,12 +10,12 @@ import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { ClaudeRuntime, helperCommand, isStatusRefusal } from "./adapters/runtime-claude.ts";
+import { ClaudeRuntime, helperCommand, isStatusRefusal, isThirdPartyAnthropicBase } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
-import { costFromOutput, modelFromOutput } from "./adapters/spend.ts";
+import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
@@ -220,7 +220,9 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const again = released ? openHome(saved) : home;
     try {
       const outcome = failure !== "" ? failure : status === 0 ? "done" : "failed";
-      again.leases.close(name, lease.id, outcome, costFromOutput(stdout));
+      const catalogPrices = preset.spend.includes("token-price") && connection.runtime === "claude" && !subscription && isThirdPartyAnthropicBase(baseUrl);
+      const cost = catalogPrices ? catalogTokenCost(stdout, preset.prices, model) : costFromOutput(stdout);
+      again.leases.close(name, lease.id, outcome, cost);
       const seen = modelFromOutput(stdout);
       if (seen && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
     } finally { if (released) again.close(); }

@@ -124,6 +124,41 @@ describe("keys run", () => {
     expect(recorded.bashEnv).not.toContain(KEY);
   }, 20_000);
 
+  it("charges a Z.ai lease from catalog token prices, not total_cost_usd", async () => {
+    const dir = homeDir();
+    const hits: { url?: string | undefined }[] = [];
+    const server = createServer((_req, res) => {
+      hits.push({ url: _req.url });
+      res.end("{}");
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("port");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[] }[];
+    const zai = body.find(row => row.id === "zai");
+    if (!zai) throw new Error("preset");
+    const runtime = zai.runtimes[0];
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = origin;
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "glm", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "20"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "glm", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "glm", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, {
+      base: true,
+      model: "glm-5.3",
+      cost: 99,
+      modelUsage: { "glm-5.3": { inputTokens: 1_000_000, outputTokens: 0 } },
+    })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(hits).toEqual([{ url: "/v1/messages" }]);
+    const spent = JSON.parse((await cli(["spend", "glm"], env)).stdout) as { spent: number };
+    expect(spent.spent).toBe(1.4);
+  }, 20_000);
+
   it("sends the key only as the helper header and keeps it out of env", async () => {
     const dir = homeDir();
     await ready(dir);
