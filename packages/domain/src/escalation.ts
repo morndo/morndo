@@ -235,7 +235,13 @@ export class Escalations {
       return;
     }
     if (s.source.kind === "unreadable") return;          // keep the status we had
-    if (s.source.kind === "missing" && e.tracking === "hub") return;   // E14: only a withdrawal or a settle ends it
+    if (s.source.kind === "missing" && e.tracking === "hub") {
+      // E14: a missing sighting is not a withdrawal, but time still ends it: unanswered, it expires at its due's TTL,
+      // as the sweep and refusal() already say, so the card never looks answerable past the refusal.
+      const ttl = (e.deadline ?? e.askedAt) + HUB_TTL_MS;
+      if (!e.decision && now >= ttl && e.status !== "expired") { e.status = "expired"; e.settledAt = ttl; }
+      return;
+    }
     if (s.source.kind === "missing" && e.tracking !== "ledger") { e.status = "settled"; e.settledAt ??= now; return; }
     if (s.source.kind === "missing" && now - e.askedAt >= LEDGER_GRACE_MS) {
       if (e.status !== "settled") { e.status = "settled"; e.settledAt = now; }
