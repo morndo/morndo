@@ -15,4 +15,5 @@ export * from "./routing.ts";
 export * from "./board.ts";
 export * from "./usage.ts";
 export * from "./jobs.ts";
+export * from "./transcription.ts";
 export * from "./chats.ts";
