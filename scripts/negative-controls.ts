@@ -1044,7 +1044,7 @@ export const CONTROLS: Control[] = [
     find: 'if (req.kind === "renew" && !renews) return refuseRequest("expiry");', replace: "",
     run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'expiry'" },
   { id: "sp1-rotation-shape", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
-    find: "shape: input.shape ?? before.shape,", replace: "shape: input.shape,",
+    find: "shape: input.shape === undefined ? before.shape : input.shape,", replace: "shape: input.shape,",
     run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'shape-a'" },
   { id: "sp1-wire-destinations-max", task: "secrets-pr1", file: "packages/protocol/src/secrets.ts",
     find: "z.maxLength(DESTINATIONS_MAX), ", replace: "",
@@ -1053,11 +1053,23 @@ export const CONTROLS: Control[] = [
     find: "z.minLength(1), z.maxLength(USE_MODES.length), ", replace: "",
     run: ["packages/protocol/test/secrets-wire-followup.test.ts"], expect: "too_small" },
   { id: "sp1-left-workspace", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
-    find: 'lane: gone.lane, workspace: gone.workspace, at: now', replace: "lane: gone.lane, at: now",
+    find: 'type: "SecretRequestLeft", request: req.id, lane: gone.lane, workspace: gone.workspace, at: now',
+    replace: 'type: "SecretRequestLeft", request: req.id, lane: gone.lane, at: now',
     run: ["packages/domain/test/secrets-followup.test.ts"], expect: "SecretRequestLeft" },
   { id: "sp1-withdraw-names-workspace", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
     find: "const { lane, workspace } = waiter;", replace: "const { lane } = waiter; const workspace = null;",
     run: ["packages/domain/test/secrets-followup.test.ts"], expect: "not_waiting" },
+  // Review round 4 (board T-80), each guard removed once.
+  { id: "sp1-wire-each-once-only", task: "secrets-pr1", file: "packages/protocol/src/secrets.ts",
+    find: 'z.refine(eachOnce, "each host once")', replace: 'z.refine((h: string[]) => eachOnce(h) && h.length <= 10, "each host once")',
+    run: ["packages/protocol/test/secrets-wire-round4.test.ts"], expect: "each host once" },
+  { id: "sp1-shape-none-clears", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: "shape: input.shape === undefined ? before.shape : input.shape,", replace: "shape: input.shape ?? before.shape,",
+    run: ["packages/domain/test/secrets-round4.test.ts"], expect: "to be null" },
+  { id: "sp1-withdrawn-waiter", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: 'const event: RequestEvent = { type: "SecretRequestWithdrawn", request: req.id, lane: gone.lane, workspace: gone.workspace, at: now };',
+    replace: 'const event = { type: "SecretRequestWithdrawn", request: req.id, at: now } as RequestEvent;',
+    run: ["packages/domain/test/secrets-round4.test.ts"], expect: "SecretRequestWithdrawn" },
 ];
 
 // ---- the runner
