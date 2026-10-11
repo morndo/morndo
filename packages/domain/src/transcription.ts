@@ -12,7 +12,7 @@
 // Language choice  `auto`, or a language code the engine lists. Not a translation target.
 // Capability  whether a ready Transcriber is there now. Not a setting: it follows the probe (TX9).
 import { err, ok, type Result } from "./shared.ts";
-import { type QueueReason } from "./queue.ts";
+import { queueDecision, type QueueGuard, type QueueReason } from "./queue.ts";
 
 // The one class Transcriptions run in (ADR-0021 decision 7: the Job rules, not the Job rows).
 export type AudioContainer = "ogg" | "webm" | "mp4" | "mp3" | "wav";
@@ -184,4 +184,22 @@ export function afterRestart(rows: readonly Transcription[], at: number): Transc
   return rows.map(tx => tx.state === "running" || tx.state === "starting"
     ? { ...tx, state: "lost", outcome: "lost", endedAt: at, position: null, reason: null, text: null }
     : tx);
+}
+
+// TX5: the one class runs at most its limit (the default is one), by the same decision Jobs uses (queue.ts). A free
+// slot is `starting`, with no start time, until work has begun. A guard delays every start and stops nothing. The
+// limit is the caller's: the config's number, or this default when it names none.
+export const TRANSCRIPTION_LIMIT_DEFAULT = 1;
+
+export function scheduleTranscriptions(rows: readonly Transcription[], limit: number, guard: QueueGuard): Transcription[] {
+  const queued = rows.filter(tx => tx.state === "queued");
+  const running = rows.filter(tx => tx.state === "starting" || tx.state === "running").length;
+  const slots = queueDecision(queued, running, limit, guard);
+  return rows.map(tx => {
+    const slot = slots.get(tx.id);
+    if (!slot) return tx;
+    return slot.start
+      ? { ...tx, state: "starting", position: null, reason: null, startedAt: null, endedAt: null }
+      : { ...tx, position: slot.position, reason: slot.reason };
+  });
 }
