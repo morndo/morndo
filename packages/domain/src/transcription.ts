@@ -121,7 +121,7 @@ export type TranscriptionBody = {
   language: string;
 };
 
-export type RequestProblem = "no_capability" | "bad_id" | "bad_recording" | "bad_language" | "bad_size";
+export type RequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size";
 
 const TX_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/;
 // `auto`, or a language code with optional subtags (`de`, `pt-br`). Not case-free: `DE` is not a code.
@@ -155,6 +155,9 @@ export function requestTranscription(
   if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0 || body.sizeBytes > MAX_RECORDING_BYTES) return err("bad_size");
   const inFlight = existing.find(row => sameRecording(row.recording, recording) && row.language === body.language && open(row.state));
   if (inFlight) return ok(inFlight);
+  // TX3: asking again after an end makes a new attempt, and only the caller's ids tell the two apart, so an id that
+  // names a finished attempt is a conflict, as a Job's is (jobs.ts). An id may be shared only by attempts in flight.
+  if (existing.some(row => row.id === body.id && terminal(row.state))) return err("id_conflict");
   return ok({
     id: body.id, recording, language: body.language, sizeBytes: body.sizeBytes, acceptedAt: at,
     state: "queued", position: null, reason: null, outcome: null, problem: null, text: null, startedAt: null, endedAt: null,
@@ -273,6 +276,9 @@ export function scheduleTranscriptions(rows: readonly Transcription[], limit: nu
   const running = rows.filter(tx => tx.state === "starting" || tx.state === "running").length;
   const slots = queueDecision(queued, running, limit, guard);
   return rows.map(tx => {
+    // TX3: a slot is for a waiting row only, as Jobs' schedule is. A finished row keeps its end whatever its id,
+    // so a queued row that shares a finished row's id can never bring it back to life.
+    if (tx.state !== "queued") return tx;
     const slot = slots.get(tx.id);
     if (!slot) return tx;
     return slot.start
