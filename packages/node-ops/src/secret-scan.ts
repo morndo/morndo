@@ -196,3 +196,16 @@ export function scan(bytes: Uint8Array, entries: readonly IndexEntry[], keyed: K
   const s = createScanner(entries, keyed);
   return mergeRanges([...s.push(bytes).ranges, ...s.end().ranges]);
 }
+
+// ---- The index (stubs until their fix)
+
+export const RETIRED_KEPT_MS = 0;
+export type IndexedVersion = { reference: string; version: number; retiredAt: number | null; entries: readonly IndexEntry[] };
+export type SecretIndex = { format: 1; versions: readonly IndexedVersion[] };
+export const emptySecretIndex = (): SecretIndex => ({ format: 1, versions: [] });
+export function withVersion(index: SecretIndex, _reference: string, _version: number, _entries: readonly IndexEntry[]): SecretIndex { return index; }
+export function retireVersion(index: SecretIndex, _reference: string, _version: number, _at: number): SecretIndex { return index; }
+export function liveEntries(_index: SecretIndex, _now: number): IndexEntry[] { return []; }
+export function pruneIndex(index: SecretIndex, _now: number): SecretIndex { return index; }
+export function serializeIndex(_index: SecretIndex): string { return ""; }
+export function parseIndex(_text: string): SecretIndex | null { return null; }

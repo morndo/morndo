@@ -4,7 +4,10 @@ import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join as joinPath } from "node:path";
 import { describe, expect, it } from "vitest";
-import { SCAN_WINDOW, createScanner, encodedForms, indexValue, scan, type IndexEntry, type ScanRange } from "../src/secret-scan.ts";
+import {
+  RETIRED_KEPT_MS, SCAN_WINDOW, createScanner, emptySecretIndex, encodedForms, indexValue, liveEntries, parseIndex, pruneIndex,
+  retireVersion, scan, serializeIndex, withVersion, type IndexEntry, type ScanRange,
+} from "../src/secret-scan.ts";
 
 const text = (s: string) => new TextEncoder().encode(s);
 const ascii = (b: Uint8Array) => new TextDecoder().decode(b);
@@ -157,6 +160,63 @@ describe("the streaming scanner: split across chunks and at the end of the strea
     const found = [...s.push(join(text("k="), enc.subarray(0, enc.length - 3))).ranges, ...s.push(enc.subarray(enc.length - 3)).ranges, ...s.end().ranges];
     expect(covers(merge(found), 2, 2 + enc.length)).toBe(true);
     expect(covers(scan(join(text("raw="), value), entries, keyed), 4, 4 + value.length)).toBe(true);
+  });
+});
+
+// ---- The index: versions, retirement, and the file's text (design §8.1, §15.4)
+
+describe("the index keeps a retired version 30 days, and its text holds no value", () => {
+  const REF = "secret://example-app/payments-test";
+  const T = 1_700_000_000_000;
+  const DAY = 86_400_000;
+  const index = () => withVersion(withVersion(emptySecretIndex(), REF, 1, entriesOf(SAMPLE)), REF, 2, entriesOf(BINARY));
+
+  it("a retired version is still found 30 days after it retired, and not after that", () => {
+    expect(RETIRED_KEPT_MS).toBe(30 * DAY);
+    const retired = retireVersion(index(), REF, 1, T);
+    const found = (now: number) => scan(join(text("x "), SAMPLE), liveEntries(retired, now), keyed).length > 0;
+    expect(found(T + 30 * DAY)).toBe(true);
+    expect(found(T + 30 * DAY + 1)).toBe(false);
+    expect(scan(join(text("x "), BINARY), liveEntries(retired, T + 365 * DAY), keyed).length).toBeGreaterThan(0);
+  });
+  it("retiring again keeps the first time, so it can't stretch the 30 days", () => {
+    const twice = retireVersion(retireVersion(index(), REF, 1, T), REF, 1, T + 20 * DAY);
+    expect(liveEntries(twice, T + 30 * DAY + 1).length).toBe(entriesOf(BINARY).length);
+  });
+  it("pruning drops what the 30 days no longer cover and keeps the rest", () => {
+    const retired = retireVersion(index(), REF, 1, T);
+    expect(pruneIndex(retired, T + 30 * DAY).versions.map(v => v.version)).toEqual([1, 2]);
+    expect(pruneIndex(retired, T + 30 * DAY + 1).versions.map(v => v.version)).toEqual([2]);
+  });
+  it("the index's text holds no form of any value it indexes (a scan for each)", () => {
+    const file = text(serializeIndex(retireVersion(index(), REF, 1, T)));
+    const holds = (needle: Uint8Array) => {
+      outer: for (let i = 0; i + needle.length <= file.length; i++) {
+        for (let j = 0; j < needle.length; j++) if (file[i + j] !== needle[j]) continue outer;
+        return true;
+      }
+      return false;
+    };
+    for (const value of [SAMPLE, BINARY]) {
+      for (const f of encodedForms(value)) expect(holds(f.bytes), `${f.encoding}/${f.alignment}`).toBe(false);
+    }
+  });
+  it("its text reads back as it was, and anything else is refused whole", () => {
+    const one = retireVersion(index(), REF, 1, T);
+    expect(parseIndex(serializeIndex(one))).toEqual(one);
+    const good = JSON.parse(serializeIndex(one)) as { format: number; versions: Record<string, unknown>[] };
+    const bad = (change: (doc: typeof good) => void) => {
+      const doc = JSON.parse(JSON.stringify(good)) as typeof good;
+      change(doc);
+      return parseIndex(JSON.stringify(doc));
+    };
+    expect(parseIndex("not json")).toBeNull();
+    expect(bad(d => { d.format = 2; })).toBeNull();
+    expect(bad(d => { (d.versions[0] as Record<string, unknown>).reference = "secret://Bad/x"; })).toBeNull();
+    expect(bad(d => { (d.versions[0] as Record<string, unknown>).version = 0; })).toBeNull();
+    expect(bad(d => { (d.versions[0] as Record<string, unknown>).value = "x"; })).toBeNull();
+    expect(bad(d => { ((d.versions[0] as { entries: Record<string, unknown>[] }).entries[0] as Record<string, unknown>).full = "nothex"; })).toBeNull();
+    expect(bad(d => { ((d.versions[0] as { entries: Record<string, unknown>[] }).entries[0] as Record<string, unknown>).length = 7; })).toBeNull();
   });
 });
 
