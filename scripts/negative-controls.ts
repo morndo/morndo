@@ -106,7 +106,7 @@ export const CONTROLS: Control[] = [
     find: `  const doubled = s.replaceAll("#", "##");`, replace: "  const doubled = s;",
     run: ["packages/node-ops/test/tmux-cli.test.ts"], expect: "amain b" },
   { id: "t2-kill-waits", task: "2", file: "packages/node-ops/test/isolated-tmux.ts",
-    find: "    for (let i = 0; i < 100 && !gone(); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);\n", replace: "",
+    find: "    for (let i = 0; i < 25 && !gone(); i++) await pause(20);\n    for (let i = 0; pid > 0 && i < 10 && fate(pid) === \"alive\"; i++) await pause(20);\n", replace: "",
     run: ["packages/node-ops/test/tmux-cli.test.ts"], expect: "to throw" },
   { id: "t2-kill-removes-socket", task: "2", file: "packages/node-ops/test/isolated-tmux.ts",
     find: "    rmSync(join(process.env.TMUX_TMPDIR || \"/tmp\", `tmux-${process.getuid?.() ?? 0}`, socket), { force: true });\n", replace: "",
@@ -654,8 +654,8 @@ export const CONTROLS: Control[] = [
     replace: "",
     run: ["test/fleet/harness.test.ts"] },
   { id: "t17-stopall-recreated-server", task: "17", file: "test/fleet-harness.ts",
-    find: "    kill: () => { t.kill(); },   // stays registered: a server recreated on this socket is stopped by stopAll too",
-    replace: "    kill: () => { servers.delete(t.socket); t.kill(); },",
+    find: "    kill: () => { return t.kill(); },   // stays registered: a server recreated on this socket is stopped by stopAll too",
+    replace: "    kill: () => { servers.delete(t.socket); return t.kill(); },",
     run: ["test/fleet/drills-nodes.test.ts", "test/fleet/harness.test.ts"] },
   // ---- The final review's fix wave (lanes FA and FB) and its follow-up (final-review.md; fixwave-FA/FB-report.md): one
   // entry per guard it added, each with the test that must notice it gone.

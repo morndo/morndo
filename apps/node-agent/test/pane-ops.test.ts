@@ -36,7 +36,7 @@ beforeEach(async () => {
   h = opsHarness({ home: home.home, socket: t.socket });
   lane = await startLane(dirOf("a"));
 });
-afterEach(() => { h.close(); t.kill(); home.cleanup(); });
+afterEach(async () => { h.close(); await t.kill(); home.cleanup(); });
 
 const send = (text: string, key: string, expect: Record<string, unknown> = {}, workerId = lane.workerId, harness = h, timeoutMs?: number) =>
   harness.call("pane.send", { workerId, text, expect: { server: lane.stamp, window: "lane-a", ...expect } }, { key, ...(timeoutMs !== undefined ? { timeoutMs } : {}) });
@@ -96,7 +96,7 @@ describe("pane.send", () => {
 
 describe("pane reuse after a tmux restart (spec §9)", () => {
   async function restartWithReusedPane() {
-    t.kill();
+    await t.kill();
     const fresh = dirOf("b");
     t.tmux("new-session", "-d", "-s", "main", "-n", "lane-a", "-x", "100", "-y", "20", claude(fresh));
     expect(await until(() => screen("=main:0").includes("❯"))).toBe(true);

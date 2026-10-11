@@ -23,7 +23,7 @@ const saved = UNSET.map(k => process.env[k]);
 beforeAll(() => { for (const k of UNSET) delete process.env[k]; });
 afterAll(() => { UNSET.forEach((k, i) => { const v = saved[i]; if (v === undefined) delete process.env[k]; else process.env[k] = v; }); });
 beforeEach(() => { home = tempHome(); t = isolatedTmux(); h = opsHarness({ home: home.home, socket: t.socket }); });
-afterEach(() => { h.close(); t.kill(); home.cleanup(); });
+afterEach(async () => { h.close(); await t.kill(); home.cleanup(); });
 
 const stampNow = () => t.tmux("show-options", "-gqv", "@morndo-server").trim().slice(0, 8);
 // The window name tmux itself shows for a pane (the whole output is the name: no splitting on anything).
@@ -103,7 +103,7 @@ describe("tmux not running, or dying mid-run (Review Focus 2)", () => {
     const old = before.panes[0];
     if (!old) throw new Error("no pane");
     const stamp = before.stamp ?? "";
-    t.kill();
+    await t.kill();
     expect(await h.call("inventory.get", {})).toMatchObject({ ok: true, result: { panes: [], invVersion: 2 } });
     const exp = { server: stamp, window: "api" };
     expect(await h.call("pane.send", { workerId: old.workerId, text: "hi", expect: exp }, { key: "hub:dead" })).toMatchObject({ ok: false, error: { code: "no_pane", executed: "no" } });

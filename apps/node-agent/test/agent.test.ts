@@ -33,7 +33,7 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const s of stops.splice(0)) await s();
   await fleet.close();
-  t.kill();
+  await t.kill();
   home.cleanup();
 });
 const of = (type: string, from = 0) => fleet.received.slice(from).filter(r => r.msg.t === type).map(r => r.msg);
@@ -73,7 +73,7 @@ describe("over the connection", () => {
     const { agent } = await runAgent(config);
     stops.push(() => agent.stop());
     expect(await fleet.waitFor(m => m.t === "ev.health")).toMatchObject({ health: { tmuxOk: true } });
-    t.kill();
+    await t.kill();
     const from = fleet.received.length;
     expect(await fleet.waitFor(m => m.t === "ev.health" && (m.health as { tmuxOk: boolean }).tmuxOk === false, 5000, from)).toBeTruthy();
   });
