@@ -94,8 +94,8 @@ function limitFor(kind: UploadKind): number {
   }
 }
 
-// S1: extension and bytes both have to agree. HTML, SVG, executables and archives are not on the list. Text is UTF-8
-// under 1 MiB; a PDF starts with %PDF- and, like an image, is at most 10 MiB.
+// S1: the extension picks the kind. An image is then whatever image its bytes are. HTML, SVG, executables and archives
+// are not on the list. Text is UTF-8 under 1 MiB; a PDF starts with %PDF- and, like an image, is at most 10 MiB.
 export function acceptNamedUpload(bytes: Uint8Array, name: string): Result<AcceptedUpload, UploadRefusal> {
   const ext = extensionOf(name);
   const image = IMAGE_BY_EXT[ext];
@@ -107,7 +107,7 @@ export function acceptNamedUpload(bytes: Uint8Array, name: string): Result<Accep
   if (!safe || extensionOf(safe) !== ext) return err("bad_name");
   if (kind === "image") {
     const mime = sniffImage(bytes);
-    return mime === image ? ok({ kind, mime, name: safe }) : err("not_allowed");
+    return mime ? ok({ kind, mime, name: safe }) : err("not_allowed");
   }
   if (kind === "pdf") return starts(bytes, 0x25, 0x50, 0x44, 0x46, 0x2d) ? ok({ kind, mime: "application/pdf", name: safe }) : err("not_allowed");
   const problem = textProblem(bytes);

@@ -40,6 +40,7 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     expect(acceptNamedUpload(png(), "shot.png").ok && acceptNamedUpload(png(), "shot.png").value).toMatchObject({ kind: "image", mime: "image/png", name: "shot.png" });
     expect(acceptNamedUpload(jpeg(), "photo.jpg")).toMatchObject({ ok: true, value: { kind: "image", mime: "image/jpeg" } });
     expect(acceptNamedUpload(jpeg(), "photo.jpeg")).toMatchObject({ ok: true, value: { mime: "image/jpeg" } });
+    expect(acceptNamedUpload(jpeg(), "shot.png")).toMatchObject({ ok: true, value: { kind: "image", mime: "image/jpeg", name: "shot.png" } });
   });
   it("keeps a safe file name and drops a path", () => {
     expect(acceptNamedUpload(text("hi\n"), "../../My Notes.md")).toMatchObject({ ok: true, value: { name: "My_Notes.md" } });
@@ -65,7 +66,7 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'/>"), "pic.svg")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'/>"), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(png(), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
-    expect(acceptNamedUpload(jpeg(), "shot.png")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("not a picture"), "shot.png")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(text("not a pdf"), "spec.pdf")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(new Uint8Array([0xff, 0xfe, 0x61]), "notes.md")).toEqual({ ok: false, error: "not_utf8" });
     expect(acceptNamedUpload(new Uint8Array(TEXT_MAX_BYTES + 1), "notes.md")).toEqual({ ok: false, error: "too_big" });
