@@ -8,6 +8,7 @@ const HOUR = 3_600_000;
 const report = (o: Partial<UsageReport> = {}): UsageReport => ({
   account: "max-1", sessionId: "s1", lane: "builder", model: "Opus", at: NOW, contextUsed: 8,
   fiveHour: { usedPercentage: 23.5, resetsAt: NOW + 2 * HOUR }, sevenDay: { usedPercentage: 41.2, resetsAt: NOW + 3 * 24 * HOUR }, spend: null,
+  limits: null, onDemand: null,
   ...o,
 });
 
@@ -54,6 +55,42 @@ describe("sessions (U3) and what is shown now", () => {
     expect(shown.fiveHour).toBeNull();
     expect(shown.sevenDay?.usedPercentage).toBe(41.2);
     expect(shown.sessions).toEqual([]);                               // 2 hours silent: not reporting
+  });
+});
+
+describe("an account's own windows", () => {
+  const cursor = (): UsageReport => ({
+    ...report({ account: "cursor", fiveHour: null, sevenDay: null, spend: null, model: "Cursor Ultra" }),
+    limits: [
+      { label: "Cursor models", usedPercentage: 88, resetsAt: NOW + 27 * 24 * HOUR, resetsOn: "2026-11-07" },
+      { label: "Other models", usedPercentage: 45, resetsAt: NOW + 27 * 24 * HOUR, resetsOn: "2026-11-07" },
+    ],
+    onDemand: "off",
+  } as UsageReport);
+
+  it("a report names each window with its label, percent and reset, and says when it has no 5-hour or weekly window", () => {
+    const a = applyReport(null, cursor(), NOW);
+    expect(a.limits?.map(w => [w.label, w.usedPercentage, w.resetsOn])).toEqual([
+      ["Cursor models", 88, "2026-11-07"],
+      ["Other models", 45, "2026-11-07"],
+    ]);
+    expect(a.onDemand).toBe("off");
+    expect(a.fiveHour).toBeNull();
+    expect(a.sevenDay).toBeNull();
+    const classic = applyReport(null, report(), NOW);
+    expect(classic.limits).toBeNull();
+    expect(classic.onDemand).toBeNull();
+    expect(classic.fiveHour?.usedPercentage).toBe(23.5);
+  });
+
+  it("a later status line keeps named windows until they reset", () => {
+    const first = applyReport(null, cursor(), NOW);
+    const kept = applyReport(first, report({ account: "cursor", at: NOW + 1000, fiveHour: null, sevenDay: null }), NOW + 1000);
+    expect(kept.limits?.[0]?.label).toBe("Cursor models");
+    expect(kept.onDemand).toBe("off");
+    expect(kept.fiveHour).toBeNull();
+    const after = accountNow(first, NOW + 27 * 24 * HOUR + 1);
+    expect(after.limits).toEqual([]);
   });
 });
 

@@ -18,6 +18,28 @@ export function decodeAccounts(raw: unknown[]): { accounts: AccountUsage[]; drop
 }
 
 export const LEVEL_WORDS: Record<UsageLevel, string> = { ok: "Fine", warning: "Running low", critical: "Nearly out" };
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+// "resets 7 Nov" from a calendar date the provider printed (YYYY-MM-DD). Nothing when it isn't a real date.
+export function resetsOnLabel(resetsOn: string | null): string | null {
+  if (!resetsOn) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(resetsOn);
+  if (!m) return null;
+  const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  const month = MONTHS[mo - 1];
+  if (!month) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+  return `resets ${d} ${month}`;
+}
+
+// The one line under a named account's bars. "off" is Cursor's "On-demand usage is off".
+export function onDemandLine(v: string | null): string | null {
+  if (v === "off") return "on-demand off";
+  if (v === "unavailable") return "on-demand limit unavailable";
+  if (v && /^on-demand [A-Za-z0-9$.,() -]{1,60}$/.test(v)) return v;
+  return null;
+}
 // "23% used" at whole percent; a window near its limit says so in words beside the number (never colour alone).
 export const pct = (v: number) => `${Math.round(v)}%`;
 

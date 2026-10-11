@@ -12,6 +12,13 @@ const orElse = z.catch;
 // the session, the model, the context used, and the rate-limit windows, each independently absent. `resets_at` is
 // epoch seconds there. Anything else is dropped (looseObject keeps unknown keys, the hub reads only these).
 const rawWindow = z.looseObject({ used_percentage: z.exactOptional(z.nullable(num())), resets_at: z.exactOptional(z.nullable(num())) });
+// A window the account names itself. Absent on a status line; present, these are the windows it has.
+const rawNamed = z.object({
+  label: z.string().check(z.minLength(1), z.maxLength(80)),
+  used_percentage: z.exactOptional(z.nullable(num())),
+  resets_at: z.exactOptional(z.nullable(num())),
+  resets_on: z.exactOptional(z.nullable(z.string().check(z.maxLength(10)))),
+});
 export const UsageReportBody = z.looseObject({
   session_id: z.string().check(z.minLength(1), z.maxLength(200)),
   session_name: z.exactOptional(z.nullable(z.string().check(z.maxLength(200)))),
@@ -25,14 +32,18 @@ export const UsageReportBody = z.looseObject({
       used_usd: z.exactOptional(z.nullable(num())), limit_usd: z.exactOptional(z.nullable(num())), period: z.exactOptional(z.nullable(z.string().check(z.maxLength(40)))),
     }))),
   }))),
+  limits: z.exactOptional(z.nullable(z.array(rawNamed).check(z.maxLength(8)))),
+  on_demand: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
 });
 export type UsageReportBody = z.output<typeof UsageReportBody>;
 
 const windowSchema = z.object({ usedPercentage: num(), resetsAt: z.nullable(num()) });
 const spendSchema = z.object({ usedPercentage: num(), resetsAt: z.nullable(num()), usedUsd: z.nullable(num()), limitUsd: z.nullable(num()), period: z.nullable(text()) });
+const namedSchema = z.object({ label: text(), usedPercentage: num(), resetsAt: z.nullable(num()), resetsOn: z.nullable(text()) });
 export const AccountUsageSchema = z.object({
   account: text(), reportedAt: num(),
   fiveHour: orElse(z.nullable(windowSchema), null), sevenDay: orElse(z.nullable(windowSchema), null), spend: orElse(z.nullable(spendSchema), null),
+  limits: orElse(z.nullable(z.array(namedSchema)), null), onDemand: orElse(z.nullable(text()), null),
   sessions: z.array(z.object({ sessionId: text(), lane: z.nullable(text()), model: z.nullable(text()), contextUsed: z.nullable(num()), at: num() })),
 });
 // Every connected account, whole, after each hello and whenever a report changed what is shown.

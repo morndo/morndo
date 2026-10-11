@@ -72,6 +72,26 @@ describe("reports under an agent token (U1)", () => {
     expect(a).toMatchObject({ fiveHour: { usedPercentage: 23.5 }, sevenDay: { usedPercentage: 41.2 } });
     expect((a.sessions as Body[]).map(s => s.sessionId)).toEqual(["s2", "s1"]);
   });
+  it("a report that names its windows keeps those bars and does not invent a 5-hour window", async () => {
+    const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
+    const body = {
+      session_id: "cursor-plan", model: { display_name: "Cursor Ultra" },
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "included usage, monthly" } },
+      limits: [
+        { label: "Cursor models", used_percentage: 88, resets_at: resets, resets_on: "2026-11-07" },
+        { label: "Other models", used_percentage: 45, resets_at: resets, resets_on: "2026-11-07" },
+      ],
+      on_demand: "off",
+    };
+    const a = (await json(await post(body, "cursor"))).account as Body;
+    expect(a.fiveHour).toBeNull();
+    expect(a.sevenDay).toBeNull();
+    expect(a.onDemand).toBe("off");
+    expect(a.limits).toEqual([
+      { label: "Cursor models", usedPercentage: 88, resetsAt: resets * 1000, resetsOn: "2026-11-07" },
+      { label: "Other models", usedPercentage: 45, resetsAt: resets * 1000, resetsOn: "2026-11-07" },
+    ]);
+  });
   it("the manager's token reports as the manager's lane", async () => {
     const manager = hub.agents.issue("manager", "manager").secret;
     const a = (await json(await post(statusLine(), "max-1", "", manager))).account as Body;
