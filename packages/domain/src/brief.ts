@@ -48,6 +48,10 @@ const ITEM_BLOCK = /^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|(?:-[ \t]*){3,
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isText = (v: unknown): v is string => typeof v === "string";
 const blank = (s: string) => s.trim() === "";
+// An odd run of backslashes at the end of a string escapes the character that would close it: inside "[label](url)"
+// it eats the "]" or ")" and the link never forms — marked 18.0.14 shows the raw text (checked 2026-10-11). An even
+// run is one escaped backslash, and the link closes as intended.
+const endsInBareBackslash = (s: string) => (/(\\+)$/.exec(s)?.[1].length ?? 0) % 2 === 1;
 
 // Money, one pattern for the whole product (DB5 and the compact card): a currency sign before a digit, or a number
 // (with k, m or bn) before a sign or an ISO code from a short list. "3 weeks" and "6 agent-days" are not money;
@@ -350,8 +354,13 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
       lint.error("bad_link", `evidence[${i}].url`, `"${url}" can't be written as a link's target; no spaces or brackets in it`);
       continue;
     }
+    if (url !== null && endsInBareBackslash(url)) {
+      lint.error("bad_link", `evidence[${i}].url`, `"${url}" can't be written as a link's target; a backslash at the end escapes the ")" that closes it`);
+      continue;
+    }
     if (label !== null) {
       if (/[[\]]/.test(label)) lint.error("bad_markdown", `evidence[${i}].label`, "no brackets in an evidence label; they would break the link it names");
+      else if (endsInBareBackslash(label)) lint.error("bad_markdown", `evidence[${i}].label`, "no backslash at the end of an evidence label; it escapes the \"]\" that closes the link");
       else lint.inline(`evidence[${i}].label`, label);
     }
     if (label !== null && url !== null) evidence.push({ label, url });
