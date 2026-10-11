@@ -4,6 +4,7 @@
 // sees exactly what the hub refuses. Warnings never refuse; a brief with errors is not returned and carries only its
 // errors, so a refusal says what to fix and nothing else.
 // The terms (decision brief, version, lint, compact card) and the rules DB1 to DB10 and E14 are in docs/domain.md.
+import type { Ask } from "./escalation.ts";
 
 export type Md = string;              // prose in the brief's markdown subset (DB7)
 
@@ -339,4 +340,70 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     ref: isText(draft.ref) ? draft.ref : null,
   };
   return { brief, problems: lint.problems };
+}
+
+// The compact card (design §4.4): what every ask, brief-backed or plain, becomes on the principal's list. Derived from
+// the ask alone, never sent: one derivation for the phone, the desktop and the hub, so they cannot disagree. The
+// clause split of a long title is the phone's own rule (apps/web/src/lib/phone/brief.ts), moved into the domain.
+const TITLE_MAX = 60;
+const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
+
+// A title from a long text: its first clause, up to a full stop or "?" or "!" followed by a space or the end, a colon,
+// a semicolon or an opening bracket ("recipes.index" or "www.example.com" don't end it); at most 60 characters, cut at
+// a word. `rest`: what isn't in the title, or the whole text when the title had to be cut.
+export function clause(text: string): { title: string; rest: string | null } {
+  const t = oneLine(text);
+  const m = /^(.+?)(?:([?!])(?:\s|$)|\.(?:\s|$)|:\s|;\s|\s\()/.exec(t);
+  const head = m ? `${m[1] ?? ""}${m[2] ?? ""}`.trim() : t;
+  const restAt = m ? (m[0].endsWith("(") ? m[0].length - 1 : m[0].length) : t.length;
+  if (head.length <= TITLE_MAX) {
+    const rest = t.slice(restAt).trim();
+    return { title: head, rest: rest || null };
+  }
+  const cut = head.slice(0, TITLE_MAX - 1);
+  const word = cut.lastIndexOf(" ");
+  return { title: `${(word > 20 ? cut.slice(0, word) : cut).replace(/[\s,.;:–-]+$/, "")}…`, rest: t };
+}
+
+export type QuickAnswer = { key: string; label: string };
+export type CompactCard = {
+  topic: string;                      // ≤ 60, one line
+  headline: string | null;            // one line: what the principal is asked
+  recommended: string | null;         // the recommended option's label
+  due: number | null;
+  minutes: number | null;
+  spend: boolean;                     // a money figure appears in the ask
+  quickAnswers: QuickAnswer[];        // the tappable answers, the recommended one first
+  hasBrief: boolean;
+};
+
+export function cardOf(item: Ask & { brief: DecisionBrief | null }): CompactCard {
+  const { brief } = item;
+  if (brief) {
+    // A brief with a money figure in it asks for a read and a decision, not a tap (owner decision Q2's default);
+    // without one, its own options are the quick answers, the recommended one first.
+    const spend = stringsOf(brief).some(hasMoney);
+    const recommended = brief.options.find(o => o.key === brief.recommend) ?? null;
+    const ordered = recommended ? [recommended, ...brief.options.filter(o => o !== recommended)] : brief.options;
+    return {
+      topic: brief.topic, headline: brief.headline,
+      recommended: recommended?.label ?? null,
+      due: brief.due, minutes: brief.minutes,
+      spend,
+      quickAnswers: spend ? [] : ordered.map(o => ({ key: o.key, label: o.label })),
+      hasBrief: true,
+    };
+  }
+  const own = item.shortTitle !== null ? oneLine(item.shortTitle) : null;
+  const split = own === null ? clause(item.title) : null;
+  return {
+    topic: own ?? split!.title,
+    headline: item.summary !== null ? oneLine(item.summary) : split!.rest,
+    recommended: item.answerBy === "tap" ? item.options[0]?.label ?? null : null,
+    due: item.deadline,
+    minutes: item.minutes,
+    spend: hasMoney(item.title) || (item.summary !== null && hasMoney(item.summary)) || (item.details !== null && hasMoney(item.details)),
+    quickAnswers: item.answerBy === "tap" ? item.options.map(o => ({ key: o.key, label: o.label })) : [],
+    hasBrief: false,
+  };
 }
