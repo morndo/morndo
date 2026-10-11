@@ -23,7 +23,8 @@ ranges=$(mktemp)
 patterns=$(mktemp)
 paths=$(mktemp)
 patch=$(mktemp)
-trap 'rm -f "$ranges" "$patterns" "$paths" "$patch"' EXIT
+hits=$(mktemp)
+trap 'rm -f "$ranges" "$patterns" "$paths" "$patch" "$hits"' EXIT
 
 gitleaks protect --no-banner --redact
 
@@ -104,95 +105,124 @@ reject() {
   exit 1
 }
 
-# 0 = a match was printed, 1 = none, other = the search itself failed.
-matched() {
-  set +e
-  "$@" >&2
-  status=$?
-  set -e
-  if [ "$status" -eq 0 ]; then
-    return 0
-  fi
-  if [ "$status" -eq 1 ]; then
-    return 1
-  fi
+search_failed() {
   echo "pre-push: pattern search failed" >&2
   exit 1
 }
 
-check_patterns() {
-  # Remaining args are a grep/git-grep command that already includes the pattern source.
-  if matched "$@"; then
-    return 0
+# Every match on one line. An allowlisted or fixture match does not hide a
+# later match, or a local pattern, on that same line. A search error aborts.
+scan_text() {
+  file=$1
+  text=$2
+  status=0
+  raw=$(printf '%s\n' "$text" | grep -o -E -e "$home_re" -e "$key_re" -e "$token_re") || status=$?
+  [ "$status" -le 1 ] || search_failed
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$raw" > "$hits"
+    while IFS= read -r one || [ -n "$one" ]; do
+      [ -n "$one" ] || continue
+      allowed "$file" "$one" && continue
+      obvious_fixture "$file" "$one" && continue
+      reject "home path, private key, or token in $file"
+    done < "$hits"
   fi
-  return 1
-}
-
-# Prints path<TAB>match for hits that are not on the allowlist. Empty means clean.
-# git grep with a tree prints "<tree>:<path>:<match>".
-kept_hits() {
-  sha=$1
-  shift
-  set +e
-  raw=$(git grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@" ":(exclude)$listfile")
-  status=$?
-  set -e
-  if [ "$status" -gt 1 ]; then
-    echo "pre-push: pattern search failed" >&2
-    exit 1
-  fi
-  printf '%s\n' "$raw" | while IFS= read -r line; do
-    [ -n "$line" ] || continue
-    rest=${line#"$sha":}
-    file=${rest%%:*}
-    hit=${rest#*:}
-    skip_file "$file" && continue
-    allowed "$file" "$hit" && continue
-    obvious_fixture "$file" "$hit" && continue
-    printf '%s\t%s\n' "$file" "$hit"
-  done
+  [ -s "$patterns" ] || return 0
+  status=0
+  printf '%s\n' "$text" | grep -E -q -f "$patterns" || status=$?
+  [ "$status" -ne 0 ] || reject "local leak pattern in $file"
+  [ "$status" -eq 1 ] || search_failed
 }
 
 scan_file() {
   file=$1
   skip_file "$file" && return 0
-  hit=$(grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" -- "$file" 2>/dev/null |
-    while IFS= read -r one; do
+  status=0
+  raw=$(grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" -- "$file") || status=$?
+  [ "$status" -le 1 ] || search_failed
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$raw" > "$hits"
+    while IFS= read -r one || [ -n "$one" ]; do
       [ -n "$one" ] || continue
       allowed "$file" "$one" && continue
       obvious_fixture "$file" "$one" && continue
-      printf '%s\n' "$one"
-      break
-    done || true)
-  if [ -n "$hit" ]; then
-    reject "home path, private key, or token in $file"
+      reject "home path, private key, or token in $file"
+    done < "$hits"
   fi
-  if [ -s "$patterns" ] && check_patterns grep -I -n -E -f "$patterns" -- "$file"; then
-    reject "local leak pattern in $file"
-  fi
+  [ -s "$patterns" ] || return 0
+  status=0
+  grep -I -q -E -f "$patterns" -- "$file" || status=$?
+  [ "$status" -ne 0 ] || reject "local leak pattern in $file"
+  [ "$status" -eq 1 ] || search_failed
 }
 
 scan_sha() {
   sha=$1
   shift
-  found=$(kept_hits "$sha" "$@" | head -n 1 || true)
-  if [ -n "$found" ]; then
-    reject "home path, private key, or token in ${found%%	*}"
+  status=0
+  raw=$(git grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@" ":(exclude)$listfile") || status=$?
+  [ "$status" -le 1 ] || search_failed
+  if [ "$status" -eq 0 ]; then
+    printf '%s\n' "$raw" > "$hits"
+    while IFS= read -r line || [ -n "$line" ]; do
+      [ -n "$line" ] || continue
+      rest=${line#"$sha":}
+      file=${rest%%:*}
+      hit=${rest#*:}
+      skip_file "$file" && continue
+      allowed "$file" "$hit" && continue
+      obvious_fixture "$file" "$hit" && continue
+      reject "home path, private key, or token in $file"
+    done < "$hits"
   fi
-  if [ -s "$patterns" ] && check_patterns git grep -I -n -E -f "$patterns" "$sha" -- "$@" ":(exclude)$listfile"; then
-    reject "local leak pattern in $sha"
-  fi
+  [ -s "$patterns" ] || return 0
+  status=0
+  git grep -I -q -E -f "$patterns" "$sha" -- "$@" ":(exclude)$listfile" || status=$?
+  [ "$status" -ne 0 ] || reject "local leak pattern in $sha"
+  [ "$status" -eq 1 ] || search_failed
 }
 
-# Added lines of a unified diff. A marker that was already in the file is not
-# an added line, so editing the file does not report it again.
+# New-file length from a hunk header. Omitted count means one line.
+hunk_new_lines() {
+  rest=${1#*+}
+  rest=${rest%% @@*}
+  case "$rest" in
+    *,*) rest=${rest#*,} ;;
+    *) rest=1 ;;
+  esac
+  case "$rest" in
+    *[!0-9]*|'') printf '0' ;;
+    *) printf '%s' "$rest" ;;
+  esac
+}
+
+# Added lines of a unified diff. Headers are read only outside a hunk, and a
+# hunk is the number of new-file lines the header names. A marker already in
+# the file is not an added line.
 scan_patch() {
   file=
-  hunk=0
+  left=0
   while IFS= read -r line || [ -n "$line" ]; do
+    if [ "$left" -gt 0 ]; then
+      case "$line" in
+        '\'*) continue ;;
+        '-'*) continue ;;
+        '+'*)
+          text=${line#+}
+          case "$file" in
+            ''|/dev/null) ;;
+            *) skip_file "$file" || scan_text "$file" "$text" ;;
+          esac
+          left=$((left - 1))
+          ;;
+        *)
+          left=$((left - 1))
+          ;;
+      esac
+      continue
+    fi
     case "$line" in
       'diff --git '*)
-        hunk=0
         file=
         ;;
       '+++ '*)
@@ -201,28 +231,9 @@ scan_patch() {
           '"'*) file=${file#\"}; file=${file%\"} ;;
         esac
         file=${file#b/}
-        hunk=0
         ;;
       '@@'*)
-        hunk=1
-        ;;
-      '+'*)
-        [ "$hunk" -eq 1 ] || continue
-        [ -n "$file" ] || continue
-        case "$file" in
-          /dev/null) continue ;;
-        esac
-        skip_file "$file" && continue
-        text=${line#+}
-        one=$(printf '%s\n' "$text" | grep -o -E -e "$home_re" -e "$key_re" -e "$token_re" | head -n 1 || true)
-        if [ -n "$one" ]; then
-          allowed "$file" "$one" && continue
-          obvious_fixture "$file" "$one" && continue
-          reject "home path, private key, or token in $file"
-        fi
-        if [ -s "$patterns" ] && printf '%s\n' "$text" | grep -E -q -f "$patterns"; then
-          reject "local leak pattern in $file"
-        fi
+        left=$(hunk_new_lines "$line")
         ;;
     esac
   done < "$1"

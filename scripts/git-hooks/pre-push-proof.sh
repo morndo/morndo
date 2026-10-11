@@ -215,6 +215,101 @@ set -e
 [ "$code" -eq 1 ] || fail "home path in a test should exit 1, got $code"
 cd "$root"
 
+# A line that starts with '++' is content, not a diff header. The home path
+# after it still fails, as does the same path without that line.
+git init -q "$scratch/hunk"
+cp "$root/.gitleaks.toml" "$scratch/hunk/.gitleaks.toml"
+cd "$scratch/hunk"
+printf 'keep\n' > a.md
+git add a.md .gitleaks.toml
+commit_ok -m 'hunk base'
+base=$(git rev-parse HEAD)
+printf 'keep\n++ counter\n/%s/%s/notes\n' home realperson > a.md
+git add a.md
+commit_ok -m 'plus plus then a path'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "path after a plus-plus line should exit 1, got $code"
+git reset -q --hard "$base"
+printf 'keep\n/%s/%s/notes\n' home realperson > a.md
+git add a.md
+commit_ok -m 'path alone'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "path without a plus-plus line should exit 1, got $code"
+cd "$root"
+
+# The first match on a line being allowlisted must not hide a later one.
+git init -q "$scratch/line"
+cp "$root/.gitleaks.toml" "$scratch/line/.gitleaks.toml"
+cd "$scratch/line"
+mkdir -p apps/fleet/test
+printf 'base\n' > apps/fleet/test/client-api.test.ts
+git add apps/fleet/test/client-api.test.ts .gitleaks.toml
+commit_ok -m 'line base'
+base=$(git rev-parse HEAD)
+printf 'see /%s/%s/ and /%s/%s/\n' home u home realname >> apps/fleet/test/client-api.test.ts
+git add apps/fleet/test/client-api.test.ts
+commit_ok -m 'two paths'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "second path on an allowlisted line should exit 1, got $code"
+git reset -q --hard "$base"
+mkdir -p "$(git rev-parse --git-dir)/info"
+marker=$(printf '%s-%s-%s' zz private marker)
+printf '%s\n' "$marker" > "$(git rev-parse --git-dir)/info/leak-patterns"
+printf '/%s/%s/ %s\n' home u "$marker" >> apps/fleet/test/client-api.test.ts
+git add apps/fleet/test/client-api.test.ts
+commit_ok -m 'path and a local pattern'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "local pattern beside an allowlisted path should exit 1, got $code"
+cd "$root"
+
+# An unreadable untracked file, and a git grep that cannot read the tree, abort.
+git init -q "$scratch/closed"
+cp "$root/.gitleaks.toml" "$scratch/closed/.gitleaks.toml"
+cd "$scratch/closed"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'closed base'
+printf 'hidden\n' > hidden.txt
+chmod 000 hidden.txt
+set +e
+out=$(sh "$root/$hook" </dev/null 2>&1)
+code=$?
+set -e
+chmod 644 hidden.txt
+[ "$code" -eq 1 ] || fail "unreadable file should exit 1, got $code"
+printf '%s\n' "$out" | grep -q 'pattern search failed' || fail "unreadable file should say the search failed"
+rm -f hidden.txt
+printf 'x\n' > extra.txt
+git add extra.txt
+commit_ok -m 'missing tree'
+bad=$(git rev-parse HEAD)
+tree=$(git rev-parse "$bad^{tree}")
+git reset -q --hard HEAD~1
+rm -f ".git/objects/${tree%${tree#??}}/${tree#??}"
+set +e
+out=$(printf '%s %s %s %s\n' refs/heads/main "$bad" refs/heads/main "$zero" | sh "$root/$hook" 2>&1)
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "unreadable tree should exit 1, got $code"
+printf '%s\n' "$out" | grep -q 'pattern search failed' || fail "unreadable tree should say the search failed"
+cd "$root"
+
 # Author and committer must both be a noreply address. Identity is set on the command.
 git init -q "$scratch/mail"
 cp "$root/.gitleaks.toml" "$scratch/mail/.gitleaks.toml"
