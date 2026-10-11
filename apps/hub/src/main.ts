@@ -238,7 +238,7 @@ switch (cmd) {
       try { steering.withdrawOverdue(); }
       catch (e) { log.warn("a queued command's deadline could not be checked", e); }
     }, Math.max(config.pollMs, 1000));
-    log.info(`morndo ${productVersion()} hub on http://127.0.0.1:${config.port}, for ${config.origin}`);
+    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
     const stop = async () => { clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
     process.on("SIGINT", () => void stop());
