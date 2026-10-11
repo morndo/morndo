@@ -228,7 +228,10 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     } finally { if (released) again.close(); }
   }
   if (refusal !== null) return refusal;
-  return status === 70 || status === 75 ? 1 : status;
+  // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
+  // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
+  // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
+  return status === 70 || status === 75 || status === 78 ? 1 : status;
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
