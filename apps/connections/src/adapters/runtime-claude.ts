@@ -239,6 +239,19 @@ export function keysLauncher(home: string, configured?: string): string {
   return INSTALLED_KEYS;
 }
 
+// A run from a checkout has no installer-written launcher. The helper must still be this program,
+// on an absolute path, or the runtime receives an empty key.
+export function keysProgram(
+  home: string,
+  configured: string | undefined,
+  present: (path: string) => boolean,
+  self: { command: string; args: readonly string[] },
+): { command: string; args: readonly string[] } {
+  const layout = keysLauncher(home, configured);
+  if (present(layout)) return { command: layout, args: [] };
+  return { command: self.command, args: self.args };
+}
+
 export function helperCommand(launcher: string, lease: string): string {
   return `${launcher} helper --lease ${lease}`;
 }

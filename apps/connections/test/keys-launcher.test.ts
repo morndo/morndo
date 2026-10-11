@@ -1,6 +1,6 @@
 import { isAbsolute, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { helperCommand, keysLauncher } from "../src/adapters/runtime-claude.ts";
+import { helperCommand, keysLauncher, keysProgram } from "../src/adapters/runtime-claude.ts";
 import { helperParts } from "../src/adapters/runtime-codex.ts";
 
 describe("keys launcher", () => {
@@ -20,5 +20,13 @@ describe("keys launcher", () => {
     expect(isAbsolute(unset)).toBe(true);
     expect(unset.startsWith(".")).toBe(false);
     expect(keysLauncher("", "morndo-keys")).toBe("/usr/local/bin/morndo-keys");
+  });
+  it("uses this program when the installed launcher is missing", () => {
+    const self = { command: "/usr/bin/node", args: ["--experimental-strip-types", "/opt/morndo/main.ts"] };
+    expect(keysProgram("/srv/person", undefined, () => false, self)).toEqual(self);
+    expect(keysProgram("", undefined, () => false, self)).toEqual(self);
+    expect(keysProgram("/srv/person", undefined, () => true, self)).toEqual({
+      command: join("/srv/person", ".local/bin/morndo-keys"), args: [],
+    });
   });
 });

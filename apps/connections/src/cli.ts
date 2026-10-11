@@ -10,7 +10,7 @@ import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { ClaudeRuntime, helperCommand, isStatusRefusal, keysLauncher } from "./adapters/runtime-claude.ts";
+import { ClaudeRuntime, isStatusRefusal, keysProgram } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
@@ -170,7 +170,11 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const row = findConnection(home.store.load().directory, name);
   const lease = row && row.custody === "morndo" ? row.leases.find(item => item.id === granted.id) : undefined;
   if (!lease) return fail(io, "missing");
-  const launcher = keysLauncher(home.env.HOME ?? "", home.env.MORNDO_KEYS);
+  const keys = keysProgram(home.env.HOME ?? "", home.env.MORNDO_KEYS, existsSync, {
+    command: process.execPath,
+    args: ["--experimental-strip-types", join(import.meta.dirname, "main.ts")],
+  });
+  const helperLine = [keys.command, ...keys.args, "helper", "--lease", lease.id].join(" ");
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
@@ -199,14 +203,15 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       onStdout: (chunk: string) => { io.stdout(outRedactor.push(chunk)); },
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
     };
+    const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
       ? await new CodexRuntime({
         bin, profilePath: saved.MORNDO_CODEX_CONFIG ?? join(home.dir, "codex-profile.toml"), configDir,
-        ...helperParts(launcher, lease.id), baseUrl, parent: saved,
+        command: codexHelper.command, args: [...keys.args, ...codexHelper.args], baseUrl, parent: saved,
       }).execute(plan, parsed.rest, hooks)
       : connection.runtime === "cursor"
         ? await new CursorRuntime(saved.MORNDO_CURSOR_BIN ?? "agent", saved).execute(plan, parsed.rest, hooks)
-        : await new ClaudeRuntime(bin, helperCommand(launcher, lease.id), saved).execute(plan, parsed.rest, hooks);
+        : await new ClaudeRuntime(bin, helperLine, saved).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
   } catch (error) {
