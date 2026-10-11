@@ -3,6 +3,7 @@
 // still fires while the agent is down. SIGTERM means cancel.
 import { spawn } from "node:child_process";
 import { chmodSync, constants, existsSync, openSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { capStep, type CapSight } from "./job-cap.ts";
 import { writeProcessFile } from "./job-identity.ts";
 import { MAX_TIMER_MS } from "./job-limits.ts";
 import { fileURLToPath } from "node:url";
@@ -92,13 +93,19 @@ async function main(): Promise<void> {
       chmodSync(spec.childPath, 0o600);
     }
   }
+  let childCode: number | null = null;
+  let childExited = false;
   stop = async (kind: "cancelled" | "timed_out" | "capped") => {
     if (stopping || wrote) return;
     stopping = kind;
+    // Design §5: a capped command keeps its own code only when its main process ended before this stop. Exits that
+    // arrive from here on are not recorded (the exit handler checks `stopping`), so a SIGTERM handler that exits 0
+    // still leaves no code.
+    const endedFirst = childExited;
     if (child.pid !== undefined) await killGroup(child.pid);
     const durationMs = Math.max(0, Date.now() - started);
     write(kind === "capped"
-      ? { outcome: "exited", exitCode: null, durationMs }
+      ? { outcome: "exited", exitCode: endedFirst ? childCode : null, durationMs }
       : { outcome: kind, exitCode: 137, durationMs });
     process.exit(0);
   };
@@ -107,13 +114,13 @@ async function main(): Promise<void> {
     write({ outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" });
     process.exit(0);
   });
-  let childCode: number | null = null;
-  let childExited = false;
   child.on("exit", (code, signal) => {
     if (stopping || wrote) return;
     childExited = true;
     childCode = code !== null ? code : signal === "SIGKILL" ? 137 : signal === "SIGTERM" ? 143 : null;
   });
+  // Design §5: this helper owns the cap. A .cap file from the supervisor counts as a sighting, never as a stop.
+  let sight: CapSight | null = null;
   const linger = setInterval(() => {
     if (stopping || wrote) return;
     if (childExited && (child.pid === undefined || gone(child.pid))) {
@@ -122,12 +129,16 @@ async function main(): Promise<void> {
       process.exit(0);
       return;
     }
-    if (existsSync(capRequest(spec.exitPath))) { void stop?.("capped"); return; }
+    let size = 0;
     if (spec.logBytes > 0) {
-      let size = 0;
       try { size = statSync(spec.logPath).size; } catch { /* a missing log is not over the cap */ }
-      if (size >= spec.logBytes) { void stop?.("capped"); return; }
     }
+    const step = capStep(sight, size, spec.logBytes, Date.now(), existsSync(capRequest(spec.exitPath)));
+    if (step.kind === "under") return;
+    if (step.kind === "grace" && !childExited) { sight = step.sight; return; }
+    // setImmediate runs after this turn's poll phase, where libuv hands over a child exit the kernel already reported,
+    // so an exit that came before this decision is seen by stop().
+    setImmediate(() => { void stop?.("capped"); });
   }, 30);
   if (spec.timeoutMs !== null && spec.timeoutMs > 0 && spec.timeoutMs <= MAX_TIMER_MS) {
     setTimeout(() => { void stop?.("timed_out"); }, spec.timeoutMs);

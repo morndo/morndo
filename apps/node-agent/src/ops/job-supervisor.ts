@@ -15,6 +15,7 @@ import {
 import { deniedBy, denyRoots, processAlive, resolvedRoots } from "@morndo/node-ops";
 import { errno } from "@morndo/service-kit";
 import { psStarts, readRecorded, sameProcess, START_RECORD_GRACE_MS, writeProcessFile, type Recorded } from "./job-identity.ts";
+import { capStep, endedBeforeStop, UNIT_CAP_LOOK_MS, type CapSight } from "./job-cap.ts";
 import { MAX_TIMER_MS } from "./job-limits.ts";
 import { askHub, JobGrants } from "./job-grant.ts";
 import { killJobUnit, managerEnv, probeUserManager, resetJobUnit, runMs, showUnit, spawnFailed, startJobUnit, stopJobUnit, type ProbeResult, type UnitLook, type UnitState } from "./job-systemd.ts";
@@ -597,9 +598,16 @@ export class JobSupervisor {
     const view = look.view;
     if (view.active === "activating" || (view.active === "active" && view.sub === "running")) {
       if (job.state === "starting") this.#store.started(id);
-      if (this.#overCap(id)) await this.#stopForCap(id);
+      if (this.#overCap(id)) await this.#capUnit(id, view);
       return;
     }
+    await this.#settleUnit(id, view);
+  }
+
+  // A unit that is no longer running: its own result, read from systemd.
+  async #settleUnit(id: string, view: UnitState): Promise<void> {
+    const job = this.#open(id);
+    if (!job) return;
     const durationMs = runMs(view, job.startedAt);
     const event = exitOf(view, durationMs);
     if (!event) return;
@@ -613,6 +621,30 @@ export class JobSupervisor {
     } catch { return; }
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
+  }
+
+  // Design §5: on systemd the sweep that sees the cap owns it. The grace runs here, looking every UNIT_CAP_LOOK_MS, so
+  // the 1-second sweep does not stretch it. Each look checks the log and the unit's main process; only when that
+  // process is gone does it ask systemd how the unit ended. The .cap file notes the sighting, so a later sweep, or a
+  // restarted agent, still knows the log is at the cap.
+  async #capUnit(id: string, view: UnitState): Promise<void> {
+    this.#requestCap(id);
+    let sight: CapSight | null = null;
+    for (;;) {
+      const step = capStep(sight, this.#logSize(id), this.#store.logBytes, Date.now(), true);
+      if (step.kind !== "grace") break;
+      sight = step.sight;
+      await wait(UNIT_CAP_LOOK_MS);
+      if (view.mainPid > 0 && processAlive(view.mainPid)) continue;
+      const look = await showUnit(id, this.#toolEnv);
+      if (look.kind === "absent") return;
+      if (look.kind === "found" && !this.#live(look.view)) { await this.#settleUnit(id, look.view); return; }
+    }
+    await this.#stopForCap(id);
+  }
+
+  #logSize(id: string): number {
+    try { return statSync(join(this.#store.dir, `${id}.log`)).size; } catch { return 0; }
   }
 
   async #cancelUnit(id: string): Promise<Result<NoticeHandoff, SuperviseProblem>> {
@@ -843,8 +875,11 @@ export class JobSupervisor {
     return after;
   }
 
+  // Design §5: no code for a unit still running when the stop is sent. A main process that exited normally (CLD_EXITED,
+  // ExecMainCode 1) before the stop keeps its own result. One found killed by a signal after the stop was stopped by it.
   async #stopForCap(id: string): Promise<void> {
     this.#requestCap(id);
+    const sentUsec = process.hrtime.bigint() / 1000n;
     const after = await this.#endLive(id);
     if (after === "unsignalled" || after === "signalled" || after.kind !== "found") return;
     const job = this.#open(id);
@@ -854,7 +889,8 @@ export class JobSupervisor {
       if (!started.ok) return;
     }
     const durationMs = runMs(after.view, job.startedAt);
-    try { this.#store.settle(id, { outcome: "exited", exitCode: null, durationMs }); } catch { return; }
+    const own = after.view.execCode === 1 && endedBeforeStop(after.view.exitedUsec, sentUsec) ? exitOf(after.view, durationMs) : null;
+    try { this.#store.settle(id, own ?? { outcome: "exited", exitCode: null, durationMs }); } catch { return; }
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
   }
