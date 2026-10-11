@@ -295,6 +295,8 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     const factor = lint.string(`comparison.rows[${i}].factor`, row.factor, CAPS.factor);
     if (factor !== null && factor.includes("|")) {
       lint.error("bad_markdown", `comparison.rows[${i}].factor`, "a factor can't hold \"|\"; it would break the table's columns");
+    } else if (factor !== null) {
+      lint.inline(`comparison.rows[${i}].factor`, factor);   // it lands in the table like its cells (§4.5)
     }
     const cellsIn = row.cells;
     let cells: string[] | null = Array.isArray(cellsIn) ? cellsIn : null;
