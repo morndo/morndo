@@ -67,13 +67,7 @@ jobs:
           else
             set -- "$BEFORE_SHA..$AFTER_SHA"
           fi
-          # A push to main does not re-check commits already published with an
-          # exception. Excluding one excludes its ancestors too, which are
-          # published with it.
-          if [ -s "$protected" ]; then
-            while IFS= read -r sha; do
-              case "$sha" in ''|'#'*) continue ;; esac
-              set -- "$@" --not "$sha"
-            done < "$protected"
-          fi
+          # Every commit in the pushed range is checked. An exception skips
+          # the mail check of the exact sha it lists, never a message, a
+          # name, or an ancestor.
           exec sh scripts/git-hooks/commit-traces range "$@"

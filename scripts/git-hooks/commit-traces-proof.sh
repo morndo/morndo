@@ -129,6 +129,37 @@ printf '%s\n' "$published" > "$protected"
 TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published" --max-count=1 || fail "the listed published commit should exit 0"
 TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published^..$published" || fail "a range holding the published commit should exit 0"
 
+# The exception skips the mail check only: a listed commit whose message
+# attributes the change still fails. The commit-msg hook would refuse the
+# message, so this bad commit is made with --no-verify.
+msg=$(printf '%s\n\nCo-authored-by: %s <a@example.invalid>\n' 'fix: clean note' 'Claude')
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
+  commit -q --no-verify --allow-empty -m "$msg"
+tip=$(git rev-parse HEAD)
+printf '%s\n' "$tip" > "$protected"
+set +e
+TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published..$tip"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a listed commit with an assistant trailer should exit 1, got $code"
+
+# Listing a sha excludes no ancestor: the plain range CI passes holds the
+# unlisted parent, and its personal address still fails.
+git reset -q --hard "$published"
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
+  commit -q --allow-empty -m 'unlisted ancestor'
+parent=$(git rev-parse HEAD)
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
+  commit -q --allow-empty -m 'published with a personal address'
+listed=$(git rev-parse HEAD)
+printf '%s\n' "$listed" > "$protected"
+set +e
+TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$published..$listed"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "an ancestor beside a listed commit should exit 1, got $code"
+TRACES_PUBLISHED_EXCEPTIONS="$protected" sh "$checker" range "$listed^..$listed" || fail "the listed commit alone should exit 0"
+
 # A branch cannot list itself: the tree under test adds its own bad commit
 # to the list, and the check still reads the copy from the branch it
 # protects, the way CI does.
