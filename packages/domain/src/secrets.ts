@@ -374,9 +374,12 @@ export function storeSecret(dir: SecretDirectory, input: StoreInput, actor: Acto
 // A store that answers a renew request (secrets.store names its kind; design §5.3, step 6). The node holds the Expiry, so
 // it decides here, before anything is stored: a renew names an Expiry later than now and than the current one. Anything
 // else is refused as renew_expiry, and the request stays open (SR8). Decided on T-80 (review round 4). Renewing is a
-// Rotation of a Secret this node holds, so a Reference it doesn't hold is refused as missing, not stored new (T-83).
+// Rotation of a Secret this node holds, so a Reference it doesn't hold is refused as missing, not stored new. The input
+// is checked first, as a store's is, so a refusal names its real problem (T-83).
 export function renewSecret(dir: SecretDirectory, input: StoreInput, actor: Actor, at: number): Result<SecretDirectory, SecretRefusal> {
   if (!commandOf(actor)) return refuse("principal");
+  const p = inputProblem(input);
+  if (p) return refuse(p);
   if (input.expiry === null || !(input.expiry > at)) return refuse("renew_expiry");
   const before = findSecret(dir, input.reference);
   if (!before) return refuse("missing");
