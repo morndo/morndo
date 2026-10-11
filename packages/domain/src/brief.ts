@@ -42,9 +42,22 @@ const CAPS = {
 // prose and allowed in the multi-line fields; the one-line fields refuse it as one.
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000D-\u001F\u007F]/;
 // A block that opens where a list item's own content starts (up to three leading spaces still leave it one): an ATX
-// heading, a block quote, a code fence, or a thematic break as the whole item (CommonMark; marked 18.0.14 renders
-// each as a block inside the <li>, checked 2026-10-11).
-const ITEM_BLOCK = /^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
+// heading, a block quote, a code fence, a thematic break as the whole item, or a list marker — bullet or ordered —
+// that would nest a list of the asker's own inside the format's (CommonMark; marked 18.0.14 renders each as a block
+// inside the <li>, checked 2026-10-11).
+const ITEM_BLOCK = /^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$)|(?:-[ \t]*){3,}$|(?:\*[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
+// Four columns of indent open an indented code block where an item's own content starts. briefMarkdown writes each
+// item as "- ${item}", so its indent counts from column two, and a tab jumps to the next multiple of four
+// (CommonMark; marked 18.0.14 renders such an item as <li><pre><code>, checked 2026-10-11).
+const indentsCode = (s: string): boolean => {
+  let col = 2;
+  for (const ch of s) {
+    if (ch === " ") col += 1;
+    else if (ch === "\t") col += 4 - (col % 4);
+    else return col - 2 >= 4;
+  }
+  return false;                     // whitespace alone is blank, refused as an empty item before these rules (DB6)
+};
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isText = (v: unknown): v is string => typeof v === "string";
 const blank = (s: string) => s.trim() === "";
@@ -98,12 +111,13 @@ class Lint {
   inline(where: string, s: string) { this.#subset(where, s); }
 
   // DB7 for a field that lands as a whole list item of its own (`- ${item}` in briefMarkdown): the item's content
-  // starts the line, so a heading, a quote, a fence or a rule that begins it opens a block inside the item — marked
-  // renders `<li><h1>APPROVE NOW</h1></li>` for `- # APPROVE NOW` (checked against marked 18.0.14, 2026-10-11), and a
-  // fence swallows the items after it. The format owns the outline, and an item is one line of prose.
+  // starts the line, so a heading, a quote, a fence, a rule or a nested list marker that begins it opens a block
+  // inside the item — marked renders `<li><h1>APPROVE NOW</h1></li>` for `- # APPROVE NOW` (checked against marked
+  // 18.0.14, 2026-10-11), a fence swallows the items after it, and four columns of indent open code. The format owns
+  // the outline, and an item is one line of prose.
   listItem(where: string, s: string) {
-    if (ITEM_BLOCK.test(s)) {
-      this.error("bad_markdown", where, "no heading, quote, fence or rule of your own; an item is one line of prose");
+    if (indentsCode(s) || ITEM_BLOCK.test(s)) {
+      this.error("bad_markdown", where, "no heading, quote, fence, rule, nested list or indented code of your own; an item is one line of prose");
       return;
     }
     this.#subset(where, s);
