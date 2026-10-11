@@ -39,10 +39,12 @@ export function due(at: number, now: number): string {
 }
 
 export function brief(d: DecisionItem, now: number): Brief {
-  const own = d.shortTitle ? oneLine(d.shortTitle) : null;
+  // A short form of whitespace only is no short form (ADR-0023 §4.4, as the domain's compact card): the title's
+  // first clause takes over, never a blank row.
+  const own = d.shortTitle?.trim() ? oneLine(d.shortTitle) : null;
   const c = own ? null : clause(d.title);
   const title = own ?? c?.title ?? d.title;
-  const sentence = d.summary ? oneLine(d.summary) : null;
+  const sentence = d.summary?.trim() ? oneLine(d.summary) : null;
   // The long text behind More: all of it when the list gave a title, else what the title left out; never a repeat.
   const long = own ? (oneLine(d.title) === own || oneLine(d.title) === sentence ? null : d.title.trim()) : c?.rest ?? null;
   const text = [long, d.details?.trim() || null].filter((x): x is string => !!x).join("\n\n") || null;

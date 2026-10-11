@@ -476,9 +476,9 @@ export function cardOf(item: Ask & { brief: DecisionBrief | null }): CompactCard
       hasBrief: true,
     };
   }
-  // An empty short form is no short form (today's truthiness, apps/web/src/lib/phone/brief.ts): the title's first
-  // clause takes over, as on the phone.
-  const own = item.shortTitle ? oneLine(item.shortTitle) : null;
+  // An empty or whitespace-only short form is no short form (today's rule, apps/web/src/lib/phone/brief.ts): the
+  // title's first clause takes over, as on the phone.
+  const own = item.shortTitle?.trim() ? oneLine(item.shortTitle) : null;
   const split = own === null ? clause(item.title) : null;
   // Q2's default, also when the brief itself is out of sight — an old app, or the wire's null fallback: an ask with a
   // money figure in what it shows (a brief the hub filed carries the whole case in `details`) is read and decided, not
@@ -486,7 +486,7 @@ export function cardOf(item: Ask & { brief: DecisionBrief | null }): CompactCard
   const spend = hasMoney(item.title) || (item.summary !== null && hasMoney(item.summary)) || (item.details !== null && hasMoney(item.details));
   return {
     topic: own ?? split!.title,
-    headline: item.summary ? oneLine(item.summary) : split?.rest ?? null,
+    headline: item.summary?.trim() ? oneLine(item.summary) : split?.rest ?? null,
     recommended: item.answerBy === "tap" ? item.options[0]?.label ?? null : null,
     due: item.deadline,
     minutes: item.minutes,
