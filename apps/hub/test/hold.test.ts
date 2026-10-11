@@ -64,6 +64,18 @@ describe("hold", () => {
     expect(res.status).toBe(503);
     expect(res.headers.get("retry-after")).toBe("1");
     expect(await res.json()).toEqual({ error: "updating" });
+    const narrow = await fetch(`${base}/api/connections/narrow`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://hub.example.test", "tailscale-user-login": LOGIN },
+      body: JSON.stringify({ version: 1, name: "work", action: "off" }),
+    });
+    expect(narrow.status).not.toBe(503);
+    const revoke = await fetch(`${base}/api/connections/revoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "https://hub.example.test", "tailscale-user-login": LOGIN },
+      body: JSON.stringify({ version: 1, name: "work" }),
+    });
+    expect(revoke.status).not.toBe(503);
   });
   it("refuses a terminal or desktop upgrade with 503", async () => {
     for (const path of ["/api/terminal?pane=%251", "/api/desktop"]) {

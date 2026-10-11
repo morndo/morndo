@@ -136,9 +136,10 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   const flight = d.updates?.flight ?? new Flight();
   const held = d.updates?.held ?? (() => false);
   const schema = d.updates?.schema ?? SCHEMA_VERSION;
-  // A revocation still runs during a hold (RL9). Every other side effect is refused before it is sent.
+  // A hold still allows a revocation, a narrowing, a lane stop and a job cancel (RL9). Every other side effect is refused before it is sent.
+  const allowedWhileHeld = new Set(["connections.revoke", "connections.narrow", "lane.stop", "job.cancel"]);
   function heldRefusal(op: Parameters<Router["op"]>[1]): { status: number; outcome: Outcome } | null {
-    if (held() && SIDE_EFFECT_OPS.has(op) && op !== "connections.revoke") {
+    if (held() && SIDE_EFFECT_OPS.has(op) && !allowedWhileHeld.has(op)) {
       return { status: 503, outcome: { ok: false, error: opError("updating", "the fleet is not taking new work while it updates"), store: null, storeSeq: null } };
     }
     return null;

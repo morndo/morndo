@@ -38,6 +38,9 @@ export const read = <O extends OpName>(run: (args: OpArgs[O]) => Promise<Outcome
 export const effect = <O extends OpName>(queue: (args: OpArgs[O]) => string, run: (args: OpArgs[O], ctx: EffectContext) => Promise<Outcome<O>>): EffectOp<O> =>
   ({ kind: "effect", queue, run });
 
+// These reduce what a caller can do. A hold still lets them through.
+const ALLOWED_WHILE_HELD = new Set<OpName>(["connections.revoke", "connections.narrow", "lane.stop", "job.cancel"]);
+
 type AnyOutcome = { ok: true; result: unknown } | Failure;
 type Answered = AnyOutcome & { discarded?: true };
 type AnyOp = { kind: "read"; run(args: unknown): Promise<AnyOutcome> }
@@ -99,7 +102,7 @@ export class OpExecutor {
         if (prior.state === "started") return fail("uncertain", "an earlier attempt with this key started, and its outcome is not known");
         if (prior.state === "mismatch") return fail("uncertain", "this key was used with other arguments: its op may have run");
       }
-      if (this.#d.held?.() && op !== "connections.revoke") return fail("updating", "this node is not taking new work while it updates");
+      if (this.#d.held?.() && !ALLOWED_WHILE_HELD.has(op)) return fail("updating", "this node is not taking new work while it updates");
       if (deadline.expired()) return fail("timeout", "the deadline passed before the op could start");
       if (key !== undefined) {
         let started: boolean;

@@ -240,10 +240,16 @@ describe("a hold, and a stop that waits for the op in flight", () => {
     const x = executor({
       "pane.send": effect(() => "q", async () => ok<"pane.send">({ problem: null, typedAt: 1 })),
       "connections.revoke": effect(() => "q", async () => ok<"connections.revoke">({ ok: true })),
+      "connections.narrow": effect(() => "q", async () => ok<"connections.narrow">({ ok: true })),
+      "lane.stop": effect(() => "q", async () => ok<"lane.stop">({ ok: true })),
+      "job.cancel": effect(() => "q", async () => ok<"job.cancel">({ ok: true })),
     }, ALL_OPS, { held: () => true });
     expect(await x.call("pane.send", sendArgs(), { key: "hub:held" })).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
     expect(x.doneKeys.status("hub:held")).toEqual({ state: "unknown" });
     expect(await x.call("connections.revoke", { version: 1, name: "work" }, { key: "hub:revoke" })).toMatchObject({ ok: true });
+    expect(await x.call("connections.narrow", { version: 1, name: "work", action: "off" }, { key: "hub:narrow" })).toMatchObject({ ok: true });
+    expect(await x.call("lane.stop", { name: "gone" }, { key: "hub:stop" })).toMatchObject({ ok: true });
+    expect(await x.call("job.cancel", { id: "job-1", token: "lane-token" })).toMatchObject({ ok: true });
   });
   it("a stop waits until the keyed op finishes and records done", async () => {
     let release: () => void = () => {};

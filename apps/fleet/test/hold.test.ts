@@ -65,4 +65,36 @@ describe("a hold on the fleet", () => {
     expect(fleet.jobs.get("pc", "job-1")?.notice).toBe("pending");
     expect(agent.reqs.filter(req => req.op === "job.noticeResult")).toHaveLength(0);
   });
+  it("still narrows, stops a lane and cancels a job while a send is refused", async () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, "hold.json"), JSON.stringify({
+      services: ["fleet"], reason: "drain", version: "0.0.0", since: new Date().toISOString(),
+    }));
+    const fleet = await startTestFleet({ dir });
+    const agent = await fleet.online("pc");
+    agent.send({
+      v: 1, t: "job", id: "job-1", node: "pc", lane: "builder", name: "pack", class: "default",
+      state: "running", outcome: null, exit: null, durationSec: null, notify: { kind: "lane", name: "builder" },
+      task: null, notice: "none", at: 1_700_000_000_000, ended: null, tail: "",
+      position: null, reason: null, error: null,
+    });
+    await vi.waitFor(() => expect(fleet.jobs.get("pc", "job-1")).not.toBeNull());
+    const api = client(fleet.config.socketPath);
+    const post = (body: unknown) => api.raw("/v1/op", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    });
+    const sent = await post({
+      workerId: W, op: "pane.send",
+      args: { workerId: W, text: "words", expect: { server: "3fa2c1d0", window: "api" } },
+      key: "hub:send",
+    });
+    expect(sent.status).toBe(503);
+    const narrow = await post({ node: "pc", op: "connections.narrow", args: { version: 1, name: "work", action: "off" }, key: "hub:narrow" });
+    const stopped = await post({ node: "pc", op: "lane.stop", args: { name: "gone" }, key: "hub:stop" });
+    const cancelled = await post({ node: "pc", op: "job.cancel", args: { id: "job-1", token: "lane-token" } });
+    expect(JSON.parse(narrow.body.toString("utf8"))).toMatchObject({ ok: true });
+    expect(JSON.parse(stopped.body.toString("utf8"))).toMatchObject({ ok: true });
+    expect(JSON.parse(cancelled.body.toString("utf8"))).toMatchObject({ ok: true });
+    expect(agent.reqs.map(req => req.op)).toEqual(["connections.narrow", "lane.stop", "job.cancel"]);
+  });
 });

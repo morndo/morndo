@@ -212,10 +212,10 @@ export function startHttp(p: {
   });
   watch.start();
   const schemaVersion = p.updates?.schema ?? SCHEMA_VERSION;
-  // A write, other than a revocation or a sign-in, is refused while hold.json names the hub (RL9).
+  // A write, other than a revocation, a narrowing or a sign-in, is refused while hold.json names the hub (RL9).
   const refusesWhenHeld = (method: string, path: string) => {
     if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
-    if (path.endsWith("/revoke")) return false;
+    if (path.endsWith("/revoke") || path.endsWith("/narrow")) return false;
     if (path === "/api/login/options" || path === "/api/login/verify" || path === "/api/logout") return false;
     if (path.startsWith("/api/stepup/") || path.startsWith("/api/identity")) return false;
     return true;
