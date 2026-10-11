@@ -165,6 +165,9 @@ describe("DB1: two to six options, in the manager protocol's grammar", () => {
   it("an empty label is refused", () => {
     expect(lines(d => { relabel(d, 0, ""); })).toEqual(["error bad_option (options[0])"]);
   });
+  it("a label is one line: it heads a column and names a tap button (DB1)", () => {
+    expect(lines(d => { relabel(d, 0, "A\nX"); })).toEqual(["error bad_option (options[0])"]);
+  });
   it("a label past 40 characters is refused as a cap", () => {
     expect(lines(d => { relabel(d, 0, "L".repeat(41)); })).toEqual(["error too_long (options[0].label)"]);
   });
