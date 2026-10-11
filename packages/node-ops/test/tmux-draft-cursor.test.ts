@@ -20,3 +20,30 @@ describe("draftOnScreen with a reverse-video cursor", () => {
     expect(draftOnScreen(box(`hal${E}[7ml${E}[27mo`))).toBe("halo");
   });
 });
+
+// Colour numbers inside 38/48/58 are palette or RGB components (xterm ctlseqs, ISO-8613-6; underline colour 58
+// follows the same shape). They must not be read as SGR 2/22 or 7/27.
+describe("SGR colour arguments never toggle dim or reverse", () => {
+  it.each([
+    ["foreground 256-colour 7", `${E}[38;5;7mT${E}[0;2mry "note"`, "T"],
+    ["background 256-colour 7", `${E}[48;5;7mT${E}[0;2mry "note"`, "T"],
+    ["underline 256-colour 7", `${E}[58;5;7mT${E}[0;2mry "note"`, "T"],
+    ["foreground 256-colour 2", `${E}[38;5;2mhallo`, "hallo"],
+    ["background 256-colour 2", `${E}[48;5;2mhallo`, "hallo"],
+    ["underline 256-colour 2", `${E}[58;5;2mhallo`, "hallo"],
+    ["truecolor selector 2", `${E}[38;2;200;200;200mhallo`, "hallo"],
+    ["truecolor red component 7", `${E}[38;2;7;8;9mT${E}[0;2mry "note"`, "T"],
+    ["truecolor red component 2", `${E}[38;2;2;3;4mhallo`, "hallo"],
+    ["background truecolor", `${E}[48;2;7;8;9mhallo`, "hallo"],
+    ["underline truecolor", `${E}[58;2;7;8;9mhallo`, "hallo"],
+    ["256-colour 22 does not clear dim", `${E}[2;38;5;22mhidden words`, null],
+    ["256-colour 27 does not clear reverse", `${E}[7;38;5;27mT${E}[0;2mry "note"`, null],
+    ["background 27 does not clear reverse", `${E}[7;48;5;27mT${E}[0;2mry "note"`, null],
+    ["underline 22 does not clear dim", `${E}[2;58;5;22mhidden words`, null],
+    ["truecolor 22 does not clear dim", `${E}[2;38;2;22;22;22mhidden words`, null],
+    ["dim still applies after a colour", `${E}[38;5;244;2mhidden words`, null],
+    ["22 after a colour still clears dim", `${E}[2;38;5;244;22mhallo`, "hallo"],
+  ])("%s", (_name, line, want) => {
+    expect(draftOnScreen(box(line))).toBe(want);
+  });
+});

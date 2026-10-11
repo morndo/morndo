@@ -65,25 +65,40 @@ export function menuIdentity(screen: string): string | null {
 // The text typed after "❯", from a capture with colors (capture-pane -e). After a turn Claude Code shows a suggested
 // next prompt as dim ghost text (SGR 2; "Prompt suggestions", promptSuggestionEnabled, default on), which plain text
 // can't tell from a draft. Only text that isn't dim counts. Plain captures (no escapes) still work.
+//
+// 38/48/58 take colour arguments (indexed 5;n or direct 2;r;g;b). Those numbers are not the dim/reverse flags, even
+// when a component is 2, 7, 22 or 27. xterm ctlseqs (ISO-8613-6; semicolon form from konsole) and kitty's underline
+// colour, which uses the same shape as 38 and 48.
+function applySgr(params: string, style: { dim: boolean; rev: boolean }) {
+  const codes = (params === "" ? "0" : params).split(";");
+  let i = 0;
+  while (i < codes.length) {
+    const code = codes[i] ?? "";
+    if (code === "38" || code === "48" || code === "58") {
+      const mode = codes[i + 1];
+      i += mode === "5" ? 3 : mode === "2" ? 5 : mode === undefined ? 1 : 2;
+      continue;
+    }
+    if (code === "0" || code === "") { style.dim = false; style.rev = false; }
+    else if (code === "7") style.rev = true;
+    else if (code === "27") style.rev = false;
+    else if (code === "2") style.dim = true;
+    else if (code === "22") style.dim = false;
+    i++;
+  }
+}
+
 export function draftOnScreen(screen: string): string | null {
   const line = screen.split("\n").slice(-12).reverse().find(l => /^[\s│]*❯/.test(l.replace(SGR, "")));
   if (!line) return null;
   const after = line.slice(line.indexOf("❯") + 1);
   // The cursor is drawn in reverse video (SGR 7) on the first character of a dim placeholder or suggestion, so that
   // one character is not dim. Reverse-video text is the cursor, not a draft.
-  let dim = false, rev = false, typed = "";
+  const style = { dim: false, rev: false };
+  let typed = "";
   for (const m of after.matchAll(/\x1b\[([0-9;]*)m|([^\x1b]+)/g)) {
-    if (m[1] !== undefined) {
-      for (const code of (m[1] || "0").split(";")) {
-        if (code === "0" || code === "") { dim = false; rev = false; }
-        else if (code === "7") rev = true;
-        else if (code === "27") rev = false;
-        else if (code === "2") dim = true;
-        else if (code === "22") dim = false;
-      }
-    } else if (!dim && !rev) {
-      typed += m[2];
-    }
+    if (m[1] !== undefined) applySgr(m[1], style);
+    else if (!style.dim && !style.rev) typed += m[2];
   }
   const draft = typed.replace(/\s*│\s*$/, "").trim();
   // 'Try "…"' is the empty box's placeholder. Claude Code draws it dim, so with colors the dim check has already left it
