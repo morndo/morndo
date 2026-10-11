@@ -116,12 +116,21 @@ code=$?
 set -e
 [ "$code" -eq 1 ] || fail "web-flow author should exit 1, got $code"
 
+# The published exception is fabricated: this throwaway repo publishes a
+# commit with a personal author address, and a copy of the checker carries
+# an exceptions list naming it. No real history is needed, so the proof runs
+# in any clone, shallow included.
+published=$(env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'published with a personal address' \
+  && git rev-parse HEAD)
+hooks=$scratch/hooks
+mkdir -p "$hooks"
+cp "$checker" "$hooks/commit-traces"
+printf '%s\n' "$published" > "$hooks/traces-published-exceptions"
+sh "$hooks/commit-traces" range "$published" --max-count=1 || fail "the listed published commit should exit 0"
+sh "$hooks/commit-traces" range "$published^..$published" || fail "a range holding the published commit should exit 0"
+
 cd "$root"
-# The published exceptions list names one sha. That exact commit passes, alone
-# and inside the range of the push that published it.
-exception=15448f3daca454ecf7916ec50d097e4ebe6381b7
-sh "$checker" range "$exception" --max-count=1 || fail "the listed published commit should exit 0"
-sh "$checker" range "$exception^..$exception" || fail "a range holding the published merge should exit 0"
 set +e
 out=$(sh "$checker" range deadbeef..HEAD 2>&1)
 code=$?

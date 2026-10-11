@@ -343,28 +343,31 @@ set -e
 [ "$code" -eq 1 ] || fail "committer email should exit 1, got $code"
 cd "$root"
 
-# A branch that merges main never re-checks published history. The clone's
-# origin/main holds the published merge of the listed exception and one more
-# published commit with a personal author address that no exception lists: the
-# remote-tip range of the push fails the plain range check, while the hook,
-# limited to commits that are not on any remote, passes it. A new home path or
-# a personal author address on the merged branch still fails.
-published=15448f3daca454ecf7916ec50d097e4ebe6381b7
-git clone --quiet --local "$root" "$scratch/merged"
+# A branch that merges main never re-checks published history. The repo is
+# throwaway and its origin/main is fabricated: one published commit with a
+# personal author address that no exception lists.
+# The remote-tip range of the push fails the plain range check, while the
+# hook, limited to commits that are not on any remote, passes it. A new home
+# path or a personal author address on the merged branch still fails.
+git init -q "$scratch/merged"
+cp "$root/.gitleaks.toml" "$scratch/merged/.gitleaks.toml"
 cd "$scratch/merged"
-git checkout -q -b feature "$published^"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'merged base'
+base=$(git rev-parse HEAD)
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'published main commit'
+published=$(git rev-parse HEAD)
+git checkout -q -b feature "$base"
 printf 'clean\n' > feature.txt
 git add feature.txt
 commit_ok -m 'feature work'
 remote_tip=$(git rev-parse HEAD)
-bad_tip=$(env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
-  -c user.email=ada@users.noreply.github.com commit-tree "$published^{tree}" -p "$published" -m 'published main commit')
-git update-ref refs/remotes/origin/main "$bad_tip"
-git -c user.name=Ada -c user.email=ada@users.noreply.github.com merge -q --no-edit origin/main
+git update-ref refs/remotes/origin/main "$published"
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com merge -q --no-edit refs/remotes/origin/main
 merge_tip=$(git rev-parse HEAD)
-for sha in "$published" "$bad_tip"; do
-  git rev-list "$remote_tip..$merge_tip" | grep -F -x -q "$sha" || fail "the pushed range should hold $sha"
-done
+git rev-list "$remote_tip..$merge_tip" | grep -F -x -q "$published" || fail "the pushed range should hold the published commit"
 set +e
 sh "$root/scripts/git-hooks/commit-traces" mails "$remote_tip..$merge_tip"
 code=$?
