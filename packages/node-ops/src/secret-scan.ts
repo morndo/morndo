@@ -2,6 +2,7 @@
 // Pure: no file system and no globals of the runtime; the keyed hash is passed in, so the index key stays in an adapter.
 // A form is the run of output bytes that depends on the value alone, so it is found wherever the value is written that
 // way, inside any surrounding bytes.
+import { parseReference } from "@morndo/domain";
 
 export type SecretEncoding = "raw" | "hex" | "percent" | "json" | "base64" | "base64url";
 // `alignment` is the value's byte offset mod 3 inside a longer base64-encoded string (null for the other encodings);
@@ -197,15 +198,68 @@ export function scan(bytes: Uint8Array, entries: readonly IndexEntry[], keyed: K
   return mergeRanges([...s.push(bytes).ranges, ...s.end().ranges]);
 }
 
-// ---- The index (stubs until their fix)
+// ---- The index: what the Secrets service writes and every output path reads (design §8.1)
 
-export const RETIRED_KEPT_MS = 0;
+// A retired version stays indexed this long after its rotation or revocation.
+export const RETIRED_KEPT_MS = 30 * 86_400_000;
 export type IndexedVersion = { reference: string; version: number; retiredAt: number | null; entries: readonly IndexEntry[] };
 export type SecretIndex = { format: 1; versions: readonly IndexedVersion[] };
 export const emptySecretIndex = (): SecretIndex => ({ format: 1, versions: [] });
-export function withVersion(index: SecretIndex, _reference: string, _version: number, _entries: readonly IndexEntry[]): SecretIndex { return index; }
-export function retireVersion(index: SecretIndex, _reference: string, _version: number, _at: number): SecretIndex { return index; }
-export function liveEntries(_index: SecretIndex, _now: number): IndexEntry[] { return []; }
-export function pruneIndex(index: SecretIndex, _now: number): SecretIndex { return index; }
-export function serializeIndex(_index: SecretIndex): string { return ""; }
-export function parseIndex(_text: string): SecretIndex | null { return null; }
+
+const sameVersion = (v: IndexedVersion, reference: string, version: number) => v.reference === reference && v.version === version;
+
+// A version's entries, live: added, or put in place of the same (Reference, version).
+export function withVersion(index: SecretIndex, reference: string, version: number, entries: readonly IndexEntry[]): SecretIndex {
+  return { format: 1, versions: [...index.versions.filter(v => !sameVersion(v, reference, version)), { reference, version, retiredAt: null, entries: [...entries] }] };
+}
+
+// Retiring again keeps the first time, so the 30 days can't be stretched.
+export function retireVersion(index: SecretIndex, reference: string, version: number, at: number): SecretIndex {
+  return { format: 1, versions: index.versions.map(v => sameVersion(v, reference, version) && v.retiredAt === null ? { ...v, retiredAt: at } : v) };
+}
+
+const kept = (v: IndexedVersion, now: number) => v.retiredAt === null || now - v.retiredAt <= RETIRED_KEPT_MS;
+
+// What the scanner looks for now: every live version, and every retired one for 30 days.
+export const liveEntries = (index: SecretIndex, now: number): IndexEntry[] => index.versions.filter(v => kept(v, now)).flatMap(v => v.entries);
+
+export const pruneIndex = (index: SecretIndex, now: number): SecretIndex => ({ format: 1, versions: index.versions.filter(v => kept(v, now)) });
+
+// The file's text: References, versions, times and keyed hashes, never a form.
+export const serializeIndex = (index: SecretIndex): string => `${JSON.stringify(index)}\n`;
+
+const HEX64 = /^[0-9a-f]{64}$/;
+const ENCODINGS: readonly string[] = ["raw", "hex", "percent", "json", "base64", "base64url"];
+const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
+const keysAre = (x: Record<string, unknown>, keys: readonly string[]) => Object.keys(x).length === keys.length && keys.every(k => k in x);
+const count = (x: unknown, min: number, max: number) => Number.isSafeInteger(x) && (x as number) >= min && (x as number) <= max;
+
+function entryOf(x: unknown): IndexEntry | null {
+  if (!isRecord(x) || !keysAre(x, ["encoding", "alignment", "length", "head", "full", "before", "after"])) return null;
+  const { encoding, alignment, length, head, full, before, after } = x;
+  if (typeof encoding !== "string" || !ENCODINGS.includes(encoding)) return null;
+  const base64 = encoding === "base64" || encoding === "base64url";
+  if (base64 ? !(alignment === 0 || alignment === 1 || alignment === 2) : alignment !== null) return null;
+  if (!count(length, SCAN_WINDOW, 1 << 20) || !count(before, 0, 1) || !count(after, 0, 1)) return null;
+  if (typeof head !== "string" || !HEX64.test(head) || typeof full !== "string" || !HEX64.test(full)) return null;
+  return { encoding: encoding as SecretEncoding, alignment: alignment as 0 | 1 | 2 | null, length: length as number, head, full, before: before as number, after: after as number };
+}
+
+function versionOf(x: unknown): IndexedVersion | null {
+  if (!isRecord(x) || !keysAre(x, ["reference", "version", "retiredAt", "entries"])) return null;
+  const { reference, version, retiredAt, entries } = x;
+  if (typeof reference !== "string" || parseReference(reference) === null || !count(version, 1, Number.MAX_SAFE_INTEGER)) return null;
+  if (retiredAt !== null && !(typeof retiredAt === "number" && Number.isFinite(retiredAt))) return null;
+  if (!Array.isArray(entries)) return null;
+  const parsed = entries.map(entryOf);
+  return parsed.every(e => e !== null) ? { reference, version: version as number, retiredAt, entries: parsed as IndexEntry[] } : null;
+}
+
+// The file's text back, or null: anything it doesn't expect, an unknown key included, refuses the whole file.
+export function parseIndex(text: string): SecretIndex | null {
+  let doc: unknown;
+  try { doc = JSON.parse(text); } catch { return null; }
+  if (!isRecord(doc) || !keysAre(doc, ["format", "versions"]) || doc.format !== 1 || !Array.isArray(doc.versions)) return null;
+  const versions = doc.versions.map(versionOf);
+  return versions.every(v => v !== null) ? { format: 1, versions: versions as IndexedVersion[] } : null;
+}
