@@ -37,6 +37,12 @@ const machine = (over: Partial<Installation> = {}): Installation => ({
   settings: { channel: "stable", mode: "apply", pin: null, window: null },
   ...over,
 });
+// The plan, for the histories that plan one: none of them is refused, so the unwrap can only throw on a bug.
+const planOf = (p: Parameters<typeof planMigrations>[0]) => {
+  const r = planMigrations(p);
+  if (!r.ok) throw new Error(`plan refused: ${JSON.stringify(r.error)}`);
+  return r.value;
+};
 
 describe("RL1 verified before unpacked", () => {
   const allTrue = { feed_signature: true, feed_namespace: true, feed_channel: true, feed_fresh: true, feed_seq: true,
@@ -165,7 +171,7 @@ describe("RL4 one Update at a time, each step recorded before it runs", () => {
 });
 
 describe("RL5 no swap without a checked Backup", () => {
-  const plan = planMigrations({
+  const plan = planOf({
     databases: { hub: { schema: 17, floor: 17 }, fleet: { schema: 15, floor: 15 }, node: { schema: 6, floor: 3 }, connections: { schema: 1, floor: 1 } },
     target: { hub: { version: 19, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
     previous: { hub: { version: 17, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
@@ -248,7 +254,7 @@ describe("RL7 health failures roll back", () => {
 });
 
 describe("RL8 no Version below the floor", () => {
-  const breaking = planMigrations({
+  const breaking = planOf({
     databases: { hub: { schema: 17, floor: 17 }, fleet: { schema: 15, floor: 15 }, node: { schema: 6, floor: 3 }, connections: { schema: 1, floor: 1 } },
     target: { hub: { version: 19, floor: 19 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
     previous: { hub: { version: 17, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
@@ -256,6 +262,22 @@ describe("RL8 no Version below the floor", () => {
   it("a rollback across a raised floor must restore that database", () => {
     expect(breaking.hub).toMatchObject({ restoreOnRollback: true });
     expect(breaking.fleet).toMatchObject({ restoreOnRollback: false });
+  });
+  it("negative control: a target that cannot open what is there is refused, never planned (no swap to a Version that would exit 78)", () => {
+    const r = planMigrations({
+      databases: { hub: { schema: 19, floor: 18 }, fleet: { schema: 15, floor: 15 }, node: { schema: 6, floor: 3 }, connections: { schema: 1, floor: 1 } },
+      target: { hub: { version: 17, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
+      previous: { hub: { version: 19, floor: 15 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
+    });
+    expect(r).toEqual({ ok: false, error: { database: "hub", reason: "target_below_floor" } });
+  });
+  it("a target below the schema but at or above the floor opens the database without migrating it", () => {
+    const r = planMigrations({
+      databases: { hub: { schema: 19, floor: 15 }, fleet: { schema: 15, floor: 15 }, node: { schema: 6, floor: 3 }, connections: { schema: 1, floor: 1 } },
+      target: { hub: { version: 17, floor: 15 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
+      previous: { hub: { version: 19, floor: 15 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
+    });
+    expect(r.ok && r.value.hub).toMatchObject({ willMigrate: false, backupRequired: false, restoreOnRollback: false });
   });
   it("negative control: a rollback below the floor with the Backup gone is refused", () => {
     expect(mayRestore({ database: "hub", restoreOnRollback: true, backupPresent: false })).toEqual({ ok: false, error: "backup_gone" });
@@ -267,12 +289,12 @@ describe("RL8 no Version below the floor", () => {
 });
 
 describe("RL9 probation holds what a restore would lose", () => {
-  const breaking = planMigrations({
+  const breaking = planOf({
     databases: { hub: { schema: 17, floor: 17 }, fleet: { schema: 15, floor: 15 }, node: { schema: 6, floor: 3 }, connections: { schema: 1, floor: 1 } },
     target: { hub: { version: 19, floor: 19 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
     previous: { hub: { version: 17, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
   });
-  const flat = planMigrations({
+  const flat = planOf({
     databases: { hub: { schema: 17, floor: 17 }, fleet: { schema: 15, floor: 15 }, node: { schema: 6, floor: 3 }, connections: { schema: 1, floor: 1 } },
     target: { hub: { version: 17, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
     previous: { hub: { version: 17, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
@@ -415,7 +437,7 @@ describe("a happy history installs", () => {
     expect(judgeVerification({ feed_signature: true, feed_namespace: true, feed_channel: true, feed_fresh: true, feed_seq: true,
       manifest_version: true, manifest_digest: true, manifest_signature: true, manifest_namespace: true,
       artifact_size: true, artifact_digest: true, file_list: true })).toEqual({ ok: true, value: true });
-    const plan = planMigrations({
+    const plan = planOf({
       databases: { hub: { schema: 19, floor: 17 }, fleet: { schema: 15, floor: 15 }, node: { schema: 6, floor: 3 }, connections: { schema: 1, floor: 1 } },
       target: { hub: { version: 19, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },
       previous: { hub: { version: 19, floor: 17 }, fleet: { version: 15, floor: 15 }, node: { version: 6, floor: 3 }, connections: { version: 1, floor: 1 } },

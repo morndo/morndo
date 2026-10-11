@@ -238,20 +238,23 @@ export type MigrationStep = {
 };
 
 // The plan from the Manifest's schemas and what the databases say. `previous` is the running Version's Manifest
-// (null on a first update, where what's running reads what's there).
+// (null on a first update, where what's running reads what's there). A target that cannot open what is there —
+// its known schema below the database's floor (§11.1) — is refused, never planned: RL8's "the updater never swaps
+// to a Version that would meet that refusal" starts here, before any Backup is taken or anything stops.
 export function planMigrations(p: {
   databases: Record<DatabaseName, DbState>; target: Record<DatabaseName, SchemaInfo>;
   previous: Record<DatabaseName, SchemaInfo> | null;
-}): Record<DatabaseName, MigrationStep> {
+}): Result<Record<DatabaseName, MigrationStep>, { database: DatabaseName; reason: "target_below_floor" }> {
   const out = {} as Record<DatabaseName, MigrationStep>;
   for (const db of DATABASES) {
     const now = p.databases[db], target = p.target[db];
+    if (target.version < now.floor) return err({ database: db, reason: "target_below_floor" });
     const willMigrate = target.version > now.schema;
     const previousKnows = p.previous === null ? now.schema : p.previous[db].version;
     out[db] = { willMigrate, backupRequired: willMigrate, expectedSchema: now.schema,
       restoreOnRollback: target.floor > previousKnows };
   }
-  return out;
+  return ok(out);
 }
 
 export type BackupRecord = { database: DatabaseName; done: boolean; passedCheck: boolean; schema: number | null };

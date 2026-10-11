@@ -1030,6 +1030,11 @@ export const CONTROLS: Control[] = [
   { id: "pr1-rl8-restore-without-backup", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (!p.backupPresent) return err(\"backup_gone\");", replace: "if (false) return err(\"backup_gone\");",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "backup_gone" },
+  // The review of 2026-10-11: the plan's refusal of a target below the database's floor (RL8's forward rule).
+  { id: "pr1-rl8-target-below-floor", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "if (target.version < now.floor) return err({ database: db, reason: \"target_below_floor\" });",
+    replace: "if (false) return err({ database: db, reason: \"target_below_floor\" });",
+    run: ["packages/domain/test/releases-invariants.test.ts"], expect: "target_below_floor" },
   { id: "pr1-rl9-hold-passes-writes", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "return now - holdSince > HOLD_STALE_MS ? \"allowed\" : \"updating\";", replace: "return \"allowed\";",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "updating" },
