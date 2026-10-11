@@ -82,12 +82,11 @@ describe("follow-up 5: a renew is Stored only when its store names an Expiry lat
   const renew = (kind: RequestAsk["kind"] = "renew") => value(openRequest({
     node: "node-a", reference: REF, kind, waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
   }, "r1", T)).request;
-  const answer = (expiry?: number | null) =>
-    ({ seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], ...(expiry === undefined ? {} : { expiry }) });
+  const answer = (expiry: number | null) => ({ seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], expiry });
   const problem = <T>(r: R<T>) => (r.ok ? "ok" : r.error.problem);
 
   it("a store that names no Expiry, or one that has passed, leaves the renew open", () => {
-    expect(problem(answerStored(renew(), answer(), T + 1))).toBe("expiry");
+    expect(problem(answerStored(renew(), answer(null), T + 1))).toBe("expiry");
     expect(problem(answerStored(renew(), answer(null), T + 1))).toBe("expiry");
     expect(problem(answerStored(renew(), answer(T + 1), T + 1))).toBe("expiry");
     expect(problem(answerStored(renew(), answer(T - DAY), T + 1))).toBe("expiry");
@@ -98,7 +97,7 @@ describe("follow-up 5: a renew is Stored only when its store names an Expiry lat
     expect(r.events.map(e => e.type)).toEqual(["SecretRequestStored"]);
   });
   it("the other kinds that store need no Expiry", () => {
-    expect(problem(answerStored(renew("new"), answer(), T + 1))).toBe("ok");
+    expect(problem(answerStored(renew("new"), answer(null), T + 1))).toBe("ok");
     expect(problem(answerStored(renew("rotate"), answer(null), T + 1))).toBe("ok");
   });
 });

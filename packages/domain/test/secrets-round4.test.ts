@@ -2,7 +2,7 @@
 // and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer, renewSecret, secretExpirySweep, storeSecret,
+  answerStored, emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer, renewSecret, secretExpirySweep, storeSecret,
   useGate, withdrawRequest,
   type Actor, type RequestAsk, type SecretDirectory, type SecretGrant,
 } from "../src/index.ts";
@@ -86,5 +86,18 @@ describe("round 4, points 1 and 2: the node renews only with an Expiry later tha
   });
   it("only the principal renews", () => {
     expect(refusal(renewSecret(held(T - DAY), input(T + DAY), { kind: "operator" }, T))).toEqual({ problem: "principal" });
+  });
+});
+
+describe("round 4, points 2 and 6: the hub's answer always names the Expiry its store sent (decided on T-80)", () => {
+  const renew = value(openRequest({
+    node: "node-a", reference: REF, kind: "renew", waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
+  }, "r1", T)).request;
+  it("an answer that leaves the Expiry out does not compile, so none is refused by accident; one that names none is refused", () => {
+    // @ts-expect-error: the Expiry is required, null when the store named none.
+    const left = answerStored(renew, { seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"] }, T + 1);
+    expect(left.ok ? "ok" : left.error.problem).toBe("expiry");
+    const none = answerStored(renew, { seen: 1, command: "c2", reference: REF, version: 2, nodes: ["node-a"], expiry: null }, T + 1);
+    expect(none.ok ? "ok" : none.error.problem).toBe("expiry");
   });
 });
