@@ -105,7 +105,7 @@ export type RequestEvent =
   | { type: "SecretRequestRejected"; request: string; at: number; command: string; reason: string | null }
   | { type: "SecretRequestExpired"; request: string; at: number };
 export type RequestProblem = "bad_reference" | "bad_purpose" | "bad_grant" | "bad_node" | "bad_lane" | "bad_workspace" | "principal"
-  | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open" | "full" | "expiry";
+  | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open" | "full" | "expiry" | "clock" | "not_renewed";
 export type RequestRefusal = { problem: RequestProblem };
 export type RequestChange = { request: SecretRequest; events: readonly RequestEvent[] };
 export type RequestLimit = "lane-open" | "lane-day" | "node-open" | "node-day" | "request-waiters";
@@ -221,25 +221,35 @@ export function answerGranted(req: SecretRequest, a: Answer, now: number): Resul
   return ok({ request, events: [{ type: "SecretRequestGranted", request: req.id, at: now, command: a.command }] });
 }
 
-// SR8: Stored only once the requester's node confirmed; `version` is the Secret's version there and `storedAt` its time
-// of the store by its own clock, both from that confirmation; `expiry` the Expiry the store sent (null: none). The node
-// refuses a renew that doesn't extend its Expiry before it stores anything (renewSecret); here a renew whose store named
-// none, or one not later than the node's time of the store, is never marked Stored. That is the node's own comparison,
-// so the hub's clock can't leave a renewed request open (T-83); the hub's clock decides only the request's own expiry.
+// A node's confirmation of a store (SecretsStoreResult, and the node it came from): the version it stored, its time of the
+// store by its own clock, and whether the renew rule held there (renewSecret).
+export type StoreConfirmation = { node: string; version: number; at: number; renewed: boolean };
+// How far a node's time of the store may lie outside the hub's window, from the request's opening to the hub's now.
+export const CONFIRMATION_SKEW_MS = 5 * 60_000;
+
+// SR8: Stored only on the requester node's own confirmation, never another node's (T-85); `nodes` are all that confirmed,
+// `expiry` the Expiry the store sent (null: none). The renew rule is the node's (renewSecret, before anything is stored),
+// so a renew needs that node's `renewed`; the Expiry later than the node's time of the store is the same comparison, kept
+// as a check that the confirmation is consistent (T-83). The node's time must lie within the hub's window, so a node's
+// wrong clock or a made-up time can't pass (T-85); the hub's clock otherwise decides only the request's own expiry.
 export function answerStored(
-  req: SecretRequest, a: Answer & { reference: string; version: number; nodes: readonly string[]; expiry: number | null; storedAt: number },
+  req: SecretRequest, a: Answer & { reference: string; nodes: readonly string[]; expiry: number | null; confirmation: StoreConfirmation },
   now: number,
 ): Result<RequestChange, RequestRefusal> {
   const p = checkAnswer(req, a.seen, a.command, now);
   if (p) return refuseRequest(p);
   if (req.kind === "access") return refuseRequest("kind");
-  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > a.storedAt)) return refuseRequest("expiry");
+  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry))) return refuseRequest("expiry");
   if (parseReference(a.reference) === null) return refuseRequest("bad_reference");
-  if (!a.nodes.includes(req.node) || !Number.isSafeInteger(a.version) || a.version < 1) return refuseRequest("node");
+  const c = a.confirmation;
+  if (c.node !== req.node || !a.nodes.includes(req.node) || !Number.isSafeInteger(c.version) || c.version < 1) return refuseRequest("node");
+  if (!(Number.isFinite(c.at) && c.at >= req.openedAt - CONFIRMATION_SKEW_MS && c.at <= now + CONFIRMATION_SKEW_MS)) return refuseRequest("clock");
+  if (req.kind === "renew" && !c.renewed) return refuseRequest("not_renewed");
+  if (req.kind === "renew" && !(typeof a.expiry === "number" && a.expiry > c.at)) return refuseRequest("expiry");
   const request: SecretRequest = { ...req, state: "stored", answer: { kind: "stored", at: now, command: a.command, reason: null } };
   return ok({
     request,
-    events: [{ type: "SecretRequestStored", request: req.id, reference: a.reference, nodes: [...a.nodes], version: a.version, at: now, command: a.command }],
+    events: [{ type: "SecretRequestStored", request: req.id, reference: a.reference, nodes: [...a.nodes], version: c.version, at: now, command: a.command }],
   });
 }
 
