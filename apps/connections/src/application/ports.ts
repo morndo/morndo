@@ -18,6 +18,7 @@ export type RunPlan = {
   configDir: string | null;
   model: string;
   effort: string;
+  smallModel?: string;
   workspace: string;
   deny: readonly string[];
   reservation: number;

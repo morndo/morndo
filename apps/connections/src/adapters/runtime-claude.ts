@@ -23,7 +23,9 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import { statSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import type { Isolation } from "@morndo/domain";
+import { BUILTIN_FIRST_PARTY_HOST } from "@morndo/protocol";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
+import { PLACEHOLDER_MODELS } from "./models.ts";
 import { HELPER_TTL_MS } from "./runtime-limits.ts";
 
 const ENV_ALLOW = ["PATH", "HOME", "LANG", "LC_ALL", "TERM", "TMPDIR", "TZ"] as const;
@@ -203,7 +205,75 @@ export async function statusOf(bin: string, args: readonly string[], env: NodeJS
 // A stray inherited key beats the subscription. Cloud-provider variables, ANTHROPIC_AUTH_TOKEN and
 // ANTHROPIC_API_KEY come before the signed-in account.
 // https://code.claude.com/docs/en/authentication (checked 2026-10-10).
-const KEPT = new Set(["CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS"]);
+// One list. childEnv keeps these, and anthropicGatewayEnv returns only these.
+export const GATEWAY_ENV_KEYS = [
+  "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL", "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
+] as const;
+
+const KEPT = new Set<string>([
+  "CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_CONFIG_DIR", "CLAUDE_CODE_API_KEY_HELPER_TTL_MS",
+  ...GATEWAY_ENV_KEYS,
+]);
+
+// A third-party base (secret-store README §8.3). The caller passes the first-party host from the
+// catalog's firstParty flag. URL.host is already lower-case and omits the scheme's default port.
+export function isThirdPartyAnthropicBase(baseUrl: string, firstPartyHost: string): boolean {
+  const party = firstPartyHost !== "" ? firstPartyHost : BUILTIN_FIRST_PARTY_HOST;
+  let host = "";
+  try { host = new URL(baseUrl).host; } catch { return false; }
+  return host !== "" && host !== party;
+}
+
+export const BASE_URL_PROBLEM = "base URL missing or invalid";
+
+export function baseUrlProblem(baseUrl: string): string | null {
+  const trimmed = baseUrl.trim();
+  if (trimmed === "") return BASE_URL_PROBLEM;
+  try {
+    if (new URL(trimmed).host === "") return BASE_URL_PROBLEM;
+  } catch {
+    return BASE_URL_PROBLEM;
+  }
+  return null;
+}
+
+function namedModel(model: string): string | null {
+  const trimmed = model.trim();
+  if (trimmed === "" || PLACEHOLDER_MODELS.has(trimmed)) return null;
+  return trimmed;
+}
+
+// --effort sets the session. CLAUDE_CODE_EFFORT_LEVEL is the same value, and
+// CLAUDE_CODE_ALWAYS_ENABLE_EFFORT sends it for a model id the runtime does not recognise.
+// https://code.claude.com/docs/en/cli-reference and https://code.claude.com/docs/en/env-vars — checked 2026-10-11.
+export function anthropicGatewayEnv(baseUrl: string, model: string, effort = "", small = "", firstPartyHost = ""): Record<string, string> {
+  // Empty means this runtime was given no base. A non-URL throws so a typo cannot be ignored.
+  if (baseUrl.trim() !== "") {
+    const problem = baseUrlProblem(baseUrl);
+    if (problem) throw new Error(problem);
+  }
+  if (!isThirdPartyAnthropicBase(baseUrl, firstPartyHost)) return {};
+  const named = namedModel(model);
+  const haiku = namedModel(small) ?? named;
+  const env: Record<string, string> = { ANTHROPIC_BASE_URL: baseUrl };
+  if (effort !== "") {
+    env.CLAUDE_CODE_EFFORT_LEVEL = effort;
+    env.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT = "1";
+  }
+  if (!named && !haiku) return env;
+  return {
+    ...env,
+    ...(named ? {
+      ANTHROPIC_MODEL: named,
+      ANTHROPIC_DEFAULT_OPUS_MODEL: named,
+      ANTHROPIC_DEFAULT_SONNET_MODEL: named,
+      CLAUDE_CODE_SUBAGENT_MODEL: named,
+    } : {}),
+    ...(haiku ? { ANTHROPIC_DEFAULT_HAIKU_MODEL: haiku } : {}),
+  };
+}
 
 function stripped(key: string): boolean {
   return key.startsWith("ANTHROPIC_")
@@ -247,9 +317,12 @@ function readRule(path: string): string[] {
   }
 }
 
-export function claudeSettings(plan: RunPlan, helper: string | null): string {
+// A bare tool name in permissions.deny removes that tool. WebSearch uses the first-party
+// backend, so a third-party base denies it (design 8.3).
+// https://code.claude.com/docs/en/permissions — checked 2026-10-11.
+export function claudeSettings(plan: RunPlan, helper: string | null, denyWebSearch = false): string {
   const body: Record<string, unknown> = {
-    permissions: { deny: plan.deny.flatMap(readRule) },
+    permissions: { deny: [...plan.deny.flatMap(readRule), ...(denyWebSearch ? ["WebSearch"] : [])] },
     sandbox: {
       ...SANDBOX,
       credentials: { envVars: DENIED_NAMES.map(name => ({ name, mode: "deny" })) },
@@ -269,18 +342,22 @@ export function claudeIsolation(settings: string): Isolation {
   return sandboxReady(body.sandbox ?? {}) && denies.length > 0 ? "os" : "rules";
 }
 
-export function claudeArgv(bin: string, plan: RunPlan, helper: string, extra: readonly string[]): string[] {
-  return [bin, "-p", "--output-format", "json", "--settings", claudeSettings(plan, helper), "--max-budget-usd", plan.reservation.toFixed(2), ...extra];
+export function claudeArgv(bin: string, plan: RunPlan, helper: string, extra: readonly string[], denyWebSearch = false): string[] {
+  return [bin, "-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, helper, denyWebSearch), "--max-budget-usd", plan.reservation.toFixed(2), ...extra];
 }
 
 export class ClaudeRuntime implements Runtime {
   readonly #bin: string;
   readonly #helper: string;
   readonly #parent: NodeJS.ProcessEnv;
-  constructor(bin: string, helper: string, parent: NodeJS.ProcessEnv) {
+  readonly #baseUrl: string;
+  readonly #firstPartyHost: string;
+  constructor(bin: string, helper: string, parent: NodeJS.ProcessEnv, baseUrl = "", firstPartyHost = "") {
     this.#bin = bin;
     this.#helper = helper;
     this.#parent = parent;
+    this.#baseUrl = baseUrl;
+    this.#firstPartyHost = firstPartyHost;
   }
 
   isolation(): Isolation {
@@ -302,11 +379,16 @@ export class ClaudeRuntime implements Runtime {
   async execute(plan: RunPlan, extra: readonly string[], hooks?: ChildHooks): Promise<ChildResult> {
     const script = this.#bin.endsWith(".mjs") || this.#bin.endsWith(".js");
     const extraEnv = loginEnv("claude", plan.configDir);
+    let denyWebSearch = false;
     if (plan.subscription) await assertSubscription(this.#bin, ["auth", "status"], childEnv(this.#parent, extraEnv), "claude");
-    else extraEnv.CLAUDE_CODE_API_KEY_HELPER_TTL_MS = String(HELPER_TTL_MS);
+    else {
+      Object.assign(extraEnv, anthropicGatewayEnv(this.#baseUrl, plan.model, plan.effort, plan.smallModel ?? "", this.#firstPartyHost));
+      extraEnv.CLAUDE_CODE_API_KEY_HELPER_TTL_MS = String(HELPER_TTL_MS);
+      denyWebSearch = isThirdPartyAnthropicBase(this.#baseUrl, this.#firstPartyHost);
+    }
     const flags = plan.subscription
-      ? ["-p", "--output-format", "json", "--settings", claudeSettings(plan, null), ...extra]
-      : claudeArgv(this.#bin, plan, this.#helper, extra).slice(1);
+      ? ["-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, null), ...extra]
+      : claudeArgv(this.#bin, plan, this.#helper, extra, denyWebSearch).slice(1);
     return runChild(script ? process.execPath : this.#bin, script ? [this.#bin, ...flags] : flags, {
       env: childEnv(this.#parent, extraEnv),
       cwd: plan.workspace,
