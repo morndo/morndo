@@ -74,7 +74,9 @@ export async function stopAll(): Promise<void> {
 }
 process.once("exit", () => {
   for (const p of procs) { try { p.child.kill("SIGKILL"); } catch { /* gone */ } }
-  void killServers();                                  // at exit only its synchronous part runs: each kill-server
+  // An exit handler can't wait, so only killServers' synchronous part runs: each server is sent kill-server. Nothing
+  // waits for a server to exit or removes its socket file; stopAll() does both.
+  void killServers();
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 

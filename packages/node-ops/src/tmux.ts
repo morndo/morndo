@@ -24,9 +24,6 @@ export type Tmux = {
 // line after "❯". The menu words follow the box's own lane-events-push guard.
 const MENU = /Enter to (select|confirm)|Esc to cancel|Do you want to proceed|trust this folder/;
 const SGR = /\x1b\[([0-9;]*)m/g;
-// One entry per character as drawn (a grapheme), so an emoji built from several code points counts once.
-const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-const graphemes = (s: string): string[] => Array.from(GRAPHEMES.segment(s), g => g.segment);
 
 // Claude Code's input box: a "❯" line directly under a ─ rule, in the bottom lines the draft is read from. A menu
 // choice ("❯ 1. Yes") is not one, nor a past prompt in the history (drawn without a rule above it).
@@ -146,7 +143,7 @@ export function draftOnScreen(screen: string): string | null {
   for (let i = 0; i < runs.length; i++) {
     const run = runs[i];
     if (!run || run.dim) continue;
-    if (run.rev && graphemes(run.text).length === 1 && runs[i + 1]?.dim) continue;
+    if (run.rev && Array.from(run.text).length === 1 && runs[i + 1]?.dim) continue;
     typed += run.text;
   }
   const draft = typed.replace(/\s*│\s*$/, "").trim();
@@ -157,13 +154,14 @@ export function draftOnScreen(screen: string): string | null {
 }
 
 // The draft keeps the reverse-video cursor cell, so a box that differs by one character is not this paste. The first
-// 20 characters are the whole short paste, or the start of a longer one. Leading space is ignored on both sides:
+// 20 code points are the whole short paste, or the start of a longer one. Leading space is ignored on both sides:
 // draftOnScreen trims the box.
 function draftStillWaiting(sent: string, draft: string): boolean {
   // A long paste is folded into one chip. The chip is the paste, still in the box.
   if (/^\[Pasted text #\d+ \+\d+ lines\]$/.test(draft)) return true;
-  const head = graphemes(sent.trim()).slice(0, 20);
-  const shown = graphemes(draft).slice(0, 20);
+  const sentPoints = Array.from(sent.trim());
+  const head = sentPoints.slice(0, 20);
+  const shown = Array.from(draft).slice(0, 20);
   return shown.length === head.length && shown.every((c, i) => c === head[i]);
 }
 
