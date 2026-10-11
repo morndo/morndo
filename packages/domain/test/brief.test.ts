@@ -2,7 +2,7 @@
 // example (docs/agents/decision-requests.md), so a lint that stops refusing fails here (the design's mutation table,
 // §7). The example itself is the fixture; every mutation is one rule broken.
 import { describe, expect, it } from "vitest";
-import { hasMoney, lintBrief, type BriefProblem } from "../src/index.ts";
+import { cardOf, hasMoney, lintBrief, type Ask, type BriefProblem, type DecisionBrief } from "../src/index.ts";
 
 // The guide's example is dated: `now` is fixed at 2026-10-01, its due is the end of 2026-10-14 (a date alone is the end
 // of its day, as the template adapter will read it).
@@ -349,5 +349,92 @@ describe("warnings: a weak brief comes back with its brief (DB10)", () => {
     const r = lint(d => { d.evidence = []; });
     expect(r.brief).not.toBe(null);
     expect(r.problems.map(p => p.level)).toEqual(["warning"]);
+  });
+});
+
+describe("the compact card, derived for every Ask (§4.4)", () => {
+  const brief = (): DecisionBrief => lintBrief(example(), NOW).brief!;      // the guide's example, money in it
+  // The example with every money figure scrubbed out: the same brief, without spend.
+  const noMoney = (): DecisionBrief => {
+    const b = brief();
+    const row = (i: number, cells: string[]) => ({ factor: b.comparison.rows[i]!.factor, cells });
+    return {
+      ...b,
+      ask: { text: "Approve **6 agent-days** to extend the in-house triage script.", alternative: "buy the hosted add-on (C); it starts faster and costs more from month 14.", uncertainty: b.ask.uncertainty },
+      comparison: { rows: b.comparison.rows.map((r, i) => i === 1 ? row(1, ["none", "6 agent-days", "a subscription"]) : i === 2 ? row(2, ["5 staff hours a week", "About 1 agent-day a quarter", "a subscription"]) : r), note: "costs are effort only; nothing is priced." },
+      why: { ...b.why, text: "B gets most of C's benefit and keeps ticket text in our own systems.", assumptions: ["The saving seen in the two-week sample holds for every ticket type."], downside: "if the saving is only 2 hours a week, we would stop at the review point." },
+      authorizes: { ...b.authorizes, limits: ["Up to 6 agent-days on the script and its tests."], freshApproval: "a new vendor, or sending ticket text outside our systems." },
+    };
+  };
+  const ask = (over: Partial<Ask> = {}): Ask => ({
+    id: "d-1", asker: { kind: "manager", name: "Manager", workerId: null }, need: "decision",
+    title: "Pick the weekday for the newsletter", shortTitle: null, summary: null, minutes: null, link: null, details: null,
+    context: null, contextKind: "markdown", options: [], answerBy: "tap", recommendation: null, ifNoAnswer: null,
+    deadline: null, blocking: false, project: null, askedAt: NOW, messageId: null, tracking: "age", ...over,
+  });
+
+  it("a brief with spend: read and decide, no quick answers (owner decision Q2's default)", () => {
+    expect(cardOf({ ...ask(), brief: brief() })).toEqual({
+      topic: "Support inbox triage", headline: "Approve option B: extend the in-house triage script",
+      recommended: "Extend the triage script", due: DUE, minutes: 4, spend: true, quickAnswers: [], hasBrief: true,
+    });
+  });
+  it("a brief without spend: the quick answers are its options, the recommended one first", () => {
+    expect(cardOf({ ...ask(), brief: noMoney() })).toEqual({
+      topic: "Support inbox triage", headline: "Approve option B: extend the in-house triage script",
+      recommended: "Extend the triage script", due: DUE, minutes: 4, spend: false,
+      quickAnswers: [
+        { key: "b", label: "Extend the triage script" },
+        { key: "a", label: "Keep manual triage" },
+        { key: "c", label: "Buy a hosted add-on" },
+      ],
+      hasBrief: true,
+    });
+  });
+  it("a plain ask with the short form: card from its own fields", () => {
+    const a = ask({
+      shortTitle: "Newsletter send day", summary: "Pick the weekday", minutes: 2, deadline: DUE,
+      options: [{ key: "tue", label: "Tuesday", detail: null }, { key: "thu", label: "Thursday", detail: null }],
+    });
+    expect(cardOf({ ...a, brief: null })).toEqual({
+      topic: "Newsletter send day", headline: "Pick the weekday", recommended: "Tuesday", due: DUE, minutes: 2,
+      spend: false, quickAnswers: [{ key: "tue", label: "Tuesday" }, { key: "thu", label: "Thursday" }], hasBrief: false,
+    });
+  });
+  it("a plain ask with only a long title: the first clause is the topic, the rest is the headline", () => {
+    const a = ask({ title: "Should we ship the release candidate today, or wait?" });
+    const card = cardOf({ ...a, brief: null });
+    expect(card.topic).toBe("Should we ship the release candidate today, or wait?");
+    expect(card.headline).toBe(null);
+    expect(card.recommended).toBe(null);
+    expect(card.quickAnswers).toEqual([]);
+    const b = ask({ title: "Pick the send day: Tuesday or Thursday for the newsletter?" });
+    expect(cardOf({ ...b, brief: null }).topic).toBe("Pick the send day");
+    expect(cardOf({ ...b, brief: null }).headline).toBe("Tuesday or Thursday for the newsletter?");
+  });
+  it("a long title past 60 characters is cut at a word; the whole text becomes the headline (§4.4)", () => {
+    const a = ask({ title: "Should we ship the release candidate today together with the migration, or wait for Monday?" });
+    const card = cardOf({ ...a, brief: null });
+    expect(card.topic.length).toBeLessThanOrEqual(60);
+    expect(card.topic.endsWith("…")).toBe(true);
+    expect(card.topic.startsWith("Should we ship the release candidate today")).toBe(true);
+    expect(card.headline).toBe("Should we ship the release candidate today together with the migration, or wait for Monday?");
+  });
+  it("a plain ask that mentions money says so", () => {
+    const a = ask({ title: "Spend $2,400 on the contractor", summary: "Approve the quote" });
+    expect(cardOf({ ...a, brief: null }).spend).toBe(true);
+  });
+  it("an ask answered in words has no quick answers and no recommendation", () => {
+    const a = ask({ answerBy: "words", title: "Where should the demo point?" });
+    const card = cardOf({ ...a, brief: null });
+    expect(card.quickAnswers).toEqual([]);
+    expect(card.recommended).toBe(null);
+  });
+  it("a time item carries its minutes and deadline only", () => {
+    const a = ask({ need: "time", title: "Review the release notes", minutes: 10, deadline: DUE, answerBy: "words" });
+    expect(cardOf({ ...a, brief: null })).toEqual({
+      topic: "Review the release notes", headline: null, recommended: null, due: DUE, minutes: 10,
+      spend: false, quickAnswers: [], hasBrief: false,
+    });
   });
 });
