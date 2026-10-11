@@ -86,7 +86,6 @@ describe("Home usage card", () => {
     expect(cursorText).not.toContain("not reported");
     expect(cursorText).not.toContain("5-hour window");
     expect(cursorText).not.toContain("Weekly window");
-    expect(cursorText).not.toContain("Auto 88%");
     const sessionsTile = tab.locator(".tile", { hasText: "Sessions reporting" });
     expect(Number((await sessionsTile.locator("b").innerText()).trim())).toBe(await tab.locator(".sess").count());
     const fiveTile = tab.locator(".tile", { hasText: "Tightest 5-hour window" });

@@ -39,6 +39,8 @@ const window = (w: UsageWindow | null): UsageWindow | null => (w ? { usedPercent
 // A window kept from before is dropped once its reset time has passed (the CLI drops it then too).
 const keep = <W extends UsageWindow>(w: W | null, now: number): W | null => (w && (w.resetsAt === null || w.resetsAt > now) ? w : null);
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+const NAMED_CAP = 8;
 const calendarDate = (v: string | null): string | null => {
   if (!v) return null;
   const m = DATE.exec(v);
@@ -64,13 +66,41 @@ const demandOf = (s: string | null): string | null => {
   if (/^on-demand [A-Za-z0-9$.,() -]+$/.test(t)) return t;
   return null;
 };
+// The one on-demand line, and the reset date a provider printed. The web formats nothing of its own.
+export function onDemandLine(v: string | null): string | null {
+  const t = demandOf(v);
+  if (t === "off") return "on-demand off";
+  if (t === "unavailable") return "on-demand limit unavailable";
+  return t;
+}
+export function resetsOnLabel(resetsOn: string | null): string | null {
+  const v = calendarDate(resetsOn);
+  if (!v) return null;
+  const month = MONTHS[Number(v.slice(5, 7)) - 1];
+  return month ? `resets ${Number(v.slice(8, 10))} ${month}` : null;
+}
 const named = (w: NamedWindow): NamedWindow | null => {
   const label = labelOf(w.label);
   if (!label) return null;
   return { label, usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
 };
-const keepNamed = (ws: NamedWindow[] | null | undefined, now: number): NamedWindow[] | null =>
-  (ws == null ? null : ws.filter(w => w.resetsAt === null || w.resetsAt > now));
+// An empty list is not named mode: every row dropped, or every window reset, falls back to the 5-hour and weekly rows.
+const keepNamed = (ws: NamedWindow[] | null | undefined, now: number): NamedWindow[] | null => {
+  if (ws == null) return null;
+  const kept = ws.filter(w => w.resetsAt === null || w.resetsAt > now);
+  return kept.length ? kept : null;
+};
+const takeNamed = (raw: readonly NamedWindow[]): NamedWindow[] | null => {
+  const out: NamedWindow[] = [];
+  for (const w of raw) {
+    const n = named(w);
+    if (!n) continue;
+    out.push(n);
+    if (out.length === NAMED_CAP) break;
+  }
+  return out.length ? out : null;
+};
+const showsNamed = (a: AccountUsage): boolean => (a.limits?.length ?? 0) > 0;
 
 // U2: the account after one report. A report older than the account's last never moves the windows (reports from
 // several sessions of one account can cross), but its session is still noted when it is newer than that session's last.
@@ -83,8 +113,8 @@ export function applyReport(current: AccountUsage | null, r: UsageReport, now: n
   const had = base.sessions.find(s => s.sessionId === r.sessionId);
   const sessions = had && had.at > r.at ? base.sessions : [...base.sessions.filter(s => s.sessionId !== r.sessionId), session];
   if (!newer) return { ...base, sessions: pruneSessions(sessions, now) };
-  // A report that names its windows replaces them. One that doesn't (a status line) keeps them until each reset.
-  const namedNow = r.limits == null ? null : r.limits.flatMap(w => { const n = named(w); return n ? [n] : []; });
+  // A report that names its windows replaces them. An empty list is not that report: the previous windows stay until each reset.
+  const namedNow = r.limits == null ? null : takeNamed(r.limits);
   const limits = namedNow ?? keepNamed(base.limits, now);
   return {
     account: base.account,
@@ -111,7 +141,26 @@ export function accountNow(a: AccountUsage, now: number): AccountUsage {
   };
 }
 
+// The notice's level: named windows count, and a hidden 5-hour or weekly row does not.
+const LEVEL_RANK: Record<UsageLevel, number> = { ok: 0, warning: 1, critical: 2 };
+export function shownLevel(accounts: readonly AccountUsage[]): UsageLevel {
+  let worst: UsageLevel = "ok";
+  for (const a of accounts) {
+    const windows: readonly (UsageWindow | null)[] = showsNamed(a) ? (a.limits ?? []) : [a.fiveHour, a.sevenDay];
+    for (const w of windows) {
+      if (!w) continue;
+      const level = usageLevel(w.usedPercentage);
+      if (LEVEL_RANK[level] > LEVEL_RANK[worst]) worst = level;
+    }
+  }
+  return worst;
+}
+
 // The account nearest its limit on a window, for the headline tiles; null when no account reports that window.
+// A named account's 5-hour and weekly rows are not on its card, so they are not candidates.
+export function tightestShown(accounts: readonly AccountUsage[], which: "fiveHour" | "sevenDay"): { account: string; window: UsageWindow } | null {
+  return tightest(accounts.filter(a => !showsNamed(a)), which);
+}
 export function tightest(accounts: readonly AccountUsage[], which: "fiveHour" | "sevenDay"): { account: string; window: UsageWindow } | null {
   let best: { account: string; window: UsageWindow } | null = null;
   for (const a of accounts) {

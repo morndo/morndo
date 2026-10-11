@@ -10,15 +10,14 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Users from "@lucide/svelte/icons/users";
   import Avatar from "./Avatar.svelte";
-  import { LEVEL_WORDS, ago, onDemandLine, pct, resetsIn, resetsOnLabel, tightest, usageLevel, usd, type AccountUsage, type UsageWindow } from "./usage.ts";
+  import { LEVEL_WORDS, ago, onDemandLine, pct, resetsIn, resetsOnLabel, shownLevel, tightestShown, usageLevel, usd, type AccountUsage, type UsageWindow } from "./usage.ts";
 
   let { accounts, at, now, live, onOpenLane }: { accounts: AccountUsage[]; at: number | null; now: number; live: boolean; onOpenLane: (name: string) => void } = $props();
 
   const sessions = $derived(accounts.reduce((n, a) => n + a.sessions.length, 0));
-  const five = $derived(tightest(accounts, "fiveHour"));
-  const week = $derived(tightest(accounts, "sevenDay"));
-  const worst = $derived([five, week].flatMap(t => (t ? [usageLevel(t.window.usedPercentage)] : [])));
-  const headline = $derived(worst.includes("critical") ? "critical" : worst.includes("warning") ? "warning" : "ok");
+  const five = $derived(tightestShown(accounts, "fiveHour"));
+  const week = $derived(tightestShown(accounts, "sevenDay"));
+  const headline = $derived(shownLevel(accounts));
 </script>
 
 {#snippet meter(label: string, w: UsageWindow | null, when: string | null)}
@@ -74,11 +73,25 @@
         {#each accounts as a (a.account)}
           <article class="card" data-account={a.account} aria-label="Account {a.account}">
             <header><Avatar name={a.account} kind="agent" size={28} /><h3>{a.account}</h3><span class="when">reported {ago(a.reportedAt, now)}</span></header>
-            {#if a.limits}
+            {#if a.limits?.length}
               {#each a.limits as w, i (`${w.label}:${i}`)}
                 {@render meter(w.label, w, resetsOnLabel(w.resetsOn))}
               {/each}
               {#if onDemandLine(a.onDemand)}<p class="ondemand">{onDemandLine(a.onDemand)}</p>{/if}
+              {#if a.spend}
+                {@render meter(`Spend limit${a.spend.period ? ` (${a.spend.period})` : ""}`, a.spend, null)}
+                {#if a.spend.usedUsd !== null}<p class="spend">{usd(a.spend.usedUsd)}{a.spend.limitUsd !== null ? ` of ${usd(a.spend.limitUsd)}` : ""}</p>{/if}
+              {/if}
+              <div class="sessions">
+                <span class="sl">{a.sessions.length ? `${a.sessions.length} session${a.sessions.length === 1 ? "" : "s"} reporting` : "No session reporting right now"}</span>
+                {#each a.sessions as s (s.sessionId)}
+                  <button class="sess" onclick={() => s.lane && onOpenLane(s.lane)} disabled={!s.lane} title={s.lane ? `Open #${s.lane}` : "A session without a lane name"}>
+                    <span class="lane">{s.lane ? `#${s.lane}` : "unnamed"}</span>
+                    {#if s.model}<span class="model">{s.model}</span>{/if}
+                    {#if s.contextUsed !== null}<span class="ctx">{pct(s.contextUsed)} context</span>{/if}
+                  </button>
+                {/each}
+              </div>
             {:else}
             {@render meter("5-hour window", a.fiveHour, null)}
             {@render meter("Weekly window", a.sevenDay, null)}

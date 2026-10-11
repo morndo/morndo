@@ -29,19 +29,21 @@ export function reportFrom(body: UsageReportBody, account: string, actor: BoardA
     limits, onDemand: limits ? (typeof body.on_demand === "string" ? body.on_demand : null) : null,
   };
 }
-// Absent: a status line. Present: the windows this account has, in order. A row without a percentage is dropped.
+// Absent, or nothing left after dropping bad rows: a status line. At most eight windows, in order.
 function namedLimits(raw: UsageReportBody["limits"]): NamedWindow[] | null {
   if (raw == null) return null;
   const out: NamedWindow[] = [];
   for (const w of raw) {
+    if (typeof w.label !== "string" || !w.label.trim()) continue;
     if (typeof w.used_percentage !== "number" || !Number.isFinite(w.used_percentage)) continue;
     out.push({
       label: w.label, usedPercentage: w.used_percentage,
       resetsAt: typeof w.resets_at === "number" && Number.isFinite(w.resets_at) ? w.resets_at * 1000 : null,
       resetsOn: typeof w.resets_on === "string" ? w.resets_on : null,
     });
+    if (out.length === 8) break;
   }
-  return out;
+  return out.length ? out : null;
 }
 const num = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
