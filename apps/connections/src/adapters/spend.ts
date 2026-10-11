@@ -18,7 +18,10 @@ export function costFromOutput(stdout: string): number | null {
 // instead of charging the whole reservation. A priced model with no token counts stays null.
 // https://code.claude.com/docs/en/agent-sdk/typescript and https://code.claude.com/docs/en/headless
 // — checked 2026-10-11.
-export type CatalogPrice = { at: string; model: string; input: number; output: number };
+export type CatalogPrice = { at: string; model: string; input: number; output: number; cacheRead?: number };
+
+type Tokens = { input: number; output: number; cacheRead: number; cacheWrite: number };
+type Price = { input: number; output: number; cacheRead?: number };
 
 export function catalogTokenCost(stdout: string, prices: readonly CatalogPrice[], model: string): number | null {
   const body = lastResult(stdout);
@@ -31,33 +34,42 @@ export function catalogTokenCost(stdout: string, prices: readonly CatalogPrice[]
     if (!aggregate) return table.has(model) ? null : costFromOutput(stdout);
     const price = table.get(model);
     if (!price) return costFromOutput(stdout);
-    return charge(aggregate.input, aggregate.output, price);
+    return charge(aggregate, price);
   }
   let total = 0;
   for (const row of rows) {
     const price = table.get(row.model);
     if (!price) return costFromOutput(stdout);
-    const part = charge(row.input, row.output, price);
+    const part = charge(row, price);
     if (part === null) return null;
     total += part;
   }
   return roundDollars(total);
 }
 
-function charge(input: number, output: number, price: { input: number; output: number } | undefined): number | null {
-  if (!price || !Number.isFinite(input) || !Number.isFinite(output) || input < 0 || output < 0) return null;
-  if (!Number.isFinite(price.input) || !Number.isFinite(price.output) || price.input < 0 || price.output < 0) return null;
-  return (input * price.input + output * price.output) / 1_000_000;
+// cacheRead is the vendor's cached-input price per 1M tokens. Z.ai lists Cached Input and no cache-creation
+// price (https://docs.z.ai/guides/overview/pricing, read 2026-10-11), so cache creation is charged as input.
+// A row with no cacheRead price charges cache reads as input too.
+function charge(tokens: Tokens, price: Price | undefined): number | null {
+  if (!price) return null;
+  const readRate = price.cacheRead ?? price.input;
+  const amounts = [tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, price.input, price.output, readRate];
+  if (amounts.some(amount => !Number.isFinite(amount) || amount < 0)) return null;
+  return (tokens.input * price.input + tokens.cacheRead * readRate + tokens.cacheWrite * price.input + tokens.output * price.output) / 1_000_000;
 }
 
 function roundDollars(amount: number): number {
   return Math.round(amount * 1_000_000) / 1_000_000;
 }
 
-function priceTable(prices: readonly CatalogPrice[]): Map<string, { input: number; output: number }> {
+function priceTable(prices: readonly CatalogPrice[]): Map<string, Price> {
   const sorted = [...prices].sort((a, b) => a.at < b.at ? -1 : a.at > b.at ? 1 : 0);
-  const table = new Map<string, { input: number; output: number }>();
-  for (const row of sorted) table.set(row.model, { input: row.input, output: row.output });
+  const table = new Map<string, Price>();
+  for (const row of sorted) {
+    table.set(row.model, row.cacheRead === undefined
+      ? { input: row.input, output: row.output }
+      : { input: row.input, output: row.output, cacheRead: row.cacheRead });
+  }
   return table;
 }
 
@@ -87,23 +99,35 @@ function isTokenRow(value: unknown): value is { inputTokens: number; outputToken
   return typeof value.inputTokens === "number" && typeof value.outputTokens === "number";
 }
 
-function modelRows(body: ResultBody): { model: string; input: number; output: number }[] | null {
+function optionalCount(value: object, key: string): number | null {
+  if (!(key in value)) return 0;
+  const count = (value as Record<string, unknown>)[key];
+  return typeof count === "number" ? count : null;
+}
+
+function modelRows(body: ResultBody): ({ model: string } & Tokens)[] | null {
   if (body.modelUsage === undefined) return [];
   if (typeof body.modelUsage !== "object" || body.modelUsage === null || Array.isArray(body.modelUsage)) return null;
-  const rows: { model: string; input: number; output: number }[] = [];
+  const rows: ({ model: string } & Tokens)[] = [];
   for (const [model, value] of Object.entries(body.modelUsage)) {
     if (!isTokenRow(value)) return null;
-    rows.push({ model, input: value.inputTokens, output: value.outputTokens });
+    const cacheRead = optionalCount(value, "cacheReadInputTokens");
+    const cacheWrite = optionalCount(value, "cacheCreationInputTokens");
+    if (cacheRead === null || cacheWrite === null) return null;
+    rows.push({ model, input: value.inputTokens, output: value.outputTokens, cacheRead, cacheWrite });
   }
   return rows;
 }
 
-function loopUsage(body: ResultBody): { input: number; output: number } | null {
+function loopUsage(body: ResultBody): Tokens | null {
   const usage = body.usage;
   if (typeof usage !== "object" || usage === null) return null;
   if (!("input_tokens" in usage) || !("output_tokens" in usage)) return null;
   if (typeof usage.input_tokens !== "number" || typeof usage.output_tokens !== "number") return null;
-  return { input: usage.input_tokens, output: usage.output_tokens };
+  const cacheRead = optionalCount(usage, "cache_read_input_tokens");
+  const cacheWrite = optionalCount(usage, "cache_creation_input_tokens");
+  if (cacheRead === null || cacheWrite === null) return null;
+  return { input: usage.input_tokens, output: usage.output_tokens, cacheRead, cacheWrite };
 }
 
 export function modelFromOutput(stdout: string): string | null {

@@ -126,9 +126,11 @@ describe("vendor catalog", () => {
     expect(zai?.defaultPicks).toEqual({ implement: "glm-5.3@max", "*": "glm-5.3@high" });
     expect(zai?.spend).toEqual(["token-price"]);
     expect(zai?.balance).toBeNull();
+    // https://docs.z.ai/guides/overview/pricing (read 2026-10-11): Cached Input is $0.26 and $0.03 per 1M.
+    // The page lists no cache-creation price, so that field is absent and those tokens are billed as input.
     expect(zai?.prices).toEqual([
-      { at: "2026-10-10", model: "glm-5.3", input: 1.4, output: 4.4 },
-      { at: "2026-10-10", model: "glm-5.3-flash", input: 0.15, output: 0.5 },
+      { at: "2026-10-11", model: "glm-5.3", input: 1.4, output: 4.4, cacheRead: 0.26 },
+      { at: "2026-10-11", model: "glm-5.3-flash", input: 0.15, output: 0.5, cacheRead: 0.03 },
     ]);
     // https://platform.kimi.ai/docs/guide/claude-code-kimi (read 2026-10-10): the messages base URL is
     // https://api.moonshot.ai/anthropic. The balance response field is not on that page, so it is not a spend source.

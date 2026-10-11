@@ -94,8 +94,8 @@
     "keyShapes": [],
     "spend": ["token-price"],
     "prices": [
-      { "at": "2026-10-10", "model": "glm-5.3", "input": 1.4, "output": 4.4 },
-      { "at": "2026-10-10", "model": "glm-5.3-flash", "input": 0.15, "output": 0.5 }
+      { "at": "2026-10-11", "model": "glm-5.3", "input": 1.4, "output": 4.4, "cacheRead": 0.26 },
+      { "at": "2026-10-11", "model": "glm-5.3-flash", "input": 0.15, "output": 0.5, "cacheRead": 0.03 }
     ],
     "balance": null,
     "defaultPicks": { "implement": "glm-5.3@max", "*": "glm-5.3@high" },

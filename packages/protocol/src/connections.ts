@@ -126,7 +126,9 @@ export const VendorPreset = z.strictObject({
   family: text(64),
   keyShapes: z.array(text(40)),
   spend: z.array(z.enum(["balance", "token-price", "manual", "provider"])),
-  prices: z.array(z.strictObject({ at: text(32), model: text(80), input: z.number(), output: z.number() })),
+  prices: z.array(z.strictObject({
+    at: text(32), model: text(80), input: z.number(), output: z.number(), cacheRead: z.optional(z.number()),
+  })),
   balance: z.nullable(z.strictObject({ endpoint: z.url(), field: text(120) })),
   defaultPicks: z.record(z.string().check(z.maxLength(64)), text(200)),
   idPatterns: z.optional(z.record(z.string().check(z.maxLength(80)), text(200))),
