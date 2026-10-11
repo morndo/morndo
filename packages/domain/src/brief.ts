@@ -81,6 +81,15 @@ class Lint {
   // refused. What lint accepts, the renderer shows; what the renderer would drop, lint refuses (A1).
   markdown(where: string, s: string) {
     if (/^\s{0,3}#{1,6}(?:\s|$)/m.test(s)) { this.error("bad_markdown", where, "no headings of your own; the format owns the outline"); return; }
+    this.#subset(where, s);
+  }
+
+  // DB7 for a field that lands inside a line of briefMarkdown which already has its own shape — the title, a labelled
+  // line, a list item, a table cell (§4.5: an old app renders `details` as markdown). Links must be https, no raw HTML,
+  // no images; a heading can't form there, so the one rule that can't bite isn't checked.
+  inline(where: string, s: string) { this.#subset(where, s); }
+
+  #subset(where: string, s: string) {
     if (/!\[[^\]]*\]\([^)]*\)/.test(s)) { this.error("bad_markdown", where, "no images; link the evidence instead"); return; }
     if (/<!--[\s\S]*?-->|<!?[a-zA-Z/][^>\n]*>/.test(s)) { this.error("bad_markdown", where, "no raw HTML; plain markdown only"); return; }
     const bad = [...s.matchAll(/\[[^\]]*\]\(\s*([^)\s]+)[^)]*\)/g)].map(m => m[1] ?? "").find(t => !t.startsWith("https://"));
@@ -158,6 +167,9 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
       keys.add(key);
       keysAnyCase.add(key.toLowerCase());
       if (label.length > 40) { lint.error("too_long", `options[${i}].label`, `${label.length} characters; the cap is 40`); options.push({ key, label }); continue; }
+      // A label lands in briefMarkdown's table head and tap lines: no pipe may break the columns (DB7).
+      if (label.includes("|")) { lint.error("bad_markdown", `options[${i}].label`, `a label can't hold "|"; it heads a column of the comparison`); continue; }
+      lint.inline(`options[${i}].label`, label);
       options.push({ key, label });
     }
   }
@@ -189,6 +201,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
 
   const topic = lint.string("topic", draft.topic, CAPS.topic);
   const headline = lint.string("headline", draft.headline, CAPS.headline);
+  if (headline !== null) lint.inline("headline", headline);   // it becomes briefMarkdown's own title line (§4.5)
   if (recommend && headline !== null) {
     // "option <KEY>" with a word boundary, and only a token that is one of the brief's own keys (any case) names an
     // option: "adoption" and "the option with less risk" name none, whatever follows "option".
@@ -216,6 +229,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   if (whyText !== null) lint.markdown("why.text", whyText);
   // Assumptions may be empty when no money appears (DB5); limits are the asker's commitment, at least one.
   const assumptions = lint.strings("why.assumptions", why.assumptions, CAPS.item, 0, CAPS.list);
+  for (const [i, a] of (assumptions ?? []).entries()) lint.inline(`why.assumptions[${i}]`, a);
   let downside: string | null = null;
   if (!isText(why.downside) || blank(why.downside)) {
     lint.error("no_downside", "why.downside", "state what happens if the assumptions are wrong; every brief has a downside case");
@@ -226,17 +240,27 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   } else {
     downside = why.downside;
   }
+  if (downside !== null) lint.inline("why.downside", downside);
+  // One-line sections print inside a labelled or list line of briefMarkdown (§4.5) — or, for changeIf and ifNoAnswer,
+  // as a section's whole body — so each is checked for the shape it lands in, as the Md fields are (DB7).
   const changeIf = lint.string("changeIf", draft.changeIf, CAPS.line);
+  if (changeIf !== null) lint.markdown("changeIf", changeIf);
   const risk = isObj(draft.risk) ? draft.risk : {};
   const riskText = lint.string("risk.risk", risk.risk, CAPS.line);
+  if (riskText !== null) lint.inline("risk.risk", riskText);
   const control = lint.string("risk.control", risk.control, CAPS.line);
+  if (control !== null) lint.inline("risk.control", control);
   const authorizes = isObj(draft.authorizes) ? draft.authorizes : {};
   const limits = lint.strings("authorizes.limits", authorizes.limits, CAPS.item, 1, CAPS.list);
+  for (const [i, l] of (limits ?? []).entries()) lint.inline(`authorizes.limits[${i}]`, l);
   const freshApproval = lint.string("authorizes.freshApproval", authorizes.freshApproval, CAPS.line);
+  if (freshApproval !== null) lint.inline("authorizes.freshApproval", freshApproval);
   const reviewPoint = lint.string("authorizes.reviewPoint", authorizes.reviewPoint, CAPS.line);
+  if (reviewPoint !== null) lint.inline("authorizes.reviewPoint", reviewPoint);
   const ifNoAnswer = draft.ifNoAnswer === undefined || draft.ifNoAnswer === null
     ? null
     : lint.string("ifNoAnswer", draft.ifNoAnswer, CAPS.line);
+  if (ifNoAnswer !== null) lint.markdown("ifNoAnswer", ifNoAnswer);
 
   // DB4: one column per option in their order, three to ten factor rows, no empty cell ("n/a" is a value), and a note
   // on what the numbers include.
@@ -251,6 +275,9 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
       if (sub !== "factor" && sub !== "cells") lint.error("unknown_section", `comparison.rows[${i}].${sub}`, `a factor row has no "${sub}" part; check the template`);
     }
     const factor = lint.string(`comparison.rows[${i}].factor`, row.factor, CAPS.factor);
+    if (factor !== null && factor.includes("|")) {
+      lint.error("bad_markdown", `comparison.rows[${i}].factor`, "a factor can't hold \"|\"; it would break the table's columns");
+    }
     const cellsIn = row.cells;
     let cells: string[] | null = Array.isArray(cellsIn) ? cellsIn : null;
     if (cells === null || (!optionsBroken && cells.length !== keys.size)) {
@@ -263,7 +290,11 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
         const cell = cells[j]!;
         if (!isText(cell) || blank(cell)) { lint.error("empty_cell", `comparison.rows[${i}].cells[${j}]`, "no empty cells: write a value, or \"n/a\" when there is none"); continue; }
         if (cell.length > CAPS.cell) { lint.error("too_long", `comparison.rows[${i}].cells[${j}]`, `${cell.length} characters; the cap is ${CAPS.cell}`); continue; }
-        if (CONTROL.test(cell)) { lint.error("control_char", `comparison.rows[${i}].cells[${j}]`, "control characters, or a line break in a one-line field"); continue; }
+        if (CONTROL.test(cell) || cell.includes("\n")) { lint.error("control_char", `comparison.rows[${i}].cells[${j}]`, "control characters, or a line break in a one-line field"); continue; }
+        // A cell sits between the row's pipes in briefMarkdown: "|" in it would add a column, a second line would
+        // leave the table (DB7).
+        if (cell.includes("|")) { lint.error("bad_markdown", `comparison.rows[${i}].cells[${j}]`, "a cell can't hold \"|\"; it would break the table's columns"); continue; }
+        lint.inline(`comparison.rows[${i}].cells[${j}]`, cell);
         kept.push(cell);
       }
       cells = kept;
@@ -280,6 +311,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   } else {
     note = comparison.note;
   }
+  if (note !== null) lint.inline("comparison.note", note);
 
   const evidenceIn = Array.isArray(draft.evidence) ? draft.evidence : [];
   if (evidenceIn.length > CAPS.evidence) lint.error("too_long", "evidence", `${evidenceIn.length} items; the cap is ${CAPS.evidence}`);
@@ -288,10 +320,19 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     const item = isObj(evidenceIn[i]) ? evidenceIn[i] : {};
     const label = lint.string(`evidence[${i}].label`, item.label, CAPS.evidenceLabel);
     const url = lint.string(`evidence[${i}].url`, item.url, CAPS.evidenceUrl);
-    // DB7 on an evidence link: https only, so nothing on the principal's devices reaches out over plain http.
+    // DB7 on an evidence link: https only, and a target briefMarkdown can write inside "[label](url)" without
+    // breaking out of it — so nothing on the principal's devices reaches out over plain http or a spliced-in link.
     if (url !== null && !/^https:\/\//.test(url)) {
       lint.error("bad_link", `evidence[${i}].url`, `"${url}" is not an https address; evidence links stay https`);
       continue;
+    }
+    if (url !== null && !/^https:\/\/[^\s()]+$/.test(url)) {
+      lint.error("bad_link", `evidence[${i}].url`, `"${url}" can't be written as a link's target; no spaces or brackets in it`);
+      continue;
+    }
+    if (label !== null) {
+      if (/[[\]]/.test(label)) lint.error("bad_markdown", `evidence[${i}].label`, "no brackets in an evidence label; they would break the link it names");
+      else lint.inline(`evidence[${i}].label`, label);
     }
     if (label !== null && url !== null) evidence.push({ label, url });
   }
