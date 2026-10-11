@@ -17,10 +17,15 @@ export type Migration = {
 /** The floor of a database at `version`, read from the database itself: no _morndo_schema table, or a table with no
  *  row, counts as the version, so a database from before floors keeps the old refusal — fail-safe (§11.1). */
 export function schemaFloor(db: Database.Database, version: number): number {
+  return storedFloor(db) ?? version;
+}
+
+// The floor row itself, or null when the database has none: a table missing, or a table with no row in it.
+function storedFloor(db: Database.Database): number | null {
   const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_morndo_schema'").get();
-  if (!table) return version;
+  if (!table) return null;
   const row = db.prepare("SELECT floor FROM _morndo_schema WHERE id = 1").get() as { floor: number } | undefined;
-  return row?.floor ?? version;
+  return row?.floor ?? null;
 }
 
 // The floor moves in the same transaction as user_version, so a failure moves neither (§11.1).
@@ -41,13 +46,17 @@ export function migrate(
   const version = () => db.pragma("user_version", { simple: true }) as number;
   const first = version();
   if (schemaFloor(db, first) > known) throw refuse(first, known);
-  if (first > known) return { from: first, to: first };            // only additive migrations are ahead: open, run nothing
+  // Nothing to do: a database ahead on additive migrations only (open, run nothing), or up to date with its floor row
+  // already there. A plain open then writes nothing — no write lock, no WAL frame — so a read-only file still opens and
+  // a busy writer cannot turn it into SQLITE_BUSY. The row is written only when a migration runs or when a database
+  // from before floors, already at this version, has none yet.
+  if (first > known || (first === known && storedFloor(db) !== null)) return { from: first, to: first };
   // The version is read again under the write lock IMMEDIATE takes: a service and a console command opening an old
   // database at once must not both run the same migrations.
   return db.transaction(() => {
     const from = version();
     if (schemaFloor(db, from) > known) throw refuse(from, known);
-    if (from > known) return { from, to: from };
+    if (from > known || (from === known && storedFloor(db) !== null)) return { from, to: from };
     for (const m of migrations.slice(from)) m.up(db);
     writeFloor(db, ownFloor);
     db.pragma(`user_version = ${known}`);

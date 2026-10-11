@@ -44,6 +44,36 @@ describe("schema floors in the runner", () => {
     expect(db.pragma("user_version", { simple: true })).toBe(3);
   });
 
+  it("writes nothing when the database is already up to date: no floor rewrite, no version write", () => {
+    const db = new Database(":memory:");
+    migrate(db, [M(1), M(2)], future);
+    const changes = () => (db.prepare("SELECT total_changes() AS n").get() as { n: number }).n;
+    const before = changes();
+    expect(migrate(db, [M(1), M(2)], future)).toEqual({ from: 2, to: 2 });
+    expect(changes()).toBe(before);                       // the upsert used to move this: a write on every open
+  });
+
+  it("opens an up-to-date database read-only: a plain open takes no write lock", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "morndo-floor-")), "db");
+    dirs.push(dirname(path));
+    const made = new Database(path);
+    migrate(made, [M(1), M(2)], future);
+    made.close();
+    const readonly = new Database(path, { readonly: true });
+    expect(migrate(readonly, [M(1), M(2)], future)).toEqual({ from: 2, to: 2 });  // BEGIN IMMEDIATE would fail here
+    readonly.close();
+  });
+
+  it("gives a database from before floors, already at this version, the floor row alone", () => {
+    const db = new Database(":memory:");
+    db.exec("CREATE TABLE t1 (x); CREATE TABLE t2 (y)");   // as the pre-floor build at version 2 left it
+    db.pragma("user_version = 2");
+    const breaking: Migration = { version: 1, name: "m1", compat: "breaking", up: () => {} };
+    expect(migrate(db, [breaking, M(2)], future)).toEqual({ from: 2, to: 2 });   // no migration runs
+    expect(db.prepare("SELECT floor FROM _morndo_schema WHERE id = 1").get()).toEqual({ floor: 1 });
+    expect(db.pragma("user_version", { simple: true })).toBe(2);
+  });
+
   it("counts a floor table with no row as floor = the version: the fail-safe refusal", () => {
     const db = new Database(":memory:");
     migrate(db, [M(1), M(2)], future);
