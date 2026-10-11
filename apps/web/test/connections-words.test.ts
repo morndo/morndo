@@ -11,6 +11,8 @@ describe("the connections page uses the protocol words", () => {
   it("imports the table and does not quote its title or its modes", () => {
     expect(board).toContain("CONNECTION_WORDS");
     expect(page).toContain("CONNECTION_WORDS.title");
+    expect(page).toContain('class="connections"');
+    expect(page.match(/api\.get[^\n]*\/api\/me/g)).toHaveLength(1);
     expect(board).not.toContain(`"${CONNECTION_WORDS.title}"`);
     expect(page).not.toContain(`"${CONNECTION_WORDS.title}"`);
     for (const label of Object.values(CONNECTION_WORDS.modes)) expect(board).not.toContain(`"${label}"`);

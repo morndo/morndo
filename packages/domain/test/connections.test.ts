@@ -326,7 +326,9 @@ describe("CN10: spend is append-only and an estimate never lowers it", () => {
     expect(problem(recordSpend(dir, "credit1", Number.POSITIVE_INFINITY, "manual", operator, T))).toBe("budget");
     const open = value(lease(ack(key(emptyDirectory(), "credit1", FP2, { budget: { kind: "unlimited" } })), "credit1", ask()));
     expect(problem(closeLease(open, "credit1", "l1", "done", Number.NaN, "estimate", operator, T, 1))).toBe("budget");
-    expect(isKey(conn(open, "credit1")) && conn(open, "credit1").leases).toHaveLength(1);
+    const leased = conn(open, "credit1");
+    if (!isKey(leased)) throw new Error("expected a key");
+    expect(leased.leases).toHaveLength(1);
     dir = value(recordSpend(dir, "credit1", 10, "provider", operator, T));
     dir = value(recordSpend(dir, "credit1", 2, "estimate", operator, T + 1));
     expect(problem(recordSpend(dir, "credit1", -100, "manual", operator, T + 2))).toBe("principal");
@@ -339,7 +341,8 @@ describe("CN10: spend is append-only and an estimate never lowers it", () => {
     const blocked = closeLease(spent, "credit1", "l1", "done", 5, "balance", operator, T + 1, 10);
     expect(problem(blocked)).toBe("principal");
     const still = conn(spent, "credit1");
-    expect(isKey(still) && spentOf(still.spend)).toBe(90);
+    if (!isKey(still)) throw new Error("expected a key");
+    expect(spentOf(still.spend)).toBe(90);
     expect(still.leases).toHaveLength(1);
     const closed = value(closeLease(spent, "credit1", "l1", "done", 5, "balance", principal(), T + 1, 10));
     const closedKey = conn(closed, "credit1");

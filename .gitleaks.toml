@@ -42,3 +42,9 @@ description = "PEM armor around a sentinel string in a redaction test"
 condition = "AND"
 targetRules = ["private-key"]
 paths = ['''(?:^|/)packages/domain/test/jobs\.test\.ts$''']
+
+[[allowlists]]
+description = "The pre-push allowlist quotes the synthetic key headers it ignores"
+condition = "AND"
+targetRules = ["private-key"]
+paths = ['''(?:^|/)scripts/git-hooks/leak-allowlist$''']
