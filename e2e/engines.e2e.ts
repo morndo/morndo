@@ -10,6 +10,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { CONNECTION_WORDS } from "@morndo/protocol";
 import { chromium, type Page } from "playwright";
 import { assert, checks, outDir, pairedPage, startOffice } from "./harness.ts";
 
@@ -59,7 +60,7 @@ try {
     await page.getByRole("button", { name: "Settings" }).click();
     await page.getByRole("link", { name: "Devices and sign out" }).click();
     await page.getByRole("link", { name: /Engines/ }).click();
-    await page.getByRole("heading", { name: "Engines", level: 1 }).waitFor({ timeout: 10_000 });
+    await page.getByRole("heading", { name: CONNECTION_WORDS.title, level: 1 }).waitFor({ timeout: 10_000 });
     assert(new URL(page.url()).pathname === "/engines", `at ${page.url()}`);
   });
 
@@ -176,7 +177,7 @@ try {
     const desk = await pairedPage(browser, office, { width: 1440, height: 900 });
     try {
       await desk.page.getByRole("link", { name: "Engines" }).click();
-      await desk.page.getByRole("heading", { name: "Engines", level: 1 }).waitFor({ timeout: 10_000 });
+      await desk.page.getByRole("heading", { name: CONNECTION_WORDS.title, level: 1 }).waitFor({ timeout: 10_000 });
       await card(desk.page, "Review").waitFor();
       await desk.page.screenshot({ path: join(OUT, "4-desktop.png"), fullPage: true });
       assert(desk.errors.length === 0, `console errors: ${desk.errors.join(" | ")}`);

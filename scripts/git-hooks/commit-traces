@@ -1,0 +1,124 @@
+#!/bin/sh
+# Reject assistant attribution in a commit message, author, or committer.
+# The author address must be @users.noreply.github.com. The committer address
+# may also be GitHub's web-flow address, noreply@github.com.
+#   sh commit-traces message FILE
+#   sh commit-traces range <git rev-list args>
+#   sh commit-traces mails <git rev-list args>
+# A dependabot[bot] author, committer, or trailer is allowed. Any other
+# [bot] identity is not. Install the commit-msg hook with scripts/install-git-hooks.sh.
+set -eu
+
+names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
+robot=$(printf '\360\237\244\226')
+err=$(mktemp)
+trap 'rm -f "$err"' EXIT
+
+fail() {
+  echo "commit-traces: $*" >&2
+  exit 1
+}
+
+# 0 when an identity (a name, an address, or a trailer) attributes the change.
+bad_ident() {
+  text=$1
+  printf '%s' "$text" | grep -E -i -q "(^|[^A-Za-z0-9])($names)([^A-Za-z0-9]|$)" && return 0
+  printf '%s' "$text" | grep -E -i -q '[^[:space:]<>@]+@(anthropic\.com|cursor\.(com|sh)|openai\.com)' && return 0
+  stripped=$(printf '%s' "$text" | sed 's/dependabot\[bot\]//g')
+  printf '%s' "$stripped" | grep -F -q '[bot]' && return 0
+  return 1
+}
+
+# A subject or body may name a product. Only attribution does not.
+bad_message() {
+  text=$1
+  printf '%s' "$text" | grep -E -i -q 'generated[[:space:]]+(with|by)' && return 0
+  printf '%s' "$text" | grep -F -q "$robot" && return 0
+  printf '%s' "$text" | grep -E -i -q 'https?://[^[:space:]]*(claude\.ai|chatgpt\.com|chat\.openai\.com|cursor\.(com|sh))' && return 0
+  printf '%s' "$text" | grep -E -i -q '[^[:space:]<>@]+@(anthropic\.com|cursor\.(com|sh)|openai\.com)' && return 0
+  trailers=$(printf '%s\n' "$text" | grep -E -i '^(Co-authored-by|Signed-off-by):' || true)
+  [ -n "$trailers" ] || return 1
+  bad_ident "$trailers"
+}
+
+check_message() {
+  if bad_message "$1"; then
+    fail "message attributes the change to an assistant"
+  fi
+}
+
+# 0 when the address is a GitHub noreply address. The local part may contain
+# the brackets a [bot] address uses.
+noreply_mail() {
+  printf '%s' "$1" | grep -E -i -q '^[^@[:space:]]+@users\.noreply\.github\.com$'
+}
+
+# Web merges and the web editor commit as GitHub <noreply@github.com>.
+github_committer() {
+  printf '%s' "$1" | grep -E -i -q '^noreply@github\.com$'
+}
+
+check_mails() {
+  sha=$1
+  ae=$(git log -1 --format='%ae' "$sha")
+  ce=$(git log -1 --format='%ce' "$sha")
+  noreply_mail "$ae" || fail "$sha author email is not @users.noreply.github.com"
+  if ! noreply_mail "$ce" && ! github_committer "$ce"; then
+    fail "$sha committer email is not a noreply address"
+  fi
+}
+
+check_commit() {
+  sha=$1
+  msg=$(git log -1 --format='%B' "$sha")
+  if bad_message "$msg"; then
+    fail "$sha message attributes the change to an assistant"
+  fi
+  ident=$(git log -1 --format='%an%n%ae%n%cn%n%ce' "$sha")
+  if bad_ident "$ident"; then
+    fail "$sha author or committer names an assistant or a bot other than dependabot[bot]"
+  fi
+  check_mails "$sha"
+}
+
+walk() {
+  action=$1
+  shift
+  [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
+  # A failing rev-list (a missing sha, a bad range) must not look like a clean check.
+  status=0
+  list=$(git rev-list "$@" 2>"$err") || status=$?
+  if [ "$status" -ne 0 ]; then
+    cat "$err" >&2
+    fail "revision range"
+  fi
+  while IFS= read -r sha; do
+    [ -n "$sha" ] || continue
+    "$action" "$sha"
+  done <<EOF
+$list
+EOF
+}
+
+[ "$#" -ge 1 ] || fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"
+
+mode=$1
+shift
+case "$mode" in
+  message)
+    [ "$#" -eq 1 ] || fail "usage: commit-traces message FILE"
+    [ -f "$1" ] || fail "no message file: $1"
+    # The editor file still has git's comment block and, with -v, the scissors
+    # diff. Those are not part of the message.
+    check_message "$(awk '/^# -+ >8 -+/ { exit } /^#/ { next } { print }' "$1")"
+    ;;
+  range)
+    walk check_commit "$@"
+    ;;
+  mails)
+    walk check_mails "$@"
+    ;;
+  *)
+    fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"
+    ;;
+esac
