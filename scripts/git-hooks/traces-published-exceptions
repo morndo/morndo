@@ -1,2 +1,2 @@
-# 15448f3, the PR #11 admin merge on main, was published with a personal author address; fixing it would rewrite history
-15448f3daca454ecf7916ec50d097e4ebe6381b7
+# Published commits whose author or committer e-mail may skip the noreply check, one full SHA per line.
+# Empty: the one entry (the PR #11 admin merge) was removed when main's history was rewritten on 2026-10-11.
