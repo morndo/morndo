@@ -15,7 +15,7 @@ const value = <T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T 
 const ask = (over: Partial<TranscriptionBody> = {}): TranscriptionBody => ({
   id: "tx-1", recording: { kind: "upload", id: "up-1" }, sizeBytes: 4096, language: "auto", ...over,
 });
-const live = (over: Partial<Transcription> = {}): Transcription => value(requestTranscription([], ask(), AT, READY));
+const live = (over: Partial<Transcription> = {}): Transcription => ({ ...value(requestTranscription([], ask(), AT, READY)), ...over });
 
 describe("sniffAudio", () => {
   it("knows each audio container by its own bytes", () => {

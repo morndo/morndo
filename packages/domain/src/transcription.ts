@@ -124,3 +124,64 @@ export function requestTranscription(
     state: "queued", position: null, reason: null, outcome: null, problem: null, text: null, startedAt: null, endedAt: null,
   });
 }
+
+// TranscriptionStarted (3.5): the engine has begun. Only `starting` moves, and a repeat is the same row: a late
+// duplicate of the report changes nothing.
+export type TranscriptionStartProblem = "not_starting";
+
+export function startTranscription(tx: Transcription, at: number): Result<Transcription, TranscriptionStartProblem> {
+  if (tx.state === "running") return ok(tx);
+  if (tx.state !== "starting") return err("not_starting");
+  return ok({ ...tx, state: "running", startedAt: at, position: null, reason: null });
+}
+
+// TranscriptionEnded (3.5), the only event that carries Text. `done` from a running attempt; `failed` also from a
+// queued one (an engine that turned out not ready before any start); `timed_out` needs a run; `cancelled` at any
+// live state; `lost` is the hub's own verdict on a run whose end it never recorded (TX4).
+export type TranscriptionEnd =
+  | { outcome: "done"; at: number; durationSec: number; language: string; text: string; engine: string; model: string }
+  | { outcome: "failed"; at: number; durationSec: number; problem: TranscriptionProblem }
+  | { outcome: "timed_out"; at: number; durationSec: number }
+  | { outcome: "cancelled"; at: number }
+  | { outcome: "lost"; at: number };
+
+export type EndProblem = "not_running" | "already_terminal" | "bad_end";
+
+// TX3: terminal once. The same outcome again is the same row; a different one, or different words for a `done`,
+// is refused. Nothing here starts a new attempt: asking again is a new request (requestTranscription).
+export function endTranscription(tx: Transcription, event: TranscriptionEnd): Result<Transcription, EndProblem> {
+  const durationOk = event.outcome !== "cancelled" && event.outcome !== "lost"
+    ? Number.isInteger(event.durationSec) && event.durationSec >= 0
+    : true;
+  const atOk = Number.isInteger(event.at);
+  if (!durationOk || !atOk) return err("bad_end");
+  if (terminal(tx.state)) {
+    if (event.outcome !== tx.outcome) return err("already_terminal");
+    if (event.outcome === "done" && tx.text !== null && tx.text.text !== event.text) return err("already_terminal");
+    return ok(tx);
+  }
+  const ran = tx.state === "running";
+  if (event.outcome === "done" && !ran) return err("not_running");
+  if (event.outcome === "timed_out" && !ran) return err("not_running");
+  if (event.outcome === "lost" && !ran && tx.state !== "starting") return err("not_running");
+  if (event.outcome === "done") {
+    return ok({
+      ...tx, state: "done", outcome: "done", endedAt: event.at, position: null, reason: null,
+      text: { language: event.language, text: event.text, edited: false, engine: event.engine, model: event.model },
+    });
+  }
+  if (event.outcome === "failed") {
+    return ok({ ...tx, state: "failed", outcome: "failed", problem: event.problem, endedAt: event.at, position: null, reason: null });
+  }
+  return ok({ ...tx, state: event.outcome, outcome: event.outcome, endedAt: event.at, position: null, reason: null });
+}
+
+const terminal = (state: TranscriptionState): state is TxOutcome => !open(state);
+
+// TX4: after a restart, a run with no recorded end is `lost` and the row stays, with no Text. What never ran is
+// still queued and waits on. A second restart changes nothing: `lost` is terminal once too.
+export function afterRestart(rows: readonly Transcription[], at: number): Transcription[] {
+  return rows.map(tx => tx.state === "running" || tx.state === "starting"
+    ? { ...tx, state: "lost", outcome: "lost", endedAt: at, position: null, reason: null, text: null }
+    : tx);
+}
