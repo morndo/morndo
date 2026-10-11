@@ -14,7 +14,7 @@ const recipient = `age1${"q".repeat(58)}`;
 const grant = { subject: { kind: "node" }, modes: ["exec"], until: { kind: "open" } };
 const body = { requestId: "q1", seen: 1, reference: REF, grant, expiry: null, destinations: ["api.example.com"], targets: [{ node: "node-a", recipient, sealed }] };
 const view = {
-  node: "node-a", reference: REF, status: "active", version: 1, keyedFingerprint: "0123456789ab", grants: [grant],
+  node: "node-a", reference: REF, status: "active", version: 1, keyedFingerprint: "000000000000", grants: [grant],
   destinations: [], expiry: null, shape: "vendor-token", lastUse: null,
 };
 
