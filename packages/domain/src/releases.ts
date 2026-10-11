@@ -88,8 +88,9 @@ export function windowContains(w: Window, localMinutes: number): boolean {
 
 // ---- Trust (RL3): the Key set and the ChannelFeed
 
-// A key is named by its fingerprint; the domain never sees key bytes. `expiresAt`: ms since epoch.
-export type KeySet = { version: number; expiresAt: number; root: string[]; release: string[]; feed: string[] };
+// A key is named by its fingerprint; the domain never sees key bytes. `expiresAt`: ms since epoch. `schema` is the
+// document's format number (§9.6: keys.json), carried so a future format is told apart, not guessed at (§6.6).
+export type KeySet = { schema: 1; version: number; expiresAt: number; root: string[]; release: string[]; feed: string[] };
 // What the Verifier reported about one offered Key set: which keys signed it (facts, not trust).
 export type OfferedKeySet = { set: KeySet; signedBy: string[] };
 
@@ -117,7 +118,7 @@ const sameKeys = (a: string[], b: string[]): boolean => a.length === b.length &&
 
 export type FeedEntry = { version: string; manifest: string; manifestSize: number; manifestSha256: string };
 export type ChannelFeed = {
-  channel: Channel; seq: number; issuedAt: number; expiresAt: number; keySetVersion: number;
+  schema: 1; channel: Channel; seq: number; issuedAt: number; expiresAt: number; keySetVersion: number;
   releases: FeedEntry[]; withdrawn: string[];
 };
 

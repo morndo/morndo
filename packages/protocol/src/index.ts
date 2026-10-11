@@ -14,3 +14,4 @@ export * from "./board.ts";
 export * from "./usage.ts";
 export * from "./connections.ts";
 export * from "./jobs.ts";
+export * from "./releases.ts";

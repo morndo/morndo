@@ -19,11 +19,11 @@ const MIN = 60_000;
 const NOW = 1_790_000_000_000;
 
 const keySet = (version: number, root: string[] = ["root-a"], others: { release?: string[]; feed?: string[]; expiresAt?: number } = {}): KeySet =>
-  ({ version, expiresAt: others.expiresAt ?? NOW + 365 * DAY, root, release: others.release ?? ["rel-1"], feed: others.feed ?? ["feed-1"] });
+  ({ schema: 1, version, expiresAt: others.expiresAt ?? NOW + 365 * DAY, root, release: others.release ?? ["rel-1"], feed: others.feed ?? ["feed-1"] });
 const offered = (set: KeySet, signedBy: string[]): OfferedKeySet => ({ set, signedBy });
 
 const feed = (over: Partial<ChannelFeed> = {}): ChannelFeed => ({
-  channel: "stable", seq: 43, issuedAt: NOW - 5 * MIN, expiresAt: NOW + 14 * DAY, keySetVersion: 1,
+  schema: 1, channel: "stable", seq: 43, issuedAt: NOW - 5 * MIN, expiresAt: NOW + 14 * DAY, keySetVersion: 1,
   releases: [{ version: "0.5.0", manifest: "https://github.com/morndo/morndo/releases/download/v0.5.0/manifest.json",
     manifestSize: 2048, manifestSha256: "ab".repeat(32) }],
   withdrawn: [], ...over,

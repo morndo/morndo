@@ -1073,6 +1073,21 @@ export const CONTROLS: Control[] = [
     find: "if (compareVersions(p.controlPlane, rollout.version) < 0) return err(\"waiting_control_plane\");",
     replace: "if (false) return err(\"waiting_control_plane\");",
     run: ["packages/domain/test/releases-state.test.ts"], expect: "waiting_control_plane" },
+  // The wire schemas of the same PR (packages/protocol/src/releases.ts): the documents come from the network, so a
+  // loosened schema is a guard gone. One entry per class of refusal, in releases-wire.test.ts.
+  { id: "pr1-wire-unknown-field", task: "pr1", file: "packages/protocol/src/releases.ts",
+    find: "export const KeySetSchema = z.strictObject({", replace: "export const KeySetSchema = z.object({",
+    run: ["packages/protocol/test/releases-wire.test.ts"], expect: "expected true to be false" },
+  { id: "pr1-wire-offset-time", task: "pr1", file: "packages/protocol/src/releases.ts",
+    find: "z.pipe(z.string().check(z.iso.datetime()), z.transform(s => Date.parse(s)))",
+    replace: "z.pipe(z.string(), z.transform(s => Date.parse(s)))",
+    run: ["packages/protocol/test/releases-wire.test.ts"], expect: "expected true to be false" },
+  { id: "pr1-wire-semver", task: "pr1", file: "packages/protocol/src/releases.ts",
+    find: "const version = () => z.string().check(z.regex(SEMVER));", replace: "const version = () => z.string();",
+    run: ["packages/protocol/test/releases-wire.test.ts"], expect: "expected true to be false" },
+  { id: "pr1-wire-file-mode", task: "pr1", file: "packages/protocol/src/releases.ts",
+    find: "const fileMode = z.string().check(z.regex(/^0[0-7]{3}$/));", replace: "const fileMode = z.string();",
+    run: ["packages/protocol/test/releases-wire.test.ts"], expect: "expected true to be false" },
 ];
 
 // ---- the runner
