@@ -70,8 +70,8 @@ describe("round 6, points 1, 2 and 7: a renew is Stored on the requester node's 
   }, "r1", T - DAY)).request;
   const confirm = (over: Partial<{ reference: string; node: string; version: number; at: number; renewed: boolean }> = {}) =>
     ({ reference: REF, node: "node-a", version: 2, at: T, renewed: true, ...over });
-  const answer = (kind: RequestKind, confirmation: ReturnType<typeof confirm>, nodes = ["node-a", "node-b"], expiry: number | null = T + 30 * DAY) =>
-    answerStored(opened(kind), { seen: 1, command: "c2", reference: REF, nodes, expiry, confirmation }, T + 60_000);
+  const answer = (kind: RequestKind, confirmation: ReturnType<typeof confirm>, others = [confirm({ node: "node-b" })], expiry: number | null = T + 30 * DAY) =>
+    answerStored(opened(kind), { seen: 1, command: "c2", reference: REF, expiry, confirmations: [confirmation, ...others] }, T + 60_000);
   const state = (r: ReturnType<typeof answer>) => (r.ok ? r.value.request.state : r.error.problem);
 
   it("the requester node's confirmation that it renewed answers the renew, and carries its version", () => {
@@ -80,8 +80,8 @@ describe("round 6, points 1, 2 and 7: a renew is Stored on the requester node's 
     expect(r.ok && r.value.events[0]).toMatchObject({ type: "SecretRequestStored", version: 2, nodes: ["node-a", "node-b"] });
   });
   it("point 1: another node's confirmation never stands in for the requester's", () => {
-    expect(state(answer("renew", confirm({ node: "node-b" })))).toBe("node");
-    expect(state(answer("new", confirm({ node: "node-b", renewed: false })))).toBe("node");
+    expect(state(answer("renew", confirm({ node: "node-b" }), []))).toBe("node");
+    expect(state(answer("new", confirm({ node: "node-b", renewed: false }), []))).toBe("node");
   });
   it("point 2: the node's time of the store lies between the request's opening and the hub's now, five minutes either way", () => {
     expect(CONFIRMATION_SKEW_MS).toBe(5 * 60_000);
@@ -95,7 +95,7 @@ describe("round 6, points 1, 2 and 7: a renew is Stored on the requester node's 
     expect(state(answer("renew", confirm({ renewed: false })))).toBe("not_renewed");
   });
   it("the other kinds that store need no renew", () => {
-    expect(state(answer("new", confirm({ renewed: false }), ["node-a"], null))).toBe("stored");
-    expect(state(answer("rotate", confirm({ renewed: false }), ["node-a"], null))).toBe("stored");
+    expect(state(answer("new", confirm({ renewed: false }), [], null))).toBe("stored");
+    expect(state(answer("rotate", confirm({ renewed: false }), [], null))).toBe("stored");
   });
 });

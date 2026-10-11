@@ -228,21 +228,23 @@ export type StoreConfirmation = { reference: string; node: string; version: numb
 // How far a node's time of the store may lie outside the hub's window, from the request's opening to the hub's now.
 export const CONFIRMATION_SKEW_MS = 5 * 60_000;
 
-// SR8: Stored only on the requester node's own confirmation, never another node's (T-85); `nodes` are all that confirmed,
-// `expiry` the Expiry the store sent (null: none). The renew rule is the node's (renewSecret, before anything is stored),
-// so a renew needs that node's `renewed`; the Expiry later than the node's time of the store is the same comparison, kept
-// as a check that the confirmation is consistent (T-83). The node's time must lie within the hub's window, so a node's
-// wrong clock or a made-up time can't pass (T-85); the hub's clock otherwise decides only the request's own expiry.
+// SR8: Stored only on the requester node's own confirmation, never another node's (T-85). `confirmations` are those of
+// every node that confirmed, and the event's nodes are theirs, so no node is named without one (T-94); `expiry` is the
+// Expiry the store sent (null: none). The renew rule is the node's (renewSecret, before anything is stored), so a renew
+// needs that node's `renewed`; the Expiry later than the node's time of the store is the same comparison, kept as a check
+// that the confirmation is consistent (T-83). The node's time must lie within the hub's window, so a node's wrong clock or
+// a made-up time can't pass (T-85); the hub's clock otherwise decides only the request's own expiry.
 export function answerStored(
-  req: SecretRequest, a: Answer & { reference: string; nodes: readonly string[]; expiry: number | null; confirmation: StoreConfirmation },
+  req: SecretRequest, a: Answer & { reference: string; expiry: number | null; confirmations: readonly StoreConfirmation[] },
   now: number,
 ): Result<RequestChange, RequestRefusal> {
   const p = checkAnswer(req, a.seen, a.command, now);
   if (p) return refuseRequest(p);
   if (req.kind === "access") return refuseRequest("kind");
   if (parseReference(a.reference) === null) return refuseRequest("bad_reference");
-  const c = a.confirmation;
-  if (c.node !== req.node || !a.nodes.includes(req.node) || !Number.isSafeInteger(c.version) || c.version < 1) return refuseRequest("node");
+  const nodes = a.confirmations.map(x => x.node);
+  const c = a.confirmations.find(x => x.node === req.node);
+  if (c === undefined || !Number.isSafeInteger(c.version) || c.version < 1) return refuseRequest("node");
   // The confirmation is for the store this answer made, under the Reference it names. A rotate or renew is about the
   // request's own Secret; a new one may be stored under the Reference chosen on the card (SR6). T-88.
   if (c.reference !== a.reference || (req.kind !== "new" && a.reference !== req.reference)) return refuseRequest("reference");
@@ -253,7 +255,7 @@ export function answerStored(
   const request: SecretRequest = { ...req, state: "stored", answer: { kind: "stored", at: now, command: a.command, reason: null } };
   return ok({
     request,
-    events: [{ type: "SecretRequestStored", request: req.id, reference: a.reference, nodes: [...a.nodes], version: c.version, at: now, command: a.command }],
+    events: [{ type: "SecretRequestStored", request: req.id, reference: a.reference, nodes, version: c.version, at: now, command: a.command }],
   });
 }
 
