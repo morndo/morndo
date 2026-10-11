@@ -9,7 +9,8 @@ const bytes = (...xs: number[]) => Uint8Array.from(xs);
 const join = (...parts: Uint8Array[]) => Uint8Array.from(parts.flatMap(p => [...p]));
 const fill = (n: number, byte: number) => new Uint8Array(n).fill(byte);
 
-const SAMPLE = text("sample-value 01/é\"\\&?=+");            // escapes in JSON and percent, non-ASCII
+const SAMPLE = text("sample-value 01/é\"\\&?=+!");           // escapes in JSON and percent, non-ASCII, a "!" that only
+                                                             // the strict percent form escapes
 const BINARY = bytes(0xfb, 0xef, 0xbe, 0xff, 0xff, 0xff, 0x00, 0x10, 0x83, 0x7f);   // "+" and "/" in base64, not UTF-8
 const forms = (v: Uint8Array) => encodedForms(v).map(f => ({ ...f, text: ascii(f.bytes) }));
 
