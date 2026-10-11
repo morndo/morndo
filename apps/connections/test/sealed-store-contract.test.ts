@@ -174,6 +174,14 @@ for (const adapter of ADAPTERS) {
         if (s.files) expect(existsSync(s.files.vault) ? readdirSync(s.files.vault) : []).toEqual([]);
       });
     }
+    it("lists the refs it holds with a prefix, and nothing else (the startup sweep, D2)", async () => {
+      const s = await adapter.make();
+      await s.plant("s-0014");
+      await s.plant("other-ref");
+      expect(s.store.refs("s-")).toEqual(["s-0014"]);
+      s.store.remove("s-0014");
+      expect(s.store.refs("s-")).toEqual([]);
+    });
     it("criterion 7: has opens nothing: with the identity gone it still answers, and makes none", async () => {
       const s = await adapter.make();
       await s.plant("s-0010");

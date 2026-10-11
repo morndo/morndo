@@ -46,6 +46,10 @@ export class FileVault implements Vault, SealedStore {
     return { ok: false, problem: "plaintext_vault" };
   }
 
+  refs(_prefix: string): readonly string[] {
+    return [];
+  }
+
   async keyedFingerprint(ref: string): Promise<string | null> {
     if (!this.has(ref)) return null;
     return this.#keys.fingerprint((await this.open(ref)).bytes());

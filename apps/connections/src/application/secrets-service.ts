@@ -4,9 +4,12 @@
 // file; entries written before a rolled-back commit can only filter more, never less. No value passes through here: the
 // vault answers with a keyed fingerprint, the index with keyed hashes.
 import {
-  err, findSecret, ok, renewSecret, storeSecret, type Actor, type Result, type SecretGrant, type SecretProblem, type ShapeInput,
+  err, findSecret, ok, renewSecret, storeSecret, type Actor, type GrantSubject, type Result, type SecretEvent, type SecretGrant,
+  type SecretProblem, type ShapeInput,
 } from "@morndo/domain";
-import type { Clock, Ids, IndexWriter, SealedProblem, SealedStore, SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRoots } from "./ports.ts";
+import type {
+  Clock, Ids, IndexWriter, SealedProblem, SealedStore, SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRoots, WorkspaceRow,
+} from "./ports.ts";
 
 export type SecretsDeps = { clock: Clock; ids: Ids; vault: SealedStore; index: IndexWriter; secrets: SecretsDirectory; roots: WorkspaceRoots };
 export type StoreRequest = {
@@ -20,6 +23,12 @@ export type SecretsRefusal = { problem: SecretsProblem };
 // The file of a version, if it still has one.
 const refOf = (vaults: readonly VaultRefRow[], reference: string, version: number) =>
   vaults.find(v => v.reference === reference && v.version === version)?.ref ?? null;
+
+// What `list` shows of a Secret: metadata only.
+export type SecretView = {
+  reference: string; status: string; version: number | null; storedAt: number | null; expiry: number | null; shape: string | null;
+  grants: readonly SecretGrant[]; destinations: readonly string[];
+};
 
 export class SecretsService {
   readonly #deps: SecretsDeps;
@@ -68,4 +77,16 @@ export class SecretsService {
     if (replaced !== null) vault.remove(replaced);
     return outcome;
   }
+
+  grant(_reference: string, _grant: SecretGrant, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
+  ungrant(_reference: string, _subject: GrantSubject, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
+  disable(_reference: string, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
+  enable(_reference: string, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
+  revoke(_reference: string, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
+  delete(_reference: string, _actor: Actor): Result<null, SecretsRefusal> { return err({ problem: "missing" }); }
+  list(): SecretView[] { return []; }
+  log(_reference: string | null): SecretEvent[] { return []; }
+  addWorkspace(_path: string, _actor: Actor): Result<WorkspaceRow, SecretsRefusal> { return err({ problem: "missing" }); }
+  workspaces(): readonly WorkspaceRow[] { return []; }
+  sweep(): string[] { return []; }
 }

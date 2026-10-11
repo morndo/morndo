@@ -98,6 +98,10 @@ export class AgeVault implements Vault, SealedStore {
     }
   }
 
+  refs(_prefix: string): readonly string[] {
+    return [];
+  }
+
   async keyedFingerprint(ref: string): Promise<string | null> {
     if (!this.has(ref)) return null;
     const plain = (await this.open(ref)).bytes();

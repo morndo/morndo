@@ -38,6 +38,8 @@ export class MemorySealedStore implements SealedStore {
 
   remove(ref: string): void { this.files.delete(ref); }
 
+  refs(prefix: string): readonly string[] { return [...this.files.keys()].filter(r => r.startsWith(prefix)); }
+
   async open(ref: string): Promise<{ bytes(): Uint8Array }> {
     const file = this.files.get(ref);
     const doc = file ? this.#parse(file) : null;
