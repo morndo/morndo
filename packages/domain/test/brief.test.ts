@@ -127,3 +127,65 @@ describe("caps (section 4.3)", () => {
     expect(lines(d => { (d.ask as { text: string }).text = `${"Approve **$2,400** of contractor time."}\n\nIt pays back in **3 weeks**.`; })).toEqual([]);
   });
 });
+
+describe("DB1: two to six options, in the manager protocol's grammar", () => {
+  const relabel = (d: Record<string, unknown>, i: number, label: string) => {
+    ((d.options as { key: string; label: string }[])[i]!).label = label;
+  };
+  it("a lone option is refused: a decision needs a real choice", () => {
+    expect(lines(d => { d.options = (d.options as unknown[]).slice(0, 1); })).toEqual(["error no_options (options)"]);
+  });
+  it("seven options are refused", () => {
+    expect(lines(d => {
+      const more = (d.options as { key: string; label: string }[]).map(o => ({ ...o }));
+      for (let i = more.length; i < 7; i++) more.push({ key: `x${i}`, label: `Extra option ${i}` });
+      d.options = more;
+    })).toEqual(["error too_many_options (options)"]);
+  });
+  it("a key outside the grammar is refused, with its place", () => {
+    expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).key = "not a key!"; }))
+      .toEqual(["error bad_option (options[0])"]);
+  });
+  it("a key past 16 characters is refused", () => {
+    expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).key = "extend-the-triage-script"; }))
+      .toEqual(["error bad_option (options[0])"]);
+  });
+  it("a repeated key is refused", () => {
+    expect(lines(d => { ((d.options as { key: string; label: string }[])[2]!).key = "a"; }))
+      .toEqual(["error duplicate_option (options[2])"]);
+  });
+  it("an empty label is refused", () => {
+    expect(lines(d => { relabel(d, 0, ""); })).toEqual(["error bad_option (options[0])"]);
+  });
+  it("a label past 40 characters is refused as a cap", () => {
+    expect(lines(d => { relabel(d, 0, "L".repeat(41)); })).toEqual(["error too_long (options[0].label)"]);
+  });
+  it("a missing options list is refused as a missing section", () => {
+    expect(lines(d => { delete d.options; })).toEqual(["error missing_section (options)"]);
+  });
+});
+
+describe("DB2: one recommendation, named in the headline", () => {
+  it("a recommend that is not an option key is refused", () => {
+    expect(lines(d => { d.recommend = "d"; })).toEqual(["error no_recommendation (recommend)"]);
+    expect(lines(d => { delete d.recommend; })).toEqual(["error no_recommendation (recommend)"]);
+  });
+  it("a headline that names another option is refused, in words the design spells (§5.1)", () => {
+    const r = lint(d => { d.headline = "Approve option C: buy the hosted add-on"; });
+    expect(r.problems).toEqual([{
+      level: "error", code: "headline_option", where: "headline",
+      text: "the headline names option C, but recommend is b; name the option you recommend",
+    }]);
+  });
+  it("a headline that names no option is refused", () => {
+    expect(lines(d => { d.headline = "Approve the extension of the triage script"; }))
+      .toEqual(["error headline_option (headline)"]);
+  });
+  it("a headline that names two options is refused", () => {
+    expect(lines(d => { d.headline = "Approve option B or option C"; }))
+      .toEqual(["error headline_option (headline)"]);
+  });
+  it("the key in the headline may be any case", () => {
+    expect(lines(d => { d.headline = "approve option b: extend the in-house triage script"; })).toEqual([]);
+  });
+});
