@@ -2,6 +2,9 @@
 # assistant attribution (trailers, generated-by lines, session links, vendor
 # addresses, and the author and committer names). The author address is
 # @users.noreply.github.com. The committer may also be noreply@github.com.
+# A push to main skips the commits listed as published exceptions
+# (scripts/git-hooks/traces-published-exceptions); a pull request checks
+# every commit in its range.
 # actions/checkout v7.0.1, same pin as ci.yml.
 name: Commit traces
 
@@ -42,6 +45,18 @@ jobs:
             exec sh scripts/git-hooks/commit-traces range "$BASE_SHA..$HEAD_SHA"
           fi
           if [ "$BEFORE_SHA" = "$zero" ]; then
-            exec sh scripts/git-hooks/commit-traces range "$AFTER_SHA"
+            set -- "$AFTER_SHA"
+          else
+            set -- "$BEFORE_SHA..$AFTER_SHA"
           fi
-          exec sh scripts/git-hooks/commit-traces range "$BEFORE_SHA..$AFTER_SHA"
+          # A push to main does not re-check commits already published with an
+          # exception. Excluding one excludes its ancestors too, which are
+          # published with it.
+          exceptions=scripts/git-hooks/traces-published-exceptions
+          if [ -s "$exceptions" ]; then
+            while IFS= read -r sha; do
+              case "$sha" in ''|'#'*) continue ;; esac
+              set -- "$@" --not "$sha"
+            done < "$exceptions"
+          fi
+          exec sh scripts/git-hooks/commit-traces range "$@"
