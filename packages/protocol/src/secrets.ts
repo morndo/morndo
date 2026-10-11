@@ -10,7 +10,8 @@ import { ED25519_SIGNATURE } from "./fleet.ts";
 import * as z from "./z.ts";
 
 // The rules are the domain's (and the fleet's signature), imported, so the wire refuses exactly what the domain does.
-const plain = (max: number) => z.string().check(z.refine(s => plainText(s, max), "plain text"));
+// The length checks come first so a refusal names its limit; the domain's rule decides the rest.
+const plain = (max: number) => z.string().check(z.minLength(1), z.maxLength(max), z.refine(s => plainText(s, max), "plain text"));
 const id = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{1,64}$/));   // a request or attempt id: the wire's own
 const node = () => z.string().check(z.regex(NODE_LABEL));
 const lane = () => z.string().check(z.regex(LANE_NAME));
