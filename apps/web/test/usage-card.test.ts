@@ -6,6 +6,7 @@ import { startWeb, type Web } from "./harness.ts";
 const NOW = Date.UTC(2026, 9, 11, 21, 0, 0);
 const RESET = Date.UTC(2026, 10, 8, 0, 0, 0);
 const HOUR = 3_600_000;
+const DEMAND = `on-demand ${"x".repeat(61)}`;
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
   import { mount } from "svelte";
@@ -15,7 +16,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
   const HOUR = ${HOUR};
   const cursor = {
     account: "cursor", reportedAt: NOW - 60_000,
-    fiveHour: null, sevenDay: null,
+    fiveHour: { usedPercentage: 40, resetsAt: NOW + 2 * HOUR }, sevenDay: null,
     spend: { usedPercentage: 85, resetsAt: RESET, usedUsd: null, limitUsd: null, period: "included usage, monthly" },
     sessions: [{ sessionId: "cursor-plan", lane: "usage-collector", model: "Cursor Ultra · Auto 88% · API 45% · on-demand off", contextUsed: null, at: NOW }],
     limits: [
@@ -23,6 +24,23 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
       { label: "Other models", usedPercentage: 45, resetsAt: RESET, resetsOn: "2026-11-07" },
     ],
     onDemand: "off",
+  };
+  const near = {
+    account: "near", reportedAt: NOW - 30_000,
+    fiveHour: null, sevenDay: null, spend: null, sessions: [],
+    limits: [{ label: "Cursor models", usedPercentage: 92, resetsAt: RESET, resetsOn: "2026-11-07" }],
+    onDemand: null,
+  };
+  const blank = {
+    account: "blank", reportedAt: NOW - 30_000,
+    fiveHour: { usedPercentage: 12, resetsAt: NOW + 4 * HOUR }, sevenDay: null, spend: null, sessions: [],
+    limits: [], onDemand: "off",
+  };
+  const metered = {
+    account: "metered", reportedAt: NOW - 30_000,
+    fiveHour: null, sevenDay: null, spend: null, sessions: [],
+    limits: [{ label: "Included", usedPercentage: 10, resetsAt: RESET, resetsOn: "2026-11-07" }],
+    onDemand: ${JSON.stringify(DEMAND)},
   };
   const claude = {
     account: "max-1", reportedAt: NOW - 120_000,
@@ -40,7 +58,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
     sessions: [{ sessionId: "z1", lane: "worker-01", model: "GLM", contextUsed: 4, at: NOW }],
     limits: null, onDemand: null,
   };
-  mount(Home, { target: document.body, props: { accounts: [claude, zai, cursor], at: NOW, now: NOW, live: true, onOpenLane: () => {} } });
+  mount(Home, { target: document.body, props: { accounts: [claude, zai, cursor, near, blank, metered], at: NOW, now: NOW, live: true, onOpenLane: () => {} } });
 </script></body></html>`;
 
 let web: Web;
@@ -62,12 +80,21 @@ describe("Home usage card", () => {
     expect(cursorText).toContain("45%");
     expect(cursorText).toContain("resets 7 Nov");
     expect(cursorText).toContain("on-demand off");
+    expect(cursorText).toContain("Spend limit");
+    expect(cursorText).toContain("85%");
+    expect(cursorText).toContain("#usage-collector");
     expect(cursorText).not.toContain("not reported");
     expect(cursorText).not.toContain("5-hour window");
     expect(cursorText).not.toContain("Weekly window");
-    expect(cursorText).not.toContain("Spend limit");
-    expect(cursorText).not.toContain("usage-collector");
     expect(cursorText).not.toContain("Auto 88%");
+    const sessionsTile = tab.locator(".tile", { hasText: "Sessions reporting" });
+    expect(Number((await sessionsTile.locator("b").innerText()).trim())).toBe(await tab.locator(".sess").count());
+    const fiveTile = tab.locator(".tile", { hasText: "Tightest 5-hour window" });
+    expect(await fiveTile.innerText()).toContain("24%");
+    expect(await fiveTile.innerText()).not.toContain("cursor");
+    expect(await tab.locator("p.note").innerText()).toContain("nearly out");
+    expect(await tab.locator("[data-account='blank']").innerText()).toContain("5-hour window");
+    expect(await tab.locator("[data-account='metered']").innerText()).toContain(DEMAND);
     const claude = await tab.locator("[data-account='max-1']").innerText();
     expect(claude).toContain("5-hour window");
     expect(claude).toContain("Weekly window");

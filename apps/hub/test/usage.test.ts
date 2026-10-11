@@ -92,6 +92,34 @@ describe("reports under an agent token (U1)", () => {
       { label: "Other models", usedPercentage: 45, resetsAt: resets * 1000, resetsOn: "2026-11-07" },
     ]);
   });
+  it("a bad named row is dropped and the session and spend are kept; nine windows keep eight", async () => {
+    const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
+    const limits = [{ label: "", used_percentage: 1 }, ...Array.from({ length: 8 }, (_, i) => ({ label: `W${i}`, used_percentage: 10 + i, resets_at: resets }))];
+    const posted = await post({
+      session_id: "cursor-plan",
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "monthly" } },
+      limits, on_demand: "off",
+    }, "cursor");
+    expect(posted.status).toBe(200);
+    const a = (await json(posted)).account as Body;
+    expect((a.limits as Body[]).map(w => w.label)).toEqual(Array.from({ length: 8 }, (_, i) => `W${i}`));
+    expect((a.spend as Body).usedPercentage).toBe(85);
+    expect((a.sessions as Body[])[0]?.sessionId).toBe("cursor-plan");
+  });
+  it("once the named windows reset, the account is a normal card and on-demand is gone", async () => {
+    const resets = Math.floor((now + 2 * HOUR) / 1000);
+    await post({
+      session_id: "cursor-plan",
+      limits: [{ label: "Cursor models", used_percentage: 88, resets_at: resets }],
+      on_demand: "off",
+    }, "cursor");
+    now += 3 * HOUR;
+    const cookie = await hub.cookie();
+    const later = await json(await fetch(`${hub.base}/api/usage`, { headers: { cookie: `__Host-morndo=${cookie}` } }));
+    const cursor = (later.accounts as Body[]).find(a => a.account === "cursor");
+    expect(cursor?.limits).toBeNull();
+    expect(cursor?.onDemand).toBeNull();
+  });
   it("the manager's token reports as the manager's lane", async () => {
     const manager = hub.agents.issue("manager", "manager").secret;
     const a = (await json(await post(statusLine(), "max-1", "", manager))).account as Body;

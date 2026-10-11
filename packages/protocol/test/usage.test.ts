@@ -18,7 +18,7 @@ describe("usage report shape", () => {
     expect(b && "limits" in b ? b.limits : undefined).toBeUndefined();
   });
 
-  it("a cursor report names its windows and on-demand, and refuses an empty label", () => {
+  it("a cursor report names its windows, and a bad row does not reject the report", () => {
     const b = parseBody(UsageReportBody, {
       session_id: "cursor-plan",
       model: { display_name: "Cursor Ultra" },
@@ -34,7 +34,14 @@ describe("usage report shape", () => {
       ["Other models", 45, "2026-11-07"],
     ]);
     expect(b?.on_demand).toBe("off");
-    expect(parseBody(UsageReportBody, { session_id: "cursor-plan", limits: [{ label: "", used_percentage: 1 }] })).toBeNull();
+    const bad = parseBody(UsageReportBody, {
+      session_id: "cursor-plan",
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: 1_762_560_000 } },
+      limits: [{ label: "", used_percentage: 1 }, ...Array.from({ length: 8 }, (_, i) => ({ label: `W${i}`, used_percentage: i + 1 }))],
+    });
+    expect(bad?.session_id).toBe("cursor-plan");
+    expect(bad?.rate_limits?.spend_limit?.used_percentage).toBe(85);
+    expect(bad?.limits).toHaveLength(9);
   });
 
   it("an old account frame still parses, and a named one keeps its windows", () => {

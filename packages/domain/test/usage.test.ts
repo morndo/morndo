@@ -90,7 +90,23 @@ describe("an account's own windows", () => {
     expect(kept.onDemand).toBe("off");
     expect(kept.fiveHour).toBeNull();
     const after = accountNow(first, NOW + 27 * 24 * HOUR + 1);
-    expect(after.limits).toEqual([]);
+    expect(after.limits).toBeNull();
+    expect(after.onDemand).toBeNull();
+    const back = applyReport(after, report({ account: "cursor", at: NOW + 27 * 24 * HOUR + 2, fiveHour: { usedPercentage: 10, resetsAt: NOW + 30 * 24 * HOUR }, sevenDay: null }), NOW + 27 * 24 * HOUR + 2);
+    expect(back.limits).toBeNull();
+    expect(back.fiveHour?.usedPercentage).toBe(10);
+    expect(back.onDemand).toBeNull();
+  });
+
+  it("an empty named list is not named mode, and a row without a label does not wipe the bars", () => {
+    const empty = applyReport(null, report({ limits: [], fiveHour: { usedPercentage: 10, resetsAt: NOW + HOUR } }), NOW);
+    expect(empty.limits).toBeNull();
+    expect(empty.onDemand).toBeNull();
+    expect(empty.fiveHour?.usedPercentage).toBe(10);
+    const first = applyReport(null, cursor(), NOW);
+    const kept = applyReport(first, { ...cursor(), at: NOW + 1, limits: [{ label: " ", usedPercentage: 9, resetsAt: NOW + HOUR, resetsOn: null }] }, NOW + 1);
+    expect(kept.limits?.map(w => w.label)).toEqual(["Cursor models", "Other models"]);
+    expect(kept.onDemand).toBe("off");
   });
 });
 
