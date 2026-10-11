@@ -71,7 +71,7 @@ function guideDraft(): Record<string, unknown> {
   const decision = list(section(markdown, "Decision"), "- [");
   return {
     topic: front.topic, due: Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3]), 23, 59, 59, 999),
-    minutes: Number(front.minutes), headline: /^# (.+)$/.exec(markdown)?.[1] ?? "", recommend: front.recommend,
+    minutes: Number(front.minutes), headline: /^# (.+)$/m.exec(markdown)?.[1] ?? "", recommend: front.recommend,
     ask: {
       text: paragraph(section(markdown, "The ask")),
       alternative: labelled(section(markdown, "The ask"), "Alternative") ?? "",
