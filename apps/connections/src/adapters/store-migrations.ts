@@ -5,6 +5,8 @@ import type Database from "better-sqlite3";
 import { emptyDirectory, emptyPolicy } from "@morndo/domain";
 import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
 
+export type { Migration };
+
 export class DatabaseFromFuture extends Error {
   readonly found: number;
   readonly known: number;
@@ -34,6 +36,6 @@ export const MIGRATIONS: readonly Migration[] = [
   },
 ];
 
-export function migrate(db: Database.Database): { from: number; to: number } {
-  return runMigrations(db, MIGRATIONS, (found, known) => new DatabaseFromFuture(found, known));
+export function migrate(db: Database.Database, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {
+  return runMigrations(db, migrations, (found, known) => new DatabaseFromFuture(found, known));
 }
