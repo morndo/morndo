@@ -503,6 +503,13 @@ describe("E14: an ask the hub tracks is answerable until the hub withdraws or se
     x.reconcile([], DUE + HUB_TTL_MS + KEEP_SETTLED_MS + 1, true);
     expect(x.get("d-1")).toBeUndefined();
   });
+  it("an adapter that keeps reporting it missing still expires it by the TTL, so the card and the refusal agree", () => {
+    const x = new Escalations();
+    x.reconcile([seen(hubAsk())], NOW, true);
+    x.reconcile([seen(hubAsk(), { kind: "missing" })], DUE + HUB_TTL_MS + 1, true);
+    expect(x.get("d-1")?.status).toBe("expired");
+    expect(refusal(x.get("d-1"), DUE + HUB_TTL_MS + 1)).toBe("expired");
+  });
 });
 
 describe("DB9: restating a brief makes the next version and a new ask", () => {
