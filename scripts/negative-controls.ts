@@ -1052,6 +1052,12 @@ export const CONTROLS: Control[] = [
   { id: "sp1-wire-modes-length", task: "secrets-pr1", file: "packages/protocol/src/secrets.ts",
     find: "z.minLength(1), z.maxLength(USE_MODES.length), ", replace: "",
     run: ["packages/protocol/test/secrets-wire-followup.test.ts"], expect: "too_small" },
+  { id: "sp1-left-workspace", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: 'lane: gone.lane, workspace: gone.workspace, at: now', replace: "lane: gone.lane, at: now",
+    run: ["packages/domain/test/secrets-followup.test.ts"], expect: "SecretRequestLeft" },
+  { id: "sp1-withdraw-names-workspace", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
+    find: "const { lane, workspace } = waiter;", replace: "const { lane } = waiter; const workspace = null;",
+    run: ["packages/domain/test/secrets-followup.test.ts"], expect: "not_waiting" },
 ];
 
 // ---- the runner
