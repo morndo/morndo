@@ -157,6 +157,8 @@ export function draftOnScreen(screen: string): string | null {
 // box: the first 20 code points on screen are the start of what was sent, or that start with exactly one code point
 // removed. A different leftover is not the paste.
 function draftStillWaiting(sent: string, draft: string): boolean {
+  // A long paste is folded into one chip. The chip is the paste, still in the box.
+  if (/^\[Pasted text #\d+ \+\d+ lines\]$/.test(draft)) return true;
   const shown = [...draft].slice(0, 20);
   const sentPoints = [...sent];
   if (shown.every((c, i) => c === sentPoints[i])) return true;

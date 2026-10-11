@@ -28,6 +28,11 @@ describe("an unsubmitted paste", () => {
     const id = await pane(`printf '%s\\n' '${RULE}' "❯ $line" '${RULE}'`);
     expect(await tmuxAdapter({ socket: t!.socket, session: "main" }).send(id, "Hello there friend")).toBe("not_submitted");
   });
+  it("is not_submitted when the paste is folded into a chip", async () => {
+    const id = await pane(`printf '%s\\n' '${RULE}' '❯ [Pasted text #1 +12 lines]' '${RULE}'`);
+    const text = Array.from({ length: 12 }, (_, n) => `line ${n} of the notes`).join("\n");
+    expect(await tmuxAdapter({ socket: t!.socket, session: "main" }).send(id, text)).toBe("not_submitted");
+  });
   it("is not the paste when the box shows something else", async () => {
     const id = await pane(`printf '%s\\n' '${RULE}' '❯ something else' '${RULE}'`);
     expect(await tmuxAdapter({ socket: t!.socket, session: "main" }).send(id, "Hello there friend")).toBeNull();
