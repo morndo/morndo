@@ -252,7 +252,11 @@ export function editText(tx: Transcription, text: string): Result<Transcription,
   if (tx.state !== "done" || tx.text === null) return err("not_done");
   const clean = text.trim();
   if (clean === "" || utf8Len(clean) > MAX_TEXT_BYTES) return err("bad_text");
-  if (clean === tx.text.text) return ok(tx);
+  // Going back to the engine's words takes the edit away: they are the words again, unmarked. Words identical to
+  // the engine's were never an edit, and an edit that returns to them no longer is one either.
+  if (clean === tx.text.text) {
+    return ok(tx.text.edit === null ? tx : { ...tx, text: { ...tx.text, edit: null, edited: false } });
+  }
   return ok({ ...tx, text: { ...tx.text, edit: clean, edited: true } });
 }
 
