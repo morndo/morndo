@@ -29,7 +29,9 @@ function storedFloor(db: Database.Database): number | null {
 }
 
 // The floor moves in the same transaction as user_version, so a failure moves neither (§11.1).
-function writeFloor(db: Database.Database, floor: number): void {
+/** Writes the floor row a version's runner leaves behind (§11.1), in the same shape whatever wrote it. Exported for
+ *  the tests that stand a newer version's database in: they write what its runner would have, not a copy of it. */
+export function writeFloor(db: Database.Database, floor: number): void {
   db.exec("CREATE TABLE IF NOT EXISTS _morndo_schema (id INTEGER PRIMARY KEY CHECK (id = 1), floor INTEGER NOT NULL)");
   db.prepare("INSERT INTO _morndo_schema (id, floor) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET floor = excluded.floor").run(floor);
 }

@@ -1,13 +1,13 @@
 // Schema floors for fleet.db (ADR-0019, docs/design/updates/README.md §11.1): the fleet's migrations since 7 are
 // additive, so a newer fleet service's database opens here with its floor (7, set when migration 7 rebuilt the jobs
 // tables) as long as this service knows schema 7 or newer; a breaking migration raises the floor above what this
-// service knows and the database is refused before any write (exit 78 in main.ts, RL8). Until the runner writes floors
-// itself, these tests build the one-row `_morndo_schema` table by hand, exactly as a newer version leaves it.
+// service knows and the database is refused before any write (exit 78 in main.ts, RL8).
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { writeFloor } from "@morndo/service-kit";
 import { openFleetDb } from "../src/adapters/db.ts";
 import { DatabaseFromFuture, MIGRATIONS, migrate } from "../src/adapters/migrations.ts";
 import { tempDir } from "./helpers/temp.ts";
@@ -20,18 +20,13 @@ const tables = (db: Database.Database) =>
   (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map(r => r.name);
 const sha = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex");
 
-function withFloor(db: Database.Database, floor: number): void {
-  db.exec("CREATE TABLE IF NOT EXISTS _morndo_schema (id INTEGER PRIMARY KEY CHECK (id = 1), floor INTEGER NOT NULL)");
-  db.prepare("INSERT INTO _morndo_schema (id, floor) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET floor = excluded.floor").run(floor);
-}
-
 // A database as the next version leaves it: this service's schema, plus that version's migration LATEST+1.
 function newerDb(floor: number): string {
   const path = join(tempDir(), "fleet.db");
   const raw = new Database(path);
   migrate(raw);
   raw.exec("CREATE TABLE future_addition (x)");          // the next version's migration LATEST+1 …
-  withFloor(raw, floor);
+  writeFloor(raw, floor);
   raw.pragma(`user_version = ${LATEST + 1}`);
   raw.close();
   return path;
