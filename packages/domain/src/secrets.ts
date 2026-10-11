@@ -455,16 +455,16 @@ export function deleteSecret(dir: SecretDirectory, reference: string, actor: Act
   });
 }
 
-// A lane's "until the lane ends" Grants end when the node sees its pane close.
+// A lane's "until the lane ends" Grants end when the node sees its pane close. One pass, one new directory.
 export function endLaneGrants(dir: SecretDirectory, lane: string, at: number): SecretDirectory {
-  let next = dir;
-  for (const s of dir.held) {
+  const events: SecretEvent[] = [];
+  const held = dir.held.map(s => {
     const gone = s.grants.filter(g => g.subject.kind === "lane" && g.subject.lane === lane && g.until.kind === "lane-end");
-    if (gone.length === 0) continue;
-    const kept = s.grants.filter(g => !gone.includes(g));
-    next = withSecret(next, { ...s, grants: kept }, gone.map(g => ({ type: "GrantEnded", reference: s.reference, at, subject: g.subject })));
-  }
-  return next;
+    if (gone.length === 0) return s;
+    for (const g of gone) events.push({ type: "GrantEnded", reference: s.reference, at, subject: g.subject });
+    return { ...s, grants: s.grants.filter(g => !gone.includes(g)) };
+  });
+  return events.length === 0 ? dir : { ...dir, held, events: [...dir.events, ...events] };
 }
 
 // A Grant with an end time ends once that time has come: removed, with one GrantEnded. The gate already refuses it
@@ -517,18 +517,19 @@ export function useSecret(dir: SecretDirectory, reference: string, caller: Calle
 export const endUse = (dir: SecretDirectory, reference: string, use: string, outcome: UseOutcome, at: number): SecretDirectory =>
   ({ ...dir, events: [...dir.events, { type: "UseEnded", reference, at, use, outcome }] });
 
-// SC9: each lead warns once; at Expiry the Secret is marked expired once. A later Expiry clears the marks.
+// SC9: each lead warns once; at Expiry the Secret is marked expired once. A later Expiry clears the marks. One pass,
+// one new directory.
 export function secretExpirySweep(dir: SecretDirectory, now: number): SecretDirectory {
-  let next = dir;
-  for (const s of dir.held) {
-    if (s.expiry === null || s.status === "revoked") continue;
+  const events: SecretEvent[] = [];
+  const held = dir.held.map(s => {
+    if (s.expiry === null || s.status === "revoked") return s;
     const expiry = s.expiry;
     const leads = SECRET_EXPIRY_LEADS.filter(([label, ms]) => now >= expiry - ms && !s.warned.includes(label)).map(([label]) => label);
     const expired = now >= expiry && !s.warned.includes("expired");
-    if (leads.length === 0 && !expired) continue;
-    const events: SecretEvent[] = leads.map(lead => ({ type: "ExpiryWarned", reference: s.reference, at: now, lead }));
+    if (leads.length === 0 && !expired) return s;
+    for (const lead of leads) events.push({ type: "ExpiryWarned", reference: s.reference, at: now, lead });
     if (expired) events.push({ type: "SecretExpired", reference: s.reference, at: now });
-    next = withSecret(next, { ...s, warned: [...s.warned, ...leads, ...(expired ? ["expired"] : [])] }, events);
-  }
-  return next;
+    return { ...s, warned: [...s.warned, ...leads, ...(expired ? ["expired"] : [])] };
+  });
+  return events.length === 0 ? dir : { ...dir, held, events: [...dir.events, ...events] };
 }
