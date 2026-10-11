@@ -5,8 +5,9 @@
 # Every commit the push adds is checked on its own, published meaning the
 # remote being pushed to: a line one commit adds and a later one removes
 # fails, a merge of the pushed-to remote's main passes, a commit only a
-# second remote holds still fails, a push to a URL checks everything, and a
-# home path in a conflict resolution fails.
+# second remote holds still fails, a push to a URL checks everything, a
+# symlink replaced by a regular file is scanned, and a home path in a
+# conflict resolution fails.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
@@ -668,6 +669,29 @@ printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$remote_tip" | sh
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "a home path in a merge resolution should exit 1, got $code"
+cd "$root"
+
+# A type change is scanned: a symlink replaced by a regular file that holds
+# a home path fails.
+typec=$scratch/typec
+git init -q --initial-branch=main "$typec"
+cp "$root/.gitleaks.toml" "$typec/.gitleaks.toml"
+cd "$typec"
+printf 'target\n' > target.txt
+ln -s target.txt link.md
+git add target.txt link.md .gitleaks.toml
+commit_ok -m 'typec base'
+base=$(git rev-parse HEAD)
+rm link.md
+printf '/%s/%s/notes\n' home example-user > link.md
+git add link.md
+commit_ok -m 'replace the symlink with a file'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a home path behind a type change should exit 1, got $code"
 cd "$root"
 
 echo "pre-push proof ok"
