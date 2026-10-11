@@ -3,7 +3,8 @@
 // recording caps, sniffAudio, one attempt per recording, one terminal outcome, the queue via the shared rule, and
 // the text it produced. No engine name, no file, no clock of its own.
 import { describe, expect, it } from "vitest";
-import { afterRestart, endTranscription, NO_CAPABILITY, scheduleTranscriptions, requestTranscription, sniffAudio, startTranscription, type Transcription, type TranscriptionBody } from "../src/index.ts";
+import { afterRestart, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, MAX_RECORDING_SECONDS, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, TEXT_MAX_BYTES, threadsFor, transcriptionTimeoutMs,
+  type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
 
 const bytes = (head: number[], ...rest: number[]) => new Uint8Array([...head, ...rest]);
 const AT = 1_700_000_000_000;
@@ -15,6 +16,8 @@ const value = <T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T 
 const ask = (over: Partial<TranscriptionBody> = {}): TranscriptionBody => ({
   id: "tx-1", recording: { kind: "upload", id: "up-1" }, sizeBytes: 4096, language: "auto", ...over,
 });
+const heard = (text = "guten Morgen", durationMs = 30_000): EngineText =>
+  ({ language: "de", durationMs, segments: [{ startMs: 0, endMs: durationMs, text }] });
 const live = (over: Partial<Transcription> = {}): Transcription => ({ ...value(requestTranscription([], ask(), AT, READY)), ...over });
 
 describe("sniffAudio", () => {
@@ -93,24 +96,24 @@ describe("starting and ending a transcription", () => {
   });
 
   it("done keeps the engine's words and when it ended, and only a running attempt can finish", () => {
-    const done = value(endTranscription(run(), { outcome: "done", at: AT + 40, durationSec: 30, language: "de", text: "guten Morgen", engine: "local", model: "small" }));
+    const done = value(endTranscription(run(), { outcome: "done", at: AT + 40, engine: heard(), engineName: "local", model: "small" }));
     expect(done).toMatchObject({
       state: "done", outcome: "done", endedAt: AT + 40, position: null, reason: null,
       text: { language: "de", text: "guten Morgen", edited: false, engine: "local", model: "small" },
     });
-    expect(endTranscription(live(), { outcome: "done", at: AT, durationSec: 1, language: "de", text: "x", engine: "e", model: "m" }))
+    expect(endTranscription(live(), { outcome: "done", at: AT, engine: heard("x", 1_000), engineName: "e", model: "m" }))
       .toEqual({ ok: false, error: "not_running" });
   });
 
   it("failed names its problem, even before a start: an engine that is not ready fails a queued attempt", () => {
-    const queuedFail = value(endTranscription(live(), { outcome: "failed", at: AT + 1, durationSec: 0, problem: "not_ready" }));
+    const queuedFail = value(endTranscription(live(), { outcome: "failed", at: AT + 1, problem: "not_ready" }));
     expect(queuedFail).toMatchObject({ state: "failed", outcome: "failed", problem: "not_ready", text: null, endedAt: AT + 1 });
-    const runFail = value(endTranscription(run(), { outcome: "failed", at: AT + 20, durationSec: 5, problem: "engine" }));
+    const runFail = value(endTranscription(run(), { outcome: "failed", at: AT + 20, problem: "engine" }));
     expect(runFail).toMatchObject({ state: "failed", problem: "engine" });
   });
 
   it("a timeout needs a run; a cancel works at any live state, queued ones never ran", () => {
-    expect(endTranscription(live(), { outcome: "timed_out", at: AT + 9, durationSec: 1 })).toEqual({ ok: false, error: "not_running" });
+    expect(endTranscription(live(), { outcome: "timed_out", at: AT + 9 })).toEqual({ ok: false, error: "not_running" });
     const queuedCancel = value(endTranscription(live(), { outcome: "cancelled", at: AT + 2 }));
     expect(queuedCancel).toMatchObject({ state: "cancelled", outcome: "cancelled", startedAt: null, endedAt: AT + 2 });
     const runCancel = value(endTranscription(run(), { outcome: "cancelled", at: AT + 30 }));
@@ -118,17 +121,17 @@ describe("starting and ending a transcription", () => {
   });
 
   it("terminal once: the same end again is the same row, a different one is refused (TX3)", () => {
-    const done = value(endTranscription(run(), { outcome: "done", at: AT + 40, durationSec: 30, language: "de", text: "guten Morgen", engine: "local", model: "small" }));
-    const same = { outcome: "done", at: AT + 99, durationSec: 30, language: "de", text: "guten Morgen", engine: "local", model: "small" } as const;
+    const done = value(endTranscription(run(), { outcome: "done", at: AT + 40, engine: heard(), engineName: "local", model: "small" }));
+    const same = { outcome: "done", at: AT + 99, engine: heard(), engineName: "local", model: "small" } as const;
     expect(value(endTranscription(done, same))).toBe(done);
-    expect(endTranscription(done, { outcome: "done", at: AT + 99, durationSec: 30, language: "de", text: "andere Worte", engine: "local", model: "small" }))
+    expect(endTranscription(done, { outcome: "done", at: AT + 99, engine: heard("andere Worte"), engineName: "local", model: "small" }))
       .toEqual({ ok: false, error: "already_terminal" });
     expect(endTranscription(done, { outcome: "cancelled", at: AT + 99 })).toEqual({ ok: false, error: "already_terminal" });
   });
 
   it("a restart with no recorded end marks the run lost and keeps the row; what never ran waits on (TX4)", () => {
     const rows = [live({ id: "tx-q" }), starting({ id: "tx-s" }), run({ id: "tx-r" }),
-      value(endTranscription(run({ id: "tx-d" }), { outcome: "done", at: AT + 40, durationSec: 30, language: "de", text: "w", engine: "e", model: "m" }))];
+      value(endTranscription(run({ id: "tx-d" }), { outcome: "done", at: AT + 40, engine: heard("w"), engineName: "e", model: "m" }))];
     const after = afterRestart(rows, AT + 60);
     expect(after.find(r => r.id === "tx-q")).toMatchObject({ state: "queued" });
     expect(after.find(r => r.id === "tx-s")).toMatchObject({ state: "lost", outcome: "lost", endedAt: AT + 60, text: null });
@@ -178,5 +181,51 @@ describe("scheduling transcriptions", () => {
     const out = scheduleTranscriptions(rows, 1, "off");
     expect(out.find(r => r.id === "tx-done")).toMatchObject({ state: "done", position: null });
     expect(out.find(r => r.id === "tx-lost")).toMatchObject({ state: "lost", position: null });
+  });
+});
+
+describe("the caps on a recording, a run and its text (TX6)", () => {
+  it("a recording over 10 MiB is refused at the request; one exactly at the line is taken", () => {
+    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES + 1 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
+    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES }), AT, READY).ok).toBe(true);
+  });
+
+  it("words that took longer than the cap are failed: too_long, not done", () => {
+    const over = value(endTranscription(run(), { outcome: "done", at: AT + 610_000, engine: heard("zu lang", 601_000), engineName: "local", model: "small" }));
+    expect(over).toMatchObject({ state: "failed", outcome: "failed", problem: "too_long", text: null });
+    const atTheLine = value(endTranscription(run(), { outcome: "done", at: AT + 600_000, engine: heard("punktlich", 600_000), engineName: "local", model: "small" }));
+    expect(atTheLine).toMatchObject({ state: "done" });
+    const probeLowered = value(endTranscription(run(), { outcome: "done", at: AT + 400_000, engine: heard("knapp", 300_500), engineName: "local", model: "small" }, 300));
+    expect(probeLowered).toMatchObject({ state: "failed", problem: "too_long" });
+  });
+
+  it("the domain joins what the engine heard and caps it at 64 KiB of UTF-8", () => {
+    const words = makeText({ language: "de", durationMs: 1000, segments: [
+      { startMs: 0, endMs: 400, text: "  guten " }, { startMs: 400, endMs: 900, text: "Morgen  " }, { startMs: 900, endMs: 1000, text: "" },
+    ] }, "local", "small");
+    expect(words).toEqual({ language: "de", text: "guten Morgen", edited: false, engine: "local", model: "small" });
+    const long = makeText({ language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "ä".repeat(40_000) }] }, "local", "small");
+    expect(long.text.endsWith("[truncated]")).toBe(true);
+    expect(long.text.length).toBeLessThanOrEqual(TEXT_MAX_BYTES);
+    for (let i = 0; i < long.text.length; i++) expect(long.text.codePointAt(i)).toBeTruthy();
+    const plain = makeText({ language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "a".repeat(100) }] }, "local", "small");
+    expect(plain.text).toBe("a".repeat(100));
+  });
+
+  it("a run's timeout is 120 s plus six times the duration, unless the config names one", () => {
+    expect(transcriptionTimeoutMs(10_000, null)).toBe(120_000 + 60_000);
+    expect(transcriptionTimeoutMs(10_000, 30)).toBe(30_000);
+  });
+
+  it("threads are half the cores, at most eight", () => {
+    expect(threadsFor(32)).toBe(8);
+    expect(threadsFor(9)).toBe(4);
+    expect(threadsFor(4)).toBe(2);
+  });
+
+  it("the effective cap is the lower of the setting and what the plugin offered", () => {
+    expect(effectiveMaxSeconds(600, 300)).toBe(300);
+    expect(effectiveMaxSeconds(300, 600)).toBe(300);
+    expect(effectiveMaxSeconds(700, 600)).toBe(600);
   });
 });
