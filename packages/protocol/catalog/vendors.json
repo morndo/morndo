@@ -4,7 +4,7 @@
     "label": "Anthropic",
     "custody": "morndo",
     "kinds": ["api-key"],
-    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.anthropic.com" }],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.anthropic.com", "firstParty": true }],
     "models": { "source": "endpoint", "url": "https://api.anthropic.com/v1/models", "shape": "anthropic-list" },
     "family": "anthropic",
     "keyShapes": ["sk-ant-"],
@@ -81,6 +81,29 @@
       "revision": "2026-10-10",
       "summary": "May train unless otherwise expressly agreed in writing.",
       "sources": ["https://platform.kimi.ai/docs/agreement/modeluse"]
+    }
+  },
+  {
+    "id": "zai",
+    "label": "Z.ai",
+    "custody": "morndo",
+    "kinds": ["api-key"],
+    "runtimes": [{ "runtime": "claude", "dialect": "anthropic", "baseUrl": "https://api.z.ai/api/anthropic" }],
+    "models": { "source": "static", "ids": ["glm-5.3", "glm-5.3-flash"] },
+    "family": "zai",
+    "keyShapes": [],
+    "spend": ["token-price"],
+    "prices": [
+      { "at": "2026-10-11", "model": "glm-5.3", "input": 1.4, "output": 4.4, "cacheRead": 0.26 },
+      { "at": "2026-10-11", "model": "glm-5.3-flash", "input": 0.15, "output": 0.5, "cacheRead": 0.03 }
+    ],
+    "balance": null,
+    "defaultPicks": { "implement": "glm-5.3@max", "*": "glm-5.3@high" },
+    "isolation": "os",
+    "terms": {
+      "revision": "2025-09-29",
+      "summary": "API input is processed in real time and not saved on Z.ai's servers.",
+      "sources": ["https://docs.z.ai/legal-agreement/privacy-policy"]
     }
   },
   {
