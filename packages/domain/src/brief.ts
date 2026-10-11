@@ -71,6 +71,17 @@ class Lint {
     return v;
   }
 
+  // DB7: prose in the subset — paragraphs, lists, bold, italic, strikethrough, code, quotes, tables, https links. No
+  // headings of the asker's own (the format owns the outline), no raw HTML, no images; a link that isn't https is
+  // refused. What lint accepts, the renderer shows; what the renderer would drop, lint refuses (A1).
+  markdown(where: string, s: string) {
+    if (/^\s{0,3}#{1,6}(?:\s|$)/m.test(s)) { this.error("bad_markdown", where, "no headings of your own; the format owns the outline"); return; }
+    if (/!\[[^\]]*\]\([^)]*\)/.test(s)) { this.error("bad_markdown", where, "no images; link the evidence instead"); return; }
+    if (/<!--[\s\S]*?-->|<!?[a-zA-Z/][^>\n]*>/.test(s)) { this.error("bad_markdown", where, "no raw HTML; plain markdown only"); return; }
+    const bad = [...s.matchAll(/\[[^\]]*\]\(\s*([^)\s]+)[^)]*\)/g)].map(m => m[1] ?? "").find(t => !t.startsWith("https://"));
+    if (bad !== undefined) this.error("bad_link", where, `"${bad}" is not an https address; links stay https`);
+  }
+
   strings(where: string, v: unknown, cap: number, min: number, max: number): string[] | null {
     if (!Array.isArray(v)) { this.error("missing_section", where, "the section is missing; every section of the template is required"); return null; }
     if (v.length < min) { this.error("empty_section", where, `list at least ${min} ${min === 1 ? "item" : "items"}`); return null; }
@@ -178,11 +189,16 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   }
   const ask = isObj(draft.ask) ? draft.ask : {};
   const askText = lint.string("ask.text", ask.text, CAPS.askText, true);
+  if (askText !== null) lint.markdown("ask.text", askText);
   const alternative = lint.string("ask.alternative", ask.alternative, CAPS.line);
+  if (alternative !== null) lint.markdown("ask.alternative", alternative);
   const uncertainty = lint.string("ask.uncertainty", ask.uncertainty, CAPS.line);
+  if (uncertainty !== null) lint.markdown("ask.uncertainty", uncertainty);
   const whyNow = lint.string("whyNow", draft.whyNow, CAPS.whyNow, true);
+  if (whyNow !== null) lint.markdown("whyNow", whyNow);
   const why = isObj(draft.why) ? draft.why : {};
   const whyText = lint.string("why.text", why.text, CAPS.whyText, true);
+  if (whyText !== null) lint.markdown("why.text", whyText);
   // Assumptions may be empty when no money appears (DB5); limits are the asker's commitment, at least one.
   const assumptions = lint.strings("why.assumptions", why.assumptions, CAPS.item, 0, CAPS.list);
   let downside: string | null = null;
@@ -257,6 +273,11 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     const item = isObj(evidenceIn[i]) ? evidenceIn[i] : {};
     const label = lint.string(`evidence[${i}].label`, item.label, CAPS.evidenceLabel);
     const url = lint.string(`evidence[${i}].url`, item.url, CAPS.evidenceUrl);
+    // DB7 on an evidence link: https only, so nothing on the principal's devices reaches out over plain http.
+    if (url !== null && !/^https:\/\//.test(url)) {
+      lint.error("bad_link", `evidence[${i}].url`, `"${url}" is not an https address; evidence links stay https`);
+      continue;
+    }
     if (label !== null && url !== null) evidence.push({ label, url });
   }
 
