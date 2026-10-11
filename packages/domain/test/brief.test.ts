@@ -192,6 +192,10 @@ describe("DB2: one recommendation, named in the headline", () => {
   it("the key in the headline may be any case", () => {
     expect(lines(d => { d.headline = "approve option b: extend the in-house triage script"; })).toEqual([]);
   });
+  it("\"option\" inside a word, or followed by a word that is no option key, names no option", () => {
+    expect(lines(d => { d.headline = "Approve option b: speeds adoption by teams"; })).toEqual([]);
+    expect(lines(d => { d.headline = "Approve option B, the option with less risk"; })).toEqual([]);
+  });
 });
 
 describe("DB3: a due time after filing, and the minutes to read and decide", () => {
