@@ -5,7 +5,7 @@
 // chunks are dropped, since the image goes on to a model provider. Files older than a week are removed.
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { IMAGE_EXTENSION, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, type EndpointId, type ImageMime, type Result, type Upload, type UploadRefusal } from "@morndo/domain";
 
 const KEEP_FILES_MS = 7 * 24 * 3_600_000;
@@ -38,6 +38,14 @@ export function stripMetadata(b: Uint8Array, mime: ImageMime): Uint8Array {
     return Buffer.concat(out);
   }
   return b;
+}
+
+// The hub stores `pasted-<stamp>-<id6>-<safe name>`. The node is asked for the safe name, not that prefix:
+// the prefix is 30 characters, and a name the domain already kept under 80 would otherwise lose its extension there.
+export function stagedUploadName(storedPath: string): string {
+  const base = basename(storedPath);
+  const named = /^pasted-\d{8}-\d{6}-[0-9a-f]{6}-(.+)$/.exec(base);
+  return named?.[1] || base;
 }
 
 export type Inbox = {

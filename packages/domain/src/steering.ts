@@ -63,12 +63,18 @@ function extensionOf(name: string): string {
   return i > 0 ? base.slice(i).toLowerCase() : "";
 }
 
+export const UPLOAD_NAME_MAX = 80;
+
 // The stored name: the last path segment, no leading dots, only letters, digits, dot, underscore and hyphen.
+// A name longer than 80 characters loses stem, never the extension, so a cut file is still the kind it claims.
 export function safeUploadName(name: string): string | null {
   const base = name.replace(/\\/g, "/").split("/").pop() ?? "";
-  const cleaned = base.normalize("NFKC").replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "").slice(0, 80);
-  if (!cleaned || extensionOf(cleaned) === "") return null;
-  return cleaned;
+  const cleaned = base.normalize("NFKC").replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "");
+  const ext = extensionOf(cleaned);
+  if (!ext || ext.length >= UPLOAD_NAME_MAX) return null;
+  const stem = cleaned.slice(0, cleaned.length - ext.length).slice(0, UPLOAD_NAME_MAX - ext.length);
+  const cut = stem + ext;
+  return extensionOf(cut) === ext ? cut : null;
 }
 
 function textProblem(b: Uint8Array): "not_allowed" | "not_utf8" | null {

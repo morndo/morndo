@@ -19,6 +19,7 @@ import {
 } from "../application/ports.ts";
 import { FleetOpFailed, FleetUnavailable, type FleetClient, type FleetEvent, type FleetLane, type NodeStatus, type OpAnswer } from "./fleet-client.ts";
 import { log } from "./log.ts";
+import { stagedUploadName } from "./uploads.ts";
 import { perKeyLimit } from "./per-key-limit.ts";
 
 export type FleetTimeouts = { listMs: number; captureMs: number; sendMs: number; keysMs: number; frameMs: number; statusMs: number; transcriptMs: number; fileMs: number };
@@ -446,7 +447,7 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
           const offset = i * LIMITS.chunkBytes;
           const final = i === chunks - 1;
           const part = bytes.subarray(offset, offset + LIMITS.chunkBytes).toString("base64");
-          const r = await putChunk(node, { upload: transfer, offset, bytes: part, final, name: basename(upload.path) }, hubKey(`upload:${transfer}:${i}`));
+          const r = await putChunk(node, { upload: transfer, offset, bytes: part, final, name: stagedUploadName(upload.path) }, hubKey(`upload:${transfer}:${i}`));
           if (!r.ok) { last = r; restart = r.restart === true; break; }
           if (final) return r.path === null ? { ok: false, problem: "no_pane" } : { ok: true, path: r.path };
         }

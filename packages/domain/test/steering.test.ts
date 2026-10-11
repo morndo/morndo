@@ -45,6 +45,19 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     expect(acceptNamedUpload(text("hi\n"), "../../My Notes.md")).toMatchObject({ ok: true, value: { name: "My_Notes.md" } });
     expect(acceptNamedUpload(text("hi\n"), ".hidden.md")).toMatchObject({ ok: true, value: { name: "hidden.md" } });
   });
+  it("shortens a long name by its stem and keeps the extension", () => {
+    const md51 = `${"n".repeat(48)}.md`;
+    const md90 = `${"n".repeat(87)}.md`;
+    const pdf90 = `${"p".repeat(86)}.pdf`;
+    expect(md51).toHaveLength(51);
+    expect(md90).toHaveLength(90);
+    expect(pdf90).toHaveLength(90);
+    expect(acceptNamedUpload(text("# Hi\n"), md51)).toMatchObject({ ok: true, value: { name: md51 } });
+    const longMd = acceptNamedUpload(text("# Hi\n"), md90);
+    expect(longMd.ok && longMd.value.name.endsWith(".md") && longMd.value.name.length <= 80).toBe(true);
+    const longPdf = acceptNamedUpload(text("%PDF-1.7\n"), pdf90);
+    expect(longPdf.ok && longPdf.value.name.endsWith(".pdf") && longPdf.value.name.length <= 80).toBe(true);
+  });
   it("refuses executables, archives, HTML, SVG, a mismatched type, bad UTF-8, and a file over its limit", () => {
     expect(acceptNamedUpload(text("MZ"), "run.exe")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), "a.zip")).toEqual({ ok: false, error: "not_allowed" });

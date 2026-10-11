@@ -178,7 +178,7 @@ Added 2026-10-01; extended 2026-10-11; code in `packages/domain/src/steering.ts`
 
 | # | Invariant |
 |---|---|
-| S1 | An Upload is allowed only when its extension and its bytes agree. Images (PNG, JPEG, GIF, WebP) and PDF are at most 10 MB; PDF bytes start with `%PDF-`. Text (`.md`, `.txt`, `.json`, `.csv`, `.yaml`, `.yml`, `.log`) is valid UTF-8 and at most 1 MB. Executables, archives, HTML and SVG are refused. A name is the last path segment, with no leading dots and no characters outside letters, digits, `.`, `_` and `-`. |
+| S1 | An Upload is allowed only when its extension and its bytes agree. Images (PNG, JPEG, GIF, WebP) and PDF are at most 10 MB; PDF bytes start with `%PDF-`. Text (`.md`, `.txt`, `.json`, `.csv`, `.yaml`, `.yml`, `.log`) is valid UTF-8 and at most 1 MB. Executables, archives, HTML and SVG are refused. A name is the last path segment, with no leading dots and no characters outside letters, digits, `.`, `_` and `-`, at most 80 characters: a longer name loses stem and keeps its extension. |
 | S2 | A Command attaches only Uploads made from its own Endpoint, within a day of upload, each once, at most six. |
 | S3 | The Command names each attached image after the principal's own text, one note per image, in the form the workers already read; a Command may be only images. |
 
