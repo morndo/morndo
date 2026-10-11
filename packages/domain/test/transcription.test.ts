@@ -277,6 +277,13 @@ describe("editing the text of a done transcription (TX7)", () => {
     const row = done();
     expect(value(editText(row, "guten Morgen"))).toBe(row);
   });
+
+  it("editing back to the engine's words takes the edit away, and with it the mark", () => {
+    const edited = value(editText(done(), "guten Abend"));
+    const back = value(editText(edited, "guten Morgen"));
+    expect(back.text).toEqual({ language: "de", text: "guten Morgen", edit: null, edited: false, engine: "local", model: "small" });
+    expect(composerText(back)).toBe("guten Morgen");
+  });
 });
 
 describe("the words a done transcription offers the composer (TX8)", () => {
