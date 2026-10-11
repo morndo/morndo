@@ -1,6 +1,6 @@
 // How an attached file is taken, on the desktop and on the phone. The domain decides the kind, the limit and the
 // name (screenNamedUpload, before the bytes are read); this turns a refusal into a sentence and runs the upload.
-import { MAX_UPLOADS_PER_COMMAND, acceptNamedUpload, screenNamedUpload, uploadByteLimit, UPLOAD_ACCEPT, type UploadKind, type UploadRefusal } from "@morndo/domain";
+import { MAX_UPLOADS_PER_COMMAND, acceptNamedUpload, screenNamedUpload, uploadByteLimit, UPLOAD_ACCEPT, type AttachmentKind, type UploadKind, type UploadRefusal } from "@morndo/domain";
 import { ApiError, explain } from "./api.ts";
 
 export { UPLOAD_ACCEPT };
@@ -27,7 +27,7 @@ export function fileSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function fileType(name: string, kind: UploadKind | string): string {
+export function fileType(name: string, kind: AttachmentKind): string {
   if (kind === "pdf") return "PDF";
   const ext = name.includes(".") ? name.split(".").pop()?.toUpperCase() ?? "" : "";
   return ext || "File";
