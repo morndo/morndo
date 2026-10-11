@@ -27,7 +27,8 @@ paths=$(mktemp)
 patch=$(mktemp)
 hits=$(mktemp)
 exc=$(mktemp)
-trap 'rm -f "$ranges" "$patterns" "$paths" "$patch" "$hits" "$exc"' EXIT
+merges=$(mktemp)
+trap 'rm -f "$ranges" "$patterns" "$paths" "$patch" "$hits" "$exc" "$merges"' EXIT
 
 gitleaks protect --no-banner --redact
 
@@ -159,32 +160,6 @@ scan_file() {
   [ "$status" -eq 1 ] || search_failed
 }
 
-scan_sha() {
-  sha=$1
-  shift
-  status=0
-  raw=$(git grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@" ":(exclude)$listfile") || status=$?
-  [ "$status" -le 1 ] || search_failed
-  if [ "$status" -eq 0 ]; then
-    printf '%s\n' "$raw" > "$hits"
-    while IFS= read -r line || [ -n "$line" ]; do
-      [ -n "$line" ] || continue
-      rest=${line#"$sha":}
-      file=${rest%%:*}
-      hit=${rest#*:}
-      skip_file "$file" && continue
-      allowed "$file" "$hit" && continue
-      obvious_fixture "$file" "$hit" && continue
-      reject "home path, private key, or token in $file"
-    done < "$hits"
-  fi
-  [ -s "$patterns" ] || return 0
-  status=0
-  git grep -I -q -E -f "$patterns" "$sha" -- "$@" ":(exclude)$listfile" || status=$?
-  [ "$status" -ne 0 ] || reject "local leak pattern in $sha"
-  [ "$status" -eq 1 ] || search_failed
-}
-
 # New-file length from a hunk header. Omitted count means one line.
 hunk_new_lines() {
   rest=${1#*+}
@@ -199,14 +174,38 @@ hunk_new_lines() {
   esac
 }
 
-# Added lines of a unified diff. Headers are read only outside a hunk, and a
-# hunk is the number of new-file lines the header names. A marker already in
-# the file is not an added line.
+# Added lines of a unified or a combined diff. Headers are read only outside
+# a hunk, and a hunk is the number of new-file lines the header names. A
+# marker already in the file is not an added line. In a combined hunk, which
+# a merge carries, a line with a '-' column for any parent is not part of the
+# result, and only a '+' in every column is new against them all.
 scan_patch() {
   file=
   left=0
+  cc=0
+  parents=0
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$left" -gt 0 ]; then
+      if [ "$cc" -eq 1 ]; then
+        case "$line" in
+          '\'*) continue ;;
+        esac
+        pre=$(printf '%.*s' "$parents" "$line")
+        case "$pre" in
+          *-*) continue ;;
+          *' '*)
+            left=$((left - 1))
+            ;;
+          *)
+            left=$((left - 1))
+            case "$file" in
+              ''|/dev/null) ;;
+              *) skip_file "$file" || scan_text "$file" "${line#"$pre"}" ;;
+            esac
+            ;;
+        esac
+        continue
+      fi
       case "$line" in
         '\'*) continue ;;
         '-'*) continue ;;
@@ -227,6 +226,15 @@ scan_patch() {
     case "$line" in
       'diff --git '*)
         file=
+        cc=0
+        ;;
+      'diff --cc '*)
+        cc=1
+        file=${line#diff --cc }
+        case "$file" in
+          *' b/'*) file=${file##* b/} ;;
+          'a/'*) file=${file#a/} ;;
+        esac
         ;;
       '+++ '*)
         file=${line#+++ }
@@ -235,7 +243,31 @@ scan_patch() {
         esac
         file=${file#b/}
         ;;
+      '@@@'*)
+        cc=1
+        parents=0
+        left=1
+        rest=${line#"${line%%[!@]*}"}
+        rest=${rest%%@*}
+        for word in $rest; do
+          case "$word" in
+            -*) parents=$((parents + 1)) ;;
+            +*)
+              count=${word#+}
+              case "$count" in
+                *,*) count=${count#*,} ;;
+                *) count=1 ;;
+              esac
+              case "$count" in
+                *[!0-9]*|'') count=0 ;;
+              esac
+              left=$count
+              ;;
+          esac
+        done
+        ;;
       '@@'*)
+        cc=0
         left=$(hunk_new_lines "$line")
         ;;
     esac
@@ -273,22 +305,39 @@ load_exceptions() {
   git show "$1:$exceptions" > "$exc"
 }
 
-# Every check below a push names is limited to commits that are not on any
-# remote: the remote tip git reports and every remote-tracking ref.
+# The patch a push would add is the net difference between the remote side
+# and the local tip - a line added and removed inside the push is not
+# checked - plus the changes a merge commit itself carries, which the net
+# difference does not separate out. A push that creates a ref has no remote
+# side; its base is the common boundary with the remote-tracking refs, or
+# the empty tree when there is none, which scans the whole tree. The mail
+# checks stay limited to commits that are not on any remote: the remote tip
+# git reports and every remote-tracking ref.
 while read -r local_sha remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   load_exceptions "$remote_sha"
-  if [ "$remote_sha" = "$zero" ] && [ -z "$(git for-each-ref --format='%(objectname)' refs/remotes)" ]; then
-    TRACES_PUBLISHED_EXCEPTIONS="$exc" sh "$mails" mails "$local_sha"
-    scan_sha "$local_sha" . ":(exclude)$self" ":(exclude)$listfile"
-    continue
-  fi
+  sel=$local_sha
   if [ "$remote_sha" = "$zero" ]; then
-    TRACES_PUBLISHED_EXCEPTIONS="$exc" sh "$mails" mails "$local_sha" --not --remotes
-    git log -p -U0 --pretty=format: --diff-filter=ACMR "$local_sha" --not --remotes -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
+    base=
+    refs=$(git for-each-ref --format='%(refname)' refs/remotes)
+    if [ -n "$refs" ]; then
+      sel="$local_sha --not --remotes"
+      base=$(git merge-base "$local_sha" $refs 2>/dev/null) || base=
+    fi
+    if [ -z "${base:-}" ]; then
+      base=$(git hash-object -t tree /dev/null)
+    fi
   else
-    TRACES_PUBLISHED_EXCEPTIONS="$exc" sh "$mails" mails "$local_sha" --not "$remote_sha" --remotes
-    git log -p -U0 --pretty=format: --diff-filter=ACMR "$local_sha" --not "$remote_sha" --remotes -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
+    base=$remote_sha
+    sel="$local_sha --not $remote_sha --remotes"
   fi
+  TRACES_PUBLISHED_EXCEPTIONS="$exc" sh "$mails" mails $sel
+  git diff -U0 --diff-filter=ACMR "$base" "$local_sha" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch" || search_failed
   scan_patch "$patch"
+  git rev-list --merges $sel > "$merges" || search_failed
+  while IFS= read -r merge || [ -n "$merge" ]; do
+    [ -n "$merge" ] || continue
+    git diff-tree --cc -U0 --no-commit-id --diff-filter=ACMR "$merge" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch" || search_failed
+    scan_patch "$patch"
+  done < "$merges"
 done < "$ranges"

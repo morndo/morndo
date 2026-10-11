@@ -399,6 +399,51 @@ set -e
 [ "$code" -eq 1 ] || fail "a personal author address after the merge should exit 1, got $code"
 cd "$root"
 
+# A merge commit can carry lines neither parent has, so the combined diff of
+# every merge in the push is scanned beside the net difference. A line added
+# and removed inside the push is not in the net difference and must pass.
+evil=$scratch/evil
+git init -q --initial-branch=main "$evil"
+cp "$root/.gitleaks.toml" "$evil/.gitleaks.toml"
+cd "$evil"
+printf 'ok\n' > file.txt
+git add file.txt .gitleaks.toml
+commit_ok -m 'evil base'
+git checkout -q -b side
+printf 'side\n' > side.txt
+git add side.txt
+commit_ok -m 'side work'
+side=$(git rev-parse HEAD)
+git checkout -q main
+printf 'main\n' > main.txt
+git add main.txt
+commit_ok -m 'main work'
+remote_tip=$(git rev-parse HEAD)
+git merge --no-commit --no-ff -q "$side"
+printf '/%s/%s/notes\n' home example-user >> file.txt
+git add file.txt
+commit_ok -m 'merge the side branch'
+merge_tip=$(git rev-parse HEAD)
+git show "$merge_tip:file.txt" | grep -q example-user || fail "the merge commit should carry the smuggled line"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$merge_tip" refs/heads/main "$remote_tip" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a smuggled line inside a merge should exit 1, got $code"
+git reset -q --hard "$remote_tip"
+printf '/%s/%s/notes\n' home example-user > churn.txt
+git add churn.txt
+commit_ok -m 'add the churn file'
+git rm -q churn.txt
+commit_ok -m 'remove the churn file'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$remote_tip" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a line added then removed inside the push should exit 0, got $code"
+cd "$root"
+
 # The published exceptions come from the remote side of the push, never from
 # the tree being pushed or from beside the hook: a branch that lists its own
 # bad commit still fails, and a commit the remote side lists passes. The
