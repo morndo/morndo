@@ -159,8 +159,9 @@ export function draftOnScreen(screen: string): string | null {
 function draftStillWaiting(sent: string, draft: string): boolean {
   // A long paste is folded into one chip. The chip is the paste, still in the box.
   if (/^\[Pasted text #\d+ \+\d+ lines\]$/.test(draft)) return true;
+  // draftOnScreen trims the box. A paste that only differs by that trim is still the same text.
   const shown = [...draft].slice(0, 20);
-  const sentPoints = [...sent];
+  const sentPoints = [...sent.trim()];
   if (shown.every((c, i) => c === sentPoints[i])) return true;
   const window = sentPoints.slice(0, shown.length + 1);
   if (window.length !== shown.length + 1) return false;
