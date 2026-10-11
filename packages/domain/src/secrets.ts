@@ -242,13 +242,14 @@ export function answerStored(
   if (p) return refuseRequest(p);
   if (req.kind === "access") return refuseRequest("kind");
   if (parseReference(a.reference) === null) return refuseRequest("bad_reference");
-  const nodes = a.confirmations.map(x => x.node);
-  const c = a.confirmations.find(x => x.node === req.node);
-  if (c === undefined || !Number.isSafeInteger(c.version) || c.version < 1) return refuseRequest("node");
-  // The confirmation is for the store this answer made, under the Reference it names. A rotate or renew is about the
-  // request's own Secret; a new one may be stored under the Reference chosen on the card (SR6). T-88.
-  if (c.reference !== a.reference || (req.kind !== "new" && a.reference !== req.reference)) return refuseRequest("reference");
-  if (!(Number.isFinite(c.at) && c.at >= req.openedAt - CONFIRMATION_SKEW_MS && c.at <= now + CONFIRMATION_SKEW_MS)) return refuseRequest("clock");
+  const all = a.confirmations;
+  const nodes = all.map(x => x.node);
+  const c = all.find(x => x.node === req.node);
+  if (c === undefined || !eachOnce(nodes) || !all.every(x => Number.isSafeInteger(x.version) && x.version >= 1)) return refuseRequest("node");
+  // Each confirmation is for the store this answer made, under the Reference it names (T-88), every node's alike (T-94). A
+  // rotate or renew is about the request's own Secret; a new one may be stored under the Reference chosen on the card (SR6).
+  if (!all.every(x => x.reference === a.reference) || (req.kind !== "new" && a.reference !== req.reference)) return refuseRequest("reference");
+  if (!all.every(x => Number.isFinite(x.at) && x.at >= req.openedAt - CONFIRMATION_SKEW_MS && x.at <= now + CONFIRMATION_SKEW_MS)) return refuseRequest("clock");
   if (req.kind === "renew" && !c.renewed) return refuseRequest("not_renewed");
   // The renew's Expiry, in one place: named, a time, and later than the node's time of the store (T-88).
   if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > c.at)) return refuseRequest("expiry");
