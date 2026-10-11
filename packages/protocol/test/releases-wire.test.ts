@@ -104,6 +104,17 @@ describe("files.json (the file list inside an installed Version)", () => {
     expect(parse(FileListSchema, [{ ...doc[0]!, path: "/etc/passwd" }])).toBe(false);
     expect(parse(FileListSchema, [{ ...doc[0]!, path: "app/../../etc/passwd" }])).toBe(false);
   });
+  it("negative control: a NUL byte, a `.` or `..` segment, or an empty segment, is refused", () => {
+    // The comment's promise: a relative path of plain segments. A NUL truncates the path at the file system and can
+    // alias two entries to one file during the file_list check; `.` and `..` move inside the tree; an empty segment
+    // (a `//` or a trailing `/`) is not a name.
+    for (const path of ["a\u0000b", "./a", "a//b", ".", "..", "a/.", "a/", "a/b/.."])
+      expect(parse(FileListSchema, [{ ...doc[0]!, path }]), path).toBe(false);
+  });
+  it("a dotfile, and dots inside a name, are still plain segments", () => {
+    expect(parse(FileListSchema, [{ ...doc[0]!, path: "app/.env.example" }])).toBe(true);
+    expect(parse(FileListSchema, [{ ...doc[0]!, path: "a..b/c" }])).toBe(true);
+  });
 });
 
 describe("health and safe-point shapes (§6.3, §6.4)", () => {

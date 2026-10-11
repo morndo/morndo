@@ -90,8 +90,12 @@ export const ManifestSchema = z.strictObject({
 
 // ---- files.json (inside an installed Version; its digest is the Manifest's filesSha256)
 
-// A path inside the tree: relative, no NUL, no `..` segment. A mode as ls writes it, octal, four digits.
-const treePath = z.string().check(z.regex(/^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$)).+$/), z.maxLength(512));
+// A path inside the tree: relative, a list of plain segments — none empty, `.`, `..`, or holding a NUL or line break
+// (a NUL truncates at the file system and can alias two entries to one file in the file_list check). A mode as ls
+// writes it, octal, four digits.
+const treePath = z.string().check(
+  z.regex(/^(?!\.(?:\/|$))(?!\.\.(?:\/|$))[^/\u0000\n\r\u2028\u2029]+(?:\/(?!\.(?:\/|$))(?!\.\.(?:\/|$))[^/\u0000\n\r\u2028\u2029]+)*$/),
+  z.maxLength(512));
 const fileMode = z.string().check(z.regex(/^0[0-7]{3}$/));
 export const FileEntrySchema = z.strictObject({ path: treePath, mode: fileMode, sha256: sha256() });
 export const FileListSchema = z.array(FileEntrySchema);
