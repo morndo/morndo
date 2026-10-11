@@ -15,12 +15,13 @@
   import type { DecisionItem } from "./decisions.ts";
   import { unreachable } from "@morndo/domain";
   import { canRetry, type OutboxRecord } from "../outbox/state.ts";
+  import { fileSize, fileType, type SentFile } from "../attach.ts";
   import { sendLabel, sendReason } from "../outbox/words.ts";
   import { dividerBefore, scrollAnchor, showJump, type Anchor, type TimelineChange } from "./timeline.ts";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
 
   // A Command of the outbox (ADR-0008 phase C), with its images' thumbnails for this page's life.
-  export type Outgoing = OutboxRecord & { images: string[] };
+  export type Outgoing = OutboxRecord & { images: string[]; files: SentFile[] };
   let { worker, messages, loading, outgoing, displayName, prefs, decisionOf, card, focus, onRetry, onDiscard, onVerify, onEdit,
     dividerMark = undefined, onAtBottom = () => {}, older = { loading: false, done: false, failed: false }, olderPages = 0, onOlder = () => {},
     detached = false, newWhileDetached = 0, onLatest = () => {} }: {
@@ -254,8 +255,10 @@
       <div class="content">
         <div class="who"><strong>You</strong><time>{label(p)}</time></div>
         {#if p.text.trim()}<div class="md">{@html renderMarkdown(p.text)}</div>{/if}
-        {#if p.images.length}<div class="sent-images">{#each p.images as src (src)}<img {src} alt="" />{/each}</div>
-        {:else if p.uploads.length}<p class="meta-line">{p.uploads.length === 1 ? "1 file" : `${p.uploads.length} files`}</p>{/if}
+        {#if p.images.length}<div class="sent-images">{#each p.images as src (src)}<img {src} alt="" />{/each}</div>{/if}
+        {#if p.files.length}
+          <div class="sent-files">{#each p.files as f (`${f.name}:${f.size}`)}<span class="filechip"><span class="fn">{f.name}</span><small>{fileType(f.name, f.kind)} · {fileSize(f.size)}</small></span>{/each}</div>
+        {:else if !p.images.length && p.uploads.length}<p class="meta-line">{p.uploads.length === 1 ? "1 file" : `${p.uploads.length} files`}</p>{/if}
         {#if stuck}<p class="err">{reason(p)}</p>{/if}
         {#if stuck || p.state === "queued" || p.state === "sending" || (p.state === "sent" && label(p) !== "Sent")}
           <div class="outbox-actions">
@@ -354,6 +357,10 @@
   .jump:hover { background: var(--hover); }
   .sent-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
   .sent-images img { max-width: 240px; max-height: 180px; border-radius: 8px; border: 1px solid var(--border); object-fit: contain; }
+  .sent-files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+  .filechip { display: flex; align-items: center; gap: 8px; max-width: 280px; height: 36px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--main-bg); min-width: 0; }
+  .filechip .fn { font: 700 13px/18px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .filechip small { flex: none; font: 400 12px/16px var(--font); color: var(--muted); }
   .pending.failed, .pending.sent { opacity: 1; }
   .pending.sent time { color: var(--ok-fg); }
   .meta-line { margin: 2px 0 0; font-size: 13px; color: var(--muted); }

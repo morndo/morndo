@@ -33,6 +33,8 @@ export function fileType(name: string, kind: UploadKind | string): string {
   return ext || "File";
 }
 
+export type SentFile = { name: string; kind: UploadKind; size: number };
+
 export type AttachmentRow = {
   key: string;
   name: string;

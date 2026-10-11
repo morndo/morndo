@@ -11,7 +11,7 @@
   import ShieldCheck from "@lucide/svelte/icons/shield-check";
   import { onDestroy, untrack } from "svelte";
   import { UPLOAD_ACCEPT } from "@morndo/domain";
-  import { beginAttachments, fileSize, fileType, settleAttachment, type AttachmentRow } from "../attach.ts";
+  import { beginAttachments, fileSize, fileType, settleAttachment, type AttachmentRow, type SentFile } from "../attach.ts";
   import { explain, uploadFile } from "../api.ts";
   import { stepUp as verify } from "../stepup.ts";
   import { deviceDrafts } from "../drafts.ts";
@@ -21,7 +21,7 @@
     conversation?: string;                                       // the worker's name: its draft comes back only with it
     edit?: { text: string; n: number } | null;                   // "Edit" on a send whose question changed: its text comes back here
     onEdited?: () => void;
-    onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; seen: string; held?: string }) => Promise<void>;
+    onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; files: SentFile[]; seen: string; held?: string }) => Promise<void>;
     onVerified: (at: number) => void; inputEl?: HTMLTextAreaElement | null;
   } = $props();
 
@@ -115,6 +115,7 @@
     const to = target, toName = conversation, written = seen ?? waitingOn ?? "none";
     const uploads = readyIds;
     const images = shots.filter(s => s.status === "ready" && s.kind === "image" && s.preview).map(s => s.preview);
+    const files = shots.filter(s => s.status === "ready" && s.kind !== "image").map((s): SentFile => ({ name: s.name, kind: s.kind, size: s.size }));
     note = null;
     let held: "step_up" | undefined;
     if (!fresh && navigator.onLine !== false) {
@@ -133,7 +134,7 @@
     const sentShots = shots;
     drafts.sent(target);                                               // a save still pending can't bring it back
     if (!destroyed) { text = ""; shots = []; inputEl?.focus(); }
-    try { await onQueue({ target: to, targetName: toName, text: body, uploads, images, seen: written, ...(held ? { held } : {}) }); }
+    try { await onQueue({ target: to, targetName: toName, text: body, uploads, images, files, seen: written, ...(held ? { held } : {}) }); }
     catch (e) {
       if (destroyed) return;
       text = text.trim() ? `${body}\n\n${text}` : body;

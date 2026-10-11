@@ -14,7 +14,7 @@
   import Clock from "@lucide/svelte/icons/clock-3";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import { UPLOAD_ACCEPT, type Message, type RosterEntry } from "@morndo/domain";
-  import { beginAttachments, fileSize, fileType, removalNote, settleAttachment, type AttachmentRow } from "../../attach.ts";
+  import { beginAttachments, fileSize, fileType, removalNote, settleAttachment, type AttachmentRow, type SentFile } from "../../attach.ts";
   import { uploadFile } from "../../api.ts";
   import type { LiveFeed } from "../../feed.svelte.ts";
   import type { DecisionItem } from "../../desktop/decisions.ts";
@@ -29,10 +29,10 @@
   import { bindWatch, pinnedToEnd } from "./watch.ts";
   import { deviceDrafts } from "../../drafts.ts";
 
-  let { feed, worker, outgoing, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCheck, onEchoes, screen = false }: {
-    feed: LiveFeed; worker: RosterEntry; outgoing: OutboxRecord[]; now: number; verifiedFresh: boolean; verify: () => Promise<boolean>;
+  let { feed, worker, outgoing, pendingFiles = {}, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCheck, onEchoes, screen = false }: {
+    feed: LiveFeed; worker: RosterEntry; outgoing: OutboxRecord[]; pendingFiles?: Record<string, SentFile[]>; now: number; verifiedFresh: boolean; verify: () => Promise<boolean>;
     onBack: () => void; onDecide: (id: string) => void;
-    onQueue: (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string }) => Promise<void>;
+    onQueue: (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string; files: SentFile[] }) => Promise<void>;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onAgain: (id: string) => void; onCheck: (id: string) => void;
     onEchoes: (worker: string, echoes: { id: string; at: number; text: string }[]) => void;
     screen?: boolean;
@@ -133,6 +133,7 @@
     busy = true;
     note = null;
     const uploads = readyIds;
+    const attached = files.filter(f => f.status === "ready").map((f): SentFile => ({ name: f.name, kind: f.kind, size: f.size }));
     const sentFiles = files;
     try {
       if (!verifiedFresh && navigator.onLine !== false && !(await verify())) { note = "Not sent: the passkey check didn't finish. Your message is still here."; return; }
@@ -140,7 +141,7 @@
       drafts.sent(worker.id);
       text = "";
       files = [];
-      try { await onQueue({ worker: worker.id, workerName: worker.name, text: body, uploads, seen: written }); }
+      try { await onQueue({ worker: worker.id, workerName: worker.name, text: body, uploads, files: attached, seen: written }); }
       catch { text = body; files = sentFiles; note = "Couldn't keep the message on this device. It is back in the box."; return; }
       atBottom = true;
       void tick().then(() => { if (scroller) scroller.scrollTop = scroller.scrollHeight; });
@@ -204,7 +205,10 @@
           {@const d = deliveryOf(o, now)}
           <li class="b mine first last pending" data-outbox={o.id} data-delivery={d}>
             <div class="bubble" class:failed={d === "failed" || d === "uncertain" || d === "lost" || d === "unseen" || d === "late" || d === "dead"}>
-              <div class="md"><p>{o.text}</p></div>
+              {#if o.text.trim()}<div class="md"><p>{o.text}</p></div>{/if}
+              {#each pendingFiles[o.id] ?? [] as f (`${f.name}:${f.size}`)}
+                <span class="file"><span>{f.name}</span><small>{fileType(f.name, f.kind)} · {fileSize(f.size)}</small></span>
+              {/each}
               <span class="meta">
                 {#if d === "delivered" || d === "arrived"}<CheckCheck size={14} />{:else if d === "sending"}<Check size={14} />{:else if d === "queued"}<Clock size={14} />{:else}<CircleAlert size={14} />{/if}
                 <span class="state" role="status">{deliveryLabel(o, outgoing, online, now)}</span>

@@ -16,6 +16,7 @@
   import type { RosterEntry } from "@morndo/domain";
   import type { DecisionItem } from "./decisions.ts";
   import type { ConversationPrefs } from "./present.ts";
+  import type { SentFile } from "../attach.ts";
   import type { LiveFeed } from "../feed.svelte.ts";
   import Avatar from "./Avatar.svelte";
   import Composer from "./Composer.svelte";
@@ -33,7 +34,7 @@
     decisions: number; decisionsOpen: boolean; onDecisions: () => void; screenRequest: { worker: string; n: number } | null;
     desktop: boolean;
     decisionOf: (messageId: string) => DecisionItem | undefined; card: Snippet<[DecisionItem]>; focus: { id: string; n: number } | null;
-    onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; seen: string; held?: string }) => Promise<void>;
+    onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; files: SentFile[]; seen: string; held?: string }) => Promise<void>;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onVerify: (id: string) => void; onEdit: (id: string) => void;
     editRequest: { worker: string; text: string; n: number } | null; onEdited: () => void; onVerified: (at: number) => void;
     dividerMark?: number | null | undefined; onAtBottom?: (atBottom: boolean, worker: string) => void;
