@@ -192,7 +192,8 @@ const engineOk = (e: EngineText): boolean =>
   typeof e === "object" && e !== null && typeof e.language === "string"
   && Number.isInteger(e.durationMs) && e.durationMs >= 0
   && Array.isArray(e.segments)
-  && e.segments.every(seg => seg !== null && Number.isInteger(seg.startMs) && Number.isInteger(seg.endMs) && typeof seg.text === "string");
+  && e.segments.every(seg => typeof seg === "object" && seg !== null
+    && Number.isInteger(seg.startMs) && Number.isInteger(seg.endMs) && typeof seg.text === "string");
 
 export function endTranscription(tx: Transcription, event: TranscriptionEnd, maxSeconds = MAX_RECORDING_SECONDS): Result<Transcription, EndProblem> {
   if (!Number.isInteger(event.at)) return err("bad_end");
