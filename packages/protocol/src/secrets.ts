@@ -47,14 +47,14 @@ export const WireGrantSubject = z.discriminatedUnion("kind", [
 ]);
 export const WireGrant = z.strictObject({
   subject: WireGrantSubject,
-  modes: z.array(mode()).check(z.minLength(1), z.maxLength(USE_MODES.length)),
+  modes: z.array(mode()).check(z.minLength(1), z.maxLength(USE_MODES.length), z.refine(m => new Set(m).size === m.length, "each mode once")),
   until: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("open") }),
     z.strictObject({ kind: z.literal("at"), at: when() }),
     z.strictObject({ kind: z.literal("lane-end") }),
   ]),
 });
-const destinations = () => z.array(host()).check(z.maxLength(10));
+const destinations = () => z.array(host()).check(z.maxLength(10), z.refine(h => new Set(h).size === h.length, "each host once"));
 
 // Node to hub: a request, as the node saw it (design §4.1). The hub takes it in through NodeRequests.
 export const SecretRequestedEvent = z.strictObject({
@@ -78,7 +78,7 @@ export const SecretRequestView = z.strictObject({
 export const SecretView = z.strictObject({
   node: node(), reference: SecretReferenceText, status: z.enum(SECRET_STATUSES), version: z.nullable(version()),
   keyedFingerprint: z.nullable(z.string().check(z.regex(/^[0-9a-f]{12}$/))), grants: z.array(WireGrant),
-  destinations: destinations(), expiry: z.nullable(when()), shape: z.nullable(id()), lastUse: z.nullable(when()),
+  destinations: destinations(), expiry: z.nullable(when()), shape: z.nullable(z.string().check(z.regex(/^[a-z0-9][a-z0-9-]{0,63}$/))), lastUse: z.nullable(when()),
 });
 
 // The card's Store (design §5.3): one SealedValue per target node, each sealed to the recipient this Endpoint pinned.
