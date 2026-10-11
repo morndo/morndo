@@ -54,6 +54,9 @@ export type AcceptedUpload =
   | { kind: "pdf"; mime: "application/pdf"; name: string }
   | { kind: "text"; mime: TextMime; name: string }
   | { kind: "audio"; container: AudioContainer; name: string };
+// Without the Capability argument an audio name is always refused, so that call can never be answered with one.
+export type NamedUpload = Exclude<AcceptedUpload, { kind: "audio" }>;
+export type NamedKind = "image" | "text" | "pdf";
 
 const starts = (b: Uint8Array, ...bytes: number[]) => b.length >= bytes.length && bytes.every((x, i) => b[i] === x);
 
@@ -128,6 +131,12 @@ function kindOf(name: string): UploadKind | null {
 
 // Name and size, before anyone reads the bytes. A 3 GB movie is refused here. An audio name (S1, TX9) is on the
 // list only while the Capability is there; the Capability comes in as an argument, so the rule stays pure.
+export function screenNamedUpload(name: string, size: number): Result<{ kind: NamedKind; name: string }, UploadRefusal>;
+export function screenNamedUpload(
+  name: string,
+  size: number,
+  capability: TranscriptionCapability,
+): Result<{ kind: UploadKind; name: string }, UploadRefusal>;
 export function screenNamedUpload(
   name: string,
   size: number,
@@ -144,6 +153,12 @@ export function screenNamedUpload(
 
 // S1: the extension picks the kind. An image is then whatever image its bytes are. HTML, SVG, executables and archives
 // are not on the list. Text is UTF-8 under 1 MiB; a PDF starts with %PDF- and, like an image, is at most 10 MiB.
+export function acceptNamedUpload(bytes: Uint8Array, name: string): Result<NamedUpload, UploadRefusal>;
+export function acceptNamedUpload(
+  bytes: Uint8Array,
+  name: string,
+  capability: TranscriptionCapability,
+): Result<AcceptedUpload, UploadRefusal>;
 export function acceptNamedUpload(
   bytes: Uint8Array,
   name: string,
