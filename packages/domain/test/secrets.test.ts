@@ -479,7 +479,7 @@ describe("SC11: a transfer carries the live Grants, from a Secret that could be 
       reference: REF, fingerprint: FP1, shape: null, grants: [workspaceGrant], expiry: null, destinations: [], from: "node-a",
     }, principal("c7"), T));
     expect(secretOf(dir).grants).toEqual([workspaceGrant]);
-    expect(dir.events).toEqual([{ type: "SecretTransferred", reference: REF, version: 1, at: T, command: "c7", from: "node-a" }]);
+    expect(dir.events).toEqual([{ type: "SecretTransferred", reference: REF, version: 1, at: T, command: "c7", from: "node-a", sameAs: [] }]);
     expect(problem(receiveTransfer(dir, { reference: REF, fingerprint: FP1, shape: null, grants: [], expiry: null, destinations: [], from: "node-a" }, principal(), T + 1))).toBe("earlier");
     expect(problem(receiveTransfer(emptySecretDirectory(), { reference: REF, fingerprint: FP1, shape: null, grants: [], expiry: null, destinations: [], from: "node-a" }, anyone, T))).toBe("principal");
   });

@@ -2,8 +2,8 @@
 // per point, each written failing before its fix.
 import { describe, expect, it } from "vitest";
 import {
-  deleteSecret, emptySecretDirectory, endTimedGrants, findSecret, joinRequest, openRequest, revokeSecret, secretExpirySweep,
-  storeSecret, useGate, withdrawRequest,
+  deleteSecret, emptySecretDirectory, endTimedGrants, findSecret, joinRequest, openRequest, receiveTransfer, revokeSecret,
+  secretExpirySweep, storeSecret, useGate, withdrawRequest,
   type Actor, type RequestAsk, type SecretDirectory, type SecretGrant,
 } from "../src/index.ts";
 
@@ -123,5 +123,18 @@ describe("review 7: a Grant with an end time ends, and the audit says so (GrantE
     const n = dir.events.length;
     dir = endTimedGrants(dir, T + 200);
     expect(dir.events.length).toBe(n);
+  });
+});
+
+describe("review 4: a transfer names a duplicate value as a store does (SC2: \"same value as …\")", () => {
+  const input = { reference: REF, fingerprint: "0123456789a1", shape: null, grants: [], expiry: null, destinations: [], from: "node-b" };
+  it("receiving a value another active Secret on the target holds names that Secret in the event", () => {
+    let dir = store(emptySecretDirectory(), "0123456789a1", null, T, "secret://shared/held-here");
+    dir = value(receiveTransfer(dir, input, who, T + 1));
+    expect(dir.events.at(-1)).toEqual({ type: "SecretTransferred", reference: REF, version: 1, at: T + 1, command: "c1", from: "node-b", sameAs: ["secret://shared/held-here"] });
+  });
+  it("a fresh value carries an empty list", () => {
+    const dir = value(receiveTransfer(emptySecretDirectory(), input, who, T));
+    expect(dir.events.at(-1)).toMatchObject({ type: "SecretTransferred", sameAs: [] });
   });
 });

@@ -42,7 +42,7 @@ const REQUEST_EVENTS: Record<RequestEvent["type"], readonly string[]> = {
 const SECRET_EVENTS: Record<SecretEvent["type"], readonly string[]> = {
   SecretStored: ["type", "reference", "version", "at", "command", "sameAs"],
   SecretRotated: ["type", "reference", "version", "at", "command", "sameAs"],
-  SecretTransferred: ["type", "reference", "version", "at", "command", "from"],
+  SecretTransferred: ["type", "reference", "version", "at", "command", "from", "sameAs"],
   SecretDisabled: ["type", "reference", "at"],
   SecretEnabled: ["type", "reference", "at", "command"],
   SecretRevoked: ["type", "reference", "version", "at", "command"],
