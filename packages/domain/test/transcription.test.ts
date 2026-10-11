@@ -47,7 +47,8 @@ describe("requesting a transcription", () => {
   it("refuses a bad id, recording, language or size before it queues anything", () => {
     expect(requestTranscription([], ask({ id: "../up" }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
     expect(requestTranscription([], ask({ recording: { kind: "upload", id: "" } }), AT, READY)).toEqual({ ok: false, error: "bad_recording" });
-    expect(requestTranscription([], ask({ recording: { kind: "agent", id: "up-1" } }), AT, READY)).toEqual({ ok: false, error: "bad_recording" });
+    const agentKind = { kind: "agent", id: "up-1" } as unknown as TranscriptionBody["recording"];   // not one of the two kinds
+    expect(requestTranscription([], ask({ recording: agentKind }), AT, READY)).toEqual({ ok: false, error: "bad_recording" });
     expect(requestTranscription([], ask({ language: "DE" }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
     expect(requestTranscription([], ask({ language: "auto-detected" }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
     expect(requestTranscription([], ask({ sizeBytes: -1 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
