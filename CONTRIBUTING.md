@@ -21,7 +21,7 @@ Install the leak hook and the commit-message hook once per clone. Neither change
 sh scripts/install-git-hooks.sh
 ```
 
-The pre-push hook runs gitleaks, then checks the commits being pushed for absolute home paths (`/home/…`, `/Users/…`), private keys, and tokens. It also checks uncommitted and untracked files, and it does not scan itself or `scripts/git-hooks/leak-allowlist`. A match on that list is ignored only when both the path and the exact text are listed; a different match in the same file still fails. A new branch is limited to commits that are not on any remote; the first push of a repository checks the whole tree. Optional extra patterns, one regex per line, can live outside the tree at `$(git rev-parse --git-dir)/info/leak-patterns`; the hook reads that file when it is present. The commit-message hook rejects assistant attribution. See `docs/public-repo.md`.
+The pre-push hook runs gitleaks, then checks the commits being pushed for absolute home paths (`/home/…`, `/Users/…`), private keys, and tokens. It also rejects a commit whose author or committer email is not at `users.noreply.github.com`. It also checks uncommitted and untracked files, and it does not scan itself or `scripts/git-hooks/leak-allowlist`. A match on that list is ignored only when both the path and the exact text are listed; a different match in the same file still fails. A new branch is limited to commits that are not on any remote; the first push of a repository checks the whole tree. Optional extra patterns, one regex per line, can live outside the tree at `$(git rev-parse --git-dir)/info/leak-patterns`; the hook reads that file when it is present. The commit-message hook rejects assistant attribution. See `docs/public-repo.md`.
 
 ## Public-repo rules
 

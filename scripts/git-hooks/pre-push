@@ -201,15 +201,19 @@ while IFS= read -r file; do
   scan_file "$file"
 done < "$paths"
 
+mails=$(dirname "$(readlink -f "$0")")/commit-traces
 while read -r local_sha remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   if [ "$remote_sha" = "$zero" ] && [ -z "$(git for-each-ref --format='%(objectname)' refs/remotes)" ]; then
+    sh "$mails" mails "$local_sha"
     scan_sha "$local_sha" . ":(exclude)$self" ":(exclude)$listfile"
     continue
   fi
   if [ "$remote_sha" = "$zero" ]; then
+    sh "$mails" mails "$local_sha" --not --remotes
     git log --name-only --pretty=format: --diff-filter=ACMR "$local_sha" --not --remotes > "$paths"
   else
+    sh "$mails" mails "${remote_sha}..${local_sha}"
     git diff --name-only --diff-filter=ACMR "$remote_sha" "$local_sha" > "$paths"
   fi
   awk -v self="$self" -v listfile="$listfile" 'NF && $0 != self && $0 != "./" self && $0 != listfile && $0 != "./" listfile { print }' "$paths" > "$specs"

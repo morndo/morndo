@@ -1,7 +1,9 @@
 #!/bin/sh
-# Reject assistant attribution in a commit message, author, or committer.
+# Reject assistant attribution in a commit message, author, or committer,
+# and an author or committer email that is not @users.noreply.github.com.
 #   sh commit-traces message FILE
 #   sh commit-traces range <git rev-list args>
+#   sh commit-traces mails <git rev-list args>
 # A dependabot[bot] author, committer, or trailer is allowed. Any other
 # [bot] identity is not. Install the commit-msg hook with scripts/install-git-hooks.sh.
 set -eu
@@ -31,6 +33,21 @@ check_message() {
   fi
 }
 
+# 0 when the address is a GitHub noreply address. The local part may contain
+# the brackets a [bot] address uses.
+noreply_mail() {
+  printf '%s' "$1" | grep -E -i -q '^[^@[:space:]]+@users\.noreply\.github\.com$'
+}
+
+check_mails() {
+  sha=$1
+  ae=$(git log -1 --format='%ae' "$sha")
+  ce=$(git log -1 --format='%ce' "$sha")
+  if ! noreply_mail "$ae" || ! noreply_mail "$ce"; then
+    fail "$sha author or committer email is not @users.noreply.github.com"
+  fi
+}
+
 check_commit() {
   sha=$1
   msg=$(git log -1 --format='%B' "$sha")
@@ -41,9 +58,22 @@ check_commit() {
   if bad_text "$ident"; then
     fail "$sha author or committer names an assistant or a bot other than dependabot[bot]"
   fi
+  check_mails "$sha"
 }
 
-[ "$#" -ge 1 ] || fail "usage: commit-traces message FILE | commit-traces range <rev-list>"
+walk() {
+  action=$1
+  shift
+  [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
+  while IFS= read -r sha; do
+    [ -n "$sha" ] || continue
+    "$action" "$sha"
+  done <<EOF
+$(git rev-list "$@")
+EOF
+}
+
+[ "$#" -ge 1 ] || fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"
 
 mode=$1
 shift
@@ -54,15 +84,12 @@ case "$mode" in
     check_message "$(cat "$1")"
     ;;
   range)
-    [ "$#" -ge 1 ] || fail "usage: commit-traces range <rev-list>"
-    while IFS= read -r sha; do
-      [ -n "$sha" ] || continue
-      check_commit "$sha"
-    done <<EOF
-$(git rev-list "$@")
-EOF
+    walk check_commit "$@"
+    ;;
+  mails)
+    walk check_mails "$@"
     ;;
   *)
-    fail "usage: commit-traces message FILE | commit-traces range <rev-list>"
+    fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"
     ;;
 esac

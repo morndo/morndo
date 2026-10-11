@@ -36,6 +36,7 @@ cleanup() {
 trap cleanup EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
+commit_ok() { git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q "$@"; }
 
 sh "$hook" </dev/null || fail "hook should exit 0 on the current tree"
 
@@ -88,7 +89,7 @@ git -C "$scratch/clone" checkout -q --detach
 cd "$scratch/clone"
 printf 'ok\n' > clean-note.txt
 git add clean-note.txt
-git commit -q -m 'clean proof'
+commit_ok -m 'clean proof'
 parent=$(git rev-parse HEAD~1)
 tip=$(git rev-parse HEAD)
 set +e
@@ -104,7 +105,7 @@ set -e
 
 printf '/%s/%s/notes\n' home example-user > planted-note.txt
 git add planted-note.txt
-git commit -q -m 'planted proof'
+commit_ok -m 'planted proof'
 parent=$(git rev-parse HEAD~1)
 tip=$(git rev-parse HEAD)
 set +e
@@ -124,7 +125,7 @@ cp "$root/.gitleaks.toml" "$scratch/first/.gitleaks.toml"
 cd "$scratch/first"
 printf 'ok\n' > readme.txt
 git add readme.txt .gitleaks.toml
-git commit -q -m 'first clean'
+commit_ok -m 'first clean'
 tip=$(git rev-parse HEAD)
 set +e
 printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook"
@@ -133,7 +134,7 @@ set -e
 [ "$code" -eq 0 ] || fail "first push of a clean tree should exit 0, got $code"
 printf '/%s/%s/notes\n' home example-user > planted-note.txt
 git add planted-note.txt
-git commit -q -m 'first planted'
+commit_ok -m 'first planted'
 tip=$(git rev-parse HEAD)
 set +e
 printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook"
@@ -151,5 +152,38 @@ printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | (cd "$sc
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "first push of this tree should exit 0, got $code"
+
+# Author and committer must both be a noreply address. Identity is set on the command.
+git init -q "$scratch/mail"
+cp "$root/.gitleaks.toml" "$scratch/mail/.gitleaks.toml"
+cd "$scratch/mail"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'mail base'
+base=$(git rev-parse HEAD)
+git -c user.name='dependabot[bot]' -c user.email='49699333+dependabot[bot]@users.noreply.github.com' commit -q --allow-empty -m 'chore: bump a fixture'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "bot noreply address should exit 0, got $code"
+git reset -q --hard "$base"
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'author mail'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "author email should exit 1, got $code"
+git reset -q --hard "$base"
+env GIT_COMMITTER_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'committer mail'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "committer email should exit 1, got $code"
+cd "$root"
 
 echo "pre-push proof ok"
