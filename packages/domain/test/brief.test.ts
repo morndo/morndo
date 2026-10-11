@@ -382,6 +382,12 @@ describe("DB7 everywhere a field lands in briefMarkdown (§4.5: an old app rende
     expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).label = "See [the plan](http://example.com/plan)"; }))
       .toEqual(["error bad_link (options[0].label)"]);
   });
+  it("an option refused only for its label's pipe still counts as an option to the checks that follow", () => {
+    // As a label past its cap: the key stands, so the recommendation is checked against all three keys and the
+    // table's cells against three columns; the refusal is the one line about the pipe, nothing half-built after it.
+    expect(lines(d => { ((d.options as { key: string; label: string }[])[0]!).label = "Keep | manual"; }))
+      .toEqual(["error bad_markdown (options[0].label)"]);
+  });
   it("a factor goes through the same check as its cells and the note: no raw HTML, no images, https links", () => {
     expect(lines(d => { ((d.comparison as { rows: { factor: string; cells: string[] }[] }).rows[0]!).factor = "<b>Outcome</b>"; }))
       .toEqual(["error bad_markdown (comparison.rows[0].factor)"]);
