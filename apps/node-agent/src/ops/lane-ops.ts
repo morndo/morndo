@@ -11,7 +11,7 @@
 // - The window to stop is targeted by its ID (@N) from the inventory, never by its name.
 import { realpathSync, statSync } from "node:fs";
 import { formatWorkerId, type OpArgs } from "@morndo/protocol";
-import { deniedBy, denyConfigFromEnv, denyRoots, exactSession, resolvedRoots, tmuxLiteral } from "@morndo/node-ops";
+import { deniedBy, denyConfigFromEnv, denyRoots, exactSession, hostTmuxServer, resolvedRoots, tmuxLiteral } from "@morndo/node-ops";
 import type { Policy } from "../config.ts";
 import { effect, fail, ok, type OpTable } from "./executor.ts";
 import type { Inventory } from "./inventory.ts";
@@ -53,7 +53,10 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
       if (snap.rows.some(r => r.window === a.name)) return fail("name_taken", "a window of that name already exists on this node");
       const late = ctx.ready();
       if (late) return { ok: false, error: late };
-      const where = (await sessionExists()) ? ["new-window", "-d", "-t", `${exactSession(session)}:`] : ["new-session", "-d", "-s", tmuxLiteral(session)];
+      const exists = await sessionExists();
+      // A missed startup host must not start the server inside this service's cgroup.
+      if (!exists) await hostTmuxServer({ socket });
+      const where = exists ? ["new-window", "-d", "-t", `${exactSession(session)}:`] : ["new-session", "-d", "-s", tmuxLiteral(session)];
       const out = await tmuxRun(socket, [...where, "-n", tmuxLiteral(a.name), "-c", tmuxLiteral(cwd), "-P", "-F", "#{pane_id}", ...laneCommand(a)]);
       const pane = /^%(\d{1,9})$/.exec(out.trim());
       if (!pane) return fail("internal", "tmux did not report the new pane");
