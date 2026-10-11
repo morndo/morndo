@@ -153,19 +153,16 @@ export function draftOnScreen(screen: string): string | null {
   return draft && (colored || !/^Try "/.test(draft)) ? draft : null;
 }
 
-// The read-back can omit the one cell under the cursor. That missing character must not look like the paste left the
-// box: the first 20 code points on screen are the start of what was sent, or that start with exactly one code point
-// removed. A different leftover is not the paste.
+// The draft keeps the reverse-video cursor cell, so a box that differs by one character is not this paste. The first
+// 20 code points are the whole short paste, or the start of a longer one. Leading space is ignored on both sides:
+// draftOnScreen trims the box.
 function draftStillWaiting(sent: string, draft: string): boolean {
   // A long paste is folded into one chip. The chip is the paste, still in the box.
   if (/^\[Pasted text #\d+ \+\d+ lines\]$/.test(draft)) return true;
-  // draftOnScreen trims the box. A paste that only differs by that trim is still the same text.
-  const shown = [...draft].slice(0, 20);
   const sentPoints = [...sent.trim()];
-  if (shown.every((c, i) => c === sentPoints[i])) return true;
-  const window = sentPoints.slice(0, shown.length + 1);
-  if (window.length !== shown.length + 1) return false;
-  return window.some((_, drop) => shown.every((c, i) => c === window[i < drop ? i : i + 1]));
+  const head = sentPoints.slice(0, 20);
+  const shown = [...draft].slice(0, 20);
+  return shown.length === head.length && shown.every((c, i) => c === head[i]);
 }
 
 export function tmuxAdapter(opts: { socket: string | null; session: string | null; historyLines?: number }): Tmux {

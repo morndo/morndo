@@ -1,5 +1,5 @@
-// After paste+Enter, a swallowed Enter leaves the text in the box. The read-back can omit the one character under
-// the cursor; that must not look like the paste was submitted.
+// After paste+Enter, a swallowed Enter leaves the text in the box. A short message that was delivered must not look
+// unsent just because the box now holds something one character away from it.
 import { afterEach, describe, expect, it } from "vitest";
 import { tmuxAdapter } from "../src/tmux.ts";
 import { isolatedTmux, type TestTmux } from "./isolated-tmux.ts";
@@ -20,9 +20,13 @@ async function pane(redraw: string) {
 }
 
 describe("an unsubmitted paste", () => {
-  it("is not_submitted even when the read-back lost the character under the cursor", async () => {
+  it("is not the paste when the read-back merely lost one character", async () => {
     const id = await pane(`holed="\${line:0:1}\${line:2}"\nprintf '%s\\n' '${RULE}' "❯ $holed" '${RULE}'`);
-    expect(await tmuxAdapter({ socket: t!.socket, session: "main" }).send(id, "Hello there friend")).toBe("not_submitted");
+    expect(await tmuxAdapter({ socket: t!.socket, session: "main" }).send(id, "Hello there friend")).toBeNull();
+  });
+  it.each(["es", "ys", "ye"])("is not a delivered yes when the box shows %s", async (shown) => {
+    const id = await pane(`printf '%s\\n' '${RULE}' '❯ ${shown}' '${RULE}'`);
+    expect(await tmuxAdapter({ socket: t!.socket, session: "main" }).send(id, "yes")).toBeNull();
   });
   it("is not_submitted when the read-back is the paste itself", async () => {
     const id = await pane(`printf '%s\\n' '${RULE}' "❯ $line" '${RULE}'`);
