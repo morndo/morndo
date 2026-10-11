@@ -388,7 +388,7 @@ Layer, as in design §3.3: **domain** (decided in `secrets.ts`, proved by a doma
 
 | # | Invariant | Layer |
 |---|---|---|
-| SR1 | One open request per (node, Reference). A repeat from another lane joins it; the same lane again changes nothing, and every caller without a lane counts as one waiter. | domain service + store |
+| SR1 | One open request per (node, Reference). A repeat from another lane joins it; the same waiter again changes nothing. A waiter is its lane, or, without a lane, its workspace (below). | domain service + store |
 | SR2 | The requester's broker answers `available` when the use gate admits the caller; with a value but no Grant the request opens as `access`, a card with no field. | application |
 | SR3 | A request carries a purpose (plain text, 1 to 300 characters), a valid Reference and Grant. No type has a field a value could travel in; the wire refuses a value-like key whole. | domain + adapter |
 | SR4 | One answer. Withdrawn only when its last waiting lane withdraws. Expired 7 days after it opened. | domain |
@@ -401,15 +401,17 @@ Layer, as in design §3.3: **domain** (decided in `secrets.ts`, proved by a doma
 | SR11 | A request grants nothing beyond the Grant stored. | domain |
 | SC1 | No value in the model: no type, event or wire shape has a field one could travel in. | domain + adapter |
 | SC2 | A Reference is unique on a node. A value matching a revoked version anywhere on the node, or an earlier version of the same Reference, is refused; a duplicate of another active Secret is stored with a warning that names it. | domain service + store |
-| SC3 | Default deny. The use gate, in order: status active, a current version, before Expiry, a live Grant admits the caller, the Grant allows the mode. The first failure is the refusal. A Grant whose end time has come is removed, with GrantEnded, as one that ends with its lane is. | domain |
+| SC3 | Default deny. The use gate, in order: status active, a current version, before Expiry, a live Grant admits the caller, the Grant allows the mode. The first failure is the refusal, so a Grant past its end time admits nobody from that moment. Removing it, with GrantEnded, is the node's sweep (`endTimedGrants`, run with the expiry sweep from PR 6); until then the list can still show it. | domain |
 | SC4 | A Use is recorded before the vault opens the value; refusals are recorded too. | application |
 | SC5 | A value reaches a program only through the use modes; no command prints one. | application + adapter |
 | SC6 | Every output path on the node passes the exact filter before it leaves. | adapter |
 | SC7 | Narrowing is anyone's; widening, judged by effect, is the principal's. Disable is anyone's. | domain + application |
 | SC8 | Disable and Revoke refuse new Uses at once. Revoke destroys the current value and keeps the Reference, history and Grants; Delete removes the Reference and Grants; the ledger keeps the fingerprints, and a value stored again under that Reference takes the next version, so (Reference, version) always names one value. | domain + adapter |
-| SC9 | Expiry warns once at 7, 2 and 1 days, then refuses; a later Expiry clears the warnings. A Rotation takes the new value's Expiry and clears them too, so renewing an expired Secret is a Rotation; it keeps the Grants and Destinations. | domain |
+| SC9 | Expiry warns once at 7, 2 and 1 days, then refuses. Only a later Expiry clears the warnings, whoever sets it (below). | domain |
 | SC10 | A Secret grants nothing: a Use is not a Mandate. | domain |
-| SC11 | A transfer starts from a Secret that could be used now and carries only the Grants that haven't ended; the target stores it through its own ledger, and names any active Secret there with the same value, as a store does. | domain + adapter |
+| SC11 | A transfer starts from a Secret that could be used now and carries only the Grants that haven't ended. The target stores it through its own ledger, naming any active Secret there with the same value, as a store does; onto a Reference it already holds, it is a Rotation there (below). | domain + adapter |
+
+**Expiry on a Rotation or a transfer, and waiters without a lane** (design §10, SC7, SC9, SR1, SR6). A store or a transfer onto a Reference the node already holds is a Rotation there. It keeps the Secret's Grants, Destinations and Expiry, unless it names an Expiry. A named Expiry replaces the old one, is recorded as ExpiryChanged with the Command, and clears the warnings only when it is later. A store or a transfer never removes an Expiry: that is `setSecretExpiry`, a widening the principal makes on purpose (SC7). Renewing an expired Secret is a Rotation that names a later Expiry. On the hub, a waiter is its lane; a caller without a lane is identified by its workspace, and no workspace counts as one. A repeat by the same waiter changes nothing (SR1). A caller without a lane from another workspace is another waiter, with its own purpose (SR6). A withdrawal names its waiter and takes only that one off.
 
 Aggregate **Secret request**: its state, version and the requester node's confirmation. Aggregate **Secret**, one per Reference per node: its status, versions and Grants, and the gate. **Request admission** decides over a node's requests of the last day; the store holds a unique index on (node, Reference) over open requests and runs the decision and the insert in one write transaction. The **Fingerprint ledger** decides over every version on the node; the store holds unique indexes on the Reference and on (Reference, keyed fingerprint) and runs the check and the insert in one write transaction. The clock is the `now` argument.
 
