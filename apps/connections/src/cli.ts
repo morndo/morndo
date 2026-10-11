@@ -232,7 +232,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       const cost = catalogPrices ? catalogTokenCost(stdout, preset.prices, model) : costFromOutput(stdout);
       again.leases.close(name, lease.id, outcome, cost);
       const seen = modelFromOutput(stdout);
-      if (seen && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
+      if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
     } finally { if (released) again.close(); }
   }
   if (refusal !== null) return refusal;

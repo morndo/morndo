@@ -163,6 +163,29 @@ describe("keys run", () => {
     expect((await cli(["log", "gate"], env)).stdout).not.toContain("LeaseGranted");
   }, 20_000);
 
+  it("does not mark a placeholder pick as a missing model after a successful run", async () => {
+    const dir = homeDir();
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[]; terms: { revision: string; summary: string; sources: string[] } }[];
+    const custom = body.find(row => row.id === "custom-anthropic");
+    if (!custom) throw new Error("preset");
+    custom.terms = { revision: "2026-01-01", summary: "Named by the test.", sources: ["https://example.com/terms"] };
+    const runtime = custom.runtimes[0];
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = "http://127.0.0.1:9";
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "gate", "--vendor", "custom-anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "gate", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "gate", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { model: "glm-5.3" })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    const enginesPath = join(dir, "engines.json");
+    const marks = existsSync(enginesPath)
+      ? (JSON.parse(readFileSync(enginesPath, "utf8")) as { marks: { reason: string }[] }).marks
+      : [];
+    expect(marks.some(mark => mark.reason.includes("missing"))).toBe(false);
+  }, 20_000);
+
   it("charges a Z.ai lease from catalog token prices, not total_cost_usd", async () => {
     const dir = homeDir();
     const hits: { url?: string | undefined }[] = [];
