@@ -48,3 +48,17 @@ describe("round 6, point 4: a renew names the missing Reference before its Expir
     expect(refusal(renewSecret(held(), input(T - 1), who, T))).toEqual({ problem: "renew_expiry" });
   });
 });
+
+describe("round 6, point 5: only { keep: true } keeps the shape; a near miss is refused, never a stale keep", () => {
+  const first = () => value(storeSecret(emptySecretDirectory(), { ...input(null, "0000000000f1"), shape: "shape-a" }, who, T));
+  const rotate = (shape: unknown) => {
+    const r = storeSecret(first(), { ...input(null), shape: shape as null }, who, T + 1);
+    return r.ok ? findSecret(r.value, REF)?.shape : r.error.problem;
+  };
+  it("a keep that isn't true, or with another key beside it, is refused", () => {
+    for (const s of [{ keep: "false" }, { keep: 1 }, { keep: "true" }, { keep: true, id: "shape-b" }, {}]) expect(rotate(s), JSON.stringify(s)).toBe("bad_shape");
+  });
+  it("exactly { keep: true } keeps it", () => {
+    expect(rotate({ keep: true })).toBe("shape-a");
+  });
+});
