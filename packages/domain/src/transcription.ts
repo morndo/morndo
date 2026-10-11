@@ -202,6 +202,11 @@ export function endTranscription(tx: Transcription, event: TranscriptionEnd, max
   if (!Number.isInteger(event.at)) return err("bad_end");
   if (event.outcome === "done" && !engineOk(event.engine)) return err("bad_end");
   if (terminal(tx.state)) {
+    // A `done` the cap turned into `failed: too_long` is that report's outcome, so the same report again — an
+    // adapter's retry — is the same row. A `done` that now fits the cap is a different report, and is refused.
+    if (event.outcome === "done" && tx.outcome === "failed" && tx.problem === "too_long") {
+      return event.engine.durationMs > maxSeconds * 1000 ? ok(tx) : err("already_terminal");
+    }
     if (event.outcome !== tx.outcome) return err("already_terminal");
     if (event.outcome === "done" && tx.text !== null && tx.text.text !== makeText(event.engine, event.engineName, event.model).text) {
       return err("already_terminal");
