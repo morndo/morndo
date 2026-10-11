@@ -1090,6 +1090,11 @@ export const CONTROLS: Control[] = [
     find: "if (previous === null) return err(\"no_previous\");",
     replace: "if (false) return err(\"no_previous\");",
     run: ["packages/domain/test/releases-state.test.ts"], expect: "no_previous" },
+  // The review of 2026-10-11: a withdrawal compared as a string lets a Version with build metadata slip through.
+  { id: "pr1-rl2-withdrawn-build-metadata", task: "pr1", file: "packages/domain/src/releases.ts",
+    find: "if (p.offered !== null && p.offered.feed.withdrawn.some(w => { const q = parseVersion(w); return q !== null && equalVersions(q, target); }))",
+    replace: "if (p.offered !== null && p.offered.feed.withdrawn.includes(formatVersion(target)))",
+    run: ["packages/domain/test/releases-invariants.test.ts"], expect: "withdrawn" },
   { id: "pr1-state-mark-any-order", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (!MARK_NEEDS[mark].includes(u.state)) return err(\"step_out_of_order\");",
     replace: "if (false) return err(\"step_out_of_order\");",

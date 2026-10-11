@@ -83,6 +83,16 @@ describe("RL2 never a downgrade unless asked", () => {
       offered: { version: v("0.5.1"), feed: feed({ releases: [{ ...feed().releases[0]!, version: "0.5.1" }], withdrawn: ["0.5.1"] }) }, rolloutHalted: false });
     expect(r).toEqual({ ok: false, error: "withdrawn" });
   });
+  it("negative control: a withdrawal matches the Version whatever its build metadata", () => {
+    // SemVer: build metadata decides nothing (§11), so a feed that withdrew 0.5.1 has withdrawn 0.5.1+linux.1 too,
+    // and one that withdrew 0.5.1+linux.1 has withdrawn the plain 0.5.1. Neither string form may slip through.
+    const bare = admit({ machine: machine(), switches, ask: { kind: "auto" },
+      offered: { version: v("0.5.1+linux.1"), feed: feed({ releases: [{ ...feed().releases[0]!, version: "0.5.1+linux.1" }], withdrawn: ["0.5.1"] }) }, rolloutHalted: false });
+    expect(bare).toEqual({ ok: false, error: "withdrawn" });
+    const meta = admit({ machine: machine(), switches, ask: { kind: "auto" },
+      offered: { version: v("0.5.1"), feed: feed({ releases: [{ ...feed().releases[0]!, version: "0.5.1" }], withdrawn: ["0.5.1+linux.1"] }) }, rolloutHalted: false });
+    expect(meta).toEqual({ ok: false, error: "withdrawn" });
+  });
   it("negative control: --to a lower Version without --allow-downgrade is refused", () => {
     const r = admit({ machine: machine(), switches, ask: { kind: "to", version: v("0.4.0"), allowDowngrade: false },
       offered: { version: v("0.4.0"), feed: feed({ releases: [{ ...feed().releases[0]!, version: "0.4.0" }] }) }, rolloutHalted: false });

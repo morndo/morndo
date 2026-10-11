@@ -195,7 +195,8 @@ export function admit(p: {
   // pinned or withdrawn Version, back to the one already on disk, and RL12 halts automatic applies only.
   if (ask.kind !== "rollback") {
     if (machine.settings.pin !== null && !equalVersions(target, machine.settings.pin)) return err("pinned");
-    if (p.offered !== null && p.offered.feed.withdrawn.includes(formatVersion(target))) return err("withdrawn");
+    if (p.offered !== null && p.offered.feed.withdrawn.some(w => { const q = parseVersion(w); return q !== null && equalVersions(q, target); }))
+      return err("withdrawn");                        // a withdrawal names the Version; build metadata decides nothing (§11)
     if (p.rolloutHalted) return err("halted");
   }
 
