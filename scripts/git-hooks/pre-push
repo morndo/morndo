@@ -60,9 +60,26 @@ scan_push
 # Generic markers only. Extra regexes, one per line, may live outside the
 # tree at "$(git rev-parse --git-dir)/info/leak-patterns".
 self=scripts/git-hooks/pre-push
+listfile=scripts/git-hooks/leak-allowlist
 home_re='/(home|Users)/[^/[:space:]]+/'
 key_re='-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----'
 token_re='(ghp_|github_pat_|sk-|xox[baprs]-|AKIA)[A-Za-z0-9_]{16,}'
+# Exact path and exact match, tab-separated. A different match in that file still fails.
+# Resolved from this script so a proof can run it against another checkout.
+allowlist=$(dirname "$(readlink -f "$0")")/leak-allowlist
+
+allowed() {
+  [ -f "$allowlist" ] || return 1
+  needle=$(printf '%s\t%s' "$1" "$2")
+  grep -F -x -q -- "$needle" "$allowlist"
+}
+
+skip_file() {
+  case "$1" in
+    "$self"|./"$self"|"$listfile"|./"$listfile") return 0 ;;
+  esac
+  return 1
+}
 
 extra=$(git rev-parse --git-dir)/info/leak-patterns
 if [ -f "$extra" ]; then
@@ -98,9 +115,41 @@ check_patterns() {
   return 1
 }
 
+# Prints path<TAB>match for hits that are not on the allowlist. Empty means clean.
+# git grep with a tree prints "<tree>:<path>:<match>".
+kept_hits() {
+  sha=$1
+  shift
+  set +e
+  raw=$(git grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@" ":(exclude)$listfile")
+  status=$?
+  set -e
+  if [ "$status" -gt 1 ]; then
+    echo "pre-push: pattern search failed" >&2
+    exit 1
+  fi
+  printf '%s\n' "$raw" | while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    rest=${line#"$sha":}
+    file=${rest%%:*}
+    hit=${rest#*:}
+    skip_file "$file" && continue
+    allowed "$file" "$hit" && continue
+    printf '%s\t%s\n' "$file" "$hit"
+  done
+}
+
 scan_file() {
   file=$1
-  if check_patterns grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" -- "$file"; then
+  skip_file "$file" && return 0
+  hit=$(grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" -- "$file" 2>/dev/null |
+    while IFS= read -r one; do
+      [ -n "$one" ] || continue
+      allowed "$file" "$one" && continue
+      printf '%s\n' "$one"
+      break
+    done || true)
+  if [ -n "$hit" ]; then
     reject "home path, private key, or token in $file"
   fi
   if [ -s "$patterns" ] && check_patterns grep -I -n -E -f "$patterns" -- "$file"; then
@@ -111,10 +160,11 @@ scan_file() {
 scan_sha() {
   sha=$1
   shift
-  if check_patterns git grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@"; then
-    reject "home path, private key, or token in $sha"
+  found=$(kept_hits "$sha" "$@" | head -n 1 || true)
+  if [ -n "$found" ]; then
+    reject "home path, private key, or token in ${found%%	*}"
   fi
-  if [ -s "$patterns" ] && check_patterns git grep -I -n -E -f "$patterns" "$sha" -- "$@"; then
+  if [ -s "$patterns" ] && check_patterns git grep -I -n -E -f "$patterns" "$sha" -- "$@" ":(exclude)$listfile"; then
     reject "local leak pattern in $sha"
   fi
 }
@@ -125,11 +175,13 @@ scan_listed() {
   set --
   while IFS= read -r file; do
     [ -n "$file" ] || continue
+    skip_file "$file" && continue
     set -- "$@" "$file"
   done < "$list"
   [ "$#" -gt 0 ] || return 0
-  if check_patterns git grep -I -n -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@"; then
-    reject "home path, private key, or token in $sha"
+  found=$(kept_hits "$sha" "$@" | head -n 1 || true)
+  if [ -n "$found" ]; then
+    reject "home path, private key, or token in ${found%%	*}"
   fi
   if [ -s "$patterns" ] && check_patterns git grep -I -n -E -f "$patterns" "$sha" -- "$@"; then
     reject "local leak pattern in $sha"
@@ -144,9 +196,7 @@ scan_listed() {
 
 while IFS= read -r file; do
   [ -n "$file" ] || continue
-  case "$file" in
-    "$self"|./"$self") continue ;;
-  esac
+  skip_file "$file" && continue
   [ -f "$file" ] || continue
   scan_file "$file"
 done < "$paths"
@@ -154,7 +204,7 @@ done < "$paths"
 while read -r local_sha remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   if [ "$remote_sha" = "$zero" ] && [ -z "$(git for-each-ref --format='%(objectname)' refs/remotes)" ]; then
-    scan_sha "$local_sha" . ":(exclude)$self"
+    scan_sha "$local_sha" . ":(exclude)$self" ":(exclude)$listfile"
     continue
   fi
   if [ "$remote_sha" = "$zero" ]; then
@@ -162,7 +212,7 @@ while read -r local_sha remote_sha; do
   else
     git diff --name-only --diff-filter=ACMR "$remote_sha" "$local_sha" > "$paths"
   fi
-  awk -v self="$self" 'NF && $0 != self && $0 != "./" self { print }' "$paths" > "$specs"
+  awk -v self="$self" -v listfile="$listfile" 'NF && $0 != self && $0 != "./" self && $0 != listfile && $0 != "./" listfile { print }' "$paths" > "$specs"
   if [ -s "$specs" ]; then
     scan_listed "$local_sha" "$specs"
   fi

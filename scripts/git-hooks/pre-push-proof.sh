@@ -18,6 +18,9 @@ if [ -f "$extra" ]; then
 fi
 
 cleanup() {
+  if [ -f apps/fleet/test/client-api.test.ts.proof-bak ]; then
+    mv apps/fleet/test/client-api.test.ts.proof-bak apps/fleet/test/client-api.test.ts
+  fi
   rm -f "$plant"
   if [ -n "$scratch" ]; then
     rm -rf "$scratch"
@@ -44,6 +47,26 @@ code=$?
 set -e
 rm -f "$plant"
 [ "$code" -eq 1 ] || fail "planted home path should exit 1, got $code"
+
+# Built at runtime so this script does not itself contain a key header.
+printf '%s%s%s\n' '-----BEGIN ' 'PRIVATE KEY' '-----' > "$plant"
+set +e
+sh "$hook" </dev/null
+code=$?
+set -e
+rm -f "$plant"
+[ "$code" -eq 1 ] || fail "planted private key should exit 1, got $code"
+
+# An allowlisted file still fails when a different match is added.
+sample=apps/fleet/test/client-api.test.ts
+cp "$sample" "$sample.proof-bak"
+printf '\n/%s/%s/notes\n' home example-user >> "$sample"
+set +e
+sh "$hook" </dev/null
+code=$?
+set -e
+mv "$sample.proof-bak" "$sample"
+[ "$code" -eq 1 ] || fail "different match in an allowlisted file should exit 1, got $code"
 
 mkdir -p "$gitdir/info"
 printf '%s\n' 'zz-private-marker' > "$extra"
@@ -118,5 +141,15 @@ code=$?
 set -e
 [ "$code" -eq 1 ] || fail "first push of a planted tree should exit 1, got $code"
 cd "$root"
+
+# First push of this tree: drop remote-tracking refs so the hook scans every file.
+git clone --quiet --local "$root" "$scratch/tree"
+git -C "$scratch/tree" remote remove origin
+tip=$(git -C "$scratch/tree" rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | (cd "$scratch/tree" && sh "$root/$hook")
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "first push of this tree should exit 0, got $code"
 
 echo "pre-push proof ok"
