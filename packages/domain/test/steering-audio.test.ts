@@ -39,6 +39,14 @@ describe("an audio upload", () => {
     expect(acceptNamedUpload(bytes([0x89, 0x50, 0x4e, 0x47]), "note.mp3", READY)).toEqual({ ok: false, error: "not_allowed" });
   });
 
+  it("an iso-bmff photo or movie under an audio name is not audio: the brand must be M4A", () => {
+    const HEIC = bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]);
+    const ISOM = bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]);
+    expect(acceptNamedUpload(HEIC, "note.m4a", READY)).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(ISOM, "note.webm", READY)).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(MP4, "note.m4a", READY).ok).toBe(true);
+  });
+
   it("is at most 10 MiB, refused on name and size before anyone reads the bytes", () => {
     expect(screenNamedUpload("note.m4a", 10 * 1024 * 1024 + 1, READY)).toEqual({ ok: false, error: "too_big" });
     expect(screenNamedUpload("note.m4a", 10 * 1024 * 1024, READY).ok).toBe(true);

@@ -36,6 +36,13 @@ describe("sniffAudio", () => {
     expect(sniffAudio(bytes([0x1a, 0x45]))).toBeNull();                          // cut short
     expect(sniffAudio(new Uint8Array(0))).toBeNull();
   });
+
+  it("an iso-bmff file is audio only when its major brand is M4A", () => {
+    expect(sniffAudio(bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x4d, 0x34, 0x41, 0x20]))).toBe("mp4");  // ftyp M4A : audio
+    expect(sniffAudio(bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]))).toBeNull();   // ftyp heic: a photo
+    expect(sniffAudio(bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d]))).toBeNull();   // ftyp isom: a movie
+    expect(sniffAudio(bytes([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66]))).toBeNull();   // ftyp avif: an image
+  });
 });
 
 describe("requesting a transcription", () => {
