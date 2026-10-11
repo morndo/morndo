@@ -78,23 +78,10 @@
                 {@render meter(w.label, w, resetsOnLabel(w.resetsOn))}
               {/each}
               {#if onDemandLine(a.onDemand)}<p class="ondemand">{onDemandLine(a.onDemand)}</p>{/if}
-              {#if a.spend}
-                {@render meter(`Spend limit${a.spend.period ? ` (${a.spend.period})` : ""}`, a.spend, null)}
-                {#if a.spend.usedUsd !== null}<p class="spend">{usd(a.spend.usedUsd)}{a.spend.limitUsd !== null ? ` of ${usd(a.spend.limitUsd)}` : ""}</p>{/if}
-              {/if}
-              <div class="sessions">
-                <span class="sl">{a.sessions.length ? `${a.sessions.length} session${a.sessions.length === 1 ? "" : "s"} reporting` : "No session reporting right now"}</span>
-                {#each a.sessions as s (s.sessionId)}
-                  <button class="sess" onclick={() => s.lane && onOpenLane(s.lane)} disabled={!s.lane} title={s.lane ? `Open #${s.lane}` : "A session without a lane name"}>
-                    <span class="lane">{s.lane ? `#${s.lane}` : "unnamed"}</span>
-                    {#if s.model}<span class="model">{s.model}</span>{/if}
-                    {#if s.contextUsed !== null}<span class="ctx">{pct(s.contextUsed)} context</span>{/if}
-                  </button>
-                {/each}
-              </div>
             {:else}
             {@render meter("5-hour window", a.fiveHour, null)}
             {@render meter("Weekly window", a.sevenDay, null)}
+            {/if}
             {#if a.spend}
               {@render meter(`Spend limit${a.spend.period ? ` (${a.spend.period})` : ""}`, a.spend, null)}
               {#if a.spend.usedUsd !== null}<p class="spend">{usd(a.spend.usedUsd)}{a.spend.limitUsd !== null ? ` of ${usd(a.spend.limitUsd)}` : ""}</p>{/if}
@@ -109,7 +96,6 @@
                 </button>
               {/each}
             </div>
-            {/if}
           </article>
         {/each}
       </div>

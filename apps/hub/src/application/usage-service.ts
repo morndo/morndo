@@ -1,7 +1,7 @@
 // Application service for the Usage context (ADR-0016): the status-line reports the agents' sessions post, kept per
 // account (U1 to U3), the latest state of every account on disk, and the whole pushed to every live feed when a report
 // changed what is shown. Usage decides nothing (U4): nothing here touches an Escalation, the engines or a Mandate.
-import { ACCOUNT_NAME, DEFAULT_ACCOUNT, accountNow, applyReport, type AccountUsage, type BoardActor, type NamedWindow, type UsageReport } from "@morndo/domain";
+import { ACCOUNT_NAME, DEFAULT_ACCOUNT, accountNow, applyReport, takeNamed, type AccountUsage, type BoardActor, type NamedWindow, type UsageReport } from "@morndo/domain";
 import type { UsageReportBody } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 
@@ -29,21 +29,20 @@ export function reportFrom(body: UsageReportBody, account: string, actor: BoardA
     limits, onDemand: limits ? (typeof body.on_demand === "string" ? body.on_demand : null) : null,
   };
 }
-// Absent, or nothing left after dropping bad rows: a status line. At most eight windows, in order.
+// Translate the wire rows and let the domain drop a bad one and cap what remains. No second label rule or cap here.
 function namedLimits(raw: UsageReportBody["limits"]): NamedWindow[] | null {
   if (raw == null) return null;
-  const out: NamedWindow[] = [];
+  const rows: NamedWindow[] = [];
   for (const w of raw) {
-    if (typeof w.label !== "string" || !w.label.trim()) continue;
-    if (typeof w.used_percentage !== "number" || !Number.isFinite(w.used_percentage)) continue;
-    out.push({
-      label: w.label, usedPercentage: w.used_percentage,
+    if (w == null) continue;
+    rows.push({
+      label: typeof w.label === "string" ? w.label : "",
+      usedPercentage: typeof w.used_percentage === "number" ? w.used_percentage : Number.NaN,
       resetsAt: typeof w.resets_at === "number" && Number.isFinite(w.resets_at) ? w.resets_at * 1000 : null,
       resetsOn: typeof w.resets_on === "string" ? w.resets_on : null,
     });
-    if (out.length === 8) break;
   }
-  return out.length ? out : null;
+  return takeNamed(rows);
 }
 const num = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 

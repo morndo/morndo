@@ -41,6 +41,8 @@ const keep = <W extends UsageWindow>(w: W | null, now: number): W | null => (w &
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 const NAMED_CAP = 8;
+const TEXT_LIMIT = 80;
+const TEXT_PREFIX = TEXT_LIMIT * 4;
 const calendarDate = (v: string | null): string | null => {
   if (!v) return null;
   const m = DATE.exec(v);
@@ -58,10 +60,10 @@ const printable = (s: string) => {
   }
   return out;
 };
-const labelOf = (s: string) => printable(s).trim().slice(0, 80);
+const labelOf = (s: string) => printable(s.slice(0, TEXT_PREFIX)).trim().slice(0, TEXT_LIMIT);
 const demandOf = (s: string | null): string | null => {
   if (!s) return null;
-  const t = printable(s).trim().slice(0, 80);
+  const t = printable(s.slice(0, TEXT_PREFIX)).trim().slice(0, TEXT_LIMIT);
   if (t === "off" || t === "unavailable") return t;
   if (/^on-demand [A-Za-z0-9$.,() -]+$/.test(t)) return t;
   return null;
@@ -81,7 +83,7 @@ export function resetsOnLabel(resetsOn: string | null): string | null {
 }
 const named = (w: NamedWindow): NamedWindow | null => {
   const label = labelOf(w.label);
-  if (!label) return null;
+  if (!label || !Number.isFinite(w.usedPercentage)) return null;
   return { label, usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
 };
 // An empty list is not named mode: every row dropped, or every window reset, falls back to the 5-hour and weekly rows.
@@ -90,7 +92,8 @@ const keepNamed = (ws: NamedWindow[] | null | undefined, now: number): NamedWind
   const kept = ws.filter(w => w.resetsAt === null || w.resetsAt > now);
   return kept.length ? kept : null;
 };
-const takeNamed = (raw: readonly NamedWindow[]): NamedWindow[] | null => {
+// Drop a blank or non-numeric row, then keep at most NAMED_CAP. The hub does not apply a second cap or label rule.
+export function takeNamed(raw: readonly NamedWindow[]): NamedWindow[] | null {
   const out: NamedWindow[] = [];
   for (const w of raw) {
     const n = named(w);
@@ -146,7 +149,7 @@ const LEVEL_RANK: Record<UsageLevel, number> = { ok: 0, warning: 1, critical: 2 
 export function shownLevel(accounts: readonly AccountUsage[]): UsageLevel {
   let worst: UsageLevel = "ok";
   for (const a of accounts) {
-    const windows: readonly (UsageWindow | null)[] = showsNamed(a) ? (a.limits ?? []) : [a.fiveHour, a.sevenDay];
+    const windows: readonly (UsageWindow | null)[] = showsNamed(a) ? [...(a.limits ?? []), a.spend] : [a.fiveHour, a.sevenDay];
     for (const w of windows) {
       if (!w) continue;
       const level = usageLevel(w.usedPercentage);

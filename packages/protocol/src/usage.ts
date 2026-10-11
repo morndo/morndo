@@ -13,13 +13,13 @@ const orElse = z.catch;
 // epoch seconds there. Anything else is dropped (looseObject keeps unknown keys, the hub reads only these).
 const rawWindow = z.looseObject({ used_percentage: z.exactOptional(z.nullable(num())), resets_at: z.exactOptional(z.nullable(num())) });
 // A window the account names itself. Absent on a status line; present, these are the windows it has.
-// A bad row (no label, no percentage, one window too many) is dropped later. It does not reject the report.
-const rawNamed = z.looseObject({
-  label: z.exactOptional(z.string()),
-  used_percentage: z.exactOptional(z.nullable(num())),
-  resets_at: z.exactOptional(z.nullable(num())),
-  resets_on: z.exactOptional(z.nullable(z.string())),
-});
+// A bad row (wrong type, null, no label, no percentage, one window too many) is dropped later. It does not reject the report.
+const rawNamed = orElse(z.looseObject({
+  label: z.exactOptional(orElse(z.nullable(z.string()), null)),
+  used_percentage: z.exactOptional(orElse(z.nullable(num()), null)),
+  resets_at: z.exactOptional(orElse(z.nullable(num()), null)),
+  resets_on: z.exactOptional(orElse(z.nullable(z.string()), null)),
+}), {});
 export const UsageReportBody = z.looseObject({
   session_id: z.string().check(z.minLength(1), z.maxLength(200)),
   session_name: z.exactOptional(z.nullable(z.string().check(z.maxLength(200)))),
@@ -34,7 +34,7 @@ export const UsageReportBody = z.looseObject({
     }))),
   }))),
   limits: z.exactOptional(z.nullable(z.array(rawNamed))),
-  on_demand: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
+  on_demand: z.exactOptional(z.nullable(z.string())),
 });
 export type UsageReportBody = z.output<typeof UsageReportBody>;
 
