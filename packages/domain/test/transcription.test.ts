@@ -170,6 +170,34 @@ describe("starting and ending a transcription", () => {
       .toEqual({ ok: false, error: "already_terminal" });
   });
 
+  it("a repeated failed report is the same only when its problem is the same (TX3)", () => {
+    const failed = value(endTranscription(run(), { outcome: "failed", at: AT + 20, problem: "engine" }));
+    expect(value(endTranscription(failed, { outcome: "failed", at: AT + 99, problem: "engine" }))).toBe(failed);
+    expect(endTranscription(failed, { outcome: "failed", at: AT + 99, problem: "not_ready" }))
+      .toEqual({ ok: false, error: "already_terminal" });
+  });
+
+  it("a repeated done report is the same only when every field of it is (TX3)", () => {
+    const done = value(endTranscription(run(), { outcome: "done", at: AT + 40, engine: heard(), engineName: "local", model: "small" }));
+    expect(value(endTranscription(done, { outcome: "done", at: AT + 99, engine: heard(), engineName: "local", model: "small" }))).toBe(done);
+    expect(endTranscription(done, { outcome: "done", at: AT + 99, engine: heard("guten Morgen", 31_000), engineName: "local", model: "small" }))
+      .toEqual({ ok: false, error: "already_terminal" });   // another duration
+    expect(endTranscription(done, { outcome: "done", at: AT + 99, engine: { ...heard(), language: "en" }, engineName: "local", model: "small" }))
+      .toEqual({ ok: false, error: "already_terminal" });   // another language
+    expect(endTranscription(done, { outcome: "done", at: AT + 99, engine: heard(), engineName: "anderer", model: "small" }))
+      .toEqual({ ok: false, error: "already_terminal" });   // another engine
+    expect(endTranscription(done, { outcome: "done", at: AT + 99, engine: heard(), engineName: "local", model: "turbo" }))
+      .toEqual({ ok: false, error: "already_terminal" });   // another model
+  });
+
+  it("the verdict a too_long row keeps does not follow the cap now in force (TX3)", () => {
+    const tooLong = value(endTranscription(run(), { outcome: "done", at: AT + 700_000, engine: heard("zu lang", 700_000), engineName: "local", model: "small" }));
+    const same = { outcome: "done" as const, at: AT + 800_000, engine: heard("zu lang", 700_000), engineName: "local", model: "small" };
+    expect(value(endTranscription(tooLong, same, 900))).toBe(tooLong);   // the cap was raised: still the same report
+    expect(endTranscription(tooLong, { outcome: "done", at: AT + 800_000, engine: heard("andere Worte", 700_000), engineName: "local", model: "small" }, 300))
+      .toEqual({ ok: false, error: "already_terminal" });   // over a lowered cap, different words are still a different report
+  });
+
   it("a restart with no recorded end marks the run lost and keeps the row; what never ran waits on (TX4)", () => {
     const rows = [live({ id: "tx-q" }), starting({ id: "tx-s" }), run({ id: "tx-r" }),
       value(endTranscription(run({ id: "tx-d" }), { outcome: "done", at: AT + 40, engine: heard("w"), engineName: "e", model: "m" }))];
