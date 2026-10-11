@@ -36,7 +36,8 @@ export function readHold(opts: { path: string; service: ServiceName; now: number
   if (!hold) return { kind: "ignored", why: "malformed" };
   const since = Date.parse(hold.since);
   if (Number.isNaN(since)) return { kind: "ignored", why: "malformed" };
-  if (opts.now - since > HOLD_MAX_AGE_MS) return { kind: "ignored", why: "stale" };
+  // A since in the future is not a hold that has started. A dead clock must not pin the service.
+  if (since > opts.now || opts.now - since > HOLD_MAX_AGE_MS) return { kind: "ignored", why: "stale" };
   if (!hold.services.includes(opts.service)) return { kind: "ignored", why: "other-service" };
   return { kind: "held", hold };
 }
@@ -118,7 +119,7 @@ export class HoldWatch {
     if (view.kind === "ignored" && view.why === "stale") {
       if (!this.#staleNoted) {
         this.#staleNoted = true;
-        this.#onStale(`hold.json at ${this.#path} is older than 10 minutes; ignoring it`);
+        this.#onStale(`hold.json at ${this.#path} is stale; ignoring it`);
       }
     } else {
       this.#staleNoted = false;

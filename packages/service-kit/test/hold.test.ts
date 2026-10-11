@@ -33,6 +33,8 @@ describe("readHold", () => {
     expect(readHold({ path, service: "hub", now })).toEqual({ kind: "ignored", why: "stale" });
     writeFileSync(path, hold({ since: new Date(now - HOLD_MAX_AGE_MS).toISOString() }));
     expect(readHold({ path, service: "hub", now }).kind).toBe("held");
+    writeFileSync(path, hold({ since: new Date(now + 60_000).toISOString() }));
+    expect(readHold({ path, service: "hub", now })).toEqual({ kind: "ignored", why: "stale" });
     writeFileSync(path, hold({ services: ["fleet"] }));
     expect(readHold({ path, service: "hub", now })).toEqual({ kind: "ignored", why: "other-service" });
     writeFileSync(path, "{");
