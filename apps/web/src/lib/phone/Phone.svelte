@@ -10,6 +10,7 @@
   import LinkedNotice from "../LinkedNotice.svelte";
   import FleetNotice from "../FleetNotice.svelte";
   import { api, ApiError, explain } from "../api.ts";
+  import type { SentFile } from "../attach.ts";
   import BoardView from "../desktop/BoardView.svelte";
   import HomeView from "../desktop/HomeView.svelte";
   import { REFUSALS as BOARD_REFUSALS } from "../desktop/board.ts";
@@ -61,8 +62,18 @@
 
   // The outbox (ADR-0008 phase C), shared with the desktop's code: replies from a card are Commands like any other.
   let outgoing = $state<OutboxRecord[]>([]);
+  let pendingFiles = $state<Record<string, SentFile[]>>({});
   let outbox: Outbox | null = null;
-  const device$ = startDeviceOutbox({ connected: () => feed.status === "live" && navigator.onLine !== false, onChange: r => (outgoing = r) });
+  const device$ = startDeviceOutbox({
+    connected: () => feed.status === "live" && navigator.onLine !== false,
+    onChange: r => {
+      outgoing = r;
+      const live = new Set(r.map(x => x.id));
+      const kept: Record<string, SentFile[]> = {};
+      for (const [id, files] of Object.entries(pendingFiles)) if (live.has(id)) kept[id] = files;
+      if (Object.keys(kept).length !== Object.keys(pendingFiles).length) pendingFiles = kept;
+    },
+  });
   void device$.ready.then(o => { outbox = o; });
   $effect(() => { if (feed.status === "live") outbox?.connected(); });
 
@@ -141,9 +152,11 @@
     away.close();
   }
   const echoes = (worker: string, e: { id: string; at: number; text: string }[]) => void outbox?.echoes(worker, e);
-  const queue = async (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string }) => {
+  const queue = async (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string; files?: SentFile[] }) => {
     const o = outbox ?? await device$.ready;
-    await o.enqueue(c);
+    const { files, ...command } = c;
+    const r = await o.enqueue(command);
+    if (files?.length) pendingFiles = { ...pendingFiles, [r.id]: files };
   };
   // Retry and Send again from a chat pass the passkey check first when it isn't fresh, as a first send does (AC7;
   // validated review finding #1): the hub refuses them step_up otherwise.
@@ -222,7 +235,7 @@
   <!-- Not under the digest: an open chat there would mark itself read while he reads the digest (review, 2026-10-05). -->
   {#if chatWorker && !deciding && !away.open}
     {#key chatWorker.id}
-      <Conversation {feed} worker={chatWorker} {outgoing} {now} {verifiedFresh} {verify} screen={chatScreen} onBack={closeChat} onDecide={id => decide({ decision: id })}
+      <Conversation {feed} worker={chatWorker} {outgoing} {pendingFiles} {now} {verifiedFresh} {verify} screen={chatScreen} onBack={closeChat} onDecide={id => decide({ decision: id })}
         onQueue={queue} onRetry={id => void again(id, "retry")} onDiscard={id => void outbox?.discard(id)}
         onAgain={id => void again(id, "again")} onCheck={id => void outbox?.check(id)} onEchoes={echoes} />
     {/key}

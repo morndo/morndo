@@ -145,6 +145,10 @@ jobs:
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/phone-chat" }
         run: node e2e/phone-chat.e2e.ts
+      - name: e2e uploads
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/uploads" }
+        run: node e2e/uploads.e2e.ts
 
       # The screenshots, passing or failing, for QA and for reading a failure (review L2).
       - name: Keep the e2e screenshots

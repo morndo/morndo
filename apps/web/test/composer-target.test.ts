@@ -170,4 +170,27 @@ describe("the composer's target", () => {
     expect(await tab.getByRole("textbox", { name: "Message beta" }).inputValue()).toBe("");
     expect(await tab.locator(".shots .shot").count()).toBe(0);
   }, 30_000);
+
+  it("shows a markdown file as a chip and refuses an executable and an oversized text file", async () => {
+    await openConversation("alpha");
+    const input = tab.locator('input[type="file"]');
+    await input.setInputFiles({ name: "notes.md", mimeType: "text/markdown", buffer: Buffer.from("# Hi\n") });
+    const chip = tab.locator(".filechip");
+    await chip.waitFor();
+    expect(await chip.innerText()).toContain("notes.md");
+    expect(await chip.innerText()).toContain("MD");
+    expect(await chip.innerText()).toContain("5 B");
+    await input.setInputFiles({ name: "run.exe", mimeType: "application/octet-stream", buffer: Buffer.from("MZ") });
+    await tab.getByText("run.exe can't be attached").waitFor();
+    await input.setInputFiles({ name: "big.md", mimeType: "text/markdown", buffer: Buffer.alloc(1024 * 1024 + 1, 0x61) });
+    await tab.getByText("big.md is over 1 MB").waitFor();
+    expect(await tab.locator(".filechip").count()).toBe(1);
+    await tab.locator("#composer").evaluate(el => {
+      const dt = new DataTransfer();
+      dt.items.add(new File(["a,b\n"], "rows.csv", { type: "text/csv" }));
+      el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+    await tab.locator(".filechip", { hasText: "rows.csv" }).waitFor();
+    expect(await tab.locator(".filechip").count()).toBe(2);
+  }, 30_000);
 });

@@ -49,13 +49,15 @@ export function fleetUrlOk(url: string): boolean {
 
 export type Expect = { server: string; window: string; sessionId?: string };
 export type ErrorCode = "bad_args" | "unknown_op" | "denied" | "no_pane" | "menu_open" | "no_input_box"
-  | "draft_present" | "busy" | "name_taken" | "lane_conflict" | "too_large" | "timeout" | "node_offline" | "uncertain" | "internal";
+  | "draft_present" | "busy" | "name_taken" | "lane_conflict" | "too_large" | "timeout" | "node_offline" | "uncertain" | "internal"
+  | "not_allowed";
 export type Executed = "no" | "maybe";
 // Whether the side effect may have happened (§5.3): "no" is safe to retry. Only an answer that may have come after the
 // side effect started is "maybe".
 export const ERROR_EXECUTED: Record<ErrorCode, Executed> = {
   bad_args: "no", unknown_op: "no", denied: "no", no_pane: "no", menu_open: "no", no_input_box: "no", draft_present: "no",
   busy: "no", name_taken: "no", lane_conflict: "no", too_large: "no", timeout: "no", node_offline: "no", uncertain: "maybe", internal: "maybe",
+  not_allowed: "no",
 };
 export type OpError = { code: ErrorCode; executed: Executed; message: string };
 

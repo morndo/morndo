@@ -5,8 +5,8 @@
 // chunks are dropped, since the image goes on to a model provider. Files older than a week are removed.
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { IMAGE_EXTENSION, UPLOAD_TTL_MS, acceptUpload, type EndpointId, type ImageMime, type Result, type Upload, type UploadRefusal } from "@morndo/domain";
+import { basename, join } from "node:path";
+import { IMAGE_EXTENSION, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, type EndpointId, type ImageMime, type Result, type Upload, type UploadRefusal } from "@morndo/domain";
 
 const KEEP_FILES_MS = 7 * 24 * 3_600_000;
 
@@ -40,8 +40,16 @@ export function stripMetadata(b: Uint8Array, mime: ImageMime): Uint8Array {
   return b;
 }
 
+// The hub stores `pasted-<stamp>-<id6>-<safe name>`. The node is asked for the safe name, not that prefix:
+// the prefix is 30 characters, and a name the domain already kept under 80 would otherwise lose its extension there.
+export function stagedUploadName(storedPath: string): string {
+  const base = basename(storedPath);
+  const named = /^pasted-\d{8}-\d{6}-[0-9a-f]{6}-(.+)$/.exec(base);
+  return named?.[1] || base;
+}
+
 export type Inbox = {
-  save(bytes: Uint8Array, endpointId: EndpointId): Result<Upload, UploadRefusal>;
+  save(bytes: Uint8Array, endpointId: EndpointId, name?: string): Result<Upload, UploadRefusal>;
   get(id: string): Upload | undefined;
   sweep(): void;
 };
@@ -64,14 +72,27 @@ export function uploadInbox(opts: { dir: string; now?: () => number; registry?: 
   const known = opts.registry ?? memoryRegistry();
   const stamp = (t: number) => new Date(t).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
   return {
-    save(bytes, endpointId) {
-      const accepted = acceptUpload(bytes);
-      if (!accepted.ok) return accepted;
-      const mime = accepted.value;
+    save(bytes, endpointId, name = "") {
       const at = now();
       const id = randomBytes(12).toString("hex");
-      const path = join(opts.dir, `pasted-${stamp(at)}-${id.slice(0, 6)}.${IMAGE_EXTENSION[mime]}`);
-      const clean = stripMetadata(bytes, mime);
+      const id6 = id.slice(0, 6);
+      let pathName: string;
+      let mime: Upload["mime"];
+      let clean: Uint8Array;
+      if (name) {
+        const accepted = acceptNamedUpload(bytes, name);
+        if (!accepted.ok) return accepted;
+        pathName = `pasted-${stamp(at)}-${id6}-${accepted.value.name}`;
+        mime = accepted.value.mime;
+        clean = accepted.value.kind === "image" ? stripMetadata(bytes, accepted.value.mime) : bytes;
+      } else {
+        const accepted = acceptUpload(bytes);
+        if (!accepted.ok) return accepted;
+        pathName = `pasted-${stamp(at)}-${id6}.${IMAGE_EXTENSION[accepted.value]}`;
+        mime = accepted.value;
+        clean = stripMetadata(bytes, accepted.value);
+      }
+      const path = join(opts.dir, pathName);
       writeFileSync(path, clean, { mode: 0o600 });
       const upload: Upload = { id, endpointId, path, mime, size: clean.length, at };
       known.saveUpload(upload);

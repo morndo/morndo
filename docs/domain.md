@@ -172,13 +172,13 @@ Added 2026-10-02 by [ADR-0008](adr/0008-patterns-borrowed-from-signal.md), model
 
 Events: LinkRequested, LinkApproved, LinkDenied, LinkExpired, LinkCancelled, LinkCodeMismatched; PairingTokenIssued (issuedBy the Endpoint), PairingTokenCodeMismatched, PairingTokenWithdrawn (by its issuer, or when its issuer is revoked).
 
-### Steering: images sent with a Command
+### Steering: files sent with a Command
 
-Added 2026-10-01; code in `packages/domain/src/steering.ts`. An **Upload** is an image the principal pasted or attached. It is saved on the office's machine, and a worker opens it by its path.
+Added 2026-10-01; extended 2026-10-11; code in `packages/domain/src/steering.ts`. An **Upload** is a file the principal pasted or attached. It is saved on the office's machine, and a worker opens it by its path. The UI shows a file chip (name, type, size). Markdown and PDF are never rendered as HTML unless the existing sanitiser has already cleaned that HTML.
 
 | # | Invariant |
 |---|---|
-| S1 | An Upload is an image by its own bytes (PNG, JPEG, GIF or WebP), never by the type its sender claims, and at most 10 MB. |
+| S1 | An Upload is allowed only when its extension and its bytes agree. An image extension (PNG, JPEG, GIF, WebP) is accepted by its bytes even when they are a different one of those types, and is refused when the bytes are not an image; images and PDF are at most 10 MB, and PDF bytes start with `%PDF-`. Text (`.md`, `.txt`, `.json`, `.csv`, `.yaml`, `.yml`, `.log`) is valid UTF-8 with no NUL byte and at most 1 MB; a text file is not judged by a binary's ASCII prefix. Executables, archives, HTML and SVG are refused. A name is the last path segment, with no leading dots and no characters outside letters, digits, `.`, `_` and `-`, at most 80 characters: a longer name loses stem and keeps its extension. The name and the size are checked before the bytes are read. |
 | S2 | A Command attaches only Uploads made from its own Endpoint, within a day of upload, each once, at most six. |
 | S3 | The Command names each attached image after the principal's own text, one note per image, in the form the workers already read; a Command may be only images. |
 
