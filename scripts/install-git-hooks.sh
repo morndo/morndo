@@ -4,5 +4,15 @@ set -eu
 root=$(git rev-parse --show-toplevel)
 hooks=$(git rev-parse --git-path hooks)
 mkdir -p "$hooks"
-ln -sfn "$root/scripts/git-hooks/pre-push" "$hooks/pre-push"
-echo "installed $hooks/pre-push"
+link() {
+  src=$root/scripts/git-hooks/$1
+  dest=$hooks/$1
+  if [ "$(readlink -f "$src")" = "$(readlink -f "$dest")" ]; then
+    echo "installed $dest"
+    return 0
+  fi
+  ln -sfn "$src" "$dest"
+  echo "installed $dest"
+}
+link pre-push
+link commit-msg

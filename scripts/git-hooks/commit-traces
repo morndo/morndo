@@ -1,0 +1,68 @@
+#!/bin/sh
+# Reject assistant attribution in a commit message, author, or committer.
+#   sh commit-traces message FILE
+#   sh commit-traces range <git rev-list args>
+# A dependabot[bot] author, committer, or trailer is allowed. Any other
+# [bot] identity is not. Install the commit-msg hook with scripts/install-git-hooks.sh.
+set -eu
+
+names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
+robot=$(printf '\360\237\244\226')
+
+fail() {
+  echo "commit-traces: $*" >&2
+  exit 1
+}
+
+# 0 when the text must be rejected.
+bad_text() {
+  text=$1
+  printf '%s' "$text" | grep -E -i -q 'generated[[:space:]]+with' && return 0
+  printf '%s' "$text" | grep -F -q "$robot" && return 0
+  printf '%s' "$text" | grep -E -i -q "(^|[^A-Za-z0-9])($names)([^A-Za-z0-9]|$)" && return 0
+  stripped=$(printf '%s' "$text" | sed 's/dependabot\[bot\]//g')
+  printf '%s' "$stripped" | grep -F -q '[bot]' && return 0
+  return 1
+}
+
+check_message() {
+  if bad_text "$1"; then
+    fail "message names an assistant, a generated-with line, a robot emoji, or a bot other than dependabot[bot]"
+  fi
+}
+
+check_commit() {
+  sha=$1
+  msg=$(git log -1 --format='%B' "$sha")
+  if bad_text "$msg"; then
+    fail "$sha message names an assistant, a generated-with line, a robot emoji, or a bot other than dependabot[bot]"
+  fi
+  ident=$(git log -1 --format='%an%n%ae%n%cn%n%ce' "$sha")
+  if bad_text "$ident"; then
+    fail "$sha author or committer names an assistant or a bot other than dependabot[bot]"
+  fi
+}
+
+[ "$#" -ge 1 ] || fail "usage: commit-traces message FILE | commit-traces range <rev-list>"
+
+mode=$1
+shift
+case "$mode" in
+  message)
+    [ "$#" -eq 1 ] || fail "usage: commit-traces message FILE"
+    [ -f "$1" ] || fail "no message file: $1"
+    check_message "$(cat "$1")"
+    ;;
+  range)
+    [ "$#" -ge 1 ] || fail "usage: commit-traces range <rev-list>"
+    while IFS= read -r sha; do
+      [ -n "$sha" ] || continue
+      check_commit "$sha"
+    done <<EOF
+$(git rev-list "$@")
+EOF
+    ;;
+  *)
+    fail "usage: commit-traces message FILE | commit-traces range <rev-list>"
+    ;;
+esac
