@@ -493,6 +493,16 @@ describe("E14: an ask the hub tracks is answerable until the hub withdraws or se
     x.reconcile([], DUE + HUB_TTL_MS, true);
     expect(x.get("d-1")?.status).toBe("expired");
   });
+  it("an answered ask is kept listed for the keep-settled window past that TTL, then swept", () => {
+    const x = new Escalations();
+    x.reconcile([seen(hubAsk())], NOW, true);
+    x.reconcile([{ ask: hubAsk(), source: { kind: "open" }, answered: { key: "b", label: "Extend the triage script", at: NOW + MIN } }], NOW + MIN, true);
+    expect(x.get("d-1")?.status).toBe("answered");
+    x.reconcile([], DUE + HUB_TTL_MS + KEEP_SETTLED_MS, true);
+    expect(x.get("d-1")?.status).toBe("answered");
+    x.reconcile([], DUE + HUB_TTL_MS + KEEP_SETTLED_MS + 1, true);
+    expect(x.get("d-1")).toBeUndefined();
+  });
 });
 
 describe("DB9: restating a brief makes the next version and a new ask", () => {
