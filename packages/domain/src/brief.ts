@@ -133,6 +133,9 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
   const optionsIn = draft.options;
   const options: BriefOption[] = [];
   const keys = new Set<string>();
+  // Keys compare case-blind (the headline names an option "in any case", DB2, and the table heads uppercase them):
+  // two keys that differ only in case are one key twice.
+  const keysAnyCase = new Set<string>();
   let optionsBroken = !Array.isArray(optionsIn);
   if (!Array.isArray(optionsIn)) lint.error("missing_section", "options", "the section is missing; every section of the template is required");
   else if (optionsIn.length < 2) lint.error("no_options", "options", "a decision needs two to six options; \"do nothing\" counts when it is a real choice");
@@ -151,8 +154,9 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
         optionsBroken = true;
         continue;
       }
-      if (keys.has(key)) { lint.error("duplicate_option", `options[${i}]`, `option ${key} appears twice; keys must be unique`); optionsBroken = true; continue; }
+      if (keysAnyCase.has(key.toLowerCase())) { lint.error("duplicate_option", `options[${i}]`, `option ${key} appears twice; keys must be unique, whatever the case`); optionsBroken = true; continue; }
       keys.add(key);
+      keysAnyCase.add(key.toLowerCase());
       if (label.length > 40) { lint.error("too_long", `options[${i}].label`, `${label.length} characters; the cap is 40`); options.push({ key, label }); continue; }
       options.push({ key, label });
     }
@@ -190,7 +194,7 @@ export function lintBrief(draft: unknown, now: number): { brief: DecisionBrief |
     // option: "adoption" and "the option with less risk" name none, whatever follows "option".
     const named = [...headline.matchAll(/\boption\s+([A-Za-z0-9_-]{1,16})/gi)]
       .map(m => (m[1] ?? "").toLowerCase())
-      .filter(k => [...keys].some(x => x.toLowerCase() === k));
+      .filter(k => keysAnyCase.has(k));
     const others = named.filter(k => k !== recommend.toLowerCase());
     if (named.length === 0) {
       lint.error("headline_option", "headline", `the headline names no option; name the one you recommend, as "option ${recommend}"`);
