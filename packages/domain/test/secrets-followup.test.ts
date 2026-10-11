@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   REQUEST_LIMITS, admitRequest, answerStored, emptySecretDirectory, findSecret, joinRequest, openRequest, receiveTransfer,
-  storeSecret,
+  storeSecret, withdrawRequest,
   type Actor, type RequestAsk, type Secret, type SecretDirectory, type SecretGrant, type SecretRequest, type SecretVersion,
 } from "../src/index.ts";
 
@@ -120,5 +120,24 @@ describe("follow-up 8: a Rotation keeps the shape unless it names one, as it kee
     let dir = put(emptySecretDirectory(), "0000000000a1", "shape-a", T);
     dir = value(receiveTransfer(dir, { reference: REF, fingerprint: "0000000000a2", shape: null, grants: [], expiry: null, destinations: [], from: "node-b" }, who(), T + 1));
     expect(findSecret(dir, REF)?.shape).toBe("shape-a");
+  });
+});
+
+describe("follow-up 2: a withdrawal names its waiter by lane and workspace, so it can't take another one off", () => {
+  const ask = (lane: string | null, workspace: string | null): RequestAsk => ({
+    node: "node-a", reference: REF, kind: "new", waiter: { lane, workspace, purpose: "Nightly job" }, proposed: nodeGrant,
+  });
+  it("a caller without a lane in app-a takes itself off, not the waiter without a workspace", () => {
+    let r = value(openRequest(ask(null, null), "r1", T)).request;
+    r = value(joinRequest(r, { lane: null, workspace: "app-a", purpose: "Deploy" }, T + 1)).request;
+    const left = value(withdrawRequest(r, { lane: null, workspace: "app-a" }, T + 2));
+    expect(left.request.waiting.map(w => [w.lane, w.workspace])).toEqual([[null, null]]);
+    expect(left.request.state).toBe("open");
+  });
+  it("a lane is its waiter, whatever workspace the withdrawal names", () => {
+    let r = value(openRequest(ask("lane-a", "example-app"), "r1", T)).request;
+    r = value(joinRequest(r, { lane: "lane-b", workspace: null, purpose: "Deploy" }, T + 1)).request;
+    const left = value(withdrawRequest(r, { lane: "lane-a", workspace: null }, T + 2));
+    expect(left.request.waiting.map(w => w.lane)).toEqual(["lane-b"]);
   });
 });

@@ -120,18 +120,18 @@ describe("SR4: one answer, withdrawal by the last waiting lane, expiry after 7 d
   });
   it("an earlier withdrawal takes only that lane off; the last one withdraws the request", () => {
     const two = value(joinRequest(opened(), { lane: "lane-b", workspace: null, purpose: "Deploy" }, T + 1)).request;
-    const one = value(withdrawRequest(two, "lane-a", T + 2));
+    const one = value(withdrawRequest(two, { lane: "lane-a", workspace: "example-app" }, T + 2));
     expect(one.request.state).toBe("open");
     expect(one.request.waiting.map(w => w.lane)).toEqual(["lane-b"]);
     expect(one.request.version).toBe(3);
     expect(one.events.map(e => e.type)).toEqual(["SecretRequestLeft"]);
-    const none = value(withdrawRequest(one.request, "lane-b", T + 3));
+    const none = value(withdrawRequest(one.request, { lane: "lane-b", workspace: null }, T + 3));
     expect(none.request.state).toBe("withdrawn");
     expect(none.events.map(e => e.type)).toEqual(["SecretRequestWithdrawn"]);
-    expect(problem(withdrawRequest(none.request, "lane-b", T + 4))).toBe("answered");
+    expect(problem(withdrawRequest(none.request, { lane: "lane-b", workspace: null }, T + 4))).toBe("answered");
   });
   it("a lane that isn't waiting can't withdraw", () => {
-    expect(problem(withdrawRequest(opened(), "lane-z", T + 1))).toBe("not_waiting");
+    expect(problem(withdrawRequest(opened(), { lane: "lane-z", workspace: null }, T + 1))).toBe("not_waiting");
   });
   it("expires 7 days after it opened, not before, and is then unanswerable", () => {
     const r = opened();
@@ -151,7 +151,7 @@ describe("SR6: an answer names the version it saw", () => {
   it("is refused as changed after a join or a withdrawal, and accepted at the current version", () => {
     const joined = value(joinRequest(opened(), { lane: "lane-b", workspace: null, purpose: "Deploy" }, T + 1)).request;
     expect(problem(answerRejected(joined, { seen: 1, command: "c2", reason: null }, T + 2))).toBe("changed");
-    const left = value(withdrawRequest(joined, "lane-b", T + 2)).request;
+    const left = value(withdrawRequest(joined, { lane: "lane-b", workspace: null }, T + 2)).request;
     expect(problem(answerRejected(left, { seen: 2, command: "c2", reason: null }, T + 3))).toBe("changed");
     expect(problem(answerRejected(left, { seen: 3, command: "c2", reason: null }, T + 3))).toBe("ok");
   });

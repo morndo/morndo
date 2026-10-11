@@ -79,9 +79,9 @@ const value = <T>(r: R<T>): T => {
 function requestHistory(): RequestEvent[] {
   const a = value(openRequest(ask, "r1", T));
   const b = value(joinRequest(a.request, { lane: "lane-b", workspace: null, purpose: "Deploy" }, T + 1));
-  const c = value(withdrawRequest(b.request, "lane-b", T + 2));
+  const c = value(withdrawRequest(b.request, { lane: "lane-b", workspace: null }, T + 2));
   const d = value(answerStored(c.request, { seen: 3, command: "c2", reference: REF, version: 1, nodes: ["node-a"] }, T + 3));
-  const e = value(withdrawRequest(value(openRequest(ask, "r2", T)).request, "lane-a", T + 1));
+  const e = value(withdrawRequest(value(openRequest(ask, "r2", T)).request, { lane: "lane-a", workspace: "example-app" }, T + 1));
   const f = value(answerGranted(value(openRequest({ ...ask, kind: "access" }, "r3", T)).request, { seen: 1, command: "c3" }, T + 1));
   const g = value(answerRejected(value(openRequest(ask, "r4", T)).request, { seen: 1, command: "c4", reason: null }, T + 1));
   const h = value(expireRequest(value(openRequest(ask, "r5", T)).request, T + 7 * DAY));

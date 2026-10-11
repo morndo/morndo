@@ -109,12 +109,12 @@ describe("verify 3 and 5: a waiter without a lane is its workspace (SR1, SR6)", 
   });
   it("a withdrawal names its waiter: one workspace leaves, the other still waits", () => {
     let r = value(joinRequest(opened(), { lane: null, workspace: "app-b", purpose: "Deploy" }, T + 1)).request;
-    const left = value(withdrawRequest(r, null, T + 2, "app-a"));
+    const left = value(withdrawRequest(r, { lane: null, workspace: "app-a" }, T + 2));
     expect(left.request.state).toBe("open");
     expect(left.request.waiting.map(w => w.workspace)).toEqual(["app-b"]);
     expect(left.events.map(e => e.type)).toEqual(["SecretRequestLeft"]);
     r = left.request;
-    expect(withdrawRequest(r, null, T + 3).ok).toBe(false);
-    expect(value(withdrawRequest(r, null, T + 3, "app-b")).request.state).toBe("withdrawn");
+    expect(withdrawRequest(r, { lane: null, workspace: null }, T + 3).ok).toBe(false);
+    expect(value(withdrawRequest(r, { lane: null, workspace: "app-b" }, T + 3)).request.state).toBe("withdrawn");
   });
 });

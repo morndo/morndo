@@ -86,9 +86,9 @@ describe("review 3: a waiter with no lane counts once, as a lane does (SR1: a re
     let r = value(openRequest(ask, "r1", T)).request;
     r = value(joinRequest(r, { lane: null, workspace: null, purpose: "Nightly job" }, T + 1)).request;
     r = value(joinRequest(r, { lane: null, workspace: null, purpose: "Nightly job again" }, T + 2)).request;
-    r = value(withdrawRequest(r, null, T + 3)).request;
+    r = value(withdrawRequest(r, { lane: null, workspace: null }, T + 3)).request;
     expect(r.waiting.map(w => w.lane)).toEqual(["lane-a"]);
-    expect(withdrawRequest(r, null, T + 4).ok).toBe(false);
+    expect(withdrawRequest(r, { lane: null, workspace: null }, T + 4).ok).toBe(false);
   });
 });
 
