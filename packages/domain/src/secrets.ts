@@ -59,10 +59,12 @@ function subjectOk(s: GrantSubject): boolean {
   if (s.kind === "workspace") return WORKSPACE_NAME.test(s.workspace);
   return s.kind === "node";
 }
+// A Grant's modes: at least one, each known, each once. The wire refines with this same rule.
+export const modesOk = (modes: readonly UseMode[]) =>
+  modes.length > 0 && new Set(modes).size === modes.length && modes.every(m => (USE_MODES as readonly string[]).includes(m));
 function grantOk(g: SecretGrant): boolean {
-  const modesOk = g.modes.length > 0 && new Set(g.modes).size === g.modes.length && g.modes.every(m => (USE_MODES as readonly string[]).includes(m));
   const untilOk = g.until.kind === "open" || g.until.kind === "lane-end" || (g.until.kind === "at" && Number.isFinite(g.until.at));
-  return subjectOk(g.subject) && modesOk && untilOk;
+  return subjectOk(g.subject) && modesOk(g.modes) && untilOk;
 }
 const sameSubject = (a: GrantSubject, b: GrantSubject): boolean =>
   a.kind === b.kind && (a.kind !== "lane" || (b.kind === "lane" && a.lane === b.lane))
@@ -274,7 +276,8 @@ export function checkFingerprint(ledger: readonly LedgerEntry[], reference: stri
   return { kind: "accept", sameAs };
 }
 
-const hostsOk = (hosts: readonly string[]) =>
+// Destinations: at most ten hosts, each once, each a lower-case host name. The wire refines with this same rule.
+export const hostsOk = (hosts: readonly string[]) =>
   hosts.length <= DESTINATIONS_MAX && new Set(hosts).size === hosts.length && hosts.every(h => DESTINATION_HOST.test(h));
 
 function inputProblem(input: StoreInput): SecretProblem | null {
