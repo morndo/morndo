@@ -23,6 +23,7 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import { statSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import type { Isolation } from "@morndo/domain";
+import { BUILTIN_FIRST_PARTY_HOST } from "../application/catalog.ts";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
 import { HELPER_TTL_MS } from "./runtime-limits.ts";
 
@@ -218,9 +219,10 @@ const KEPT = new Set<string>([
 // A third-party base (secret-store README §8.3). The caller passes the first-party host from the
 // catalog's firstParty flag. URL.host is already lower-case and omits the scheme's default port.
 export function isThirdPartyAnthropicBase(baseUrl: string, firstPartyHost: string): boolean {
+  const party = firstPartyHost !== "" ? firstPartyHost : BUILTIN_FIRST_PARTY_HOST;
   let host = "";
   try { host = new URL(baseUrl).host; } catch { return false; }
-  return host !== "" && host !== firstPartyHost;
+  return host !== "" && host !== party;
 }
 
 export const BASE_URL_PROBLEM = "base URL missing or invalid";

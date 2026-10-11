@@ -15,6 +15,9 @@ export function dialectOf(preset: VendorPreset, runtime: string): string {
   return preset.runtimes.find(r => r.runtime === runtime)?.dialect ?? "";
 }
 
+// Used when a catalog has no firstParty row, including a file written before that flag existed.
+export const BUILTIN_FIRST_PARTY_HOST = "api.anthropic.com";
+
 export function firstPartyHost(presets: readonly VendorPreset[]): string {
   for (const preset of presets) {
     for (const runtime of preset.runtimes) {
@@ -25,5 +28,5 @@ export function firstPartyHost(presets: readonly VendorPreset[]): string {
       } catch { /* a flagged row with an unusable base is ignored */ }
     }
   }
-  return "";
+  return BUILTIN_FIRST_PARTY_HOST;
 }

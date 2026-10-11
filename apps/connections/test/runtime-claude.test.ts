@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { VendorPreset } from "@morndo/protocol";
 import type { RunPlan } from "../src/application/ports.ts";
+import { firstPartyHost } from "../src/application/catalog.ts";
 import { anthropicGatewayEnv, baseUrlProblem, childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, GATEWAY_ENV_KEYS, isThirdPartyAnthropicBase, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "../src/adapters/runtime-limits.ts";
 
@@ -58,6 +60,13 @@ describe("gateway env keys", () => {
     expect(isThirdPartyAnthropicBase("https://API.ANTHROPIC.COM", host)).toBe(false);
     expect(isThirdPartyAnthropicBase("https://api.anthropic.com:443", host)).toBe(false);
     expect(isThirdPartyAnthropicBase("https://api.anthropic.com:8443", host)).toBe(true);
+    const old = [{ runtimes: [{ runtime: "claude", dialect: "anthropic", baseUrl: "https://api.anthropic.com" }] }] as unknown as VendorPreset[];
+    expect(firstPartyHost(old)).toBe("api.anthropic.com");
+    expect(firstPartyHost([])).toBe("api.anthropic.com");
+    expect(isThirdPartyAnthropicBase("https://API.ANTHROPIC.COM", "")).toBe(false);
+    expect(isThirdPartyAnthropicBase("https://api.anthropic.com:443", "")).toBe(false);
+    expect(isThirdPartyAnthropicBase("http://127.0.0.1:9", "")).toBe(true);
+    expect(anthropicGatewayEnv("https://api.anthropic.com", "sonnet-5.5")).toEqual({});
     const extra = anthropicGatewayEnv("http://127.0.0.1:9", "glm-5.3", "max", "glm-5.3-flash", host);
     expect(Object.keys(extra).sort()).toEqual([...GATEWAY_ENV_KEYS].sort());
     const env = childEnv({ ANTHROPIC_API_KEY: "sk-ant-synthetic-test-key-0001", ANTHROPIC_MODEL: "inherited" }, extra);
