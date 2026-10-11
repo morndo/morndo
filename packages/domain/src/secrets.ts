@@ -149,15 +149,20 @@ export function joinRequest(req: SecretRequest, waiter: Omit<Waiter, "at">, now:
   if (req.state !== "open") return refuseRequest("answered");
   const w = waiterProblem(waiter);
   if (w) return refuseRequest(w);
-  // One waiter per lane, and one for every caller without a lane: a repeat changes nothing (SR1).
-  if (req.waiting.some(x => x.lane === waiter.lane)) return ok({ request: req, events: [] });
+  // A repeat by the same waiter changes nothing (SR1).
+  if (req.waiting.some(x => sameWaiter(x, waiter.lane, waiter.workspace))) return ok({ request: req, events: [] });
   const request = { ...req, waiting: [...req.waiting, { ...waiter, at: now }], version: req.version + 1 };
   return ok({ request, events: [{ type: "SecretRequestJoined", request: req.id, lane: waiter.lane, at: now }] });
 }
 
-export function withdrawRequest(req: SecretRequest, lane: string | null, now: number): Result<RequestChange, RequestRefusal> {
+// A waiter is its lane; a caller without a lane is its workspace, and no workspace counts as one (docs/domain.md).
+const sameWaiter = (w: Omit<Waiter, "at" | "purpose">, lane: string | null, workspace: string | null) =>
+  lane !== null ? w.lane === lane : w.lane === null && w.workspace === workspace;
+
+// A withdrawal names its waiter: a lane, or for a caller without one, its workspace.
+export function withdrawRequest(req: SecretRequest, lane: string | null, now: number, workspace: string | null = null): Result<RequestChange, RequestRefusal> {
   if (req.state !== "open") return refuseRequest("answered");
-  const at = req.waiting.findIndex(w => w.lane === lane);
+  const at = req.waiting.findIndex(w => sameWaiter(w, lane, workspace));
   if (at < 0) return refuseRequest("not_waiting");
   if (req.waiting.length > 1) {
     const request = { ...req, waiting: req.waiting.filter((_, i) => i !== at), version: req.version + 1 };
