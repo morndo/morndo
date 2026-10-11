@@ -51,7 +51,7 @@ const blank = (s: string) => s.trim() === "";
 // An odd run of backslashes at the end of a string escapes the character that would close it: inside "[label](url)"
 // it eats the "]" or ")" and the link never forms — marked 18.0.14 shows the raw text (checked 2026-10-11). An even
 // run is one escaped backslash, and the link closes as intended.
-const endsInBareBackslash = (s: string) => (/(\\+)$/.exec(s)?.[1].length ?? 0) % 2 === 1;
+const endsInBareBackslash = (s: string) => (/(\\+)$/.exec(s)?.[1]?.length ?? 0) % 2 === 1;
 
 // Money, one pattern for the whole product (DB5 and the compact card): a currency sign before a digit, or a number
 // (with k, m or bn) before a sign or an ISO code from a short list. "3 weeks" and "6 agent-days" are not money;
