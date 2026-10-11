@@ -177,17 +177,20 @@ export async function startJobUnit(job: {
     `--property=StandardOutput=append:${job.logPath}`, `--property=StandardError=append:${job.logPath}`,
   ];
   if (job.timeoutMs !== null && job.timeoutMs > 0) args.push(`--property=RuntimeMaxSec=${job.timeoutMs}ms`);
-  for (const key of job.unset) {
+  const drop = new Set(job.unset);
+  // The user manager passes its own environment to children. A hosted runner can import the
+  // launching process's names into that block after show-environment was read (JAVA_HOME_*).
+  // UnsetEnvironment= is applied last, so naming them here keeps them out of the job.
+  // systemd.exec(5), https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html, read 2026-10-11.
+  for (const key of Object.keys(toolEnv ?? process.env)) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) drop.add(key);
+  }
+  for (const key of drop) {
     if (key in job.env) continue;
     args.push(`--property=UnsetEnvironment=${key}`);
   }
   for (const [key, value] of Object.entries(job.env)) args.push(`--setenv=${key}=${value}`);
-  // The user manager passes its own environment to the process, and UnsetEnvironment= is applied last
-  // (systemd.exec(5), https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html, read 2026-10-11).
-  // env -i then keeps only the names above: a runner that injects a name after that list was read
-  // (JAVA_HOME_* on a hosted image) cannot reach the job.
-  const assignments = Object.entries(job.env).map(([key, value]) => `${key}=${value}`);
-  args.push("--", "/usr/bin/env", "-i", ...assignments, ...job.command);
+  args.push("--", ...job.command);
   await run("systemd-run", args, 15_000, toolEnv);
 }
 

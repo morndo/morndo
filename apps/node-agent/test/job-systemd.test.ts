@@ -452,6 +452,40 @@ exit 0
     expect(text).not.toContain("systemd-run");
     expect(text.split("\n").filter(line => line.includes("show-environment"))).toHaveLength(1);
   });
+
+  it("unsets a name the process holds when the manager listing omitted it, and execs the job command", async () => {
+    const h = tempHome();
+    const log = join(h.home, "run.log");
+    const env = fakeTools(h.home, `#!/bin/sh
+if [ "$2" = "show-environment" ]; then printf 'PATH=/usr/bin\\n'; exit 0; fi
+if [ "$2" = "show" ]; then printf '%s\\n' LoadState=not-found; exit 0; fi
+exit 0
+`, `#!/bin/sh\nprintf '%s\\n' "$@" >> '${log}'\nexit 0\n`);
+    env.MORNDO_LATE_INJECT = "from-the-process";
+    const adb = openAgentDb(join(h.home, "agent.db"));
+    const dir = join(h.home, "job-logs");
+    const work = join(h.home, "work");
+    mkdirSync(work, { recursive: true });
+    const store = new JobStore(adb.db, dir, () => Date.now(), { home: h.home });
+    const paths = agentPaths(h.home);
+    const sup = new JobSupervisor(store, {
+      home: h.home, stateDir: paths.stateDir, socketPath: paths.jobSock,
+      systemd: { slice: "morndofake.slice", toolEnv: env },
+    });
+    open.push({ adb, cleanup: h.cleanup, dir, sup });
+    const decided = await sup.start({
+      id: track(jobId()), lane: "builder", name: "pack", jobClass: "default",
+      notify: { kind: "lane", name: "builder" }, cwd: work, command: ["/bin/true"],
+    });
+    if (!decided.ok) throw new Error(decided.error);
+    const lines = readFileSync(log, "utf8").split("\n");
+    expect(lines).toContain("--property=Type=exec");
+    expect(lines).toContain("--property=UnsetEnvironment=MORNDO_LATE_INJECT");
+    expect(lines).not.toContain("/usr/bin/env");
+    expect(lines).not.toContain("-i");
+    const dash = lines.indexOf("--");
+    expect(lines[dash + 1]).toBe("/bin/true");
+  });
 });
 
 describe.skipIf(!bus.ok)("systemd environment", () => {
