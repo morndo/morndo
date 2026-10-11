@@ -1243,6 +1243,18 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-fingerprint-keyed", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
     find: "createHmac(\"sha256\", this.#key(\"fingerprint.key\"))", replace: "createHmac(\"sha256\", new Uint8Array(32))",
     run: ["apps/connections/test/node-keys.test.ts"], expect: "two nodes" },
+  { id: "sp2b-sealed-one-stanza", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
+    find: "    if (stanzas !== 1) return { ok: false, problem: \"stanzas\" };\n", replace: "",
+    run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "stanzas" },
+  { id: "sp2b-sealed-opens-here", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
+    find: "catch { return { ok: false, problem: \"foreign\" }; }", replace: "catch { plain = new Uint8Array(sealed); }",
+    run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "foreign" },
+  { id: "sp2b-sealed-not-age", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
+    find: "    if (stanzas === null) return { ok: false, problem: \"not_age\" };\n", replace: "",
+    run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "not_age" },
+  { id: "sp2b-sealed-atomic", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
+    find: "      writePrivate(this.#file(ref), sealed, this.#uid);", replace: "      if (existsSync(this.#file(ref))) unlinkSync(this.#file(ref));\n      writePrivate(this.#file(ref), sealed, this.#uid);",
+    run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "crash between the write and the rename" },
 ];
 
 // ---- the runner

@@ -9,6 +9,7 @@ import { existsSync, statSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { Decrypter, Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { assertPrivate, readPrivate, refuseBareHome, writeNew, writePrivate, writePrivatePair } from "./file-mode.ts";
+import { NodeKeys } from "./node-keys.ts";
 import { fingerprintOf, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
 import type { SealedProblem, SealedStore } from "../application/ports.ts";
@@ -21,10 +22,12 @@ export class AgeVault implements Vault, SealedStore {
   #cached: { secret: string; ino: bigint; mtimeNs: bigint; mode: number; uid: number } | null = null;
   #recipient: string | null = null;
   #recipientFor: string | null = null;
-  constructor(dir: string, identityPath: string, uid?: number) {
+  readonly #keys: NodeKeys;
+  constructor(dir: string, identityPath: string, uid?: number, keys?: NodeKeys) {
     this.#dir = dir;
     this.#identityPath = identityPath;
     this.#uid = uid ?? process.getuid?.() ?? -1;
+    this.#keys = keys ?? new NodeKeys(dirname(identityPath), this.#uid);
   }
 
   async seal(ref: string, material: SecretMaterial): Promise<void> {
@@ -75,12 +78,30 @@ export class AgeVault implements Vault, SealedStore {
     return this.#recipientOf();
   }
 
-  async storeSealed(_ref: string, _sealed: Uint8Array): Promise<{ ok: true; fingerprint: string } | { ok: false; problem: SealedProblem }> {
-    return { ok: false, problem: "not_age" };
+  // A Secret's value as the Endpoint sealed it (design §6): the header must hold exactly one recipient stanza, and the file
+  // must open with this node's identity. Then the ciphertext is written as received, by temp file and rename, so a crash
+  // leaves the old one. The plaintext lives only to compute the keyed fingerprint, and is zeroed after.
+  async storeSealed(ref: string, sealed: Uint8Array): Promise<{ ok: true; fingerprint: string } | { ok: false; problem: SealedProblem }> {
+    const stanzas = recipientStanzas(sealed);
+    if (stanzas === null) return { ok: false, problem: "not_age" };
+    if (stanzas !== 1) return { ok: false, problem: "stanzas" };
+    const decrypter = new Decrypter();
+    decrypter.addIdentity(await this.#identity());
+    let plain: Uint8Array;
+    try { plain = await decrypter.decrypt(sealed, "uint8array"); } catch { return { ok: false, problem: "foreign" }; }
+    try {
+      const fingerprint = this.#keys.fingerprint(plain);
+      writePrivate(this.#file(ref), sealed, this.#uid);
+      return { ok: true, fingerprint };
+    } finally {
+      plain.fill(0);
+    }
   }
 
-  async keyedFingerprint(_ref: string): Promise<string | null> {
-    return null;
+  async keyedFingerprint(ref: string): Promise<string | null> {
+    if (!this.has(ref)) return null;
+    const plain = (await this.open(ref)).bytes();
+    try { return this.#keys.fingerprint(plain); } finally { plain.fill(0); }
   }
 
   async #recipientOf(): Promise<string> {
@@ -121,6 +142,26 @@ export class AgeVault implements Vault, SealedStore {
   #mark(ref: string): string {
     return `${this.#file(ref)}.fingerprint`;
   }
+}
+
+// The recipient stanzas in an age file's header, or null when it isn't a binary age v1 file. The header is the version
+// line, then stanzas that each start with "-> ", then the "--- " MAC line; a stanza's body lines are base64, so none starts
+// with "-" (C2SP age.md, https://github.com/C2SP/C2SP/blob/main/age.md, read 2026-10-12). Exactly one is Morndo's rule,
+// not age's: each copy is then readable by one node only (design §6).
+const VERSION_LINE = new TextEncoder().encode("age-encryption.org/v1\n");
+export function recipientStanzas(file: Uint8Array): number | null {
+  if (file.length < VERSION_LINE.length || !VERSION_LINE.every((b, i) => file[i] === b)) return null;
+  const text = new TextDecoder("latin1");
+  let count = 0;
+  for (let at = VERSION_LINE.length; at < file.length;) {
+    const end = file.indexOf(0x0a, at);
+    if (end < 0) return null;
+    const line = text.decode(file.subarray(at, end));
+    if (line.startsWith("--- ")) return count;
+    if (line.startsWith("-> ")) count++;
+    at = end + 1;
+  }
+  return null;
 }
 
 function markOf(plain: Uint8Array, cipher: Uint8Array): Uint8Array {
