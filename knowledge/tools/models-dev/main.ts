@@ -2,10 +2,9 @@
 // holds each request to its deadline, the cache directory under XDG_CACHE_HOME (or ~/.cache) and today's date, and sets the exit
 // code and returns, so piped output drains before exit.
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { run } from "./cli.ts";
+import { cacheDirOf, run } from "./cli.ts";
 
-const cacheDir = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "morndo-knowledge", "models-dev");
+const cacheDir = cacheDirOf(process.env, homedir());
 process.exitCode = await run(process.argv.slice(2), {
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),

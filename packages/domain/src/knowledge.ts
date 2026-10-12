@@ -2,8 +2,8 @@
 // steps that each name a Role and a model class (or a deterministic tool) and declare their effect, gates before
 // anything outward, stop rules, a budget, a report and metrics. This module judges a parsed SOP. It reads nothing and
 // keeps no clock: the caller passes the shipped skill names, the notes with their re-check dates, the engine layer's
-// roles, today's date and a way to tell whether a time zone exists, and, when the user gives them, the ids of their
-// preferences and the dates of their model snapshots, which cited preferences and snapshots must then resolve to.
+// roles, today's date and a way to tell whether a time zone exists, and, when the user gives them, what their preferences
+// file and model snapshot directory hold, which cited preferences and snapshots must then resolve to.
 import { isDate, isRec, PREFERENCE_ID, shown, text } from "./knowledge-guards.ts";
 
 export const MODEL_CLASSES = ["flagship", "everyday", "fast"] as const;
@@ -18,14 +18,17 @@ export type SopRule = (typeof SOP_RULES)[number];
 export type SopWarning = "stale-citation" | "outward-sounding" | "unchecked-citation";
 
 export type SopFinding<R extends string = SopRule> = { rule: R; at: string; message: string };
+// What one of the user's files holds for citations: the preference ids or snapshot dates that resolve, and those it holds but
+// left out, each with why.
+export type CitationIndex = { usable: ReadonlySet<string>; leftOut: ReadonlyMap<string, string> };
 export type SopContext = {
   skills: readonly string[];
   notes: ReadonlyMap<string, string>; // note id -> its re-check date, YYYY-MM-DD
   roles: readonly string[];
   today: string; // YYYY-MM-DD
   isTimeZone: (tz: string) => boolean; // whether the runtime knows this IANA time zone
-  preferences?: ReadonlySet<string>; // the ids in the user's preferences file; without it, pref:<id> is checked for its form only
-  snapshots?: ReadonlySet<string>; // the dates of the user's model snapshots; without them, models.dev@<date> is checked for its form only
+  preferences?: CitationIndex; // the user's preferences file; without it, pref:<id> is checked for its form only
+  snapshots?: CitationIndex; // the user's model snapshots, by date; without them, models.dev@<date> is checked for its form only
 };
 export type SopVerdict = { refusals: SopFinding[]; warnings: SopFinding<SopWarning>[] };
 
@@ -83,6 +86,17 @@ export function posixCron(line: string): boolean {
   });
 }
 
+// The id a pref:<id> citation names, or the date a models.dev@<date> one names: null when the citation isn't of that form.
+const citedPreference = (c: unknown): string | null => (typeof c === "string" && c.startsWith("pref:") && PREFERENCE_ID.test(c.slice("pref:".length)) ? c.slice("pref:".length) : null);
+const citedSnapshot = (c: unknown): string | null => (typeof c === "string" && c.startsWith("models.dev@") && isDate(c.slice("models.dev@".length)) ? c.slice("models.dev@".length) : null);
+
+// The preference ids and snapshot dates an SOP's steps cite, in the forms checkSop resolves: what a caller needs to read.
+export function sopCitations(doc: unknown): { preferences: string[]; snapshots: string[] } {
+  const steps: unknown[] = isRec(doc) && Array.isArray(doc.steps) ? doc.steps : [];
+  const why = steps.flatMap(s => (isRec(s) && Array.isArray(s.why) ? (s.why as unknown[]) : []));
+  return { preferences: why.flatMap(c => citedPreference(c) ?? []), snapshots: why.flatMap(c => citedSnapshot(c) ?? []) };
+}
+
 // Every string in the SOP that still holds a blank, with where it is: steps by id, other lists by position.
 function blanksIn(x: unknown, at: string): string[] {
   if (blank(x)) return [at];
@@ -135,18 +149,16 @@ export function checkSop(doc: unknown, ctx: SopContext): SopVerdict {
     if (c === NO_EVIDENCE || ctx.skills.includes(c)) return;
     // A preference or a snapshot resolves against the user's files when the caller has them; without them it is checked for
     // its form only, and a warning says so.
-    const pref = c.startsWith("pref:") ? c.slice("pref:".length) : "";
-    if (PREFERENCE_ID.test(pref)) {
-      if (ctx.preferences === undefined) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no preferences file was given` });
-      else if (!ctx.preferences.has(pref)) refuse("why-resolves", at, `${c} is no preference of the preferences file`);
-      return;
-    }
-    const fetched = c.startsWith("models.dev@") ? c.slice("models.dev@".length) : "";
-    if (isDate(fetched)) {
-      if (ctx.snapshots === undefined) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no snapshot directory was given` });
-      else if (!ctx.snapshots.has(fetched)) refuse("why-resolves", at, `${c} is no snapshot of the snapshot directory`);
-      return;
-    }
+    const resolve = (index: CitationIndex | undefined, key: string, file: string, absent: string) => {
+      const why = index?.leftOut.get(key);
+      if (index === undefined) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no ${file} was given` });
+      else if (why !== undefined) refuse("why-resolves", at, `${c}: the ${file} left it out: ${why}`);
+      else if (!index.usable.has(key)) refuse("why-resolves", at, `${c} is no ${absent} of the ${file}`);
+    };
+    const pref = citedPreference(c);
+    if (pref !== null) return resolve(ctx.preferences, pref, "preferences file", "preference");
+    const fetched = citedSnapshot(c);
+    if (fetched !== null) return resolve(ctx.snapshots, fetched, "snapshot directory", "snapshot");
     if (!c.startsWith("notes/")) return unknown();
     const due = ctx.notes.get(c.slice("notes/".length));
     if (due === undefined) refuse("why-resolves", at, `${c} is not a note of the recurring-job skill`);

@@ -5,8 +5,6 @@ import { MODEL_CLASSES, type ModelClass } from "./knowledge.ts";
 import { isDate, isRec, PREFERENCE_ID, shown, text, utcMs } from "./knowledge-guards.ts";
 import { err, ok, type Result } from "./shared.ts";
 
-export { PREFERENCE_ID };
-
 export const SNAPSHOT_STALE_DAYS = 30;
 
 export type ModelFact = { provider: string; model: string; name: string; family: string | null; context: number | null; output: number | null; inputPrice: number | null; outputPrice: number | null; released: string | null };
@@ -77,31 +75,47 @@ export const PREFERENCE_FIELDS = ["id", "holder", "on", "said", "tasks"] as cons
 
 export type Preference = { id: string; holder: string; on: string; said: string; tasks: string[] };
 
-export function parsePreferences(doc: unknown): { preferences: Preference[]; refusals: { at: string; message: string }[] } {
-  const preferences: Preference[] = [];
-  const refusals: { at: string; message: string }[] = [];
+// The preferences that hold, one refusal per entry or field that doesn't, by its place in the file, and each id the file
+// holds only in refused entries, with the first refusal's words, so a citation of it can say why it doesn't resolve.
+export type ParsedPreferences = { preferences: Preference[]; refusals: { at: string; message: string }[]; leftOut: ReadonlyMap<string, string> };
+
+export function parsePreferences(doc: unknown): ParsedPreferences {
   const list = isRec(doc) ? doc.preferences : undefined;
-  if (!isRec(doc) || !Array.isArray(list)) return { preferences, refusals: [{ at: "preferences", message: "a preferences file is a mapping with a preferences list" }] };
-  for (const k of Object.keys(doc)) if (k !== "preferences") refusals.push({ at: k, message: `'${k}' is not a field of the preferences file: it holds a preferences list` });
-  // Where each id is used: an id used twice names no one preference, so every entry using it is left out.
-  const places = new Map<unknown, string[]>();
-  (list as unknown[]).forEach((raw, i) => { if (isRec(raw)) places.set(raw.id, [...(places.get(raw.id) ?? []), `preferences[${i}]`]); });
-  (list as unknown[]).forEach((raw, i) => {
-    const at = `preferences[${i}]`;
-    const refuse = (message: string) => refusals.push({ at, message });
-    if (!isRec(raw)) return refuse("a preference is a mapping");
-    const extra = Object.keys(raw).find(k => !(PREFERENCE_FIELDS as readonly string[]).includes(k));
-    if (extra !== undefined) return refuse(`'${extra}' is not a preference field (${PREFERENCE_FIELDS.join(", ")})`);
-    if (!(text(raw.id) && PREFERENCE_ID.test(raw.id))) return refuse("id is lowercase letters, digits and hyphens, starting with a letter or a digit");
-    const same = places.get(raw.id) ?? [];
-    if (same.length > 1) return refuse(`id '${raw.id}' is used by ${same.slice(0, -1).join(", ")} and ${same.at(-1)}: an id names one preference`);
-    if (!text(raw.holder)) return refuse("holder is a non-empty string");
-    if (!isDate(raw.on)) return refuse("on must be a real date, YYYY-MM-DD");
-    if (!text(raw.said)) return refuse("said is a non-empty string");
-    if (!Array.isArray(raw.tasks) || raw.tasks.length === 0 || !raw.tasks.every(text)) return refuse("tasks is a non-empty list of task names");
-    preferences.push({ id: raw.id, holder: raw.holder, on: raw.on, said: raw.said, tasks: raw.tasks as string[] });
-  });
-  return { preferences, refusals };
+  if (!isRec(doc) || !Array.isArray(list)) return { preferences: [], refusals: [{ at: "preferences", message: "a preferences file is a mapping with a preferences list" }], leftOut: new Map() };
+  const refusals = Object.keys(doc).filter(k => k !== "preferences").map(k => ({ at: k, message: `'${k}' is not a field of the preferences file: it holds a preferences list` }));
+  // Each entry on its own first: a preference, or the reason it is none.
+  const judged = (list as unknown[]).map((raw, i) => ({ at: `preferences[${i}]`, id: isRec(raw) && typeof raw.id === "string" ? raw.id : null, ...judgePreference(raw) }));
+  // Then the ids among the entries that hold: one two of them use names no one preference, so both are left out. An entry
+  // refused for another reason never counts.
+  const places = new Map<string, string[]>();
+  for (const j of judged) if (j.preference) places.set(j.preference.id, [...(places.get(j.preference.id) ?? []), j.at]);
+  const preferences: Preference[] = [];
+  const leftOut = new Map<string, string>();
+  for (const { at, id, preference, why } of judged) {
+    const same = preference ? (places.get(preference.id) ?? []) : [];
+    if (preference && same.length < 2) {
+      preferences.push(preference);
+      continue;
+    }
+    const message = preference ? `id '${preference.id}' is used by ${same.slice(0, -1).join(", ")} and ${same.at(-1)}: an id names one preference` : why;
+    refusals.push({ at, message });
+    if (id !== null && !leftOut.has(id)) leftOut.set(id, message);
+  }
+  for (const p of preferences) leftOut.delete(p.id);
+  return { preferences, refusals, leftOut };
+}
+
+function judgePreference(raw: unknown): { preference: Preference; why: null } | { preference: null; why: string } {
+  const no = (why: string) => ({ preference: null, why });
+  if (!isRec(raw)) return no("a preference is a mapping");
+  const extra = Object.keys(raw).find(k => !(PREFERENCE_FIELDS as readonly string[]).includes(k));
+  if (extra !== undefined) return no(`'${extra}' is not a preference field (${PREFERENCE_FIELDS.join(", ")})`);
+  if (!(text(raw.id) && PREFERENCE_ID.test(raw.id))) return no("id is lowercase letters, digits and hyphens, starting with a letter or a digit");
+  if (!text(raw.holder)) return no("holder is a non-empty string");
+  if (!isDate(raw.on)) return no("on must be a real date, YYYY-MM-DD");
+  if (!text(raw.said)) return no("said is a non-empty string");
+  if (!Array.isArray(raw.tasks) || raw.tasks.length === 0 || !raw.tasks.every(text)) return no("tasks is a non-empty list of task names");
+  return { preference: { id: raw.id, holder: raw.holder, on: raw.on, said: raw.said, tasks: raw.tasks as string[] }, why: null };
 }
 
 export function renderPreference(p: Preference): string {

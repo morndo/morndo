@@ -87,12 +87,18 @@ describe("freshness", () => {
 const WRITE_LONG: Preference = { id: "write-long", holder: "principal", on: "2026-10-11", said: "Acme models for long-form writing.", tasks: ["draft"] };
 const SEARCH_ACME: Preference = { id: "search-pass-acme", holder: "principal", on: "2026-10-11", said: "Acme for the search pass.", tasks: ["search-pass"] };
 
+// What parsePreferences keeps and refuses; the ids it left out have a test of their own.
+const entries = (doc: unknown) => {
+  const { preferences, refusals } = parsePreferences(doc);
+  return { preferences, refusals };
+};
+
 describe("parsePreferences", () => {
   it("keeps the valid entries, in order", () => {
-    expect(parsePreferences({ preferences: [WRITE_LONG, SEARCH_ACME] })).toEqual({ preferences: [WRITE_LONG, SEARCH_ACME], refusals: [] });
+    expect(entries({ preferences: [WRITE_LONG, SEARCH_ACME] })).toEqual({ preferences: [WRITE_LONG, SEARCH_ACME], refusals: [] });
   });
   it("a broken entry is left out, with one refusal naming its place in the file", () => {
-    expect(parsePreferences({ preferences: [{ ...WRITE_LONG, on: "2026-13-01" }, SEARCH_ACME] })).toEqual({
+    expect(entries({ preferences: [{ ...WRITE_LONG, on: "2026-13-01" }, SEARCH_ACME] })).toEqual({
       preferences: [SEARCH_ACME],
       refusals: [{ at: "preferences[0]", message: expect.any(String) }],
     });
@@ -101,29 +107,28 @@ describe("parsePreferences", () => {
     expect(parsePreferences({ preferences: [{ ...WRITE_LONG, tasks: [] }] }).refusals).toEqual([{ at: "preferences[0]", message: "tasks is a non-empty list of task names" }]);
   });
   it("a field the file does not have breaks the entry", () => {
-    expect(parsePreferences({ preferences: [{ ...WRITE_LONG, rank: 1 }] })).toEqual({ preferences: [], refusals: [{ at: "preferences[0]", message: expect.any(String) }] });
+    expect(entries({ preferences: [{ ...WRITE_LONG, rank: 1 }] })).toEqual({ preferences: [], refusals: [{ at: "preferences[0]", message: expect.any(String) }] });
   });
   it("entries that share an id are all left out, each with a refusal: an id names one preference, so no entry wins by its place", () => {
     const twice = "id 'write-long' is used by preferences[0] and preferences[2]: an id names one preference";
-    expect(parsePreferences({ preferences: [WRITE_LONG, SEARCH_ACME, { ...WRITE_LONG, holder: "editor" }] })).toEqual({
+    expect(entries({ preferences: [WRITE_LONG, SEARCH_ACME, { ...WRITE_LONG, holder: "editor" }] })).toEqual({
       preferences: [SEARCH_ACME],
       refusals: [{ at: "preferences[0]", message: twice }, { at: "preferences[2]", message: twice }],
     });
   });
   it("an entry refused for another reason never makes a valid one with its id a duplicate", () => {
-    expect(parsePreferences({ preferences: [WRITE_LONG, { ...WRITE_LONG, rank: 1 }, { ...WRITE_LONG, on: "2026-02-30" }] })).toEqual({
+    expect(entries({ preferences: [WRITE_LONG, { ...WRITE_LONG, rank: 1 }, { ...WRITE_LONG, on: "2026-02-30" }] })).toEqual({
       preferences: [WRITE_LONG],
       refusals: [{ at: "preferences[1]", message: expect.stringContaining("'rank'") }, { at: "preferences[2]", message: "on must be a real date, YYYY-MM-DD" }],
     });
   });
-  it("a refusal names the id of the entry it left out, when the entry has one, so a citation of it can say why", () => {
-    expect(parsePreferences({ preferences: [{ ...WRITE_LONG, holder: " " }, { holder: "principal" }] }).refusals).toEqual([
-      { at: "preferences[0]", id: "write-long", message: "holder is a non-empty string" },
-      { at: "preferences[1]", message: expect.any(String) },
-    ]);
+  it("names each id it holds only in entries it left out, with the first one's refusal, so a citation of it can say why", () => {
+    const parsed = parsePreferences({ preferences: [{ ...WRITE_LONG, holder: " " }, { holder: "principal" }, SEARCH_ACME, { ...SEARCH_ACME, rank: 1 }, { ...WRITE_LONG, on: "2026-02-30" }] });
+    expect(parsed.preferences).toEqual([SEARCH_ACME]);
+    expect([...parsed.leftOut]).toEqual([["write-long", "holder is a non-empty string"]]);
   });
   it("a doc that is not a mapping with a preferences list is one refusal, at preferences", () => {
-    expect(parsePreferences("nothing")).toEqual({ preferences: [], refusals: [{ at: "preferences", message: expect.any(String) }] });
+    expect(entries("nothing")).toEqual({ preferences: [], refusals: [{ at: "preferences", message: expect.any(String) }] });
   });
 });
 

@@ -7,7 +7,7 @@ import { dirname as dirname2, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // knowledge/tools/sop-check/cli.ts
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync as readFileSync2 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 // packages/domain/src/knowledge-guards.ts
@@ -72,6 +72,13 @@ function posixCron(line) {
     });
   });
 }
+var citedPreference = (c) => typeof c === "string" && c.startsWith("pref:") && PREFERENCE_ID.test(c.slice("pref:".length)) ? c.slice("pref:".length) : null;
+var citedSnapshot = (c) => typeof c === "string" && c.startsWith("models.dev@") && isDate(c.slice("models.dev@".length)) ? c.slice("models.dev@".length) : null;
+function sopCitations(doc) {
+  const steps = isRec(doc) && Array.isArray(doc.steps) ? doc.steps : [];
+  const why = steps.flatMap((s) => isRec(s) && Array.isArray(s.why) ? s.why : []);
+  return { preferences: why.flatMap((c) => citedPreference(c) ?? []), snapshots: why.flatMap((c) => citedSnapshot(c) ?? []) };
+}
 function blanksIn(x, at) {
   if (blank(x)) return [at];
   if (Array.isArray(x)) return x.flatMap((v, i) => blanksIn(v, at === "steps" && isRec(v) && text(v.id) ? `steps.${v.id}` : `${at}[${i}]`));
@@ -118,18 +125,16 @@ function checkSop(doc, ctx) {
       return refuse("preference-in-template", at, "a template cites no preference: a preference is one person's, so only an instance may cite pref:<id> (K12)");
     }
     if (c === NO_EVIDENCE || ctx.skills.includes(c)) return;
-    const pref = c.startsWith("pref:") ? c.slice("pref:".length) : "";
-    if (PREFERENCE_ID.test(pref)) {
-      if (ctx.preferences === void 0) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no preferences file was given` });
-      else if (!ctx.preferences.has(pref)) refuse("why-resolves", at, `${c} is no preference of the preferences file`);
-      return;
-    }
-    const fetched = c.startsWith("models.dev@") ? c.slice("models.dev@".length) : "";
-    if (isDate(fetched)) {
-      if (ctx.snapshots === void 0) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no snapshot directory was given` });
-      else if (!ctx.snapshots.has(fetched)) refuse("why-resolves", at, `${c} is no snapshot of the snapshot directory`);
-      return;
-    }
+    const resolve2 = (index, key, file, absent) => {
+      const why = index?.leftOut.get(key);
+      if (index === void 0) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no ${file} was given` });
+      else if (why !== void 0) refuse("why-resolves", at, `${c}: the ${file} left it out: ${why}`);
+      else if (!index.usable.has(key)) refuse("why-resolves", at, `${c} is no ${absent} of the ${file}`);
+    };
+    const pref = citedPreference(c);
+    if (pref !== null) return resolve2(ctx.preferences, pref, "preferences file", "preference");
+    const fetched = citedSnapshot(c);
+    if (fetched !== null) return resolve2(ctx.snapshots, fetched, "snapshot directory", "snapshot");
     if (!c.startsWith("notes/")) return unknown();
     const due = ctx.notes.get(c.slice("notes/".length));
     if (due === void 0) refuse("why-resolves", at, `${c} is not a note of the recurring-job skill`);
@@ -246,39 +251,77 @@ function checkSop(doc, ctx) {
   return { refusals, warnings };
 }
 
+// packages/domain/src/shared.ts
+var ok = (value) => ({ ok: true, value });
+var err = (error) => ({ ok: false, error });
+
 // packages/domain/src/knowledge-facts.ts
+var strOrNull = (x) => typeof x === "string" || x === null;
+var numOrNull = (x) => x === null || typeof x === "number" && Number.isFinite(x) && x >= 0;
+function readSnapshot(doc) {
+  if (!isRec(doc)) return err("a snapshot is a mapping");
+  if (!text(doc.source)) return err("source is a non-empty string");
+  if (!isDate(doc.fetched)) return err("fetched must be a real date, YYYY-MM-DD");
+  if (!text(doc.licence)) return err("licence is a non-empty string");
+  if (!Array.isArray(doc.models)) return err("models is a list of model facts");
+  const models = [];
+  for (const [i, raw] of doc.models.entries()) {
+    if (!isRec(raw)) return err(`models[${i}] is a mapping`);
+    if (!(text(raw.provider) && text(raw.model) && text(raw.name))) return err(`models[${i}] names its provider, model and name`);
+    if (!(strOrNull(raw.family) && strOrNull(raw.released))) return err(`models[${i}] holds family and released as strings or null`);
+    if (!(numOrNull(raw.context) && numOrNull(raw.output) && numOrNull(raw.inputPrice) && numOrNull(raw.outputPrice))) return err(`models[${i}] holds its numbers as non-negative numbers or null`);
+    models.push({ provider: raw.provider, model: raw.model, name: raw.name, family: raw.family, context: raw.context, output: raw.output, inputPrice: raw.inputPrice, outputPrice: raw.outputPrice, released: raw.released });
+  }
+  return ok({ source: doc.source, fetched: doc.fetched, licence: doc.licence, models });
+}
 var PREFERENCE_FIELDS = ["id", "holder", "on", "said", "tasks"];
 function parsePreferences(doc) {
-  const preferences = [];
-  const refusals = [];
   const list = isRec(doc) ? doc.preferences : void 0;
-  if (!isRec(doc) || !Array.isArray(list)) return { preferences, refusals: [{ at: "preferences", message: "a preferences file is a mapping with a preferences list" }] };
-  for (const k of Object.keys(doc)) if (k !== "preferences") refusals.push({ at: k, message: `'${k}' is not a field of the preferences file: it holds a preferences list` });
+  if (!isRec(doc) || !Array.isArray(list)) return { preferences: [], refusals: [{ at: "preferences", message: "a preferences file is a mapping with a preferences list" }], leftOut: /* @__PURE__ */ new Map() };
+  const refusals = Object.keys(doc).filter((k) => k !== "preferences").map((k) => ({ at: k, message: `'${k}' is not a field of the preferences file: it holds a preferences list` }));
+  const judged = list.map((raw, i) => ({ at: `preferences[${i}]`, id: isRec(raw) && typeof raw.id === "string" ? raw.id : null, ...judgePreference(raw) }));
   const places = /* @__PURE__ */ new Map();
-  list.forEach((raw, i) => {
-    if (isRec(raw)) places.set(raw.id, [...places.get(raw.id) ?? [], `preferences[${i}]`]);
-  });
-  list.forEach((raw, i) => {
-    const at = `preferences[${i}]`;
-    const refuse = (message) => refusals.push({ at, message });
-    if (!isRec(raw)) return refuse("a preference is a mapping");
-    const extra = Object.keys(raw).find((k) => !PREFERENCE_FIELDS.includes(k));
-    if (extra !== void 0) return refuse(`'${extra}' is not a preference field (${PREFERENCE_FIELDS.join(", ")})`);
-    if (!(text(raw.id) && PREFERENCE_ID.test(raw.id))) return refuse("id is lowercase letters, digits and hyphens, starting with a letter or a digit");
-    const same = places.get(raw.id) ?? [];
-    if (same.length > 1) return refuse(`id '${raw.id}' is used by ${same.slice(0, -1).join(", ")} and ${same.at(-1)}: an id names one preference`);
-    if (!text(raw.holder)) return refuse("holder is a non-empty string");
-    if (!isDate(raw.on)) return refuse("on must be a real date, YYYY-MM-DD");
-    if (!text(raw.said)) return refuse("said is a non-empty string");
-    if (!Array.isArray(raw.tasks) || raw.tasks.length === 0 || !raw.tasks.every(text)) return refuse("tasks is a non-empty list of task names");
-    preferences.push({ id: raw.id, holder: raw.holder, on: raw.on, said: raw.said, tasks: raw.tasks });
-  });
-  return { preferences, refusals };
+  for (const j of judged) if (j.preference) places.set(j.preference.id, [...places.get(j.preference.id) ?? [], j.at]);
+  const preferences = [];
+  const leftOut = /* @__PURE__ */ new Map();
+  for (const { at, id, preference, why } of judged) {
+    const same = preference ? places.get(preference.id) ?? [] : [];
+    if (preference && same.length < 2) {
+      preferences.push(preference);
+      continue;
+    }
+    const message = preference ? `id '${preference.id}' is used by ${same.slice(0, -1).join(", ")} and ${same.at(-1)}: an id names one preference` : why;
+    refusals.push({ at, message });
+    if (id !== null && !leftOut.has(id)) leftOut.set(id, message);
+  }
+  for (const p of preferences) leftOut.delete(p.id);
+  return { preferences, refusals, leftOut };
+}
+function judgePreference(raw) {
+  const no = (why) => ({ preference: null, why });
+  if (!isRec(raw)) return no("a preference is a mapping");
+  const extra = Object.keys(raw).find((k) => !PREFERENCE_FIELDS.includes(k));
+  if (extra !== void 0) return no(`'${extra}' is not a preference field (${PREFERENCE_FIELDS.join(", ")})`);
+  if (!(text(raw.id) && PREFERENCE_ID.test(raw.id))) return no("id is lowercase letters, digits and hyphens, starting with a letter or a digit");
+  if (!text(raw.holder)) return no("holder is a non-empty string");
+  if (!isDate(raw.on)) return no("on must be a real date, YYYY-MM-DD");
+  if (!text(raw.said)) return no("said is a non-empty string");
+  if (!Array.isArray(raw.tasks) || raw.tasks.length === 0 || !raw.tasks.every(text)) return no("tasks is a non-empty list of task names");
+  return { preference: { id: raw.id, holder: raw.holder, on: raw.on, said: raw.said, tasks: raw.tasks }, why: null };
 }
 
 // knowledge/tools/shared.ts
+import { readFileSync } from "node:fs";
 var firstLine = (e) => (e instanceof Error ? e.message : String(e)).split("\n")[0] ?? "";
-var SNAPSHOT_FILE = /^(\d{4}-\d{2}-\d{2})\.json$/;
+function readSnapshotFile(path) {
+  let doc;
+  try {
+    doc = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    return err(`not JSON: ${firstLine(e)}`);
+  }
+  return readSnapshot(doc);
+}
 
 // knowledge/tools/sop-check/cli.ts
 var DEFAULT_ROLES = ["plan", "implement-backend", "implement-ui", "implement-infra", "validate", "review", "research", "read-long", "images", "video"];
@@ -302,7 +345,7 @@ async function yamlParse() {
 function readYaml(file, parse) {
   let text2;
   try {
-    text2 = readFileSync(file, "utf8");
+    text2 = readFileSync2(file, "utf8");
   } catch (e) {
     return { line: `sop-check: can't read ${file}: ${firstLine(e)}` };
   }
@@ -315,7 +358,7 @@ function readYaml(file, parse) {
 function notesIn(dir, parse) {
   const notes = /* @__PURE__ */ new Map();
   for (const f of existsSync(dir) ? readdirSync(dir).filter((n) => n.endsWith(".md")) : []) {
-    const head = FRONT.exec(readFileSync(join(dir, f), "utf8").replace(/^﻿/, ""))?.[1];
+    const head = FRONT.exec(readFileSync2(join(dir, f), "utf8").replace(/^﻿/, ""))?.[1];
     if (head === void 0 || !/^note:/m.test(head)) continue;
     const meta = parse(head);
     if (typeof meta?.note !== "string" || typeof meta.recheck !== "string") throw new Error(`the note ${f} needs a note id and a recheck date`);
@@ -354,26 +397,53 @@ async function run(args, io) {
       return 2;
     }
     const doc = sopFile.doc;
+    const cited = sopCitations(doc);
+    const fileLines = [];
     let preferences;
-    let leftOut = [];
-    if (preferencesFile !== null) {
+    const firstPref = cited.preferences[0];
+    if (preferencesFile !== null && !existsSync(preferencesFile)) {
+      if (firstPref !== void 0) {
+        io.err(`sop-check: ${preferencesFile} doesn't exist, and the SOP cites pref:${firstPref}`);
+        return 2;
+      }
+      fileLines.push(`warning  no-preferences-file  --preferences  ${preferencesFile} doesn't exist; the SOP cites no preference`);
+    } else if (preferencesFile !== null) {
       const prefFile = readYaml(preferencesFile, parse);
       if ("line" in prefFile) {
         io.err(prefFile.line);
         return 2;
       }
       const parsed = parsePreferences(prefFile.doc);
-      preferences = new Set(parsed.preferences.map((p) => p.id));
-      leftOut = parsed.refusals;
+      preferences = { usable: new Set(parsed.preferences.map((p) => p.id)), leftOut: parsed.leftOut };
+      for (const r of parsed.refusals) fileLines.push(`warning  preference-left-out  ${r.at}  ${r.message}`);
     }
     let snapshots;
-    if (snapshotsDir !== null) {
+    const firstSnap = cited.snapshots[0];
+    if (snapshotsDir !== null && !existsSync(snapshotsDir)) {
+      if (firstSnap !== void 0) {
+        io.err(`sop-check: ${snapshotsDir} doesn't exist, and the SOP cites models.dev@${firstSnap}`);
+        return 2;
+      }
+      fileLines.push(`warning  no-snapshot-directory  --snapshots  ${snapshotsDir} doesn't exist; the SOP cites no snapshot`);
+    } else if (snapshotsDir !== null) {
+      let names;
       try {
-        snapshots = new Set(readdirSync(snapshotsDir).flatMap((n) => SNAPSHOT_FILE.exec(n)?.[1] ?? []));
+        names = readdirSync(snapshotsDir);
       } catch (e) {
         io.err(`sop-check: can't read ${snapshotsDir}: ${firstLine(e)}`);
         return 2;
       }
+      const usable = /* @__PURE__ */ new Set();
+      const leftOut = /* @__PURE__ */ new Map();
+      for (const date of new Set(cited.snapshots)) {
+        const name2 = `${date}.json`;
+        if (!names.includes(name2)) continue;
+        const read = readSnapshotFile(join(snapshotsDir, name2));
+        if (!read.ok) leftOut.set(date, `${name2}: ${read.error}`);
+        else if (read.value.fetched !== date) leftOut.set(date, `${name2} was fetched ${read.value.fetched}`);
+        else usable.add(date);
+      }
+      snapshots = { usable, leftOut };
     }
     const skillsDir = dirname(io.skillDir);
     const skills = readdirSync(skillsDir, { withFileTypes: true }).filter((d) => (d.isDirectory() || d.isSymbolicLink()) && existsSync(join(skillsDir, d.name, "SKILL.md"))).map((d) => d.name);
@@ -383,7 +453,7 @@ async function run(args, io) {
     const name = typeof sop === "string" ? sop : basename(file);
     for (const r of refusals) io.out(`refused  ${r.rule}  ${r.at}  ${r.message}`);
     for (const w of warnings) io.out(`warning  ${w.rule}  ${w.at}  ${w.message}`);
-    for (const r of leftOut) io.out(`warning  preference-left-out  ${r.at}  ${r.message}`);
+    for (const line of fileLines) io.out(line);
     io.out(refusals.length === 0 ? `${name}: passes` : `${name}: ${refusals.length} refusal${refusals.length === 1 ? "" : "s"}`);
     return refusals.length === 0 ? 0 : 1;
   } catch (e) {

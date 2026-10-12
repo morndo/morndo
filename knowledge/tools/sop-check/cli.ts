@@ -1,15 +1,15 @@
 // sop-check's command line (ADR-0026, K10 and K14). It reads an SOP, the skills installed beside the recurring-job skill,
 // the notes in that skill's references and the engine layer's roles, and, when given, the user's preferences file and model
 // snapshot directory, judges the SOP with the domain's checkSop, and prints one line per refusal or warning, then one per
-// entry the preferences file left out. Exit 0: passes. 1: refused. 2: a bad call, a file it can't read, or anything
-// unexpected, as one line. main.ts wires the real process; build.ts bundles both, and the domain's rules, into the skill's
+// entry the preferences file left out or file that doesn't exist. Exit 0: passes. 1: refused. 2: a bad call, a file it
+// can't read or that is missing while the SOP cites it, or anything unexpected, as one line. main.ts wires the real process; build.ts bundles both, and the domain's rules, into the skill's
 // scripts/sop-check.mjs.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { parsePreferences } from "../../../packages/domain/src/knowledge-facts.ts";
 import { isDate } from "../../../packages/domain/src/knowledge-guards.ts";
-import { checkSop } from "../../../packages/domain/src/knowledge.ts";
-import { firstLine, SNAPSHOT_FILE } from "../shared.ts";
+import { checkSop, sopCitations, type CitationIndex } from "../../../packages/domain/src/knowledge.ts";
+import { firstLine, readSnapshotFile } from "../shared.ts";
 
 // The engine layer's default roles, as its `engines get --json` lists them (recorded in
 // apps/hub/test/fixtures/engines-defaults.json; a test holds the two equal). Other roles come with --roles.
@@ -98,28 +98,56 @@ export async function run(args: readonly string[], io: Io): Promise<number> {
       return 2;
     }
     const doc = sopFile.doc;
-    // The ids the preferences file holds, and each entry it left out, said as a warning: a citation of one is refused.
-    let preferences: ReadonlySet<string> | undefined;
-    let leftOut: { at: string; message: string }[] = [];
-    if (preferencesFile !== null) {
+    // The user's files, read only when given. One that doesn't exist only warns while the SOP cites nothing in it.
+    const cited = sopCitations(doc);
+    const fileLines: string[] = [];
+    // The preferences file: the ids that hold, each it left out with the entry's refusal, and each refusal as a warning.
+    let preferences: CitationIndex | undefined;
+    const firstPref = cited.preferences[0];
+    if (preferencesFile !== null && !existsSync(preferencesFile)) {
+      if (firstPref !== undefined) {
+        io.err(`sop-check: ${preferencesFile} doesn't exist, and the SOP cites pref:${firstPref}`);
+        return 2;
+      }
+      fileLines.push(`warning  no-preferences-file  --preferences  ${preferencesFile} doesn't exist; the SOP cites no preference`);
+    } else if (preferencesFile !== null) {
       const prefFile = readYaml(preferencesFile, parse);
       if ("line" in prefFile) {
         io.err(prefFile.line);
         return 2;
       }
       const parsed = parsePreferences(prefFile.doc);
-      preferences = new Set(parsed.preferences.map(p => p.id));
-      leftOut = parsed.refusals;
+      preferences = { usable: new Set(parsed.preferences.map(p => p.id)), leftOut: parsed.leftOut };
+      for (const r of parsed.refusals) fileLines.push(`warning  preference-left-out  ${r.at}  ${r.message}`);
     }
-    // The dates of the snapshots in the directory, by their file names, as models-dev writes them.
-    let snapshots: ReadonlySet<string> | undefined;
-    if (snapshotsDir !== null) {
+    // The snapshot directory: a cited date counts only if its file reads as models-dev show reads it and was fetched that day.
+    let snapshots: CitationIndex | undefined;
+    const firstSnap = cited.snapshots[0];
+    if (snapshotsDir !== null && !existsSync(snapshotsDir)) {
+      if (firstSnap !== undefined) {
+        io.err(`sop-check: ${snapshotsDir} doesn't exist, and the SOP cites models.dev@${firstSnap}`);
+        return 2;
+      }
+      fileLines.push(`warning  no-snapshot-directory  --snapshots  ${snapshotsDir} doesn't exist; the SOP cites no snapshot`);
+    } else if (snapshotsDir !== null) {
+      let names: string[];
       try {
-        snapshots = new Set(readdirSync(snapshotsDir).flatMap(n => SNAPSHOT_FILE.exec(n)?.[1] ?? []));
+        names = readdirSync(snapshotsDir);
       } catch (e) {
         io.err(`sop-check: can't read ${snapshotsDir}: ${firstLine(e)}`);
         return 2;
       }
+      const usable = new Set<string>();
+      const leftOut = new Map<string, string>();
+      for (const date of new Set(cited.snapshots)) {
+        const name = `${date}.json`;
+        if (!names.includes(name)) continue;
+        const read = readSnapshotFile(join(snapshotsDir, name));
+        if (!read.ok) leftOut.set(date, `${name}: ${read.error}`);
+        else if (read.value.fetched !== date) leftOut.set(date, `${name} was fetched ${read.value.fetched}`);
+        else usable.add(date);
+      }
+      snapshots = { usable, leftOut };
     }
 
     const skillsDir = dirname(io.skillDir);
@@ -132,7 +160,7 @@ export async function run(args: readonly string[], io: Io): Promise<number> {
     const name = typeof sop === "string" ? sop : basename(file);
     for (const r of refusals) io.out(`refused  ${r.rule}  ${r.at}  ${r.message}`);
     for (const w of warnings) io.out(`warning  ${w.rule}  ${w.at}  ${w.message}`);
-    for (const r of leftOut) io.out(`warning  preference-left-out  ${r.at}  ${r.message}`);
+    for (const line of fileLines) io.out(line);
     io.out(refusals.length === 0 ? `${name}: passes` : `${name}: ${refusals.length} refusal${refusals.length === 1 ? "" : "s"}`);
     return refusals.length === 0 ? 0 : 1;
   } catch (e) {

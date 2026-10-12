@@ -1,23 +1,32 @@
 // models.dev's command line (ADR-0026, design docs/design/capability-knowledge, section 7). `refresh` fetches api.json and the
 // licence, each within FETCH_TIMEOUT_MS, trims them with the domain's trimModelsDev into a snapshot dated today under the cache
-// directory, written whole or not at all, and `show` prints the newest snapshot that reads, saying which newer ones it skipped,
+// directory (cacheDirOf), written whole or not at all, and `show` prints the newest snapshot that reads, saying which newer ones it skipped,
 // with a filter, a warning past SNAPSHOT_STALE_DAYS (K6) or for a date after today, and `?` for a missing value. Exit 0:
 // refreshed or shown, and a cache with nothing in it yet. 1: no fact matches the filter. 2: a bad call, a failed or timed-out
 // fetch, or anything unexpected, as one line. Never run in CI against the network: the tests pass a fake fetch, and only
 // main.ts hands run the real one.
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { freshness, readSnapshot, SNAPSHOT_STALE_DAYS, trimModelsDev, type ModelFact, type ModelSnapshot } from "../../../packages/domain/src/knowledge-facts.ts";
+import { freshness, SNAPSHOT_STALE_DAYS, trimModelsDev, type ModelFact, type ModelSnapshot } from "../../../packages/domain/src/knowledge-facts.ts";
 import { isDate } from "../../../packages/domain/src/knowledge-guards.ts";
 import { err, ok, type Result } from "../../../packages/domain/src/shared.ts";
-import { firstLine, SNAPSHOT_FILE } from "../shared.ts";
+import { firstLine, readSnapshotFile, SNAPSHOT_FILE } from "../shared.ts";
 
 export const API_URL = "https://models.dev/api.json";
 export const LICENCE_URL = "https://raw.githubusercontent.com/anomalyco/models.dev/dev/LICENSE";
 // How long one request may take, its body included: api.json is about 5 MB.
 export const FETCH_TIMEOUT_MS = 60_000;
+// A temporary file older than this belongs to a refresh that died before its rename; a younger one may be one still writing.
+export const LEFTOVER_MS = 10 * 60_000;
+const TMP_FILE = /^\d{4}-\d{2}-\d{2}\.json\.\d+\.tmp$/;
 
-export type Fetched = { ok: boolean; status: number; text: () => Promise<string> };
+// The snapshot directory: under $XDG_CACHE_HOME, or ~/.cache when it is unset or empty.
+export const cacheDirOf = (env: Readonly<Record<string, string | undefined>>, home: string): string =>
+  join(env.XDG_CACHE_HOME || join(home, ".cache"), "morndo-knowledge", "models-dev");
+
+// A body it won't read is cancelled, so the connection is let go at once (undici's README, "Garbage Collection": always
+// either consume or cancel the response body; read 2026-10-12).
+export type Fetched = { ok: boolean; status: number; text: () => Promise<string>; body?: { cancel: () => Promise<void> } | null };
 // fetch honours the signal for the headers and the body, as the platform's fetch does. today is the real date: refresh always
 // dates its snapshot with it, and only show takes --today. timeoutMs and writeFile are for tests; they default to the real ones.
 export type Io = {
@@ -44,7 +53,10 @@ async function fetchText(io: Io, url: string): Promise<Result<string, string>> {
   const signal = AbortSignal.timeout(ms);
   try {
     const res = await io.fetch(url, signal);
-    if (!res.ok) return err(`can't fetch ${url}: ${res.status}`);
+    if (!res.ok) {
+      await res.body?.cancel().catch(() => undefined); // the status is the failure; a body that won't cancel adds nothing
+      return err(`can't fetch ${url}: ${res.status}`);
+    }
     return ok(await res.text());
   } catch (e) {
     return err(`can't fetch ${url}: ${signal.aborted ? `no answer within ${ms / 1000} s` : firstLine(e)}`);
@@ -64,14 +76,12 @@ function writeWhole(path: string, data: string, write: (path: string, data: stri
   }
 }
 
-function readSnapshotFile(path: string): Result<ModelSnapshot, string> {
-  let doc: unknown;
-  try {
-    doc = JSON.parse(readFileSync(path, "utf8"));
-  } catch (e) {
-    return err(`is not JSON: ${firstLine(e)}`);
+// Removes the temporary files of refreshes that died, which nothing else would ever remove.
+function clearLeftovers(dir: string, now: number): void {
+  for (const name of readdirSync(dir).filter(n => TMP_FILE.test(n))) {
+    const stat = statSync(join(dir, name), { throwIfNoEntry: false });
+    if (stat && now - stat.mtimeMs > LEFTOVER_MS) rmSync(join(dir, name), { force: true });
   }
-  return readSnapshot(doc);
 }
 
 export async function run(args: readonly string[], io: Io): Promise<number> {
@@ -129,6 +139,7 @@ export async function run(args: readonly string[], io: Io): Promise<number> {
       const path = join(dir, `${today}.json`);
       try {
         mkdirSync(dir, { recursive: true });
+        clearLeftovers(dir, Date.now());
         writeWhole(path, `${JSON.stringify(snap.value, null, 2)}\n`, io.writeFile ?? writeFileSync);
       } catch (e) {
         io.err(`models-dev: can't write ${path}: ${firstLine(e)}`);
@@ -156,17 +167,18 @@ export async function run(args: readonly string[], io: Io): Promise<number> {
       skipped.push({ file, why: read.error });
     }
     if (found === null) {
-      io.err(`models-dev: no snapshot in ${dir} reads; the newest, ${files[0]}, ${skipped[0]?.why ?? ""}`);
+      const newest = `the newest, ${files[0]}: ${skipped[0]?.why ?? ""}`;
+      io.err(files.length === 1 ? `models-dev: the one snapshot in ${dir} doesn't read; ${newest}` : `models-dev: none of the ${files.length} snapshots in ${dir} reads; ${newest}`);
       return 2;
     }
     const { file, snap } = found;
     const facts = snap.models.filter(m => !filter || m.provider === filter || `${m.provider}/${m.model}` === filter);
+    if (facts.length > 0) io.out(`models.dev, fetched ${snap.fetched}, from ${snap.source}`);
+    for (const s of skipped) io.out(`warning  skipped-snapshot  ${s.file}  ${s.why}; using ${file}`);
     if (facts.length === 0) {
       io.err(`models-dev: no model matches '${filter}'`);
       return 1;
     }
-    io.out(`models.dev, fetched ${snap.fetched}, from ${snap.source}`);
-    for (const s of skipped) io.out(`warning  skipped-snapshot  ${s.file}  ${s.why}; showing ${file}`);
     const { ageDays, state } = freshness(snap.fetched, today);
     if (state === "stale") io.out(`warning  stale-snapshot  fetched ${snap.fetched}, ${ageDays} days ago, past ${SNAPSHOT_STALE_DAYS}: run npm run knowledge:models -- refresh`);
     if (state === "future") io.out(`warning  future-snapshot  fetched ${snap.fetched}, ${days(-ageDays)} after today, ${today}: check this machine's clock and the snapshot's date`);
