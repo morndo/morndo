@@ -1312,6 +1312,21 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-sweep-reconciles", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
     find: "      if (retire.length > 0) index.write({ add: null, retire, at: clock.now() });\n", replace: "",
     run: ["apps/connections/test/secrets-service.test.ts"], expect: "the sweep retires what the ledger no longer holds current" },
+  { id: "sp2b-cli-stdin-only", task: "secrets-pr2b", file: "apps/connections/src/secrets-cli.ts",
+    find: "  if (p.positionals.length !== 1) throw new Usage(\"put takes a Reference and reads the value from stdin only\");", replace: "  if (p.positionals.length < 1) throw new Usage(\"put takes a Reference and reads the value from stdin only\");",
+    run: ["apps/connections/test/secrets-cli.test.ts"], expect: "refuses a value in the arguments" },
+  { id: "sp2b-cli-typed-match", task: "secrets-pr2b", file: "apps/connections/src/secrets-cli.ts",
+    find: "if (typed.trim() !== expected)", replace: "if (typed.trim() === \"\")",
+    run: ["apps/connections/test/secrets-cli.test.ts"], expect: "refuses a value in the arguments" },
+  { id: "sp2b-cli-typed-needed", task: "secrets-pr2b", file: "apps/connections/src/secrets-cli.ts",
+    find: "  if (typed === null) throw new Refused(", replace: "  if (typed === null) return { kind: \"principal\", command: home.commandId() };\n  if (false) throw new Refused(",
+    run: ["apps/connections/test/secrets-cli.test.ts"], expect: "enable does" },
+  { id: "sp2b-cli-strip-one", task: "secrets-pr2b", file: "apps/connections/src/secrets-cli.ts",
+    find: "  const strip = !p.flags.has(\"raw\") && piped.length > 0 && piped[piped.length - 1] === 0x0a ? 1 : 0;", replace: "  const strip = 0;",
+    run: ["apps/connections/test/secrets-cli.test.ts"], expect: "strips one trailing newline" },
+  { id: "sp2b-cli-short-warns", task: "secrets-pr2b", file: "apps/connections/src/secrets-cli.ts",
+    find: "  if (!r.value.indexed) io.stderr(", replace: "  if (false) io.stderr(",
+    run: ["apps/connections/test/secrets-cli.test.ts"], expect: "not indexed" },
 ];
 
 // ---- the runner
