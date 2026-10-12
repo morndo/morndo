@@ -2,37 +2,35 @@
 // pieces of the Knowledge context: models.dev's api.json trimmed to a snapshot and judged for freshness, the user's preferences file
 // parsed with a refusal per broken entry, and an SOP step's model class linked to the Scorecard cells of its role group.
 import { MODEL_CLASSES, type ModelClass } from "./knowledge.ts";
+import { isDate, isRec, PREFERENCE_ID, shown, text, utcMs } from "./knowledge-guards.ts";
 import { err, ok, type Result } from "./shared.ts";
+
+export { PREFERENCE_ID };
 
 export const SNAPSHOT_STALE_DAYS = 30;
 
 export type ModelFact = { provider: string; model: string; name: string; family: string | null; context: number | null; output: number | null; inputPrice: number | null; outputPrice: number | null; released: string | null };
 export type ModelSnapshot = { source: string; fetched: string; licence: string; models: ModelFact[] };
 
-type Rec = Record<string, unknown>;
-const isRec = (x: unknown): x is Rec => typeof x === "object" && x !== null && !Array.isArray(x);
-const text = (x: unknown): x is string => typeof x === "string" && x.trim() !== "";
-const shown = (x: unknown): string => (typeof x === "string" ? x : (JSON.stringify(x) ?? "nothing"));
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const numOf = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : null);
 const strOrNull = (x: unknown): x is string | null => typeof x === "string" || x === null;
 const numOrNull = (x: unknown): x is number | null => x === null || (typeof x === "number" && Number.isFinite(x) && x >= 0);
-const utcMs = (date: string): number => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10));
-// A real date round-trips through Date.UTC: 2026-02-30 rolls over into March, so it is not one.
-const isDate = (x: unknown): x is string => typeof x === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x) && new Date(utcMs(x)).toISOString().slice(0, 10) === x;
 
 export function trimModelsDev(api: unknown, meta: { source: string; fetched: string; licence: string }): Result<ModelSnapshot, string> {
   if (!isRec(api)) return err("api.json is a mapping of providers, each mapping model ids to models");
   if (!isDate(meta.fetched)) return err(`fetched must be a real date, YYYY-MM-DD, not '${shown(meta.fetched)}'`);
   if (!text(meta.source) || !text(meta.licence)) return err("source and licence are non-empty strings");
   const models: ModelFact[] = [];
+  // A blank provider or model key is left out with the rest of what can't be kept, so all it keeps reads back (readSnapshot).
   for (const p of Object.keys(api).sort(byText)) {
+    if (!text(p)) continue;
     const provider = api[p];
     const catalog = isRec(provider) ? provider.models : undefined;
     if (!isRec(catalog)) continue; // a provider whose models is not a mapping holds nothing we can keep
     for (const m of Object.keys(catalog).sort(byText)) {
       const raw = catalog[m];
-      if (!isRec(raw)) continue;
+      if (!text(m) || !isRec(raw)) continue;
       const limit = isRec(raw.limit) ? raw.limit : {};
       const cost = isRec(raw.cost) ? raw.cost : {};
       models.push({
@@ -66,29 +64,37 @@ export function readSnapshot(doc: unknown): Result<ModelSnapshot, string> {
   return ok({ source: doc.source, fetched: doc.fetched, licence: doc.licence, models });
 }
 
-export function freshness(fetched: string, today: string): { ageDays: number; stale: boolean } {
+// Fresh up to SNAPSHOT_STALE_DAYS old, stale past it, and future when fetched after today: a wrong clock or a wrong date in the
+// file, an anomaly to warn about, never fresh.
+export type Freshness = { ageDays: number; state: "fresh" | "stale" | "future" };
+
+export function freshness(fetched: string, today: string): Freshness {
   const ageDays = Math.round((utcMs(today) - utcMs(fetched)) / 86_400_000);
-  return { ageDays, stale: ageDays > SNAPSHOT_STALE_DAYS };
+  return { ageDays, state: ageDays < 0 ? "future" : ageDays > SNAPSHOT_STALE_DAYS ? "stale" : "fresh" };
 }
 
 export const PREFERENCE_FIELDS = ["id", "holder", "on", "said", "tasks"] as const;
 
 export type Preference = { id: string; holder: string; on: string; said: string; tasks: string[] };
 
-const PREF_ID = /^[a-z0-9][a-z0-9-]*$/;
-
 export function parsePreferences(doc: unknown): { preferences: Preference[]; refusals: { at: string; message: string }[] } {
   const preferences: Preference[] = [];
   const refusals: { at: string; message: string }[] = [];
   const list = isRec(doc) ? doc.preferences : undefined;
-  if (!Array.isArray(list)) return { preferences, refusals: [{ at: "preferences", message: "a preferences file is a mapping with a preferences list" }] };
+  if (!isRec(doc) || !Array.isArray(list)) return { preferences, refusals: [{ at: "preferences", message: "a preferences file is a mapping with a preferences list" }] };
+  for (const k of Object.keys(doc)) if (k !== "preferences") refusals.push({ at: k, message: `'${k}' is not a field of the preferences file: it holds a preferences list` });
+  // Where each id is used: an id used twice names no one preference, so every entry using it is left out.
+  const places = new Map<unknown, string[]>();
+  (list as unknown[]).forEach((raw, i) => { if (isRec(raw)) places.set(raw.id, [...(places.get(raw.id) ?? []), `preferences[${i}]`]); });
   (list as unknown[]).forEach((raw, i) => {
     const at = `preferences[${i}]`;
     const refuse = (message: string) => refusals.push({ at, message });
     if (!isRec(raw)) return refuse("a preference is a mapping");
     const extra = Object.keys(raw).find(k => !(PREFERENCE_FIELDS as readonly string[]).includes(k));
     if (extra !== undefined) return refuse(`'${extra}' is not a preference field (${PREFERENCE_FIELDS.join(", ")})`);
-    if (!(text(raw.id) && PREF_ID.test(raw.id))) return refuse("id is lowercase letters, digits and hyphens, starting with a letter or a digit");
+    if (!(text(raw.id) && PREFERENCE_ID.test(raw.id))) return refuse("id is lowercase letters, digits and hyphens, starting with a letter or a digit");
+    const same = places.get(raw.id) ?? [];
+    if (same.length > 1) return refuse(`id '${raw.id}' is used by ${same.slice(0, -1).join(", ")} and ${same.at(-1)}: an id names one preference`);
     if (!text(raw.holder)) return refuse("holder is a non-empty string");
     if (!isDate(raw.on)) return refuse("on must be a real date, YYYY-MM-DD");
     if (!text(raw.said)) return refuse("said is a non-empty string");

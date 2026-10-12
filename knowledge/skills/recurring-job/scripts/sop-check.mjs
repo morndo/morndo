@@ -10,6 +10,18 @@ import { fileURLToPath } from "node:url";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
+// packages/domain/src/knowledge-guards.ts
+var isRec = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
+var text = (x) => typeof x === "string" && x.trim() !== "";
+var shown = (x) => typeof x === "string" ? x : JSON.stringify(x) ?? "nothing";
+var utcMs = (date) => /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(`${date}T00:00:00Z`) : NaN;
+var isDate = (x) => {
+  if (typeof x !== "string") return false;
+  const ms = utcMs(x);
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === x;
+};
+var PREFERENCE_ID = /^[a-z0-9][a-z0-9-]*$/;
+
 // packages/domain/src/knowledge.ts
 var MODEL_CLASSES = ["flagship", "everyday", "fast"];
 var SOP_FIELDS = ["sop", "version", "kind", "patterns", "trigger", "inputs", "steps", "gates", "done", "stop", "budget", "report", "metrics"];
@@ -37,15 +49,10 @@ var CRON_RANGES = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]];
 var BLANK = /<[^<>]+>/;
 var AMOUNT = /^(\d+(?:\.\d{1,2})?) ([A-Z]{3})$/;
 var ID = /^[a-z][a-z0-9-]*$/;
-var PREF = /^pref:[a-z0-9][a-z0-9-]*$/;
-var SNAPSHOT = /^models\.dev@\d{4}-\d{2}-\d{2}$/;
 var NO_EVIDENCE = "no evidence: default";
-var isRec = (x) => typeof x === "object" && x !== null && !Array.isArray(x);
-var text = (x) => typeof x === "string" && x.trim() !== "";
 var texts = (x) => Array.isArray(x) && x.length > 0 && x.every(text);
 var oneOf = (list, x) => list.includes(x);
 var rounds = (x) => typeof x === "number" && Number.isInteger(x) && x >= 1 && x <= MAX_ROUNDS;
-var shown = (x) => typeof x === "string" ? x : JSON.stringify(x) ?? "nothing";
 var blank = (x) => typeof x === "string" && BLANK.test(x);
 function amountOf(x) {
   if (x === 0 || x === "0") return { value: 0, currency: null };
@@ -105,18 +112,28 @@ function checkSop(doc, ctx) {
     else for (const p of doc.patterns) if (!oneOf(ctx.skills, p)) refuse("pattern-known", "patterns", `'${shown(p)}' is not a shipped skill`);
   }
   const cite = (c, at) => {
-    if (typeof c === "string" && template && c.startsWith("pref:")) {
-      refuse("preference-in-template", at, "a template cites no preference: a preference is one person's, so only an instance may cite pref:<id> (K12)");
+    const unknown = () => refuse("why-resolves", at, `'${shown(c)}' cites nothing known: a skill, notes/<id>, pref:<id>, models.dev@<date> or '${NO_EVIDENCE}'`);
+    if (typeof c !== "string") return unknown();
+    if (template && c.startsWith("pref:")) {
+      return refuse("preference-in-template", at, "a template cites no preference: a preference is one person's, so only an instance may cite pref:<id> (K12)");
+    }
+    if (c === NO_EVIDENCE || ctx.skills.includes(c)) return;
+    const pref = c.startsWith("pref:") ? c.slice("pref:".length) : "";
+    if (PREFERENCE_ID.test(pref)) {
+      if (ctx.preferences === void 0) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no preferences file was given` });
+      else if (!ctx.preferences.has(pref)) refuse("why-resolves", at, `${c} is no preference of the preferences file`);
       return;
     }
-    if (typeof c === "string" && (c === NO_EVIDENCE || PREF.test(c) || SNAPSHOT.test(c) || ctx.skills.includes(c))) return;
-    if (typeof c === "string" && c.startsWith("notes/")) {
-      const due = ctx.notes.get(c.slice("notes/".length));
-      if (due === void 0) refuse("why-resolves", at, `${c} is not a note of the recurring-job skill`);
-      else if (ctx.today > due) warnings.push({ rule: "stale-citation", at, message: `${c} was due for a re-read on ${due}` });
+    const fetched = c.startsWith("models.dev@") ? c.slice("models.dev@".length) : "";
+    if (isDate(fetched)) {
+      if (ctx.snapshots === void 0) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no snapshot directory was given` });
+      else if (!ctx.snapshots.has(fetched)) refuse("why-resolves", at, `${c} is no snapshot of the snapshot directory`);
       return;
     }
-    refuse("why-resolves", at, `'${shown(c)}' cites nothing known: a skill, notes/<id>, pref:<id>, models.dev@<date> or '${NO_EVIDENCE}'`);
+    if (!c.startsWith("notes/")) return unknown();
+    const due = ctx.notes.get(c.slice("notes/".length));
+    if (due === void 0) refuse("why-resolves", at, `${c} is not a note of the recurring-job skill`);
+    else if (ctx.today > due) warnings.push({ rule: "stale-citation", at, message: `${c} was due for a re-read on ${due}` });
   };
   const steps = Array.isArray(doc.steps) ? doc.steps : [];
   if (has("steps") && steps.length === 0) refuse("shape", "steps", "an SOP has at least one step");
@@ -229,10 +246,43 @@ function checkSop(doc, ctx) {
   return { refusals, warnings };
 }
 
+// packages/domain/src/knowledge-facts.ts
+var PREFERENCE_FIELDS = ["id", "holder", "on", "said", "tasks"];
+function parsePreferences(doc) {
+  const preferences = [];
+  const refusals = [];
+  const list = isRec(doc) ? doc.preferences : void 0;
+  if (!isRec(doc) || !Array.isArray(list)) return { preferences, refusals: [{ at: "preferences", message: "a preferences file is a mapping with a preferences list" }] };
+  for (const k of Object.keys(doc)) if (k !== "preferences") refusals.push({ at: k, message: `'${k}' is not a field of the preferences file: it holds a preferences list` });
+  const places = /* @__PURE__ */ new Map();
+  list.forEach((raw, i) => {
+    if (isRec(raw)) places.set(raw.id, [...places.get(raw.id) ?? [], `preferences[${i}]`]);
+  });
+  list.forEach((raw, i) => {
+    const at = `preferences[${i}]`;
+    const refuse = (message) => refusals.push({ at, message });
+    if (!isRec(raw)) return refuse("a preference is a mapping");
+    const extra = Object.keys(raw).find((k) => !PREFERENCE_FIELDS.includes(k));
+    if (extra !== void 0) return refuse(`'${extra}' is not a preference field (${PREFERENCE_FIELDS.join(", ")})`);
+    if (!(text(raw.id) && PREFERENCE_ID.test(raw.id))) return refuse("id is lowercase letters, digits and hyphens, starting with a letter or a digit");
+    const same = places.get(raw.id) ?? [];
+    if (same.length > 1) return refuse(`id '${raw.id}' is used by ${same.slice(0, -1).join(", ")} and ${same.at(-1)}: an id names one preference`);
+    if (!text(raw.holder)) return refuse("holder is a non-empty string");
+    if (!isDate(raw.on)) return refuse("on must be a real date, YYYY-MM-DD");
+    if (!text(raw.said)) return refuse("said is a non-empty string");
+    if (!Array.isArray(raw.tasks) || raw.tasks.length === 0 || !raw.tasks.every(text)) return refuse("tasks is a non-empty list of task names");
+    preferences.push({ id: raw.id, holder: raw.holder, on: raw.on, said: raw.said, tasks: raw.tasks });
+  });
+  return { preferences, refusals };
+}
+
+// knowledge/tools/shared.ts
+var firstLine = (e) => (e instanceof Error ? e.message : String(e)).split("\n")[0] ?? "";
+var SNAPSHOT_FILE = /^(\d{4}-\d{2}-\d{2})\.json$/;
+
 // knowledge/tools/sop-check/cli.ts
 var DEFAULT_ROLES = ["plan", "implement-backend", "implement-ui", "implement-infra", "validate", "review", "research", "read-long", "images", "video"];
-var USAGE = "usage: sop-check <sop.yaml> [--roles plan,review,...] [--today YYYY-MM-DD]";
-var firstLine = (e) => (e instanceof Error ? e.message : String(e)).split("\n")[0] ?? "";
+var USAGE = "usage: sop-check <sop.yaml> [--roles plan,review,...] [--today YYYY-MM-DD] [--preferences <preferences.yaml>] [--snapshots <models-dev cache dir>]";
 var FRONT = /^---\r?\n([\s\S]*?)\r?\n---/;
 var isTimeZone = (tz) => {
   try {
@@ -247,6 +297,19 @@ async function yamlParse() {
     return (await import("yaml")).parse;
   } catch {
     return null;
+  }
+}
+function readYaml(file, parse) {
+  let text2;
+  try {
+    text2 = readFileSync(file, "utf8");
+  } catch (e) {
+    return { line: `sop-check: can't read ${file}: ${firstLine(e)}` };
+  }
+  try {
+    return { doc: parse(text2) };
+  } catch (e) {
+    return { line: `sop-check: ${file} is not YAML: ${firstLine(e)}` };
   }
 }
 function notesIn(dir, parse) {
@@ -265,14 +328,18 @@ async function run(args, io) {
     let file = "";
     let roles = DEFAULT_ROLES;
     let today = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+    let preferencesFile = null;
+    let snapshotsDir = null;
     for (let i = 0; i < args.length; i++) {
       const a = args[i] ?? "";
       if (a === "--roles") roles = (args[++i] ?? "").split(",").map((r) => r.trim()).filter(Boolean);
       else if (a === "--today") today = args[++i] ?? "";
+      else if (a === "--preferences") preferencesFile = args[++i] ?? "";
+      else if (a === "--snapshots") snapshotsDir = args[++i] ?? "";
       else if (!a.startsWith("--") && !file) file = a;
       else file = "\0";
     }
-    if (!file || file === "\0" || roles.length === 0 || !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    if (!file || file === "\0" || roles.length === 0 || !isDate(today) || preferencesFile === "" || snapshotsDir === "") {
       io.err(USAGE);
       return 2;
     }
@@ -281,28 +348,42 @@ async function run(args, io) {
       io.err(`sop-check: the yaml package is missing; run npm install in ${io.skillDir} once`);
       return 2;
     }
-    let text2;
-    try {
-      text2 = readFileSync(file, "utf8");
-    } catch (e) {
-      io.err(`sop-check: can't read ${file}: ${firstLine(e)}`);
+    const sopFile = readYaml(file, parse);
+    if ("line" in sopFile) {
+      io.err(sopFile.line);
       return 2;
     }
-    let doc;
-    try {
-      doc = parse(text2);
-    } catch (e) {
-      io.err(`sop-check: ${file} is not YAML: ${firstLine(e)}`);
-      return 2;
+    const doc = sopFile.doc;
+    let preferences;
+    let leftOut = [];
+    if (preferencesFile !== null) {
+      const prefFile = readYaml(preferencesFile, parse);
+      if ("line" in prefFile) {
+        io.err(prefFile.line);
+        return 2;
+      }
+      const parsed = parsePreferences(prefFile.doc);
+      preferences = new Set(parsed.preferences.map((p) => p.id));
+      leftOut = parsed.refusals;
+    }
+    let snapshots;
+    if (snapshotsDir !== null) {
+      try {
+        snapshots = new Set(readdirSync(snapshotsDir).flatMap((n) => SNAPSHOT_FILE.exec(n)?.[1] ?? []));
+      } catch (e) {
+        io.err(`sop-check: can't read ${snapshotsDir}: ${firstLine(e)}`);
+        return 2;
+      }
     }
     const skillsDir = dirname(io.skillDir);
     const skills = readdirSync(skillsDir, { withFileTypes: true }).filter((d) => (d.isDirectory() || d.isSymbolicLink()) && existsSync(join(skillsDir, d.name, "SKILL.md"))).map((d) => d.name);
     const notes = notesIn(join(io.skillDir, "references"), parse);
-    const { refusals, warnings } = checkSop(doc, { skills, notes, roles, today, isTimeZone });
+    const { refusals, warnings } = checkSop(doc, { skills, notes, roles, today, isTimeZone, ...preferences && { preferences }, ...snapshots && { snapshots } });
     const sop = doc?.sop;
     const name = typeof sop === "string" ? sop : basename(file);
     for (const r of refusals) io.out(`refused  ${r.rule}  ${r.at}  ${r.message}`);
     for (const w of warnings) io.out(`warning  ${w.rule}  ${w.at}  ${w.message}`);
+    for (const r of leftOut) io.out(`warning  preference-left-out  ${r.at}  ${r.message}`);
     io.out(refusals.length === 0 ? `${name}: passes` : `${name}: ${refusals.length} refusal${refusals.length === 1 ? "" : "s"}`);
     return refusals.length === 0 ? 0 : 1;
   } catch (e) {

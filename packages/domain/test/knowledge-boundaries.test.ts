@@ -4,37 +4,48 @@
 // the terms. Each matcher is proven by a planted line it must flag, so a passing walk means something; the walks are proven on a
 // made-up repository to read what it ships and nothing else.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, relative } from "node:path";
-import { afterAll, describe, expect, it } from "vitest";
+import { basename, dirname, join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as domain from "../src/index.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
+// The one hook that reads the repository gets a minute of its own, so a loaded machine slows it without failing it; the
+// tests then only match text already read.
+const READ_TIMEOUT_MS = 60_000;
 
 export type Walked = { path: string; text: string };
-const walk = (dir: string, skip: readonly string[], tsOnly: boolean): string[] =>
-  readdirSync(dir, { withFileTypes: true }).flatMap(e => {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) return skip.includes(e.name) ? [] : walk(p, skip, tsOnly);
-    return tsOnly && !e.name.endsWith(".ts") ? [] : [p];
-  });
-// Every .ts file under packages/*/src or apps/*/src, by its repository-relative path.
-export const packageSources = (): Walked[] =>
-  ["packages", "apps"].flatMap(top =>
-    readdirSync(join(ROOT, top), { withFileTypes: true })
-      .filter(e => e.isDirectory() && existsSync(join(ROOT, top, e.name, "src")))
-      .flatMap(e => walk(join(ROOT, top, e.name, "src"), ["node_modules"], true))
-      .map(p => ({ path: relative(ROOT, p), text: readFileSync(p, "utf8") })));
+// git in root, without any GIT_* variable a hook may have set, so it works on root's own repository.
+const git = (root: string, args: readonly string[]): string =>
+  execFileSync("git", args, { cwd: root, env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("GIT_"))), encoding: "utf8", maxBuffer: 64 << 20 });
+// The files root's repository would ship, by root-relative path: tracked, or new and not ignored, and on disk, sorted. One
+// list from git, so a run reads the same files whatever else lies in the folder (.gitignore leaves out build output and the
+// lanes' worktrees under .worktrees/).
+export const shippedFiles = (root: string): string[] => {
+  const listed = git(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  return [...new Set(listed.split("\0"))].filter(p => p !== "" && existsSync(join(root, p))).sort();
+};
+const SOURCE = /^(?:packages|apps)\/[^/]+\/src\/.+\.ts$/;
+// Every .ts file under packages/*/src or apps/*/src that root ships, read at once.
+export const packageSources = async (root: string): Promise<Walked[]> =>
+  Promise.all(shippedFiles(root).filter(p => SOURCE.test(p)).map(async path => ({ path, text: await readFile(join(root, path), "utf8") })));
+let sources: Walked[] = [];
+beforeAll(async () => {
+  sources = await packageSources(ROOT);
+}, READ_TIMEOUT_MS);
 // The files, other than the allowed ones, whose text holds any of the banned strings: their paths.
 export const offenders = (files: readonly Walked[], banned: readonly string[], allowed: readonly string[]): string[] =>
   files.filter(f => !allowed.includes(f.path) && banned.some(b => f.text.includes(b))).map(f => f.path);
 
 describe("knowledge never routes (K9)", () => {
-  const banned = ["knowledge.ts", "knowledge-facts.ts", "checkSop", "scorecardFor", "parsePreferences"];
-  const allowed = ["packages/domain/src/knowledge.ts", "packages/domain/src/knowledge-facts.ts", "packages/domain/src/index.ts"];
+  const banned = ["knowledge.ts", "knowledge-facts.ts", "knowledge-guards", "checkSop", "scorecardFor", "parsePreferences"];
+  const allowed = ["packages/domain/src/knowledge.ts", "packages/domain/src/knowledge-facts.ts", "packages/domain/src/knowledge-guards.ts", "packages/domain/src/index.ts"];
   it("no other source under packages/*/src or apps/*/src names the knowledge modules or their functions", () => {
-    expect(offenders(packageSources(), banned, allowed)).toEqual([]);
+    // The walk read the knowledge modules themselves, so an empty list can't pass for a clean one.
+    expect(allowed.filter(p => !sources.some(f => f.path === p))).toEqual([]);
+    expect(offenders(sources, banned, allowed)).toEqual([]);
   });
   it("the same matcher flags a planted import", () => {
     const planted = [{ path: "apps/hub/src/adapters/planted.ts", text: 'import { scorecardFor } from "@morndo/domain";' }];
@@ -47,7 +58,7 @@ describe("the snapshot never feeds a gate (K13)", () => {
   // knowledge.ts names the citation form models.dev@<date>; it reads no snapshot.
   const allowed = ["packages/domain/src/knowledge-facts.ts", "packages/domain/src/knowledge.ts", "packages/domain/src/index.ts"];
   it("no source outside knowledge-facts names the snapshot's source or its reader", () => {
-    expect(offenders(packageSources(), banned, allowed)).toEqual([]);
+    expect(offenders(sources, banned, allowed)).toEqual([]);
   });
   it("the same matcher flags a planted read", () => {
     const planted = [{ path: "apps/hub/src/adapters/planted.ts", text: "const snapshot = readSnapshot(doc);" }];
@@ -55,9 +66,8 @@ describe("the snapshot never feeds a gate (K13)", () => {
   });
 });
 
-// Every preferences.yaml or .yml under root, by its root-relative path.
-export const preferencesFiles = (root: string): string[] =>
-  walk(root, ["node_modules", ".git", "dist"], false).filter(p => ["preferences.yaml", "preferences.yml"].includes(basename(p))).map(p => relative(root, p));
+// Every preferences.yaml or .yml root ships, by its root-relative path.
+export const preferencesFiles = (root: string): string[] => shippedFiles(root).filter(p => ["preferences.yaml", "preferences.yml"].includes(basename(p)));
 
 describe("shipped knowledge holds no user's preferences (K12)", () => {
   it("no file in the repository is a preferences.yaml", () => {
@@ -74,7 +84,7 @@ describe("the walks read what the repository ships, the same files on every run"
     mkdirSync(dirname(join(repo, path)), { recursive: true });
     writeFileSync(join(repo, path), text);
   };
-  execFileSync("git", ["init", "--quiet", repo]);
+  git(repo, ["init", "--quiet"]);
   put(".gitignore", ".worktrees/\nbuild/\n");
   put("packages/one/src/b.ts", "export const b = 1;\n");
   put("packages/one/src/a/z.ts", "export const z = 1;\n");

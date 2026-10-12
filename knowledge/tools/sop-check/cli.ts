@@ -1,10 +1,15 @@
 // sop-check's command line (ADR-0026, K10 and K14). It reads an SOP, the skills installed beside the recurring-job skill,
-// the notes in that skill's references and the engine layer's roles, judges the SOP with the domain's checkSop, and
-// prints one line per refusal or warning. Exit 0: passes. 1: refused. 2: a bad call, or anything unexpected, as one line.
-// main.ts wires the real process; build.ts bundles both, and the domain's rules, into the skill's scripts/sop-check.mjs.
+// the notes in that skill's references and the engine layer's roles, and, when given, the user's preferences file and model
+// snapshot directory, judges the SOP with the domain's checkSop, and prints one line per refusal or warning, then one per
+// entry the preferences file left out. Exit 0: passes. 1: refused. 2: a bad call, a file it can't read, or anything
+// unexpected, as one line. main.ts wires the real process; build.ts bundles both, and the domain's rules, into the skill's
+// scripts/sop-check.mjs.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { parsePreferences } from "../../../packages/domain/src/knowledge-facts.ts";
+import { isDate } from "../../../packages/domain/src/knowledge-guards.ts";
 import { checkSop } from "../../../packages/domain/src/knowledge.ts";
+import { firstLine, SNAPSHOT_FILE } from "../shared.ts";
 
 // The engine layer's default roles, as its `engines get --json` lists them (recorded in
 // apps/hub/test/fixtures/engines-defaults.json; a test holds the two equal). Other roles come with --roles.
@@ -13,8 +18,7 @@ export const DEFAULT_ROLES: readonly string[] = ["plan", "implement-backend", "i
 export type Io = { skillDir: string; out: (line: string) => void; err: (line: string) => void };
 type Parse = (text: string) => unknown;
 
-const USAGE = "usage: sop-check <sop.yaml> [--roles plan,review,...] [--today YYYY-MM-DD]";
-const firstLine = (e: unknown) => (e instanceof Error ? e.message : String(e)).split("\n")[0] ?? "";
+const USAGE = "usage: sop-check <sop.yaml> [--roles plan,review,...] [--today YYYY-MM-DD] [--preferences <preferences.yaml>] [--snapshots <models-dev cache dir>]";
 const FRONT = /^---\r?\n([\s\S]*?)\r?\n---/;
 
 const isTimeZone = (tz: string) => {
@@ -32,6 +36,21 @@ async function yamlParse(): Promise<Parse | null> {
     return ((await import("yaml")) as { parse: Parse }).parse;
   } catch {
     return null;
+  }
+}
+
+// A YAML file's document, or the one line that says why not.
+function readYaml(file: string, parse: Parse): { doc: unknown } | { line: string } {
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch (e) {
+    return { line: `sop-check: can't read ${file}: ${firstLine(e)}` };
+  }
+  try {
+    return { doc: parse(text) };
+  } catch (e) {
+    return { line: `sop-check: ${file} is not YAML: ${firstLine(e)}` };
   }
 }
 
@@ -53,14 +72,18 @@ export async function run(args: readonly string[], io: Io): Promise<number> {
     let file = "";
     let roles = DEFAULT_ROLES;
     let today = new Date().toISOString().slice(0, 10);
+    let preferencesFile: string | null = null;
+    let snapshotsDir: string | null = null;
     for (let i = 0; i < args.length; i++) {
       const a = args[i] ?? "";
       if (a === "--roles") roles = (args[++i] ?? "").split(",").map(r => r.trim()).filter(Boolean);
       else if (a === "--today") today = args[++i] ?? "";
+      else if (a === "--preferences") preferencesFile = args[++i] ?? "";
+      else if (a === "--snapshots") snapshotsDir = args[++i] ?? "";
       else if (!a.startsWith("--") && !file) file = a;
       else file = "\0";
     }
-    if (!file || file === "\0" || roles.length === 0 || !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    if (!file || file === "\0" || roles.length === 0 || !isDate(today) || preferencesFile === "" || snapshotsDir === "") {
       io.err(USAGE);
       return 2;
     }
@@ -69,19 +92,34 @@ export async function run(args: readonly string[], io: Io): Promise<number> {
       io.err(`sop-check: the yaml package is missing; run npm install in ${io.skillDir} once`);
       return 2;
     }
-    let text: string;
-    try {
-      text = readFileSync(file, "utf8");
-    } catch (e) {
-      io.err(`sop-check: can't read ${file}: ${firstLine(e)}`);
+    const sopFile = readYaml(file, parse);
+    if ("line" in sopFile) {
+      io.err(sopFile.line);
       return 2;
     }
-    let doc: unknown;
-    try {
-      doc = parse(text);
-    } catch (e) {
-      io.err(`sop-check: ${file} is not YAML: ${firstLine(e)}`);
-      return 2;
+    const doc = sopFile.doc;
+    // The ids the preferences file holds, and each entry it left out, said as a warning: a citation of one is refused.
+    let preferences: ReadonlySet<string> | undefined;
+    let leftOut: { at: string; message: string }[] = [];
+    if (preferencesFile !== null) {
+      const prefFile = readYaml(preferencesFile, parse);
+      if ("line" in prefFile) {
+        io.err(prefFile.line);
+        return 2;
+      }
+      const parsed = parsePreferences(prefFile.doc);
+      preferences = new Set(parsed.preferences.map(p => p.id));
+      leftOut = parsed.refusals;
+    }
+    // The dates of the snapshots in the directory, by their file names, as models-dev writes them.
+    let snapshots: ReadonlySet<string> | undefined;
+    if (snapshotsDir !== null) {
+      try {
+        snapshots = new Set(readdirSync(snapshotsDir).flatMap(n => SNAPSHOT_FILE.exec(n)?.[1] ?? []));
+      } catch (e) {
+        io.err(`sop-check: can't read ${snapshotsDir}: ${firstLine(e)}`);
+        return 2;
+      }
     }
 
     const skillsDir = dirname(io.skillDir);
@@ -89,11 +127,12 @@ export async function run(args: readonly string[], io: Io): Promise<number> {
       .filter(d => (d.isDirectory() || d.isSymbolicLink()) && existsSync(join(skillsDir, d.name, "SKILL.md")))
       .map(d => d.name);
     const notes = notesIn(join(io.skillDir, "references"), parse);
-    const { refusals, warnings } = checkSop(doc, { skills, notes, roles, today, isTimeZone });
+    const { refusals, warnings } = checkSop(doc, { skills, notes, roles, today, isTimeZone, ...(preferences && { preferences }), ...(snapshots && { snapshots }) });
     const sop = (doc as { sop?: unknown } | null)?.sop;
     const name = typeof sop === "string" ? sop : basename(file);
     for (const r of refusals) io.out(`refused  ${r.rule}  ${r.at}  ${r.message}`);
     for (const w of warnings) io.out(`warning  ${w.rule}  ${w.at}  ${w.message}`);
+    for (const r of leftOut) io.out(`warning  preference-left-out  ${r.at}  ${r.message}`);
     io.out(refusals.length === 0 ? `${name}: passes` : `${name}: ${refusals.length} refusal${refusals.length === 1 ? "" : "s"}`);
     return refusals.length === 0 ? 0 : 1;
   } catch (e) {

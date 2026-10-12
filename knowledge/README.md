@@ -27,7 +27,7 @@ npm run knowledge:sop-check -- knowledge/skills/recurring-job/assets/daily-blog-
 # daily-blog-post: passes
 ```
 
-It exits 1 with one line per refusal, each naming its rule and step, and 2 on a bad call or anything unexpected, as one line. Its rules are pure, in `packages/domain/src/knowledge.ts`; the skill lists them. `--roles` names the engine layer's roles when they differ from the defaults; `--today` sets the date the notes' staleness is judged on.
+It exits 1 with one line per refusal, each naming its rule and step, and 2 on a bad call or anything unexpected, as one line. Its rules are pure, in `packages/domain/src/knowledge.ts`; the skill lists them. `--roles` names the engine layer's roles when they differ from the defaults; `--today` sets the date the notes' staleness is judged on; `--preferences <file>` and `--snapshots <dir>` resolve an instance's `pref:<id>` and `models.dev@<date>` citations, which without them are checked for their form only, with a warning.
 
 `scripts/sop-check.mjs` is generated: `npm run knowledge:build` bundles `knowledge/tools/sop-check/` and the domain's rules into it, and a test fails when it differs from a fresh build. A copy of the skill runs it with Node 20 or later after `npm install` in the skill's folder, which installs the one package it leaves out (yaml, pinned in the skill's `package.json`).
 
@@ -37,7 +37,7 @@ The recurring-job skill's `references/` holds the notes its SOPs cite as `notes/
 
 ## Model facts
 
-`npm run knowledge:models -- refresh` fetches models.dev's model list once (MIT licence) and writes a dated, trimmed snapshot to `~/.cache/morndo-knowledge/models-dev/`: provider, model, context, output limit, prices per million tokens and release date, with the source and the licence. `npm run knowledge:models -- show [provider[/model]]` prints the newest one, with a warning once it is older than 30 days. Nothing in this repository holds a copy, and no code that routes or gates work reads it.
+`npm run knowledge:models -- refresh` fetches models.dev's model list once (MIT licence), each request within 60 seconds, and writes a trimmed snapshot dated today to `~/.cache/morndo-knowledge/models-dev/`, whole or not at all: provider, model, context, output limit, prices per million tokens and release date, with the source and the licence. `npm run knowledge:models -- show [provider[/model]]` prints the newest snapshot that reads, naming any newer one it skipped, with a warning once it is older than 30 days or if it is dated after today. Nothing in this repository holds a copy, and no code that routes or gates work reads it.
 
 ## Install
 
