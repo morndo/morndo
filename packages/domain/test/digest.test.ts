@@ -590,6 +590,45 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row).toMatchObject({ claims: 1, laterFailed: 1 });
     expect(row?.levels).toEqual([{ level: "claimed", claims: 1, laterFailed: 1 }]);
   });
+  it("a claim on a task is one count with its linked change's claim, judged with the change's evidence (§3.1)", () => {
+    const t12 = task(12);
+    const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN }];
+    const sources: ClaimSource[] = [
+      { subject: c7, revision: a1, at: NOW, via: "filed" },
+      { subject: t12, revision: a1, at: NOW + MIN, via: "review" },       // T-12 moved to review at #87's head
+    ];
+    expect(countedClaims(sources, links)).toEqual([{ subject: c7, revision: a1, at: NOW }]);
+    const r = records({
+      claimSources: sources,
+      claimRounds: [{ subject: t12, at: NOW + MIN }],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", at: NOW })],
+      links,
+      evidence: [
+        evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
+        evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW + 2 * DAY }),
+      ],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
+    expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
+    expect(row?.levels).toEqual([{ level: "reviewed", claims: 1, laterFailed: 0 }]);
+  });
+  it("a failure recorded on the linked change fails the task's claim (DG12)", () => {
+    const t12 = task(12);
+    const r = records({
+      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
+      claimRounds: [{ subject: t12, at: NOW }],
+      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN }],
+      evidence: [
+        evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
+        evidence({ subject: c7, revision: a1, kind: "ci", result: "fail", at: NOW + 10 * DAY }),
+      ],
+      claimFailures: [{ subject: c7, revision: a1, at: NOW + 10 * DAY, via: "evidence" }],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 11 * DAY);
+    expect(row).toMatchObject({ claims: 1, laterFailed: 1 });
+    expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 1 }]);
+  });
   it("the weekly columns are counts of records: shipped, merged, reverted, done with its times, deploys, stuck", () => {
     const t1 = taskKey(1), t2 = taskKey(2), t3 = taskKey(3);
     const r = records({
