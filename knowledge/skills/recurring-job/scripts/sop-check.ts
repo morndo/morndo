@@ -53,7 +53,15 @@ for (const f of existsSync(notesDir) ? readdirSync(notesDir).filter(n => n.endsW
   if (typeof meta?.note === "string" && typeof meta.recheck === "string") notes.set(meta.note, meta.recheck);
 }
 
-const { refusals, warnings } = checkSop(doc, { skills, notes, roles, today });
+const isTimeZone = (tz: string) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+const { refusals, warnings } = checkSop(doc, { skills, notes, roles, today, isTimeZone });
 const name = typeof (doc as { sop?: unknown } | null)?.sop === "string" ? (doc as { sop: string }).sop : basename(file);
 for (const r of refusals) process.stdout.write(`refused  ${r.rule}  ${r.at}  ${r.message}\n`);
 for (const w of warnings) process.stdout.write(`warning  ${w.rule}  ${w.at}  ${w.message}\n`);

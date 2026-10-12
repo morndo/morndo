@@ -119,8 +119,9 @@ describe("a template keeps its blanks, an instance fills them", () => {
   it("a template may keep its schedule blank, but a filled-in one must still be valid", () => {
     expect(broken(s => { s.trigger = { schedule: { cron: "0 25 * * *", timezone: "<IANA zone>" } }; })).toEqual(["trigger"]);
   });
-  it("kind is template or instance, and an SOP without one is an instance", () => {
-    expect(broken(s => { s.kind = "draft"; })).toEqual(["shape"]);
+  it("kind is template or instance; an SOP without one, or with another, is judged as an instance", () => {
+    const unknown = broken(s => { s.kind = "draft"; });
+    expect([unknown[0], unknown.includes("blanks-filled")]).toEqual(["shape", true]);
     expect(broken(s => { delete s.kind; })).toContain("blanks-filled");
   });
 });
