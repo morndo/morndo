@@ -187,8 +187,10 @@ export class SqliteSecrets implements SecretsDirectory {
       for (const g of s.grants) this.#insertGrant.run(s.reference, JSON.stringify(g));
     }
     for (const [i, e] of dir.ledger.entries()) {
-      const ref = refs.get(key(e.reference, e.version)) ?? null;
+      const k = key(e.reference, e.version);
       const old = was.ledger[i];
+      // A row the change names sets the ref, null clearing it; an entry it leaves out keeps the stored one (review 9).
+      const ref = refs.has(k) ? refs.get(k) ?? null : old ? before.vaults[i]?.ref ?? null : null;
       if (!old) this.#insertVersion.run(e.reference, e.version, e.fingerprint, e.state, ref);
       else if (old.state !== e.state || before.vaults[i]?.ref !== ref) this.#updateVersion.run(e.state, ref, e.reference, e.version);
     }

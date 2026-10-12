@@ -1461,6 +1461,9 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-r8-every-expiry", task: "secrets-pr2b", file: "packages/domain/src/secrets.ts",
     find: "all.every(x => expiry > x.at)", replace: "expiry > c.at",
     run: ["packages/domain/test/secrets-round9.test.ts"], expect: "to be 'expiry'" },
+  { id: "sp2b-r9-keep-untouched-ref", task: "secrets-pr2b", file: "apps/connections/src/adapters/secrets-sqlite.ts",
+    find: "refs.has(k) ? refs.get(k) ?? null : old ? before.vaults[i]?.ref ?? null : null", replace: "refs.get(k) ?? null",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "review point 9" },
 ];
 
 // ---- the runner
