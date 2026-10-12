@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { RefNotRemoved } from "../application/ports.ts";
 import { assertPrivate } from "./file-mode.ts";
 
 export const SECRET_REF = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -26,18 +27,27 @@ export function refFiles(dir: string, ref: string): { values: string[]; mark: st
   return { values: [secretPath(dir, ref), secretPath(dir, ref, SEALED_SUFFIX)], mark: secretPath(dir, ref, MARK_SUFFIX) };
 }
 
-// Removes every file of `ref` there is, each checked private first. A ref with no value file is refused or passed over,
-// as `missing` says.
-export function removeRef(dir: string, ref: string, uid: number, missing: "refuse" | "pass"): void {
+// Removes every file of `ref` there is, the value files first, each checked private before it goes. When one can't be
+// removed after another went, RefNotRemoved names exactly what went and what is left; when the first can't, nothing went
+// and its own error (a FileRefused, say) is thrown as it is. A ref with no value file throws RefNotRemoved too, after its
+// stray mark is removed, so none is left to fail every later removal (round 3, point 5).
+export function removeRef(dir: string, ref: string, uid: number): void {
   const { values, mark } = refFiles(dir, ref);
-  const present = values.filter(path => existsSync(path));
-  if (present.length === 0 && missing === "refuse") throw new Error(`no file of ${ref} in ${dir}, plaintext or sealed: nothing was removed`);
-  for (const path of [...present, mark]) {
-    if (!existsSync(path)) continue;
-    assertPrivate(dir, "dir", uid);
-    assertPrivate(path, "file", uid);
-    unlinkSync(path);
+  const present = [...values, mark].filter(path => existsSync(path));
+  const missing = !values.some(path => present.includes(path));
+  const removed: string[] = [];
+  for (const [i, path] of present.entries()) {
+    try {
+      assertPrivate(dir, "dir", uid);
+      assertPrivate(path, "file", uid);
+      unlinkSync(path);
+    } catch (error) {
+      if (removed.length === 0) throw error;
+      throw new RefNotRemoved(ref, removed, present.slice(i).map(p => basename(p)), missing, error);
+    }
+    removed.push(basename(path));
   }
+  if (missing) throw new RefNotRemoved(ref, removed, [], true);
 }
 
 // The refs a vault directory's file names stand for, that start with `prefix`: a name is the ref plus the vault's

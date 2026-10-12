@@ -3,7 +3,7 @@
 // made the same way. The keyed fingerprint is HMAC-SHA-256 under a key of this fake node.
 import { createHmac } from "node:crypto";
 import { VALUE_MAX_BYTES } from "@morndo/node-ops";
-import type { SealedProblem, SealedStore } from "../src/application/ports.ts";
+import { RefNotRemoved, type SealedProblem, type SealedStore } from "../src/application/ports.ts";
 
 export class MemorySealedStore implements SealedStore {
   readonly files = new Map<string, Uint8Array>();
@@ -42,7 +42,8 @@ export class MemorySealedStore implements SealedStore {
     return doc ? this.#fingerprint(doc.value) : null;
   }
 
-  remove(ref: string): void { this.files.delete(ref); }
+  // As the vaults do: a ref with no file is reported, never passed over (round 3, point 5).
+  remove(ref: string): void { if (!this.files.delete(ref)) throw new RefNotRemoved(ref, [], [], true); }
 
   refs(prefix: string, writtenBefore: number): readonly string[] {
     return [...this.files.keys()].filter(r => r.startsWith(prefix) && (this.writtenAt.get(r) ?? 0) < writtenBefore).sort();

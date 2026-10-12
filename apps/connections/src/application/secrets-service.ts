@@ -8,8 +8,9 @@ import {
   ungrantSecret, type Actor, type GrantSubject, type Result, type SecretDirectory, type SecretEvent, type SecretGrant, type SecretProblem,
   type SecretRefusal, type ShapeInput,
 } from "@morndo/domain";
-import type {
-  Clock, Ids, IndexWriter, SealedProblem, SealedStore, SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRoots, WorkspaceRow,
+import {
+  RefNotRemoved, type Clock, type Ids, type IndexWriter, type SealedProblem, type SealedStore, type SecretsDirectory, type SecretsState,
+  type VaultRefRow, type WorkspaceRoots, type WorkspaceRow,
 } from "./ports.ts";
 
 // How long an unreferenced vault file is left alone: a store writes its file before its transaction, so a younger one may
@@ -90,12 +91,12 @@ export class SecretsService {
       });
     } catch (error) {
       const left: string[] = [];
-      this.#removeOr(ref, left);
+      this.#removeOr(ref, left, "gone is fine");
       throw left.length > 0 ? new LeftBehind(error, left) : error;
     }
     if (!outcome.ok) {
       const left: string[] = [];
-      this.#removeOr(ref, left);
+      this.#removeOr(ref, left, "gone is fine");
       return left.length > 0 ? err({ ...outcome.error, left }) : outcome;
     }
     // After the commit: each step runs whatever the one before it did, and a failure is named, not thrown (review 4).
@@ -175,7 +176,7 @@ export class SecretsService {
       const kept = new Set<string>();
       for (const v of state.vaults) if (v.ref !== null) kept.add(v.ref);
       const gone = vault.refs("s-", clock.now() - SWEEP_GRACE_MS).filter(ref => !kept.has(ref));
-      for (const ref of gone) vault.remove(ref);
+      for (const ref of gone) removeIfThere(vault, ref);
       const retire = state.directory.ledger.filter(e => e.state !== "current").map(e => ({ reference: e.reference, version: e.version }));
       if (retire.length > 0) index.write({ add: null, retire, at: clock.now() });
       return { next: null, result: gone };
@@ -214,9 +215,12 @@ export class SecretsService {
     }
   }
 
-  #removeOr(ref: string, left: string[]): void {
-    try { this.#deps.vault.remove(ref); } catch (error) {
-      left.push(`vault: the file of ${ref} was not removed (${messageOf(error)}); a sweep on the age vault removes one no version refers to`);
+  // `gone is fine` for a store's own new file, which a sweep may have removed already; a version's file must be there.
+  #removeOr(ref: string, left: string[], gone?: "gone is fine"): void {
+    try {
+      if (gone) removeIfThere(this.#deps.vault, ref); else this.#deps.vault.remove(ref);
+    } catch (error) {
+      left.push(`vault: ${error instanceof RefNotRemoved ? error.message : `${ref}: ${messageOf(error)}`}`);
     }
   }
 
@@ -229,6 +233,13 @@ export class SecretsService {
       index.write({ add: null, retire: [{ reference, version }], at: clock.now() });
       return { next: null, result: null };
     });
+  }
+}
+
+// Removes the ref's files, a ref with none already being gone; whatever can't be removed is still thrown.
+function removeIfThere(vault: SealedStore, ref: string): void {
+  try { vault.remove(ref); } catch (error) {
+    if (!(error instanceof RefNotRemoved && error.missing && error.left.length === 0)) throw error;
   }
 }
 

@@ -58,10 +58,10 @@ export class FileVault implements Vault, SealedStore {
   }
 
   // Every file of the ref, whichever vault wrote it, so a revoke or delete run on this vault still destroys a value the
-  // age vault holds (round 2, points 2 and 5; secret-ref.ts removeRef). A ref with no value file is refused, never passed
-  // over: the caller must learn that nothing was removed.
+  // age vault holds, by the rule both vaults share (round 2, points 2 and 5; round 3, points 5 and 6; secret-ref.ts
+  // removeRef).
   remove(ref: string): void {
-    removeRef(this.#dir, ref, this.#uid, "refuse");
+    removeRef(this.#dir, ref, this.#uid);
   }
 
   #path(ref: string): string {

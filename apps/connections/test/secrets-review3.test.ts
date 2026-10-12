@@ -115,14 +115,15 @@ describe("round 3, point 5: removal reports exactly what it removed and what is 
     expect(message).toMatch(new RegExp(`no file of ${REF5}`));
     expect(message).toMatch(new RegExp(`removed ${REF5}\\.age\\.fingerprint`));
   });
-  it("a revoke on the plaintext vault whose sealed file won't go says what is left, not that the file was not removed", async () => {
+  it("a revoke on the plaintext vault whose sealed file won't go names that file and why, not that the file was not removed", async () => {
     const h = home();
     expect((await put(h.env, "synthetic-value-of-32-bytes-0005")).code).toBe(0);
     const [file] = sealed(h.vault);
     chmodSync(join(h.vault, file ?? ""), 0o644);
     const r = await cli({ ...h.env, MORNDO_VAULT: "file" }, ["revoke", REF], { typed: REF });
     expect(r.code, r.stderr).toBe(3);
-    expect(r.stderr).toMatch(new RegExp(`left to clean: vault: .*left ${(file ?? "").replace(".", "\\.")}`));
+    // Nothing went, so the report is the refusal of the file itself.
+    expect(r.stderr).toMatch(new RegExp(`left to clean: vault: s-[0-9a-f]{16}: .*${(file ?? "").replace(".", "\\.")} is looser than a private file`));
     expect(r.stderr).not.toMatch(/was not removed/);
   });
 });

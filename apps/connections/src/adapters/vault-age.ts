@@ -66,9 +66,10 @@ export class AgeVault implements Vault, SealedStore {
     return fingerprintOf(plain);
   }
 
-  // Every file of the ref, a plaintext one the plaintext vault wrote included (round 3, point 6; secret-ref.ts removeRef).
+  // Every file of the ref, a plaintext one the plaintext vault wrote included, by the rule both vaults share (round 3,
+  // points 5 and 6; secret-ref.ts removeRef).
   remove(ref: string): void {
-    removeRef(this.#dir, ref, this.#uid, "pass");
+    removeRef(this.#dir, ref, this.#uid);
   }
 
   // The node's age recipient (age1…), from its identity, made on first use.

@@ -132,6 +132,24 @@ export type Ids = { next(prefix: string): string };
 // Why a sealed value was refused before anything was written: not an age file, a header with other than one recipient
 // stanza, a file this node's identity doesn't open, or a vault that would keep it as plaintext (decided on T-85).
 export type SealedProblem = "not_age" | "stanzas" | "foreign" | "plaintext_vault" | "too_large";
+// A ref's files not all removed, naming exactly which went and which are left, by file name; `missing` when the ref had
+// no value file at all, plaintext or sealed (round 3, point 5).
+export class RefNotRemoved extends Error {
+  readonly ref: string;
+  readonly removed: readonly string[];
+  readonly left: readonly string[];
+  readonly missing: boolean;
+  constructor(ref: string, removed: readonly string[], left: readonly string[], missing: boolean, cause?: unknown) {
+    const what = missing ? `no file of ${ref}, plaintext or sealed` : `${ref} not fully removed`;
+    const why = cause === undefined ? "" : ` (${cause instanceof Error ? cause.message : "failed"})`;
+    super(`${what}: removed ${removed.length > 0 ? removed.join(", ") : "nothing"}${left.length > 0 ? `; left ${left.join(", ")}` : ""}${why}`, { cause });
+    this.name = "RefNotRemoved";
+    this.ref = ref;
+    this.removed = removed;
+    this.left = left;
+    this.missing = missing;
+  }
+}
 export type SealedStore = {
   // Checks the age file and writes it as received under `ref`, by temp file and rename. Returns the value's keyed
   // fingerprint (HMAC-SHA-256 under the node's fingerprint key, 12 hex), never the value.
@@ -139,9 +157,10 @@ export type SealedStore = {
   // Opens nothing.
   has(ref: string): boolean;
   keyedFingerprint(ref: string): Promise<string | null>;
-  // Removes the ref's file, the age vault's sealed form included where the plaintext vault shares its directory. The
-  // plaintext vault refuses a ref it finds no file of, so a destroy run on it can't pass over a value it doesn't see; the
-  // age vault, which sees every form it writes, passes over one already gone (round 2, points 2 and 5).
+  // Removes every file of the ref, whichever vault wrote it, as both share the directory (round 3, point 6). Throws
+  // RefNotRemoved when one can't be removed, and when the ref had no value file at all (a stray mark is removed all the
+  // same), so a destroy never passes over a value silently; the caller decides whether a ref already gone is fine
+  // (round 2, points 2 and 5; round 3, point 5).
   remove(ref: string): void;
   // The refs it holds that start with `prefix` and whose file was last written before `writtenBefore` (ms since the
   // epoch), for the startup sweep (D2).
