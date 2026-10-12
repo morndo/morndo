@@ -217,9 +217,10 @@ export function admit(p: {
   return ok(machine.previous);
 }
 
-// What a commit writes back into the Installation: the pair moves, and the highest committed Version only ever
-// rises — a rollback doesn't license the auto path to re-take what it left (RL2).
-export function commitInstallation(i: Installation, to: Version): Installation {
+// What a commit writes back into the Installation: the pair moves — previous is the Version that was current,
+// which an Installation always has — and the highest committed Version only ever rises. A rollback doesn't
+// license the auto path to re-take what it left (RL2).
+export function commitInstallation(i: Installation, to: Version): Installation & { previous: Version } {
   return { ...i, current: to, previous: i.current, staged: null, highestCommitted: higherOf(i.highestCommitted, to) };
 }
 // A rollback marks its target bad on this machine (RL7), so nothing auto-installs it again here.
@@ -408,6 +409,24 @@ export type Rollout = {
   nodes: Record<string, { jitterUntil: number | null }>;   // each node's drawn delay; its applied state is its own Installation's
 };
 
+// A Version's Rollout across the fleet (§7). It starts unhalted: a halt is one machine's rollback, recorded by
+// haltRollout (RL12). The soak runs from the control plane's commit; until that commit the time is null and no
+// node applies. A node with no entry has no drawn delay.
+export function beginRollout(p: {
+  version: Version;
+  controlPlaneCommittedAt: number | null;
+  soakMinutes?: number;
+  nodes?: Rollout["nodes"];
+}): Rollout {
+  return {
+    version: p.version,
+    controlPlaneCommittedAt: p.controlPlaneCommittedAt,
+    soakMinutes: p.soakMinutes ?? DEFAULT_SOAK_MINUTES,
+    halted: false,
+    haltedBy: null,
+    nodes: p.nodes ?? {},
+  };
+}
 // One machine's rollback halts the Version fleet-wide (RL12); the principal's word resumes it. A halt stays until
 // then — a newer Release supersedes it simply by being another Version, with a Rollout of its own.
 export function haltRollout(r: Rollout, byMachine: string): Rollout {
