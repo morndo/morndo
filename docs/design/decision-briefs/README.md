@@ -1,6 +1,6 @@
 # Decision briefs: compact cards, the full brief in a modal, one format for every agent
 
-**Phase: design only.** This document and [ADR-0023](../../adr/0023-decision-briefs.md). No product code. Building starts after the owner answers section 12.
+**Phase: building.** The owner approved section 12's defaults and said build (2026-10-12). This document and [ADR-0023](../../adr/0023-decision-briefs.md). PR 1 is the domain; PR 2 is the hub and `morndo-decide`.
 
 **The request (the owner, 2026-10-11, paraphrased):** the decisions panel is too thin and the cards are not clear enough; he keeps asking what they mean. He wants compact, sharp cards. Clicking a card opens a modal with the full brief, and he decides there. The brief follows one format, his own (section 3), and it is part of the public harness, so every agent writes it the same way.
 

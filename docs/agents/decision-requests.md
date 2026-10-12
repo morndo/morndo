@@ -1,7 +1,6 @@
 # How to write a decision request
 
-**Status:** proposed with [ADR-0023](../adr/0023-decision-briefs.md). The command, `morndo-decide`, arrives with the
-build; until then this page is the format to aim for.
+**Status:** the format for [ADR-0023](../adr/0023-decision-briefs.md). File one with `morndo-decide`.
 
 A decision request asks the principal for one decision, with the case for it. The principal reads a three-line card
 first and opens the full brief only to decide, so the brief has to stand on its own: someone who has not followed
@@ -226,3 +225,35 @@ morndo-decide show d-12            # where it stands, and the answer once given
 - **A lane's request is a draft** for the manager, who forwards it (`forward`) or turns it down (`decline --why`),
   as with board proposals. Whether lanes may file to the principal directly is the owner's call (ADR-0023).
 - **Never put a secret in a request.** It is shown on the principal's devices and kept in the hub's record.
+
+## The instruction blocks
+
+`morndo-decide prompt --role manager` and `--role worker` print these. A lane's prompt carries the one for its role.
+
+<!-- prompt:manager -->
+## Decision briefs
+
+You ask the principal for a decision with `morndo-decide`. One brief, his format, every time. He reads a three-line card and opens the full brief to decide, so write it for someone who has not followed the work.
+
+- File one when the decision is his: spending money, anything public or outside the team, an irreversible step, a product or taste call. Don't file one for something you can find out by running a command, or for a choice the team owns.
+- Start from the blank: `morndo-decide template`. Check it before you file: `morndo-decide lint brief.md`. A refusal is one line per problem; fix those and lint again. Warnings do not refuse.
+- File it: `morndo-decide new brief.md`. It prints an id, such as `d-12`. `morndo-decide show d-12` says where it stands.
+- The answer arrives in your conversation as `[tap d-12] b (…)` for an option, or `About d-12: …` when he answered in his own words. Act on it, then `morndo-decide settle d-12`.
+- The facts changed: `morndo-decide restate d-12 brief.md`. An answer to the old version is refused, so he never approves something you no longer propose.
+- The question went away: `morndo-decide withdraw d-12 --why "…"`.
+- A lane's brief is a draft. Read it (`morndo-decide list --drafts`), then `morndo-decide forward d-12` or `morndo-decide decline d-12 --why "…"`. Forwarded, you are the asker: the answer comes to you, and the card says who drafted it.
+- Never put a secret in a brief. It is shown on the principal's devices and kept in the hub's record.
+<!-- /prompt:manager -->
+
+<!-- prompt:worker -->
+## Decision briefs
+
+When a decision is the principal's, write a brief and hand it to the manager. You don't file it to the principal yourself: yours is a draft until the manager forwards it.
+
+- Start from the blank: `morndo-decide template`. Check it: `morndo-decide lint brief.md`. A refusal is one line per problem. Fix those before you file.
+- File the draft: `morndo-decide new brief.md`. Tell the manager the id. `morndo-decide list` shows your drafts.
+- The facts changed before it is forwarded: `morndo-decide restate d-12 brief.md`.
+- The question went away: `morndo-decide withdraw d-12 --why "…"`.
+- Don't ask the principal in your own words instead. The manager forwards the brief, and the answer comes back through him.
+- Never put a secret in a brief.
+<!-- /prompt:worker -->
