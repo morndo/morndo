@@ -1153,6 +1153,10 @@ export const CONTROLS: Control[] = [
     replace: `if (e.revision.sha === claim.revision.sha) return "refuted";`,
     run: ["packages/domain/test/verification.test.ts"], expect: "work in progress on a newer push" },
   // A task claim's one sha is not the head of every linked change or deploy (§3.4).
+  { id: "dg12-assignment-time-bound", task: "DG12", file: "packages/domain/src/digest.ts",
+    find: `r.assignments.filter(a => a.at <= judgeAt)`,
+    replace: `r.assignments`,
+    run: ["packages/domain/test/digest.test.ts"], expect: "assignment filed later" },
   { id: "dg12-claim-own-revision", task: "DG12", file: "packages/domain/src/digest.ts",
     find: `    if (claim.subject.kind === "change" && subjectKey(s) === subjectKey(claim.subject)) return claim.revision;\n`,
     replace: ``,

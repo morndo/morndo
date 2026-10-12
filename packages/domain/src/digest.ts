@@ -522,7 +522,7 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, edges
     for (const c of r.claimRounds) if (subjectKey(c.subject) === key && c.at <= judgeAt) round = Math.max(round ?? c.at, c.at);
     let deployed: number | null = null;
     for (const d of r.deploysOf) if (subjectKey(d.subject) === key && d.at <= judgeAt) deployed = deployed === null ? d.at : Math.max(deployed, d.at);
-    const claimants = claimantsOf(s, r.claims.filter(c => c.at <= judgeAt), r.links.filter(l => l.at <= judgeAt), r.assignments);
+    const claimants = claimantsOf(s, r.claims.filter(c => c.at <= judgeAt), r.links.filter(l => l.at <= judgeAt), r.assignments.filter(a => a.at <= judgeAt));
     return subjectLevel(
       {
         subject: s, title: null, revision: revisionOf(s),
