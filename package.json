@@ -21,6 +21,7 @@
     "lint": "oxlint --format=stylish",
     "knowledge:sop-check": "node knowledge/skills/recurring-job/scripts/sop-check.mjs",
     "knowledge:build": "node knowledge/tools/sop-check/build.ts",
+    "knowledge:models": "node knowledge/tools/models-dev/main.ts",
     "e2e:engines": "npm run build && node e2e/engines.e2e.ts",
     "e2e:board": "npm run build && node e2e/board.e2e.ts",
     "e2e:home": "npm run build && node e2e/home.e2e.ts"
