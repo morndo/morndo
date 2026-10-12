@@ -30,7 +30,8 @@ export type ContractSubject = {
 const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
 
 function leaked(error: unknown, sentence: string): boolean {
-  return JSON.stringify(error).includes(sentence);
+  if (!(error instanceof Error)) return false;
+  return error.message.includes(sentence) || (error.stack ?? "").includes(sentence);
 }
 const HEARD: EngineText = {
   language: "de", durationMs: 5200, segments: [{ startMs: 0, endMs: 5200, text: SENTENCE }],
