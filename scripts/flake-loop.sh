@@ -39,18 +39,20 @@ mkdir -p "$out"
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/flake-loop-io-XXXXXX")
 pids=() churners=()
 tag="flake-loop-$$"
-# A churner ends after its current network, so none is left behind. One whose docker command hangs is killed with its
-# process group after 30 s, and the label catches what it left.
+# Every loop it starts ends with it: a churner after its current network, so none is left behind; a CPU loop or fsync
+# writer at once. On EXIT, INT, TERM and HUP stop() tells them; a churner whose docker command hangs is killed with its
+# whole session (setsid: its own, recorded) after 30 s, and the label catches what it left. Killed outright (SIGKILL,
+# no trap), each loop sees this script's pid gone, ends by itself and removes the scratch directory.
 stop() {
   touch "$scratch/stop"
   [ ${#pids[@]} -gt 0 ] && kill "${pids[@]}" 2>/dev/null
   for ((t = 0; t < 30; t++)); do
     live=0
-    for p in "${churners[@]}"; do kill -0 "$p" 2>/dev/null && live=1; done
+    for sid in "${churners[@]}"; do pgrep -s "$sid" >/dev/null && live=1; done
     [ $live -eq 0 ] && break
     sleep 1
   done
-  for p in "${churners[@]}"; do kill -- "-$p" 2>/dev/null; done
+  for sid in "${churners[@]}"; do pkill -KILL -s "$sid" 2>/dev/null; done
   wait 2>/dev/null
   if [ "$net" -gt 0 ]; then
     timeout 30 docker ps -aq --filter "label=$tag" | xargs -r timeout 30 docker rm -f >/dev/null 2>&1
@@ -60,13 +62,16 @@ stop() {
 }
 trap stop EXIT
 trap 'exit 130' INT TERM
-for ((k = 0; k < cpu; k++)); do nice -n 10 sh -c 'while :; do :; done' & pids+=($!); done
+trap 'exit 129' HUP
+me=$$
+for ((k = 0; k < cpu; k++)); do nice -n 10 sh -c "while kill -0 $me 2>/dev/null; do :; done" & pids+=($!); done
 for ((k = 0; k < io; k++)); do
-  nice -n 10 ionice -c3 sh -c "while :; do dd if=/dev/zero of='$scratch/w$k' bs=64k count=16 oflag=dsync 2>/dev/null; done" & pids+=($!)
+  nice -n 10 ionice -c3 sh -c "while kill -0 $me 2>/dev/null; do dd if=/dev/zero of='$scratch/w$k' bs=64k count=16 oflag=dsync 2>/dev/null; done; kill -0 $me 2>/dev/null || rm -rf '$scratch'" & pids+=($!)
 done
-# setsid: each churner leads a process group of its own, so stop() can end the docker command it is waiting on.
+# setsid: each churner leads a session of its own (its pid is the session id), so stop() can end the docker command it
+# is waiting on.
 for ((k = 0; k < net; k++)); do
-  setsid sh -c "i=0; while [ ! -e '$scratch/stop' ]; do n=$tag-$k-\$i; docker network create --label $tag \$n >/dev/null 2>&1; docker run --rm --pull never --label $tag --network \$n alpine:3 true >/dev/null 2>&1; docker network rm \$n >/dev/null 2>&1; i=\$((i + 1)); done" & churners+=($!)
+  setsid sh -c "i=0; while [ ! -e '$scratch/stop' ] && kill -0 $me 2>/dev/null; do n=$tag-$k-\$i; docker network create --label $tag \$n >/dev/null 2>&1; docker run --rm --pull never --label $tag --network \$n alpine:3 true >/dev/null 2>&1; docker network rm \$n >/dev/null 2>&1; i=\$((i + 1)); done; kill -0 $me 2>/dev/null || rm -rf '$scratch'" & churners+=($!)
 done
 failed=0
 for ((r = 1; r <= runs; r++)); do
