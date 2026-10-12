@@ -143,4 +143,16 @@ describe("the records' own guards", () => {
       expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: `https://ci.acme.test/x?${name}=a` })))).toBe("ok");
     }
   });
+  it("a plural, a lowercased run-together credential name, or an allowlisted harmless name is judged as such (§3.3)", () => {
+    const bad = ["accesskeyid", "apiKeys", "apikeys", "subscriptionkey"];
+    for (const name of bad) {
+      const link = `https://ci.acme.test/x?${name}=abc`;
+      expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link }))), link).toBe("bad_link");
+    }
+    const harmless = ["pageToken", "nextPageToken", "sortKey", "cacheKey", "primaryKey"];
+    for (const name of harmless) {
+      const link = `https://ci.acme.test/x?${name}=abc`;
+      expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link }))), link).toBe("ok");
+    }
+  });
 });
