@@ -11,3 +11,16 @@ export function secretPath(dir: string, ref: string, suffix = ""): string {
   if (!SECRET_REF.test(ref)) throw new Error("refused ref");
   return join(dir, `${ref}${suffix}`);
 }
+
+// The refs a vault directory's file names stand for, that start with `prefix`: a name is the ref plus the vault's
+// `suffix`. A temp file starts with a dot and a fingerprint mark has a suffix of its own, so neither matches. The ref
+// grammar stays here, so no vault keeps a copy of it.
+export function refsIn(names: readonly string[], prefix: string, suffix: string): string[] {
+  const out: string[] = [];
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith(suffix)) continue;
+    const ref = name.slice(0, name.length - suffix.length);
+    if (SECRET_REF.test(ref)) out.push(ref);
+  }
+  return out.sort();
+}

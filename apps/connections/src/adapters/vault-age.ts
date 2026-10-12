@@ -10,7 +10,7 @@ import { dirname } from "node:path";
 import { Decrypter, Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { assertPrivate, readPrivate, refuseBareHome, writeNew, writePrivate, writePrivatePair } from "./file-mode.ts";
 import { NodeKeys } from "./node-keys.ts";
-import { SECRET_REF, fingerprintOf, secretPath } from "./secret-ref.ts";
+import { fingerprintOf, refsIn, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
 import type { SealedProblem, SealedStore } from "../application/ports.ts";
 import type { Vault } from "./vault.ts";
@@ -100,17 +100,11 @@ export class AgeVault implements Vault, SealedStore {
     }
   }
 
-  // The refs of the files in the vault directory that start with `prefix` (temp files start with a dot, so never match).
+  // The refs of the files in the vault directory that start with `prefix`, for the startup sweep.
   refs(prefix: string): readonly string[] {
     if (!existsSync(this.#dir)) return [];
     assertPrivate(this.#dir, "dir", this.#uid);
-    const out: string[] = [];
-    for (const name of readdirSync(this.#dir)) {
-      if (!name.startsWith(prefix) || !name.endsWith(SUFFIX)) continue;
-      const ref = name.slice(0, name.length - SUFFIX.length);
-      if (SECRET_REF.test(ref)) out.push(ref);
-    }
-    return out.sort();
+    return refsIn(readdirSync(this.#dir), prefix, SUFFIX);
   }
 
   async keyedFingerprint(ref: string): Promise<string | null> {
