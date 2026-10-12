@@ -122,4 +122,15 @@ describe("the records' own guards", () => {
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, note: "x".repeat(141) })))).toBe("too_long");
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, producer: lane("") })))).toBe("bad_name");
   });
+  it("a credential in the fragment, a ';' parameter, or a percent-encoded name is refused (§3.3)", () => {
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/cb#access_token=abc" })))).toBe("bad_link");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/r;token=abc" })))).toBe("bad_link");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/r?%74oken=abc" })))).toBe("bad_link");
+  });
+  it("an ordinary name that merely contains sig, auth or key is kept (§3.3)", () => {
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?design=a" })))).toBe("ok");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?author=me" })))).toBe("ok");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?monkey=1" })))).toBe("ok");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?keyword=x" })))).toBe("ok");
+  });
 });
