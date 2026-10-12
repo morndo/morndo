@@ -8,7 +8,7 @@ export type ModelClass = (typeof MODEL_CLASSES)[number];
 
 export const SOP_RULES = [
   "shape", "trigger", "pattern-known", "step-kind", "role-known", "no-model-id", "model-class", "engine-why", "why-resolves",
-  "step-check", "outward-declared", "gate-before-outward", "gate-shape", "silence-never-approves", "loop-max-rounds",
+  "step-check", "outward-declared", "gate-before-outward", "gate-shape", "silence-never-approves", "round-limit",
   "stop-required", "budget-stop", "done-required", "report-citations", "metrics-required",
 ] as const;
 export type SopRule = (typeof SOP_RULES)[number];
@@ -129,8 +129,8 @@ export function checkSop(doc: unknown, ctx: SopContext): SopVerdict {
     }
 
     if ("on_fail" in raw || raw.pattern === "loop-review-fix") {
-      if ("on_fail" in raw && !(typeof raw.on_fail === "string" && seen.includes(raw.on_fail))) refuse("loop-max-rounds", at, "on_fail goes back to an earlier step");
-      if (!rounds(raw.max_rounds)) refuse("loop-max-rounds", at, `a loop stops after max_rounds, 1 to ${MAX_ROUNDS}`);
+      if ("on_fail" in raw && !(typeof raw.on_fail === "string" && seen.includes(raw.on_fail))) refuse("round-limit", at, "on_fail goes back to an earlier step");
+      if (!rounds(raw.max_rounds)) refuse("round-limit", at, `a loop stops after max_rounds, 1 to ${MAX_ROUNDS}`);
     }
     if (id) seen.push(id);
     if (id && isEngine) engines.add(id);
@@ -158,8 +158,8 @@ export function checkSop(doc: unknown, ctx: SopContext): SopVerdict {
     }
     if ("on_change" in g && idx >= 0) {
       const back = typeof g.on_change === "string" ? seen.indexOf(g.on_change) : -1;
-      if (back < 0 || back >= idx) refuse("loop-max-rounds", at, "on_change goes back to a step before the gated one");
-      if (!rounds(g.max_changes)) refuse("loop-max-rounds", at, `a change loop stops after max_changes, 1 to ${MAX_ROUNDS}`);
+      if (back < 0 || back >= idx) refuse("round-limit", at, "on_change goes back to a step before the gated one");
+      if (!rounds(g.max_changes)) refuse("round-limit", at, `a change loop stops after max_changes, 1 to ${MAX_ROUNDS}`);
     }
   });
   for (const id of outward) if (!gated.has(id)) refuse("gate-before-outward", `steps.${id}`, "an outward or irreversible step waits for the principal: put a gate before it");

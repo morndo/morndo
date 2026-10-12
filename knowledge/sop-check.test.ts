@@ -58,7 +58,6 @@ describe("sop-check, the command", () => {
 });
 
 describe("the SOP's JSON Schema", () => {
-  // oxlint-disable-next-line typescript/no-explicit-any -- a JSON document read for its keys
   const load = () => JSON.parse(readFileSync(join(SKILL, "assets/sop.schema.json"), "utf8")) as Record<string, any>;
   const sorted = (xs: readonly string[]) => [...xs].sort();
   it("is JSON Schema 2020-12 and closed at every level the check closes", () => {

@@ -43,7 +43,7 @@ describe("the brief's three: each break refused by its rule", () => {
     expect(broken(s => { s.gates = []; })).toEqual(["gate-before-outward"]);
   });
   it("without max_rounds on the fact-check loop", () => {
-    expect(broken(s => { delete step(s, "fact-check").max_rounds; })).toEqual(["loop-max-rounds"]);
+    expect(broken(s => { delete step(s, "fact-check").max_rounds; })).toEqual(["round-limit"]);
   });
   it("with a model id where the model class belongs", () => {
     expect(broken(s => { step(s, "draft").model = "acme-large-2"; })).toEqual(["no-model-id"]);
@@ -77,11 +77,11 @@ describe("every other rule, one break each", () => {
     expect(broken(s => { (s.gates[0] as Record<string, unknown>).options = ["change", "drop"]; })).toEqual(["gate-shape"]);
   });
   it("a gate's change loop without a limit", () => {
-    expect(broken(s => { delete (s.gates[0] as Record<string, unknown>).max_changes; })).toEqual(["loop-max-rounds"]);
+    expect(broken(s => { delete (s.gates[0] as Record<string, unknown>).max_changes; })).toEqual(["round-limit"]);
   });
   it("a loop back to a later step, or past five rounds", () => {
-    expect(broken(s => { step(s, "fact-check").on_fail = "publish"; })).toEqual(["loop-max-rounds"]);
-    expect(broken(s => { step(s, "fact-check").max_rounds = 9; })).toEqual(["loop-max-rounds"]);
+    expect(broken(s => { step(s, "fact-check").on_fail = "publish"; })).toEqual(["round-limit"]);
+    expect(broken(s => { step(s, "fact-check").max_rounds = 9; })).toEqual(["round-limit"]);
   });
   it("no stop rule", () => {
     expect(broken(s => { s.stop = []; })).toEqual(["stop-required"]);

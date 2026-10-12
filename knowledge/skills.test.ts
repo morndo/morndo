@@ -12,6 +12,7 @@ import { parse } from "yaml";
 const SKILLS = "knowledge/skills";
 const FIELDS = new Set(["name", "description", "license", "allowed-tools", "metadata", "compatibility"]);
 const PATTERN_SECTIONS = ["When to use", "When not to use", "Failure modes", "Guards", "Sources"];
+const PROCEDURE_SECTIONS = ["When to use", "When not to use", "How to design it", "Where the approval sits", "Choosing engines", "Reporting and measuring", "Sources"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY = 86_400_000;
 // The rule ids docs/domain.md defines (table rows such as "| V3 |", list items such as "**R1**") and the terms of its
@@ -90,12 +91,13 @@ function checkSkill(dir: string, text: string, today: string, known: Set<string>
 
   const md = (typeof meta === "object" && meta !== null ? meta : {}) as Record<string, unknown>;
   if (dir.startsWith("loop-") && md["morndo-kind"] !== "loop-pattern") return { errors: [...errors, "a loop-* skill must declare morndo-kind: loop-pattern"], warnings };
-  if (md["morndo-kind"] !== "loop-pattern") return { errors, warnings };
+  const kind = md["morndo-kind"];
+  if (kind !== "loop-pattern" && kind !== "procedure") return { errors, warnings };
 
-  // A loop pattern: Morndo's own rules on top of the specification.
-  if (desc && (!/\bUse (when|for|before)\b/.test(desc) || !/\bNot\b/.test(desc))) errors.push("description must say when to use the loop and when not");
+  // A loop pattern or a procedure: Morndo's own rules on top of the specification.
+  if (desc && (!/\bUse (when|for|before)\b/.test(desc) || !/\bNot\b/.test(desc))) errors.push("description must say when to use it and when not");
   const secs = sections(body);
-  for (const s of PATTERN_SECTIONS) if (!secs.has(s)) errors.push(`missing section '## ${s}'`);
+  for (const s of kind === "loop-pattern" ? PATTERN_SECTIONS : PROCEDURE_SECTIONS) if (!secs.has(s)) errors.push(`missing section '## ${s}'`);
   const read = md["morndo-sources-read"];
   const recheck = md["morndo-recheck"];
   if (!realDate(read)) errors.push("morndo-sources-read must be a real calendar date, YYYY-MM-DD");

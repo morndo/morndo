@@ -1,0 +1,30 @@
+# The user's preferences file
+
+A preference is a person's stated view, such as which vendor they want for long-form writing. It is not a fact, needs no source, and is never shown as one (ADR-0026, K4). It lives with the user, never in this repository (K12):
+
+`~/.config/morndo-knowledge/preferences.yaml`
+
+## Format
+
+```yaml
+preferences:
+  - id: write-long          # what an SOP step cites: pref:write-long
+    holder: principal       # whose view it is
+    on: "2026-10-11"        # when they said it, YYYY-MM-DD
+    said: Acme models for long-form writing.   # their words, as they said them
+    tasks: [draft]          # the kinds of step it speaks to
+  - id: search-pass-acme
+    holder: principal
+    on: "2026-10-11"
+    said: Acme for the search pass.
+    tasks: [search-pass]
+```
+
+`id` is lowercase letters, digits and hyphens. `on` is a quoted date, so every YAML reader keeps it as text.
+
+## How it is used
+
+- An SOP instance may cite a preference in a step's `why`: `why: [notes/writing-boards, pref:write-long]`. A shipped template never does, since a preference is one person's.
+- It is always shown as the holder's view, with its date: **Acme models for long-form writing (your preference, 2026-10-11)**. Never as "Acme writes best", never in a list of facts.
+- A preference doesn't route. The step still names a Role and a model class; to run a given vendor, the user puts it in that Role's chain (K9).
+- Beside it, once auto routing keeps a Scorecard (ADR-0020), Morndo shows this user's own results for that kind of step: first-try approvals at the gate and the changes asked for, per model. That record is what can turn a preference into evidence for this user. It stays a preference until then, and is never deleted for disagreeing with a board.
