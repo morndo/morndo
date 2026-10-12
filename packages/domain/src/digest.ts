@@ -353,7 +353,7 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
         } else shown = levelOf(root);
       }
       const belongs: Section[] = [];
-      if (live !== null) belongs.push("needs_you");
+      if (live) belongs.push("needs_you");
       if (staleCond !== null) belongs.push("stale_or_stuck");
       for (const e of seenEvents) if (sinceMark(e)) belongs.push(sectionOfEvent(e.kind));
       let shownSection = "";
