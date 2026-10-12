@@ -1,19 +1,16 @@
 import { randomBytes } from "node:crypto";
 import { accessSync, constants, existsSync, readFileSync, readdirSync, statfsSync } from "node:fs";
 import { availableParallelism } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
 
 // The web tests that drive headless Chromium each start a Vite server and compile the app cold. All of them at once
 // saturate the box and their first page load times out, so at most 4 of those files run at a time, after every other
-// test file has run as before (Vitest runs projects with different worker limits as groups, one after the other). A
-// test file is one of them when it imports playwright, itself or through a helper of this folder (harness.ts: eight
-// files reach Chromium only through it, so they ran as units, beside every other file, with no limit on how many at
-// once). Each needs about two CPUs (its Vite server and its browser), so
-// a smaller machine runs fewer at once: 4 on this 16-CPU box, 1 on GitHub's 2-CPU runner for private repositories
-// (docs.github.com, "GitHub-hosted runners", read 2026-10-02). Even here, 4 at once under a load average of 20 once
-// pushed a first test from 2 s to over 30 s.
-const WEB_TESTS = "apps/web/test";
+// test file has run as before (Vitest runs projects with different worker limits as groups, one after the other). Each
+// needs about two CPUs (its Vite server and its browser), so a smaller machine runs fewer at once: 4 on this 16-CPU box,
+// 1 on GitHub's 2-CPU runner for private repositories (docs.github.com, "GitHub-hosted runners", read 2026-10-02). Even
+// here, 4 at once under a load average of 20 once pushed a first test from 2 s to over 30 s.
+const WEB_TESTS = resolve("apps/web/test");
 const browserWorkers = Math.min(4, Math.max(1, Math.floor(availableParallelism() / 2)));
 // The fleet's cross-app drills (test/fleet, spec §9): real fleet, agent and hub processes on isolated tmux servers. Most of
 // their time is waiting (reconnects, health every 30 s, a 75 s flapping window), not CPU, so they run after everything
@@ -45,16 +42,25 @@ function ramScratch(): Record<string, string> {
   } catch { return {}; }
 }
 const scratch = ramScratch();
-// Follows `from "./x.ts"` imports within the folder; seen guards a cycle.
+// A web test file is a Chromium test when it imports playwright, or a module under apps/web/test that does, at any
+// depth: static, side-effect or dynamic imports, either quote style, subfolders. `import type` and comments don't
+// count. A file this misses and that launches Chromium anyway fails at once in the units project
+// (test/units-without-chromium.ts) instead of running there beside everything else.
+const IMPORTS = /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/gm;
 const startsChromium = (file: string, seen = new Set<string>()): boolean => {
-  if (seen.has(file) || !existsSync(join(WEB_TESTS, file))) return false;
+  if (seen.has(file) || !existsSync(file)) return false;
   seen.add(file);
-  const source = readFileSync(join(WEB_TESTS, file), "utf8");
-  return source.includes('from "playwright"') || [...source.matchAll(/from "\.\/([^"/]+\.ts)"/g)].some(m => startsChromium(m[1] ?? "", seen));
+  for (const m of readFileSync(file, "utf8").matchAll(IMPORTS)) {
+    const spec = m[1] ?? m[2] ?? m[3] ?? "";
+    if (spec === "playwright") return true;
+    const next = resolve(dirname(file), spec);
+    if (spec.startsWith(".") && next.startsWith(`${WEB_TESTS}/`) && startsChromium(next, seen)) return true;
+  }
+  return false;
 };
-const browserTests = readdirSync(WEB_TESTS)
-  .filter(f => f.endsWith(".test.ts") && startsChromium(f))
-  .map(f => `${WEB_TESTS}/${f}`);
+const browserTests = readdirSync(WEB_TESTS, { recursive: true, encoding: "utf8" })
+  .filter(f => f.endsWith(".test.ts") && startsChromium(join(WEB_TESTS, f)))
+  .map(f => relative(".", join(WEB_TESTS, f)));
 
 export default defineConfig({
   test: {
@@ -71,6 +77,7 @@ export default defineConfig({
           hookTimeout: 20_000,
           env: scratch,
           globalSetup: ["test/run-scratch.ts"],
+          setupFiles: ["test/units-without-chromium.ts"],
           sequence: { groupOrder: 0 },
         },
       },
