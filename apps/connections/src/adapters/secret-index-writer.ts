@@ -35,6 +35,9 @@ export class SecretIndexWriter implements IndexWriter {
     let indexed: ReturnType<typeof indexValue>;
     // The plaintext is zeroed once its keyed hashes are made (review 12).
     try { indexed = indexValue(bytes, this.#keyed); } finally { bytes.fill(0); }
+    // A value too short to index makes the index key all the same, so a key missing later is always a lost one (round 3,
+    // point 3; node-keys.ts homeRecords).
+    if (indexed.kind === "too_short") this.#keyed(new Uint8Array(0)).fill(0);
     if (indexed.kind === "too_large") throw new Error("the value is over VALUE_MAX_BYTES, so the index can't hold it; the vault refuses it before this");
     const prepared: PreparedIndex = Object.freeze({ short: indexed.kind === "too_short" });
     this.#prepared.set(prepared, indexed.kind === "indexed" ? indexed.entries : null);

@@ -5,6 +5,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { LedgerEntry } from "@morndo/domain";
 import { readSecretIndex } from "@morndo/node-ops";
 import { readPrivate, writeNew } from "./file-mode.ts";
 import { secretIndexPath } from "./secret-index-writer.ts";
@@ -27,21 +28,23 @@ export class NodeKeyRefused extends Error {
 // One answer per key, as each has its own records (round 2, point 1).
 export type KeyRecords = (key: NodeKey) => boolean;
 
-// The records of a Connections home: the ledger's keyed fingerprints for the fingerprint key, and for the index key the
-// index file's hashes, which only a value of 8 bytes or more makes; so a node whose first value was shorter still makes
-// its index key on the first value that is indexed. An index file it can't read is refused (IndexFileRefused), never taken
-// as empty.
-export function homeRecords(dir: string, ledger: () => boolean, uid?: number): KeyRecords {
-  return key => key === "fingerprint.key" ? ledger() : readSecretIndex(secretIndexPath(dir), uid).versions.some(v => v.entries.length > 0);
+// The records of a Connections home. The fingerprint key: any ledger entry, as every one holds a fingerprint made with it.
+// The index key: a current version in the ledger, or hashes in the index file, either alone (round 3, point 3), so losing
+// the index file with the key never lets a new key in. The index writer makes the index key at the first store whatever
+// the value's length, so a short first value doesn't stop later puts (round 2, point 1): a missing key is a lost one. An
+// index file it can't read is refused (IndexFileRefused), never taken as empty.
+export function homeRecords(dir: string, ledger: () => readonly LedgerEntry[], uid?: number): KeyRecords {
+  return key => key === "fingerprint.key" ? ledger().length > 0
+    : ledger().some(e => e.state === "current") || readSecretIndex(secretIndexPath(dir), uid).versions.some(v => v.entries.length > 0);
 }
 
 // Whether the home's Connections database holds a ledger entry: opened only when a key is missing, then closed. With no
 // database, nothing is on record yet.
-function ledgerIn(dir: string, uid: number): boolean {
+function ledgerIn(dir: string, uid: number): readonly LedgerEntry[] {
   const path = join(dir, "connections.db");
-  if (!existsSync(path)) return false;
+  if (!existsSync(path)) return [];
   const secrets = new SqliteSecrets(path, uid);
-  try { return secrets.load().directory.ledger.length > 0; } finally { secrets.close(); }
+  try { return secrets.load().directory.ledger; } finally { secrets.close(); }
 }
 
 export class NodeKeys {

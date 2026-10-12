@@ -57,7 +57,8 @@ describe("round 2, point 1: a first value under 8 bytes never stops a later put"
     const h = home();
     const short = await put(h.env, "1234");
     expect(short.code, short.stderr).toBe(0);
-    expect(existsSync(join(h.dir, "index.key"))).toBe(false);
+    // Since round 3 (point 3) the first store makes the index key whatever the value's length.
+    expect(existsSync(join(h.dir, "index.key"))).toBe(true);
     const normal = await put(h.env, "synthetic-long-value-two", OTHER);
     expect(normal.code, normal.stderr).toBe(0);
     expect(existsSync(join(h.dir, "index.key"))).toBe(true);

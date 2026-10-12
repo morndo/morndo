@@ -117,7 +117,7 @@ export function openSecrets(env: NodeJS.ProcessEnv): SecretsHome {
   const dir = env.MORNDO_CONNECTIONS_HOME ?? join(env.HOME ?? "", ".config/morndo-connections");
   const secrets = new SqliteSecrets(join(dir, "connections.db"));
   // A node key may be made only while nothing made with it is on record (review 6; round 2, point 1).
-  const keys = new NodeKeys(dir, undefined, homeRecords(dir, () => secrets.load().directory.ledger.length > 0));
+  const keys = new NodeKeys(dir, undefined, homeRecords(dir, () => secrets.load().directory.ledger));
   const age = env.MORNDO_VAULT === "file" ? null : new AgeVault(join(dir, "vault"), join(dir, "identity"), undefined, keys);
   const vault = age ?? new FileVault(join(dir, "vault"), undefined, keys);
   const random = (prefix: string) => `${prefix}${randomBytes(8).toString("hex")}`;
