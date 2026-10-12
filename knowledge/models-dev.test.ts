@@ -1,7 +1,9 @@
 // models-dev, the command. Its logic (knowledge/tools/models-dev/cli.ts) through `run`: refresh trims models.dev's api.json and
-// licence into a dated snapshot under a cache directory (the fixture is made-up, in api.json's shape), and show prints the newest
-// snapshot, with a filter, a staleness warning past SNAPSHOT_STALE_DAYS that never fails (K6) and `?` for a missing value. The net
-// is a fake that records the URLs it serves, so nothing here reaches models.dev. Then main.ts, as sop-check's, sets the exit code.
+// licence into a snapshot dated today under a cache directory (the fixture is made-up, in api.json's shape), through a temporary
+// file, and gives up on a stalled request at its deadline; show prints the newest snapshot that reads, saying which it skipped,
+// with a filter, a warning past SNAPSHOT_STALE_DAYS or for a date after today that never fails (K6) and `?` for a missing value.
+// The net is a fake that records the URLs it serves, so nothing here reaches models.dev. Then main.ts, as sop-check's, sets the
+// exit code, and hands the real fetch its deadline.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,23 +31,36 @@ const NO_SNAPSHOT = "models.dev: no snapshot yet; run npm run knowledge:models -
 const STALE = `warning  stale-snapshot  fetched 2026-10-12, 31 days ago, past ${SNAPSHOT_STALE_DAYS}: run npm run knowledge:models -- refresh`;
 
 // A fake net: it records each URL it is asked for and answers the fixture for api.json and the made-up licence for the licence.
-// `api` breaks the api.json answer on demand: another status, a body that is not JSON, or a rejected promise.
-type Api = { text?: string; ok?: boolean; offline?: boolean };
-const call = async (args: readonly string[], cacheDir: string, api: Api = {}) => {
+// `api` breaks the api.json answer on demand: another status, a body that is not JSON, a rejected promise, or an answer that
+// stalls before its headers or during its body until the request's signal aborts it. `extra` overrides the rest of the Io.
+type Api = { text?: string; ok?: boolean; offline?: boolean; stall?: "headers" | "body" };
+// A request that never ends by itself: it fails with the signal's reason when the signal aborts. Without a signal it gives up
+// after a second, as a stand-in for hanging forever, so a run that passes no deadline fails here instead of hanging the suite.
+const stalled = (signal: AbortSignal | undefined): Promise<never> =>
+  new Promise((_, reject) => {
+    if (!signal) setTimeout(() => reject(new Error("no deadline: this request would hang forever")), 1000);
+    else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+  });
+const call = async (args: readonly string[], cacheDir: string, api: Api = {}, extra: Partial<Io> = {}) => {
   const out: string[] = [];
   const err: string[] = [];
   const urls: string[] = [];
   const io: Io = {
     out: l => out.push(l), err: l => err.push(l), cacheDir, today: "2026-10-12",
-    fetch: url => {
+    fetch: (url, signal) => {
       urls.push(url);
       if (api.offline) return Promise.reject(new Error("the net is down"));
       if (url === LICENCE_URL) return Promise.resolve({ ok: true, status: 200, text: async () => LICENCE });
+      if (api.stall === "headers") return stalled(signal);
+      if (api.stall === "body") return Promise.resolve({ ok: true, status: 200, text: () => stalled(signal) });
       return Promise.resolve({ ok: api.ok ?? true, status: api.ok === false ? 503 : 200, text: async () => api.text ?? FIXTURE });
     },
+    ...extra,
   };
   return { code: await run(args, io), out, err, urls };
 };
+const written = (dir: string) => (existsSync(dir) ? readdirSync(dir).sort() : []);
+const snapshotText = (fetched: string, models: unknown[]) => `${JSON.stringify({ ...SNAPSHOT, fetched, models }, null, 2)}\n`;
 
 describe("refresh", () => {
   it("fetches api.json and the licence, trims to one fact per model and writes today's snapshot", async () => {
@@ -74,6 +89,34 @@ describe("refresh", () => {
     const r = await call(["refresh"], join(tmp, "not-json"), { text: "this is not json" });
     expect([r.code, r.out, r.err.length]).toEqual([2, [], 1]);
     expect(r.err[0]).toMatch(/^models-dev: /);
+  });
+  it("a request that stalls, before its headers or during its body, gives up at its deadline with one line and writes nothing", async () => {
+    for (const stall of ["headers", "body"] as const) {
+      const dir = join(tmp, `stall-${stall}`);
+      const r = await call(["refresh"], dir, { stall }, { timeoutMs: 50 });
+      expect([stall, r.code, r.out, r.err]).toEqual([stall, 2, [], [`models-dev: can't fetch ${API_URL}: no answer within 0.05 s`]]);
+      expect(written(dir)).toEqual([]);
+    }
+  });
+  it("writes through a temporary file: a write that breaks halfway leaves the earlier snapshots as they were, and nothing else", async () => {
+    const dir = join(tmp, "half-written");
+    mkdirSync(dir, { recursive: true });
+    const earlier = snapshotText("2026-09-01", [PRO_FACT]);
+    writeFileSync(join(dir, "2026-09-01.json"), earlier);
+    const halfway = (path: string, data: string) => {
+      writeFileSync(path, data.slice(0, data.length >> 1));
+      throw new Error("ENOSPC: no space left on device, write");
+    };
+    const r = await call(["refresh"], dir, {}, { writeFile: halfway });
+    expect([r.code, r.out, r.err.length]).toEqual([2, [], 1]);
+    expect(written(dir)).toEqual(["2026-09-01.json"]);
+    expect(readFileSync(join(dir, "2026-09-01.json"), "utf8")).toBe(earlier);
+  });
+  it("dates its snapshot with the real today: --today is show's alone, so refresh with it is a bad call that fetches and writes nothing", async () => {
+    const dir = join(tmp, "forged-date");
+    const r = await call(["refresh", "--today", "2099-01-01"], dir);
+    expect([r.code, r.out, r.err.length, r.urls]).toEqual([2, [], 1, []]);
+    expect(written(dir)).toEqual([]);
   });
 });
 
@@ -106,6 +149,30 @@ describe("show", () => {
     expect((await call(["refresh"], dir)).code).toBe(0);
     expect(await call(["show", "--dir", dir], join(tmp, "elsewhere"))).toEqual({ code: 0, out: [HEADER, ...FACTS], err: [], urls: [] });
   });
+  it("skips a snapshot that doesn't read, says so, and shows the newest one that does", async () => {
+    const dir = join(tmp, "fallback");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "2026-10-01.json"), snapshotText("2026-10-01", [PRO_FACT]));
+    writeFileSync(join(dir, "2026-10-11.json"), `${JSON.stringify({ source: API_URL })}\n`);
+    writeFileSync(join(dir, "2026-10-12.json"), "{\n  \"source\": \"https://models.dev/api.js");
+    const r = await call(["show"], dir);
+    expect([r.code, r.err]).toEqual([0, []]);
+    expect(r.out).toEqual([
+      `models.dev, fetched 2026-10-01, from ${API_URL}`,
+      expect.stringMatching(/^warning {2}skipped-snapshot {2}2026-10-12\.json {2}is not JSON: .+; showing 2026-10-01\.json$/),
+      expect.stringMatching(/^warning {2}skipped-snapshot {2}2026-10-11\.json {2}fetched must be a real date.*; showing 2026-10-01\.json$/),
+      PRO_LINE,
+    ]);
+  });
+  it("a snapshot dated after today is an anomaly: shown with a warning, never as fresh", async () => {
+    const dir = join(tmp, "future");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "2026-10-13.json"), snapshotText("2026-10-13", [LARGE_FACT, SMALL_FACT, PRO_FACT]));
+    expect(await call(["show"], dir)).toEqual({
+      code: 0, err: [], urls: [],
+      out: [`models.dev, fetched 2026-10-13, from ${API_URL}`, "warning  future-snapshot  fetched 2026-10-13, 1 day after today, 2026-10-12: check this machine's clock and the snapshot's date", ...FACTS],
+    });
+  });
   it("a snapshot file that is not JSON is exit 2, one line", async () => {
     const dir = join(tmp, "corrupt");
     mkdirSync(dir, { recursive: true });
@@ -128,5 +195,8 @@ describe("main", () => {
   it("sets the exit code and lets output drain, instead of exiting at once", () => {
     const main = readFileSync("knowledge/tools/models-dev/main.ts", "utf8");
     expect([main.includes("process.exitCode"), main.includes("process.exit(")]).toEqual([true, false]);
+  });
+  it("hands the real fetch the request's signal, so its deadline holds for the headers and the body", () => {
+    expect(readFileSync("knowledge/tools/models-dev/main.ts", "utf8")).toMatch(/fetch: \(url, signal\) => fetch\(url, \{ signal \}\)/);
   });
 });

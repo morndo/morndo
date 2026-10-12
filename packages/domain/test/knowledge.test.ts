@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { checkSop, SOP_REQUIRED, SOP_RULES, type SopContext } from "../src/knowledge.ts";
+import { parsePreferences } from "../src/knowledge-facts.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const TEMPLATE = parse(readFileSync(join(ROOT, "knowledge/skills/recurring-job/assets/daily-blog-post.yaml"), "utf8")) as Sop;
@@ -230,6 +231,49 @@ describe("a shipped template cites no preference (K12)", () => {
     const cites = (sop: Sop) => { step(sop, "draft").why = ["notes/writing-boards", "pref:write-long"]; };
     expect(broken(cites)).toEqual(["preference-in-template"]);
     expect(brokenInstance(cites)).toEqual([]);
+  });
+});
+
+describe("a cited preference or snapshot resolves against the user's files when they are given", () => {
+  const citing = (why: string[]) => {
+    const sop = instance();
+    step(sop, "draft").why = why;
+    return sop;
+  };
+  const found = (sop: Sop, ctx: SopContext) => {
+    const v = checkSop(sop, ctx);
+    return { refusals: v.refusals.map(r => [r.rule, r.at, r.message]), warnings: v.warnings.map(w => [w.rule, w.at, w.message]) };
+  };
+  it("pref:<id> resolves to a preference of the given file; one the file doesn't hold is refused", () => {
+    const ctx: SopContext = { ...CTX, preferences: new Set(["write-long"]) };
+    expect(found(citing(["pref:write-long"]), ctx)).toEqual({ refusals: [], warnings: [] });
+    expect(found(citing(["pref:does-not-exist"]), ctx)).toEqual({
+      refusals: [["why-resolves", "steps.draft", "pref:does-not-exist is no preference of the preferences file"]], warnings: [],
+    });
+  });
+  it("models.dev@<date> resolves to a snapshot of the given cache; a date it doesn't hold, or no real date, is refused", () => {
+    const ctx: SopContext = { ...CTX, snapshots: new Set(["2026-10-12"]) };
+    expect(found(citing(["models.dev@2026-10-12"]), ctx)).toEqual({ refusals: [], warnings: [] });
+    expect(found(citing(["models.dev@2026-10-01"]), ctx)).toEqual({
+      refusals: [["why-resolves", "steps.draft", "models.dev@2026-10-01 is no snapshot of the snapshot directory"]], warnings: [],
+    });
+    expect(found(citing(["models.dev@2026-02-30"]), ctx).refusals.map(r => r[0])).toEqual(["why-resolves"]);
+  });
+  it("pref:<id> has its form exactly when parsePreferences takes the id: one id rule", () => {
+    const ids = ["write-long", "2-write", "a", "Write-long", "-write", "write_long", "write long", ""];
+    const entry = (id: string) => ({ id, holder: "principal", on: "2026-10-11", said: "Acme.", tasks: ["draft"] });
+    const kept = parsePreferences({ preferences: ids.map(entry) }).preferences.map(p => p.id);
+    const cited = ids.filter(id => found(citing([`pref:${id}`]), { ...CTX, preferences: new Set(ids) }).refusals.length === 0);
+    expect(cited).toEqual(kept);
+  });
+  it("without the file, each is checked for its form only, and a warning says so", () => {
+    expect(found(citing(["pref:write-long", "models.dev@2026-10-12"]), CTX)).toEqual({
+      refusals: [],
+      warnings: [
+        ["unchecked-citation", "steps.draft", "pref:write-long is checked for its form only: no preferences file was given"],
+        ["unchecked-citation", "steps.draft", "models.dev@2026-10-12 is checked for its form only: no snapshot directory was given"],
+      ],
+    });
   });
 });
 

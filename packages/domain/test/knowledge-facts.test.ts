@@ -44,6 +44,16 @@ describe("trimModelsDev", () => {
     expect(refusal(trimModelsDev(API, { ...META, fetched: "2026-02-30" }))).toEqual(expect.any(String));
     expect(refusal(trimModelsDev(API, { ...META, licence: "" }))).toEqual(expect.any(String));
   });
+  it("leaves out a provider or a model whose key is blank, so all it keeps reads back as a snapshot", () => {
+    const api = {
+      ...API,
+      " ": { id: " ", name: "Blank", models: { "blank-1": { name: "Blank 1" } } },
+      acme: { ...API.acme, models: { ...API.acme.models, "": { name: "Nameless" }, "  ": { name: "Spaces" } } },
+    };
+    const trimmed = trimModelsDev(api, META);
+    expect(trimmed).toEqual({ ok: true, value: SNAPSHOT });
+    expect(trimmed.ok ? readSnapshot(JSON.parse(JSON.stringify(trimmed.value))) : null).toEqual({ ok: true, value: SNAPSHOT });
+  });
 });
 
 describe("readSnapshot", () => {
@@ -61,9 +71,16 @@ describe("readSnapshot", () => {
 
 describe("freshness", () => {
   it("ageDays is the whole days between the dates; a snapshot is stale only past SNAPSHOT_STALE_DAYS", () => {
-    expect(freshness("2026-10-12", "2026-10-12")).toEqual({ ageDays: 0, stale: false });
-    expect(freshness("2026-09-12", "2026-10-12")).toEqual({ ageDays: 30, stale: false });
-    expect(freshness("2026-09-11", "2026-10-12")).toEqual({ ageDays: 31, stale: true });
+    expect(freshness("2026-10-12", "2026-10-12")).toEqual({ ageDays: 0, state: "fresh" });
+    expect(freshness("2026-09-12", "2026-10-12")).toEqual({ ageDays: 30, state: "fresh" });
+    expect(freshness("2026-09-11", "2026-10-12")).toEqual({ ageDays: 31, state: "stale" });
+  });
+  it("a snapshot dated after today is never fresh: its state is future, an anomaly to warn about", () => {
+    expect(freshness("2026-10-13", "2026-10-12")).toEqual({ ageDays: -1, state: "future" });
+    expect(freshness("2099-01-01", "2026-10-12")).toEqual({ ageDays: -26_379, state: "future" });
+  });
+  it("counts the days of any four-digit year, as an ISO date names it", () => {
+    expect(freshness("0026-01-01", "0026-01-31")).toEqual({ ageDays: 30, state: "fresh" });
   });
 });
 
@@ -85,6 +102,13 @@ describe("parsePreferences", () => {
   });
   it("a field the file does not have breaks the entry", () => {
     expect(parsePreferences({ preferences: [{ ...WRITE_LONG, rank: 1 }] })).toEqual({ preferences: [], refusals: [{ at: "preferences[0]", message: expect.any(String) }] });
+  });
+  it("entries that share an id are all left out, each with a refusal: an id names one preference, so no entry wins by its place", () => {
+    const twice = "id 'write-long' is used by preferences[0] and preferences[2]: an id names one preference";
+    expect(parsePreferences({ preferences: [WRITE_LONG, SEARCH_ACME, { ...WRITE_LONG, holder: "editor" }] })).toEqual({
+      preferences: [SEARCH_ACME],
+      refusals: [{ at: "preferences[0]", message: twice }, { at: "preferences[2]", message: twice }],
+    });
   });
   it("a doc that is not a mapping with a preferences list is one refusal, at preferences", () => {
     expect(parsePreferences("nothing")).toEqual({ preferences: [], refusals: [{ at: "preferences", message: expect.any(String) }] });
