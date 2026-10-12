@@ -525,6 +525,26 @@ describe("new since the last look (DG8)", () => {
     });
     expect(one(assigned, "T-3")).toMatchObject({ level: "claimed", seq: 20, fresh: true });
   });
+  it("an assignment on another task that changes the claimants raises the sequence (DG8)", () => {
+    // #7 is rooted under T-1 and also linked to T-4. The reviewer is assigned to T-4, not the root.
+    // Their review stops counting, and that assignment's sequence makes the drop new.
+    const c7 = change("acme/web", 7);
+    const a1 = rev("sha-a1", "patch-1");
+    const d = digest({
+      mark: { seq: 15, seen: [] },
+      states: [state(c7, { revision: a1 })],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
+      links: [
+        { task: taskKey(1), target: c7, by: "builder", at: NOW - 20, seq: 3 },
+        { task: taskKey(4), target: c7, by: "builder", at: NOW - 19, seq: 4 },
+      ],
+      assignments: [{ task: taskKey(4), lane: "reviewer", seq: 20, at: NOW - MIN }],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
+      events: [event("merged", c7, 8, NOW - 8)],
+      stale: [{ kind: "task_in_review", task: taskKey(1), since: NOW - 9 * HOUR }],
+    });
+    expect(one(d, "T-1")).toMatchObject({ level: "claimed", seq: 20, fresh: true });
+  });
 });
 
 // ---- DG9: a rebuild gives the same answer; counts are counts
