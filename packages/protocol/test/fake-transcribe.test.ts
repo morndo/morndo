@@ -119,7 +119,7 @@ describe("fake-transcribe", () => {
     expect(token.stderr).toBe("fixture-token-9f3a\n");
   });
 
-  it("a hang stays up with a child, a signal to the parent leaves the child, and the group kill takes both", async () => {
+  linuxOnly("a hang stays up with a child, a signal to the parent leaves the child, and the group kill takes both", async () => {
     const proc = spawn(process.execPath, [FIXTURE, ...runArgs("/audio/hang.wav")], { detached: true, stdio: "ignore" });
     const pid = proc.pid;
     if (pid === undefined) throw new Error("the fixture started without a pid");
