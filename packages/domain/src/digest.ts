@@ -264,10 +264,31 @@ export function buildDigest(input: DigestInput): DigestResult {
     for (const l of groupLinks) linkedTasks.add(l.task);
     for (const c of groupClaims) if (c.task !== undefined) linkedTasks.add(c.task);
     const groupAssignments = input.assignments.filter(a => linkedTasks.has(a.task));
-    // Claims, links and assignments are records too (DG8): a claim, or a claimant change through a link or an
-    // assignment, raises the item's sequence past the mark, so the level drop shows as new again.
+    // Claims, links and assignments are records too (DG8). A claim always raises the sequence. A link or an
+    // assignment raises it only when it changes who the claimants are, or a link brings a member in: a repeat
+    // link, or assigning a lane that already claimed, changes nothing the principal sees and must not.
     const records: { seq: number; at: number }[] = [...events, ...evidence, ...voided, ...groupClaims];
-    for (const raised of [...groupLinks, ...groupAssignments]) records.push(raised);
+    const setsDiffer = (before: ReadonlySet<string>, after: ReadonlySet<string>): boolean =>
+      before.size !== after.size || [...after].some(laneName => !before.has(laneName));
+    const raisesItem = (record: LinkRecord | Assignment): boolean => {
+      if ("target" in record) {
+        const without = groupLinks.filter(l => l !== record);
+        if (group.members.some(m => setsDiffer(
+          claimantsOf(m, input.claims, without, input.assignments),
+          claimantsOf(m, input.claims, groupLinks, input.assignments),
+        ))) return true;
+        const key = subjectKey(record.target);
+        const already = without.some(l => subjectKey(l.target) === key)
+          || input.claims.some(c => c.task !== undefined && subjectKey(c.subject) === key);
+        return !already;
+      }
+      const without = input.assignments.filter(a => a !== record);
+      return group.members.some(m => setsDiffer(
+        claimantsOf(m, input.claims, groupLinks, without),
+        claimantsOf(m, input.claims, groupLinks, input.assignments),
+      ));
+    };
+    for (const raised of [...groupLinks, ...groupAssignments].filter(raisesItem)) records.push(raised);
     const seq = records.reduce((m, r) => Math.max(m, r.seq), 0);
     const n = itemNew({ id: rootKey, seq, level, section }, input.mark);
     items.push({

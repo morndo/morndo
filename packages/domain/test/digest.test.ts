@@ -570,6 +570,7 @@ describe("new since the last look (DG8)", () => {
     expect(markAllSeen(base.mark, [{ id: "T-3", seq: again?.seq ?? 0, level: again?.level ?? null, section: again?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
     const reassigned = digest({
       ...base,
+      claims: [...base.claims, claim({ subject: task(3), lane: "builder", seq: 5, at: NOW - 9 })],
       links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 20, seq: 3 }],
       assignments: [{ task: taskKey(3), lane: "builder", seq: 31, at: NOW - MIN }],
     });
