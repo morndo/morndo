@@ -1,4 +1,5 @@
-// The hand-written notes (ADR-0026): each source is a link, the date read, its basis and a sentence in our own words
+// The hand-written notes (ADR-0026), kept in the recurring-job skill's references so a copied skill has them, each a
+// Markdown file whose front matter names the note: each source is a link, the date read, its basis and a sentence in our own words
 // (K1), with no stored quotes; a leaderboard line names its snapshot date and method (K3); a re-check at most 90 days
 // after the reads (K2); a stale note warns and still passes (K6). The negative controls are the same checks on broken
 // copies.
@@ -7,7 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
-const NOTES = "knowledge/notes";
+const NOTES = "knowledge/skills/recurring-job/references";
 const BASES = ["vendor-doc", "vendor-claim", "measured", "study"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY = 86_400_000;
@@ -53,7 +54,7 @@ function checkNote(id: string, text: string, today: string): { errors: string[];
   return { errors, warnings };
 }
 
-const files = existsSync(NOTES) ? readdirSync(NOTES).filter(f => f.endsWith(".md")).sort() : [];
+const files = existsSync(NOTES) ? readdirSync(NOTES).filter(f => f.endsWith(".md") && /^---\r?\nnote: /.test(readFileSync(join(NOTES, f), "utf8"))).sort() : [];
 const today = new Date().toISOString().slice(0, 10);
 
 describe("the shipped notes", () => {
