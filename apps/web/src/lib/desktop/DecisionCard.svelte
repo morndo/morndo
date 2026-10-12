@@ -14,7 +14,6 @@
   // asks that machine and never types it twice (fleet core §3.1, §7).
   import CalendarClock from "@lucide/svelte/icons/calendar-clock";
   import CheckCheck from "@lucide/svelte/icons/check-check";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import CircleCheckBig from "@lucide/svelte/icons/circle-check-big";
   import Flag from "@lucide/svelte/icons/flag";
   import Hourglass from "@lucide/svelte/icons/hourglass";
@@ -25,16 +24,16 @@
   import Signpost from "@lucide/svelte/icons/signpost";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import Star from "@lucide/svelte/icons/star";
-  import { renderMarkdown } from "../markdown.ts";
+  import { cardOf } from "@morndo/domain";
   import { MAY_HAVE_GONE, againLabel, endsDoubt } from "../catchup/answer.ts";
-  import Avatar from "./Avatar.svelte";
   import { ago, deliveryLine, dueLabel, REFUSALS, urgency, type DecisionItem } from "./decisions.ts";
   import { clock } from "./grouping.ts";
 
-  let { item, variant, now, verifiedFresh, onAnswer, onOpenScreen, onOpenChat }: {
-    item: DecisionItem; variant: "panel" | "inline"; now: number; verifiedFresh: boolean;
-    onAnswer: (id: string, body: AnswerBody, requestId: string) => Promise<AnswerProblem | null>;
+  let { item, variant, now, verifiedFresh, briefOpen = false, onAnswer, onOpenScreen, onOpenChat, onOpen }: {
+    item: DecisionItem; variant: "panel" | "inline"; now: number; verifiedFresh: boolean; briefOpen?: boolean;
+    onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>;
     onOpenScreen: (workerId: string) => void; onOpenChat?: (item: DecisionItem) => void;
+    onOpen?: (item: DecisionItem) => void;
   } = $props();
 
   let mode = $state<"idle" | "confirm" | "words">("idle");
@@ -43,12 +42,14 @@
   let sending = $state(false);
   let error = $state<string | null>(null);
   let again = $state<{ body: AnswerBody; requestId: string; code: string } | null>(null);   // may have been typed
-  let showContext = $state(false);
   let wordsEl = $state<HTMLTextAreaElement | null>(null);
+  // The version he was looking at when he picked: a restate meanwhile is refused as changed (E12).
+  let seenVersion = $state(item.version);
 
   const u = $derived(urgency(item, now));
   const open = $derived(item.status === "open");
   const canAnswer = $derived(open && item.answerable === null);
+  const card = $derived(cardOf(item));
   const asker = $derived(item.asker.kind === "manager" ? "Manager" : `#${item.asker.name}`);
   const whom = $derived(item.asker.kind === "manager" ? "the manager" : item.asker.name);
   const recommended = $derived(item.answerBy === "tap" ? item.options[0]?.key ?? null : null);
@@ -59,12 +60,22 @@
   // Picking an option opens the confirmation inside the card: keep it in view (the chat may have it at the bottom edge).
   $effect(() => { if (mode !== "idle") requestAnimationFrame(() => root?.querySelector(".confirm")?.scrollIntoView({ block: "nearest" })); });
   const showTitle = $derived(variant === "panel" || !(item.context ?? "").includes(item.title.slice(0, 48)));
+  const byline = $derived([
+    asker,
+    ago(item.askedAt, now),
+    card.minutes !== null ? `≈${card.minutes} min` : null,
+    card.spend ? "Includes spend" : null,
+    item.blocking && open ? "Blocking" : null,
+    item.askedAgain && open ? "Asked again" : null,
+    card.hasBrief ? null : "Filed without a brief",
+  ].filter((part): part is string => part !== null).join(" · "));
+  const readLabel = $derived(card.spend ? "Read and decide ›" : card.hasBrief ? "Read the brief ›" : "Details ›");
   // Closed meanwhile (an answer that may have been typed arrived after all, say): the card says so, and nothing is left to check.
   $effect(() => { void item.status; if (item.status !== "open") { mode = "idle"; picked = null; if (again) { again = null; error = null; } } });
   $effect(() => { if (mode === "words") wordsEl?.focus(); });
 
-  function pick(label: string, body: AnswerBody) { picked = { label, body }; mode = "confirm"; error = null; }
-  function writeWords(prefill = "") { words = prefill; mode = "words"; error = null; }
+  function pick(label: string, body: AnswerBody) { seenVersion = item.version; picked = { label, body }; mode = "confirm"; error = null; }
+  function writeWords(prefill = "") { seenVersion = item.version; words = prefill; mode = "words"; error = null; }
   // Back keeps an answer in doubt: the card then offers only Check again for it, never another answer (E8).
   function back() { mode = "idle"; picked = null; if (!again) error = null; }
   function escBack(e: KeyboardEvent) { if (e.key === "Escape") { e.preventDefault(); back(); } }
@@ -77,7 +88,7 @@
     sending = true;
     error = null;
     const doubt = again;
-    const problem = await onAnswer(item.id, body, requestId);
+    const problem = await onAnswer(item.id, body, requestId, seenVersion);
     sending = false;
     if (problem) {
       error = problem.text;
@@ -96,14 +107,26 @@
   }
 </script>
 
-<article bind:this={root} class="dc {variant} u-{u}" data-decision={item.id} aria-label="Decision: {item.title}">
-  <header class="meta">
-    {#if variant === "panel"}
-      <Avatar name={item.asker.kind === "manager" ? "Manager" : item.asker.name} kind={item.asker.kind === "manager" ? "peer" : "agent"} size={20} />
-      <strong class="asker">{asker}</strong><span class="when" title={new Date(item.askedAt).toLocaleString()}>{ago(item.askedAt, now)}</span>
-    {:else}
-      <span class="kind"><Signpost size={14} />{item.need === "time" ? "Needs your time" : "Decision"}</span>
+<article bind:this={root} class="dc {variant} u-{u}" data-decision={item.id} aria-label="Decision: {card.topic}">
+  {#if variant === "panel"}
+    <div class="top">
+      {#if card.headline}
+        <p class="topic" id="topic-{item.id}">{card.topic}</p>
+      {:else}
+        <h3 class="hit"><button type="button" class="headline" aria-haspopup="dialog" aria-expanded={briefOpen} id="topic-{item.id}" onclick={() => onOpen?.(item)}>{card.topic}</button></h3>
+      {/if}
+      {#if card.due !== null}
+        <span class="chip" class:bad={u === "overdue"} class:warn={u === "soon"}><CalendarClock size={12} />{dueLabel(card.due, now)}</span>
+      {/if}
+    </div>
+    {#if card.headline}
+      <h3 class="hit"><button type="button" class="headline" aria-haspopup="dialog" aria-expanded={briefOpen} onclick={() => onOpen?.(item)}>{card.headline}</button></h3>
     {/if}
+    <p class="byline">{byline}</p>
+    {#if card.spend && card.recommended}<p class="rec"><Star size={14} aria-hidden="true" /> Recommended: {card.recommended}</p>{/if}
+  {:else}
+  <header class="meta">
+    <span class="kind"><Signpost size={14} />{item.need === "time" ? "Needs your time" : "Decision"}</span>
     <span class="chips">
       {#if item.askedAgain && open}<span class="chip info"><Repeat size={12} />Asked again</span>{/if}
       {#if item.blocking && open}<span class="chip bad"><Flag size={12} />Blocking</span>{/if}
@@ -112,12 +135,11 @@
       {/if}
     </span>
   </header>
-
   {#if showTitle}<h3 class="title">{item.title}</h3>{/if}
+  {/if}
   {#if item.status === "open" && item.notice}<p class="sub" role="status">{item.notice}</p>{/if}
-  {#if variant === "panel" && item.project}<span class="project">#{item.project}</span>{/if}
 
-  {#if showRecommendation || showDefault}
+  {#if variant !== "panel" && (showRecommendation || showDefault)}
     <dl class="facts">
       {#if showRecommendation}<div><dt><Lightbulb size={14} />Recommended</dt><dd>{item.recommendation}</dd></div>{/if}
       {#if showDefault}<div><dt><Hourglass size={14} />If you don't answer</dt><dd>{item.ifNoAnswer}</dd></div>{/if}
@@ -200,37 +222,33 @@
     </div>
   {:else}
     <div class="actions">
-      {#if item.answerBy === "tap"}
+      {#if variant === "panel" && card.spend}
+        <button type="button" class="btn" disabled={!canAnswer} onclick={() => onOpen?.(item)}>Read and decide ›</button>
+      {:else if item.answerBy === "tap"}
         {#each item.options as o (o.key)}
           <button class="btn" class:primary={o.key === recommended} disabled={!canAnswer} onclick={() => pick(o.label, { key: o.key })}
+            aria-describedby={variant === "panel" ? `topic-${item.id}` : undefined}
             title={o.key === recommended ? `${o.label} (recommended)` : o.label}>
-            {#if o.key === recommended}<Star size={14} />{/if}{o.label}
+            {#if o.key === recommended}<Star size={14} aria-hidden="true" />{/if}{o.label}
           </button>
         {/each}
         {#if canAnswer}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
+        {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {:else if item.need === "time"}
         <button class="btn primary" disabled={!canAnswer} onclick={() => pick("Done", { text: "Done" })}>Done</button>
         <button class="btn" disabled={!canAnswer} onclick={() => writeWords()}><MessageSquareText size={14} />Reply…</button>
+        {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {:else}
         <button class="btn primary" disabled={!canAnswer} onclick={() => writeWords()}><MessageSquareText size={14} />Answer…</button>
         {#if item.ifNoAnswer}<button class="btn" disabled={!canAnswer} onclick={() => pick(`Go with the default (${item.ifNoAnswer})`, { text: `Go with the default: ${item.ifNoAnswer}` })}>Go with the default</button>{/if}
+        {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {/if}
     </div>
     {#if !canAnswer && item.answerable}<p class="note">{REFUSALS[item.answerable]}</p>{/if}
   {/if}
   {#if error}<p class="err" role="alert">{error}</p>{/if}
-
-  {#if variant === "panel" && ((item.context && item.contextKind === "markdown") || (onOpenChat && item.messageId))}
-    <div class="more">
-      {#if item.context && item.contextKind === "markdown"}
-        <button class="link" aria-expanded={showContext} onclick={() => (showContext = !showContext)}>
-          <span class="caret" class:shut={!showContext}><ChevronDown size={14} /></span>{showContext ? "Hide the details" : `Why ${whom} asks`}
-        </button>
-      {/if}
-      {#if onOpenChat && item.messageId}<button class="link right" onclick={() => onOpenChat?.(item)}>Show in chat</button>{/if}
-      <span class="id">{item.id.startsWith("ny-") ? item.id : ""}</span>
-    </div>
-    {#if showContext && item.context}<div class="context md">{@html renderMarkdown(item.context)}</div>{/if}
+  {#if variant === "panel" && onOpenChat && item.messageId}
+    <button type="button" class="link chat" onclick={() => onOpenChat?.(item)}>Show in chat</button>
   {/if}
 </article>
 
@@ -311,16 +329,19 @@
   }
   .note { margin: 0; font: 400 13px/18px var(--font); color: var(--muted); }
   .err { margin: 0; font: 400 13px/18px var(--font); color: var(--bad-fg); }
-  .more { display: flex; align-items: center; gap: 12px; padding-top: 2px; }
-  .more .right { margin-left: auto; }
-  .more .id { font: 400 11px/1 var(--mono); color: var(--muted); }
-  .caret { display: inline-grid; transition: transform 0.12s; }
-  .caret.shut { transform: rotate(-90deg); }
-  .context { max-height: 320px; overflow: auto; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border); font: 400 14px/21px var(--font); overflow-wrap: anywhere; }
-  .context :global(p) { margin: 0 0 6px; }
-  .context :global(p:last-child) { margin: 0; }
-  .context :global(ul), .context :global(ol) { margin: 2px 0 6px; padding-left: 22px; }
-  .context :global(code) { font: 12px/18px var(--mono); padding: 1px 3px; border-radius: 3px; background: var(--code-bg); border: 1px solid var(--code-border); }
-  .context :global(a) { color: var(--link); }
-  .context :global(h1), .context :global(h2), .context :global(h3) { font: 900 14px/20px var(--font); margin: 6px 0 2px; }
+  .top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .top .hit { flex: 1; min-width: 0; }
+  .topic { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 700 12px/16px var(--font); letter-spacing: 0.04em; text-transform: uppercase; }
+  .top .chip { margin-left: auto; }
+  .hit { margin: 0; min-width: 0; font: inherit; }
+  .headline {
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    width: 100%; padding: 0; border: 0; background: none; color: var(--text); text-align: left; cursor: pointer;
+    font: 700 15px/22px var(--font);
+  }
+  .headline::after { content: ""; position: absolute; inset: 0; }
+  .byline { margin: 0; font: 400 13px/18px var(--font); color: var(--muted); }
+  .rec { margin: 0; display: flex; align-items: center; gap: 6px; font: 400 13px/18px var(--font); }
+  .chat { justify-self: start; }
+  .actions, .confirm, .state, .err, .note, .chat, .readonly, .screen { position: relative; z-index: 1; }
 </style>

@@ -81,6 +81,11 @@
     if (w) open(w.id);
   }
   let sidebarWidth = $state(store.get("morndo.sidebar", 300));
+  const RIGHT_MIN = 360;
+  const RIGHT_MAX = 640;
+  const clampRight = (n: number) => Math.min(RIGHT_MAX, Math.max(RIGHT_MIN, Math.round(n)));
+  let rightWidth = $state(clampRight(store.get("morndo.right.width", 440)));
+  function setRightWidth(n: number) { rightWidth = clampRight(n); store.set("morndo.right.width", rightWidth); }
   // The right-hand panel with the decisions: open by default beside every conversation. Closing it is remembered on this
   // device.
   let right = $state<{ open: boolean }>(store.get("morndo.right", { open: true }));
@@ -118,8 +123,7 @@
   // Like Slack, the right-hand panel sits beside the conversation while the conversation keeps a readable width (560px);
   // in a narrower window it stays shut until asked for, and then lies over the conversation.
   let windowWidth = $state(typeof innerWidth === "number" ? innerWidth : 1920);
-  const RIGHT_WIDTH = 440;
-  const narrow = $derived(windowWidth - 70 - 4 - sidebarWidth - RIGHT_WIDTH < 560);
+  const narrow = $derived(windowWidth - 70 - 4 - sidebarWidth - rightWidth < 560);
   const rightShown = $derived(narrow ? overlayOpen : right.open);
   const decisionsShown = $derived(rightShown);
   function saveRight(next: { open: boolean }) { right = next; store.set("morndo.right", next); }
@@ -132,9 +136,9 @@
   // The hub's own word is its code ("uncertain": the asker's machine may have typed it); no word of the hub's own (the
   // connection failed, a proxy's page) is "unknown", which may have gone too; anything else (a cancelled passkey
   // prompt) sent nothing.
-  async function answer(id: string, body: AnswerBody, requestId: string): Promise<AnswerProblem | null> {
+  async function answer(id: string, body: AnswerBody, requestId: string, seen?: string): Promise<AnswerProblem | null> {
     try {
-      await withStepUp(() => api.post(`/api/escalations/${encodeURIComponent(id)}/answer`, { ...body, requestId }), at => (verifiedAt = at));
+      await withStepUp(() => api.post(`/api/escalations/${encodeURIComponent(id)}/answer`, { ...body, requestId, ...(seen ? { seen } : {}) }), at => (verifiedAt = at));
       return null;
     } catch (e) {
       if (e instanceof ApiError) return e.code === `http_${e.status}` ? { code: "unknown", text: UNKNOWN } : { code: hubRefusal(e), text: REFUSALS[hubRefusal(e)] ?? explain(e) };
@@ -143,6 +147,14 @@
     }
   }
   function openScreen(workerId: string) { open(workerId); overlayOpen = false; screenRequest = { worker: workerId, n: (screenRequest?.n ?? 0) + 1 }; }
+  async function askForBrief(d: DecisionItem): Promise<boolean> {
+    const worker = d.asker.workerId;
+    if (!worker) return false;
+    const w = feed.workers.find(x => x.id === worker);
+    // The command is written for the question that pane is on now, or the hub refuses it as stale (S6).
+    await onQueue({ target: worker, targetName: w?.name ?? d.asker.name, text: `Please restate ${d.id} as a decision brief: morndo-decide template`, uploads: [], images: [], files: [], seen: w?.waitingOn ?? "none" });
+    return true;
+  }
   function openChat(d: DecisionItem) {
     if (!d.asker.workerId || !d.messageId) return;
     open(d.asker.workerId);
@@ -344,7 +356,7 @@
       decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
       onView={v => (view = v)} onManager={() => manager && open(manager.id)} onPreferences={t => (preferences = t)} />
     <div class="workspace">
-      <div class="panel" class:over={narrow && rightShown} style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${RIGHT_WIDTH}px` : ''}">
+      <div class="panel" class:over={narrow && rightShown} style:--right-w="{rightWidth}px" style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${rightWidth}px` : ''}">
         <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines}
           decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
           {prefsOf} onMenu={(id, x, y) => (menu = { x, y, id })}
@@ -374,9 +386,9 @@
           {/if}
         </main>
         {#if rightShown}
-          <RightPanel waiting={decisionsWaiting} onClose={closeRight}>
+          <RightPanel waiting={decisionsWaiting} width={rightWidth} onWidth={setRightWidth} onClose={closeRight}>
             <DecisionsPanel items={feed.decisions} ledger={feed.ledger} {now} {verifiedFresh} onAnswer={answer}
-              onOpenScreen={openScreen} onOpenChat={openChat} />
+              onOpenScreen={openScreen} onOpenChat={openChat} onAskBrief={askForBrief} />
           </RightPanel>
         {/if}
       </div>
@@ -404,7 +416,7 @@
   .main { display: flex; min-width: 0; min-height: 0; border-left: 1px solid var(--border-soft); }
   .empty { margin: auto; color: var(--muted); }
   .panel.over > :global(.side-panel) {
-    position: absolute; top: 0; right: 0; bottom: 0; width: min(440px, calc(100% - 16px)); z-index: 6;
+    position: absolute; top: 0; right: 0; bottom: 0; width: min(var(--right-w), calc(100% - 16px)); z-index: 6;
     box-shadow: -10px 0 28px rgba(0, 0, 0, 0.16);
   }
 </style>

@@ -4,22 +4,37 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import PartyPopper from "@lucide/svelte/icons/party-popper";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import BriefModal from "./BriefModal.svelte";
   import DecisionCard, { type AnswerBody, type AnswerProblem } from "./DecisionCard.svelte";
   import { groups, urgency, waitingCount, type DecisionItem, type LedgerState } from "./decisions.ts";
   import { clock } from "./grouping.ts";
 
-  let { items, ledger, now, verifiedFresh, onAnswer, onOpenScreen, onOpenChat }: {
+  let { items, ledger, now, verifiedFresh, onAnswer, onOpenScreen, onOpenChat, onAskBrief }: {
     items: DecisionItem[]; ledger: LedgerState; now: number; verifiedFresh: boolean;
-    onAnswer: (id: string, body: AnswerBody, requestId: string) => Promise<AnswerProblem | null>;
+    onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>;
     onOpenScreen: (workerId: string) => void; onOpenChat: (item: DecisionItem) => void;
+    onAskBrief?: (item: DecisionItem) => boolean | Promise<boolean>;
   } = $props();
 
   let collapsed = $state<Record<string, boolean>>({});
+  let openId = $state<string | null>(null);
+  const openItem = $derived(items.find(d => d.id === openId) ?? null);
   const list = $derived(groups(items));
   const waiting = $derived(waitingCount(items));
   const urgent = $derived(items.filter(d => d.status === "open" && ["blocking", "overdue", "soon"].includes(urgency(d, now))).length);
   const plate = $derived(items.filter(d => d.status === "open" && d.need === "time").length);
   const isShut = (key: string, open: boolean) => collapsed[key] ?? !open;
+  $effect(() => { if (openId && !items.some(d => d.id === openId)) closeBrief(); });
+
+  function closeBrief() {
+    const id = openId;
+    openId = null;
+    queueMicrotask(() => {
+      const opener = id ? document.querySelector(`[data-decision="${CSS.escape(id)}"] button[aria-haspopup="dialog"]`) : null;
+      if (opener instanceof HTMLElement) opener.focus();
+      else document.getElementById("decisions-heading")?.focus();
+    });
+  }
 </script>
 
 <div class="dp">
@@ -49,13 +64,16 @@
         {#if !isShut(g.key, g.open)}
           <div class="cards">
             {#each g.items as d (d.id)}
-              <DecisionCard item={d} variant="panel" {now} {verifiedFresh} {onAnswer} {onOpenScreen} {onOpenChat} />
+              <DecisionCard item={d} variant="panel" {now} {verifiedFresh} briefOpen={openId === d.id} {onAnswer} {onOpenScreen} {onOpenChat} onOpen={item => (openId = item.id)} />
             {/each}
           </div>
         {/if}
       </section>
     {/each}
   </div>
+  {#if openItem}
+    <BriefModal item={openItem} {now} {verifiedFresh} {onAnswer} {onOpenScreen} onAskBrief={onAskBrief ?? (async () => false)} onClose={closeBrief} />
+  {/if}
 </div>
 
 <style>
