@@ -13,6 +13,7 @@ const ROOT = resolve(import.meta.dirname, "..");
 const SKILLS = join(ROOT, "knowledge/skills");
 const FIELDS = new Set(["name", "description", "license", "allowed-tools", "metadata", "compatibility"]);
 const PATTERN_SECTIONS = ["When to use", "When not to use", "Failure modes", "Guards", "Sources"];
+const PROCEDURE_SECTIONS = ["When to use", "When not to use", "How to design it", "Where the approval sits", "Choosing engines", "Reporting and measuring", "Sources"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY = 86_400_000;
 // What docs/domain.md defines, read when a check first needs it, so a missing file fails a test instead of the import:
@@ -110,12 +111,13 @@ function checkSkill(dir: string, text: string, today: string, known: Set<string>
 
   const md = (typeof meta === "object" && meta !== null ? meta : {}) as Record<string, unknown>;
   if (dir.startsWith("loop-") && md["morndo-kind"] !== "loop-pattern") return { errors: [...errors, "a loop-* skill must declare morndo-kind: loop-pattern"], warnings };
-  if (md["morndo-kind"] !== "loop-pattern") return { errors, warnings };
+  const kind = md["morndo-kind"];
+  if (kind !== "loop-pattern" && kind !== "procedure") return { errors, warnings };
 
-  // A loop pattern: Morndo's own rules on top of the specification.
-  if (desc && (!/\bUse (when|for|before)\b/.test(desc) || !/\bNot\b/.test(desc))) errors.push("description must say when to use the loop and when not");
+  // A loop pattern or a procedure: Morndo's own rules on top of the specification.
+  if (desc && (!/\bUse (when|for|before)\b/.test(desc) || !/\bNot\b/.test(desc))) errors.push("description must say when to use it and when not");
   const secs = sections(body);
-  for (const s of PATTERN_SECTIONS) if (!secs.has(s)) errors.push(`missing section '## ${s}'`);
+  for (const s of kind === "loop-pattern" ? PATTERN_SECTIONS : PROCEDURE_SECTIONS) if (!secs.has(s)) errors.push(`missing section '## ${s}'`);
   const read = md["morndo-sources-read"];
   const recheck = md["morndo-recheck"];
   if (!realDate(read)) errors.push("morndo-sources-read must be a real calendar date, YYYY-MM-DD");
@@ -163,10 +165,15 @@ const dirs = readdirSync(SKILLS, { withFileTypes: true }).filter(d => d.isDirect
 const known = new Set(dirs);
 const today = new Date().toISOString().slice(0, 10);
 const LOOPS = ["loop-fan-out-merge", "loop-human-gate", "loop-one-shot", "loop-plan-execute-verify", "loop-review-fix", "loop-scheduled"];
+const PROCEDURES = ["recurring-job"];
 
 describe("the shipped skills", () => {
-  it("are the six loop patterns, each a directory with a SKILL.md", () => {
-    expect(dirs).toEqual(LOOPS);
+  it("are the six loop patterns and the recurring-job procedure, each a directory with a SKILL.md", () => {
+    expect(dirs).toEqual([...LOOPS, ...PROCEDURES].sort());
+  });
+  it("recurring-job declares morndo-kind: procedure", () => {
+    const head = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(join(SKILLS, "recurring-job", "SKILL.md"), "utf8"))?.[1] ?? "";
+    expect((parse(head) as { metadata?: Record<string, unknown> }).metadata?.["morndo-kind"]).toBe("procedure");
   });
   it("every loop-* skill declares morndo-kind: loop-pattern, so the pattern rules can't be skipped by a typo", () => {
     for (const dir of dirs.filter(d => d.startsWith("loop-"))) {
@@ -212,7 +219,40 @@ Anything else.
 
 - Example, A page. https://example.org/page (read 2026-10-12). Supports the sample.
 `;
-const SAMPLE = new Set(["loop-sample"]);
+const PROCEDURE = `---
+name: recurring-sample
+description: A sample procedure. Use when testing the checks. Not for anything else.
+metadata:
+  morndo-kind: procedure
+  morndo-sources-read: "2026-10-12"
+  morndo-recheck: "2027-01-10"
+---
+
+# Sample
+
+## When to use
+Tests.
+
+## When not to use
+Anything else.
+
+## How to design it
+Use \`loop-sample\`.
+
+## Where the approval sits
+Before publishing.
+
+## Choosing engines
+A class.
+
+## Reporting and measuring
+A metric.
+
+## Sources
+
+- Example, A page. https://example.org/page (read 2026-10-12). Supports the sample.
+`;
+const SAMPLE = new Set(["loop-sample", "recurring-sample"]);
 const errorsOf = (text: string, dir = "loop-sample", day = "2026-10-12") => checkSkill(dir, text, day, SAMPLE).errors;
 
 describe("the design and the skills", () => {
@@ -310,6 +350,12 @@ describe("negative controls: a broken copy is refused", () => {
   });
   it("an escaped pipe inside a guard cell is part of the cell", () => {
     expect(errorsOf(GOOD.replace("| A round limit. |", "| A round limit \\| a cap. |"))).toEqual([]);
+  });
+  it("a procedure skill passes with its sections and dated sources, and is refused without one", () => {
+    expect(errorsOf(PROCEDURE, "recurring-sample")).toEqual([]);
+    expect(errorsOf(PROCEDURE.replace("## Where the approval sits\nBefore publishing.\n\n", ""), "recurring-sample")).toEqual(["missing section '## Where the approval sits'"]);
+    expect(errorsOf(PROCEDURE.replace(" (read 2026-10-12)", ""), "recurring-sample")).toHaveLength(1);
+    expect(errorsOf(PROCEDURE.replace("Before publishing.", "See `loop-missing`."), "recurring-sample")).toEqual(["refers to a skill that doesn't exist: loop-missing"]);
   });
   it("past its re-check date a skill warns and still passes", () => {
     const r = checkSkill("loop-sample", GOOD, "2027-01-11", SAMPLE);
