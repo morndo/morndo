@@ -74,17 +74,21 @@ const reference = (text: string | undefined): string => {
 // copied. Not Buffer.concat: it cuts a result under half of Buffer.poolSize (32 KiB since Node 24.18) from Node's shared
 // pool, where the value would outlive the zeroing (round 2, point 3; https://nodejs.org/docs/latest-v24.x/api/buffer.html,
 // Buffer.poolSize and Buffer.allocUnsafe, read 2026-10-12).
+// The chunks are zeroed in a finally, so a stream that fails midway leaves none of them behind (round 3, point 4).
 export async function stdinValue(source: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
   const chunks: Uint8Array[] = [];
-  for await (const chunk of source) chunks.push(chunk);
-  const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.length;
-    chunk.fill(0);
+  try {
+    for await (const chunk of source) chunks.push(chunk);
+    const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+    let at = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, at);
+      at += chunk.length;
+    }
+    return bytes;
+  } finally {
+    for (const chunk of chunks) chunk.fill(0);
   }
-  return bytes;
 }
 
 export async function runSecrets(argv: readonly string[], env: NodeJS.ProcessEnv, io: SecretsIo): Promise<number> {
