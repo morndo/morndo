@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { accessSync, constants, existsSync, readFileSync, readdirSync, statfsSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync, readdirSync, statSync, statfsSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { defineConfig } from "vitest/config";
@@ -45,24 +45,34 @@ function ramScratch(): string | null {
 const scratchBase = ramScratch();
 const scratch = (project: string): Record<string, string> => (scratchBase ? { TMPDIR: `${scratchBase}-${project}` } : {});
 // A web test file is a Chromium test when it imports playwright, or a module under apps/web/test that does, at any
-// depth: static, side-effect or dynamic imports, either quote style, subfolders. `import type` and comments don't
-// count. A file this misses and that launches Chromium anyway fails at once in the units project
-// (test/units-without-chromium.ts) instead of running there beside everything else.
+// depth: static, side-effect or dynamic imports, either quote style, subfolders, and a helper named as Node or Vite
+// would find a .ts file (as written, without its extension, with .js for .ts, or a folder's index.ts). `import type`
+// and comments don't count. Each file of the folder is read once; a file imports Chromium when one of its helpers does,
+// repeated until nothing changes, so a cycle of helpers is settled too. A file this misses and that launches Chromium
+// anyway fails at once in the units project (test/units-without-chromium.ts) instead of running there beside
+// everything else.
 const IMPORTS = /^\s*(?:import|export)\s+(?!type\b)[^;]*?\bfrom\s*["']([^"']+)["']|^\s*import\s*["']([^"']+)["']|\bimport\(\s*["']([^"']+)["']\s*\)/gm;
-const startsChromium = (file: string, seen = new Set<string>()): boolean => {
-  if (seen.has(file) || !existsSync(file)) return false;
-  seen.add(file);
-  for (const m of readFileSync(file, "utf8").matchAll(IMPORTS)) {
-    const spec = m[1] ?? m[2] ?? m[3] ?? "";
-    if (spec === "playwright") return true;
-    const next = resolve(dirname(file), spec);
-    if (spec.startsWith(".") && next.startsWith(`${WEB_TESTS}/`) && startsChromium(next, seen)) return true;
+const helperFile = (from: string, spec: string): string | null => {
+  const base = resolve(dirname(from), spec);
+  for (const f of [base, `${base}.ts`, base.replace(/\.js$/, ".ts"), join(base, "index.ts")]) {
+    if (f.startsWith(`${WEB_TESTS}/`) && f.endsWith(".ts") && existsSync(f) && statSync(f).isFile()) return f;
   }
-  return false;
+  return null;
 };
-const browserTests = readdirSync(WEB_TESTS, { recursive: true, encoding: "utf8" })
-  .filter(f => f.endsWith(".test.ts") && startsChromium(join(WEB_TESTS, f)))
-  .map(f => relative(".", join(WEB_TESTS, f)));
+const webSources = readdirSync(WEB_TESTS, { recursive: true, encoding: "utf8" }).filter(f => f.endsWith(".ts")).map(f => join(WEB_TESTS, f));
+const imports = new Map(webSources.map(file => {
+  const specs = [...readFileSync(file, "utf8").matchAll(IMPORTS)].map(m => m[1] ?? m[2] ?? m[3] ?? "");
+  const helpers = specs.filter(spec => spec.startsWith(".")).map(spec => helperFile(file, spec)).filter(f => f !== null);
+  return [file, { playwright: specs.includes("playwright"), helpers }] as const;
+}));
+const chromiumFiles = new Set(webSources.filter(f => imports.get(f)?.playwright));
+for (let grew = true; grew;) {
+  grew = false;
+  for (const [file, { helpers }] of imports) {
+    if (!chromiumFiles.has(file) && helpers.some(h => chromiumFiles.has(h))) { chromiumFiles.add(file); grew = true; }
+  }
+}
+const browserTests = webSources.filter(f => f.endsWith(".test.ts") && chromiumFiles.has(f)).map(f => relative(".", f));
 
 export default defineConfig({
   test: {
