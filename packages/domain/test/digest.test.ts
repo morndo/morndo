@@ -545,6 +545,38 @@ describe("new since the last look (DG8)", () => {
     });
     expect(one(d, "T-1")).toMatchObject({ level: "claimed", seq: 20, fresh: true });
   });
+  it("a link or an assignment that changes neither the claimants nor the level does not raise the sequence (DG8)", () => {
+    // Builder already claimed #7 and linked it. Linking it again, or assigning builder, changes nothing the
+    // principal sees. The item stays at the review's sequence, so Mark all seen is not blocked behind N more.
+    const c7 = change("acme/web", 7);
+    const a1 = rev("sha-a1", "patch-1");
+    const seen: SeenAt = { id: "T-3", seq: 9, level: "reviewed", section: "stale_or_stuck" };
+    const base = {
+      mark: { seq: 8, seen: [seen] },
+      states: [state(c7, { revision: a1 })],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
+      stale: [{ kind: "task_in_review", task: taskKey(3), since: NOW - 9 * HOUR }],
+    };
+    const relinked = digest({
+      ...base,
+      links: [
+        { task: taskKey(3), target: c7, by: "builder", at: NOW - 20, seq: 3 },
+        { task: taskKey(3), target: c7, by: "builder", at: NOW - MIN, seq: 30 },
+      ],
+    });
+    const again = one(relinked, "T-3");
+    expect(again).toMatchObject({ level: "reviewed", seq: 9, fresh: false });
+    expect(markAllSeen(base.mark, [{ id: "T-3", seq: again?.seq ?? 0, level: again?.level ?? null, section: again?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
+    const reassigned = digest({
+      ...base,
+      links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 20, seq: 3 }],
+      assignments: [{ task: taskKey(3), lane: "builder", seq: 31, at: NOW - MIN }],
+    });
+    const item = one(reassigned, "T-3");
+    expect(item).toMatchObject({ level: "reviewed", seq: 9, fresh: false });
+    expect(markAllSeen(base.mark, [{ id: "T-3", seq: item?.seq ?? 0, level: item?.level ?? null, section: item?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
+  });
 });
 
 // ---- DG9: a rebuild gives the same answer; counts are counts
