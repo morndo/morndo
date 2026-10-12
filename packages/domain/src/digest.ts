@@ -147,14 +147,19 @@ const bareState = (subject: SubjectRef): SubjectState =>
 // task groups its changes — and everything else is its own root.
 type Group = { root: SubjectRef; members: SubjectRef[] };
 
-// The first task ever linked to a subject (a link record, or a claim naming both, §3.3): its root, in time order.
-export function linkMapOf(links: readonly LinkRecord[], claims: readonly Claim[]): Map<string, TaskKey> {
+// The first task linked to a subject at or before `at` (a link record, or a claim naming both, §3.3): its root, in
+// time order. A link filed later is not in the map, so a closed week does not change when someone links afterwards
+// (DG9, DG12). Omit `at` for the digest as it stands now.
+export function linkMapOf(links: readonly LinkRecord[], claims: readonly Claim[], at = Number.POSITIVE_INFINITY): Map<string, TaskKey> {
   const map = new Map<string, TaskKey>();
   const all = [
     ...links.map(l => ({ target: l.target, task: l.task, at: l.at })),
     ...claims.filter(c => c.task !== undefined).map(c => ({ target: c.subject, task: c.task as TaskKey, at: c.at })),
   ].sort((a, b) => a.at - b.at);
-  for (const l of all) if (!map.has(subjectKey(l.target))) map.set(subjectKey(l.target), l.task);
+  for (const l of all) {
+    if (l.at > at) break;
+    if (!map.has(subjectKey(l.target))) map.set(subjectKey(l.target), l.task);
+  }
   return map;
 }
 
@@ -441,9 +446,9 @@ export type CountedClaim = { subject: SubjectRef; revision: Revision | null; at:
 // DG12: counted once per root subject and revision, at the earliest of its sources. A claim filed on the change and
 // the same revision claimed when its task moved to review are one count: the root is the linked task (DG5).
 export function countedClaims(sources: readonly ClaimSource[], links: readonly LinkRecord[] = [], claims: readonly Claim[] = []): CountedClaim[] {
-  const linked = linkMapOf(links, claims);
   const byKey = new Map<string, CountedClaim>();
   for (const s of [...sources].sort((a, b) => a.at - b.at)) {
+    const linked = linkMapOf(links, claims, s.at);
     const key = `${rootKeyOf(s.subject, linked)}@${s.revision?.sha ?? "-"}`;
     if (!byKey.has(key)) byKey.set(key, { subject: s.subject, revision: s.revision, at: s.at });
   }
@@ -535,14 +540,15 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords): Item
 }
 
 export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: number): WeeklyRow[] {
-  const linked = linkMapOf(r.links, r.claims);
   const counted = countedClaims(r.claimSources, r.links, r.claims);
   return weeks.map(w => {
     const inWeek = (at: number) => at >= w.start && at < w.end;
     const weekClaims = counted.filter(c => inWeek(c.at));
-    const failureOf = (c: CountedClaim) => r.claimFailures.find(f =>
-      rootKeyOf(f.subject, linked) === rootKeyOf(c.subject, linked) && f.at >= c.at && f.at - c.at <= LATER_FAILED_MS
-      && (f.revision === null ? c.revision === null : c.revision !== null && revisionCovers(f.revision, c.revision))) ?? null;
+    const failureOf = (c: CountedClaim) => r.claimFailures.find(f => {
+      const linked = linkMapOf(r.links, r.claims, f.at);
+      return rootKeyOf(f.subject, linked) === rootKeyOf(c.subject, linked) && f.at >= c.at && f.at - c.at <= LATER_FAILED_MS
+        && (f.revision === null ? c.revision === null : c.revision !== null && revisionCovers(f.revision, c.revision));
+    }) ?? null;
     const levels = new Map<ItemLevel, LevelHeld>();
     for (const c of weekClaims) {
       const f = failureOf(c);
