@@ -113,6 +113,10 @@ describe("the records' own guards", () => {
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "att-1" })))).toBe("ok");
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "http://ci.acme.test/runs/9" })))).toBe("bad_link");
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "see the terminal" })))).toBe("bad_link");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci:hunter2@ci.acme.test/runs/9" })))).toBe("bad_link");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?token=hunter2" })))).toBe("bad_link");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?X-Amz-Signature=abc" })))).toBe("bad_link");
+    expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?run=9&branch=main" })))).toBe("ok");
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, kind: "ci", counts: { passed: 1, failed: 0, skipped: 0 } })))).toBe("bad_counts");
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, kind: "tests", counts: { passed: 14, failed: 0, skipped: 2 } })))).toBe("ok");
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, note: "x".repeat(141) })))).toBe("too_long");
