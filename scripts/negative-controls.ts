@@ -1041,7 +1041,7 @@ export const CONTROLS: Control[] = [
     find: 'if (full(req)) return refuseRequest("full");', replace: "",
     run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'full'" },
   { id: "sp1-renew-expiry", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
-    find: 'if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > c.at)) return refuseRequest("expiry");',
+    find: 'if (req.kind === "renew" && !(typeof expiry === "number" && Number.isFinite(expiry) && all.every(x => expiry > x.at))) return refuseRequest("expiry");',
     replace: "",
     run: ["packages/domain/test/secrets-followup.test.ts"], expect: "to be 'expiry'" },
   { id: "sp1-rotation-shape", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
@@ -1091,7 +1091,7 @@ export const CONTROLS: Control[] = [
     replace: 'const before = findSecret(dir, input.reference);\n  const r = as === "renew" ? renewProblem(before, input.expiry, at) : null;\n  if (r) return refuse(r);\n  const p = inputProblem(input);\n  if (p) return refuse(p);',
     run: ["packages/domain/test/secrets-round4.test.ts"], expect: "bad_reference" },
   { id: "sp1-hub-node-clock", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
-    find: 'a.expiry > c.at)) return refuseRequest("expiry");', replace: 'a.expiry > now)) return refuseRequest("expiry");',
+    find: 'all.every(x => expiry > x.at))) return refuseRequest("expiry");', replace: 'expiry > now)) return refuseRequest("expiry");',
     run: ["packages/domain/test/secrets-round4.test.ts"], expect: "stored" },
   { id: "sp1-shape-stated", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
     find: 'const shapeOk = (s: ShapeInput) => s === null || (typeof s === "string" ? SHAPE_ID.test(s) : keepsShape(s));',
@@ -1116,7 +1116,7 @@ export const CONTROLS: Control[] = [
     replace: "",
     run: ["packages/domain/test/secrets-round6.test.ts"], expect: "clock" },
   { id: "sp1-renewed-required", task: "secrets-pr2", file: "packages/domain/src/secrets.ts",
-    find: 'if (req.kind === "renew" && !c.renewed) return refuseRequest("not_renewed");', replace: "",
+    find: 'if (req.kind === "renew" && !all.every(x => x.renewed)) return refuseRequest("not_renewed");', replace: "",
     run: ["packages/domain/test/secrets-round6.test.ts"], expect: "not_renewed" },
   // ---- Secrets, PR 2a (board T-88): the node's exact filter, each guard removed once.
   { id: "sp2a-floor", task: "secrets-pr2a", file: "packages/node-ops/src/secret-scan.ts",
@@ -1455,6 +1455,12 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-r11-exit-code", task: "secrets-pr2b", file: "apps/connections/src/secrets-main.ts",
     find: "  confirm,\n});\n", replace: "  confirm,\n});\nprocess.exit(process.exitCode);\n",
     run: ["apps/connections/test/secrets-bin.test.ts"], expect: "20001" },
+  { id: "sp2b-r8-every-renewed", task: "secrets-pr2b", file: "packages/domain/src/secrets.ts",
+    find: "!all.every(x => x.renewed)", replace: "!c.renewed",
+    run: ["packages/domain/test/secrets-round9.test.ts"], expect: "not_renewed" },
+  { id: "sp2b-r8-every-expiry", task: "secrets-pr2b", file: "packages/domain/src/secrets.ts",
+    find: "all.every(x => expiry > x.at)", replace: "expiry > c.at",
+    run: ["packages/domain/test/secrets-round9.test.ts"], expect: "to be 'expiry'" },
 ];
 
 // ---- the runner

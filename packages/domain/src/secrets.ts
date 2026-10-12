@@ -250,9 +250,11 @@ export function answerStored(
   // rotate or renew is about the request's own Secret; a new one may be stored under the Reference chosen on the card (SR6).
   if (!all.every(x => x.reference === a.reference) || (req.kind !== "new" && a.reference !== req.reference)) return refuseRequest("reference");
   if (!all.every(x => Number.isFinite(x.at) && x.at >= req.openedAt - CONFIRMATION_SKEW_MS && x.at <= now + CONFIRMATION_SKEW_MS)) return refuseRequest("clock");
-  if (req.kind === "renew" && !c.renewed) return refuseRequest("not_renewed");
-  // The renew's Expiry, in one place: named, a time, and later than the node's time of the store (T-88).
-  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > c.at)) return refuseRequest("expiry");
+  // A renew holds on every node the answer names, not only the requester's (review 8 of PR #40).
+  if (req.kind === "renew" && !all.every(x => x.renewed)) return refuseRequest("not_renewed");
+  // The renew's Expiry, in one place: named, a time, and later than each node's time of the store (T-88, T-94).
+  const expiry = a.expiry;
+  if (req.kind === "renew" && !(typeof expiry === "number" && Number.isFinite(expiry) && all.every(x => expiry > x.at))) return refuseRequest("expiry");
   const request: SecretRequest = { ...req, state: "stored", answer: { kind: "stored", at: now, command: a.command, reason: null } };
   return ok({
     request,
