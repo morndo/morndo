@@ -1104,6 +1104,11 @@ export const CONTROLS: Control[] = [
     find: `if (revisionCovers(e.revision, claim.revision)) return "refuted";`,
     replace: `if (e.revision.sha === claim.revision.sha) return "refuted";`,
     run: ["packages/domain/test/verification.test.ts"], expect: "work in progress on a newer push" },
+  // A task claim's one sha is not the head of every linked change or deploy (§3.4).
+  { id: "dg12-own-head", task: "DG12", file: "packages/domain/src/digest.ts",
+    find: `    const recorded = s.kind === "deploy"\n      ? { sha: s.sha, patchId: null }\n      : r.subjectStates.find(st => subjectKey(st.subject) === subjectKey(s))?.revision ?? null;\n    return recorded ?? claim.revision;`,
+    replace: `    return claim.revision;`,
+    run: ["packages/domain/test/digest.test.ts"], expect: "at its own head" },
 ];
 
 // ---- the runner

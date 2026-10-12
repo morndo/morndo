@@ -486,6 +486,14 @@ const medianOf = (sorted: readonly number[]): number | null =>
 // without one on its own claim round. A revert, a rollback or a reopen was not failed just before it landed, so the
 // ladder runs without those flags.
 function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords): ItemLevel {
+  // A task claim names one revision (§3.1). Each linked change is judged at its own head, and a deploy at the
+  // revision in its subject: the claim's sha is not theirs, so their evidence must not be voided against it.
+  const revisionOf = (s: SubjectRef): Revision | null => {
+    const recorded = s.kind === "deploy"
+      ? { sha: s.sha, patchId: null }
+      : r.subjectStates.find(st => subjectKey(st.subject) === subjectKey(s))?.revision ?? null;
+    return recorded ?? claim.revision;
+  };
   const levelOn = (s: SubjectRef): ItemLevel => {
     const key = subjectKey(s);
     let round: number | null = null;
@@ -495,7 +503,7 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords): Item
     const claimants = claimantsOf(s, r.claims.filter(c => c.at <= judgeAt), r.links.filter(l => l.at <= judgeAt), r.assignments);
     return subjectLevel(
       {
-        subject: s, title: null, revision: claim.revision,
+        subject: s, title: null, revision: revisionOf(s),
         claimRound: claim.revision === null ? round : null, deployedAt: deployed,
         reverted: false, rolledBack: false, reopened: false,
       },
