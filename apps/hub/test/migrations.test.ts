@@ -164,9 +164,20 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
   it("migration 17 remembers which board results the fleet has not acknowledged", () => {
     const db = new Database(join(tempDir(), "morndo.db"));
     migrate(db, MIGRATIONS.slice(0, 16));
-    expect(migrate(db)).toEqual({ from: 16, to: 17 });
+    expect(migrate(db, MIGRATIONS.slice(0, 17))).toEqual({ from: 16, to: 17 });
     expect(columns(db, "job_notices")).toEqual(["id", "result", "acked"]);
     expect(() => MIGRATIONS[16]?.up(db)).not.toThrow();
+  });
+
+  it("migration 18 stores a decision brief, one row per version, and changes nothing run again", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 17));
+    expect(migrate(db)).toEqual({ from: 17, to: 18 });
+    expect(columns(db, "decision_briefs")).toEqual([
+      "id", "version", "ref", "asker_kind", "asker_name", "token_id", "filed_by_kind", "filed_by_name",
+      "brief", "state", "filed_at", "resolution", "drafted_by", "closed_at",
+    ]);
+    expect(() => MIGRATIONS[17]?.up(db)).not.toThrow();
   });
 
   it("the Store migrates the database it opens", () => {
