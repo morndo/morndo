@@ -44,9 +44,11 @@ export type Evidence = {
 };
 
 // The outcomes a lane can claim (§3.1). A claim is filed by a lane, a board task moved to review, or a lane event
-// that said done; which of the three made it is the weekly count's business (DG12), not the record's.
+// that said done. The row carries which of the three, and the revisions it was made at (DG12).
 export const CLAIM_OUTCOMES = ["done", "merged", "shipped", "fixed"] as const;
 export type ClaimOutcome = (typeof CLAIM_OUTCOMES)[number];
+export type ClaimVia = "filed" | "review" | "lane_event";
+export type ClaimRevision = { subject: SubjectRef; revision: Revision | null };
 export type Claim = {
   id: string;
   seq: number;
@@ -55,13 +57,15 @@ export type Claim = {
   revision: Revision | null;
   outcome: ClaimOutcome;
   lane: string;
+  via?: ClaimVia;                         // filed, moved to review, or a lane event that said done (DG12)
+  revisions?: readonly ClaimRevision[];   // the revisions it was made at, filled in by the hub (DG12)
   task?: TaskKey;                         // counts as the task's link to this subject (§3.3)
   note?: string;
 };
 
 // A task's link to a change or a deploy (§3.1): the only way a task groups its changes into one digest item (DG5).
-// `seq` and `at` are the hub sequence and the time it was filed, as on a claim. Replaying the group's records in
-// sequence order, a record raises the item when the members, claimants, level or section change (DG8).
+// The hub stamps `seq` and `at` together. A link or an assignment raises the item only when it changes the line
+// (subjects, revisions, level, chips), and the section is not part of that line (DG8).
 export type LinkRecord = { task: TaskKey; target: SubjectRef; by: string; seq: number; at: number };
 export type Assignment = { task: TaskKey; lane: string; seq: number; at: number };
 
@@ -87,6 +91,7 @@ const HARMLESS_NAME: Readonly<Record<string, string>> = {
   cachekey: "cacheKey: a cache entry's name",
   primarykey: "primaryKey: a database column",
   monkey: "monkey: an ordinary word that ends in key",
+  maxtokens: "max_tokens: how many tokens a model may spend",
 };
 
 const decodeName = (raw: string): string => {
@@ -120,7 +125,9 @@ const splitCamel = (part: string): string[] => {
 const nameCarriesCredential = (raw: string): boolean => {
   const name = decodeName(raw);
   const lower = name.toLowerCase();
-  if (Object.hasOwn(HARMLESS_NAME, lower)) return false;
+  // Separators are not part of the name: page_token and sort-key are the same allowlist entries as pageToken and sortKey.
+  const normalised = lower.replace(/[^a-z0-9]/g, "");
+  if (Object.hasOwn(HARMLESS_NAME, normalised)) return false;
   if (RUN_TOGETHER_KEY.test(lower)) return true;
   if (CREDENTIAL_SUFFIX.test(lower)) return true;
   return name.split(/[^A-Za-z0-9]+/).flatMap(splitCamel).some(part => CREDENTIAL_WORD.test(part));

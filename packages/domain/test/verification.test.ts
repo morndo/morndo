@@ -149,7 +149,7 @@ describe("the records' own guards", () => {
       const link = `https://ci.acme.test/x?${name}=abc`;
       expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link }))), link).toBe("bad_link");
     }
-    const harmless = ["pageToken", "nextPageToken", "sortKey", "cacheKey", "primaryKey"];
+    const harmless = ["pageToken", "page_token", "nextPageToken", "sortKey", "sort-key", "cacheKey", "primaryKey", "max_tokens"];
     for (const name of harmless) {
       const link = `https://ci.acme.test/x?${name}=abc`;
       expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link }))), link).toBe("ok");

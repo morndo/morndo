@@ -7,7 +7,7 @@ import { cutText, unreachable } from "./shared.ts";
 import type { TaskKey } from "./board.ts";
 import {
   claimantsOf, independentOf, NOTE_MAX, revisionCovers, subjectKey,
-  type Assignment, type Claim, type Evidence, type EvidenceKind, type LinkRecord, type Revision,
+  type Assignment, type Claim, type ClaimRevision, type Evidence, type EvidenceKind, type LinkRecord, type Revision,
 } from "./verification.ts";
 
 export { subjectKey as subjectRef } from "./verification.ts";
@@ -148,25 +148,27 @@ const bareState = (subject: SubjectRef): SubjectState =>
 // task groups its changes — and everything else is its own root.
 type Group = { root: SubjectRef; members: SubjectRef[] };
 
-// One link edge, sorted by time: the first task that claims a subject (DG5). Built once per weekly view and shared
-// by grouping's map, the claim count and the failure match.
-export type RootEdge = { key: string; task: TaskKey; at: number };
+// One link edge. The first task that claims a subject is the lowest sequence (DG5, SQ10). Built once per weekly
+// view and shared by grouping's map, the claim count and the failure match.
+export type RootEdge = { key: string; task: TaskKey; at: number; seq: number };
 
 export function rootIndex(links: readonly LinkRecord[], claims: readonly Claim[]): RootEdge[] {
-  return [
-    ...links.map(l => ({ key: subjectKey(l.target), task: l.task, at: l.at })),
-    ...claims.filter(c => c.task !== undefined).map(c => ({ key: subjectKey(c.subject), task: c.task as TaskKey, at: c.at })),
-  ].sort((a, b) => a.at - b.at);
+  const edges: RootEdge[] = links.map(l => ({ key: subjectKey(l.target), task: l.task, at: l.at, seq: l.seq }));
+  for (const c of claims) {
+    if (c.task === undefined) continue;
+    edges.push({ key: subjectKey(c.subject), task: c.task, at: c.at, seq: c.seq });
+  }
+  return edges.sort((a, b) => a.seq - b.seq || a.at - b.at);
 }
 
 type FirstRoot = { task: TaskKey; at: number };
 
-// The first link for each subject, once. The list is sorted here: a caller that hands the edges over in the
-// wrong order still roots at the earliest link (DG5, DG12). One walk serves every claim and failure.
+// The first link for each subject, once. rootIndex already sorted by sequence, so this walk does not sort again
+// (DG5, DG12). One walk serves every claim and failure.
 function firstRoots(edges: readonly RootEdge[], passes?: PassCount): Map<string, FirstRoot> {
   if (passes) passes.n++;
   const map = new Map<string, FirstRoot>();
-  for (const e of [...edges].sort((a, b) => a.at - b.at)) if (!map.has(e.key)) map.set(e.key, { task: e.task, at: e.at });
+  for (const e of edges) if (!map.has(e.key)) map.set(e.key, { task: e.task, at: e.at });
   return map;
 }
 
@@ -180,7 +182,7 @@ function rootKeyAt(first: ReadonlyMap<string, FirstRoot>, s: SubjectRef, at: num
 function mapAsOf(edges: readonly RootEdge[], at: number): Map<string, TaskKey> {
   const map = new Map<string, TaskKey>();
   for (const e of edges) {
-    if (e.at > at) break;
+    if (e.at > at) continue;
     if (!map.has(e.key)) map.set(e.key, e.task);
   }
   return map;
@@ -204,11 +206,16 @@ export function rootOf(s: SubjectRef, linked: ReadonlyMap<string, TaskKey>): Sub
 export type PassCount = { n: number };
 
 export function buildDigest(input: DigestInput, passes?: PassCount): DigestResult {
-  const claimants = (s: SubjectRef) => claimantsOf(s, input.claims, input.links, input.assignments);
-  const stateOf = (s: SubjectRef): SubjectState => {
-    for (const st of input.states) if (sameSubject(st.subject, s)) return st;
-    return bareState(s);
-  };
+  const stateByKey = new Map<string, SubjectState>();
+  for (const st of input.states) stateByKey.set(subjectKey(st.subject), st);
+  const stateOf = (s: SubjectRef): SubjectState => stateByKey.get(subjectKey(s)) ?? bareState(s);
+  const evidenceByKey = new Map<string, Evidence[]>();
+  for (const e of input.evidence) {
+    const k = subjectKey(e.subject);
+    const list = evidenceByKey.get(k);
+    if (list === undefined) evidenceByKey.set(k, [e]);
+    else list.push(e);
+  }
   // The first look (no mark) shows the last 24 hours (§4); after that, the mark decides (DG7).
   const sinceMark = (e: DigestEvent) => (input.mark !== null ? e.seq > input.mark.seq : e.at >= input.now - DAY_MS);
 
@@ -244,36 +251,16 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
     const belongs: Section[] = [];
     if (live !== null) belongs.push("needs_you");
     if (staleCond !== null) belongs.push("stale_or_stuck");
-    for (const e of trail) belongs.push(sectionOfEvent(e.kind));
+    // DG6: a needs-you or stale event places the item only while the condition holds. After that it is a trail entry.
+    for (const e of trail) {
+      if (e.kind === "needs_you" || e.kind === "stale_or_stuck") continue;
+      belongs.push(sectionOfEvent(e.kind));
+    }
     let section: Section | null = null;
     for (const s of SECTIONS) if (belongs.includes(s)) { section = s; break; }
     if (section === null) continue;
 
-    const evidence: Evidence[] = [], voided: Evidence[] = [];
-    for (const m of group.members) {
-      const sl = subjectLevel(stateOf(m), input.evidence, claimants(m));
-      evidence.push(...sl.current); voided.push(...sl.voided);
-    }
-    evidence.sort((a, b) => a.seq - b.seq);
-    voided.sort((a, b) => a.seq - b.seq);
-
-    // §3.4: a task's level is the lowest of its linked changes and deploys — reopened it is failed (DG3) — and its
-    // own evidence when it has none.
     const root = group.root;
-    let level: ItemLevel | null = null;
-    if (root.kind === "task" || root.kind === "change" || root.kind === "deploy") {
-      const linked = root.kind === "task" ? group.members.filter(m => m.kind === "change" || m.kind === "deploy") : [];
-      if (linked.length > 0) {
-        level = linked.reduce((low, m) => {
-          const sl = subjectLevel(stateOf(m), input.evidence, claimants(m));
-          return LEVEL_RANK[sl.level] < LEVEL_RANK[low] ? sl.level : low;
-        }, "verified_live" as ItemLevel);
-        if (stateOf(root).reopened) level = "failed";
-      } else {
-        level = subjectLevel(stateOf(root), input.evidence, claimants(root)).level;
-      }
-    }
-
     const groupClaims = input.claims.filter(c => keys.has(subjectKey(c.subject))).sort((a, b) => a.at - b.at);
     const last = groupClaims[groupClaims.length - 1] ?? null;
     const groupLinks = input.links.filter(l => keys.has(subjectKey(l.target)));
@@ -283,9 +270,9 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
     for (const l of groupLinks) linkedTasks.add(l.task);
     for (const c of groupClaims) if (c.task !== undefined) linkedTasks.add(c.task);
     const groupAssignments = input.assignments.filter(a => linkedTasks.has(a.task));
-    // One pass, in sequence order (DG8). A record raises the item exactly when the members, claimants, level
-    // or section the principal would see differ from the record before it. A later record cannot make an
-    // earlier one look redundant.
+    // One pass, in sequence order (DG8). Events, evidence and claims always raise. A link, an assignment or a
+    // change head raises only when the line changes. The line is the subjects with their revisions, the level
+    // and the chips. The mark and the section never enter it.
     const members = new Set<string>([rootKey]);
     const refs = new Map<string, SubjectRef>([[rootKey, root]]);
     const lanesOf = new Map<string, Set<string>>();
@@ -300,7 +287,6 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
       return list;
     };
     const seenEvidence: Evidence[] = [];
-    const seenEvents: DigestEvent[] = [];
     const revs = new Map<string, Revision>();
     if (root.kind === "task") tasksOf.set(rootKey, new Set([root.key]));
     const addClaimant = (k: string, laneName: string) => {
@@ -319,6 +305,26 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
       addClaimant(subjectKey(c.subject), c.lane);
       if (c.task !== undefined) bindTask(subjectKey(c.subject), c.task);
     };
+    // A change's revision is its latest head so far. Before the first head it has none. Never the live head.
+    const shownRevision = (s: SubjectRef): Revision | null => {
+      if (s.kind === "deploy") return { sha: s.sha, patchId: null };
+      if (s.kind === "change") return revs.get(subjectKey(s)) ?? null;
+      return null;
+    };
+    const memberLevel = new Map<string, ItemLevel>();
+    const memberChips = new Map<string, string>();
+    const recompute = (k: string): void => {
+      const ref = refs.get(k);
+      if (ref === undefined || !members.has(k)) return;
+      const st = stateOf(ref);
+      const who = lanesOf.get(k) ?? new Set<string>();
+      const sl = subjectLevel({ ...st, revision: shownRevision(ref) }, seenEvidence, who);
+      memberLevel.set(k, sl.level);
+      const chips: string[] = [];
+      for (const e of sl.current) chips.push(`${e.id}:${e.result === "pass" && !independentOf(e.producer, who) ? "attached" : "counts"}`);
+      for (const e of sl.voided) chips.push(`${e.id}:voided`);
+      memberChips.set(k, chips.sort().join(","));
+    };
     const ensureMember = (s: SubjectRef): void => {
       const k = subjectKey(s);
       if (members.has(k)) return;
@@ -327,97 +333,114 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
       if (s.kind === "task") bindTask(k, s.key);
       for (const c of queuedClaims.get(k) ?? []) effectClaim(c);
       for (const e of queuedEvidence.get(k) ?? []) seenEvidence.push(e);
-      for (const e of queuedEvents.get(k) ?? []) seenEvents.push(e);
       queuedClaims.delete(k);
       queuedEvidence.delete(k);
       queuedEvents.delete(k);
+      recompute(k);
     };
-    const viewNow = (): string => {
-      const memberIds = [...members].sort();
-      const who = memberIds.map(k => `${k}:${[...(lanesOf.get(k) ?? [])].sort().join(",")}`).join(";");
-      let shown: ItemLevel | null = null;
+    const lineNow = (): string => {
+      const ids = [...members].sort();
+      const revsPart = ids.map(k => {
+        const ref = refs.get(k);
+        return `${k}@${ref === undefined ? "-" : (shownRevision(ref)?.sha ?? "-")}`;
+      }).join(",");
+      let shown = "";
       if (root.kind === "task" || root.kind === "change" || root.kind === "deploy") {
-        const linked = memberIds.map(k => refs.get(k)).filter((m): m is SubjectRef => m !== undefined && (m.kind === "change" || m.kind === "deploy"));
-        const levelOf = (m: SubjectRef): ItemLevel => {
-          const st = stateOf(m);
-          const revision = revs.get(subjectKey(m)) ?? st.revision;
-          return subjectLevel({ ...st, revision }, seenEvidence, lanesOf.get(subjectKey(m)) ?? new Set()).level;
-        };
-        if (root.kind === "task" && linked.length > 0) {
-          shown = "verified_live";
-          for (const m of linked) {
-            const sl = levelOf(m);
-            if (LEVEL_RANK[sl] < LEVEL_RANK[shown]) shown = sl;
+        const changes = ids.flatMap(k => {
+          const ref = refs.get(k);
+          return ref !== undefined && ref.kind === "change" ? [k] : [];
+        });
+        if (root.kind === "task" && changes.length > 0) {
+          let low: ItemLevel = "verified_live";
+          for (const k of changes) {
+            const lvl = memberLevel.get(k) ?? "claimed";
+            if (LEVEL_RANK[lvl] < LEVEL_RANK[low]) low = lvl;
           }
-          if (stateOf(root).reopened) shown = "failed";
-        } else shown = levelOf(root);
+          if (stateOf(root).reopened) low = "failed";
+          shown = low;
+        } else shown = memberLevel.get(rootKey) ?? "claimed";
       }
-      const belongs: Section[] = [];
-      if (live) belongs.push("needs_you");
-      if (staleCond !== null) belongs.push("stale_or_stuck");
-      for (const e of seenEvents) if (sinceMark(e)) belongs.push(sectionOfEvent(e.kind));
-      let shownSection = "";
-      for (const s of SECTIONS) if (belongs.includes(s)) { shownSection = s; break; }
-      return `${memberIds.join(",")}|${who}|${shown ?? ""}|${shownSection}`;
+      return `${revsPart}|${shown}|${ids.map(k => memberChips.get(k) ?? "").join(";")}`;
     };
-    type Step = { seq: number | null; at: number; apply: () => void };
+    recompute(rootKey);
+    type Step = { seq: number; at: number; structural: boolean; apply: () => void };
     const steps: Step[] = [];
-    for (const e of events) steps.push({ seq: e.seq, at: e.at, apply: () => {
+    for (const e of events) steps.push({ seq: e.seq, at: e.at, structural: false, apply: () => {
       const k = subjectKey(e.subject);
-      if (members.has(k)) seenEvents.push(e);
-      else queue(queuedEvents, k).push(e);
+      if (!members.has(k)) queue(queuedEvents, k).push(e);
     } });
-    // Every piece of evidence, including what the live head has voided. The revision at this step decides whether
-    // it counts, so a later head can drop the level (DG4, DG8).
-    for (const e of input.evidence) if (keys.has(subjectKey(e.subject))) steps.push({ seq: e.seq, at: e.at, apply: () => {
+    // Every piece of evidence, including what a later head voids. The revision at this step decides the chip (DG4, DG8).
+    for (const e of input.evidence) if (keys.has(subjectKey(e.subject))) steps.push({ seq: e.seq, at: e.at, structural: false, apply: () => {
       const k = subjectKey(e.subject);
-      if (members.has(k)) seenEvidence.push(e);
+      if (members.has(k)) { seenEvidence.push(e); recompute(k); }
       else queue(queuedEvidence, k).push(e);
     } });
-    for (const c of groupClaims) steps.push({ seq: c.seq, at: c.at, apply: () => {
+    for (const c of groupClaims) steps.push({ seq: c.seq, at: c.at, structural: false, apply: () => {
       const k = subjectKey(c.subject);
-      const q = queuedClaims.get(k) ?? [];
-      q.push(c);
-      queuedClaims.set(k, q);
+      queue(queuedClaims, k).push(c);
       const brings = c.task !== undefined && root.kind === "task" && c.task === root.key;
       if (brings) ensureMember(c.subject);
-      else if (members.has(k)) effectClaim(c);
+      else if (members.has(k)) { effectClaim(c); recompute(k); }
     } });
-    for (const l of groupLinks) steps.push({ seq: l.seq, at: l.at, apply: () => {
+    for (const l of groupLinks) steps.push({ seq: l.seq, at: l.at, structural: true, apply: () => {
       const brings = root.kind === "task" && l.task === root.key;
       if (brings) ensureMember(l.target);
       const k = subjectKey(l.target);
       if (!members.has(k)) return;
       addClaimant(k, l.by);
       bindTask(k, l.task);
+      recompute(k);
     } });
-    for (const a of groupAssignments) steps.push({ seq: a.seq, at: a.at, apply: () => {
+    for (const a of groupAssignments) steps.push({ seq: a.seq, at: a.at, structural: true, apply: () => {
       let set = assignees.get(a.task);
       if (set === undefined) { set = new Set(); assignees.set(a.task, set); }
       set.add(a.lane);
-      for (const [k, tasks] of tasksOf) if (tasks.has(a.task)) addClaimant(k, a.lane);
+      for (const [k, tasks] of tasksOf) if (tasks.has(a.task)) { addClaimant(k, a.lane); recompute(k); }
     } });
     for (const h of input.changeHeads ?? []) if (keys.has(subjectKey(h.subject))) steps.push({ seq: h.seq, at: h.at, apply: () => {
-      revs.set(subjectKey(h.subject), h.revision);
-    } });
-    steps.sort((a, b) => {
-      if (a.seq !== null && b.seq !== null) return a.seq - b.seq || a.at - b.at;
-      return a.at - b.at;
-    });
+      const k = subjectKey(h.subject);
+      revs.set(k, h.revision);
+      if (members.has(k)) recompute(k);
+    }, structural: true });
+    steps.sort((a, b) => a.seq - b.seq || a.at - b.at);
     if (passes) passes.n++;
     let seq = 0;
-    let previous = viewNow();
+    for (const e of events) seq = Math.max(seq, e.seq);
+    for (const m of group.members) for (const e of evidenceByKey.get(subjectKey(m)) ?? []) seq = Math.max(seq, e.seq);
+    for (const c of groupClaims) seq = Math.max(seq, c.seq);
     const raisedAt: { seq: number; at: number }[] = [];
     for (const step of steps) {
+      if (!step.structural) { step.apply(); continue; }
+      const previous = lineNow();
       step.apply();
-      const next = viewNow();
+      const next = lineNow();
       if (next !== previous) {
-        if (step.seq !== null) {
-          seq = Math.max(seq, step.seq);
-          raisedAt.push({ seq: step.seq, at: step.at });
-        }
-        previous = next;
+        seq = Math.max(seq, step.seq);
+        raisedAt.push({ seq: step.seq, at: step.at });
       }
+    }
+    for (const m of group.members) recompute(subjectKey(m));
+    const evidence: Evidence[] = [], voided: Evidence[] = [];
+    for (const m of group.members) {
+      const who = lanesOf.get(subjectKey(m)) ?? new Set<string>();
+      const sl = subjectLevel({ ...stateOf(m), revision: shownRevision(m) }, seenEvidence, who);
+      evidence.push(...sl.current); voided.push(...sl.voided);
+    }
+    evidence.sort((a, b) => a.seq - b.seq);
+    voided.sort((a, b) => a.seq - b.seq);
+    // §3.4: a task's level is the lowest of its linked changes — a deploy is not a ladder member (SQ11) — and its
+    // own evidence when it has none. Reopened, it is failed (DG3). The level is the replay's final level.
+    let level: ItemLevel | null = null;
+    if (root.kind === "task" || root.kind === "change" || root.kind === "deploy") {
+      const changes = root.kind === "task" ? group.members.filter(m => m.kind === "change") : [];
+      if (changes.length > 0) {
+        let low: ItemLevel = "verified_live";
+        for (const m of changes) {
+          const lvl = memberLevel.get(subjectKey(m)) ?? "claimed";
+          if (LEVEL_RANK[lvl] < LEVEL_RANK[low]) low = lvl;
+        }
+        level = stateOf(root).reopened ? "failed" : low;
+      } else level = memberLevel.get(rootKey) ?? "claimed";
     }
     const records: { seq: number; at: number }[] = [...events, ...evidence, ...voided, ...groupClaims, ...raisedAt];
     const n = itemNew({ id: rootKey, seq, level, section }, input.mark);
@@ -446,7 +469,7 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
       const blocking = Number(b.needsYou?.blocking ?? false) - Number(a.needsYou?.blocking ?? false);
       if (blocking !== 0) return blocking;
       const due = (a.needsYou?.due ?? Number.POSITIVE_INFINITY) - (b.needsYou?.due ?? Number.POSITIVE_INFINITY);
-      if (due !== 0) return due;
+      if (!Number.isNaN(due) && due !== 0) return due;
       return a.seq - b.seq;
     }
     if (section === "stale_or_stuck") return (a.staleSince ?? 0) - (b.staleSince ?? 0) || a.seq - b.seq;
@@ -482,9 +505,9 @@ export function markAllSeen(mark: DigestMark | null, items: readonly SeenAt[], c
   for (const it of [...items].sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : 1))) {
     if (it.seq <= base) continue;
     const seenAt = prior.get(it.id);
-    // DG7, DG8: a prior seen entry covers this line only when nothing about it changed — the same sequence, level
-    // and section. A changed item behind "N more" was not covered, so the mark stops.
-    const unchanged = seenAt !== undefined && seenAt.seq === it.seq && seenAt.level === it.level && seenAt.section === it.section;
+    // DG7, DG8: a prior seen entry covers this line only when the sequence and the level match. The section is
+    // not compared (Rule 1). A level change behind "N more" was not covered, so the mark stops.
+    const unchanged = seenAt !== undefined && seenAt.seq === it.seq && seenAt.level === it.level;
     if (!shown.has(it.id) && !unchanged) break;
     walked.push(it);
     seq = it.seq;
@@ -506,12 +529,12 @@ export function openedItem(mark: DigestMark | null, item: SeenAt): DigestMark {
   return { seq: base, seen: [...seen.values()] };
 }
 
-// DG8: an item is new while its sequence is above the mark and it was not seen at that sequence. An item whose level
-// or section changed after it was seen is new again, with what changed.
-export function itemNew(item: SeenAt, mark: DigestMark | null): { fresh: boolean; changed: "level" | "section" | null } {
+// DG8: an item is new while its sequence is above the mark and it was not seen at that sequence, or while its level
+// differs from the level it was seen at. The section is never compared. `changed` reports a level change only.
+export function itemNew(item: SeenAt, mark: DigestMark | null): { fresh: boolean; changed: "level" | null } {
   if (mark === null) return { fresh: true, changed: null };              // the first look: everything shown is new
   const seen = mark.seen.find(s => s.id === item.id) ?? null;
-  const changed = seen === null ? null : seen.level !== item.level ? "level" : seen.section !== item.section ? "section" : null;
+  const changed = seen !== null && seen.level !== item.level ? "level" : null;
   const fresh = (item.seq > mark.seq && (seen === null || seen.seq !== item.seq)) || changed !== null;
   return { fresh, changed };
 }
@@ -601,26 +624,37 @@ export function staleSubject(c: StaleCondition): SubjectRef {
 export const LATER_FAILED_MS = 14 * 24 * 3_600_000;       // a claim counts as later failed within 14 days (DG12)
 export const DAY_MS = 24 * 3_600_000;
 
-// What made a claim count (DG12): a lane filed it, a board task was moved to review, or a lane event said done. What
-// failed it later: failing evidence on that revision, a merge reverted, a deploy rolled back, a task reopened.
-export type ClaimSource = { subject: SubjectRef; revision: Revision | null; at: number; via: "filed" | "review" | "lane_event" };
+// What failed a claim later: failing evidence on one of its revisions, a merge reverted, a deploy rolled back, a task reopened.
 export type ClaimFailure = { subject: SubjectRef; revision: Revision | null; at: number; via: "evidence" | "reverted" | "rolled_back" | "reopened" };
 export type CountedClaim = { subject: SubjectRef; revision: Revision | null; at: number };
 
-// DG12: counted once per root subject and revision, at the earliest of its sources. A claim filed on the change and
-// the same revision claimed when its task moved to review are one count: the root is the linked task (DG5).
-function countFrom(sources: readonly ClaimSource[], first: ReadonlyMap<string, FirstRoot>): CountedClaim[] {
-  const byKey = new Map<string, CountedClaim>();
-  for (const s of [...sources].sort((a, b) => a.at - b.at)) {
-    const key = `${rootKeyAt(first, s.subject, s.at)}@${s.revision?.sha ?? "-"}`;
-    if (!byKey.has(key)) byKey.set(key, { subject: s.subject, revision: s.revision, at: s.at });
+// The revisions a claim was made at. The hub fills `revisions` in. A change or deploy claim that omits them is judged
+// at its own revision. A task claim that omits them has no entries: its round uses the task's own evidence.
+function revisionsOf(c: Claim): readonly ClaimRevision[] {
+  if (c.revisions !== undefined) return c.revisions;
+  if (c.subject.kind === "task") return [];
+  return [{ subject: c.subject, revision: c.revision }];
+}
+
+type HeldClaim = CountedClaim & { entries: readonly ClaimRevision[]; root: string };
+
+// DG12: counted once per root and per set of revisions, at the earliest source. A task with no change is keyed by
+// the round's start, so two review rounds are two counts. The root is the root at filing (DG5).
+function countFrom(claims: readonly Claim[], first: ReadonlyMap<string, FirstRoot>): HeldClaim[] {
+  const byKey = new Map<string, HeldClaim>();
+  for (const s of [...claims].sort((a, b) => a.at - b.at)) {
+    const entries = revisionsOf(s);
+    const root = rootKeyAt(first, s.subject, s.at);
+    const set = entries.length === 0 ? `#${s.at}` : entries.map(e => `${subjectKey(e.subject)}@${e.revision?.sha ?? "-"}`).sort().join("+");
+    const key = `${root}|${set}`;
+    if (!byKey.has(key)) byKey.set(key, { subject: s.subject, revision: s.revision, at: s.at, entries, root });
   }
   return [...byKey.values()];
 }
 
-export function countedClaims(sources: readonly ClaimSource[], links: readonly LinkRecord[], claims: readonly Claim[], passes?: PassCount): CountedClaim[] {
+export function countedClaims(claims: readonly Claim[], links: readonly LinkRecord[], passes?: PassCount): CountedClaim[] {
   const edges = rootIndex(links, claims);
-  return countFrom(sources, firstRoots(edges, passes));
+  return countFrom(claims, firstRoots(edges, passes)).map(({ subject, revision, at }) => ({ subject, revision, at }));
 }
 
 // An ISO week in the principal's zone, from the edge: the domain counts, the edge draws the windows.
@@ -633,15 +667,11 @@ export type WeeklyRecords = {
   deploys: readonly { env: string; at: number; failed: boolean }[];     // every deploy, for the recovery measure
   deploysOf: readonly { subject: SubjectRef; at: number }[];            // when a change's deploy landed
   stuck: readonly { raisedAt: number; clearedAt: number | null; actedOn: boolean }[];
-  claimSources: readonly ClaimSource[];
-  claimRounds: readonly { subject: SubjectRef; at: number }[];          // every move to review
   claimFailures: readonly ClaimFailure[];
   claims: readonly Claim[];
   links: readonly LinkRecord[];
   assignments: readonly Assignment[];
   evidence: readonly Evidence[];
-  subjectStates: readonly SubjectState[];
-  changeHeads: readonly ChangeHead[];      // a change's head when the forge reported it (§3.2)
 };
 // A change's head at a time (§3.2): filed when the forge reports the head SHA changed, with the hub's sequence
 // number, like a claim (DG8). The weekly level uses the latest one at or before the moment it judges, not the live head.
@@ -663,88 +693,35 @@ const nearestRank = (sorted: readonly number[], p: number): number | null =>
 const medianOf = (sorted: readonly number[]): number | null =>
   sorted.length === 0 ? null : (sorted[Math.floor((sorted.length - 1) / 2)] ?? null);
 
-// The level a claim's item showed at a moment (DG12): the same ladder, fed only the records from before it. A claim
-// about a task with a revision (a board or lane-event claim, §3.1) is about the heads of its linked changes, so it is
-// judged on those subjects at that revision — a task with changes shows the lowest of theirs (§3.4) — and a task
-// without one on its own claim round. A revert, a rollback or a reopen was not failed just before it landed, so the
-// ladder runs without those flags.
-// Change heads for one weekly view, indexed by subject and sorted by time. A link or the first claim files the
-// opening head: a task claim's revision, at the claim's time, for each change already linked to it that has no
-// earlier head on record (DG12). Built once; levelHeld does not walk the lists again.
-function indexChangeHeads(r: WeeklyRecords): Map<string, ChangeHead[]> {
-  const map = new Map<string, ChangeHead[]>();
-  const add = (h: ChangeHead) => {
-    const k = subjectKey(h.subject);
-    const list = map.get(k);
-    if (list === undefined) map.set(k, [h]);
-    else list.push(h);
-  };
-  for (const h of r.changeHeads) add(h);
-  for (const c of r.claims) {
-    if (c.subject.kind !== "task" || c.revision === null) continue;
-    for (const l of r.links) {
-      if (l.task !== c.subject.key || l.at > c.at || l.target.kind !== "change") continue;
-      const known = r.changeHeads.some(h => subjectKey(h.subject) === subjectKey(l.target) && h.at <= c.at);
-      if (known) continue;
-      add({ subject: l.target, revision: c.revision, seq: c.seq, at: c.at });
-    }
-  }
-  for (const list of map.values()) list.sort((a, b) => a.at - b.at);
-  return map;
-}
-
-// The latest head at or before judgeAt, or, if the change had not been filed yet, the earliest head after it.
-// Never the live head (DG12).
-function revisionAsOf(heads: readonly ChangeHead[] | undefined, judgeAt: number): Revision | null {
-  if (heads === undefined) return null;
-  let before: ChangeHead | null = null;
-  let after: ChangeHead | null = null;
-  for (const h of heads) {
-    if (h.at <= judgeAt) before = h;
-    else if (after === null) after = h;
-  }
-  return (before ?? after)?.revision ?? null;
-}
-
-function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, first: ReadonlyMap<string, FirstRoot>, heads: ReadonlyMap<string, readonly ChangeHead[]>): ItemLevel {
-  // A change claim that names a revision is judged at that revision. Anything else is judged at the head the
-  // index holds for that moment. A deploy is judged at the revision in its subject.
-  const revisionOf = (s: SubjectRef): Revision | null => {
-    if (claim.subject.kind === "change" && subjectKey(s) === subjectKey(claim.subject) && claim.revision !== null) return claim.revision;
-    if (s.kind === "deploy") return { sha: s.sha, patchId: null };
-    return revisionAsOf(heads.get(subjectKey(s)), judgeAt);
-  };
-  const levelOn = (s: SubjectRef): ItemLevel => {
-    const key = subjectKey(s);
-    let round: number | null = null;
-    for (const c of r.claimRounds) if (subjectKey(c.subject) === key && c.at <= judgeAt) round = Math.max(round ?? c.at, c.at);
+// The level a claim showed, from the revisions it carries (DG12). Evidence is taken from before the failure, or
+// before the end of the 14 days. A task with no entries uses its own evidence until its next claim. Deploys are not
+// ladder members of a task (SQ11). A revert, a rollback or a reopen was not failed just before it landed.
+function levelHeld(claim: HeldClaim, judgeAt: number, r: WeeklyRecords): ItemLevel {
+  // Judged only at the revisions the claim carries. A null revision stays claimed: never the live head.
+  const levelOn = (entry: ClaimRevision, round: number | null, until: number): ItemLevel => {
+    if (entry.revision === null && entry.subject.kind !== "task") return "claimed";
     let deployed: number | null = null;
-    for (const d of r.deploysOf) if (subjectKey(d.subject) === key && d.at <= judgeAt) deployed = deployed === null ? d.at : Math.max(deployed, d.at);
-    const claimants = claimantsOf(s, r.claims.filter(c => c.at <= judgeAt), r.links.filter(l => l.at <= judgeAt), r.assignments.filter(a => a.at <= judgeAt));
+    for (const d of r.deploysOf) if (sameSubject(d.subject, entry.subject) && d.at <= until) deployed = deployed === null ? d.at : Math.max(deployed, d.at);
+    const claimants = claimantsOf(entry.subject, r.claims.filter(c => c.at <= until), r.links.filter(l => l.at <= until), r.assignments.filter(a => a.at <= judgeAt));
     return subjectLevel(
       {
-        subject: s, title: null, revision: revisionOf(s),
-        claimRound: claim.revision === null ? round : null, deployedAt: deployed,
+        subject: entry.subject, title: null, revision: entry.revision,
+        claimRound: round, deployedAt: deployed,
         reverted: false, rolledBack: false, reopened: false,
       },
-      r.evidence.filter(e => e.at < judgeAt),
+      r.evidence.filter(e => e.at < until),
       claimants,
     ).level;
   };
-  const judged: SubjectRef[] = [];
-  if (claim.subject.kind === "task" && claim.revision !== null) {
-    // DG5: a subject is rooted under its first task. A later link to this task does not make it part of the claim.
-    const add = (t: SubjectRef, at: number) => {
-      if (at > judgeAt || rootKeyAt(first, t, judgeAt) !== subjectKey(claim.subject)) return;
-      if (!judged.some(s => subjectKey(s) === subjectKey(t))) judged.push(t);
-    };
-    for (const l of r.links) if (l.task === claim.subject.key) add(l.target, l.at);
-    for (const c of r.claims) if (c.task === claim.subject.key) add(c.subject, c.at);
+  if (claim.entries.length === 0) {
+    const next = r.claims.filter(c => sameSubject(c.subject, claim.subject) && c.at > claim.at).sort((a, b) => a.at - b.at)[0];
+    return levelOn({ subject: claim.subject, revision: null }, claim.at, Math.min(judgeAt, next?.at ?? Number.POSITIVE_INFINITY));
   }
-  const ladder = judged.length > 0 ? judged : [claim.subject];
+  const changes = claim.entries.filter(e => e.subject.kind !== "deploy");
+  const ladder = changes.length > 0 ? changes : claim.entries;
   let level: ItemLevel = "verified_live";
-  for (const s of ladder) {
-    const lvl = levelOn(s);
+  for (const entry of ladder) {
+    const lvl = levelOn(entry, null, judgeAt);
     if (LEVEL_RANK[lvl] < LEVEL_RANK[level]) level = lvl;             // §3.4: a task shows the lowest of its changes
   }
   return level;
@@ -752,19 +729,19 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, first
 
 export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: number, passes?: PassCount): WeeklyRow[] {
   const first = firstRoots(rootIndex(r.links, r.claims), passes);
-  const heads = indexChangeHeads(r);
-  const counted = countFrom(r.claimSources, first);
+  const counted = countFrom(r.claims, first);
   return weeks.map(w => {
     const inWeek = (at: number) => at >= w.start && at < w.end;
     const weekClaims = counted.filter(c => inWeek(c.at));
-    const failureOf = (c: CountedClaim) => r.claimFailures.find(f => {
-      return rootKeyAt(first, f.subject, f.at) === rootKeyAt(first, c.subject, f.at) && f.at >= c.at && f.at - c.at <= LATER_FAILED_MS
-        && (f.revision === null ? c.revision === null : c.revision !== null && revisionCovers(f.revision, c.revision));
+    const failureOf = (c: HeldClaim) => r.claimFailures.find(f => {
+      if (!(f.at >= c.at && f.at - c.at <= LATER_FAILED_MS)) return false;
+      if (f.via === "reopened") return f.subject.kind === "task" && subjectKey(f.subject) === c.root;
+      return c.entries.some(e => sameSubject(e.subject, f.subject) && (e.revision === null ? f.revision === null : f.revision !== null && revisionCovers(f.revision, e.revision)));
     }) ?? null;
     const levels = new Map<ItemLevel, LevelHeld>();
     for (const c of weekClaims) {
       const f = failureOf(c);
-      const level = levelHeld(c, f === null ? Math.min(c.at + LATER_FAILED_MS, now) : f.at, r, first, heads);
+      const level = levelHeld(c, f === null ? Math.min(c.at + LATER_FAILED_MS, now) : f.at, r);
       const row = levels.get(level) ?? { level, claims: 0, laterFailed: 0 };
       row.claims++;
       if (f !== null) row.laterFailed++;

@@ -3,8 +3,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildDigest, itemNew, markAllSeen, mergeMarks, weeklyView,
-  type Claim, type ClaimFailure, type ClaimSource, type DigestEvent, type DigestInput, type DigestItem,
-  type DigestMark, type Evidence, type Revision, type SubjectRef, type SubjectState, type WeeklyRecords, type WeekWindow,
+  type Claim, type ClaimFailure, type DigestEvent, type DigestInput, type DigestItem,
+  type DigestMark, type Evidence, type Producer, type Revision, type SubjectRef, type SubjectState, type WeeklyRecords, type WeekWindow,
 } from "../src/index.ts";
 import { taskKey } from "../src/index.ts";
 
@@ -30,10 +30,10 @@ const w1 = change("acme/web", 1);
 const api3 = change("acme/api", 3);
 
 const atOf = (seq: number) => NOW - 100 + seq;
-const ev = (seq: number, subject: SubjectRef, revision: Revision | null, kind: Evidence["kind"], result: Evidence["result"], producer = FORGE): Evidence =>
+const ev = (seq: number, subject: SubjectRef, revision: Revision | null, kind: Evidence["kind"], result: Evidence["result"], producer: Producer = FORGE): Evidence =>
   ({ id: `e${seq}`, seq, at: atOf(seq), subject, revision, kind, result, producer });
 const cl = (seq: number, subject: SubjectRef, revision: Revision | null, laneName: string, extra: Partial<Claim> = {}): Claim =>
-  ({ id: `c${seq}`, seq, at: atOf(seq), subject, revision, outcome: "done", lane: laneName, ...extra });
+  ({ id: `c${seq}`, seq, at: atOf(seq), subject, revision, outcome: "done", lane: laneName, via: "filed", revisions: extra.revisions ?? (subject.kind === "task" ? [] : [{ subject, revision }]), ...extra });
 const ln = (seq: number, t: number, target: SubjectRef, by: string) =>
   ({ task: taskKey(t), target, by, seq, at: atOf(seq) });
 const asg = (seq: number, t: number, laneName: string) =>
@@ -62,20 +62,15 @@ const base = (t: number, evidence: Evidence[] = [ev(9, w7, A, "review", "pass", 
 const WEEK: WeekWindow[] = [{ week: "w1", start: NOW - DAY, end: NOW + 6 * DAY }];
 const blank = (): WeeklyRecords => ({
   shipped: [], merged: [], reverted: [], done: [], deploys: [], deploysOf: [], stuck: [],
-  claimSources: [], claimRounds: [], claimFailures: [], claims: [], links: [], assignments: [],
-  evidence: [], subjectStates: [], changeHeads: [],
+  claimFailures: [], claims: [], links: [], assignments: [], evidence: [],
 });
 let idn = 0;
-const wev = (subject: SubjectRef, revision: Revision | null, kind: Evidence["kind"], result: Evidence["result"], at: number, producer = FORGE): Evidence =>
+const wev = (subject: SubjectRef, revision: Revision | null, kind: Evidence["kind"], result: Evidence["result"], at: number, producer: Producer = FORGE): Evidence =>
   ({ id: `w${++idn}`, seq: idn, at, subject, revision, kind, result, producer });
 const wcl = (subject: SubjectRef, revision: Revision | null, laneName: string, at: number, extra: Partial<Claim> = {}): Claim =>
-  ({ id: `w${++idn}`, seq: idn, at, subject, revision, outcome: "done", lane: laneName, ...extra });
+  ({ id: `w${++idn}`, seq: idn, at, subject, revision, outcome: "done", lane: laneName, via: extra.via ?? "filed", revisions: extra.revisions ?? (subject.kind === "task" ? [] : [{ subject, revision }]), ...extra });
 const wln = (t: number, target: SubjectRef, at: number, by = "bld") =>
   ({ task: taskKey(t), target, by, seq: ++idn, at });
-const whd = (subject: SubjectRef, revision: Revision, at: number) =>
-  ({ subject, revision, seq: ++idn, at });
-const src = (subject: SubjectRef, revision: Revision | null, at: number, via: ClaimSource["via"]): ClaimSource =>
-  ({ subject, revision, at, via });
 const fail = (subject: SubjectRef, revision: Revision | null, at: number, via: ClaimFailure["via"]): ClaimFailure =>
   ({ subject, revision, at, via });
 const levelsOf = (o: Partial<WeeklyRecords>, now = NOW + 30 * DAY) => {
@@ -204,7 +199,7 @@ describe("Rule 1: new since the mark", () => {
     const input = { events: [evt(7, "merged", w1), evt(9, "opened_or_pushed", w1)] };
     const before = dg({ ...input, mark: { seq: 5, seen: [] } });
     const item = one(before, "acme/web#1");
-    expect(item, "N14").toMatchObject({ seq: 9, fresh: true });
+    expect(item, "the mark never enters").toMatchObject({ seq: 9, fresh: true });
     const marked = markAllSeen(
       { seq: 5, seen: [] },
       [{ id: "acme/web#1", seq: item?.seq ?? 0, level: item?.level ?? null, section: item?.section ?? "merged" }],
@@ -329,7 +324,7 @@ describe("Rule 1: new since the mark", () => {
       events: [evt(6, "merged", w7), evt(8, "stale_or_stuck", task(3))],
       mark: { seq: 5, seen: [seen("T-3", 8, "claimed", "stale_or_stuck")] },
     });
-    expect(one(d, "T-3"), "N25").toMatchObject({ seq: 8, fresh: false });
+    expect(one(d, "T-3"), "N25").toMatchObject({ seq: 8, fresh: false, section: "merged" });
   });
   it("N26", () => {
     const mark = markAllSeen(
@@ -362,74 +357,62 @@ describe("Rule 2: which revision a claim is judged at", () => {
 
   it("W01", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY)], links: [wln(1, w7, NOW - DAY)],
-      claims: [wcl(w7, A, "bld", NOW)], claimSources: [src(w7, A, NOW, "filed")],
+      links: [wln(1, w7, NOW - DAY)],
+      claims: [wcl(w7, A, "bld", NOW)],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
     }), "W01").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
   });
   it("W02", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY), whd(w7, B, NOW + 8 * DAY)],
-      subjectStates: [st(w7, B)], links: [wln(1, w7, NOW - DAY)],
-      claims: [wcl(w7, A, "bld", NOW)], claimSources: [src(w7, A, NOW, "filed")],
+      links: [wln(1, w7, NOW - DAY)],
+      claims: [wcl(w7, A, "bld", NOW)],
       evidence: [wev(w7, A, "review", "pass", NOW + DAY, lane("rvw"))],
     }), "W02").toEqual({ claims: 1, laterFailed: 0, levels: ["reviewed 1/0"] });
   });
   it("W03", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY), whd(w7, B, NOW + 5 * DAY)],
-      subjectStates: [st(w7, B)],
-      claims: [wcl(w7, null, "bld", NOW)], claimSources: [src(w7, null, NOW, "filed")],
+      claims: [wcl(w7, null, "bld", NOW, { revisions: [{ subject: w7, revision: A }] })],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
     }), "W03").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
   });
   it("W04", () => {
     expect(levelsOf({
-      subjectStates: [st(w7, A)],
-      claims: [wcl(w7, null, "bld", NOW)], claimSources: [src(w7, null, NOW, "filed")],
+      claims: [wcl(w7, null, "bld", NOW)],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
-    }), "W04").toEqual({ claims: 1, laterFailed: 0, levels: ["claimed 1/0"] });
+    }), "never the live head").toEqual({ claims: 1, laterFailed: 0, levels: ["claimed 1/0"] });
   });
   it("W05", () => {
     const prod = deploy("acme/web", "prod", "sha-b1");
     expect(levelsOf({
-      changeHeads: [whd(w7, a1, NOW - DAY), whd(w8, b1, NOW - DAY)],
       links: [wln(12, w7, NOW - DAY), wln(12, w8, NOW - DAY), wln(12, prod, NOW - DAY)],
-      claims: [wcl(task(12), a1, "bld", NOW)], claimSources: [src(task(12), a1, NOW, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }],
+      claims: [wcl(task(12), a1, "bld", NOW, { via: "review", revisions: [{ subject: w7, revision: a1 }, { subject: w8, revision: b1 }] })],
       evidence: [wev(w7, a1, "ci", "pass", NOW + DAY), wev(w8, b1, "ci", "pass", NOW + DAY), wev(prod, b1, "deploy", "pass", NOW + DAY)],
     }), "W05").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
   });
   it("W06", () => {
     expect(levelsOf({
       links: [wln(12, w7, NOW - MIN), wln(12, api3, NOW - MIN)],
-      claims: [wcl(task(12), sw, "bld", NOW)], claimSources: [src(task(12), sw, NOW, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }],
+      claims: [wcl(task(12), sw, "bld", NOW, { via: "review", revisions: [{ subject: w7, revision: sw }, { subject: api3, revision: sp }] })],
       evidence: [wev(w7, sw, "ci", "pass", NOW + DAY), wev(api3, sp, "ci", "pass", NOW + DAY)],
     }), "W06").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
   });
   it("W07", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY), whd(w7, B, NOW + 20 * DAY)],
-      subjectStates: [st(w7, B)], links: [wln(12, w7, NOW - MIN)],
-      claims: [wcl(task(12), A, "bld", NOW)], claimSources: [src(task(12), A, NOW, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }],
+      links: [wln(12, w7, NOW - MIN)],
+      claims: [wcl(task(12), A, "bld", NOW, { via: "review", revisions: [{ subject: w7, revision: A }] })],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
     }, NOW + 8 * DAY), "W07").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
   });
   it("W08", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, B, NOW + 20 * DAY)], subjectStates: [st(w7, B)],
-      claims: [wcl(w7, null, "bld", NOW)], claimSources: [src(w7, null, NOW, "filed")],
+      claims: [wcl(w7, null, "bld", NOW, { revisions: [{ subject: w7, revision: A }] })],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
     }), "W08").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
   });
   it("W09", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY), whd(w7, B, NOW + 2 * DAY)],
       links: [wln(12, w7, NOW - MIN)],
-      claims: [wcl(task(12), A, "bld", NOW)], claimSources: [src(task(12), A, NOW, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }],
+      claims: [wcl(task(12), A, "bld", NOW, { via: "review", revisions: [{ subject: w7, revision: A }] })],
       evidence: [wev(w7, A, "ci", "pass", NOW + HOUR)],
     }), "W09").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
   });
@@ -437,27 +420,24 @@ describe("Rule 2: which revision a claim is judged at", () => {
     const want = { claims: 2, laterFailed: 0, levels: ["checked 1/0", "claimed 1/0"] };
     const common = {
       links: [wln(12, w7, NOW - MIN)],
-      claims: [wcl(task(12), A, "bld", NOW), wcl(task(12), B, "bld", NOW + 2 * DAY)],
-      claimSources: [src(task(12), A, NOW, "review"), src(task(12), B, NOW + 2 * DAY, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }, { subject: task(12), at: NOW + 2 * DAY }],
+      claims: [
+        wcl(task(12), A, "bld", NOW, { via: "review", revisions: [{ subject: w7, revision: A }] }),
+        wcl(task(12), B, "bld", NOW + 2 * DAY, { via: "review", revisions: [{ subject: w7, revision: B }] }),
+      ],
       evidence: [wev(w7, A, "ci", "pass", NOW + 12 * HOUR)],
     };
     expect(levelsOf(common), "W10").toEqual(want);
-    expect(levelsOf({ ...common, changeHeads: [whd(w7, A, NOW - DAY), whd(w7, B, NOW + DAY)] }), "W10").toEqual(want);
   });
   it("W11", () => {
     expect(levelsOf({
-      claims: [wcl(task(12), A, "bld", NOW)], claimSources: [src(task(12), A, NOW, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }],
+      claims: [wcl(task(12), A, "bld", NOW, { via: "review" })],
       links: [wln(12, w7, NOW + HOUR)],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
     }), "W11").toEqual({ claims: 1, laterFailed: 0, levels: ["claimed 1/0"] });
   });
   it("W12", () => {
     expect(levelsOf({
-      claims: [wcl(w7, A, "bld", NOW), wcl(task(12), null, "bld", NOW)],
-      claimSources: [src(w7, A, NOW, "filed"), src(task(12), null, NOW, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }],
+      claims: [wcl(w7, A, "bld", NOW), wcl(task(12), null, "bld", NOW, { via: "review" })],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY), wev(w7, A, "ci", "fail", NOW + 10 * DAY)],
       claimFailures: [fail(w7, A, NOW + 10 * DAY, "evidence")],
       links: [wln(12, w7, NOW + 21 * DAY)],
@@ -466,8 +446,7 @@ describe("Rule 2: which revision a claim is judged at", () => {
   it("W13", () => {
     expect(levelsOf({
       links: [wln(4, w9, NOW - 2 * DAY), wln(12, w9, NOW - DAY)],
-      claims: [wcl(task(12), A, "bld", NOW)], claimSources: [src(task(12), A, NOW, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }],
+      claims: [wcl(task(12), A, "bld", NOW, { via: "review" })],
       evidence: [wev(w9, A, "ci", "fail", NOW + DAY)],
       claimFailures: [fail(w9, A, NOW + DAY, "evidence")],
     }), "W13").toEqual({ claims: 1, laterFailed: 0, levels: ["claimed 1/0"] });
@@ -475,16 +454,17 @@ describe("Rule 2: which revision a claim is judged at", () => {
   it("W14", () => {
     expect(levelsOf({
       links: [wln(12, w7, NOW - DAY)],
-      claims: [wcl(w7, A, "bld", NOW), wcl(task(12), A, "bld", NOW + MIN)],
-      claimSources: [src(w7, A, NOW, "filed"), src(task(12), A, NOW + MIN, "review")],
-      claimRounds: [{ subject: task(12), at: NOW + MIN }],
+      claims: [
+        wcl(w7, A, "bld", NOW),
+        wcl(task(12), A, "bld", NOW + MIN, { via: "review", revisions: [{ subject: w7, revision: A }] }),
+      ],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY), wev(w7, A, "review", "pass", NOW + 2 * DAY, lane("rvw"))],
     }), "W14").toEqual({ claims: 1, laterFailed: 0, levels: ["reviewed 1/0"] });
   });
   it("W15", () => {
     const common = {
-      changeHeads: [whd(w7, A, NOW - DAY)], links: [wln(1, w7, NOW - DAY)],
-      claims: [wcl(w7, A, "bld", NOW, { task: taskKey(1) })], claimSources: [src(w7, A, NOW, "filed")],
+      links: [wln(1, w7, NOW - DAY)],
+      claims: [wcl(w7, A, "bld", NOW, { task: taskKey(1) })],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY), wev(w7, A, "review", "pass", NOW + DAY, lane("rvw"))],
     };
     expect(levelsOf({ ...common, assignments: [{ task: taskKey(1), lane: "rvw", seq: 1, at: NOW + 16 * DAY }] }), "W15").toEqual({ claims: 1, laterFailed: 0, levels: ["reviewed 1/0"] });
@@ -496,8 +476,7 @@ describe("Rule 2: which revision a claim is judged at", () => {
         { task: taskKey(12), lane: "la", seq: 1, at: NOW - 2 * DAY },
         { task: taskKey(12), lane: "lb", seq: 2, at: NOW - DAY },
       ],
-      claims: [wcl(task(12), null, "lb", NOW)], claimSources: [src(task(12), null, NOW, "review")],
-      claimRounds: [{ subject: task(12), at: NOW }],
+      claims: [wcl(task(12), null, "lb", NOW, { via: "review" })],
       evidence: [wev(task(12), null, "review", "pass", NOW + HOUR, lane("la"))],
     }), "W16").toEqual({ claims: 1, laterFailed: 0, levels: ["claimed 1/0"] });
   });
@@ -508,35 +487,31 @@ describe("Rule 2: which revision a claim is judged at", () => {
     expect(levelsOf({
       links: [wln(1, p1, NOW - DAY), wln(2, p2, NOW - HOUR)],
       claims: [wcl(p2, m2, "bld", NOW, { task: taskKey(2), outcome: "shipped" })],
-      claimSources: [src(p2, m2, NOW, "filed")],
       deploysOf: [{ subject: p2, at: NOW - HOUR }],
       evidence: [wev(p2, m2, "live", "pass", NOW + HOUR, MGR), wev(p1, rev("sha-m1"), "live", "fail", NOW + HOUR, MGR)],
     }), "W17").toEqual({ claims: 1, laterFailed: 0, levels: ["verified_live 1/0"] });
   });
   it("W18", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY), whd(w8, B, NOW - DAY)],
       links: [wln(1, w7, NOW - DAY), wln(1, w8, NOW - DAY)],
-      claims: [wcl(w7, A, "bld", NOW, { task: taskKey(1) }), wcl(task(1), A, "bld", NOW + HOUR)],
-      claimSources: [src(w7, A, NOW, "filed"), src(task(1), A, NOW + HOUR, "review")],
-      claimRounds: [{ subject: task(1), at: NOW + HOUR }],
+      claims: [
+        wcl(w7, A, "bld", NOW, { task: taskKey(1) }),
+        wcl(task(1), A, "bld", NOW + HOUR, { via: "review", revisions: [{ subject: w7, revision: A }, { subject: w8, revision: B }] }),
+      ],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY), wev(w8, B, "ci", "fail", NOW + 2 * DAY)],
       claimFailures: [fail(w8, B, NOW + 2 * DAY, "evidence")],
     }), "W18").toEqual({ claims: 2, laterFailed: 1, levels: ["checked 1/0", "claimed 1/1"] });
   });
   it("W19", () => {
     expect(levelsOf({
-      claims: [wcl(task(1), null, "bld", NOW), wcl(task(1), null, "bld", NOW + 3 * DAY)],
-      claimSources: [src(task(1), null, NOW, "review"), src(task(1), null, NOW + 3 * DAY, "review")],
-      claimRounds: [{ subject: task(1), at: NOW }, { subject: task(1), at: NOW + 3 * DAY }],
+      claims: [wcl(task(1), null, "bld", NOW, { via: "review" }), wcl(task(1), null, "bld", NOW + 3 * DAY, { via: "review" })],
       evidence: [wev(task(1), null, "tests", "pass", NOW + DAY, MGR)],
     }), "W19").toEqual({ claims: 2, laterFailed: 0, levels: ["checked 1/0", "claimed 1/0"] });
   });
   it("W20", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY)], links: [wln(1, w7, NOW - DAY)],
-      claims: [wcl(task(1), A, "bld", NOW)], claimSources: [src(task(1), A, NOW, "review")],
-      claimRounds: [{ subject: task(1), at: NOW }],
+      links: [wln(1, w7, NOW - DAY)],
+      claims: [wcl(task(1), A, "bld", NOW, { via: "review", revisions: [{ subject: w7, revision: A }] })],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
       claimFailures: [fail(task(1), null, NOW + 5 * DAY, "reopened")],
     }), "W20").toEqual({ claims: 1, laterFailed: 1, levels: ["checked 1/1"] });
@@ -544,24 +519,21 @@ describe("Rule 2: which revision a claim is judged at", () => {
   it("W21", () => {
     const pm = deploy("acme/web", "prod", "sha-m");
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY)],
       links: [wln(1, w7, NOW - DAY), wln(1, pm, NOW + DAY)],
-      claims: [wcl(w7, A, "bld", NOW, { task: taskKey(1) })], claimSources: [src(w7, A, NOW, "filed")],
+      claims: [wcl(w7, A, "bld", NOW, { task: taskKey(1) })],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
-      claimFailures: [fail(pm, rev("sha-m"), NOW + 3 * DAY, "rolled_back")],
+      claimFailures: [fail(w7, A, NOW + 3 * DAY, "rolled_back")],
     }), "W21").toEqual({ claims: 1, laterFailed: 1, levels: ["checked 1/1"] });
   });
   it("W22", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY), whd(w7, A2, NOW + HOUR)],
-      claims: [wcl(w7, A, "bld", NOW)], claimSources: [src(w7, A, NOW, "filed")],
+      claims: [wcl(w7, A, "bld", NOW)],
       evidence: [wev(w7, A2, "ci", "pass", NOW + DAY)],
     }), "W22").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
   });
   it("W23", () => {
     expect(levelsOf({
-      changeHeads: [whd(w7, A, NOW - DAY), whd(w7, B, NOW + 2 * DAY)],
-      claims: [wcl(w7, A, "bld", NOW)], claimSources: [src(w7, A, NOW, "filed")],
+      claims: [wcl(w7, A, "bld", NOW)],
       evidence: [wev(w7, A, "ci", "pass", NOW + DAY), wev(w7, A, "review", "fail", NOW + 3 * DAY, lane("rvw"))],
       claimFailures: [fail(w7, A, NOW + 3 * DAY, "evidence")],
     }), "W23").toEqual({ claims: 1, laterFailed: 1, levels: ["checked 1/1"] });

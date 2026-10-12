@@ -6,7 +6,7 @@ import {
   DAY_MS, LATER_FAILED_MS, SECTIONS, STALE_LIMITS_DEFAULT, buildDigest, countedClaims, itemNew, markAllSeen,
   mergeMarks, openedItem, staleConditions, subjectRef, subjectLevel, vetoDecision, weeklyView,
   type PassCount,
-  type Claim, type ClaimSource, type DigestEvent, type DigestEventKind, type DigestInput, type DigestItem,
+  type Claim, type DigestEvent, type DigestEventKind, type DigestInput, type DigestItem,
   type DigestMark, type Evidence, type EvidenceKind, type EvidenceResult,
   type NeedsYouState, type Producer, type Revision, type Section, type SeenAt, type StaleCondition,
   type StaleFacts, type StaleLimits, type SubjectRef, type SubjectState, type WeeklyRecords, type WeekWindow,
@@ -32,15 +32,24 @@ let seqN = 0;
 const evidence = (o: Partial<Evidence> & { subject: SubjectRef; kind: EvidenceKind; result: EvidenceResult }): Evidence => ({
   id: `e-${++seqN}`, seq: seqN, at: NOW, revision: null, producer: FORGE, ...o,
 });
-const claim = (o: Partial<Claim> & { subject: SubjectRef; lane: string }): Claim =>
-  ({ id: `cl-${++seqN}`, seq: seqN, at: NOW, revision: null, outcome: "done", ...o });
+const claim = (o: Partial<Claim> & { subject: SubjectRef; lane: string }): Claim => {
+  const revision = o.revision ?? null;
+  const revisions = o.revisions ?? (o.subject.kind === "task" ? [] : [{ subject: o.subject, revision }]);
+  return { id: `cl-${++seqN}`, seq: seqN, at: NOW, revision: null, outcome: "done", via: "filed", revisions, ...o };
+};
 const event = (kind: DigestEventKind, subject: SubjectRef, seq: number, at: number): DigestEvent =>
   ({ kind, subject, seq, at, origin: `${kind}:${subjectRef(subject)}:${seq}` });
 const state = (subject: SubjectRef, o: Partial<SubjectState> = {}): SubjectState => ({
   subject, revision: null, claimRound: null, deployedAt: null, reverted: false, rolledBack: false, reopened: false, title: null, ...o,
 });
-const digest = (o: Partial<DigestInput> = {}, passes?: PassCount) =>
-  buildDigest({ now: NOW, newest: 10_000, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [], states: [], needsYou: [], stale: [], ...o }, passes);
+const digest = (o: Partial<DigestInput> = {}, passes?: PassCount) => {
+  // A change's evidence counts only after a forge head (Rule 1). Tests that name a revision on the subject and
+  // do not file heads themselves get that head, so the level assertion stays the one the record supports.
+  const filed = o.changeHeads !== undefined;
+  const changeHeads = [...(o.changeHeads ?? [])];
+  if (!filed) for (const s of o.states ?? []) if (s.subject.kind === "change" && s.revision !== null) changeHeads.push({ subject: s.subject, revision: s.revision, seq: 1, at: 0 });
+  return buildDigest({ now: NOW, newest: 10_000, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [], states: [], needsYou: [], stale: [], ...o, changeHeads }, passes);
+};
 const allItems = (d: { sections: { items: DigestItem[] }[] }) => d.sections.flatMap(s => s.items);
 const one = (d: ReturnType<typeof digest>, id: string) => allItems(d).find(i => i.id === id);
 const inSection = (d: ReturnType<typeof digest>, s: Section) => d.sections.find(x => x.section === s)?.items ?? [];
@@ -436,9 +445,10 @@ describe("the mark (DG7)", () => {
     const level = markAllSeen({ seq: 3, seen: [xSeen] }, [xFailed, y], ["y"], 20);
     expect(level.seq).toBe(3);
     expect(itemNew(xFailed, level)).toEqual({ fresh: true, changed: "level" });
+    // Rule 1.7: the section is never compared, so a section change does not stop the mark.
     const section = markAllSeen({ seq: 3, seen: [xSeen] }, [xMoved, y], ["y"], 20);
-    expect(section.seq).toBe(3);
-    expect(itemNew(xMoved, section)).toEqual({ fresh: true, changed: "section" });
+    expect(section.seq).toBe(7);
+    expect(itemNew(xMoved, section)).toEqual({ fresh: false, changed: null });
   });
   it("opening an item marks that item seen and moves nothing else", () => {
     expect(openedItem({ seq: 4, seen: [] }, b)).toEqual({ seq: 4, seen: [b] });
@@ -472,7 +482,8 @@ describe("new since the last look (DG8)", () => {
   });
   it("a level or section that changed after it was seen makes it new again, with what changed", () => {
     expect(itemNew({ ...seen, level: "failed" }, { seq: 7, seen: [seen] })).toEqual({ fresh: true, changed: "level" });
-    expect(itemNew({ ...seen, section: "failed_or_rolled_back" }, { seq: 7, seen: [seen] })).toEqual({ fresh: true, changed: "section" });
+    // Rule 1.7: a section change alone is not news.
+    expect(itemNew({ ...seen, section: "failed_or_rolled_back" }, { seq: 7, seen: [seen] })).toEqual({ fresh: false, changed: null });
   });
   it("the digest says it of its items: a failing check after the mark marks the line changed", () => {
     const c7 = change("acme/web", 7);
@@ -615,20 +626,20 @@ describe("new since the last look (DG8)", () => {
     });
     expect(one(brought, "T-4"), "two records that each look redundant").toMatchObject({ seq: 30, fresh: true });
   });
-  it("a link that brings a member in raises the sequence when a claim names some other task (DG8)", () => {
-    // The claim on #7 names T-99 and carries an earlier sequence. It does not put #7 on T-12.
-    // The link at seq 30 does, and that arrival is new.
+  it("the first link is the lowest sequence, so a later link does not move the change (SQ10)", () => {
+    // The claim names T-99 at seq 20. The link to T-12 at seq 30 is later, so #7 stays under T-99.
     const c7 = change("acme/web", 7);
     const a1 = rev("sha-a1", "patch-1");
     const d = digest({
-      mark: { seq: 20, seen: [] },
+      mark: { seq: 15, seen: [] },
       states: [state(c7, { revision: a1 })],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 20, at: NOW - 5, task: taskKey(99) })],
       links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 30 }],
       events: [event("opened_or_pushed", c7, 10, NOW - 10)],
-      stale: [{ kind: "task_in_review", task: taskKey(12), since: NOW - 9 * HOUR }],
+      stale: [{ kind: "task_in_review", task: taskKey(99), since: NOW - 9 * HOUR }],
     });
-    expect(one(d, "T-12"), "a backfilled claim does not hide the link").toMatchObject({ seq: 30, fresh: true });
+    expect(one(d, "T-99"), "the lowest sequence is the root").toMatchObject({ seq: 20, fresh: true });
+    expect(one(d, "T-12"), "a later link does not move it").toBeUndefined();
   });
   it("a second link that changes nothing the principal sees stays quiet (DG8)", () => {
     const c7 = change("acme/web", 7);
@@ -801,48 +812,49 @@ describe("the weekly count of claims (DG12)", () => {
   it("counted claims root from the links even when those are not in time order", () => {
     // The later task is listed first. The earlier link is the root, so the two sources are one claim.
     const t1 = task(1);
-    const sources: ClaimSource[] = [
-      { subject: c7, revision: a1, at: 20, via: "filed" },
-      { subject: t1, revision: a1, at: 21, via: "review" },
+    const same = [{ subject: c7, revision: a1 }];
+    const claims = [
+      claim({ subject: c7, revision: a1, at: 20, lane: "builder", revisions: same }),
+      claim({ subject: t1, revision: a1, at: 21, lane: "builder", via: "review", revisions: same }),
     ];
     const links = [
       { task: taskKey(2), target: c7, by: "builder", at: 50, seq: 5 },
       { task: taskKey(1), target: c7, by: "builder", at: 10, seq: 1 },
     ];
-    expect(countedClaims(sources, links, []), "never trusted to be sorted").toEqual([{ subject: c7, revision: a1, at: 20 }]);
+    // SQ10: the first link is the lowest sequence, which here is also the earlier time.
+    expect(countedClaims(claims, links), "never trusted to be sorted").toEqual([{ subject: c7, revision: a1, at: 20 }]);
   });
   it("counted claims take one root input: links are not overridden by an empty index", () => {
     const t12 = task(12);
-    const sources: ClaimSource[] = [
-      { subject: c7, revision: a1, at: NOW, via: "filed" },
-      { subject: t12, revision: a1, at: NOW + MIN, via: "review" },
+    const same = [{ subject: c7, revision: a1 }];
+    const claims = [
+      claim({ subject: c7, revision: a1, at: NOW, lane: "builder", revisions: same }),
+      claim({ subject: t12, revision: a1, at: NOW + MIN, lane: "builder", via: "review", revisions: same }),
     ];
     const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }];
-    expect(countedClaims(sources, links, []), "one root input").toEqual([{ subject: c7, revision: a1, at: NOW }]);
+    expect(countedClaims(claims, links), "one root input").toEqual([{ subject: c7, revision: a1, at: NOW }]);
   });
   it("counted once per root subject and revision, at the earliest of its sources", () => {
-    const sources: ClaimSource[] = [
-      { subject: c7, revision: a1, at: NOW + 1, via: "filed" },
-      { subject: c7, revision: a1, at: NOW, via: "review" },
-      { subject: c7, revision: rev("sha-b2", "patch-2"), at: NOW + 2, via: "lane_event" },
+    const b2 = rev("sha-b2", "patch-2");
+    const claims = [
+      claim({ subject: c7, revision: a1, at: NOW + 1, lane: "builder" }),
+      claim({ subject: c7, revision: a1, at: NOW, lane: "builder", via: "review" }),
+      claim({ subject: c7, revision: b2, at: NOW + 2, lane: "builder", via: "lane_event" }),
     ];
-    expect(countedClaims(sources, [], [])).toEqual([
+    expect(countedClaims(claims, [])).toEqual([
       { subject: c7, revision: a1, at: NOW },
       { subject: c7, revision: rev("sha-b2", "patch-2"), at: NOW + 2 },
     ]);
   });
   const records = (o: Partial<WeeklyRecords> = {}): WeeklyRecords => ({
     shipped: [], merged: [], reverted: [], done: [], deploys: [], deploysOf: [], stuck: [],
-    claimSources: [], claimRounds: [], claimFailures: [], claims: [], links: [], assignments: [], evidence: [], subjectStates: [], changeHeads: [],
+    claimFailures: [], claims: [], links: [], assignments: [], evidence: [],
     ...o,
   });
   const week = (start = NOW, end = NOW + 7 * DAY): WeekWindow => ({ week: "w-40", start, end });
   it("later failed within 14 days, counted under the level the item showed just before it failed", () => {
     const r = records({
-      claimSources: [{ subject: c7, revision: a1, at: NOW, via: "review" }],
-      claimRounds: [{ subject: c7, at: NOW }],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
-      subjectStates: [state(c7, { revision: a1 })],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
         evidence({ subject: c7, revision: a1, kind: "ci", result: "fail", at: NOW + 10 * DAY }),
@@ -855,10 +867,7 @@ describe("the weekly count of claims (DG12)", () => {
   });
   it("past 14 days it is not later failed; a claim that held is counted under its level when the window ended", () => {
     const base = records({
-      claimSources: [{ subject: c7, revision: a1, at: NOW, via: "review" }],
-      claimRounds: [{ subject: c7, at: NOW }],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
-      subjectStates: [state(c7, { revision: a1 })],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
         evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW + 2 * DAY }),
@@ -874,8 +883,6 @@ describe("the weekly count of claims (DG12)", () => {
   it("a revert, a rollback and a reopen count as later failed as surely as failing evidence", () => {
     const t5 = task(5);
     const r = records({
-      claimSources: [{ subject: t5, revision: null, at: NOW, via: "review" }],
-      claimRounds: [{ subject: t5, at: NOW }],
       claims: [claim({ subject: t5, lane: "builder" })],
       claimFailures: [{ subject: t5, revision: null, at: NOW + DAY, via: "reopened" }],
     });
@@ -886,15 +893,14 @@ describe("the weekly count of claims (DG12)", () => {
   it("a claim on a task is one count with its linked change's claim, judged with the change's evidence (§3.1)", () => {
     const t12 = task(12);
     const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }];
-    const sources: ClaimSource[] = [
-      { subject: c7, revision: a1, at: NOW, via: "filed" },
-      { subject: t12, revision: a1, at: NOW + MIN, via: "review" },       // T-12 moved to review at #87's head
+    const same = [{ subject: c7, revision: a1 }];
+    const claims = [
+      claim({ subject: c7, revision: a1, at: NOW, lane: "builder", revisions: same }),
+      claim({ subject: t12, revision: a1, at: NOW + MIN, lane: "builder", via: "review", revisions: same }),
     ];
-    expect(countedClaims(sources, links, [])).toEqual([{ subject: c7, revision: a1, at: NOW }]);
+    expect(countedClaims(claims, links)).toEqual([{ subject: c7, revision: a1, at: NOW }]);
     const r = records({
-      claimSources: sources,
-      claimRounds: [{ subject: t12, at: NOW + MIN }],
-      claims: [claim({ subject: c7, revision: a1, lane: "builder", at: NOW })],
+      claims,
       links,
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
@@ -908,9 +914,7 @@ describe("the weekly count of claims (DG12)", () => {
   it("a failure recorded on the linked change fails the task's claim (DG12)", () => {
     const t12 = task(12);
     const r = records({
-      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
-      claimRounds: [{ subject: t12, at: NOW }],
-      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW, via: "review", revisions: [{ subject: c7, revision: a1 }] })],
       links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
@@ -923,27 +927,22 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 1 }]);
   });
   it("a link filed after a claim does not change how that week was counted (DG9, DG12)", () => {
-    // Week 1 counted #7 and T-12 as two claims. Three weeks later someone links them. A rebuild still counts two,
-    // and the failure on #7 does not fail T-12's claim.
+    // Both claims name #7 at A. The link is filed three weeks later, so at filing #7 is still its own root and the
+    // two claims stay two. The failure matches both, because both name that revision.
     const t12 = task(12);
-    const sources: ClaimSource[] = [
-      { subject: c7, revision: a1, at: NOW, via: "filed" },
-      { subject: t12, revision: a1, at: NOW, via: "review" },
+    const same = [{ subject: c7, revision: a1 }];
+    const claims = [
+      claim({ subject: c7, revision: a1, lane: "builder", at: NOW, revisions: same }),
+      claim({ subject: t12, revision: a1, lane: "builder", at: NOW, via: "review", revisions: same }),
     ];
     const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW + 21 * DAY, seq: 40 }];
-    expect(countedClaims(sources, links, [])).toEqual([
+    expect(countedClaims(claims, links)).toEqual([
       { subject: c7, revision: a1, at: NOW },
       { subject: t12, revision: a1, at: NOW },
     ]);
     const r = records({
-      claimSources: sources,
-      claimRounds: [{ subject: t12, at: NOW }],
-      claims: [
-        claim({ subject: c7, revision: a1, lane: "builder", at: NOW }),
-        claim({ subject: t12, revision: a1, lane: "builder", at: NOW }),
-      ],
+      claims,
       links,
-      subjectStates: [state(c7, { revision: a1 })],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
         evidence({ subject: c7, revision: a1, kind: "ci", result: "fail", at: NOW + 10 * DAY }),
@@ -951,12 +950,9 @@ describe("the weekly count of claims (DG12)", () => {
       claimFailures: [{ subject: c7, revision: a1, at: NOW + 10 * DAY, via: "evidence" }],
     });
     const [row] = weeklyView(r, [week()], NOW + 22 * DAY);
-    expect(row?.claims).toBe(2);
-    expect(row?.laterFailed).toBe(1);
-    expect(row?.levels).toEqual([
-      { level: "claimed", claims: 1, laterFailed: 0 },
-      { level: "checked", claims: 1, laterFailed: 1 },
-    ]);
+    expect(row?.claims, "filed after a claim").toBe(2);
+    expect(row?.laterFailed).toBe(2);
+    expect(row?.levels).toEqual([{ level: "checked", claims: 2, laterFailed: 2 }]);
   });
   it("a change rooted under another task is not judged as part of this task's claim (DG5)", () => {
     // #9 was linked to T-4 first and later to T-12 as well. The digest groups it under T-4. T-12's weekly level
@@ -971,11 +967,8 @@ describe("the weekly count of claims (DG12)", () => {
     expect(one(grouped, "T-4")?.subjects).toContainEqual(c9);
     expect(one(grouped, "T-12")).toBeUndefined();
     const r = records({
-      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
-      claimRounds: [{ subject: t12, at: NOW }],
       claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
       links,
-      subjectStates: [state(c9, { revision: a1 })],
       evidence: [evidence({ subject: c9, revision: a1, kind: "ci", result: "fail", at: NOW + DAY })],
     });
     const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
@@ -989,19 +982,15 @@ describe("the weekly count of claims (DG12)", () => {
     const b1 = rev("sha-b1", "patch-2");
     const prod = deploy("acme/web", "prod", "sha-b1");
     const r = records({
-      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
-      claimRounds: [{ subject: t12, at: NOW }],
-      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      claims: [claim({
+        subject: t12, revision: a1, lane: "builder", at: NOW, via: "review",
+        revisions: [{ subject: c7, revision: a1 }, { subject: c8, revision: b1 }],
+      })],
       links: [
         { task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 },
         { task: taskKey(12), target: c8, by: "builder", at: NOW - MIN, seq: 0 },
         { task: taskKey(12), target: prod, by: "builder", at: NOW - MIN, seq: 0 },
       ],
-      changeHeads: [
-        { subject: c7, revision: a1, at: NOW - MIN, seq: 1 },
-        { subject: c8, revision: b1, at: NOW - MIN, seq: 1 },
-      ],
-      subjectStates: [state(c7, { revision: a1 }), state(c8, { revision: b1 }), state(prod, { revision: b1 })],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
         evidence({ subject: c8, revision: b1, kind: "ci", result: "pass", at: NOW + DAY }),
@@ -1013,20 +1002,11 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
   });
   it("a later push of a linked change does not rewrite a provisional week", () => {
-    // T-12 was claimed with #7 at head A, and CI passed on A. The forge then filed head B, after the moment
-    // the week is judged. The live subject state is already B. The week stays checked.
+    // T-12 was claimed with #7 at A, and CI passed on A. A later head is not an input: the claim keeps A.
     const t12 = task(12);
-    const b2 = rev("sha-b2", "patch-2");
     const r = records({
-      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
-      claimRounds: [{ subject: t12, at: NOW }],
-      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW, via: "review", revisions: [{ subject: c7, revision: a1 }] })],
       links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }],
-      subjectStates: [state(c7, { revision: b2 })],
-      changeHeads: [
-        { subject: c7, revision: b2, at: NOW + 20 * DAY, seq: 2 },
-        { subject: c7, revision: a1, at: NOW, seq: 1 },
-      ],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
     });
     const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
@@ -1034,36 +1014,25 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
   });
   it("a pull request opened at A stays checked when a push to B is filed on day 20", () => {
-    // The opening head is not a change-head record: only the push to B is. The live state is already B.
-    // The week is judged on day 8, while the claim and the link still name A.
+    // The claim stores A. The week does not read a later head.
     const t12 = task(12);
-    const b2 = rev("sha-b2", "patch-2");
     const r = records({
-      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
-      claimRounds: [{ subject: t12, at: NOW }],
-      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW, via: "review", revisions: [{ subject: c7, revision: a1 }] })],
       links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }],
-      subjectStates: [state(c7, { revision: b2 })],
-      changeHeads: [{ subject: c7, revision: b2, at: NOW + 20 * DAY, seq: 2 }],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
     });
     const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
     expect(row?.levels, "opened at A").toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
   });
   it("a lane-event claim with no revision is judged at the change head, and with no head stays claimed", () => {
-    const head = records({
-      claimSources: [{ subject: c7, revision: null, at: NOW, via: "lane_event" }],
-      claims: [claim({ subject: c7, revision: null, lane: "builder", at: NOW })],
-      subjectStates: [state(c7, { revision: rev("sha-b2", "patch-2") })],
-      changeHeads: [{ subject: c7, revision: a1, at: NOW, seq: 1 }],
+    const stored = records({
+      claims: [claim({ subject: c7, revision: null, lane: "builder", at: NOW, via: "lane_event", revisions: [{ subject: c7, revision: a1 }] })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
     });
-    const [withHead] = weeklyView(head, [week()], NOW + 8 * DAY);
-    expect(withHead?.levels, "revision unknown").toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
+    const [withHead] = weeklyView(stored, [week()], NOW + 8 * DAY);
+    expect(withHead?.levels, "stored at filing").toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
     const none = records({
-      claimSources: [{ subject: c7, revision: null, at: NOW, via: "lane_event" }],
-      claims: [claim({ subject: c7, lane: "builder", at: NOW })],
-      subjectStates: [state(c7, { revision: a1 })],
+      claims: [claim({ subject: c7, revision: null, lane: "builder", at: NOW, via: "lane_event" })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
     });
     const [without] = weeklyView(none, [week()], NOW + 8 * DAY);
@@ -1073,8 +1042,6 @@ describe("the weekly count of claims (DG12)", () => {
     // Reviewer was independent in week 1. Assigning them in week 3 must not drop that week's level.
     const t12 = task(12);
     const r = records({
-      claimSources: [{ subject: t12, revision: null, at: NOW, via: "review" }],
-      claimRounds: [{ subject: t12, at: NOW }],
       claims: [claim({ subject: t12, lane: "builder", at: NOW })],
       evidence: [evidence({ subject: t12, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW + DAY })],
       assignments: [{ task: taskKey(12), lane: "reviewer", seq: 30, at: NOW + 21 * DAY }],
@@ -1084,12 +1051,9 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row?.levels).toEqual([{ level: "reviewed", claims: 1, laterFailed: 0 }]);
   });
   it("a change claim stays at its own revision when the change is pushed again", () => {
-    // Claimed and reviewed at sha A. A week later the change's head is sha B. The past week stays reviewed.
-    const b2 = rev("sha-b2", "patch-2");
+    // Claimed and reviewed at sha A. A later head is not an input, so the past week stays reviewed.
     const r = records({
-      claimSources: [{ subject: c7, revision: a1, at: NOW, via: "filed" }],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", at: NOW })],
-      subjectStates: [state(c7, { revision: b2 })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW + DAY })],
     });
     const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
@@ -1098,17 +1062,17 @@ describe("the weekly count of claims (DG12)", () => {
   });
   it("the weekly view walks the root index once for a large history", () => {
     const n = 80;
-    const claimSources: ClaimSource[] = [];
+    const claims: Claim[] = [];
     const claimFailures: WeeklyRecords["claimFailures"][number][] = [];
     const links: WeeklyRecords["links"][number][] = [];
     for (let i = 0; i < n; i++) {
       const c = change("acme/web", i + 1);
       const revision = rev(`sha-${i}`, null);
-      claimSources.push({ subject: c, revision, at: NOW + i, via: "filed" });
+      claims.push(claim({ subject: c, revision, at: NOW + i, lane: "builder" }));
       claimFailures.push({ subject: change("acme/other", i + 1), revision: rev(`other-${i}`, null), at: NOW + 10 * DAY, via: "evidence" });
       links.push({ task: taskKey(1), target: c, by: "builder", at: NOW + n + i, seq: i });
     }
-    const r = records({ claimSources, claimFailures, links });
+    const r = records({ claims, claimFailures, links });
     const passes: PassCount = { n: 0 };
     const [row] = weeklyView(r, [week()], NOW + 8 * DAY, passes);
     expect(row?.claims).toBe(n);
@@ -1149,7 +1113,6 @@ describe("the weekly count of claims (DG12)", () => {
   it("a rebuild of the weekly view gives the same rows", () => {
     const r = records({
       shipped: [{ at: NOW + HOUR, verifiedLive: true }],
-      claimSources: [{ subject: c7, revision: a1, at: NOW, via: "review" }],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
     });
     expect(weeklyView(r, [week()], NOW + 8 * DAY)).toEqual(weeklyView(r, [week()], NOW + 8 * DAY));
