@@ -677,6 +677,15 @@ describe("no powers of its own (DG11)", () => {
 describe("the weekly count of claims (DG12)", () => {
   const c7 = change("acme/web", 7);
   const a1 = rev("sha-a1", "patch-1");
+  it("counted claims take one root input: links are not overridden by an empty index", () => {
+    const t12 = task(12);
+    const sources: ClaimSource[] = [
+      { subject: c7, revision: a1, at: NOW, via: "filed" },
+      { subject: t12, revision: a1, at: NOW + MIN, via: "review" },
+    ];
+    const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }];
+    expect(countedClaims(sources, links, [], []), "one root input").toEqual([{ subject: c7, revision: a1, at: NOW }]);
+  });
   it("counted once per root subject and revision, at the earliest of its sources", () => {
     const sources: ClaimSource[] = [
       { subject: c7, revision: a1, at: NOW + 1, via: "filed" },
