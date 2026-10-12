@@ -1745,6 +1745,19 @@ export const CONTROLS: Control[] = [
     find: `if (entry.revision === null && entry.subject.kind !== "task") return "claimed";\n`,
     replace: `if (entry.revision === null && entry.subject.kind !== "task") return "checked";\n`,
     run: ["packages/domain/test/digest-semantics.test.ts"], expect: "never the live head" },
+  // ---- Job start record (board T-110, PR #44 review round 1): one start range for the window, the record and
+  // sameProcess, each guard removed once.
+  { id: "t110-window-point-start", task: "T-110", file: "apps/node-agent/src/ops/job-identity.ts",
+    find: "start.latest < spawnedAt - SPAWN_WINDOW_MS || start.earliest > spawnedAt + SPAWN_WINDOW_MS",
+    replace: "Math.abs(start.earliest - spawnedAt) > SPAWN_WINDOW_MS",
+    run: ["apps/node-agent/test/job-identity.test.ts"], expect: "truncated to the second" },
+  { id: "t110-no-exact-start", task: "T-110", file: "packages/node-ops/src/pid.ts",
+    find: "const exact = uptime === null ? null : startFromUptime(stat, uptime, hz, before, after);",
+    replace: "const exact = null;",
+    run: ["apps/node-agent/test/job-identity.test.ts"], expect: "the record is the exact start" },
+  { id: "t110-uptime-clock-after", task: "T-110", file: "packages/node-ops/src/pid.ts",
+    find: "startFromUptime(stat, uptime, hz, before, after)", replace: "startFromUptime(stat, uptime, hz, after, after)",
+    run: ["apps/node-agent/test/job-identity.test.ts"], expect: "widens the start instead of moving it" },
 ];
 
 // ---- the runner

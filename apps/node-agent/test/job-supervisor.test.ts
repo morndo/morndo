@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { noticeIdOf, type Job } from "@morndo/domain";
-import { processIdentity } from "@morndo/node-ops";
+import { processIdentity, resetProcessStartCache } from "@morndo/node-ops";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore, type NoticeHandoff } from "../src/ops/job-store.ts";
 import { psStarts, START_RECORD_GRACE_MS, writeProcessFile } from "../src/ops/job-identity.ts";
@@ -692,8 +692,8 @@ describe("child supervisor", () => {
       return "10 Thu Jan  1 00:00:01 1970\n11 Thu Jan  1 00:00:02 1970\n";
     });
     expect(calls).toEqual([[10, 11]]);
-    expect(starts.get(10)).toBe(Date.parse("Thu Jan  1 00:00:01 1970"));
-    expect(starts.get(11)).toBe(Date.parse("Thu Jan  1 00:00:02 1970"));
+    expect(starts.get(10)?.earliest).toBe(Date.parse("Thu Jan  1 00:00:01 1970"));
+    expect(starts.get(11)?.earliest).toBe(Date.parse("Thu Jan  1 00:00:02 1970"));
   });
 
   it("records a start identity only inside the spawn window, before it returns", async () => {
@@ -712,6 +712,36 @@ describe("child supervisor", () => {
       expect(existsSync(late)).toBe(false);
     } finally {
       try { process.kill(child.pid!, "SIGKILL"); } catch { /* already gone */ }
+    }
+  });
+
+  // /proc/stat prints the boot time in whole seconds, here 990 ms short of the boot clock's own. A process that started
+  // 50 ms before the spawn stamp is inside the window all the same. The tick rate and ps are given, not the host's.
+  it("records a start inside the spawn window when btime is most of a second short", () => {
+    const { dir } = rig();
+    const bootS = 1_791_300_000;
+    const bootMs = bootS * 1000 + 990;
+    const ticks = 100_000;
+    const startedMs = bootMs + ticks * 10;
+    const nowMs = startedMs + 200;
+    const proc: Record<string, string> = {
+      "/proc/4242/stat": `4242 (job) S ${Array.from({ length: 18 }, () => "0").join(" ")} ${ticks}`,
+      "/proc/stat": `cpu 1\nbtime ${bootS}\n`,
+      "/proc/uptime": `${((nowMs - bootMs) / 1000).toFixed(2)} 1.00\n`,
+      "/proc/sys/kernel/random/boot_id": "0f6c1b52-7a3e-4c55-9d1e-2b8f4a6c9e10\n",
+    };
+    const io = { read: (path: string) => proc[path] ?? null, now: () => nowMs, hz: 100, ps: () => null };
+    resetProcessStartCache();
+    try {
+      writeProcessFile(join(dir, "born.at"), 4242, startedMs + 50, io);
+      expect(existsSync(join(dir, "born.at"))).toBe(true);
+      expect(JSON.parse(readFileSync(join(dir, "born.at"), "utf8"))).toEqual({ ticks, bootId: "0f6c1b52-7a3e-4c55-9d1e-2b8f4a6c9e10" });
+      writeProcessFile(join(dir, "late.at"), 4242, startedMs + 60_000, io);
+      writeProcessFile(join(dir, "early.at"), 4242, startedMs - 60_000, io);
+      expect(existsSync(join(dir, "late.at"))).toBe(false);
+      expect(existsSync(join(dir, "early.at"))).toBe(false);
+    } finally {
+      resetProcessStartCache();
     }
   });
 
