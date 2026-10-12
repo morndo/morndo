@@ -225,6 +225,17 @@ describe("every other rule, one break each", () => {
   });
 });
 
+describe("the ubiquitous language", () => {
+  it("docs/domain.md has the Knowledge context, its terms and the invariants this check enforces", () => {
+    const doc = readFileSync(join(ROOT, "docs/domain.md"), "utf8");
+    const section = doc.split(/^## /m).find(s => s.startsWith("Knowledge")) ?? "";
+    const terms = [...section.matchAll(/^\| ([A-Z][^|]*?) \|/gm)].map(m => m[1]);
+    expect(terms).toEqual(expect.arrayContaining(["SOP", "Template", "Instance", "Step", "Effect", "Gate", "Stop rule", "Budget amount", "Model class", "Family rule", "Citation", "Note", "Preference", "Pattern"]));
+    for (const id of ["K4", "K6", "K9", "K10", "K11", "K12", "K14"]) expect([id, section.includes(`| ${id} |`)]).toEqual([id, true]);
+    expect(doc).toMatch(/\*Knowledge stands beside Engines\*/);
+  });
+});
+
 describe("findings", () => {
   it("name the step they are about", () => {
     const sop = copy();
