@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { FileVault } from "../src/adapters/vault-file.ts";
 import { secretIndexPath } from "../src/compose.ts";
 import { readSecretIndex } from "@morndo/node-ops";
 import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
@@ -63,5 +64,32 @@ describe("round 2, point 1: a first value under 8 bytes never stops a later put"
     expect(r.stderr).toMatch(/index\.key is missing/);
     expect(existsSync(join(h.dir, "index.key"))).toBe(false);
     expect(sealed(h.vault)).toHaveLength(2);
+  });
+});
+
+describe("round 2, points 2 and 5: revoke and delete on the plaintext vault destroy the age vault's file, or say what is left", () => {
+  for (const verb of ["revoke", "delete"]) {
+    it(`${verb} run with MORNDO_VAULT=file removes the sealed file the age vault wrote`, async () => {
+      const h = home();
+      expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+      expect(sealed(h.vault)).toHaveLength(1);
+      const r = await cli({ ...h.env, MORNDO_VAULT: "file" }, [verb, REF], { typed: REF });
+      expect(r.code, r.stderr).toBe(0);
+      expect(r.stdout).toContain(`${verb}d ${REF}`);
+      expect(readdirSync(h.vault)).toEqual([]);
+    });
+  }
+  it("a version whose file is in neither form is named as left to clean (exit 3), never passed over", async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+    for (const name of sealed(h.vault)) rmSync(join(h.vault, name));
+    const r = await cli({ ...h.env, MORNDO_VAULT: "file" }, ["revoke", REF], { typed: REF });
+    expect(r.code, r.stderr).toBe(3);
+    expect(r.stdout).toContain(`revoked ${REF}`);
+    expect(r.stderr).toMatch(/left to clean: vault: .*s-[0-9a-f]{16}/);
+  });
+  it("FileVault.remove refuses a ref it finds no file of, in either form", () => {
+    const h = home();
+    expect(() => new FileVault(h.vault).remove("s-00000000000000e1")).toThrow(/s-00000000000000e1/);
   });
 });
