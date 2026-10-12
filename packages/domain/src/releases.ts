@@ -217,9 +217,10 @@ export function admit(p: {
   return ok(machine.previous);
 }
 
-// What a commit writes back into the Installation: the pair moves, and the highest committed Version only ever
-// rises — a rollback doesn't license the auto path to re-take what it left (RL2).
-export function commitInstallation(i: Installation, to: Version): Installation {
+// What a commit writes back into the Installation: the pair moves — previous is the Version that was current,
+// which an Installation always has — and the highest committed Version only ever rises. A rollback doesn't
+// license the auto path to re-take what it left (RL2).
+export function commitInstallation(i: Installation, to: Version): Installation & { previous: Version } {
   return { ...i, current: to, previous: i.current, staged: null, highestCommitted: higherOf(i.highestCommitted, to) };
 }
 // A rollback marks its target bad on this machine (RL7), so nothing auto-installs it again here.
