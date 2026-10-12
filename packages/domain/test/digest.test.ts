@@ -22,8 +22,6 @@ const task = (n: number): SubjectRef => ({ kind: "task", key: taskKey(n) });
 const change = (repo: string, n: number): SubjectRef => ({ kind: "change", repo, n });
 const deploy = (repo: string, env: string): SubjectRef => ({ kind: "deploy", repo, env });
 const ask = (id: string): SubjectRef => ({ kind: "ask", id });
-const laneSubject = (name: string): SubjectRef => ({ kind: "lane", name });
-const job = (id: string): SubjectRef => ({ kind: "job", id });
 
 const FORGE: Producer = { kind: "forge", name: "forge-1" };
 const lane = (name: string): Producer => ({ kind: "lane", name });
@@ -97,10 +95,14 @@ describe("the level ladder (DG2)", () => {
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer") })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
     });
-    expect(one(d, "acme/web#7")?.level).toBe("claimed");
+    expect(one(d, "T-3")?.level).toBe("claimed");           // the linked task roots the item (DG5)
   });
   it("the forge's CI raises it to checked, another lane's review to reviewed; the highest holds", () => {
-    const base = { states: [state(c7, { revision: a1 })], events: [event("merged", c7, 2, NOW)] };
+    const base = {
+      states: [state(c7, { revision: a1 })],
+      events: [event("merged", c7, 2, NOW)],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
+    };
     const ciOnly = digest({ ...base, evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass" })] });
     expect(one(ciOnly, "acme/web#7")?.level).toBe("checked");
     const both = digest({ ...base, evidence: [
@@ -139,7 +141,7 @@ describe("the level ladder (DG2)", () => {
     expect(one(withForge, "acme/web#7")?.level).toBe("checked");
   });
   it("verified live: only from another producer, and only once the deploy containing the revision has landed", () => {
-    const base = { claims: [claim({ subject: c7, revision: a1, lane: "builder" })], events: [event("shipped", deploy("acme/web", "prod"), 2, NOW)] };
+    const base = { claims: [claim({ subject: c7, revision: a1, lane: "builder" })], events: [event("merged", c7, 2, NOW)] };
     const before = digest({ ...base, states: [state(c7, { revision: a1, deployedAt: NOW + 10 })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "live", result: "pass", producer: lane("reviewer"), at: NOW + 5 })] });
     expect(one(before, "acme/web#7")?.level).toBe("claimed");        // before the deploy: not a live check of it
@@ -348,12 +350,12 @@ describe("the mark (DG7)", () => {
     expect(markAllSeen({ seq: 4, seen: [] }, items, ["a", "b", "c"], 9)).toEqual({ seq: 9, seen: [] });
   });
   it("it never passes the hub's newest sequence, and it never moves back", () => {
-    expect(markAllSeen({ seq: 4, seen: [] }, items, ["a", "b", "c"], 8)).toEqual({ seq: 8, seen: [] });
+    expect(markAllSeen({ seq: 4, seen: [] }, items, ["a", "b", "c"], 8)).toEqual({ seq: 8, seen: [c] });   // c stays seen above
     expect(markAllSeen({ seq: 6, seen: [] }, items, ["a"], 9)).toEqual({ seq: 6, seen: [] });
   });
-  it("a line already seen above the mark counts as covered, and is recorded with what it showed", () => {
-    const marked = markAllSeen({ seq: 4, seen: [] }, items, ["a"], 9);   // stops at b, nothing above
-    expect(markAllSeen(marked, items, ["a", "b", "c"], 9)).toEqual({ seq: 9, seen: [c] });
+  it("a line already seen above the mark counts as covered: the walk may pass it", () => {
+    expect(markAllSeen({ seq: 5, seen: [c] }, items, ["a", "b"], 9)).toEqual({ seq: 9, seen: [] });
+    expect(markAllSeen({ seq: 4, seen: [] }, items, ["a"], 9)).toEqual({ seq: 5, seen: [] });   // stops at b
   });
   it("opening an item marks that item seen and moves nothing else", () => {
     expect(openedItem({ seq: 4, seen: [] }, b)).toEqual({ seq: 4, seen: [b] });
@@ -390,7 +392,7 @@ describe("new since the last look (DG8)", () => {
       mark: { seq: 7, seen: [seen] },
       states: [state(c7, { revision: a1 })],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
-      events: [event("merged", c7, 7, NOW - MIN)],
+      events: [event("merged", c7, 7, NOW - MIN), event("failed", c7, 8, NOW)],   // the fail evidence is a failed event (§3.2)
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "fail", seq: 8 })],
     });
     expect(one(d, "acme/web#7")).toMatchObject({ fresh: true, changed: "level" });
@@ -528,7 +530,7 @@ describe("the weekly count of claims (DG12)", () => {
         evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW + 2 * DAY }),
       ],
     });
-    const late = { ...base, claimFailures: [{ subject: c7, revision: a1, at: NOW + 15 * DAY, via: "evidence" }] };
+    const late: WeeklyRecords = { ...base, claimFailures: [{ subject: c7, revision: a1, at: NOW + 15 * DAY, via: "evidence" }] };
     const [row] = weeklyView(late, [week()], NOW + 16 * DAY);
     expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
     expect(row?.levels).toEqual([{ level: "reviewed", claims: 1, laterFailed: 0 }]);

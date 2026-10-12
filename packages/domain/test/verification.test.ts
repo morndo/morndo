@@ -34,8 +34,8 @@ describe("the claimants of a subject (V1)", () => {
     expect([...claimantsOf(c7, claims, [], assignments)].sort()).toEqual(["builder", "tester"]);
   });
   it("a reassignment does not make the old assignee independent", () => {
-    // builder was assigned T-3, then it went to tester: both stay claimants of the linked change.
-    const links: LinkRecord[] = [{ task: taskKey(3), target: c7, by: "manager", at: NOW }];
+    // builder linked the change to T-3 and was assigned it, then it went to tester: both stay claimants.
+    const links: LinkRecord[] = [{ task: taskKey(3), target: c7, by: "builder", at: NOW }];
     const assignments: Assignment[] = [{ task: taskKey(3), lane: "builder" }, { task: taskKey(3), lane: "tester" }];
     expect([...claimantsOf(c7, [], links, assignments)].sort()).toEqual(["builder", "tester"]);
   });
