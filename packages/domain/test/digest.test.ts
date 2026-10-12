@@ -333,6 +333,19 @@ describe("items and sections (DG5)", () => {
   });
 });
 
+// ---- §3.5: the line's own time — its newest record's, never the moment the digest was built
+
+describe("the line's time (§3.5)", () => {
+  it("an item's time is its newest record's time, not now; a live condition's line says since when it holds", () => {
+    const c7 = change("acme/web", 7);
+    const d = digest({ events: [event("merged", c7, 2, NOW - 5 * HOUR)] });
+    expect(one(d, "acme/web#7")?.at).toBe(NOW - 5 * HOUR);
+    const a1 = ask("ask-1");
+    const needs = digest({ needsYou: [{ subject: a1, blocking: true, due: null, since: NOW - 2 * HOUR }] });
+    expect(one(needs, "ask:ask-1")?.at).toBe(NOW - 2 * HOUR);
+  });
+});
+
 // ---- DG6: needs you and stale are live conditions: they hold whatever the mark, and leave when they clear
 
 describe("live conditions (DG6)", () => {
