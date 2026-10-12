@@ -10,7 +10,8 @@ import { NodeKeys } from "../src/adapters/node-keys.ts";
 import { SecretIndexWriter } from "../src/adapters/secret-index-writer.ts";
 import { SecretMaterial } from "../src/adapters/secret-material.ts";
 import { SqliteSecrets } from "../src/adapters/secrets-sqlite.ts";
-import { AgeVault } from "../src/adapters/vault-age.ts";
+import { AgeVault, recipientStanzas } from "../src/adapters/vault-age.ts";
+import { Encrypter, Stanza, generateX25519Identity, identityToRecipient, type Recipient } from "age-encryption";
 import { GitWorkspaceRoots } from "../src/adapters/git-workspaces.ts";
 import { SecretsService } from "../src/application/secrets-service.ts";
 import { secretIndexPath } from "../src/compose.ts";
@@ -84,7 +85,6 @@ describe("review point 5 (data loss): the sweep never removes the file of a stor
     const service = new SecretsService({
       clock: { now: () => Date.now() }, ids: { next: prefix => `${prefix}00000000000000a${++n}` }, vault, index, secrets, roots: new GitWorkspaceRoots(),
     });
-    const { Encrypter } = await import("age-encryption");
     const e = new Encrypter();
     e.addRecipient(await vault.recipient());
     const r = await service.store({
@@ -100,7 +100,6 @@ describe("review point 5 (data loss): the sweep never removes the file of a stor
     const h = home();
     expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
     const vault = new AgeVault(h.vault, join(h.dir, "identity"));
-    const { Encrypter } = await import("age-encryption");
     const e = new Encrypter();
     e.addRecipient(await vault.recipient());
     const orphan = await e.encrypt(new TextEncoder().encode("synthetic-left-over"));
@@ -202,6 +201,36 @@ describe("review point 9: a save never clears a vault ref the change didn't name
       expect(secrets.load().vaults.map(v => v.ref)).toEqual([null]);
     } finally {
       secrets.close();
+    }
+  });
+});
+
+describe("review point 10: a grease stanza is not a recipient", () => {
+  // rage adds one to every header without scrypt: a tag of 1 to 8 printable characters and "-grease", 0 to 4 such args,
+  // and up to 99 random bytes (age-core/src/format.rs, grease_the_joint, read 2026-10-12). age's spec: identities "MUST
+  // ignore unrecognized stanzas" (C2SP age.md, read 2026-10-12).
+  const custom = (args: string[]): Recipient => ({ wrapFileKey: () => [new Stanza(args, new Uint8Array(40).fill(7))] });
+  const value = new TextEncoder().encode("synthetic-value-greased");
+  const sealedWith = async (vault: AgeVault, more: Recipient | string) => {
+    const e = new Encrypter();
+    e.addRecipient(await vault.recipient());
+    e.addRecipient(more);
+    return e.encrypt(value);
+  };
+  it("this node's recipient plus a rage-style grease stanza is one recipient: stored, and it opens", async () => {
+    const h = home();
+    const vault = new AgeVault(h.vault, join(h.dir, "identity"));
+    const sealed = await sealedWith(vault, custom(["q}7-grease", "Ap)", "{x"]));
+    expect(recipientStanzas(sealed)).toBe(1);
+    expect((await vault.storeSealed("s-00000000000000c1", sealed)).ok).toBe(true);
+    expect((await vault.open("s-00000000000000c1")).bytes()).toEqual(value);
+  });
+  it("any other second stanza still counts, a known type or not", async () => {
+    const h = home();
+    const vault = new AgeVault(h.vault, join(h.dir, "identity"));
+    const other = await identityToRecipient(await generateX25519Identity());
+    for (const more of [other, custom(["ssh-ed25519", "Zm9v", "YmFy"]), custom(["grease"]), custom(["x-grease-not"])]) {
+      expect(await vault.storeSealed("s-00000000000000c2", await sealedWith(vault, more))).toEqual({ ok: false, problem: "stanzas" });
     }
   });
 });
