@@ -254,10 +254,13 @@ describe("a rolled-back change never retires a live version in the index", () =>
     const w = world();
     await w.service.store(w.request("synthetic-value-one"), principal);
     await w.service.store(w.request("synthetic-value-two", { shape: { keep: true } }), principal);
+    // The crash: the retirement never reached the index, so version 1 is still live there (the adds stay).
+    const added = w.index.changes.filter(c => c.add !== null);
     w.index.changes.length = 0;
+    w.index.changes.push(...added);
     w.clock.at = T + 50;
     w.service.sweep();
-    expect(w.index.changes).toEqual([{ add: null, retire: [{ reference: REF, version: 1 }], at: T + 50 }]);
+    expect(w.index.changes.slice(added.length)).toEqual([{ add: null, retire: [{ reference: REF, version: 1 }], at: T + 50 }]);
   });
 });
 

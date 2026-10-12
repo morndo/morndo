@@ -179,6 +179,8 @@ export type IndexWriter = {
   prepare(ref: string): Promise<PreparedIndex>;
   // One atomic write of the index file: the new version added, the retired ones marked, what 30 days no longer cover pruned.
   write(change: IndexChange): void;
+  // The versions the index holds live, not yet retired: the only ones a sweep has to retire (round 3, point 7).
+  live(): readonly { reference: string; version: number }[];
 };
 
 // Where each version's sealed file lives (null once removed), and the registered workspaces (design §6).

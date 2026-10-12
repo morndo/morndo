@@ -85,6 +85,7 @@ describe("review point 5 (data loss): the sweep never removes the file of a stor
         return p;
       },
       write: writer.write.bind(writer),
+      live: writer.live.bind(writer),
     };
     let n = 0;
     const service = new SecretsService({

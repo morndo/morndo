@@ -6,7 +6,6 @@ import {
   indexValue, pruneIndex, readSecretIndex, retireVersion, serializeIndex, withVersion, type IndexEntry, type Keyed,
 } from "@morndo/node-ops";
 import type { IndexChange, IndexWriter, PreparedIndex } from "../application/ports.ts";
-import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { writePrivate } from "./file-mode.ts";
 
@@ -44,19 +43,18 @@ export class SecretIndexWriter implements IndexWriter {
     return prepared;
   }
 
+  // Read as every output path reads it, so an index it would refuse is refused here too.
+  live(): readonly { reference: string; version: number }[] {
+    return readSecretIndex(this.#path, this.#uid).versions.filter(v => v.retiredAt === null).map(v => ({ reference: v.reference, version: v.version }));
+  }
+
   write(change: IndexChange): void {
     const entries = change.add ? this.#prepared.get(change.add.prepared) : null;
     if (entries === undefined) throw new Error("the index writer refuses a prepared index it did not make");
-    const current = readSecretIndex(this.#path, this.#uid);
-    let index = current;
+    let index = readSecretIndex(this.#path, this.#uid);
     if (change.add && entries !== null) index = withVersion(index, change.add.reference, change.add.version, entries);
     for (const r of change.retire) index = retireVersion(index, r.reference, r.version, change.at);
     index = pruneIndex(index, change.at);
-    const text = serializeIndex(index);
-    // Every command's sweep retires again each version the ledger no longer holds current, which after a first rotation is
-    // never none; a write that changes nothing is skipped, so it costs a read, not a durable rewrite (round 2, point 12).
-    // The first write still creates the file.
-    if (text === serializeIndex(current) && existsSync(this.#path)) return;
-    writePrivate(this.#path, new TextEncoder().encode(text), this.#uid);
+    writePrivate(this.#path, new TextEncoder().encode(serializeIndex(index)), this.#uid);
   }
 }

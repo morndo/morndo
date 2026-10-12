@@ -167,9 +167,9 @@ export class SecretsService {
 
   // D2: a crash between the vault write and the commit can leave a file no version refers to, and one between a commit
   // and its retirement in the index leaves a version live there. The sweep removes those files once they are older than
-  // the grace period, so never one of a store still running elsewhere (review 5), and retires every version
-  // the ledger no longer holds current (retiring again keeps the first time), inside a write transaction, so no store
-  // commits meanwhile; a store checks inside its own transaction that its file is still there.
+  // the grace period, so never one of a store still running elsewhere (review 5), and retires every version the ledger
+  // no longer holds current that the index still holds live, inside a write transaction, so no store commits meanwhile;
+  // a store checks inside its own transaction that its file is still there.
   sweep(): string[] {
     const { secrets, vault, index, clock } = this.#deps;
     return secrets.write(state => {
@@ -177,7 +177,11 @@ export class SecretsService {
       for (const v of state.vaults) if (v.ref !== null) kept.add(v.ref);
       const gone = vault.refs("s-", clock.now() - SWEEP_GRACE_MS).filter(ref => !kept.has(ref));
       for (const ref of gone) removeIfThere(vault, ref);
-      const retire = state.directory.ledger.filter(e => e.state !== "current").map(e => ({ reference: e.reference, version: e.version }));
+      // Only a version the index still holds live: retiring one again changes nothing, and the ledger only grows (round 3,
+      // point 7). So a sweep with nothing left live writes nothing.
+      const live = new Set(index.live().map(v => JSON.stringify([v.reference, v.version])));
+      const retire = state.directory.ledger.filter(e => e.state !== "current" && live.has(JSON.stringify([e.reference, e.version])))
+        .map(e => ({ reference: e.reference, version: e.version }));
       if (retire.length > 0) index.write({ add: null, retire, at: clock.now() });
       return { next: null, result: gone };
     });

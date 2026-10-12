@@ -236,6 +236,15 @@ export class MemoryIndex implements IndexWriter {
     return { short: await this.#short(ref) };
   }
   write(change: IndexChange): void { this.changes.push(change); }
+  // What the written changes leave live: each version added (a short one is never indexed), until it is retired.
+  live(): readonly { reference: string; version: number }[] {
+    const live = new Map<string, { reference: string; version: number }>();
+    for (const c of this.changes) {
+      if (c.add && !c.add.prepared.short) live.set(JSON.stringify([c.add.reference, c.add.version]), { reference: c.add.reference, version: c.add.version });
+      for (const r of c.retire) live.delete(JSON.stringify([r.reference, r.version]));
+    }
+    return [...live.values()];
+  }
 }
 
 // A path's repository: the longest registered prefix's common dir.
