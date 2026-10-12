@@ -20,18 +20,20 @@ Each says when to use the loop, when not, how it fails, the guards that catch ea
 
 ## SOPs and sop-check
 
-`recurring-job` holds the SOP's shape (`assets/sop.schema.json`), a worked example (`assets/daily-blog-post.yaml`), the user's preferences format (`references/preferences.md`) and the check:
+`recurring-job` holds the SOP's shape (`assets/sop.schema.json`), a worked example (`assets/daily-blog-post.yaml`), the notes it cites and the user's preferences format (`references/`), and the check, `scripts/sop-check.mjs`:
 
 ```sh
 npm run knowledge:sop-check -- knowledge/skills/recurring-job/assets/daily-blog-post.yaml
 # daily-blog-post: passes
 ```
 
-It exits 1 with one line per refusal, each naming its rule and step, and 2 on a bad call or a file that isn't YAML. Its rules are pure, in `packages/domain/src/knowledge.ts`; the skill lists them. `--roles` names the engine layer's roles when they differ from the defaults; `--today` sets the date the notes' staleness is judged on.
+It exits 1 with one line per refusal, each naming its rule and step, and 2 on a bad call or anything unexpected, as one line. Its rules are pure, in `packages/domain/src/knowledge.ts`; the skill lists them. `--roles` names the engine layer's roles when they differ from the defaults; `--today` sets the date the notes' staleness is judged on.
+
+`scripts/sop-check.mjs` is generated: `npm run knowledge:build` bundles `knowledge/tools/sop-check/` and the domain's rules into it, and a test fails when it differs from a fresh build. A copy of the skill runs it with Node 20 or later after `npm install` in the skill's folder, which installs the one package it leaves out (yaml, pinned in the skill's `package.json`).
 
 ## Notes
 
-`notes/` holds what the procedures cite as `notes/<id>`: per source a link, the date read, its basis (vendor-doc, vendor-claim, measured, study) and a sentence in our own words. No quotes are stored. A note past its `recheck` date warns in the tests and in `sop-check`, and never fails either.
+The recurring-job skill's `references/` holds the notes its SOPs cite as `notes/<id>`, so a copied skill has them: per source a link, the date read, its basis (vendor-doc, vendor-claim, measured, study) and a sentence in our own words. No quotes are stored. A note past its `recheck` date warns in the tests and in `sop-check`, and never fails either.
 
 ## Install
 

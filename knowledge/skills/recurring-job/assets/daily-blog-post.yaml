@@ -1,7 +1,7 @@
 # A daily blog post, as an SOP template (kind: template). Blanks in <angle brackets> are filled by a user's instance,
 # which says kind: instance and may keep no blank.
 # Steps name a Role and a model class, never a model id; the Role's chain decides what runs.
-# Check it with: node knowledge/skills/recurring-job/scripts/sop-check.ts <this file>
+# Check it with: npm run knowledge:sop-check -- <this file> (or node scripts/sop-check.mjs <this file> in a copied skill)
 sop: daily-blog-post
 version: 1
 kind: template

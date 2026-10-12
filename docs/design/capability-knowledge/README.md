@@ -58,7 +58,7 @@ A bounded context, **Knowledge**. Its shipped files live under `knowledge/` at t
 | Recurring-job skill | Shipped file | How to write an SOP, the SOP check, templates. | `knowledge/skills/recurring-job/` |
 | SOP | Aggregate, one per recurring job | Trigger, steps, gates, checks, stop rules, budget, report, metrics. Guards K10, K11, K14. | Templates in the skill's `assets/`; a user's instances in the overlay |
 | Model facts | Read model over an imported snapshot | Lineup, context, output limit, price per model, from models.dev, with the date fetched. Guards K13, K15. | `~/.cache/morndo-knowledge/models-dev/` |
-| Note | Shipped file | One topic: links, the date each was read, a sentence each in our own words, a re-check date. Guards K1, K3, K6. | `knowledge/notes/<topic>.md` |
+| Note | Shipped file | One topic: links, the date each was read, a sentence each in our own words, a re-check date. Guards K1, K3, K6. | the citing skill's `references/<topic>.md` |
 | Preference set | Aggregate, one per user | The user's Preferences. Guards K4, K12. | `~/.config/morndo-knowledge/preferences.yaml` |
 
 How it relates to the other contexts:
@@ -138,7 +138,7 @@ knowledge/
 │   ├── loop-human-gate/SKILL.md
 │   └── recurring-job/              PR 2
 │       ├── SKILL.md
-│       ├── scripts/sop-check.ts
+│       ├── scripts/sop-check.mjs (generated from knowledge/tools/sop-check), package.json
 │       ├── assets/daily-blog-post.yaml, assets/sop.schema.json
 │       └── references/preferences.md
 └── notes/                          PR 2: the Notes the blog template cites
@@ -197,7 +197,7 @@ Two disagreements are kept as they are, in the skills too:
 
 ### 6.1 The skill
 
-`knowledge/skills/recurring-job/` holds: `SKILL.md` (when a job is worth making recurring, how to design it from the pattern skills, where the approval sits, how to choose engines, how to report and measure, and the check's rules), `scripts/sop-check.ts`, `assets/sop.schema.json` (the SOP's shape as JSON Schema 2020-12), `assets/daily-blog-post.yaml` (the first template) and `references/preferences.md` (the user's preferences format). The notes it cites are in `knowledge/notes/`.
+`knowledge/skills/recurring-job/` holds: `SKILL.md` (when a job is worth making recurring, how to design it from the pattern skills, where the approval sits, how to choose engines, how to report and measure, and the check's rules), `scripts/sop-check.mjs` (a bundle of `knowledge/tools/sop-check/` and the domain's rules; a copied skill needs Node and `npm install` there for its one package, yaml), `assets/sop.schema.json` (the SOP's shape as JSON Schema 2020-12), `assets/daily-blog-post.yaml` (the first template) and `references/preferences.md` (the user's preferences format). The notes it cites are in its `references/`, so a copied skill has them.
 
 ### 6.2 The SOP file
 
@@ -219,7 +219,7 @@ Two disagreements are kept as they are, in the skills too:
 
 ### 6.3 The SOP check
 
-The rules are pure, in `packages/domain/src/knowledge.ts` (`checkSop`); `scripts/sop-check.ts` reads the SOP, the shipped skill names, the notes' re-check dates and the engine layer's roles, and prints one line per refusal with its rule and step. Exit 1 on a refusal, 2 on a bad call or a file that isn't YAML. Its rules: `gate-before-outward`, `outward-declared` (a step whose id or tool reads as outward must say so), `silence-never-approves`, `gate-shape`, `round-limit`, `stop-required`, `budget-stop`, `engine-why`, `why-resolves`, `step-check`, `no-model-id`, `model-class`, `role-known`, `step-kind`, `pattern-known`, `trigger`, `done-required`, `report-citations`, `metrics-required`, `shape`. A test holds the JSON Schema's fields and enums equal to the domain's lists.
+The rules are pure, in `packages/domain/src/knowledge.ts` (`checkSop`); `scripts/sop-check.mjs` reads the SOP, the skills installed beside it, the notes' re-check dates and the engine layer's roles, and prints one line per refusal with its rule and step. Exit 1 on a refusal, 2 on a bad call or anything unexpected. Its rules: `gate-before-outward`, `effect-declared` (every step says local, outward or irreversible; a word list only warns on a local step that sounds outward), `blanks-filled` (an instance, the default `kind`, keeps no `<blank>`; a template may), `silence-never-approves`, `gate-shape`, `round-limit`, `stop-required`, `budget-stop` (amounts in one currency, or 0, which allows only tool steps), `engine-why`, `why-resolves`, `step-check`, `no-model-id`, `model-class`, `role-known`, `step-kind`, `pattern-known`, `trigger` (in an instance, a five-field POSIX cron line and a known time zone), `done-required`, `report-citations`, `metrics-required`, `shape`. A test holds the JSON Schema's fields and enums equal to the domain's lists.
 
 It warns, without failing, on each Citation of a note past its re-check date (K6).
 
@@ -236,7 +236,7 @@ It warns, without failing, on each Citation of a note past its re-check date (K6
 
 Stop rules: no topic, budget spent, fact-check past its rounds, three dropped runs in a row, two hours. Metrics: approved first try, changes asked at the gate, cost per post, clicks and impressions at 28 days.
 
-Why it looks as it does (the notes it cites, `knowledge/notes/`, each hold links, read dates and a sentence per source):
+Why it looks as it does (the notes it cites, in the skill's `references/`, each hold links, read dates and a sentence per source):
 - **Grounding off.** Gemini's API terms bar modifying grounded results or mixing them with other content without Google's written permission [S25]; a post is exactly that. Whether a grounded answer may serve as research notes is a question for counsel (Q10).
 - **A cadence is a ceiling, not a quota.** Google's spam policy counts generating many pages with AI tools without adding value for users as scaled content abuse [S26]; its guidance asks whether content is produced with extensive automation on many topics [S27]. So no topic means no post, and three dropped runs pause the SOP.
 - **The approval gate.** Google advises fact-checking and reviewing AI-generated content by hand before publishing [S28]; publishing is outward (K10, F4).
