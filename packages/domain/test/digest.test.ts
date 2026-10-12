@@ -551,8 +551,9 @@ describe("new since the last look (DG8)", () => {
     const c7 = change("acme/web", 7);
     const a1 = rev("sha-a1", "patch-1");
     const seen: SeenAt = { id: "T-3", seq: 9, level: "reviewed", section: "stale_or_stuck" };
-    const base = {
-      mark: { seq: 8, seen: [seen] },
+    const mark: DigestMark = { seq: 8, seen: [seen] };
+    const base: Partial<DigestInput> = {
+      mark,
       states: [state(c7, { revision: a1 })],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
@@ -567,16 +568,16 @@ describe("new since the last look (DG8)", () => {
     });
     const again = one(relinked, "T-3");
     expect(again).toMatchObject({ level: "reviewed", seq: 9, fresh: false });
-    expect(markAllSeen(base.mark, [{ id: "T-3", seq: again?.seq ?? 0, level: again?.level ?? null, section: again?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
+    expect(markAllSeen(mark, [{ id: "T-3", seq: again?.seq ?? 0, level: again?.level ?? null, section: again?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
     const reassigned = digest({
       ...base,
-      claims: [...base.claims, claim({ subject: task(3), lane: "builder", seq: 5, at: NOW - 9 })],
+      claims: [...(base.claims ?? []), claim({ subject: task(3), lane: "builder", seq: 5, at: NOW - 9 })],
       links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 20, seq: 3 }],
       assignments: [{ task: taskKey(3), lane: "builder", seq: 31, at: NOW - MIN }],
     });
     const item = one(reassigned, "T-3");
     expect(item).toMatchObject({ level: "reviewed", seq: 9, fresh: false });
-    expect(markAllSeen(base.mark, [{ id: "T-3", seq: item?.seq ?? 0, level: item?.level ?? null, section: item?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
+    expect(markAllSeen(mark, [{ id: "T-3", seq: item?.seq ?? 0, level: item?.level ?? null, section: item?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
   });
 });
 
