@@ -220,6 +220,16 @@ export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset
   "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type Alert = { id: number; at: number; node: string | null; kind: AlertKind; detail: Record<string, unknown> };
+// The alerts the app pushes (the owner, 2026-10-12): a node's key may be stolen (a new source, a second instance), events
+// are lost or piling up for a subscriber, or a message has waited a quarter of an hour (2 minutes is in-app only). The
+// hub's push and the app's marking both read this one rule.
+export function urgentAlert(a: { kind: string; detail: Record<string, unknown> }): boolean {
+  switch (a.kind) {
+    case "source_changed": case "instance_conflict": case "dead_letter": case "backlog_full": return true;
+    case "delivery_waiting": return typeof a.detail.minutes === "number" && a.detail.minutes >= 15;
+    default: return false;
+  }
+}
 
 // ---- the pieces messages are made of
 

@@ -76,7 +76,17 @@ export const retryDelay = (attempt: number) => RETRY_MS[attempt] ?? RETRY_CAP_MS
 export const withinBudget = (r: Pick<OutboxRecord, "createdAt">, now: number) => now - r.createdAt < BUDGET_MS;
 // Retry on Not sent, Check again on Uncertain: the same request id both times, so the hub types it at most once (S5).
 // A message the manager's queue has is Sent: never retried (ruling 83). It waits there up to 24 hours, or is cancelled.
-export const canRetry = (r: OutboxRecord, now: number) => (r.state === "failed" || r.state === "uncertain") && now - r.createdAt < RETRY_WINDOW_MS;
+// Refusals a retry can't change: the text itself has to (over the length a lane takes, or nothing left of it once control
+// characters go). A Retry there could only fail again: Edit instead (the rage QA: a long paste offered a Retry that never
+// worked).
+const LASTING = new Set(["too_long", "empty"]);
+export const canRetry = (r: OutboxRecord, now: number) =>
+  (r.state === "failed" || r.state === "uncertain") && !(r.state === "failed" && LASTING.has(r.error ?? "")) && now - r.createdAt < RETRY_WINDOW_MS;
+// Edit: back into its box to be read or changed first: the question it was written for changed, or its text can't go as
+// it is.
+export const canEdit = (r: OutboxRecord) => r.state === "failed" && (r.error === "stale" || LASTING.has(r.error ?? ""));
+// The longest text one message can carry (the hub refuses longer: too_long).
+export const MAX_TEXT = LIMITS.maxSendText;
 // Cancel: a message the manager's queue still holds, not typed yet (ruling 83). Once typed it can't be taken back.
 export const canCancel = (r: OutboxRecord) => r.state === "sent" && r.delivery?.state === "queued" && r.delivery.waiting !== "typed" && r.delivery.waiting !== "held";
 

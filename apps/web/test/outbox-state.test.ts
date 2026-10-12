@@ -2,7 +2,7 @@
 // echo matching.
 import { describe, expect, it } from "vitest";
 import { LIMITS } from "@morndo/protocol";
-import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, HUB_KEEPS_MS, RETRY_WINDOW_MS, advance, canRetry, matchEchoes, retryDelay, withinBudget, type OutboxRecord } from "../src/lib/outbox/state.ts";
+import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, HUB_KEEPS_MS, RETRY_WINDOW_MS, advance, canEdit, canRetry, matchEchoes, retryDelay, withinBudget, type OutboxRecord } from "../src/lib/outbox/state.ts";
 
 const rec = (id: string, createdAt: number, text: string, state: OutboxRecord["state"] = "sent"): OutboxRecord =>
   ({ id, worker: "%1", workerName: "alpha", text, uploads: [], createdAt, budgetFrom: createdAt, state, error: null, attempts: 1, seen: "none", sentAt: createdAt, typedAt: null });
@@ -103,5 +103,15 @@ describe("echo matching on the clock of the machine that typed it (fleet core §
   });
   it("a record kept from before typedAt (hubAt only) is still matched by it", () => {
     expect(matchEchoes([{ ...rec("a", 100_000, "ship it"), hubAt: 90_000 }], [{ id: "m1", at: 90_200, text: "ship it" }]).get("a")).toBe("m1");
+  });
+});
+
+describe("Retry or Edit (the rage QA: a Retry that could only fail again)", () => {
+  const failed = (error: string) => ({ state: "failed", error, createdAt: 0 }) as unknown as Parameters<typeof canRetry>[0];
+  it("too_long and empty are Edit, never Retry; any other refusal keeps Retry; stale is Edit", () => {
+    for (const e of ["too_long", "empty"]) { expect(canRetry(failed(e), 1), e).toBe(false); expect(canEdit(failed(e)), e).toBe(true); }
+    expect(canRetry(failed("node_offline"), 1)).toBe(true);
+    expect(canEdit(failed("node_offline"))).toBe(false);
+    expect(canEdit(failed("stale"))).toBe(true);
   });
 });

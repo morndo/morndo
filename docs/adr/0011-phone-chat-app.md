@@ -62,6 +62,8 @@ The fleet clients work (ADR-0014; reconciliation ruling 81) removed ADR-0010's i
 - **Where it stands** is the queue's word, pushed to the app as it changes (the hub's `deliveries` frames): Queued, with why it waits; Delivered; May have been delivered (typed, never seen taken); or Not delivered, with why. Nothing is judged from the clock, so the 60-minute "late" bubble and its Check are gone.
 - **Cancel** withdraws a message still queued and not typed (ruling 83).
 - **Send again** repeats the same request id, flagged. The hub queues the text once more only when the queue gave the first up, as the second attempt under that id (`hub:<endpoint>:<request>~2`), after the same checks as a first send. One request is at most two messages, and never two that can both arrive. A body that can't be built again is `cannot_resend`, and the bubble then offers Write it again. A plain repeat, the app's status read included, never queues anything.
+- **The manager always listed** (the owner, 2026-10-12): while it has no window, the chat list keeps its pinned row, as not running, and its chat stays open across the restart. A message written then waits in the fleet's queue for it (with the queue on), and its entry stays in the chat until the manager's next window echoes it.
+- **The fleet's alerts** are on Status (the desktop's Activity), with a badge until opened (the owner, 2026-10-12).
 
 ## Sources (read 2026-10-05)
 

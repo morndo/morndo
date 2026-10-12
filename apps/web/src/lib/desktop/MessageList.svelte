@@ -14,7 +14,7 @@
   import { present, type ConversationPrefs } from "./present.ts";
   import type { DecisionItem } from "./decisions.ts";
   import { unreachable } from "@morndo/domain";
-  import { canCancel, canRetry, type OutboxRecord } from "../outbox/state.ts";
+  import { canCancel, canEdit, canRetry, type OutboxRecord } from "../outbox/state.ts";
   import { fileSize, fileType, type SentFile } from "../attach.ts";
   import { deliveryNote, sendLabel, sendReason } from "../outbox/words.ts";
   import { dividerBefore, scrollAnchor, showJump, type Anchor, type TimelineChange } from "./timeline.ts";
@@ -265,7 +265,7 @@
         {#if stuck || p.state === "queued" || p.state === "sending" || (p.state === "sent" && label(p) !== "Sent")}
           <div class="outbox-actions">
             {#if p.state === "failed" && p.error === "step_up"}<button onclick={() => onVerify(p.id)}>Verify and send</button>
-            {:else if p.state === "failed" && p.error === "stale"}<button onclick={() => onEdit(p.id)}>Edit</button>
+            {:else if canEdit(p)}<button onclick={() => onEdit(p.id)}>Edit</button>
             {:else if canRetry(p, clockNow)}<button onclick={() => onRetry(p.id)}>{p.state === "uncertain" ? "Check again" : "Retry"}</button>
             {:else if canCancel(p)}<button onclick={() => onCancel(p.id)}>Cancel</button>{/if}
             <button onclick={() => onDiscard(p.id)}>{p.state === "sent" ? "Dismiss" : "Discard"}</button>

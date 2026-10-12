@@ -7,7 +7,7 @@ import {
 } from "../src/index.ts";
 
 const NOW = 1_000_000;
-const counts = { decisions: 2, workers: 1, linked: 0 };
+const counts = { decisions: 2, workers: 1, linked: 0, alerts: 0 };
 
 describe("a push service's reason for a refusal (N1: codes, never text)", () => {
   it("keeps a short code of letters and digits, and nothing else", () => {
@@ -19,13 +19,17 @@ describe("a push service's reason for a refusal (N1: codes, never text)", () => 
 describe("the payload (N1)", () => {
   it("is numbers only: the kind as its number, then the counts", () => {
     const p = payloadOf("worker", counts);
-    expect(p).toEqual({ kind: 1, decisions: 2, workers: 1, linked: 0 });
+    expect(p).toEqual({ kind: 1, decisions: 2, workers: 1, linked: 0, alerts: 0 });
     expect(Object.values(p).every(v => typeof v === "number")).toBe(true);
-    expect([kindCode("decision"), kindCode("worker"), kindCode("linked")]).toEqual([0, 1, 2]);
+    expect([kindCode("decision"), kindCode("worker"), kindCode("linked"), kindCode("alert")]).toEqual([0, 1, 2, 3]);
   });
 });
 
 describe("what raises one (N2)", () => {
+  it("an urgent fleet alert, and only an urgent one", () => {
+    expect(raises({ kind: "alert", urgent: true })).toBe(true);
+    expect(raises({ kind: "alert", urgent: false })).toBe(false);
+  });
   it("a Decision starting to wait, even in a muted conversation's world: mute isn't asked", () => {
     expect(raises({ kind: "decision", waiting: 1 })).toBe(true);
     expect(raises({ kind: "decision", waiting: 0 })).toBe(false);

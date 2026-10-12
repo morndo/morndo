@@ -2,9 +2,15 @@
   // The principal's inbox: every agent that waits for you, then what finished recently.
   import Bell from "@lucide/svelte/icons/bell";
   import type { RosterEntry } from "@morndo/domain";
+  import type { AlertWire } from "@morndo/protocol";
   import Avatar from "./Avatar.svelte";
+  import AlertList from "../AlertList.svelte";
 
-  let { workers, onOpen, nameOf }: { workers: RosterEntry[]; onOpen: (id: string) => void; nameOf: (w: RosterEntry) => string } = $props();
+  // `alerts`: the fleet's (the owner, 2026-10-12), seen up to `seenAt`; none without a fleet.
+  let { workers, onOpen, nameOf, alerts = [], seenAt = 0, onSeen = () => {} }: {
+    workers: RosterEntry[]; onOpen: (id: string) => void; nameOf: (w: RosterEntry) => string;
+    alerts?: AlertWire[]; seenAt?: number; onSeen?: (at: number) => void;
+  } = $props();
   let now = $state(Date.now());
   $effect(() => { const t = setInterval(() => (now = Date.now()), 30_000); return () => clearInterval(t); });
   const waiting = $derived(workers.filter(w => w.needsYou));
@@ -19,6 +25,10 @@
 <section class="act">
   <header><Bell size={18} /><h1>Activity</h1></header>
   <div class="body">
+    {#if alerts.length}
+      <h2>Alerts from your fleet</h2>
+      <AlertList items={alerts} {seenAt} {onSeen} />
+    {/if}
     <h2>Waiting for you <span>{waiting.length}</span></h2>
     {#each waiting as w (w.id)}
       <button class="item urgent" onclick={() => onOpen(w.id)}>

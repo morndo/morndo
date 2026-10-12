@@ -5,6 +5,7 @@ import type { ChatRowWire } from "@morndo/protocol";
 import type { DecisionItem } from "../../desktop/decisions.ts";
 import { stripButtonsLine, stripMarkers, withoutFileNotes } from "../../desktop/present.ts";
 import { spanLabel } from "../words.ts";
+import { ABSENT_MANAGER } from "../../manager.ts";
 
 export const MANAGER = "manager";
 export const displayName = (name: string) => (name === MANAGER ? "Manager" : name);
@@ -52,6 +53,8 @@ export function status(w: RosterEntry, asks: readonly DecisionItem[], answer: Me
     state: w.state, changedAt: w.changedAt, needsYou: w.needsYou, answer, repliedAt,
     asks: asks.map(d => ({ title: d.shortTitle ?? d.title, askedAt: d.askedAt })),
   });
+  // The manager while it has no window (a restart): not running, whatever its last state said.
+  if (w.id === ABSENT_MANAGER) return { kind: "idle", since: w.changedAt, ask: null, answer: null, line: "Not running", label: "Not running" };
   const said = s.answer ? plain(s.answer.text) : "";
   const reported = s.answer && statusOf(s.answer.text).status === "decision";
   const line = s.kind === "waits" ? `Waits for you: ${s.ask ? plain(s.ask) : reported && said ? said : "a prompt on its screen"}`
@@ -83,7 +86,7 @@ export function chatRows(o: {
     const st = status(w, asks, c?.answer ?? null, o.now, replied);
     return {
       worker: w.id, name: w.name, display: displayName(w.name), lastAt: c?.lastAt ?? w.lastMessageAt,
-      preview: c ? preview(c.last) : w.title ?? "", unread: muted ? 0 : c?.unread ?? 0, muted,
+      preview: w.id === ABSENT_MANAGER ? "Not running: a message waits for it" : c ? preview(c.last) : w.title ?? "", unread: muted ? 0 : c?.unread ?? 0, muted,
       needsYou: st.kind === "waits", active: w.state === "active" && !w.offline, offline: w.offline, status: st,
     };
   });

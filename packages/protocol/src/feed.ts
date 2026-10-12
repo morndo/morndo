@@ -194,6 +194,10 @@ export const ChatRowSchema = z.object({
 });
 
 // Hub → app.
+// One of the fleet's alerts (fleet-api §14), as the app shows it: `kind` may be one a newer fleet added (shown in general
+// words), `detail` is per kind, `node` the machine it concerns (none for the fleet itself).
+const AlertWireSchema = z.object({ id: z.int().check(z.gte(0)), at: count(), node: z.nullable(text()), kind: text(), detail: z.record(z.string(), z.unknown()) });
+
 export const ServerFeedFrames = {
   snapshot: z.object({ t: z.literal("snapshot"), epoch: text(), seq: z.int().check(z.gte(0)), workers: each(RosterEntrySchema, "worker") }),
   // Events are decoded one by one (decodeEvent), so one of an unknown type doesn't drop its neighbours.
@@ -236,6 +240,12 @@ export const ServerFeedFrames = {
   // Fleet-clients §9.1: where this device's messages to the manager stand in the fleet's delivery queue, every one of the
   // last day after each hello, then each change. An app from before ignores it, as any frame type it doesn't know.
   deliveries: z.object({ t: z.literal("deliveries"), items: each(QueuedCommandSchema, "delivery") }),
+  // The manager is always on the list: whether a message to it waits in the fleet's queue while it has no window (a
+  // restart), after every hello. An app from before ignores it; a hub from before never sends it.
+  manager: z.object({ t: z.literal("manager"), queue: z.boolean() }),
+  // The fleet's alerts in the app (the owner, 2026-10-12: without kira, the app is where they show): the latest 100,
+  // newest first, after every hello and on each new one. An app from before ignores it; a hub without a fleet never sends.
+  alerts: z.object({ t: z.literal("alerts"), items: each(AlertWireSchema, "alert") }),
   // Background jobs (design §7): the fleet mirror's list and the counts beside each node, after every hello and on change.
   jobs: JobsFrameSchema,
   // ADR-0011: the chat list (H1, H2); what each unmuted conversation brought since he left, for the digest (H5); and
@@ -246,6 +256,8 @@ export const ServerFeedFrames = {
 };
 
 // App → hub.
+export type AlertWire = z.infer<typeof AlertWireSchema>;
+
 export const ClientFeedFrames = {
   hello: z.object({ t: z.literal("hello"), epoch: z.exactOptional(str(100)), cursor: z.exactOptional(z.int().check(z.gte(0))), layout: z.exactOptional(str(16)) }),
   details: z.object({ t: z.literal("details"), worker: workerIdText }),

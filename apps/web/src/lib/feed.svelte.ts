@@ -2,13 +2,14 @@
 // Screens arrive only for the watched worker, latest state only (O3).
 // Every frame is decoded with the shared protocol (ADR-0008, A2): a malformed one is dropped, an unknown type ignored.
 import { unreachable, type FeedEvent, type Message, type RosterEntry } from "@morndo/domain";
-import { ServerFeedFrames, decode, decodeEvent, onDropped, type CatchUpConversationWire, type ChatRowWire, type QueuedCommand, type ServerFeedFrame, type SessionInfoWire } from "@morndo/protocol";
+import { ServerFeedFrames, decode, decodeEvent, onDropped, type AlertWire, type CatchUpConversationWire, type ChatRowWire, type QueuedCommand, type ServerFeedFrame, type SessionInfoWire } from "@morndo/protocol";
 import type { DecisionItem, LedgerState } from "./desktop/decisions.ts";
 import { decodeTasks, type Task } from "./desktop/board.ts";
 import { decodeJobs, type JobCount, type ShownJob } from "./desktop/jobs.ts";
 import { decodeAccounts, type AccountUsage } from "./desktop/usage.ts";
 import { FeedConnection, PROBE_AFTER_MS, type SocketLike } from "./connection.ts";
 import { AttendingTracker } from "./attending.ts";
+import { ABSENT_MANAGER, MANAGER, absentManager } from "./manager.ts";
 // A list element the protocol dropped (it didn't fit) is worth a line in the console, never a crash.
 onDropped(where => console.warn(`morndo: dropped a ${where} the hub sent that this app can't read`));
 
@@ -74,6 +75,14 @@ export class LiveFeed {
   // Fleet-clients §9.1: where this device's messages to the manager stand in the fleet's queue, by request id, as the
   // hub last said (every one of the last day after a hello, then each change). The outbox applies them.
   deliveries = $state<QueuedCommand[]>([]);
+  // Whether a message to the manager waits in the fleet's queue while it has no window, as the hub last said; null: a hub
+  // from before, which the app lists the manager for only while it has one.
+  managerQueue = $state<boolean | null>(null);
+  // The fleet's latest alerts, newest first, as the hub last said (a hub without a fleet never sends them).
+  alerts = $state<AlertWire[]>([]);
+  // The lists' workers: these, and the manager as not running while it has no window (ABSENT_MANAGER), so every list
+  // always shows it (the owner, 2026-10-12).
+  roster = $derived(this.managerQueue === null || this.workers.some(w => w.name === MANAGER) ? this.workers : [absentManager(), ...this.workers]);
   // Catch-up (ADR-0009): what each unmuted conversation brought since its Read mark (C5), by conversation name, as the
   // hub last said (`catchupAt`: when the whole list last came); and when he last finished a run (C7).
   catchup = $state<Record<string, CatchUpConversationWire>>({});
@@ -151,7 +160,7 @@ export class LiveFeed {
     checkSession: sessionState,
     onOpen: () => {
       this.#hello();
-      if (this.#watching) this.#send({ t: "watch", worker: this.#watching });
+      if (this.#watching && this.#watching !== ABSENT_MANAGER) this.#send({ t: "watch", worker: this.#watching });
       this.#sendPending();
       this.#attending.resend();                              // a new connection: the hub has no word from it yet
     },
@@ -226,12 +235,14 @@ export class LiveFeed {
     this.older = NO_OLDER;
     this.detached = false;
     this.newWhileDetached = 0;
+    // The manager with no window has nothing to show yet, and the hub knows no worker of that id: nothing is asked.
+    if (worker === ABSENT_MANAGER) { this.historyFor = worker; this.older = { loading: false, done: true, failed: false }; return; }
     this.#send({ t: "watch", worker });
   }
 
   // Back to the latest messages after older pages pushed them out (the jump button): the hub sends the history again.
   latest() {
-    if (!this.#watching) return;
+    if (!this.#watching || this.#watching === ABSENT_MANAGER) return;
     this.detached = false;
     this.newWhileDetached = 0;
     this.older = NO_OLDER;
@@ -283,7 +294,7 @@ export class LiveFeed {
   // An older page before the oldest message held (O9).
   loadOlder() {
     const oldest = this.messages[0];
-    if (!this.#watching || !oldest || this.older.loading || this.older.done) return;
+    if (!this.#watching || this.#watching === ABSENT_MANAGER || !oldest || this.older.loading || this.older.done) return;
     this.older = { loading: true, done: false, failed: false };
     this.#send({ t: "older", worker: this.#watching, before: oldest.id });
   }
@@ -312,7 +323,7 @@ export class LiveFeed {
 
   get watching() { return this.#watching; }
 
-  askDetails(worker: string) { this.#send({ t: "details", worker }); }
+  askDetails(worker: string) { if (worker !== ABSENT_MANAGER) this.#send({ t: "details", worker }); }
 
   #send(m: unknown): boolean { return this.#conn.send(m); }
 
@@ -467,6 +478,12 @@ export class LiveFeed {
       }
       case "fleet":
         this.fleetAvailable = m.available;
+        break;
+      case "manager":
+        this.managerQueue = m.queue;
+        break;
+      case "alerts":
+        this.alerts = m.items;
         break;
       case "deliveries": {
         const named = new Set(m.items.map(i => i.requestId));

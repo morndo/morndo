@@ -6,6 +6,7 @@
 import type { QueuedCommand } from "@morndo/protocol";
 import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, advance, canCancel, canRetry, matchEchoes, retryDelay, type CommandDelivery, type Echo, type OutboxRecord } from "./state.ts";
 import type { OutboxStore } from "./store.ts";
+import { sentTo } from "../manager.ts";
 
 // What one POST came to. "typed": ok, or "duplicate" (typed before), with the typing machine's time of it when it says;
 // "wait": a 429 with its Retry-After; "unanswered": no answer of the hub's own (a network error, a proxy's page, or no
@@ -58,7 +59,7 @@ export class Outbox {
   #cancel: ((r: OutboxRecord) => Promise<CancelOutcome>) | null;
   #timers: Timers;
   #connected: () => boolean;
-  #onChange: (records: OutboxRecord[]) => void;
+  #onChange: (records: OutboxRecord[], fromRefresh: boolean) => void;
   #newId: () => string;
   #records = new Map<string, OutboxRecord>();
   #running = new Set<string>();                    // workers whose queue is being worked through
@@ -73,7 +74,9 @@ export class Outbox {
   constructor(d: {
     store: OutboxStore; post: (r: OutboxRecord, signal: AbortSignal) => Promise<PostOutcome>; timers: Timers; connected: () => boolean;
     cancel?: (r: OutboxRecord) => Promise<CancelOutcome>;               // the hub's cancel of a message the manager's queue holds
-    onChange: (records: OutboxRecord[]) => void; newId?: () => string;
+    // `fromRefresh`: the change is what the store already held (another tab's, or a reload's), not this tab's own: the
+    // device tells the other tabs of its own changes only (review M5), so a refresh never echoes between them.
+    onChange: (records: OutboxRecord[], fromRefresh: boolean) => void; newId?: () => string;
     // false: another tab sends; this one only writes down and shows (activate() when it takes over; review M5).
     active?: boolean;
   }) {
@@ -96,6 +99,7 @@ export class Outbox {
 
   async refresh(resume = false) {
     const now = this.#timers.now();
+    const before = new Map(this.#records);
     const fresh = new Map<string, OutboxRecord>();
     for (const r of await this.#store.all()) {
       if (r.state === "sent" && now - r.createdAt >= KEEP_SENT_MS) { await this.#store.delete(r.id); continue; }
@@ -106,9 +110,12 @@ export class Outbox {
       }
       fresh.set(next.id, next);
     }
+    // What this tab wrote while the store was read (a message written, a state saved) is newer than what was read: kept,
+    // or a message written during a refresh would be dropped from this tab until the next one, and never sent from it.
+    for (const [id, r] of this.#records) if (before.get(id) !== r) fresh.set(id, r);
     for (const id of this.#records.keys()) if (!fresh.has(id)) this.#inFlight.get(id)?.abort();   // gone elsewhere
     this.#records = fresh;
-    this.#changed();
+    this.#changed(true);
     this.#kickAll();
   }
 
@@ -226,9 +233,10 @@ export class Outbox {
   // The principal's messages as the conversation shows them: each ends at most one Sent record (S8), and an echo that
   // ended one never ends another, however often the conversation is read (M1). The screen drops the entry before the
   // disk delete: the echo is already in the conversation, and a slow disk must not keep the pending copy up.
-  echoes(worker: string, echoes: Echo[]): Promise<void> {
+  // `name`: the conversation's worker name; the manager's also ends what was written while it had no window.
+  echoes(worker: string, echoes: Echo[], name = ""): Promise<void> {
     this.#echoing = this.#echoing.then(async () => {
-      const matched = matchEchoes(this.records.filter(r => r.worker === worker), echoes, this.#spent);
+      const matched = matchEchoes(this.records.filter(r => sentTo(r, { id: worker, name })), echoes, this.#spent);
       const drop: string[] = [];
       for (const [id, echo] of matched) {
         this.#spent.add(echo);
@@ -269,7 +277,7 @@ export class Outbox {
     return run;
   }
 
-  #changed() { this.#onChange(this.records); }
+  #changed(fromRefresh = false) { this.#onChange(this.records, fromRefresh); }
 
   #wakeAll() { const w = [...this.#waiters]; this.#waiters.clear(); for (const f of w) f(); }
 

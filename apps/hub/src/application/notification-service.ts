@@ -21,6 +21,7 @@ const OPTIONS: Record<NotificationKind, PushOptions> = {
   decision: { ttlSeconds: 12 * 3600, topic: "decision", urgency: "high" },
   worker: { ttlSeconds: 3600, topic: "worker", urgency: "normal" },
   linked: { ttlSeconds: 3600, topic: "linked", urgency: "high" },
+  alert: { ttlSeconds: 6 * 3600, topic: "alert", urgency: "high" },
 };
 const delivered = (status: number) => status >= 200 && status < 300;
 
@@ -30,6 +31,7 @@ export class NotificationService {
   #now: () => number;
   #timers: Timers;
   #muted: (workerId: string) => boolean;
+  #alerts: () => number;                               // urgent fleet alerts he hasn't seen
   #extraOrigins: readonly string[];
   #queue = new NotificationQueue();
   #reports = new Map<string, AttendingReport>();       // per feed connection
@@ -40,12 +42,13 @@ export class NotificationService {
   #sending: Promise<void> = Promise.resolve();
 
   // `extraOrigins`: push services a test runs, besides the browsers' own (never set in production).
-  constructor(d: { store: PushStore; send: PushSender; now?: () => number; timers?: Timers; muted?: (workerId: string) => boolean; extraOrigins?: readonly string[] }) {
+  constructor(d: { store: PushStore; send: PushSender; now?: () => number; timers?: Timers; muted?: (workerId: string) => boolean; extraOrigins?: readonly string[]; alerts?: () => number }) {
     this.#store = d.store;
     this.#send = d.send;
     this.#now = d.now ?? Date.now;
     this.#timers = d.timers ?? { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id as ReturnType<typeof setTimeout>) };
     this.#muted = d.muted ?? (() => false);
+    this.#alerts = d.alerts ?? (() => 0);
     this.#extraOrigins = d.extraOrigins ?? [];
   }
 
@@ -88,13 +91,18 @@ export class NotificationService {
     if (raises({ kind: "linked" })) this.#raise("linked");
   }
 
+  // A fleet alert came in (AlertsService): an urgent one raises a Notification, counts only (N1).
+  alert(urgent: boolean) {
+    if (raises({ kind: "alert", urgent })) this.#raise("alert");
+  }
+
   // What each device's app says about the principal using it (N3); a connection that closes says nothing any more.
   attending(connection: string, attending: boolean) { this.#reports.set(connection, { attending, at: this.#now() }); }
   left(connection: string) { this.#reports.delete(connection); }
 
   counts(): Counts {
     const workers = [...this.#needing].filter(([id, needs]) => needs && !this.#muted(id)).length;
-    return { decisions: this.#waiting?.size ?? 0, workers, linked: this.#linked };
+    return { decisions: this.#waiting?.size ?? 0, workers, linked: this.#linked, alerts: this.#alerts() };
   }
 
   // Resolves once everything due has been sent (for tests and an orderly stop).
@@ -126,7 +134,7 @@ export class NotificationService {
     for (const p of due) {
       if (attending && suppressedWhileAttending(p.kind)) continue;     // …but a device linked always does (review M2)
       const counts = this.counts();                                  // as things are now, not as they were a second ago
-      const relevant = p.kind === "decision" ? counts.decisions : p.kind === "worker" ? counts.workers : counts.linked;
+      const relevant = p.kind === "decision" ? counts.decisions : p.kind === "worker" ? counts.workers : p.kind === "alert" ? counts.alerts : counts.linked;
       if (p.kind === "linked") this.#linked = 0;
       if (relevant === 0) continue;                                  // answered meanwhile: nothing to say
       const payload = Buffer.from(JSON.stringify(payloadOf(p.kind, counts)));

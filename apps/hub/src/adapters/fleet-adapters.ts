@@ -129,7 +129,10 @@ export type JobSink = {
   ackNotice(node: string, id: string): void;
 };
 
-export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | null; stagingDir: string; timeouts?: Partial<FleetTimeouts>; jobs?: JobSink }): FleetPorts {
+// `alerts`: where the fleet's alerts go (the app shows them): its list at each connect, then each `alert` event.
+export type AlertSink = { load(list: readonly unknown[]): void; add(raw: unknown): void };
+
+export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | null; stagingDir: string; timeouts?: Partial<FleetTimeouts>; jobs?: JobSink; alerts?: AlertSink }): FleetPorts {
   const t: FleetTimeouts = { ...FLEET_TIMEOUTS, ...o.timeouts };
   const view = new NodeView();
   let unsubscribe = () => {};
@@ -519,14 +522,22 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
         try { return await client.jobs(); }
         catch (e) { log.warn(`fleet: reading the jobs failed (${(e as Error).message}); the next connect asks again`); return null; }
       }, (list, seen) => { if (list && o.jobs) o.jobs.merge(list, seen); });
+      // The fleet's alerts, read again at each connect (an event sent while this hub was away is not replayed).
+      const loadAlerts = async () => {
+        if (!o.alerts) return;
+        try { o.alerts.load(await client.alerts()); }
+        catch (e) { log.warn(`fleet: reading the alerts failed (${(e as Error).message}); the next connect asks again`); }
+      };
       unsubscribe = client.events(e => {
         view.apply(e);
+        if (e.t === "alert") { o.alerts?.add(e.body); return; }
         if (e.t !== "job" || !o.jobs) return;
         const parsed = JobViewSchema.safeParse(e.body);
         if (parsed.success) jobsSync.note(parsed.data);
         o.jobs.apply(e.body, jobsSync.listing);
-      }, { onOpen: () => { void resync(); } });
+      }, { onOpen: () => { void resync(); void loadAlerts(); } });
       await resync();
+      await loadAlerts();
     },
     stop() {
       if (noticeTimer) clearInterval(noticeTimer);

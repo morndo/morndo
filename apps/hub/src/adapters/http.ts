@@ -16,7 +16,7 @@ import type { Config } from "../config.ts";
 import type { HubIdentity } from "./identity.ts";
 import type { AccessService, Authenticated } from "../application/access-service.ts";
 import type { ObservationService, OlderResult } from "../application/observation-service.ts";
-import type { SteeringService } from "../application/steering-service.ts";
+import type { SendResult, SteeringService } from "../application/steering-service.ts";
 import type { EscalationService } from "../application/escalation-service.ts";
 import type { RemoteService, Viewer } from "../application/remote-service.ts";
 import type { ReadingService } from "../application/reading-service.ts";
@@ -27,6 +27,7 @@ import type { ConnectionsPageService } from "../application/connections-page.ts"
 import type { BoardService } from "../application/board-service.ts";
 import type { AgentAccess } from "../application/agent-access.ts";
 import type { JobsService } from "../application/jobs-service.ts";
+import type { AlertsService } from "../application/alerts-service.ts";
 import type { UsageService } from "../application/usage-service.ts";
 import { bridgeDesktop } from "./rfb.ts";
 import { servingHeaders, type Files } from "./files.ts";
@@ -198,6 +199,7 @@ export function startHttp(p: {
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
   queue?: ManagerQueue | null;                                              // the manager's delivery queue (fleet-clients §9.1); null without a fleet
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
+  alerts?: AlertsService | null;                                            // the fleet's alerts in the app; null: no fleet
 }) {
   const { config, identity, access, observation, steering, escalations, remote } = p;
   const files = p.files ?? null;
@@ -274,6 +276,13 @@ export function startHttp(p: {
   const setCookie = (secret: string) =>
     `${COOKIE}=${secret}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(LONGEST_SESSION_MS / 1000)}`;   // the hub enforces the policy's real limits
   const clearCookie = `${COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`;
+  // A send's answer, to a worker or to the manager by its role: a repeat of one already typed or queued is 200 with where
+  // it stands; a refusal is 403 (a fresh passkey first), 404 (no such window) or 409.
+  const sent = (res: ServerResponse, r: SendResult) => {
+    if (r.ok) return json(res, 200, r);
+    if (r.problem === "duplicate") return json(res, 200, { error: "duplicate", ok: true, at: r.at, ...(r.delivery ? { delivery: r.delivery } : {}) });
+    return json(res, r.problem === "step_up" ? 403 : r.problem === "no_pane" ? 404 : 409, { error: r.problem });
+  };
 
   const deviceView = (a: Authenticated | null) => (e: ReturnType<AccessService["devices"]>[number]) => ({
     id: e.id, name: e.name, pairedAt: e.pairedAt, lastSeenAt: e.lastSeenAt, revokedAt: e.revokedAt, current: a?.endpoint.id === e.id,
@@ -476,10 +485,13 @@ export function startHttp(p: {
     if (sendTo !== null && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody);
-      const r = await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true);
-      if (r.ok) return json(res, 200, r);
-      if (r.problem === "duplicate") return json(res, 200, { error: "duplicate", ok: true, at: r.at, ...(r.delivery ? { delivery: r.delivery } : {}) });
-      return json(res, r.problem === "step_up" ? 403 : r.problem === "no_pane" ? 404 : 409, { error: r.problem });
+      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true));
+    }
+    // The manager by its role: its window, or, while it has none, the fleet's queue for its sticky lane (steering).
+    if (path === "/api/manager/send" && method === "POST") {
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, SendBody);
+      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true));
     }
     // The principal's cancel of one of his messages to the manager still waiting in the fleet's queue (ruling 83; spec
     // §9.1): 200 with where it stands now (given up, cancelled), 409 only when it is too late (already typed), 404 for
@@ -697,6 +709,7 @@ export function startHttp(p: {
         if (c.row.kind === "command" && c.row.endpointId === conn.auth.endpoint.id) send({ t: "deliveries", items: [queuedCommand(c.row, c.view)] });
       }) ?? (() => false);
       const unsubscribeJobs = p.jobs?.subscribe(v => send({ t: "jobs", ...v })) ?? (() => false);
+      const unsubscribeAlerts = p.alerts?.subscribe(items => send({ t: "alerts", items })) ?? (() => false);
       // Older pages, one at a time per connection (fleet core §3.1): each waits for the one before it.
       let olderDone: Promise<void> = Promise.resolve();
       // Read marks and mute (phase D): every change, from any device, to every feed.
@@ -705,7 +718,7 @@ export function startHttp(p: {
       // without a listener that emit would end the hub. Logged without the payload.
       ws.on("error", e => log.warn(`feed socket: ${e.message}`));
       ws.on("pong", () => { conn.alive = true; });
-      ws.on("close", () => { conns.delete(conn); unsubscribe(); unsubscribeBoard(); unsubscribeTasks(); unsubscribeUsage(); unsubscribeJobs(); unsubscribeQueue(); unsubscribeReading(); p.push?.notifications.left(conn.id); p.presence?.left(conn.id); });
+      ws.on("close", () => { conns.delete(conn); unsubscribe(); unsubscribeBoard(); unsubscribeTasks(); unsubscribeUsage(); unsubscribeJobs(); unsubscribeAlerts(); unsubscribeQueue(); unsubscribeReading(); p.push?.notifications.left(conn.id); p.presence?.left(conn.id); });
       // Every frame is decoded (ADR-0008, A2): malformed closes with 1003, a type this hub doesn't know is ignored.
       ws.on("message", raw => {
         if (!buckets.feedFrames.take(conn.id).ok) return ws.close(1008, "too many messages");
@@ -736,6 +749,8 @@ export function startHttp(p: {
             if (p.board) send({ t: "board", ...p.board.service.view() });   // ADR-0015: whole, after every hello
             if (p.usage) send({ t: "usage", ...p.usage.view() });           // ADR-0016: every account, after every hello
             if (p.queue) send({ t: "deliveries", items: p.queue.commandsOf(conn.auth.endpoint.id) });   // all of the last day
+            send({ t: "manager", queue: steering.managerQueue });           // whether a message waits for it while it has no window
+            if (p.alerts) send({ t: "alerts", ...p.alerts.view() });        // the fleet's latest alerts, after every hello
             if (p.jobs) send({ t: "jobs", ...p.jobs.view() });               // the fleet mirror, after every hello
             if (p.reading) send(p.reading.state());           // all marks and mutes: they may have moved while away
             if (p.reading) send({ t: "caught_up", at: p.reading.caughtUpAt() });   // ADR-0009, C7

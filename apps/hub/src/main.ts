@@ -42,6 +42,7 @@ import { BoardService } from "./application/board-service.ts";
 import { AgentAccess } from "./application/agent-access.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
+import { AlertsService, SEEN_MARK } from "./application/alerts-service.ts";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -126,7 +127,10 @@ switch (cmd) {
     // MORNDO_FLEET_SOCKET set: every port goes through the fleet service; unset: this machine's tmux and Claude Code, as
     // before (spec §10). Nothing below this line knows which.
     const jobs = new JobsService();
-    const fleet = config.fleetSocket ? await openFleet(config.fleetSocket, files, jobs) : null;
+    // The fleet's alerts in the app; an urgent new one is a push (counts only), told once the notifications exist below.
+    let alertPush: (urgent: boolean) => void = () => {};
+    const alerts = config.fleetSocket ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
+    const fleet = config.fleetSocket ? await openFleet(config.fleetSocket, files, jobs, alerts) : null;
     const ports: HubPorts = fleet?.ports ?? legacyPorts(config, { files });
     // Engine lanes on this machine, only when MORNDO_ENGINE_SESSIONS names their registry. Off otherwise: nothing is read.
     const engineLanes = engineLanesFor(config);
@@ -158,7 +162,8 @@ switch (cmd) {
     // A Command is judged on arrival against what the worker waits for now (S6). With a fleet, a repeat of a send in
     // doubt asks the worker's node (op.status, spec §3.1).
     const steering = new SteeringService(store, typist, Date.now, () => access.policy(), inbox, id => observation.waitingOn(id),
-      id => observation.nameOf(id), ports.uploads, ports.sendStatus, queue ? { queue, isManager: id => id === managerPane() } : null);
+      id => observation.nameOf(id), ports.uploads, ports.sendStatus, queue ? { queue, isManager: id => id === managerPane() } : null,
+      () => managerPane() ?? null, config.managerWindow);
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -197,7 +202,9 @@ switch (cmd) {
     const notifications = new NotificationService({
       store, send: pushSender(vapid), extraOrigins: config.pushExtraOrigins ?? [],
       muted: id => { const name = nameOf(id); return name !== undefined && reading.state().muted.includes(name); },
+      alerts: () => alerts?.urgentSince(reading.state().reads[SEEN_MARK] ?? 0) ?? 0,
     });
+    alertPush = urgent => notifications.alert(urgent);
     // ADR-0013: the Engines page, through the engine layer's CLI when MORNDO_ENGINES names it.
     const engines = config.enginesBin ? new EnginesService({ cli: enginesCli(config.enginesBin), store, policy: () => access.policy() }) : null;
     // The connections program, named like the engines CLI. A private home only, and never the engines program.
@@ -213,7 +220,7 @@ switch (cmd) {
     jobs.attach({ store, board });
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
-      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue,
+      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
       updates: { holdPath: holdFile(process.env.HOME || homedir()) },
     });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
@@ -322,7 +329,7 @@ switch (cmd) {
 //   (openStore above);
 // - a fleet that doesn't answer yet is only said: the observation loop keeps asking, and the hub serves meanwhile
 //   (spec §7, "Fleet service down or restarting").
-async function openFleet(socket: string, files: LocalFileStore, jobs: JobsService): Promise<{ ports: FleetPorts; client: FleetClient }> {
+async function openFleet(socket: string, files: LocalFileStore, jobs: JobsService, alerts: AlertsService | null): Promise<{ ports: FleetPorts; client: FleetClient }> {
   const client = new FleetClient(socket, { log });
   const check = await checkFleet(client);
   if (check === "unsupported") {
@@ -330,7 +337,7 @@ async function openFleet(socket: string, files: LocalFileStore, jobs: JobsServic
     process.exit(EXIT_CONFIG);
   }
   if (check === "unreachable") log.warn(`the fleet service at ${socket} doesn't answer yet; the hub keeps asking`);
-  const ports = fleetPorts(client, { files, jobs, stagingDir: mkdtempSync(join(tmpdir(), "morndo-fleet-files-")) });
+  const ports = fleetPorts(client, { files, jobs, ...(alerts ? { alerts } : {}), stagingDir: mkdtempSync(join(tmpdir(), "morndo-fleet-files-")) });
   await ports.start();
   return { ports, client };
 }

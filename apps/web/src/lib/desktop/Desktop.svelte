@@ -23,6 +23,8 @@
   import type { OutboxRecord } from "../outbox/state.ts";
   import Rail, { type View } from "./Rail.svelte";
   import Sidebar from "./Sidebar.svelte";
+  import { sentTo } from "../manager.ts";
+  import { SEEN_MARK, unseen } from "../alerts.ts";
   import TopNav from "./TopNav.svelte";
   import DecisionCard, { type AnswerBody, type AnswerProblem } from "./DecisionCard.svelte";
   import { UNKNOWN, hubRefusal } from "../catchup/answer.ts";
@@ -106,10 +108,12 @@
   let screenRequest = $state<{ worker: string; n: number } | null>(null);
   let focus = $state<{ id: string; n: number } | null>(null);
 
-  const manager = $derived(feed.workers.find(w => w.name === "manager") ?? null);
-  const current = $derived(feed.workers.find(w => w.id === selected) ?? null);
+  // The roster lists the manager even while it has no window (a restart): not running, and a message to it can wait.
+  const manager = $derived(feed.roster.find(w => w.name === "manager") ?? null);
+  const current = $derived(feed.roster.find(w => w.id === selected) ?? null);
   const nameOf = (w: RosterEntry) => (w.name === "manager" ? "Manager" : w.name);
-  const needsYouCount = $derived(feed.workers.filter(w => w.needsYou).length);
+  // Activity's count: who waits for him, and the fleet's alerts he hasn't seen (they are on Activity too).
+  const needsYouCount = $derived(feed.workers.filter(w => w.needsYou).length + unseen(feed.alerts, feed.reads[SEEN_MARK]));
   const decisionsWaiting = $derived(waitingCount(feed.decisions));
   const decisionByMessage = $derived(new Map(feed.decisions.filter(d => d.messageId).map(d => [d.messageId as string, d])));
   const stepUpMs = $derived(STEP_UP_MS[policy.stepUp]);
@@ -180,9 +184,9 @@
 
   // Pick a channel: the last one, else the manager, else the first agent.
   $effect(() => {
-    if (selected && feed.workers.some(w => w.id === selected)) return;
+    if (selected && feed.roster.some(w => w.id === selected)) return;
     const last = store.get<string | null>("morndo.channel", null);
-    const pick = feed.workers.find(w => w.name === last) ?? manager ?? feed.workers[0];
+    const pick = feed.roster.find(w => w.name === last) ?? manager ?? feed.roster[0];
     if (pick) selected = pick.id;
   });
   $effect(() => { if (view === "home") feed.watch(selected); });
@@ -220,8 +224,9 @@
   $effect(() => {
     const worker = feed.historyFor;
     const messages = feed.messages;
-    const sent = outgoing.some(r => r.worker === worker && r.state === "sent");
-    if (outbox && worker && sent) void outbox.echoes(worker, echoesOf(messages));
+    const name = feed.roster.find(w => w.id === worker)?.name ?? "";
+    const sent = worker !== null && outgoing.some(r => sentTo(r, { id: worker, name }) && r.state === "sent");
+    if (outbox && worker && sent) void outbox.echoes(worker, echoesOf(messages), name);
   });
   // Waiting sends try at once when the feed is live again (S7).
   $effect(() => { if (feed.status === "live") outbox?.connected(); });
@@ -287,7 +292,7 @@
   function openFromAddress() {
     const v = new URLSearchParams(location.search).get("view");
     if (v === "decisions") showRight();
-    else if (v === "activity") view = "activity";
+    else if (v === "activity" || v === "alerts") view = "activity";            // the fleet's alerts are on Activity
     if (v) history.replaceState(history.state, "", location.pathname);
   }
 
@@ -356,7 +361,8 @@
         <div class="resizer" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" style:left="{sidebarWidth - 2}px" onpointerdown={startResize}></div>
         <main class="main">
           {#if view === "activity"}
-            <ActivityView workers={feed.workers} onOpen={open} {nameOf} />
+            <ActivityView workers={feed.workers} onOpen={open} {nameOf}
+              alerts={feed.alerts} seenAt={feed.reads[SEEN_MARK] ?? 0} onSeen={at => feed.markRead(SEEN_MARK, at)} />
           {:else if view === "dashboard"}
             <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane} />
           {:else if view === "board"}
@@ -364,7 +370,7 @@
               onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />
           {:else if current}
             <ChannelView worker={current} displayName={nameOf(current)} {feed} {verifiedAt} panel={rightShown}
-              outgoing={outgoing.filter(r => r.worker === current?.id).map((r): Outgoing => ({ ...r, images: previews.get(r.id) ?? [], files: sentFiles.get(r.id) ?? [] }))}
+              outgoing={outgoing.filter(r => current !== null && sentTo(r, current)).map((r): Outgoing => ({ ...r, images: previews.get(r.id) ?? [], files: sentFiles.get(r.id) ?? [] }))}
               {onQueue} {onRetry} {onDiscard} {onCancel} {onVerify} {onEdit} {editRequest} {onEdited}
               prefs={prefsOf(current.name)} onDetails={() => current && openDetails(current.id)}
               dividerMark={opened?.worker === current.id ? opened.mark : undefined} onAtBottom={(value, worker) => (atBottom = { worker, value })}

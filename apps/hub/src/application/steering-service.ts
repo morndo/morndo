@@ -79,6 +79,8 @@ export class SteeringService {
   #status: SendStatus | null;                                // the fleet's op.status; null: the legacy hub, nobody else knows
   // The manager's queue (fleet-clients §9.1) and which worker is the manager; null without a fleet.
   #manager: { queue: ManagerQueue; isManager: (workerId: string) => boolean } | null;
+  #managerPane: () => string | null;                         // the manager's window now, with or without a fleet; null: none
+  #absent: string;                                           // what a message to the manager stands for while it has none
 
   constructor(
     store: Store, tmux: Pick<Tmux, "send">, now: () => number = Date.now, policy: () => AccessPolicy = () => DEFAULT_POLICY,
@@ -86,8 +88,11 @@ export class SteeringService {
     nameOf: (workerId: string) => string | null = () => null, uploads: UploadSink = localUploads(),
     status: SendStatus | null = null,
     manager: { queue: ManagerQueue; isManager: (workerId: string) => boolean } | null = null,
+    managerPane: () => string | null = () => null, managerLane = "manager",
   ) {
     this.#manager = manager;
+    this.#managerPane = managerPane;
+    this.#absent = `lane:${managerLane}`;
     this.#status = status;
     this.#nameOf = nameOf;
     this.#inbox = inbox;
@@ -146,6 +151,20 @@ export class SteeringService {
     try { return await job; }
     finally { this.#typing.delete(key); }
   }
+
+  // A message to the manager by its role (POST /api/manager/send; the phone and the desktop always list the manager): into
+  // its window when it has one, as any send is. While it has none (a restart), into the fleet's queue for its sticky lane,
+  // which holds it on the node that last had it until a window of that name is back (fleet-clients §4.1, §10). With the
+  // queue off, or without a fleet, nothing can hold it: no_pane. Files go onto the manager's machine, so none while it has
+  // no window. Written to the role, not to a window: neither the question it waited on nor the window's name is checked.
+  async sendToManager(a: Authenticated, text: string, requestId: string, uploads: string[] = [], createdAt?: number, again = false): Promise<SendResult> {
+    const pane = this.#managerPane();
+    if (pane !== null) return this.send(a, pane, text, requestId, uploads, undefined, undefined, createdAt, again);
+    if (!this.#manager?.queue.on || uploads.length) return { ok: false, problem: "no_pane" };
+    return this.send(a, this.#absent, text, requestId, [], undefined, undefined, createdAt, again);
+  }
+  // Whether a message to the manager can wait for it while it has no window (the app's `manager` frame).
+  get managerQueue(): boolean { return this.#manager?.queue.on === true; }
 
   // A send in doubt is settled with its node first; then the send is judged on arrival and typed.
   async #judge(a: Authenticated, key: string, workerId: string, text: string, uploads: string[], now: number, inDoubt: boolean, seen?: string, name?: string, createdAt?: number): Promise<SendResult> {
@@ -245,7 +264,7 @@ export class SteeringService {
   async #stageAndType(a: Authenticated, key: string, workerId: string, text: string, uploads: string[], now: number, createdAt?: number): Promise<SendResult> {
     const prepared = await this.#prepare(a, workerId, text, uploads, now);
     if (!prepared.ok) return prepared;
-    if (this.#manager?.queue.on && this.#manager.isManager(workerId)) return this.#queueCommand(a, key, workerId, prepared.body, uploads.length, now, createdAt);
+    if (this.#manager?.queue.on && (workerId === this.#absent || this.#manager.isManager(workerId))) return this.#queueCommand(a, key, workerId, prepared.body, uploads.length, now, createdAt);
     if (!this.#store.startSend(key, now)) return { ok: false, problem: "uncertain" };
     const audit = (): AccessEvent => this.#commandSent(a, workerId, prepared.body, uploads.length, now);
     return this.#type(key, workerId, prepared.body, audit);

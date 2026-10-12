@@ -142,7 +142,7 @@ The agent sends `ev.delivery { id, state, … }` on every change, and after ever
 
 ### 4.5 Alerts
 
-A delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes raises a fleet alert, once each (`delivery_waiting`, with its state and reason). kira posts alerts to the owner (§9.4).
+A delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes raises a fleet alert, once each (`delivery_waiting`, with its state and reason). The hub shows the fleet's alerts in the app, on the desktop's Activity and the phone's Status, and pushes the urgent ones, counts only (the owner, 2026-10-12: kira is one owner's bot, so the open-source app shows them itself). kira may post them too (§9.4).
 
 ### 4.6 The fleet's part
 
@@ -238,6 +238,7 @@ Clients name themselves (`x-morndo-client`, a-z, at most 16 characters: `hub`, `
 - Commands to other lanes stay typed directly (`pane.send`), as today.
 - **The switch:** `MORNDO_MANAGER_QUEUE`, on by default when the hub has a fleet; `off` types to the manager directly, as before (step 2's rollback, §13). Because the delivery's id and the direct send's key are one key, a direct retry after the switch finds the delivery's key (`done`: a duplicate, already typed; `started`: in doubt) and never types again. A delivery still queued when the switch goes off is cancelled first.
 - **Without a fleet** (legacy mode), the hub types to the manager directly, as before.
+- **The manager is always on the list** (the owner, 2026-10-12). While it has no window (a restart), the app lists it as not running. With the queue on, a message written to it goes to `POST /api/manager/send`, which queues it for the sticky lane `manager` (§4.1): it waits on the node that last had it and goes in once a window of that name is back. With the queue off, or without a fleet, nothing can hold it, so the app says to start the manager. Files go onto its machine, so none while it isn't running.
 
 ### 9.2 `morndo lanes`
 

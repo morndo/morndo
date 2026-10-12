@@ -20,7 +20,7 @@
   import type { DecisionItem } from "../../desktop/decisions.ts";
   import { renderMarkdown } from "../../markdown.ts";
   import { present, withoutFileNotes } from "../../desktop/present.ts";
-  import { canCancel, canRetry, type OutboxRecord } from "../../outbox/state.ts";
+  import { MAX_TEXT, canCancel, canEdit, canRetry, type OutboxRecord } from "../../outbox/state.ts";
   import { heldBehind, sendReason } from "../../outbox/words.ts";
   import { attachmentKey, bubbles, isLong, shortened } from "./bubbles.ts";
   import { deadReason, deliveryLabel, deliveryOf, lostReason, maybeReason } from "./delivery.ts";
@@ -28,13 +28,14 @@
   import { followKeyboard } from "./keyboard.ts";
   import { bindWatch, pinnedToEnd } from "./watch.ts";
   import { deviceDrafts } from "../../drafts.ts";
+  import { ABSENT_MANAGER, sentTo } from "../../manager.ts";
 
   let { feed, worker, outgoing, pendingFiles = {}, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCancel, onEchoes, screen = false }: {
     feed: LiveFeed; worker: RosterEntry; outgoing: OutboxRecord[]; pendingFiles?: Record<string, SentFile[]>; now: number; verifiedFresh: boolean; verify: () => Promise<boolean>;
     onBack: () => void; onDecide: (id: string) => void;
     onQueue: (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string; files: SentFile[] }) => Promise<void>;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onAgain: (id: string) => void; onCancel: (id: string) => void;
-    onEchoes: (worker: string, echoes: { id: string; at: number; text: string }[]) => void;
+    onEchoes: (worker: string, echoes: { id: string; at: number; text: string }[], name?: string) => void;
     screen?: boolean;
   } = $props();
 
@@ -46,7 +47,16 @@
   const repliedAt = $derived(loaded ? feed.messages.findLast((m: Message) => m.author.kind === "principal")?.at ?? null : feed.chats[worker.id]?.repliedAt ?? null);
   const st = $derived(status(worker, asks, feed.chats[worker.id]?.answer ?? null, now, repliedAt));
   const items = $derived(loaded ? bubbles(present(feed.messages, { show: "clean", activity: true }), now) : []);
-  const mine = $derived(outgoing.filter(o => o.worker === worker.id));
+  const mine = $derived(outgoing.filter(o => sentTo(o, worker)));
+  // The manager while it has no window (a restart): listed as not running. A message waits for it in the fleet's queue
+  // when the hub has one on; without it, nothing can hold one, so the box stays shut until it runs again.
+  const absent = $derived(worker.id === ABSENT_MANAGER);
+  const canWrite = $derived(!absent || feed.managerQueue === true);
+  const scope = $derived(absent
+    ? (canWrite ? "Waits for the manager while it isn't running, up to a day; it goes in once it runs again." : "Start the manager to message it.")
+    : worker.name === "manager"
+      ? (feed.managerQueue ? "Goes to the manager's queue; it's typed in once its box is free." : "Goes straight to the manager.")
+      : `Goes straight to ${name}; the manager won't see it.`);
   let view = $state<"chat" | "screen">(screen ? "screen" : "chat");
   $effect(() => { if (screen) view = "screen"; });
   let expanded = $state<Record<string, boolean>>({});
@@ -59,7 +69,7 @@
   // His messages as the conversation shows them end the matching entries on their way (S8): delivered.
   $effect(() => {
     if (!loaded || !mine.some(o => o.state === "sent")) return;
-    onEchoes(worker.id, feed.messages.filter((m: Message) => m.author.kind === "principal").map((m: Message) => ({ id: m.id, at: m.at, text: withoutFileNotes(m.text) })));
+    onEchoes(worker.id, feed.messages.filter((m: Message) => m.author.kind === "principal").map((m: Message) => ({ id: m.id, at: m.at, text: withoutFileNotes(m.text) })), worker.name);
   });
 
   // Scrolling: to the bottom when it opens and when something arrives while he is at the bottom.
@@ -95,6 +105,8 @@
   const drafts = deviceDrafts();
   const restored = untrack(() => drafts.get(worker.id, worker.name));
   let text = $state(restored?.text ?? "");
+  // Longer than a lane takes: said while typing, and not sent (the hub would refuse it too_long).
+  const over = $derived(text.length > MAX_TEXT);
   let seen = $state<string | null>(restored?.seen ?? null);
   $effect(() => { drafts.typed(worker.id, worker.name, text, seen); });
   let note = $state<string | null>(null);
@@ -107,6 +119,7 @@
   const uploading = $derived(files.some(f => f.status === "uploading"));
   const failed = $derived(files.some(f => f.status === "error"));
   function addFiles(list: File[]) {
+    if (absent) { note = "Files can't go to the manager while it isn't running."; return; }
     const started = beginAttachments(files.length, list);
     note = started.note;
     for (const { file, row } of started.taken) {
@@ -129,7 +142,7 @@
     const blocked = removalNote(files);
     if (blocked) { note = blocked; return; }
     const body = text.trim();
-    if ((!body && readyIds.length === 0) || busy || uploading) return;
+    if (!canWrite || over || (!body && readyIds.length === 0) || busy || uploading) return;
     busy = true;
     note = null;
     const uploads = readyIds;
@@ -166,11 +179,13 @@
   <header class="bar">
     <button class="back" onclick={onBack} aria-label="Back to chats"><ChevronLeft size={26} /></button>
     <span class="avatar" class:quiet={worker.name !== "manager"} aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
-    <span class="who"><b>{name}</b><span class="sub {st.kind}">{st.label}</span></span>
-    <div class="seg" role="tablist" aria-label="Show">
-      <button role="tab" aria-selected={view === "chat"} class:on={view === "chat"} onclick={() => (view = "chat")}>Chat</button>
-      <button role="tab" aria-selected={view === "screen"} class:on={view === "screen"} onclick={() => (view = "screen")}>Screen</button>
-    </div>
+    <span class="who"><b>{name}</b><span class="sub {absent ? "idle" : st.kind}">{absent ? "Not running" : st.label}</span></span>
+    {#if !absent}
+      <div class="seg" role="tablist" aria-label="Show">
+        <button role="tab" aria-selected={view === "chat"} class:on={view === "chat"} onclick={() => (view = "chat")}>Chat</button>
+        <button role="tab" aria-selected={view === "screen"} class:on={view === "screen"} onclick={() => (view = "screen")}>Screen</button>
+      </div>
+    {/if}
   </header>
 
   {#if view === "screen"}
@@ -178,6 +193,11 @@
   {:else}
     <div class="scroll" bind:this={scroller} onscroll={onScroll}>
       {#if !loaded}<p class="note pad">Loading the conversation…</p>{/if}
+      {#if absent}
+        <p class="note pad" data-absent>{canWrite
+          ? "The manager isn't running right now. What you write waits for it, up to a day, and goes in once it runs again."
+          : "The manager isn't running. Start it to message it."}</p>
+      {/if}
       <ol class="msgs">
         {#each items as it (it.kind === "bubble" ? it.m.id : it.key)}
           {#if it.kind === "day"}
@@ -226,6 +246,7 @@
               <p class="why">{sendReason(o, name, "its Screen")}</p>
               <div class="acts">
                 {#if canRetry(o, now)}<button class="pbtn small" onclick={() => onRetry(o.id)}>Retry</button>{/if}
+                {#if canEdit(o)}<button class="pbtn small" onclick={() => { text = o.text; onDiscard(o.id); input?.focus(); }}>Edit</button>{/if}
                 <button class="pbtn small" onclick={() => onDiscard(o.id)}>Discard</button>
               </div>
             {:else if d === "lost"}
@@ -281,15 +302,16 @@
       </div>
     {/if}
     <div class="box">
-      <button class="clip" type="button" onclick={() => fileInput?.click()} aria-label="Attach a file"><Paperclip size={20} /></button>
+      {#if !absent}<button class="clip" type="button" onclick={() => fileInput?.click()} aria-label="Attach a file"><Paperclip size={20} /></button>{/if}
       <input bind:this={fileInput} type="file" accept={UPLOAD_ACCEPT} multiple hidden
         onchange={e => { void addFiles([...((e.currentTarget as HTMLInputElement).files ?? [])]); (e.currentTarget as HTMLInputElement).value = ""; }} />
-      <textarea bind:this={input} bind:value={text} rows="1" placeholder="Message {name}" aria-label="Message {name}" enterkeyhint="send"
+      <textarea bind:this={input} bind:value={text} rows="1" placeholder="Message {name}" aria-label="Message {name}" enterkeyhint="send" disabled={!canWrite}
         onpaste={e => { const list = [...(e.clipboardData?.files ?? [])]; if (!list.length) return; if (!e.clipboardData?.getData("text/plain")) e.preventDefault(); void addFiles(list); }}
         onkeydown={e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); void send(); } }}></textarea>
-      <button class="send" disabled={((!text.trim() && readyIds.length === 0 && !failed) || busy || uploading)} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
+      <button class="send" disabled={!canWrite || over || ((!text.trim() && readyIds.length === 0 && !failed) || busy || uploading)} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
     </div>
-    <p class="scope note">{worker.name === "manager" ? "Goes to the manager's inbox; it is typed in once its box is free." : `Goes straight to ${name}; the manager won't see it.`}</p>
+    {#if over}<p class="err" data-over>Too long for one message: {text.length} of {MAX_TEXT} characters.</p>{/if}
+    <p class="scope note">{scope}</p>
   </div>
 </section>
 

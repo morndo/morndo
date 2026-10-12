@@ -1485,7 +1485,7 @@ The `subscriber` examples in §11.4 are what such a subscriber receives. Lane st
 
 ## 14. Alerts
 
-An alert is something for the owner to look at that changes no state. Each one is an audit row `{ id, at, node, kind, detail }`, kept 90 days, served by `GET /v1/alerts` and sent as the `alert` event.
+An alert is something for the owner to look at that changes no state. Each one is an audit row `{ id, at, node, kind, detail }`, kept 90 days, served by `GET /v1/alerts` and sent as the `alert` event. The hub shows them in its app and pushes the urgent ones (the protocol's `urgentAlert`); any other client may take them too.
 
 | Kind | When | `detail` |
 |---|---|---|
