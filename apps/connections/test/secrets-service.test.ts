@@ -222,3 +222,34 @@ describe("the startup sweep (D2)", () => {
     expect(w.secrets.writes).toBe(0);
   });
 });
+
+// ---- The index retires a version only after the commit that retired it (found while wiring the index writer, T-94).
+
+describe("a rolled-back change never retires a live version in the index", () => {
+  const retired = (w: ReturnType<typeof world>) => w.index.changes.flatMap(c => c.retire.map(r => r.version));
+  it("a rotation whose save fails leaves version 1 live in the index; its file stays", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    w.secrets.failNextSave = true;
+    await expect(w.service.store(w.request("synthetic-value-two", { shape: { keep: true } }), principal)).rejects.toThrow(/the save failed/);
+    expect(retired(w)).toEqual([]);
+    expect([...w.vault.files.keys()]).toEqual(["s-0001"]);
+  });
+  it("a revoke whose save fails retires nothing and removes nothing", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    w.secrets.failNextSave = true;
+    expect(() => w.service.revoke(REF, principal)).toThrow(/the save failed/);
+    expect(retired(w)).toEqual([]);
+    expect(w.vault.files.size).toBe(1);
+  });
+  it("after a crash between the commit and the retirement, the sweep retires what the ledger no longer holds current", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    await w.service.store(w.request("synthetic-value-two", { shape: { keep: true } }), principal);
+    w.index.changes.length = 0;
+    w.clock.at = T + 50;
+    w.service.sweep();
+    expect(w.index.changes).toEqual([{ add: null, retire: [{ reference: REF, version: 1 }], at: T + 50 }]);
+  });
+});

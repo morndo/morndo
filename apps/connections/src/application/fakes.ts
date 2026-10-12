@@ -195,9 +195,12 @@ const copyState = (s: SecretsState): SecretsState => JSON.parse(JSON.stringify(s
 export class MemorySecrets implements SecretsDirectory {
   state: SecretsState = { directory: emptySecretDirectory(), vaults: [], workspaces: [] };
   writes = 0;
+  // Fails the next save after the change ran, as a constraint or a full disk would: nothing is saved.
+  failNextSave = false;
   load(): SecretsState { return copyState(this.state); }
   write<T>(change: (state: SecretsState) => { next: SecretsState | null; result: T }): T {
     const { next, result } = change(copyState(this.state));
+    if (next && this.failNextSave) { this.failNextSave = false; throw new Error("the save failed"); }
     if (next) { this.state = copyState(next); this.writes += 1; }
     return result;
   }
