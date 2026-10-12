@@ -11,6 +11,7 @@ import { FileVault } from "../src/adapters/vault-file.ts";
 import { run } from "../src/cli.ts";
 import { secretIndexPath } from "../src/compose.ts";
 import { runSecrets, stdinValue, type SecretsIo } from "../src/secrets-cli.ts";
+import { keysBeside } from "./fixtures/keys.ts";
 
 // Several real commands per test (age, SQLite, the index): seconds alone, more under load, as in rounds 1 and 2.
 vi.setConfig({ testTimeout: 60_000 });
@@ -73,8 +74,8 @@ const plainKeys = (dir: string) => (existsSync(dir) ? readdirSync(dir).filter(n 
 describe("round 3, point 6: removal works both ways in the shared vault directory", () => {
   it("AgeVault.remove removes a plaintext file the plaintext vault wrote under the ref", async () => {
     const h = home();
-    await new FileVault(h.vault).seal("key-example-1-aa", new SecretMaterial(new TextEncoder().encode("synthetic-connection-key")));
-    new AgeVault(h.vault, join(h.dir, "identity")).remove("key-example-1-aa");
+    await new FileVault(h.vault, keysBeside(h.vault)).seal("key-example-1-aa", new SecretMaterial(new TextEncoder().encode("synthetic-connection-key")));
+    new AgeVault(h.vault, join(h.dir, "identity"), keysBeside(h.vault)).remove("key-example-1-aa");
     expect(readdirSync(h.vault)).toEqual([]);
   });
   it("a key added on the plaintext vault, then rotated on the age vault: the old plaintext file is gone", async () => {
@@ -93,7 +94,7 @@ describe("round 3, point 5: removal reports exactly what it removed and what is 
   const REF5 = "s-00000000000000f5";
   it("both forms there, the sealed one loosened: the plaintext one goes, and the error says so and names the one left", async () => {
     const h = home();
-    const vault = new FileVault(h.vault);
+    const vault = new FileVault(h.vault, keysBeside(h.vault));
     await vault.seal(REF5, new SecretMaterial(new TextEncoder().encode("synthetic-value-five")));
     writeFileSync(join(h.vault, `${REF5}.age`), "synthetic", { mode: 0o600 });
     chmodSync(join(h.vault, `${REF5}.age`), 0o644);
@@ -111,7 +112,7 @@ describe("round 3, point 5: removal reports exactly what it removed and what is 
     chmodSync(h.vault, 0o700);
     writeFileSync(join(h.vault, `${REF5}.age.fingerprint`), "synthetic", { mode: 0o600 });
     let message = "";
-    try { new FileVault(h.vault).remove(REF5); } catch (error) { message = error instanceof Error ? error.message : String(error); }
+    try { new FileVault(h.vault, keysBeside(h.vault)).remove(REF5); } catch (error) { message = error instanceof Error ? error.message : String(error); }
     expect(existsSync(join(h.vault, `${REF5}.age.fingerprint`))).toBe(false);
     expect(message).toMatch(new RegExp(`no file of ${REF5}`));
     expect(message).toMatch(new RegExp(`removed ${REF5}\\.age\\.fingerprint`));

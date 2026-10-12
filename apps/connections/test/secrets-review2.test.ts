@@ -12,12 +12,14 @@ import { SecretIndexWriter } from "../src/adapters/secret-index-writer.ts";
 import { CountingIds, ManualClock, MemoryIndex, MemoryRoots, MemorySecrets } from "../src/application/fakes.ts";
 import { SecretsService, type StoreRequest } from "../src/application/secrets-service.ts";
 import { MemorySealedStore } from "./sealed-store-fake.ts";
-import { NodeKeys } from "../src/adapters/node-keys.ts";
+import { NodeKeys, homeRecords } from "../src/adapters/node-keys.ts";
+import { SqliteSecrets } from "../src/adapters/secrets-sqlite.ts";
 import { AgeVault } from "../src/adapters/vault-age.ts";
 import { FileVault } from "../src/adapters/vault-file.ts";
 import { openHome, secretIndexPath } from "../src/compose.ts";
 import { IndexFileRefused, readSecretIndex } from "@morndo/node-ops";
 import { runSecrets, stdinValue, type SecretsIo } from "../src/secrets-cli.ts";
+import { NOTHING_ON_RECORD, keysBeside } from "./fixtures/keys.ts";
 
 // Several real commands per test (age, SQLite, the index): seconds alone, more under load, as in round 1.
 vi.setConfig({ testTimeout: 60_000 });
@@ -101,7 +103,7 @@ describe("round 2, points 2 and 5: revoke and delete on the plaintext vault dest
   });
   it("FileVault.remove refuses a ref it finds no file of, in either form", () => {
     const h = home();
-    expect(() => new FileVault(h.vault).remove("s-00000000000000e1")).toThrow(/s-00000000000000e1/);
+    expect(() => new FileVault(h.vault, keysBeside(h.vault)).remove("s-00000000000000e1")).toThrow(/s-00000000000000e1/);
   });
 });
 
@@ -115,7 +117,7 @@ describe("round 2, point 9: the node keys refuse to remake a key while hashes ma
     try {
       await expect(opened.vault.keyedFingerprint(ref)).rejects.toThrow(/fingerprint\.key is missing/);
       const e = new Encrypter();
-      e.addRecipient(await new AgeVault(h.vault, join(h.dir, "identity")).recipient());
+      e.addRecipient(await new AgeVault(h.vault, join(h.dir, "identity"), keysBeside(join(h.dir, "identity"))).recipient());
       await expect(opened.vault.storeSealed("s-00000000000000f1", await e.encrypt(new TextEncoder().encode("synthetic-value-two"))))
         .rejects.toThrow(/fingerprint\.key is missing/);
     } finally {
@@ -124,11 +126,18 @@ describe("round 2, point 9: the node keys refuse to remake a key while hashes ma
     expect(existsSync(join(h.dir, "fingerprint.key"))).toBe(false);
     expect(existsSync(join(h.vault, "s-00000000000000f1.age"))).toBe(false);
   });
-  it("NodeKeys given no records reads the home's: the index key is refused while the index holds hashes made with it", async () => {
+  // Since round 3 (points 2 and 9) the records are required, so the root passes them: here as openSecrets does.
+  it("NodeKeys with the home's records refuses the index key while the index holds hashes made with it", async () => {
     const h = home();
     expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
     rmSync(join(h.dir, "index.key"));
-    expect(() => new NodeKeys(h.dir).index(new TextEncoder().encode("synthetic"))).toThrow(/index\.key is missing/);
+    const secrets = new SqliteSecrets(join(h.dir, "connections.db"));
+    try {
+      const keys = new NodeKeys(h.dir, homeRecords(h.dir, () => secrets.load().directory.ledger));
+      expect(() => keys.index(new TextEncoder().encode("synthetic"))).toThrow(/index\.key is missing/);
+    } finally {
+      secrets.close();
+    }
     expect(existsSync(join(h.dir, "index.key"))).toBe(false);
   });
 });
@@ -241,7 +250,7 @@ describe("round 2, points 3, 4 and 7: no copy of the value this code makes outli
   });
   it("point 4: AgeVault.open zeroes what the library decrypted, so the index writer and keyedFingerprint leave none behind", async () => {
     const h = home();
-    const vault = new AgeVault(h.vault, join(h.dir, "identity"));
+    const vault = new AgeVault(h.vault, join(h.dir, "identity"), keysBeside(join(h.dir, "identity")));
     const e = new Encrypter();
     e.addRecipient(await vault.recipient());
     expect((await vault.storeSealed("s-00000000000000a4", await e.encrypt(new TextEncoder().encode("synthetic-value-four")))).ok).toBe(true);
@@ -253,7 +262,7 @@ describe("round 2, points 3, 4 and 7: no copy of the value this code makes outli
       return out as never;
     });
     try {
-      const keys = new NodeKeys(h.dir);
+      const keys = new NodeKeys(h.dir, NOTHING_ON_RECORD);
       await new SecretIndexWriter(secretIndexPath(h.dir), b => keys.index(b), vault).prepare("s-00000000000000a4");
       expect(await vault.keyedFingerprint("s-00000000000000a4")).toMatch(/^[0-9a-f]{12}$/);
     } finally {

@@ -24,11 +24,13 @@ export class AgeVault implements Vault, SealedStore {
   #recipient: string | null = null;
   #recipientFor: string | null = null;
   readonly #keys: NodeKeys;
-  constructor(dir: string, identityPath: string, uid?: number, keys?: NodeKeys) {
+  // The node keys are the root's, built with its records (round 3, points 2 and 9).
+  constructor(dir: string, identityPath: string, keys: NodeKeys, uid?: number) {
+    if (!(keys instanceof NodeKeys)) throw new TypeError("AgeVault needs the node keys its root built");
     this.#dir = dir;
     this.#identityPath = identityPath;
+    this.#keys = keys;
     this.#uid = uid ?? process.getuid?.() ?? -1;
-    this.#keys = keys ?? new NodeKeys(dirname(identityPath), this.#uid);
   }
 
   async seal(ref: string, material: SecretMaterial): Promise<void> {

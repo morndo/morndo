@@ -12,6 +12,7 @@ import { AgeVault } from "../src/adapters/vault-age.ts";
 import { VALUE_MAX_BYTES } from "@morndo/node-ops";
 import { FileVault } from "../src/adapters/vault-file.ts";
 import { MemorySealedStore } from "./sealed-store-fake.ts";
+import { keysBeside } from "./fixtures/keys.ts";
 
 const value = new TextEncoder().encode("synthetic-sealed-value-0123");
 const other = new TextEncoder().encode("synthetic-sealed-value-4567");
@@ -56,7 +57,7 @@ const ageVault: Adapter = {
   async make(home = node()) {
     const vault = join(home, "vault");
     const identity = join(home, "identity");
-    const store = new AgeVault(vault, identity);
+    const store = new AgeVault(vault, identity, keysBeside(identity));
     const mine = await store.recipient();
     return {
       store,
@@ -64,7 +65,7 @@ const ageVault: Adapter = {
       sealForOthers: async (bytes, alsoMine) => sealTo(alsoMine ? [mine, await stranger()] : [await stranger()], bytes),
       open: async ref => (await store.open(ref)).bytes(),
       plant: async ref => { await store.storeSealed(ref, await sealTo([mine], value)); },
-      files: { vault, identity, fileOf: ref => join(vault, `${ref}.age`), withUid: uid => new AgeVault(vault, identity, uid) },
+      files: { vault, identity, fileOf: ref => join(vault, `${ref}.age`), withUid: uid => new AgeVault(vault, identity, keysBeside(identity, uid), uid) },
     };
   },
 };
@@ -76,14 +77,14 @@ const fileVault: Adapter = {
   async make(home = node()) {
     const vault = join(home, "vault");
     const identity = join(home, "identity");
-    const store = new FileVault(vault);
+    const store = new FileVault(vault, keysBeside(vault));
     return {
       store,
       seal: async bytes => sealTo([await stranger()], bytes),
       sealForOthers: async (bytes, alsoMine) => sealTo(alsoMine ? [await stranger(), await stranger()] : [await stranger()], bytes),
       open: async ref => (await store.open(ref)).bytes(),
       plant: ref => store.seal(ref, new SecretMaterial(value)),
-      files: { vault, identity, fileOf: ref => join(vault, ref), withUid: uid => new FileVault(vault, uid) },
+      files: { vault, identity, fileOf: ref => join(vault, ref), withUid: uid => new FileVault(vault, keysBeside(vault, uid), uid) },
     };
   },
 };

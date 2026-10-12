@@ -9,7 +9,6 @@ import type { LedgerEntry } from "@morndo/domain";
 import { readSecretIndex } from "@morndo/node-ops";
 import { readPrivate, writeNew } from "./file-mode.ts";
 import { secretIndexPath } from "./secret-index-writer.ts";
-import { SqliteSecrets } from "./secrets-sqlite.ts";
 
 const KEY_BYTES = 32;
 
@@ -38,28 +37,23 @@ export function homeRecords(dir: string, ledger: () => readonly LedgerEntry[], u
     : ledger().some(e => e.state === "current") || readSecretIndex(secretIndexPath(dir), uid).versions.some(v => v.entries.length > 0);
 }
 
-// Whether the home's Connections database holds a ledger entry: opened only when a key is missing, then closed. With no
-// database, nothing is on record yet.
-function ledgerIn(dir: string, uid: number): readonly LedgerEntry[] {
-  const path = join(dir, "connections.db");
-  if (!existsSync(path)) return [];
-  const secrets = new SqliteSecrets(path, uid);
-  try { return secrets.load().directory.ledger; } finally { secrets.close(); }
-}
+// For a root that holds no Secrets records (the Connections commands): it uses the node keys there are and never makes
+// one, as it can't tell whether anything made with a key is on record.
+export const ONLY_EXISTING_KEYS: KeyRecords = () => true;
 
 export class NodeKeys {
   readonly #dir: string;
   readonly #uid: number;
   readonly #onRecord: KeyRecords;
   // A missing key is made only while nothing made with it is on record (review 6): a new key would let a revoked value in
-  // again under a new fingerprint and blind the output filter to every indexed value. Without `onRecord`, the records are
-  // those of the home `dir` itself, so every composition root is guarded, not only the one that passes them (round 2,
-  // point 9); one that holds the database open already passes its own.
-  constructor(dir: string, uid?: number, onRecord?: KeyRecords) {
+  // again under a new fingerprint and blind the output filter to every indexed value. `onRecord` is required: every
+  // composition root passes the records of the store it holds, so this adapter never opens one of its own (round 3,
+  // points 2 and 9).
+  constructor(dir: string, onRecord: KeyRecords, uid?: number) {
+    if (typeof onRecord !== "function") throw new TypeError("NodeKeys needs its root's records: a missing key is made only while nothing made with it is on record");
     this.#dir = dir;
+    this.#onRecord = onRecord;
     this.#uid = uid ?? process.getuid?.() ?? -1;
-    const owner = this.#uid;
-    this.#onRecord = onRecord ?? homeRecords(dir, () => ledgerIn(dir, owner), owner);
   }
 
   // The keyed fingerprint (SC2): the first 12 hex characters of HMAC-SHA-256 under the fingerprint key.

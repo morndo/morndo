@@ -1,6 +1,5 @@
 // Plain files at 0600, one per secret ref. The migration adapter (design section 5).
 import { existsSync } from "node:fs";
-import { dirname } from "node:path";
 import { assertPrivate, readPrivate, writePrivate } from "./file-mode.ts";
 import { NodeKeys } from "./node-keys.ts";
 import { fingerprintOf, removeRef, secretPath } from "./secret-ref.ts";
@@ -12,11 +11,12 @@ export class FileVault implements Vault, SealedStore {
   readonly #dir: string;
   readonly #uid: number;
   readonly #keys: NodeKeys;
-  // The node's keys sit in the Connections home, the vault directory's parent, beside the identity.
-  constructor(dir: string, uid?: number, keys?: NodeKeys) {
+  // The node keys are the root's, built with its records (round 3, points 2 and 9); they sit in the Connections home.
+  constructor(dir: string, keys: NodeKeys, uid?: number) {
+    if (!(keys instanceof NodeKeys)) throw new TypeError("FileVault needs the node keys its root built");
     this.#dir = dir;
+    this.#keys = keys;
     this.#uid = uid ?? process.getuid?.() ?? -1;
-    this.#keys = keys ?? new NodeKeys(dirname(dir), this.#uid);
   }
 
   async seal(ref: string, material: SecretMaterial): Promise<void> {

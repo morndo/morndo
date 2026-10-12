@@ -21,7 +21,7 @@ import { readUsage } from "./adapters/usage-file.ts";
 import { FileVault } from "./adapters/vault-file.ts";
 import { SecretMaterial } from "./adapters/secret-material.ts";
 import { GitWorkspaceRoots } from "./adapters/git-workspaces.ts";
-import { NodeKeys, homeRecords } from "./adapters/node-keys.ts";
+import { NodeKeys, ONLY_EXISTING_KEYS, homeRecords } from "./adapters/node-keys.ts";
 import { SecretIndexWriter, secretIndexPath } from "./adapters/secret-index-writer.ts";
 import { SqliteSecrets } from "./adapters/secrets-sqlite.ts";
 import { SecretsService } from "./application/secrets-service.ts";
@@ -76,7 +76,9 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
   const identity = join(dir, "identity");
   const catalog = new FileCatalog(catalogPath(env));
   const store = new SqliteStore(db);
-  const vault = env.MORNDO_VAULT === "file" ? new FileVault(vaultDir) : new AgeVault(vaultDir, identity);
+  // The Connections commands hold no Secrets records, so they use the node keys there are and never make one.
+  const keys = new NodeKeys(dir, ONLY_EXISTING_KEYS);
+  const vault = env.MORNDO_VAULT === "file" ? new FileVault(vaultDir, keys) : new AgeVault(vaultDir, identity, keys);
   const engines = env.MORNDO_ENGINES_BIN ? new CliEngines(env.MORNDO_ENGINES_BIN, env) : new FileEngines(join(dir, "engines.json"));
   const models = new FileModels(join(dir, "models"));
   const processes = new ProcProcesses();
@@ -116,10 +118,11 @@ export { secretIndexPath };
 export function openSecrets(env: NodeJS.ProcessEnv): SecretsHome {
   const dir = env.MORNDO_CONNECTIONS_HOME ?? join(env.HOME ?? "", ".config/morndo-connections");
   const secrets = new SqliteSecrets(join(dir, "connections.db"));
-  // A node key may be made only while nothing made with it is on record (review 6; round 2, point 1).
-  const keys = new NodeKeys(dir, undefined, homeRecords(dir, () => secrets.load().directory.ledger));
-  const age = env.MORNDO_VAULT === "file" ? null : new AgeVault(join(dir, "vault"), join(dir, "identity"), undefined, keys);
-  const vault = age ?? new FileVault(join(dir, "vault"), undefined, keys);
+  // A node key may be made only while nothing made with it is on record, by the records of the store this root holds
+  // (review 6; round 2, point 1; round 3, points 2, 3 and 9).
+  const keys = new NodeKeys(dir, homeRecords(dir, () => secrets.load().directory.ledger));
+  const age = env.MORNDO_VAULT === "file" ? null : new AgeVault(join(dir, "vault"), join(dir, "identity"), keys);
+  const vault = age ?? new FileVault(join(dir, "vault"), keys);
   const random = (prefix: string) => `${prefix}${randomBytes(8).toString("hex")}`;
   const service = new SecretsService({
     clock: { now: () => Date.now() }, ids: { next: random }, vault,

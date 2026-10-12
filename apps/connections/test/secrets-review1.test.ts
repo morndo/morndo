@@ -17,6 +17,7 @@ import { SecretsService } from "../src/application/secrets-service.ts";
 import { secretIndexPath } from "../src/compose.ts";
 import { VALUE_MAX_BYTES, readSecretIndex } from "@morndo/node-ops";
 import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
+import { NOTHING_ON_RECORD, keysBeside } from "./fixtures/keys.ts";
 
 // Each test runs several real commands (age, SQLite, the index): about 3 s alone, but past the 20 s default in a full run
 // under load (r1-all-units.txt), so 60 s here; what each test checks is unchanged.
@@ -57,7 +58,7 @@ describe("review point 1 (data loss): a command on the plaintext vault never swe
   it("a Secret stored with the age vault, and a Connections key beside it, survive a command run with MORNDO_VAULT=file", async () => {
     const h = home();
     expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
-    await new AgeVault(h.vault, join(h.dir, "identity")).seal("key-example-1-aa", new SecretMaterial(new TextEncoder().encode("synthetic-connection-key")));
+    await new AgeVault(h.vault, join(h.dir, "identity"), keysBeside(join(h.dir, "identity"))).seal("key-example-1-aa", new SecretMaterial(new TextEncoder().encode("synthetic-connection-key")));
     const before = sealed(h.vault);
     expect(before).toHaveLength(2);
     for (const args of [["list"], ["log"], ["recipient"]]) await cli({ ...h.env, MORNDO_VAULT: "file" }, args);
@@ -70,8 +71,8 @@ describe("review point 5 (data loss): the sweep never removes the file of a stor
   it("another process's command runs its sweep between this store's vault write and its commit, and the store still lands", async () => {
     const h = home();
     expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
-    const keys = new NodeKeys(h.dir);
-    const vault = new AgeVault(h.vault, join(h.dir, "identity"), undefined, keys);
+    const keys = new NodeKeys(h.dir, NOTHING_ON_RECORD);
+    const vault = new AgeVault(h.vault, join(h.dir, "identity"), keys);
     const secrets = new SqliteSecrets(join(h.dir, "connections.db"));
     const writer = new SecretIndexWriter(secretIndexPath(h.dir), b => keys.index(b), vault);
     const other: { status: number | null; stderr: string }[] = [];
@@ -103,7 +104,7 @@ describe("review point 5 (data loss): the sweep never removes the file of a stor
   it("a file no version refers to is removed once it is older than the grace period, not before", async () => {
     const h = home();
     expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
-    const vault = new AgeVault(h.vault, join(h.dir, "identity"));
+    const vault = new AgeVault(h.vault, join(h.dir, "identity"), keysBeside(join(h.dir, "identity")));
     const e = new Encrypter();
     e.addRecipient(await vault.recipient());
     const orphan = await e.encrypt(new TextEncoder().encode("synthetic-left-over"));
@@ -137,7 +138,7 @@ describe("review point 6 (fail-open): a missing node key, while hashes made with
   });
   it("NodeKeys refuses to make a key when told hashes made with it are on record", () => {
     const h = home();
-    const keys = new NodeKeys(h.dir, undefined, () => true);
+    const keys = new NodeKeys(h.dir, () => true);
     expect(() => keys.fingerprint(new TextEncoder().encode("synthetic"))).toThrow(/fingerprint\.key is missing/);
     expect(existsSync(join(h.dir, "fingerprint.key"))).toBe(false);
   });
@@ -223,7 +224,7 @@ describe("review point 10: a grease stanza is not a recipient", () => {
   };
   it("this node's recipient plus a rage-style grease stanza is one recipient: stored, and it opens", async () => {
     const h = home();
-    const vault = new AgeVault(h.vault, join(h.dir, "identity"));
+    const vault = new AgeVault(h.vault, join(h.dir, "identity"), keysBeside(join(h.dir, "identity")));
     const sealed = await sealedWith(vault, custom(["q}7-grease", "Ap)", "{x"]));
     expect(recipientStanzas(sealed)).toBe(1);
     expect((await vault.storeSealed("s-00000000000000c1", sealed)).ok).toBe(true);
@@ -231,7 +232,7 @@ describe("review point 10: a grease stanza is not a recipient", () => {
   });
   it("any other second stanza still counts, a known type or not", async () => {
     const h = home();
-    const vault = new AgeVault(h.vault, join(h.dir, "identity"));
+    const vault = new AgeVault(h.vault, join(h.dir, "identity"), keysBeside(join(h.dir, "identity")));
     const other = await identityToRecipient(await generateX25519Identity());
     for (const more of [other, custom(["ssh-ed25519", "Zm9v", "YmFy"]), custom(["grease"]), custom(["x-grease-not"])]) {
       expect(await vault.storeSealed("s-00000000000000c2", await sealedWith(vault, more))).toEqual({ ok: false, problem: "stanzas" });
