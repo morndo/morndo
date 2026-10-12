@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Actor } from "@morndo/domain";
 import { NodeKeys } from "../src/adapters/node-keys.ts";
 import { SecretIndexWriter } from "../src/adapters/secret-index-writer.ts";
@@ -17,6 +17,10 @@ import { SecretsService } from "../src/application/secrets-service.ts";
 import { secretIndexPath } from "../src/compose.ts";
 import { VALUE_MAX_BYTES, readSecretIndex } from "@morndo/node-ops";
 import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
+
+// Each test runs several real commands (age, SQLite, the index): about 3 s alone, but past the 20 s default in a full run
+// under load (r1-all-units.txt), so 60 s here; what each test checks is unchanged.
+vi.setConfig({ testTimeout: 60_000 });
 
 const REF = "secret://example-app/payments-test";
 const OTHER = "secret://example-app/other-token";
