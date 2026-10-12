@@ -168,7 +168,7 @@
     ondragover={e => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragging = true; } }}
     ondragleave={() => (dragging = false)} ondrop={onDrop}>
     <div class="bar">
-      {#each QUICK as q}
+      {#each closed ? [] : QUICK as q}
         <button class="chip" onclick={() => { text = text ? `${text} ${q}` : q; inputEl?.focus(); }}>{q}</button>
       {/each}
       <span class="scope">{scope ?? (targetName === "Manager" ? "Goes to the manager" : `Goes straight to ${targetName}; the manager won't see it`)}</span>

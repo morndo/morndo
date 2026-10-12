@@ -5,7 +5,7 @@
 // feed and a fake send endpoint (harness.ts).
 import type { Page } from "playwright";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { fakeFeed, startWeb, type FeedWin, type Web } from "./harness.ts";
+import { fakeFeed, startWeb, type FeedOptions, type FeedWin, type Web } from "./harness.ts";
 
 // The phone, mounted on its own (as fleet-unavailable-web.test.ts does): signed in with a passkey check just now.
 const PHONE_PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
@@ -23,14 +23,14 @@ beforeAll(async () => { [web, phone] = await Promise.all([startWeb(), startWeb(P
 afterAll(async () => { await Promise.all([web?.close(), phone?.close()]); });
 afterEach(async () => { await tab.context().close(); });
 
-async function open(width: number) {
+async function open(width: number, feed: FeedOptions = { workers: [{ id: "%1", name: "alpha" }] }) {
   const app = width < 900 ? phone : web;
   const context = await app.browser.newContext({ viewport: { width, height: 860 } });
   tab = await context.newPage();
   errors = [];
   posts = [];
   tab.on("pageerror", e => errors.push(e.message));
-  await tab.addInitScript(fakeFeed, { workers: [{ id: "%1", name: "alpha" }] });
+  await tab.addInitScript(fakeFeed, feed);
   await tab.route(/\/api\/(manager|workers\/[^/]+)\/send$/, async route => {
     const body = route.request().postDataJSON() as Record<string, unknown>;
     posts.push({ path: new URL(route.request().url()).pathname, body });
@@ -40,6 +40,10 @@ async function open(width: number) {
   await tab.goto(app.url);
 }
 const push = (m: unknown) => tab.evaluate(x => (globalThis as unknown as FeedWin).__feedPush(x), m);
+// A manager with one answer in its chat, whose window then goes (a restart; staging QA 2026-10-12: the chat went blank).
+const WITH_MANAGER: FeedOptions = { workers: [{ id: "%3", name: "manager" }, { id: "%1", name: "alpha" }],
+  history: { "%3": [{ id: "m1", at: Date.now() - 60_000, author: { kind: "agent", name: "manager" }, kind: "text", text: "the last answer before the restart" }] } };
+const managerGone = () => push({ t: "events", events: [{ epoch: "e1", seq: 1, at: 1, body: { type: "WorkerGone", workerId: "%3" } }] });
 
 describe("the desktop", () => {
   it("lists the manager as not running; with the queue on, a message to it goes to its role, without files", { timeout: 30_000 }, async () => {
@@ -89,9 +93,33 @@ describe("the desktop", () => {
     await tab.locator("article.pending", { hasText: "written while it was gone" }).waitFor();
     expect(errors).toEqual([]);
   });
+  it("when the manager's window goes, its conversation stays on screen, and nothing says where it works", { timeout: 30_000 }, async () => {
+    await open(1400, WITH_MANAGER);
+    await push({ t: "manager", queue: true });
+    await tab.locator("button.row", { hasText: "Manager" }).first().click();
+    await tab.getByText("the last answer before the restart").waitFor();
+    await managerGone();
+    await tab.locator("[data-absent]").waitFor();
+    expect(await tab.getByText("the last answer before the restart").count()).toBe(1);
+    expect(await tab.getByText("Working in").count()).toBe(0);
+    expect(await tab.getByText("Beginning of conversation").count()).toBe(0);
+    expect(errors).toEqual([]);
+  });
 });
 
 describe("the phone", () => {
+  it("when the manager's window goes, its conversation stays on screen", { timeout: 30_000 }, async () => {
+    await open(390, WITH_MANAGER);
+    await push({ t: "manager", queue: true });
+    await tab.locator('[data-chat="manager"]').click();
+    const convo = tab.getByRole("region", { name: "Conversation with Manager" });
+    await convo.getByText("the last answer before the restart").waitFor();
+    await managerGone();
+    await convo.locator("[data-absent]").waitFor();
+    expect(await convo.getByText("the last answer before the restart").count()).toBe(1);
+    expect(errors).toEqual([]);
+  });
+
   it("lists the manager pinned and not running; its chat says a message waits, and sends to its role", { timeout: 30_000 }, async () => {
     await open(390);
     await tab.locator('[data-chat="alpha"]').waitFor();

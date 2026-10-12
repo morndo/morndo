@@ -147,6 +147,8 @@ export class LiveFeed {
   #epoch: string | null = null;
   #seq = 0;
   #watching: string | null = null;
+  #lastManager: string | null = null;      // the manager's window before it went: its conversation stays while it is gone
+  #managerSaid: { id: string; messages: Message[] } | null = null;
   // The socket's lifecycle: app-level ping, wake, backoff, offline (connection.ts, ADR-0008 phase B).
   #conn = new FeedConnection({
     open: () => {
@@ -231,12 +233,19 @@ export class LiveFeed {
     if (this.#watching === worker) return;
     this.#watching = worker;
     if (this.screen && this.screen.worker !== worker) this.screen = null;
+    // The manager going away (a restart) leaves its conversation on its row until it is back (staging QA, 2026-10-12):
+    // kept when it is left, as the phone leaves it (its chat closes for the window, then opens for the row).
+    if (this.historyFor !== null && this.historyFor === this.#lastManager) this.#managerSaid = { id: this.historyFor, messages: this.messages };
     if (this.historyFor !== worker) { this.messages = []; this.historyFor = null; this.session = null; }
     this.older = NO_OLDER;
     this.detached = false;
     this.newWhileDetached = 0;
-    // The manager with no window has nothing to show yet, and the hub knows no worker of that id: nothing is asked.
-    if (worker === ABSENT_MANAGER) { this.historyFor = worker; this.older = { loading: false, done: true, failed: false }; return; }
+    // The manager with no window: the hub knows no worker of that id, so nothing is asked, and no older page is read.
+    if (worker === ABSENT_MANAGER) {
+      if (this.#managerSaid?.id === this.#lastManager) this.messages = this.#managerSaid.messages;
+      this.historyFor = worker;
+      return;
+    }
     this.#send({ t: "watch", worker });
   }
 
@@ -326,12 +335,14 @@ export class LiveFeed {
   askDetails(worker: string) { if (worker !== ABSENT_MANAGER) this.#send({ t: "details", worker }); }
 
   #send(m: unknown): boolean { return this.#conn.send(m); }
+  #noteManager() { const m = this.workers.find(w => w.name === MANAGER); if (m) this.#lastManager = m.id; }
 
   #onMessage(m: ServerFeedFrame) {
     switch (m.t) {
       case "snapshot":
         this.#epoch = m.epoch;
         this.#seq = m.seq;
+        this.#noteManager();
         this.workers = m.workers;
         this.status = "live";
         break;
@@ -567,6 +578,7 @@ export class LiveFeed {
         break;
       }
       case "WorkerGone":
+        this.#noteManager();
         this.workers = this.workers.filter(w => w.id !== b.workerId);
         if (this.#watching === b.workerId) this.screen = null;
         break;

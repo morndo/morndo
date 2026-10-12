@@ -17,6 +17,7 @@
   import { canCancel, canEdit, canRetry, type OutboxRecord } from "../outbox/state.ts";
   import { fileSize, fileType, type SentFile } from "../attach.ts";
   import { deliveryNote, sendLabel, sendReason } from "../outbox/words.ts";
+  import { ABSENT_MANAGER } from "../manager.ts";
   import { dividerBefore, scrollAnchor, showJump, type Anchor, type TimelineChange } from "./timeline.ts";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
 
@@ -184,8 +185,12 @@
   <div class="intro">
     <div class="big">{#if worker.name === "manager"}<Avatar name="Manager" kind="peer" size={72} />{:else}<Avatar name={worker.name} size={72} />{/if}</div>
     <h2>{displayName}</h2>
-    <p>{worker.title ?? "An agent working on this machine."}</p>
-    <p class="meta">Working in <strong>{worker.location}</strong>. You see its answers here; the raw terminal is under Screen.</p>
+    {#if worker.id === ABSENT_MANAGER}
+      <p>Not running right now.</p>
+    {:else}
+      <p>{worker.title ?? "An agent working on this machine."}</p>
+      <p class="meta">Working in <strong>{worker.location}</strong>. You see its answers here; the raw terminal is under Screen.</p>
+    {/if}
   </div>
 
   <div class="older-top" bind:this={top}></div>
