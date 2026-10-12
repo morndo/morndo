@@ -35,15 +35,21 @@ const NOTE_LABELS = new Set(["Note"]);
 
 const problem = (code: string, where: string, text: string): BriefProblem => ({ level: "error", code, where, text });
 
+// GFM tables, spec §4.10 (https://github.github.com/gfm/#tables-extension-, read 2026-10-13).
+// A leading or trailing pipe is optional (example 199). A delimiter cell is one or more hyphens,
+// with an optional colon on either side (`:-:`, `|-|`).
 function cellsOf(line: string): string[] | null {
   const t = line.trim();
-  if (!t.startsWith("|")) return null;
-  return t.replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+  if (!t.includes("|")) return null;
+  let s = t;
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|")) s = s.slice(0, -1);
+  return s.split("|").map(c => c.trim());
 }
 
 function isRule(line: string): boolean {
   const cells = cellsOf(line);
-  return cells !== null && cells.length > 0 && cells.every(c => /^:?-{3,}:?$/.test(c));
+  return cells !== null && cells.length > 0 && cells.every(c => /^:?-+:?$/.test(c));
 }
 
 // A labelled line, then its continuation (wrapped prose joined with a space; a list stays items). The prose before
