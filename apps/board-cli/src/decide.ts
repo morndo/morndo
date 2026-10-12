@@ -59,6 +59,7 @@ function explain(error: string): string {
 }
 
 const problemLine = (p: BriefProblem) => `${p.level} ${p.code} (${p.where}): ${p.text}`;
+const asText = (v: unknown) => typeof v === "string" || typeof v === "number" ? String(v) : "";
 
 class Usage extends Error {}
 class Refused extends Error { constructor(message: string) { super(message); this.name = "Refused"; } }
@@ -167,7 +168,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const { status, data } = await call("POST", "/api/agent/decisions", body);
         if (status === 422 || !status.toString().startsWith("2")) refused(data);
         warn(data);
-        io.out(String(data.id));
+        io.out(asText(data.id));
         return 0;
       }
       case "restate": {
@@ -176,7 +177,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const { status, data } = await call("PUT", `/api/agent/decisions/${id}`, body);
         if (status === 422 || !status.toString().startsWith("2")) refused(data);
         warn(data);
-        io.out(`${data.id}  v${data.version}`);
+        io.out(`${asText(data.id)}  v${asText(data.version)}`);
         return 0;
       }
       case "show": {

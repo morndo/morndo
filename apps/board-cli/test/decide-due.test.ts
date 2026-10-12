@@ -30,7 +30,8 @@ describe("morndo-decide and a date-only due", () => {
     let sent = "";
     const post: Io = {
       fetch: async (_url, init) => {
-        sent = String(init?.body ?? "");
+        const body = init?.body;
+        sent = typeof body === "string" ? body : "";
         return new Response(JSON.stringify({ id: "d-1", version: 1, warnings: [] }), { status: 201, headers: { "content-type": "application/json" } });
       },
       lane: async () => "builder",

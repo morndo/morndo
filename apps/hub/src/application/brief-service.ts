@@ -14,7 +14,14 @@ import type { EscalationService } from "./escalation-service.ts";
 const MAX_OPEN = 20;
 const WHY_CAP = 300;
 const REF = /^ny-[A-Za-z0-9_-]{1,29}$/;
-const CONTROL = /[\u0000-\u0008\u000B\u000C\u000D-\u001F\u007F]/;
+// C0 controls and DEL, except tab and newline. Checked by code point so the pattern is not a control-character regex.
+const hasControl = (text: string) => {
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c <= 8 || c === 11 || c === 12 || (c >= 13 && c <= 31) || c === 127) return true;
+  }
+  return false;
+};
 
 // What one poll sights. `ref` set: this joins that list item (the list decides E10) instead of a hub-tracked ask.
 // `closed`: the asker withdrew or settled it, so the Ask is settled even when the list still has it.
@@ -252,7 +259,7 @@ export class BriefService {
     const t = text.trim();
     if (!t) return optional ? "" : { problem: "reason_needed" };
     if (t.length > WHY_CAP) return { problem: "too_long" };
-    if (CONTROL.test(t)) return { problem: "bad_text" };
+    if (hasControl(t)) return { problem: "bad_text" };
     return t;
   }
 
