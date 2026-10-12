@@ -23,6 +23,8 @@ export type Transcriber = {
 
 export type ContractSubject = {
   transcriber: Transcriber;
+  /** True once the run is in progress, so an abort lands after it started. A process adapter uses group() instead. */
+  started?: () => boolean;
   /** Pids the adapter started for the run in progress. Absent for an in-memory fake. */
   group?: () => readonly number[];
 };
@@ -90,8 +92,12 @@ export function transcriberContract(make: () => ContractSubject): void {
     });
 
     it("an abort mid-run ends with no text", async () => {
+      const { transcriber, started, group } = make();
       const ac = new AbortController();
-      const pending = make().transcriber.transcribe(call("/audio/hang.wav", ac.signal));
+      const pending = transcriber.transcribe(call("/audio/hang.wav", ac.signal));
+      const began = group ? () => group().length > 0 : started;
+      if (!began) throw new Error("abort mid-run needs started() or group()");
+      expect(await until(began, 2000)).toBe(true);
       ac.abort();
       const outcome = await settle(pending, 500);
       expect(outcome.kind).toBe("error");
