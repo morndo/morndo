@@ -1484,7 +1484,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/connections/test/secrets-review2.test.ts"], expect: "put of a 4-byte value" },
   { id: "sp2b-r2p1-index-hashes", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
     find: ".versions.some(v => v.entries.length > 0);", replace: ".versions.some(() => false);",
-    run: ["apps/connections/test/secrets-review2.test.ts"], expect: "still stops the command" },
+    run: ["apps/connections/test/secrets-review2.test.ts", "apps/connections/test/secrets-review3.test.ts"], expect: "a revoked one's hashes still in the index" },
   { id: "sp2b-r2p25-sealed-form", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-ref.ts",
     find: "values: [secretPath(dir, ref), secretPath(dir, ref, SEALED_SUFFIX)]", replace: "values: [secretPath(dir, ref)]",
     run: ["apps/connections/test/secrets-review2.test.ts"], expect: "removes the sealed file the age vault wrote" },

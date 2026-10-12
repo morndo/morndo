@@ -61,6 +61,16 @@ describe("round 3, point 3: a lost index key is refused while the ledger holds a
     expect(existsSync(join(h.dir, "index.key"))).toBe(false);
     expect(sealed(h.vault)).toHaveLength(1);
   });
+  it("no current version, but a revoked one's hashes still in the index (its 30 days): a lost index key is refused (70)", async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-of-32-bytes-0003")).code).toBe(0);
+    expect((await cli(h.env, ["revoke", REF], { typed: REF })).code).toBe(0);
+    rmSync(join(h.dir, "index.key"));
+    const r = await put(h.env, "synthetic-long-value-two", OTHER);
+    expect(r.code, r.stderr).toBe(70);
+    expect(r.stderr).toMatch(/index\.key is missing/);
+    expect(existsSync(join(h.dir, "index.key"))).toBe(false);
+  });
 });
 
 // The Connections CLI (morndo-keys) on the same home, for the points about its vault/ directory.
