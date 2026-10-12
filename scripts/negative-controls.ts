@@ -1007,7 +1007,7 @@ export const CONTROLS: Control[] = [
   { id: "dg2-claimant-evidence-counts", task: "DG2", file: "packages/domain/src/digest.ts",
     find: `if (e.result !== "pass" || !independentOf(e.producer, claimants)) continue;`,
     replace: `if (e.result !== "pass") continue;`,
-    run: ["packages/domain/test/digest.test.ts"], expect: "expected 'claimed' to be 'checked'" },
+    run: ["packages/domain/test/digest.test.ts"], expect: "expected 'checked' to be 'claimed'" },
   { id: "dg3-fail-beats-pass", task: "DG3", file: "packages/domain/src/digest.ts",
     find: `if (current.some(e => e.result === "fail") || s.reverted || s.rolledBack || s.reopened) level = "failed";`,
     replace: `if (s.reverted || s.rolledBack || s.reopened) level = "failed";`,
