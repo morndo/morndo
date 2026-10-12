@@ -137,7 +137,7 @@ describe("review point 6 (fail-open): a missing node key, while hashes made with
   });
   it("NodeKeys refuses to make a key when told hashes made with it are on record", () => {
     const h = home();
-    const keys = new NodeKeys(h.dir, undefined, () => false);
+    const keys = new NodeKeys(h.dir, undefined, () => true);
     expect(() => keys.fingerprint(new TextEncoder().encode("synthetic"))).toThrow(/fingerprint\.key is missing/);
     expect(existsSync(join(h.dir, "fingerprint.key"))).toBe(false);
   });

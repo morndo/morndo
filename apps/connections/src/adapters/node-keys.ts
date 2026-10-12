@@ -5,20 +5,35 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { readSecretIndex } from "@morndo/node-ops";
 import { readPrivate, writeNew } from "./file-mode.ts";
+import { secretIndexPath } from "./secret-index-writer.ts";
 
 const KEY_BYTES = 32;
+
+export type NodeKey = "fingerprint.key" | "index.key";
+// Whether anything made with a key is on record: then a missing key file must be restored, never made anew (review 6).
+// One answer per key, as each has its own records (round 2, point 1).
+export type KeyRecords = (key: NodeKey) => boolean;
+
+// The records of a Connections home: the ledger's keyed fingerprints for the fingerprint key, and for the index key the
+// index file's hashes, which only a value of 8 bytes or more makes; so a node whose first value was shorter still makes
+// its index key on the first value that is indexed. An index file it can't read is refused (IndexFileRefused), never taken
+// as empty.
+export function homeRecords(dir: string, ledger: () => boolean, uid?: number): KeyRecords {
+  return key => key === "fingerprint.key" ? ledger() : readSecretIndex(secretIndexPath(dir), uid).versions.some(v => v.entries.length > 0);
+}
 
 export class NodeKeys {
   readonly #dir: string;
   readonly #uid: number;
-  readonly #mayCreate: () => boolean;
-  // `mayCreate` says whether a missing key may be made: only while nothing made with it is on record (review 6). A new
-  // key would let a revoked value in again under a new fingerprint and blind the output filter to every indexed value.
-  constructor(dir: string, uid?: number, mayCreate: () => boolean = () => true) {
+  readonly #onRecord: KeyRecords;
+  // A missing key is made only while nothing made with it is on record (review 6): a new key would let a revoked value in
+  // again under a new fingerprint and blind the output filter to every indexed value.
+  constructor(dir: string, uid?: number, onRecord: KeyRecords = () => false) {
     this.#dir = dir;
     this.#uid = uid ?? process.getuid?.() ?? -1;
-    this.#mayCreate = mayCreate;
+    this.#onRecord = onRecord;
   }
 
   // The keyed fingerprint (SC2): the first 12 hex characters of HMAC-SHA-256 under the fingerprint key.
@@ -32,10 +47,10 @@ export class NodeKeys {
   }
 
   // Read each time, so a key file loosened or swapped since is refused, not used from memory.
-  #key(name: string): Uint8Array {
+  #key(name: NodeKey): Uint8Array {
     const path = join(this.#dir, name);
     if (!existsSync(path)) {
-      if (!this.#mayCreate()) {
+      if (this.#onRecord(name)) {
         throw new Error(`${path} is missing while hashes made with it are on record: restore it from where the identity is kept; a new key would let a revoked value in again and blind the output filter`);
       }
       writeNew(path, new Uint8Array(randomBytes(KEY_BYTES)), this.#uid);

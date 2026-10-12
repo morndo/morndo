@@ -6,7 +6,11 @@ import {
   indexValue, pruneIndex, readSecretIndex, retireVersion, serializeIndex, withVersion, type IndexEntry, type Keyed,
 } from "@morndo/node-ops";
 import type { IndexChange, IndexWriter, PreparedIndex } from "../application/ports.ts";
+import { join } from "node:path";
 import { writePrivate } from "./file-mode.ts";
+
+// The index the node's output paths read, in the Connections home (design §8.1; packages/node-ops secret-index-file.ts).
+export const secretIndexPath = (dir: string) => join(dir, "secret-index.json");
 
 // The vault's `open`, structurally: this file must not import the secret material's class (architecture test).
 type Opener = { open(ref: string): Promise<{ bytes(): Uint8Array }> };
