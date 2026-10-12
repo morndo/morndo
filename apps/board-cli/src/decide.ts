@@ -40,7 +40,8 @@ function explain(error: string): string {
   switch (error) {
     case "not_allowed": return "only the manager may do that";
     case "unknown": return "no such request";
-    case "bad_ref": return "ref must be a list id like ny-400";
+    case "due_past": return "the due date has passed; restate it before forwarding";
+    case "no_ledger": return "this hub has no list, so a ref cannot be answered";
     case "ref_taken": return "that ref is already a request";
     case "too_many_open": return "20 open requests already; settle or withdraw one first";
     case "not_open": return "that request is not open";

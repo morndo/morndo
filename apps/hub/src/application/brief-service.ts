@@ -206,6 +206,8 @@ export class BriefService {
     const row = this.#store.brief(id);
     if (!row) return { ok: false, problem: "unknown" };
     if (row.state !== "draft") return { ok: false, problem: "not_open" };
+    const now = this.#now();
+    if (lintBrief(row.brief, now).problems.some(p => p.code === "due_past")) return { ok: false, problem: "due_past" };
     const ref = row.brief.ref;
     if (ref !== null && !REF.test(ref)) return { ok: false, problem: "bad_ref" };
     if (ref !== null) {
