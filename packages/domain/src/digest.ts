@@ -310,7 +310,10 @@ export function markAllSeen(mark: DigestMark | null, items: readonly SeenAt[], c
   for (const it of [...items].sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : 1))) {
     if (it.seq <= base) continue;
     const seenAt = prior.get(it.id);
-    if (!shown.has(it.id) && (seenAt === undefined || seenAt.seq !== it.seq)) break;
+    // DG7, DG8: a prior seen entry covers this line only when nothing about it changed — the same sequence, level
+    // and section. A changed item behind "N more" was not covered, so the mark stops.
+    const unchanged = seenAt !== undefined && seenAt.seq === it.seq && seenAt.level === it.level && seenAt.section === it.section;
+    if (!shown.has(it.id) && !unchanged) break;
     walked.push(it);
     seq = it.seq;
   }
