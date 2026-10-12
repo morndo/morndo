@@ -62,7 +62,11 @@ function heard(language: string): EngineText {
 }
 
 export class MemoryTranscriber implements Transcriber {
-  constructor(private readonly clock = new ManualClock()) {}
+  private readonly clock: ManualClock;
+
+  constructor(clock?: ManualClock) {
+    this.clock = clock ?? new ManualClock();
+  }
 
   probe(): Promise<TranscriberProbe> {
     return Promise.resolve({
