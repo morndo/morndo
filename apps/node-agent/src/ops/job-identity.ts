@@ -45,12 +45,20 @@ function ticksPerSec(): number | null {
   } catch { return null; }
 }
 
-function observedStartMs(pid: number): number | null {
+// What writeProcessFile reads: a /proc file's text, null when it cannot be read, and the wall clock. Tests pass both.
+export type ProcessFileIo = { read?: (path: string) => string | null; now?: () => number };
+
+const readText = (path: string): string | null => {
+  try { return readFileSync(path, "utf8"); } catch { return null; }
+};
+
+function observedStartMs(pid: number, read: (path: string) => string | null): number | null {
   try {
     const hz = ticksPerSec();
     if (hz === null) throw new Error("clk");
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const proc = readFileSync("/proc/stat", "utf8");
+    const stat = read(`/proc/${pid}/stat`);
+    const proc = read("/proc/stat");
+    if (stat === null || proc === null) throw new Error("proc");
     const ms = startMsFromProc(stat, proc, hz);
     if (ms !== null) return ms;
   } catch { /* the ps line below is the fallback */ }
@@ -65,10 +73,11 @@ function observedStartMs(pid: number): number | null {
 }
 
 // Writes the identity before returning. A start outside the spawn window is a reused pid and is not recorded.
-export function writeProcessFile(path: string, pid: number, spawnedAt: number): void {
-  const before = processIdentity(pid);
-  const started = observedStartMs(pid);
-  const after = processIdentity(pid);
+export function writeProcessFile(path: string, pid: number, spawnedAt: number, io: ProcessFileIo = {}): void {
+  const read = io.read ?? readText;
+  const before = processIdentity(pid, read);
+  const started = observedStartMs(pid, read);
+  const after = processIdentity(pid, read);
   if (before && after && (before.ticks !== after.ticks || before.bootId !== after.bootId)) return;
   if (started === null || Math.abs(started - spawnedAt) > SPAWN_WINDOW_MS) return;
   const ident = before ?? after;
