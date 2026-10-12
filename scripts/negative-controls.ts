@@ -1327,6 +1327,9 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-cli-short-warns", task: "secrets-pr2b", file: "apps/connections/src/secrets-cli.ts",
     find: "  if (!r.value.indexed) io.stderr(", replace: "  if (false) io.stderr(",
     run: ["apps/connections/test/secrets-cli.test.ts"], expect: "not indexed" },
+  { id: "sp2b-real-store-revoked", task: "secrets-pr2b", file: "apps/connections/src/adapters/secrets-sqlite.ts",
+    find: "this.#updateVersion.run(e.state, ref, e.reference, e.version);", replace: "this.#updateVersion.run(old.state, ref, e.reference, e.version);",
+    run: ["apps/connections/test/secrets-service-sqlite.test.ts"], expect: "criterion 12" },
 ];
 
 // ---- the runner
