@@ -3,7 +3,8 @@
 import { createHmac } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  emptySecretIndex, indexValue, liveEntries, parseIndex, pruneIndex, retireVersion, scan, serializeIndex, withVersion, type IndexEntry,
+  INDEX_FORM_MAX, VALUE_MAX_BYTES, emptySecretIndex, indexValue, liveEntries, parseIndex, pruneIndex, retireVersion, scan, serializeIndex,
+  withVersion, type IndexEntry,
 } from "../src/secret-scan.ts";
 
 const KEY = new Uint8Array(32).fill(6);
@@ -72,5 +73,22 @@ describe("check review, point 4: a value written by Python's default quote or by
   it("both with lower-case escapes", () => {
     expect(found(lower(PY_QUOTE_DEFAULT))).toBe(true);
     expect(found(lower(encodeURI(VALUE)))).toBe(true);
+  });
+});
+
+describe("PR #40 review, point 2: a value the index file couldn't hold is not indexed, and the two limits agree", () => {
+  it("at VALUE_MAX_BYTES, the worst case (control bytes: six JSON bytes each) indexes, and its index reads back", () => {
+    const value = new Uint8Array(VALUE_MAX_BYTES).fill(1);
+    const r = indexValue(value, keyed);
+    if (r.kind !== "indexed") throw new Error(r.kind);
+    let longest = 0;
+    for (const e of r.entries) longest = Math.max(longest, e.length);
+    expect(longest).toBe(6 * VALUE_MAX_BYTES);
+    expect(longest).toBeLessThanOrEqual(INDEX_FORM_MAX);
+    const index = withVersion(emptySecretIndex(), REF, 1, r.entries);
+    expect(parseIndex(serializeIndex(index))).toEqual(index);
+  });
+  it("one byte more is too large to index", () => {
+    expect(indexValue(new Uint8Array(VALUE_MAX_BYTES + 1).fill(1), keyed)).toEqual({ kind: "too_large" });
   });
 });

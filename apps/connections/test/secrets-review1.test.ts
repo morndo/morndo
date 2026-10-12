@@ -14,6 +14,7 @@ import { AgeVault } from "../src/adapters/vault-age.ts";
 import { GitWorkspaceRoots } from "../src/adapters/git-workspaces.ts";
 import { SecretsService } from "../src/application/secrets-service.ts";
 import { secretIndexPath } from "../src/compose.ts";
+import { VALUE_MAX_BYTES, readSecretIndex } from "@morndo/node-ops";
 import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
 
 const REF = "secret://example-app/payments-test";
@@ -138,3 +139,19 @@ describe("review point 6 (fail-open): a missing node key, while hashes made with
     expect(existsSync(join(h.dir, "fingerprint.key"))).toBe(false);
   });
 });
+
+describe("review point 2: a value too large for the index is refused at put, before anything is stored", () => {
+  it("VALUE_MAX_BYTES + 1 bytes is refused and leaves no vault file; VALUE_MAX_BYTES is stored and the index still reads", async () => {
+    const h = home();
+    const worst = (n: number) => "\u0001".repeat(n);
+    const big = await cli(h.env, ["put", REF, "--raw"], { stdin: worst(VALUE_MAX_BYTES + 1), typed: REF });
+    expect(big.code).toBe(1);
+    expect(big.stderr).toContain("too_large");
+    expect(existsSync(h.vault) ? sealed(h.vault) : []).toEqual([]);
+    const max = await cli(h.env, ["put", REF, "--raw"], { stdin: worst(VALUE_MAX_BYTES), typed: REF });
+    expect(max.code, max.stderr).toBe(0);
+    expect(readSecretIndex(secretIndexPath(h.dir)).versions).toHaveLength(1);
+    expect((await put(h.env, "synthetic-value-two", OTHER)).code).toBe(0);
+  });
+});
+

@@ -122,6 +122,10 @@ export function encodedForms(value: Uint8Array): EncodedForm[] {
 export type Keyed = (bytes: Uint8Array) => Uint8Array;
 // The scanner's window, and the floor: a value under 8 bytes is not indexed (design §8.1), so every form is at least this.
 export const SCAN_WINDOW = 8;
+// The longest form the index file takes (parseIndex), and the largest value indexed. A control byte written as JSON's
+// \uXXXX is the widest form, six bytes for one, so every form of a value of VALUE_MAX_BYTES fits (review 2 of PR #40).
+export const INDEX_FORM_MAX = 1 << 20;
+export const VALUE_MAX_BYTES = 64 * 1024;
 // `head` is the keyed hash of the form's first SCAN_WINDOW bytes, `full` of the whole form, both hex.
 export type IndexEntry = {
   encoding: SecretEncoding; alignment: 0 | 1 | 2 | null; length: number; head: string; full: string; before: number; after: number;

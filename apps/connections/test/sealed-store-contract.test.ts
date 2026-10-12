@@ -9,6 +9,7 @@ import type { SealedStore } from "../src/application/ports.ts";
 import { FileRefused, durable } from "../src/adapters/file-mode.ts";
 import { SecretMaterial } from "../src/adapters/secret-material.ts";
 import { AgeVault } from "../src/adapters/vault-age.ts";
+import { VALUE_MAX_BYTES } from "@morndo/node-ops";
 import { FileVault } from "../src/adapters/vault-file.ts";
 import { MemorySealedStore } from "./sealed-store-fake.ts";
 
@@ -146,6 +147,13 @@ for (const adapter of ADAPTERS) {
         expect(s.store.has("s-0007")).toBe(false);
         expect(await s.store.keyedFingerprint("s-0007")).toBeNull();
         if (s.files) expect(readdirSync(s.files.vault)).toEqual([]);
+      });
+      it("review 2: a value over VALUE_MAX_BYTES is refused as too_large, and nothing is written", async () => {
+        const s = await adapter.make();
+        const big = new Uint8Array(VALUE_MAX_BYTES + 1).fill(0x61);
+        expect(await s.store.storeSealed("s-0015", await s.seal(big))).toEqual({ ok: false, problem: "too_large" });
+        expect(s.store.has("s-0015")).toBe(false);
+        expect((await s.store.storeSealed("s-0016", await s.seal(big.subarray(1)))).ok).toBe(true);
       });
       it("a replace under one ref leaves the newer value", async () => {
         const s = await adapter.make();

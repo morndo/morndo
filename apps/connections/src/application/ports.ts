@@ -131,7 +131,7 @@ export type Ids = { next(prefix: string): string };
 
 // Why a sealed value was refused before anything was written: not an age file, a header with other than one recipient
 // stanza, a file this node's identity doesn't open, or a vault that would keep it as plaintext (decided on T-85).
-export type SealedProblem = "not_age" | "stanzas" | "foreign" | "plaintext_vault";
+export type SealedProblem = "not_age" | "stanzas" | "foreign" | "plaintext_vault" | "too_large";
 export type SealedStore = {
   // Checks the age file and writes it as received under `ref`, by temp file and rename. Returns the value's keyed
   // fingerprint (HMAC-SHA-256 under the node's fingerprint key, 12 hex), never the value.
