@@ -62,6 +62,14 @@ describe("plugin protocol 1", () => {
     expect(RunDocument.safeParse({ ...RUN, language: "pt-BR" }).success).toBe(true);
   });
 
+  it("accepts a probe that offers more than the recording cap; the hub keeps the lower", () => {
+    const high = { ...PROBE, maxSeconds: 1800 };
+    expect(parseProbe(JSON.stringify(high))).toEqual({ ok: true, value: high });
+    expect(parseProbe(JSON.stringify({ ...PROBE, maxSeconds: 24 * 60 * 60 })).ok).toBe(true);
+    expect(parseProbe(JSON.stringify({ ...PROBE, maxSeconds: 24 * 60 * 60 + 1 }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseBody(MeTranscription, { engine: "fixture-ear", model: "tiny-fixture", languages: "multi", maxSeconds: 1800 })).toBeNull();
+  });
+
   it("takes ids, languages and problems from the domain instead of restating them", () => {
     const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
     expect(src).toContain("TRANSCRIPTION_ID");
