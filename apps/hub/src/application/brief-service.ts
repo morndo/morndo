@@ -109,7 +109,7 @@ export class BriefService {
   file(body: { kind: "markdown"; text: string } | { kind: "json"; value: unknown }, actor: BoardActor, dry: boolean): FileResult {
     const who = filer(actor);
     if (!who) return { ok: false, problem: "not_allowed" };
-    const { draft, problems } = body.kind === "markdown" ? parseBriefMarkdown(body.text) : { draft: body.value, problems: [] as BriefProblem[] };
+    const { draft, problems } = body.kind === "markdown" ? parseBriefMarkdown(body.text, this.#zone()) : { draft: body.value, problems: [] as BriefProblem[] };
     return this.#accept(draft, problems, who, dry, null);
   }
 
@@ -120,7 +120,7 @@ export class BriefService {
     if (!row || !this.#canSee(row, who)) return { ok: false, problem: "unknown" };
     if (!this.#isAsker(row, who)) return { ok: false, problem: "not_allowed" };
     if (row.state !== "open" && row.state !== "draft") return { ok: false, problem: "not_open" };
-    const { draft, problems } = body.kind === "markdown" ? parseBriefMarkdown(body.text) : { draft: body.value, problems: [] as BriefProblem[] };
+    const { draft, problems } = body.kind === "markdown" ? parseBriefMarkdown(body.text, this.#zone()) : { draft: body.value, problems: [] as BriefProblem[] };
     return this.#accept(draft, problems, who, dry, row);
   }
 
@@ -253,6 +253,11 @@ export class BriefService {
     if (t.length > WHY_CAP) return { problem: "too_long" };
     if (CONTROL.test(t)) return { problem: "bad_text" };
     return t;
+  }
+
+  #zone(): string {
+    const z = this.#store.setting<string>("time_zone");
+    return typeof z === "string" && z.trim() ? z.trim() : "UTC";
   }
 
   // Open, settled and expired rows hold the ref. A draft never does, and neither does a withdrawn or declined row.
