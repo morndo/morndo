@@ -429,6 +429,12 @@ describe("the mark (DG7)", () => {
     expect(mergeMarks({ seq: 7, seen: [y] }, null)).toEqual({ seq: 7, seen: [y] });
     expect(mergeMarks(null, null)).toBeNull();
   });
+  it("an item seen on both devices keeps its newer entry, whichever mark carries it (§4)", () => {
+    const x5: SeenAt = { id: "x", seq: 5, level: "claimed", section: "done" };
+    const x8: SeenAt = { ...x5, seq: 8, level: "checked", section: "merged" };
+    expect(mergeMarks({ seq: 3, seen: [x8] }, { seq: 2, seen: [x5] })).toEqual({ seq: 3, seen: [x8] });
+    expect(mergeMarks({ seq: 3, seen: [x5] }, { seq: 2, seen: [x8] })).toEqual({ seq: 3, seen: [x8] });
+  });
 });
 
 // ---- DG8: new while above the mark and unseen; changed after seen, new again
