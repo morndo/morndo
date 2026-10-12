@@ -490,6 +490,31 @@ describe("new since the last look (DG8)", () => {
     });
     expect(one(d, "T-12")).toMatchObject({ level: "claimed", fresh: true, changed: null });
   });
+  it("a link or an assignment that changes the claimants raises the item's sequence (DG8)", () => {
+    // Reviewed at seq 9 by a lane that is not a claimant. The mark is 15. The reviewer then links the change,
+    // or is assigned the linked task: the level drops to claimed, and that record's sequence makes it new.
+    const c7 = change("acme/web", 7);
+    const a1 = rev("sha-a1", "patch-1");
+    const reviewed: Partial<DigestInput> = {
+      mark: { seq: 15, seen: [] },
+      states: [state(c7, { revision: a1 })],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
+      events: [event("merged", c7, 8, NOW - 8)],
+      stale: [{ kind: "task_in_review", task: taskKey(3), since: NOW - 9 * HOUR }],
+    };
+    const linked = digest({
+      ...reviewed,
+      links: [{ task: taskKey(3), target: c7, by: "reviewer", at: NOW - MIN, seq: 20 }],
+    });
+    expect(one(linked, "T-3")).toMatchObject({ level: "claimed", seq: 20, fresh: true });
+    const assigned = digest({
+      ...reviewed,
+      links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 20, seq: 3 }],
+      assignments: [{ task: taskKey(3), lane: "reviewer", seq: 20, at: NOW - MIN }],
+    });
+    expect(one(assigned, "T-3")).toMatchObject({ level: "claimed", seq: 20, fresh: true });
+  });
 });
 
 // ---- DG9: a rebuild gives the same answer; counts are counts
