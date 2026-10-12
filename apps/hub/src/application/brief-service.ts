@@ -167,8 +167,9 @@ export class BriefService {
     const who = filer(actor);
     if (!who) return { ok: false, problem: "not_allowed" };
     this.#refresh();
+    const board = this.#escalations.board();
     const rows = this.#store.currentBriefs().filter(r => this.#listed(r, who, o.drafts));
-    const requests = rows.filter(r => !o.open || r.state === "open").map(r => this.#summary(r));
+    const requests = rows.filter(r => !o.open || r.state === "open").map(r => this.#summary(r, board));
     return { ok: true, requests };
   }
 
@@ -178,7 +179,7 @@ export class BriefService {
     this.#refresh();
     const row = this.#store.brief(id);
     if (!row || !this.#canSee(row, who)) return { ok: false, problem: "unknown" };
-    return { ok: true, request: { ...this.#summary(row), brief: row.brief } };
+    return { ok: true, request: { ...this.#summary(row, this.#escalations.board()), brief: row.brief } };
   }
 
   withdraw(actor: BoardActor, id: string, why: string): BriefAction {
@@ -296,8 +297,8 @@ export class BriefService {
     return row.askerKind === "manager" && row.askerName === who.name;
   }
 
-  #summary(row: BriefRecord): BriefSummary {
-    const onBoard = this.#escalations.board().items.find(i => i.id === row.id);
+  #summary(row: BriefRecord, board: ReturnType<EscalationService["board"]>): BriefSummary {
+    const onBoard = board.items.find(i => i.id === row.id);
     let status: BriefSummary["status"] = row.state;
     if (row.state === "open" && onBoard && (onBoard.status === "settled" || onBoard.status === "expired")) status = onBoard.status;
     const choice = onBoard?.decision?.choice ?? null;
