@@ -12,7 +12,7 @@ import {
   err, ok,
   type FinishEvent, type FinishProblem, type Guard, type Job, type NotifyTarget, type Result, type StartProblem,
 } from "@morndo/domain";
-import { deniedBy, denyRoots, processAlive, resolvedRoots } from "@morndo/node-ops";
+import { deniedBy, denyRoots, processAlive, resolvedRoots, type ProcessStart } from "@morndo/node-ops";
 import { errno } from "@morndo/service-kit";
 import { psStarts, readRecorded, sameProcess, START_RECORD_GRACE_MS, writeProcessFile, type Recorded } from "./job-identity.ts";
 import { capStep, endedBeforeStop, monotonicUsec, UNIT_CAP_LOOK_MS, type CapSight } from "./job-cap.ts";
@@ -410,13 +410,13 @@ export class JobSupervisor {
       if (job.state !== "running" && job.state !== "starting") continue;
       for (const kind of ["pid", "child"] as const) {
         const found = this.#recorded(job.id, kind);
-        if (found?.recorded.kind === "lstart") pids.push(found.pid);
+        if (found?.recorded.kind === "start") pids.push(found.pid);
       }
     }
     return pids;
   }
 
-  async #sweepOne(id: string, pending: Set<string>, starts: ReadonlyMap<number, number | null>, watches: Promise<void>[] = []): Promise<void> {
+  async #sweepOne(id: string, pending: Set<string>, starts: ReadonlyMap<number, ProcessStart | null>, watches: Promise<void>[] = []): Promise<void> {
     if (this.#slice) { await this.#sweepUnit(id, pending, watches); return; }
     if (!this.#open(id)) return;
     if (existsSync(join(this.#store.dir, `${id}.exit`))) { this.#takeExit(id); return; }
@@ -954,7 +954,7 @@ export class JobSupervisor {
     try { writeFileSync(path, "", { flag: "wx", mode: 0o600 }); } catch { /* already requested */ }
   }
 
-  async #stopChild(id: string, starts?: ReadonlyMap<number, number | null>): Promise<void> {
+  async #stopChild(id: string, starts?: ReadonlyMap<number, ProcessStart | null>): Promise<void> {
     const child = this.#recorded(id, "child");
     if (!child || !(await sameProcess(child.pid, child.recorded, starts))) return;
     // SIGKILL leaves a zombie, and kill(pid, 0) still succeeds until it is reaped

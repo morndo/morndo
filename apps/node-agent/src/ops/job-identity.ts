@@ -1,12 +1,16 @@
 // Whether a recorded pid is still that process. The record is the start tick (field 22 of /proc/<pid>/stat, starttime
 // in clock ticks since boot) and this boot's id.
 // https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html (read 2026-10-10)
-// Where /proc does not yield them, it is `ps -o lstart`. A pid file with no start record is unknown: it is never
-// signalled, and the job is lost only after the grace below. A refused signal is processAlive's answer, checked once.
-import { execFile, execFileSync } from "node:child_process";
+// Without a boot id it is the start itself, as the range node-ops reads (processStart: /proc, else `ps -o lstart`). A pid
+// file with no start record is unknown: it is never signalled, and the job is lost only after the grace below. A
+// refused signal is processAlive's answer, checked once.
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { chmodSync, readFileSync, writeFileSync } from "node:fs";
-import { processAlive, processIdentity, processStartedMs, startMsFromProc, startMsFromUptime, type ProcessIdentity } from "@morndo/node-ops";
+import { chmodSync, writeFileSync } from "node:fs";
+import {
+  identityFromStat, processAlive, processIdentity, processStart, processStartSync, readText, sameStart, startFromLstart,
+  type ProcessIdentity, type ProcessStart, type ProcessStartIo,
+} from "@morndo/node-ops";
 
 // How long a pid file may exist before its start record is written. Inside this window the pid is left alone.
 export const START_RECORD_GRACE_MS = 5_000;
@@ -15,87 +19,43 @@ export type Recorded =
   | { kind: "none" }
   | { kind: "bad" }
   | { kind: "id"; id: ProcessIdentity }
-  | { kind: "lstart"; ms: number };
+  | { kind: "start"; start: ProcessStart };
+
+// A record written before the start was a range: {"lstart": ms}, the btime or ps start, up to a second and a tick
+// (USER_HZ 100) early.
+const LEGACY_LSTART_MS = 1_010;
 
 export function readRecorded(text: string | null): Recorded {
   if (text === null) return { kind: "none" };
   let value: unknown;
   try { value = JSON.parse(text); } catch { return { kind: "bad" }; }
   if (value === null || typeof value !== "object" || Array.isArray(value)) return { kind: "bad" };
-  const rec = value as { ticks?: unknown; bootId?: unknown; lstart?: unknown };
+  const rec = value as { ticks?: unknown; bootId?: unknown; earliest?: unknown; latest?: unknown; lstart?: unknown };
   if (typeof rec.ticks === "number" && Number.isInteger(rec.ticks) && rec.ticks >= 0 && typeof rec.bootId === "string" && rec.bootId !== "") {
     return { kind: "id", id: { ticks: rec.ticks, bootId: rec.bootId } };
   }
-  if (typeof rec.lstart === "number" && Number.isFinite(rec.lstart)) return { kind: "lstart", ms: rec.lstart };
+  if (typeof rec.earliest === "number" && typeof rec.latest === "number" && Number.isFinite(rec.earliest)
+    && Number.isFinite(rec.latest) && rec.earliest <= rec.latest) {
+    return { kind: "start", start: { earliest: rec.earliest, latest: rec.latest } };
+  }
+  if (typeof rec.lstart === "number" && Number.isFinite(rec.lstart)) {
+    return { kind: "start", start: { earliest: rec.lstart, latest: rec.lstart + LEGACY_LSTART_MS } };
+  }
   return { kind: "bad" };
 }
 
 const SPAWN_WINDOW_MS = 1_000;
 
-// CLK_TCK does not change. A failed getconf is not remembered: the next call tries again.
-let clockHz: number | undefined;
-
-function ticksPerSec(): number | null {
-  if (clockHz !== undefined) return clockHz;
-  try {
-    const n = Number(execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8" }).trim());
-    if (!Number.isInteger(n) || n <= 0) return null;
-    clockHz = n;
-    return n;
-  } catch { return null; }
-}
-
-// What writeProcessFile reads: a /proc file's text, null when it cannot be read, and the wall clock. Tests pass both.
-export type ProcessFileIo = { read?: (path: string) => string | null; now?: () => number };
-
-const readText = (path: string): string | null => {
-  try { return readFileSync(path, "utf8"); } catch { return null; }
-};
-
-function observedStartMs(pid: number, read: (path: string) => string | null): number | null {
-  try {
-    const hz = ticksPerSec();
-    if (hz === null) throw new Error("clk");
-    const stat = read(`/proc/${pid}/stat`);
-    const proc = read("/proc/stat");
-    if (stat === null || proc === null) throw new Error("proc");
-    const ms = startMsFromProc(stat, proc, hz);
-    if (ms !== null) return ms;
-  } catch { /* the ps line below is the fallback */ }
-  try {
-    const out = execFileSync("ps", ["-o", "lstart=", "-p", String(pid)], {
-      encoding: "utf8",
-      env: { ...process.env, LC_ALL: "C" },
-    }).trim();
-    const ms = Date.parse(out);
-    return Number.isFinite(ms) ? ms : null;
-  } catch { return null; }
-}
-
-// The start to about 10 ms, from the process's age on the boot clock (startMsFromUptime), or null without /proc.
-function exactStartMs(pid: number, read: (path: string) => string | null, now: () => number): number | null {
-  const hz = ticksPerSec();
-  const stat = read(`/proc/${pid}/stat`);
-  const uptime = read("/proc/uptime");
-  const at = now();
-  if (hz === null || stat === null || uptime === null) return null;
-  return startMsFromUptime(stat, uptime, hz, at);
-}
-
-// Writes the identity before returning. A start outside the spawn window is a reused pid and is not recorded. The
-// window is checked on the exact start where /proc gives one: the btime start is up to a second early, which is the
-// whole window. A start record with no identity keeps the btime or ps start, the one sameProcess compares it with.
-export function writeProcessFile(path: string, pid: number, spawnedAt: number, io: ProcessFileIo = {}): void {
+// Writes the identity before returning. A start that cannot lie inside the spawn window is a reused pid and is not
+// recorded: the window allows for how far the start's source can be off, and nothing more. The identity and the start
+// come from one read of /proc/<pid>/stat, so they describe one process; without a boot id the record is that start.
+export function writeProcessFile(path: string, pid: number, spawnedAt: number, io: ProcessStartIo = {}): void {
   const read = io.read ?? readText;
-  const before = processIdentity(pid, read);
-  const started = observedStartMs(pid, read);
-  const exact = exactStartMs(pid, read, io.now ?? Date.now);
-  const after = processIdentity(pid, read);
-  if (before && after && (before.ticks !== after.ticks || before.bootId !== after.bootId)) return;
-  if (started === null || Math.abs((exact ?? started) - spawnedAt) > SPAWN_WINDOW_MS) return;
-  const ident = before ?? after;
-  const text = ident ? JSON.stringify(ident) : JSON.stringify({ lstart: started });
-  writeFileSync(path, text, { mode: 0o600 });
+  const stat = Number.isInteger(pid) && pid > 0 ? read(`/proc/${pid}/stat`) : null;
+  const start = processStartSync(pid, io, stat);
+  if (start === null || start.latest < spawnedAt - SPAWN_WINDOW_MS || start.earliest > spawnedAt + SPAWN_WINDOW_MS) return;
+  const ident = stat === null ? null : identityFromStat(stat, read);
+  writeFileSync(path, JSON.stringify(ident ?? start), { mode: 0o600 });
   chmodSync(path, 0o600);
 }
 
@@ -115,8 +75,8 @@ async function defaultPsStarts(pids: readonly number[]): Promise<string | null> 
 export async function psStarts(
   pids: readonly number[],
   ps: (pids: readonly number[]) => Promise<string | null> = defaultPsStarts,
-): Promise<Map<number, number | null>> {
-  const out = new Map<number, number | null>();
+): Promise<Map<number, ProcessStart | null>> {
+  const out = new Map<number, ProcessStart | null>();
   const wanted = [...new Set(pids.filter(pid => Number.isInteger(pid) && pid > 0))];
   for (const pid of wanted) out.set(pid, null);
   if (wanted.length === 0) return out;
@@ -127,9 +87,9 @@ export async function psStarts(
     const gap = trimmed.indexOf(" ");
     if (gap < 0) continue;
     const pid = Number(trimmed.slice(0, gap));
-    const ms = Date.parse(trimmed.slice(gap + 1).trim());
-    if (!out.has(pid) || !Number.isFinite(ms)) continue;
-    out.set(pid, ms);
+    const start = startFromLstart(trimmed.slice(gap + 1));
+    if (!out.has(pid) || start === null) continue;
+    out.set(pid, start);
   }
   return out;
 }
@@ -139,14 +99,15 @@ export async function psStarts(
 export async function sameProcess(
   pid: number,
   recorded: Recorded,
-  starts?: ReadonlyMap<number, number | null>,
+  starts?: ReadonlyMap<number, ProcessStart | null>,
+  io: ProcessStartIo = {},
 ): Promise<boolean> {
   if (!processAlive(pid)) return false;
   if (recorded.kind === "none" || recorded.kind === "bad") return false;
   if (recorded.kind === "id") {
-    const live = processIdentity(pid);
+    const live = processIdentity(pid, io.read);
     return live !== null && live.ticks === recorded.id.ticks && live.bootId === recorded.id.bootId;
   }
-  const ms = starts?.has(pid) ? starts.get(pid) ?? null : await processStartedMs(pid);
-  return ms !== null && Math.floor(ms / 1000) === Math.floor(recorded.ms / 1000);
+  const now = starts?.has(pid) ? starts.get(pid) ?? null : await processStart(pid, io);
+  return now !== null && sameStart(now, recorded.start);
 }

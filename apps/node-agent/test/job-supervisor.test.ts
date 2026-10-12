@@ -692,8 +692,8 @@ describe("child supervisor", () => {
       return "10 Thu Jan  1 00:00:01 1970\n11 Thu Jan  1 00:00:02 1970\n";
     });
     expect(calls).toEqual([[10, 11]]);
-    expect(starts.get(10)).toBe(Date.parse("Thu Jan  1 00:00:01 1970"));
-    expect(starts.get(11)).toBe(Date.parse("Thu Jan  1 00:00:02 1970"));
+    expect(starts.get(10)?.earliest).toBe(Date.parse("Thu Jan  1 00:00:01 1970"));
+    expect(starts.get(11)?.earliest).toBe(Date.parse("Thu Jan  1 00:00:02 1970"));
   });
 
   it("records a start identity only inside the spawn window, before it returns", async () => {
