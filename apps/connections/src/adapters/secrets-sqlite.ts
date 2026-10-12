@@ -8,47 +8,14 @@
 // IMMEDIATE "start[s] a new write immediately", so a second writer waits (the timeout, 5 s) before it reads,
 // https://www.sqlite.org/lang_transaction.html, read 2026-10-12.
 import Database from "better-sqlite3";
-import { chmodSync, existsSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { assertLocalDisk, openPrivateDb } from "@morndo/service-kit";
 import type { LedgerEntry, Secret, SecretEvent, SecretGrant, SecretStatus, SecretVersion } from "@morndo/domain";
 import type { SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRow } from "../application/ports.ts";
-import { FileRefused, assertPrivate, ensurePrivateDir, refuseBareHome, writePrivate } from "./file-mode.ts";
+import { assertPrivate, ensurePrivateDir, refuseBareHome } from "./file-mode.ts";
 import { DatabaseFromFuture, MIGRATIONS, migrate } from "./store-migrations.ts";
-
-// The store directory's adoption and mark, as store-sqlite.ts does them for the same directory.
-const STORE_DIR = "morndo-connections";
-const STORE_MARK = ".morndo-store";
-
-function recognisedStoreDir(dir: string): boolean {
-  return basename(dir) === STORE_DIR || existsSync(join(dir, STORE_MARK));
-}
-
-function adoptStoreDir(dir: string, uid: number): void {
-  let mode: number;
-  let owner: number;
-  try {
-    const st = statSync(dir);
-    if (!st.isDirectory()) return;
-    mode = st.mode & 0o777;
-    owner = st.uid;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
-  if (owner !== uid) throw new FileRefused("owner", dir);
-  if ((mode & ~0o700) === 0) return;
-  if (!recognisedStoreDir(dir)) throw new FileRefused("mode", dir);
-  console.warn(`tightening ${dir} to 0700; it was looser than a private directory`);
-  chmodSync(dir, 0o700);
-}
-
-function markStoreDir(dir: string, uid: number): void {
-  const marker = join(dir, STORE_MARK);
-  if (existsSync(marker)) return;
-  writePrivate(marker, new TextEncoder().encode("morndo-connections\n"), uid);
-}
+import { adoptStoreDir, markStoreDir } from "./store-sqlite.ts";
 
 type SecretsHooks = { beforeSave?: () => void };
 type SecretRow = {

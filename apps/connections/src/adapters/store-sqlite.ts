@@ -15,7 +15,8 @@ function recognisedStoreDir(dir: string): boolean {
   return basename(dir) === STORE_DIR || existsSync(join(dir, STORE_MARK));
 }
 
-function adoptStoreDir(dir: string, uid: number): void {
+// Shared with secrets-sqlite.ts, which opens the same file.
+export function adoptStoreDir(dir: string, uid: number): void {
   let mode: number;
   let owner: number;
   try {
@@ -34,7 +35,7 @@ function adoptStoreDir(dir: string, uid: number): void {
   chmodSync(dir, 0o700);
 }
 
-function markStoreDir(dir: string, uid: number): void {
+export function markStoreDir(dir: string, uid: number): void {
   const marker = join(dir, STORE_MARK);
   if (existsSync(marker)) return;
   writePrivate(marker, new TextEncoder().encode("morndo-connections\n"), uid);
