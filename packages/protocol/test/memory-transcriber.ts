@@ -63,9 +63,14 @@ function heard(language: string): EngineText {
 
 export class MemoryTranscriber implements Transcriber {
   private readonly clock: ManualClock;
+  private running = false;
 
   constructor(clock?: ManualClock) {
     this.clock = clock ?? new ManualClock();
+  }
+
+  hasStarted(): boolean {
+    return this.running;
   }
 
   probe(): Promise<TranscriberProbe> {
@@ -77,9 +82,11 @@ export class MemoryTranscriber implements Transcriber {
 
   async transcribe(input: TranscribeInput): Promise<Result<EngineText, TranscriptionProblem>> {
     const base = baseName(input.path);
-    if (base.startsWith("hang")) await this.clock.wait(Number.POSITIVE_INFINITY, input.signal);
-    else if (base.startsWith("delay")) await this.clock.wait(1000, input.signal);
-    else if (input.signal.aborted) throw abortError();
+    if (base.startsWith("hang") || base.startsWith("delay")) {
+      const waiting = this.clock.wait(base.startsWith("hang") ? Number.POSITIVE_INFINITY : 1000, input.signal);
+      this.running = true;
+      await waiting;
+    } else if (input.signal.aborted) throw abortError();
     if (base.startsWith("unreadable")) return err("unreadable");
     if (base.startsWith("too-long")) return err("too_long");
     if (base.startsWith("not-ready")) return err("not_ready");

@@ -6,7 +6,10 @@ import { transcriberContract } from "./transcriber-contract.ts";
 
 const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
 
-transcriberContract(() => ({ transcriber: new MemoryTranscriber() }));
+transcriberContract(() => {
+  const transcriber = new MemoryTranscriber();
+  return { transcriber, started: () => transcriber.hasStarted() };
+});
 
 describe("MemoryTranscriber clock", () => {
   it("a delayed answer arrives when the clock reaches it, and an abort wins over a later tick", async () => {
