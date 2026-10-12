@@ -62,6 +62,7 @@ describe("refreshing a ref the list does not have yet", () => {
     expect(hub.store.brief("ny-401")?.state).toBe("open");
 
     writeFileSync(path, JSON.stringify({ needsYou: [{ id: "ny-401", kind: "tap", question: "How should triage work?" }], needsYouClosed: [] }));
+    hub.escalations.poll();
     const cookie = await hub.cookie();
     const board = await json(await fetch(`${hub.base}/api/escalations`, { headers: { cookie: `__Host-morndo=${cookie}`, origin: ORIGIN } }));
     expect((board.items as { id: string; status: string }[]).find(i => i.id === "ny-401")).toMatchObject({ status: "open" });

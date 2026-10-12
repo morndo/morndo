@@ -285,14 +285,17 @@ export class BriefService {
     this.#store.record([event]);
   }
 
-  // The board after this poll, and a ref the list has closed is closed on the row too (E10), so it stops counting as open.
+  // The board after this poll. A ref the list has actually closed is closed on the row too (E10), so it stops counting
+  // as open. A "missing" item the grace window has temporarily called settled is not a decision and is not stored.
   #refresh() {
     this.#escalations.poll();
     for (const item of this.#escalations.board().items) {
       const row = this.#store.brief(item.id);
       if (!row || row.state !== "open") continue;
-      if (item.status !== "settled" && item.status !== "expired") continue;
-      this.#store.setBriefState(row.id, row.version, item.status, item.resolution, item.settledAt ?? this.#now());
+      const settled = item.source === "settled";
+      const expired = item.status === "expired" && item.source !== "missing";
+      if (!settled && !expired) continue;
+      this.#store.setBriefState(row.id, row.version, settled ? "settled" : "expired", item.resolution, item.settledAt ?? this.#now());
     }
   }
 }
