@@ -70,12 +70,20 @@ const reference = (text: string | undefined): string => {
   return text;
 };
 
-// stdin's bytes, read to the end; each chunk the stream handed over is zeroed once copied.
+// stdin's bytes, read to the end, copied into an array of their own, and each chunk the stream handed over zeroed once
+// copied. Not Buffer.concat: it cuts a result under half of Buffer.poolSize (32 KiB since Node 24.18) from Node's shared
+// pool, where the value would outlive the zeroing (round 2, point 3; https://nodejs.org/docs/latest-v24.x/api/buffer.html,
+// Buffer.poolSize and Buffer.allocUnsafe, read 2026-10-12).
 export async function stdinValue(source: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of source) chunks.push(chunk as Buffer);
-  const bytes = new Uint8Array(Buffer.concat(chunks));
-  for (const chunk of chunks) chunk.fill(0);
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of source) chunks.push(chunk);
+  const bytes = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+    chunk.fill(0);
+  }
   return bytes;
 }
 
@@ -96,6 +104,8 @@ export async function runSecrets(argv: readonly string[], env: NodeJS.ProcessEnv
     const file = [FileRefused, DatabaseFromFuture, IndexFileRefused, NodeKeyRefused].some(kind => cause instanceof kind);
     return file ? FILES : REFUSED;
   } finally {
+    // The value's bytes are zeroed whatever happened, a usage error or a home that won't open included (round 2, point 7).
+    io.stdin?.fill(0);
     home?.close();
   }
 }
@@ -152,14 +162,9 @@ async function dispatch(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<nu
   }
 }
 
-// The value's bytes are zeroed once sealed, the stdin buffer included, whatever happens (review 12). What this code
-// can't zero: the age library's own buffers while it encrypts, and the copies Node's stream made before the bin got the
-// bytes.
+// The value's copy is zeroed once sealed, and runSecrets zeroes the stdin buffer whatever happens (review 12; round 2,
+// point 7). What can't be zeroed is in design §6 (zeroing).
 async function put(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<number> {
-  try { return await putValue(home, p, io); } finally { io.stdin?.fill(0); }
-}
-
-async function putValue(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<number> {
   if (p.positionals.length !== 1) throw new Usage("put takes a Reference and reads the value from stdin only");
   const ref = reference(p.positionals[0]);
   const expiry = expiryOf(p.values.get("expiry")?.at(-1));

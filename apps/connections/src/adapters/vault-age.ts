@@ -43,7 +43,8 @@ export class AgeVault implements Vault, SealedStore {
     const decrypter = new Decrypter();
     decrypter.addIdentity(await this.#identity());
     const plain = await decrypter.decrypt(readPrivate(this.#file(ref), this.#uid), "uint8array");
-    return new SecretMaterial(new Uint8Array(plain));
+    // The library's output is zeroed once copied: the caller zeroes the copy it gets (round 2, point 4).
+    try { return new SecretMaterial(new Uint8Array(plain)); } finally { plain.fill(0); }
   }
 
   has(ref: string): boolean {
