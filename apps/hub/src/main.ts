@@ -25,6 +25,7 @@ import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
 import { managerInbox } from "./adapters/manager-inbox.ts";
 import { EscalationService, managerOf } from "./application/escalation-service.ts";
+import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { fileStore } from "./adapters/files.ts";
 import { uploadInbox } from "./adapters/uploads.ts";
@@ -146,6 +147,7 @@ switch (cmd) {
     const steering = new SteeringService(store, typist, Date.now, () => access.policy(), inbox, id => observation.waitingOn(id),
       id => observation.nameOf(id), ports.uploads, ports.sendStatus,
       queue ? { isManager: id => id === managerPane(), inbox: queue } : null);
+    const filed: { briefs: BriefService | null } = { briefs: null };
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -158,7 +160,10 @@ switch (cmd) {
       // An answer in doubt is settled as a send is, with its node (op.status; final review C1).
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
       inbox: queue,
+      briefs: () => filed.briefs?.sightings() ?? [],
     });
+    const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane });
+    filed.briefs = briefs;
     const remote = new RemoteService({
       store, terminal: ports.terminal, policy: () => access.policy(),
       panes: () => observation.snapshot().workers.map(w => w.id as string),
@@ -190,7 +195,7 @@ switch (cmd) {
     const usage = new UsageService({ store });
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
-    const http = startHttp({ config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence, push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs });
+    const http = startHttp({ config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence, push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, briefs });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
     // Old pairing tokens and long-ended sessions, on start and daily; never the audit or the decisions (A8).
     const stopRetention = startRetention(store, Date.now,

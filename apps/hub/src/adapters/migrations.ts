@@ -153,6 +153,20 @@ export const MIGRATIONS: readonly Migration[] = [
     name: "a board result waits until the fleet acknowledges it (ADR-0017)",
     up: db => { if (!hasColumn(db, "job_notices", "acked")) db.exec("ALTER TABLE job_notices ADD COLUMN acked INTEGER NOT NULL DEFAULT 0"); },
   },
+  {
+    version: 18,
+    name: "decision briefs (ADR-0023): one row per version, so a restate keeps the earlier brief; the counter lives in settings",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS decision_briefs (
+        id TEXT NOT NULL, version INTEGER NOT NULL, ref TEXT,
+        asker_kind TEXT NOT NULL, asker_name TEXT NOT NULL, token_id TEXT NOT NULL,
+        filed_by_kind TEXT NOT NULL, filed_by_name TEXT NOT NULL,
+        brief TEXT NOT NULL, state TEXT NOT NULL, filed_at INTEGER NOT NULL,
+        resolution TEXT, drafted_by TEXT, closed_at INTEGER,
+        PRIMARY KEY (id, version));
+      CREATE INDEX IF NOT EXISTS decision_briefs_state ON decision_briefs (state, asker_kind, asker_name);
+    `),
+  },
 ];
 
 // Runs every migration newer than the database's user_version, in order, in one IMMEDIATE transaction that ends by

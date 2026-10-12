@@ -5,9 +5,10 @@
 // adapters, read through Observation; nothing is decided from them, O4).
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_POLICY, Escalations, answered, askVersion, escalationId, mayCommand, refusal, sameDecision,
-  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type Escalation, type Message, type Sighting,
+  DEFAULT_POLICY, Escalations, answered, askFromBrief, askVersion, escalationId, mayCommand, refusal, sameDecision,
+  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type DecisionBrief, type Escalation, type Message, type Sighting,
 } from "@morndo/domain";
+import type { BriefSighting } from "./brief-service.ts";
 import { menuEscalationId } from "@morndo/protocol";
 import type { LedgerItem, LedgerRead } from "../adapters/ledger.ts";
 import { isLedgerId, parseAnswer, parseTap, tapLine, wordsLine, type ButtonOption } from "../adapters/manager-protocol.ts";
@@ -40,7 +41,10 @@ type QueuedAnswer = {
 type RestoredAnswer = Partial<Omit<QueuedAnswer, "escalationId" | "decision" | "words" | "state">> & {
   decision: Decision; words?: QueuedAnswer["words"]; settledAt?: number;
 };
-export type EscalationView = Escalation & { answerable: AnswerRefusal | null; version: string; inbox: InboxView | null; notice: string | null };
+export type EscalationView = Escalation & {
+  answerable: AnswerRefusal | null; version: string; inbox: InboxView | null; notice: string | null;
+  brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null;
+};
 type ButtonMessage = { message: Message; body: string; options: ButtonOption[] };
 export type Board = { items: EscalationView[]; ledger: { configured: boolean; ok: boolean; at: number | null } };
 // `duplicate`: a repeat of an answer in doubt that its node had typed after all; `at` is when, on that node's clock.
@@ -128,9 +132,13 @@ export class EscalationService {
   #readers = new Map<string, ManagerInbox>();
   #prunedAt = 0;                                        // settled pending rows are dropped on a coarse timer, not every poll
   static readonly #pruneEveryMs = 60 * 60_000;
+  // Briefs filed through the hub (ADR-0023). Read at the start of each poll; the service does not store them.
+  #briefs: (() => BriefSighting[]) | null;
+  #briefOf = new Map<string, BriefSighting>();
 
   constructor(p: {
     watch: Watch; ledger: (() => LedgerRead) | null; store: Store; managerName: string;
+    briefs?: () => BriefSighting[];
     // Typing the answer: the port's outcome, with the node's own typedAt (spec 3.1) and the store it went to.
     send: (pane: string, text: string, key: string) => Promise<SendOutcome>; now?: () => number; policy?: () => AccessPolicy;
     // How an answer in doubt is settled with its node (SteeringService.settleInDoubt). Absent: the legacy hub, which has
@@ -148,6 +156,7 @@ export class EscalationService {
     this.#managerName = p.managerName;
     this.#now = p.now ?? Date.now;
     this.#policy = p.policy ?? (() => DEFAULT_POLICY);
+    this.#briefs = p.briefs ?? null;
     this.#firstSeen = this.#store.askFirstSeen();
     // The stored row may also carry the inbox key and the words' hash: they are the service's, never the Decision's, so
     // they never reach the board (code review B8).
@@ -188,13 +197,17 @@ export class EscalationService {
     const now = this.#now();
     const l = this.#lastLedger;
     return {
-      items: this.#x.list().map(e => ({ ...e, answerable: refusal(e, now), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null })),
+      items: this.#x.list().map(e => ({ ...e, answerable: refusal(e, now), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null, ...this.#briefView(e.id) })),
       ledger: { configured: this.#ledger !== null, ok: l?.ok ?? false, at: l?.at ?? null },
     };
   }
   #view(id: string): EscalationView | null {
     const e = this.#x.get(id);
-    return e ? { ...e, answerable: refusal(e, this.#now()), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null } : null;
+    return e ? { ...e, answerable: refusal(e, this.#now()), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null, ...this.#briefView(e.id) } : null;
+  }
+  #briefView(id: string): { brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null } {
+    const b = this.#briefOf.get(id);
+    return { brief: b?.brief ?? null, briefVersion: b?.version ?? 0, draftedBy: b?.draftedBy ?? null };
   }
   // A queued answer whose ask was asked again or settled meanwhile answers a question the principal no longer has
   // (E11, E12): withdrawn from the inbox, once, and its echo ignored should the cancel come too late (code review B1).
@@ -323,7 +336,10 @@ export class EscalationService {
   // What the principal was shown of an ask, as one string (E12): for a menu on a screen, the menu, not the screen around it.
   #version(e: Escalation): string {
     const menu = e.contextKind === "screen" ? this.#menus.get(e.id) : undefined;
-    return askVersion(menu === undefined ? e : { ...e, context: menu });
+    const base = menu === undefined ? e : { ...e, context: menu };
+    // A brief's version joins the hash (DB9, E12), so a restate counts even when the markdown reads the same.
+    const brief = this.#briefOf.get(e.id);
+    return askVersion(brief ? { ...base, briefVersion: brief.version } : base);
   }
 
   start(pollMs: number) {
@@ -340,7 +356,8 @@ export class EscalationService {
     const now = this.#now();
     const ledger = this.#ledger ? this.#ledger() : null;
     this.#lastLedger = ledger;
-    const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now)];
+    this.#briefOf = new Map((this.#briefs?.() ?? []).map(b => [b.id, b]));
+    const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now), ...this.#hubSightings()];
     const changed = this.#x.reconcile(sightings, now, ledger?.ok ?? true);
     for (const id of this.#buttons.keys()) if (!this.#x.get(id)) this.#buttons.delete(id);   // kept as long as its ask
     const pending = this.#store.pendingAnswers();       // one read per poll, shared by the notice and the echo prune
@@ -471,6 +488,8 @@ export class EscalationService {
         if (key.startsWith("ledger:") && !ids.has(key.slice("ledger:".length))) { this.#firstSeen.delete(key); this.#store.dropAskFirstSeen(key); }
       }
     }
+    // A brief that names a list item is that item (E10): one Escalation, the list still decides whether it is open.
+    for (const b of this.#briefOf.values()) if (b.ref !== null) ids.add(b.id);
     const out: Sighting[] = [];
     for (const [id, b] of buttons) this.#buttons.set(id, b);
     for (const id of ids) {
@@ -506,11 +525,41 @@ export class EscalationService {
         messageId: b?.message.id ?? null,
         tracking: onList ? "ledger" : "age",
       };
-      const source: Sighting["source"] = !onList ? { kind: "open" }
+      let source: Sighting["source"] = !onList ? { kind: "open" }
         : !ledger || !ledger.ok ? { kind: "unreadable" }
         : !l ? { kind: "missing" }
         : l.open ? { kind: "open" } : { kind: "settled", resolution: l.resolution, at: l.closedAt };
-      out.push({ ask, source, answered: taps.get(id) ?? null });
+      const filed = this.#briefOf.get(id);
+      let shown = ask;
+      if (filed?.ref) {
+        // The brief's options, short form and version time. tracking stays the list's (E10). The version's own time
+        // and a message id make a restate a new ask (DB9): an earlier Decision no longer answers it (E11).
+        const from = askFromBrief(id, filed.brief, ask.asker, filed.version, filed.at);
+        shown = {
+          ...ask, need: "decision", title: from.title, shortTitle: from.shortTitle, summary: from.summary,
+          minutes: from.minutes, details: from.details, options: from.options, answerBy: "tap",
+          recommendation: from.recommendation, ifNoAnswer: from.ifNoAnswer, deadline: from.deadline,
+          blocking: from.blocking, project: from.project, askedAt: filed.at, messageId: `brief-v${filed.version}`,
+        };
+        if (filed.closed) source = { kind: "settled", resolution: filed.closed.resolution, at: filed.closed.at };
+      }
+      out.push({ ask: shown, source, answered: taps.get(id) ?? null });
+    }
+    return out;
+  }
+
+  // Briefs the hub holds open itself (E14). A `ref` is sighted with its list item, above, not here.
+  #hubSightings(): Sighting[] {
+    const out: Sighting[] = [];
+    for (const b of this.#briefOf.values()) {
+      if (b.ref !== null) continue;
+      const ask = askFromBrief(b.id, b.brief, b.asker, b.version, b.at);
+      const { briefVersion: _version, ...shown } = ask;
+      out.push({
+        ask: shown,
+        source: b.closed ? { kind: "settled", resolution: b.closed.resolution, at: b.closed.at } : { kind: "open" },
+        answered: null,
+      });
     }
     return out;
   }

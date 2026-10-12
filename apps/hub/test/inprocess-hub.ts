@@ -14,7 +14,8 @@ import { uploadInbox } from "../src/adapters/uploads.ts";
 import { AccessService } from "../src/application/access-service.ts";
 import { ObservationService } from "../src/application/observation-service.ts";
 import { SteeringService } from "../src/application/steering-service.ts";
-import { EscalationService } from "../src/application/escalation-service.ts";
+import { EscalationService, type Watch } from "../src/application/escalation-service.ts";
+import { BriefService } from "../src/application/brief-service.ts";
 import { RemoteService } from "../src/application/remote-service.ts";
 import { ReadingService } from "../src/application/reading-service.ts";
 import { PresenceService } from "../src/application/presence-service.ts";
@@ -26,6 +27,10 @@ import { BoardService } from "../src/application/board-service.ts";
 import { AgentAccess } from "../src/application/agent-access.ts";
 import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
+import type { LedgerRead } from "../src/adapters/ledger.ts";
+import type { ManagerInbox } from "../src/adapters/manager-inbox.ts";
+import { managerInbox } from "../src/adapters/manager-inbox.ts";
+import type { SendOutcome } from "../src/application/ports.ts";
 import type { Config } from "../src/config.ts";
 
 export const ORIGIN = "https://hub.example.test";
@@ -35,6 +40,8 @@ export type InProcessHub = {
   notifications: NotificationService;
   board: BoardService;
   agents: AgentAccess;
+  briefs: BriefService;
+  escalations: EscalationService;
   usage: UsageService;
   jobs: JobsService;
   pushes: { endpoint: string; payload: unknown }[];             // what the fake push sender was given
@@ -47,7 +54,14 @@ export type InProcessHub = {
 // `now`: the hub's clock for access and rate limits (a test moves it to expire tokens, requests and verifications).
 // `observation`: the service the feed reads from, when a test needs its own (default: one over an empty tmux).
 // `engines`: the engine layer's CLI to run (a test's fake) and its environment; absent, the Engines page is off.
-export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService; engines?: { bin: string; env: NodeJS.ProcessEnv } } = {}): Promise<InProcessHub> {
+export async function startInProcessHub(o: {
+  limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService;
+  engines?: { bin: string; env: NodeJS.ProcessEnv };
+  watch?: Watch; ledger?: (() => LedgerRead) | null; inbox?: ManagerInbox | null;
+  /** A manager inbox with a live deliverer, in the temp dir, on the same clock. */
+  withInbox?: boolean;
+  send?: (pane: string, text: string, key: string) => Promise<SendOutcome>;
+} = {}): Promise<InProcessHub> {
   const dir = mkdtempSync(join(tmpdir(), "morndo-inproc-"));
   const web = join(dir, "web");
   mkdirSync(web);
@@ -68,10 +82,30 @@ export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: numb
   };
   const access = new AccessService(store, passkeys, o.now);
   const tmux = { listWorkers: async () => [], capture: async () => null, captureMany: async () => new Map<string, string | null>(), send: async () => ({ problem: null, typedAt: Date.now() }) };
+  const watch: Watch = o.watch ?? { workers: () => [], history: () => [], openQuestions: () => [], screen: () => undefined };
+  let managerQueue: ManagerInbox | null = o.inbox ?? null;
+  if (o.withInbox) {
+    const inboxDir = join(dir, "manager-inbox");
+    mkdirSync(inboxDir, { recursive: true });
+    writeFileSync(join(inboxDir, "deliverer.json"), JSON.stringify({ pid: 1, at: (o.now ?? Date.now)() }));
+    managerQueue = managerInbox(inboxDir, o.now ?? Date.now);
+  }
+  const filed: { briefs: BriefService | null } = { briefs: null };
   const escalations = new EscalationService({
-    watch: { workers: () => [], history: () => [], openQuestions: () => [], screen: () => undefined },
-    ledger: null, store, managerName: "manager", send: async () => ({ problem: null, typedAt: 0 }), ...(o.now ? { now: o.now } : {}),
+    watch, ledger: o.ledger === undefined ? null : o.ledger, store, managerName: "manager",
+    send: o.send ?? (async () => ({ problem: null, typedAt: 0 })),
+    ...(o.now ? { now: o.now } : {}),
+    inbox: managerQueue,
+    briefs: () => filed.briefs?.sightings() ?? [],
   });
+  const briefs = new BriefService({
+    store, escalations, managerName: "manager", ...(o.now ? { now: o.now } : {}),
+    managerWorkerId: () => {
+      const named = watch.workers().filter(w => w.name === "manager");
+      return named.some(w => w.conflict) ? null : named[0]?.id ?? null;
+    },
+  });
+  filed.briefs = briefs;
   const frame = { cols: 80, rows: 24, x: 0, y: 0, cursor: true, lines: ["$ "] };
   const remote = new RemoteService({ store, terminal: { frame: async () => frame, keys: async () => true }, panes: () => ["%1"], desktop: () => null });
   const inbox = uploadInbox({ dir: join(dir, "inbox") });
@@ -92,14 +126,14 @@ export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: numb
     config, identity: loadOrCreateIdentity(dir), access, observation: o.observation ?? new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox), escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now),
     push: { publicKey: vapid.publicKey, notifications },
-    board: { service: board, agents }, usage, jobs,
+    board: { service: board, agents }, usage, jobs, briefs,
     engines: o.engines ? new EnginesService({ cli: enginesCli(o.engines.bin, o.engines.env), store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}) }) : null,
     ...(o.limits ? { limits: o.limits } : {}), ...(o.heartbeatMs ? { heartbeatMs: o.heartbeatMs } : {}), ...(o.now ? { now: o.now } : {}),
   });
   await http.ready;
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
   return {
-    base, store, access, dir, notifications, board, agents, usage, jobs, pushes,
+    base, store, access, dir, notifications, board, agents, briefs, escalations, usage, jobs, pushes,
     async cookie() {
       const opts = await access.pairOptions(access.issueConsoleToken().secret, "phone");
       if (!("flowId" in opts)) throw new Error(opts.refused);
