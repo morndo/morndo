@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { readSecretIndex } from "@morndo/node-ops";
 import { readPrivate, writeNew } from "./file-mode.ts";
 import { secretIndexPath } from "./secret-index-writer.ts";
+import { SqliteSecrets } from "./secrets-sqlite.ts";
 
 const KEY_BYTES = 32;
 
@@ -24,16 +25,28 @@ export function homeRecords(dir: string, ledger: () => boolean, uid?: number): K
   return key => key === "fingerprint.key" ? ledger() : readSecretIndex(secretIndexPath(dir), uid).versions.some(v => v.entries.length > 0);
 }
 
+// Whether the home's Connections database holds a ledger entry: opened only when a key is missing, then closed. With no
+// database, nothing is on record yet.
+function ledgerIn(dir: string, uid: number): boolean {
+  const path = join(dir, "connections.db");
+  if (!existsSync(path)) return false;
+  const secrets = new SqliteSecrets(path, uid);
+  try { return secrets.load().directory.ledger.length > 0; } finally { secrets.close(); }
+}
+
 export class NodeKeys {
   readonly #dir: string;
   readonly #uid: number;
   readonly #onRecord: KeyRecords;
   // A missing key is made only while nothing made with it is on record (review 6): a new key would let a revoked value in
-  // again under a new fingerprint and blind the output filter to every indexed value.
-  constructor(dir: string, uid?: number, onRecord: KeyRecords = () => false) {
+  // again under a new fingerprint and blind the output filter to every indexed value. Without `onRecord`, the records are
+  // those of the home `dir` itself, so every composition root is guarded, not only the one that passes them (round 2,
+  // point 9); one that holds the database open already passes its own.
+  constructor(dir: string, uid?: number, onRecord?: KeyRecords) {
     this.#dir = dir;
     this.#uid = uid ?? process.getuid?.() ?? -1;
-    this.#onRecord = onRecord;
+    const owner = this.#uid;
+    this.#onRecord = onRecord ?? homeRecords(dir, () => ledgerIn(dir, owner), owner);
   }
 
   // The keyed fingerprint (SC2): the first 12 hex characters of HMAC-SHA-256 under the fingerprint key.
