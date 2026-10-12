@@ -228,12 +228,13 @@ export type StoreConfirmation = { reference: string; node: string; version: numb
 // How far a node's time of the store may lie outside the hub's window, from the request's opening to the hub's now.
 export const CONFIRMATION_SKEW_MS = 5 * 60_000;
 
-// SR8: Stored only on the requester node's own confirmation, never another node's (T-85). `confirmations` are those of
-// every node that confirmed, and the event's nodes are theirs, so no node is named without one (T-94); `expiry` is the
-// Expiry the store sent (null: none). The renew rule is the node's (renewSecret, before anything is stored), so a renew
-// needs that node's `renewed`; the Expiry later than the node's time of the store is the same comparison, kept as a check
-// that the confirmation is consistent (T-83). The node's time must lie within the hub's window, so a node's wrong clock or
-// a made-up time can't pass (T-85); the hub's clock otherwise decides only the request's own expiry.
+// SR8: Stored only with the requester node's own confirmation among them (T-85). `confirmations` are those of every node
+// that confirmed, and the event's nodes are theirs, so no node is named without one (T-94); `expiry` is the Expiry the
+// store sent (null: none). The renew rule is each node's (renewSecret, before anything is stored), so a renew needs every
+// confirming node's `renewed`, and the Expiry later than each node's time of the store, the same comparison kept as a
+// check that each confirmation is consistent (T-83; review 8 of PR #40). Each node's time must lie within the hub's
+// window, so a node's wrong clock or a made-up time can't pass (T-85); the hub's clock otherwise decides only the
+// request's own expiry.
 export function answerStored(
   req: SecretRequest, a: Answer & { reference: string; expiry: number | null; confirmations: readonly StoreConfirmation[] },
   now: number,

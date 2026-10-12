@@ -161,8 +161,9 @@ export class AgeVault implements Vault, SealedStore {
 // not age's: each copy is then readable by one node only (design §6).
 const VERSION_LINE = new TextEncoder().encode("age-encryption.org/v1\n");
 // A grease stanza is no recipient: rage adds one to every header without scrypt, typed "<1 to 8 printable characters>-grease"
-// (age-core/src/format.rs, grease_the_joint), and identities "MUST ignore unrecognized stanzas" (C2SP age.md); both read
-// 2026-10-12 (review 10). Any other second stanza counts, a type this code doesn't know included.
+// (grease_the_joint in age-core/src/format.rs, https://github.com/str4d/rage/blob/b5b68c4f4f7ea5c368bc060f6fe0237549c3a13f/age-core/src/format.rs#L122-L158, main of 2026-07-14), and identities "MUST ignore unrecognized
+// stanzas" (C2SP age.md, above); both read 2026-10-12 (review 10; round 2, point 14). The spec defines no grease form, so
+// the type is all there is to go by. Any other second stanza counts, a type this code doesn't know included.
 const GREASE = /^[!-~]{1,8}-grease$/;
 export function recipientStanzas(file: Uint8Array): number | null {
   if (file.length < VERSION_LINE.length || !VERSION_LINE.every((b, i) => file[i] === b)) return null;

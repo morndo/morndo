@@ -211,7 +211,7 @@ describe("review point 9: a save never clears a vault ref the change didn't name
 
 describe("review point 10: a grease stanza is not a recipient", () => {
   // rage adds one to every header without scrypt: a tag of 1 to 8 printable characters and "-grease", 0 to 4 such args,
-  // and up to 99 random bytes (age-core/src/format.rs, grease_the_joint, read 2026-10-12). age's spec: identities "MUST
+  // and up to 99 random bytes (https://github.com/str4d/rage/blob/b5b68c4f4f7ea5c368bc060f6fe0237549c3a13f/age-core/src/format.rs#L122-L158, grease_the_joint, read 2026-10-12). age's spec: identities "MUST
   // ignore unrecognized stanzas" (C2SP age.md, read 2026-10-12).
   const custom = (args: string[]): Recipient => ({ wrapFileKey: () => [new Stanza(args, new Uint8Array(40).fill(7))] });
   const value = new TextEncoder().encode("synthetic-value-greased");
