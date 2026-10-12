@@ -234,3 +234,26 @@ describe("review point 10: a grease stanza is not a recipient", () => {
     }
   });
 });
+
+describe("review point 12: the value's bytes are zeroed after use, as far as this code holds them", () => {
+  it("put zeroes the stdin buffer it was given", async () => {
+    const h = home();
+    const stdin = new TextEncoder().encode("synthetic-value-to-zero\n");
+    const code = await runSecrets(["put", REF], h.env, { stdout: () => {}, stderr: () => {}, stdin, confirm: async () => REF });
+    expect(code).toBe(0);
+    expect(stdin.every(b => b === 0)).toBe(true);
+  });
+  it("a refused put zeroes it too", async () => {
+    const h = home();
+    const stdin = new TextEncoder().encode("synthetic-value-to-zero\n");
+    expect(await runSecrets(["put", REF], h.env, { stdout: () => {}, stderr: () => {}, stdin, confirm: async () => "wrong" })).toBe(1);
+    expect(stdin.every(b => b === 0)).toBe(true);
+  });
+  it("the index writer zeroes the bytes it opened", async () => {
+    const h = home();
+    const bytes = new TextEncoder().encode("synthetic-value-to-zero");
+    const writer = new SecretIndexWriter(secretIndexPath(h.dir), b => b.slice(0, 32), { open: async () => ({ bytes: () => bytes }) });
+    await writer.prepare("s-00000000000000d1");
+    expect(bytes.every(b => b === 0)).toBe(true);
+  });
+});
