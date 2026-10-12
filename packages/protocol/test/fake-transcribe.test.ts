@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseProbe, parseRun } from "../src/index.ts";
 
+const linuxOnly = it.runIf(process.platform === "linux");
+
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-transcribe.mjs", import.meta.url));
 const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
 const PROBE = {
