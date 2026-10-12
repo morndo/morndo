@@ -15,8 +15,8 @@ function recognisedStoreDir(dir: string): boolean {
   return basename(dir) === STORE_DIR || existsSync(join(dir, STORE_MARK));
 }
 
-// Shared with secrets-sqlite.ts, which opens the same file.
-export function adoptStoreDir(dir: string, uid: number): void {
+// A loose directory is tightened only when it is recognisably the store's own; any other is refused.
+function adoptStoreDir(dir: string, uid: number): void {
   let mode: number;
   let owner: number;
   try {
@@ -35,7 +35,7 @@ export function adoptStoreDir(dir: string, uid: number): void {
   chmodSync(dir, 0o700);
 }
 
-export function markStoreDir(dir: string, uid: number): void {
+function markStoreDir(dir: string, uid: number): void {
   const marker = join(dir, STORE_MARK);
   if (existsSync(marker)) return;
   writePrivate(marker, new TextEncoder().encode("morndo-connections\n"), uid);
