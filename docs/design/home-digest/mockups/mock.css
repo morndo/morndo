@@ -1,0 +1,142 @@
+/* Shared styles for the Home digest mockups (design phase, 2026-10-12). Static HTML at 1280 px, synthetic data.
+   The colours are the app's: the brand tokens and the desktop's aliases (desk-tokens.css), so light and dark follow the
+   system as the desktop does. Monochrome; colour only for status: red for failed, amber for stale, green only for
+   "verified live". A claim is grey and dashed, never green. Every level carries its word beside its icon. */
+@import url("../../../../packages/brand/assets/tokens/morndo-tokens.css");
+@import url("../../../../apps/web/src/lib/desktop/desk-tokens.css");
+
+@font-face { font-family: "Lato"; src: url("../../../../node_modules/@fontsource/lato/files/lato-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Lato"; src: url("../../../../node_modules/@fontsource/lato/files/lato-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: block; }
+@font-face { font-family: "Lato"; src: url("../../../../node_modules/@fontsource/lato/files/lato-latin-900-normal.woff2") format("woff2"); font-weight: 900; font-display: block; }
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { width: 1280px; background: var(--frame); color: var(--text); font: 400 15px/22px var(--font); -webkit-font-smoothing: antialiased; }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+button { font: inherit; color: inherit; }
+
+/* The desktop's frame: the 40px top bar and the 70px rail are dark in both themes (Desktop.svelte, Rail.svelte). */
+.desk { display: grid; grid-template-rows: 40px auto; min-height: 100vh; }
+.top { display: flex; align-items: center; justify-content: center; color: var(--frame-fg); }
+.search { width: 574px; height: 28px; border-radius: 4px; background: var(--search-bg); font: 400 13px/28px var(--font); padding: 0 12px; }
+.bodyrow { display: flex; }
+.rail { width: 70px; flex: none; display: flex; flex-direction: column; align-items: center; padding: 8px 0 12px; color: var(--frame-fg); }
+.team { width: 36px; height: 36px; border-radius: 8px; margin-bottom: 17px; background: var(--frame-fg); color: var(--frame); font: 900 18px/36px var(--font); text-align: center; }
+.tab { width: 52px; height: 68px; padding: 8px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.ico { position: relative; width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; }
+.ico svg { width: 20px; height: 20px; }
+.tab.on .ico { background: var(--frame-active); }
+.lbl { font: 700 11px/12px var(--font); }
+.rail .badge { position: absolute; top: -2px; right: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--frame-fg); color: var(--frame); font: 700 11px/18px var(--font); text-align: center; box-shadow: 0 0 0 2px var(--frame); }
+.workspace { flex: 1; min-width: 0; padding: 0 4px 4px 0; display: flex; }
+.panel { flex: 1; border-radius: 6px; overflow: clip; background: var(--main-bg); }
+
+/* Home (HomeView.svelte): the 49px header, then the body on the sidebar background. */
+.hh { height: 49px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 18px; border-bottom: 1px solid var(--border); }
+.hh h1 { margin: 0; font: 900 18px/24px var(--font); }
+.upd { margin-left: auto; font: 400 12px/18px var(--font); color: var(--muted); }
+.home-body { padding: 16px 20px 32px; background: var(--sidebar-bg); }
+h2 { margin: 0; font: 700 15px/22px var(--font); }
+
+/* The digest's head: the title, the mark, the view switch, Mark all seen. */
+.dhead { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.since { font: 400 13px/18px var(--font); color: var(--muted); }
+.since b { color: var(--text); font-weight: 700; }
+.seg { margin-left: auto; display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-md); overflow: hidden; }
+.seg span { padding: 4px 12px; font: 700 13px/18px var(--font); color: var(--muted); }
+.seg span.on { background: var(--selected); color: var(--text); box-shadow: inset 0 -3px 0 var(--selected-bar); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: var(--radius-md); border: 1px solid var(--border-strong); background: var(--main-bg); font: 700 13px/18px var(--font); color: var(--text); white-space: nowrap; }
+.btn.primary { background: var(--send); color: var(--send-fg); border-color: var(--send); }
+.btn.small { padding: 2px 8px; font: 700 12px/16px var(--font); }
+
+/* The strip: one count per section, read from the same items the sections list. */
+.strip { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin-bottom: 8px; }
+.cnt { display: grid; gap: 2px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--main-bg); }
+.cnt .tl { display: inline-flex; align-items: center; gap: 6px; font: 700 12px/16px var(--font); color: var(--muted); white-space: nowrap; }
+.cnt .tl svg { width: 14px; height: 14px; }
+.cnt b { font: 600 22px/28px var(--font); }
+.cnt .ts { font: 400 12px/16px var(--font); color: var(--muted); }
+.cnt.zero b { color: var(--muted); }
+.cnt.bad b { color: var(--bad-fg); }
+.cnt.warn b { color: var(--warn-fg); }
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 14px; font: 400 12px/16px var(--font); color: var(--muted); }
+.legend .lv { font-size: 12px; }
+
+/* A section: a card with a head (icon, name, count, new) and its lines. */
+.sec { margin-bottom: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--main-bg); }
+.sh { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.sh h3 { margin: 0; font: 900 15px/20px var(--font); }
+.sh .n { font: 700 13px/18px var(--font); color: var(--muted); }
+.sh .new { font: 700 12px/16px var(--font); padding: 0 6px; border-radius: 9px; background: var(--count-bg); color: var(--count-fg); }
+.sh .right { margin-left: auto; display: flex; gap: 8px; align-items: center; font: 400 12px/16px var(--font); color: var(--muted); }
+.sec.bad .sh h3, .sec.bad .sh > svg { color: var(--bad-fg); }
+.sec.warn .sh h3, .sec.warn .sh > svg { color: var(--warn-fg); }
+.sec.collapsed .sh { border-bottom: 0; }
+
+/* One line per piece of work: new dot, level, what happened, evidence, the action. */
+.row { display: grid; grid-template-columns: 10px 128px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: 0; }
+.row .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 7px; }
+.row.new .dot { background: var(--morndo-ink); }
+.main { min-width: 0; display: grid; gap: 3px; }
+.l1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.verb { font: 700 14px/20px var(--font); white-space: nowrap; }
+.key { font: 700 13px/20px var(--mono); color: var(--muted); white-space: nowrap; }
+.title { font: 400 14px/20px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font: 400 12px/16px var(--font); color: var(--muted); }
+.meta .lane { font-weight: 700; color: var(--text); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 3px; }
+.chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 6px; background: var(--muted-bg); font: 400 12px/18px var(--font); color: var(--text); white-space: nowrap; }
+.chip svg { width: 12px; height: 12px; }
+.chip.pass svg { color: var(--morndo-success); }
+.chip.fail { background: var(--bad-bg); color: var(--bad-fg); }
+.chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
+.chip.own { background: transparent; border: 1px dashed var(--border-strong); color: var(--muted); }
+.chip.void { background: transparent; border: 1px dashed var(--border-strong); color: var(--muted); text-decoration: line-through; }
+.quote { font: italic 400 13px/18px var(--font); color: var(--muted); }
+.why { font: 400 13px/18px var(--font); }
+.why b { font-weight: 700; }
+.trail { font: 400 12px/16px var(--font); color: var(--muted); }
+.acts { display: flex; gap: 6px; align-items: center; }
+.more { padding: 8px 14px; font: 700 13px/18px var(--font); color: var(--muted); }
+
+/* The level: icon and word, always both. */
+.lv { display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px 1px 6px; border-radius: 6px; font: 700 12px/20px var(--font); white-space: nowrap; }
+.lv svg { width: 14px; height: 14px; }
+.lv.claimed { border: 1px dashed var(--border-strong); color: var(--muted); }
+.lv.checked { background: var(--muted-bg); color: var(--text); }
+.lv.reviewed { background: var(--muted-bg); color: var(--text); }
+.lv.live { background: var(--ok-bg); color: var(--ok-fg); }
+.lv.failed { background: var(--bad-bg); color: var(--bad-fg); }
+.lv.ask { background: var(--count-bg); color: var(--count-fg); }
+.lv.stale { background: var(--warn-bg); color: var(--warn-fg); }
+.lv.decided { border: 1px solid var(--border-strong); color: var(--text); }
+
+/* Usage, as today, below the digest. */
+.usage { margin-top: 20px; }
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+.tile { display: grid; gap: 2px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--main-bg); }
+.tile .tl { display: inline-flex; align-items: center; gap: 6px; font: 700 12px/16px var(--font); color: var(--muted); }
+.tile .tl svg { width: 14px; height: 14px; }
+.tile b { font: 600 30px/36px var(--font); }
+.tile .ts { font: 400 12px/16px var(--font); color: var(--muted); }
+.tile.warn b { color: var(--warn-fg); }
+
+/* The weekly view. */
+.wk { width: 100%; border-collapse: collapse; background: var(--main-bg); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; font: 400 13px/18px var(--font); }
+.wk th, .wk td { padding: 8px 12px; text-align: right; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+.wk th:first-child, .wk td:first-child { text-align: left; }
+.wk thead th { font: 700 12px/16px var(--font); color: var(--muted); background: var(--sidebar-bg); }
+.wk tr:last-child td { border-bottom: 0; }
+.wk .prov td { color: var(--muted); }
+.wk .prov td:first-child::after { content: " · provisional"; font-size: 12px; }
+.wk td.bad { color: var(--bad-fg); font-weight: 700; }
+.panelgrid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-top: 12px; align-items: start; }
+.note { margin: 8px 0 0; font: 400 12px/16px var(--font); color: var(--muted); max-width: 90ch; }
+.bar { display: inline-block; height: 8px; border-radius: 4px; background: var(--morndo-ink); vertical-align: middle; margin-left: 8px; }
+.bar.bad { background: var(--morndo-danger); }
+.row.changed .dot { border: 2px solid var(--morndo-ink); }           /* seen before, changed since: a ring, not a dot */
+.wk td { white-space: nowrap; }
+.wk th.rate, .wk td.rate { text-align: left; }
+.panel { min-height: calc(100vh - 44px); }
+.home-body { min-height: calc(100vh - 93px); }
