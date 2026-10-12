@@ -695,6 +695,9 @@ describe("the weekly count of claims (DG12)", () => {
       { subject: t12, revision: a1, at: NOW + MIN, via: "review" },       // T-12 moved to review at #87's head
     ];
     expect(countedClaims(sources, links)).toEqual([{ subject: c7, revision: a1, at: NOW }]);
+    // The same root index grouping would build: weekly counting accepts it and does not sort the links again.
+    const index = [{ key: subjectRef(c7), task: taskKey(12), at: NOW - MIN }];
+    expect(countedClaims(sources, [], [], index), "one root index").toEqual([{ subject: c7, revision: a1, at: NOW }]);
     const r = records({
       claimSources: sources,
       claimRounds: [{ subject: t12, at: NOW + MIN }],
