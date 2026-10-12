@@ -2,6 +2,7 @@
 // is bad_output. A path is not a field: the wire never carries where the audio sits.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { MAX_TEXT_BYTES } from "@morndo/domain";
 import {
   MeTranscription, ProbeDocument, RunDocument, TranscriptionCancelBody, TranscriptionCreateBody, TranscriptionView,
   parseBody, parseProbe, parseRun, problemFromExit,
@@ -31,6 +32,20 @@ describe("plugin protocol 1", () => {
     expect(src).toContain("export type TranscriberProbe ");
     expect(src).toContain("export type TranscribeInput ");
     expect(src).toContain("export type Transcriber ");
+  });
+
+  it("bounds segment text and a view's words by UTF-8 bytes", () => {
+    const cjk = "\u6d77".repeat(21_846);
+    expect(new TextEncoder().encode(cjk).length).toBe(65_538);
+    expect(cjk.length).toBeLessThan(MAX_TEXT_BYTES);
+    const run = { ...RUN, segments: [{ startMs: 0, endMs: 1, text: cjk }] };
+    expect(parseRun(JSON.stringify(run))).toEqual({ ok: false, error: "bad_output" });
+    const words = VIEW.text;
+    if (words === null) throw new Error("the view fixture has words");
+    expect(parseBody(TranscriptionView, { ...VIEW, text: { ...words, text: cjk } })).toBeNull();
+    expect(parseBody(TranscriptionView, { ...VIEW, text: { ...words, edit: cjk, edited: true } })).toBeNull();
+    const fit = "a".repeat(MAX_TEXT_BYTES);
+    expect(parseRun(JSON.stringify({ ...RUN, segments: [{ startMs: 0, endMs: 1, text: fit }] })).ok).toBe(true);
   });
 
   it("refuses a segment that ends before it starts or runs past the duration", () => {
