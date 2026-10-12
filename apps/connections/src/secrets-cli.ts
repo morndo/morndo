@@ -70,6 +70,15 @@ const reference = (text: string | undefined): string => {
   return text;
 };
 
+// stdin's bytes, read to the end; each chunk the stream handed over is zeroed once copied.
+export async function stdinValue(source: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of source) chunks.push(chunk as Buffer);
+  const bytes = new Uint8Array(Buffer.concat(chunks));
+  for (const chunk of chunks) chunk.fill(0);
+  return bytes;
+}
+
 export async function runSecrets(argv: readonly string[], env: NodeJS.ProcessEnv, io: SecretsIo): Promise<number> {
   let home: SecretsHome | null = null;
   try {

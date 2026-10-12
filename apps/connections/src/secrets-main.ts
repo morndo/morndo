@@ -5,15 +5,11 @@
 // pipe, which Node writes asynchronously on POSIX, drains first (review 11; nodejs.org/docs/latest-v24.x/api/process.html,
 // "A note on process I/O" and process.exit(), read 2026-10-12).
 import { closeSync, openSync, readSync, writeSync } from "node:fs";
-import { runSecrets } from "./secrets-cli.ts";
+import { runSecrets, stdinValue } from "./secrets-cli.ts";
 
 async function stdinBytes(): Promise<Uint8Array | null> {
   if (process.stdin.isTTY) return null;
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-  const bytes = new Uint8Array(Buffer.concat(chunks));
-  for (const chunk of chunks) chunk.fill(0);
-  return bytes;
+  return stdinValue(process.stdin);
 }
 
 function confirm(prompt: string): Promise<string | null> {
