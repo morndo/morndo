@@ -35,6 +35,10 @@ It exits 1 with one line per refusal, each naming its rule and step, and 2 on a 
 
 The recurring-job skill's `references/` holds the notes its SOPs cite as `notes/<id>`, so a copied skill has them: per source a link, the date read, its basis (vendor-doc, vendor-claim, measured, study) and a sentence in our own words. No quotes are stored. A note past its `recheck` date warns in the tests and in `sop-check`, and never fails either.
 
+## Model facts
+
+`npm run knowledge:models -- refresh` fetches models.dev's model list once (MIT licence) and writes a dated, trimmed snapshot to `~/.cache/morndo-knowledge/models-dev/`: provider, model, context, output limit, prices per million tokens and release date, with the source and the licence. `npm run knowledge:models -- show [provider[/model]]` prints the newest one, with a warning once it is older than 30 days. Nothing in this repository holds a copy, and no code that routes or gates work reads it.
+
 ## Install
 
 Agents look for skills in their own folders, not in this repository. Link each skill folder into your user skill folder, from the repository root:
