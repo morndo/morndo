@@ -26,6 +26,13 @@ const VIEW = {
 };
 
 describe("plugin protocol 1", () => {
+  it("declares the transcriber port on the protocol module", () => {
+    const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
+    expect(src).toContain("export type TranscriberProbe ");
+    expect(src).toContain("export type TranscribeInput ");
+    expect(src).toContain("export type Transcriber ");
+  });
+
   it("reads a ready probe and a run that names its segments", () => {
     expect(parseProbe(JSON.stringify(PROBE))).toEqual({ ok: true, value: PROBE });
     expect(parseRun(`${JSON.stringify(RUN)}\n`)).toEqual({ ok: true, value: RUN });

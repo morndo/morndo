@@ -3,23 +3,9 @@
 // the abort case fails. A process adapter reports the pids it started; a timeout must leave that group dead.
 import { describe, expect, it } from "vitest";
 import type { EngineText, Result, TranscriptionProblem } from "@morndo/domain";
+import type { TranscribeInput, Transcriber, TranscriberProbe } from "../src/index.ts";
 
-export type TranscriberProbe =
-  | { ready: true; engine: string; engineVersion: string; model: string; languages: "multi" | readonly string[]; maxSeconds: number }
-  | { ready: false; reason: "missing" | "not_ready" | "protocol"; detail: string };
-
-export type TranscribeInput = {
-  path: string;
-  language: string;
-  threads: number;
-  maxSeconds: number;
-  signal: AbortSignal;
-};
-
-export type Transcriber = {
-  probe(): Promise<TranscriberProbe>;
-  transcribe(input: TranscribeInput): Promise<Result<EngineText, TranscriptionProblem>>;
-};
+export type { TranscribeInput, Transcriber, TranscriberProbe };
 
 export type ContractSubject = {
   transcriber: Transcriber;
