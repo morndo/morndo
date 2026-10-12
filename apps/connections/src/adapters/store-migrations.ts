@@ -29,6 +29,11 @@ export const MIGRATIONS: readonly Migration[] = [
       db.prepare("INSERT INTO policy (id, body) VALUES (1, ?)").run(JSON.stringify(emptyPolicy()));
     },
   },
+  {
+    version: 2,
+    name: "secrets on the node: metadata, the fingerprint ledger, grants, uses, events and workspaces",
+    up: () => {},
+  },
 ];
 
 export function migrate(db: Database.Database): { from: number; to: number } {
