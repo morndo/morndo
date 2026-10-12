@@ -7,6 +7,7 @@ import { KEEP_SHAPE, USE_MODES, parseReference, type Actor, type GrantEnd, type 
 import { LeftBehind } from "./application/secrets-service.ts";
 import { openSecrets, type SecretsHome } from "./compose.ts";
 import { FileRefused } from "./adapters/file-mode.ts";
+import { NodeKeyRefused } from "./adapters/node-keys.ts";
 import { DatabaseFromFuture } from "./adapters/store-migrations.ts";
 import { IndexFileRefused } from "@morndo/node-ops";
 
@@ -23,6 +24,7 @@ const USAGE = 64;
 const REFUSED = 1;
 // Done, with something left to clean that the command names on stderr (review 4).
 const PARTIAL = 3;
+// A file to restore or fix: a node key, the database, the index file or a vault file.
 const FILES = 70;
 const BOOLEANS = new Set(["raw", "node"]);
 const VALUES = new Set(["lane", "workspace", "mode", "until", "expiry"]);
@@ -82,7 +84,8 @@ export async function runSecrets(argv: readonly string[], env: NodeJS.ProcessEnv
     io.stderr(`${cause instanceof Error ? cause.message : "failed"}\n`);
     if (error instanceof LeftBehind || error instanceof Refused) leftOver(error.left, io);
     if (cause instanceof Usage) return USAGE;
-    return cause instanceof FileRefused || cause instanceof DatabaseFromFuture || cause instanceof IndexFileRefused ? FILES : REFUSED;
+    const file = [FileRefused, DatabaseFromFuture, IndexFileRefused, NodeKeyRefused].some(kind => cause instanceof kind);
+    return file ? FILES : REFUSED;
   } finally {
     home?.close();
   }

@@ -13,6 +13,16 @@ import { SqliteSecrets } from "./secrets-sqlite.ts";
 const KEY_BYTES = 32;
 
 export type NodeKey = "fingerprint.key" | "index.key";
+// A key file this node can't use: gone while hashes made with it are on record, or not a key. A file to restore, so the
+// command exits as for any file problem (70), not as a refusal (round 2, point 8).
+export class NodeKeyRefused extends Error {
+  readonly problem: "missing" | "length";
+  constructor(problem: "missing" | "length", message: string) {
+    super(message);
+    this.name = "NodeKeyRefused";
+    this.problem = problem;
+  }
+}
 // Whether anything made with a key is on record: then a missing key file must be restored, never made anew (review 6).
 // One answer per key, as each has its own records (round 2, point 1).
 export type KeyRecords = (key: NodeKey) => boolean;
@@ -64,12 +74,12 @@ export class NodeKeys {
     const path = join(this.#dir, name);
     if (!existsSync(path)) {
       if (this.#onRecord(name)) {
-        throw new Error(`${path} is missing while hashes made with it are on record: restore it from where the identity is kept; a new key would let a revoked value in again and blind the output filter`);
+        throw new NodeKeyRefused("missing", `${path} is missing while hashes made with it are on record: restore it from where the identity is kept; a new key would let a revoked value in again and blind the output filter`);
       }
       writeNew(path, new Uint8Array(randomBytes(KEY_BYTES)), this.#uid);
     }
     const key = readPrivate(path, this.#uid);
-    if (key.length !== KEY_BYTES) throw new Error(`${path} is not a ${KEY_BYTES}-byte key`);
+    if (key.length !== KEY_BYTES) throw new NodeKeyRefused("length", `${path} is not a ${KEY_BYTES}-byte key`);
     return key;
   }
 }
