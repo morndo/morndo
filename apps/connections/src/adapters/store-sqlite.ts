@@ -46,6 +46,29 @@ type StoreHooks = {
   afterOpen?: (db: Database.Database) => void;
 };
 
+// The Connections database, as both its stores open it (this one and secrets-sqlite.ts): every check on the directory
+// and the file, then the kit's private open and the migrations. One opener, so the two connections can't drift apart
+// (review 15 of PR #40); a store that needs other settings says so here.
+export function openConnectionsDb(path: string, uid?: number, afterOpen?: (db: Database.Database) => void): Database.Database {
+  const owner = uid ?? process.getuid?.() ?? -1;
+  const dir = dirname(path);
+  refuseBareHome(path);
+  assertLocalDisk(dir);
+  adoptStoreDir(dir, owner);
+  ensurePrivateDir(dir, owner);
+  markStoreDir(dir, owner);
+  assertPrivate(path, "file", owner);
+  return openPrivateDb(path, {
+    synchronous: "NORMAL",
+    knownVersion: MIGRATIONS.length,
+    refuseNewer: (found, known) => new DatabaseFromFuture(found, known),
+    migrate: db => {
+      afterOpen?.(db);
+      migrate(db);
+    },
+  });
+}
+
 export class SqliteStore implements ConnectionStore {
   readonly #db: Database.Database;
   readonly #readVersion: Database.Statement;
@@ -59,23 +82,7 @@ export class SqliteStore implements ConnectionStore {
 
   constructor(path: string, uid?: number, hooks?: StoreHooks) {
     this.#hooks = hooks ?? {};
-    const owner = uid ?? process.getuid?.() ?? -1;
-    const dir = dirname(path);
-    refuseBareHome(path);
-    assertLocalDisk(dir);
-    adoptStoreDir(dir, owner);
-    ensurePrivateDir(dir, owner);
-    markStoreDir(dir, owner);
-    assertPrivate(path, "file", owner);
-    this.#db = openPrivateDb(path, {
-      synchronous: "NORMAL",
-      knownVersion: MIGRATIONS.length,
-      refuseNewer: (found, known) => new DatabaseFromFuture(found, known),
-      migrate: db => {
-        this.#hooks.afterOpen?.(db);
-        migrate(db);
-      },
-    });
+    this.#db = openConnectionsDb(path, uid, db => this.#hooks.afterOpen?.(db));
     this.#readVersion = this.#db.prepare("SELECT version FROM cas WHERE id = 1");
     this.#readDirectory = this.#db.prepare("SELECT body FROM directory WHERE id = 1");
     this.#readPolicy = this.#db.prepare("SELECT body FROM policy WHERE id = 1");

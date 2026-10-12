@@ -8,14 +8,10 @@
 // IMMEDIATE "start[s] a new write immediately", so a second writer waits (the timeout, 5 s) before it reads,
 // https://www.sqlite.org/lang_transaction.html, read 2026-10-12.
 import Database from "better-sqlite3";
-import { dirname } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { assertLocalDisk, openPrivateDb } from "@morndo/service-kit";
 import type { LedgerEntry, Secret, SecretEvent, SecretGrant, SecretStatus, SecretVersion } from "@morndo/domain";
 import type { SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRow } from "../application/ports.ts";
-import { assertPrivate, ensurePrivateDir, refuseBareHome } from "./file-mode.ts";
-import { DatabaseFromFuture, MIGRATIONS, migrate } from "./store-migrations.ts";
-import { adoptStoreDir, markStoreDir } from "./store-sqlite.ts";
+import { openConnectionsDb } from "./store-sqlite.ts";
 
 type SecretsHooks = { beforeSave?: () => void };
 type SecretRow = {
@@ -91,20 +87,7 @@ export class SqliteSecrets implements SecretsDirectory {
 
   constructor(path: string, uid?: number, hooks?: SecretsHooks) {
     this.#hooks = hooks ?? {};
-    const owner = uid ?? process.getuid?.() ?? -1;
-    const dir = dirname(path);
-    refuseBareHome(path);
-    assertLocalDisk(dir);
-    adoptStoreDir(dir, owner);
-    ensurePrivateDir(dir, owner);
-    markStoreDir(dir, owner);
-    assertPrivate(path, "file", owner);
-    this.#db = openPrivateDb(path, {
-      synchronous: "NORMAL",
-      knownVersion: MIGRATIONS.length,
-      refuseNewer: (found, known) => new DatabaseFromFuture(found, known),
-      migrate: db => { migrate(db); },
-    });
+    this.#db = openConnectionsDb(path, uid);
     // Rows come back in the order they were written: the rewritten tables are emptied and refilled in order, and the
     // ledger and the events only grow.
     this.#selectSecrets = this.#db.prepare(
