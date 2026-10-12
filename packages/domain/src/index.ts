@@ -16,3 +16,4 @@ export * from "./usage.ts";
 export * from "./jobs.ts";
 export * from "./chats.ts";
 export * from "./knowledge.ts";
+export * from "./knowledge-facts.ts";

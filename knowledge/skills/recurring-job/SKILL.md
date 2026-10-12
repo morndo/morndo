@@ -12,7 +12,7 @@ metadata:
 
 An SOP is a recurring job written down as data: what starts it, what each step does and how it is checked, where the principal approves, when it stops, what it may spend, what it reports and what it measures. Write it once, check it with `scripts/sop-check.mjs`, and ask the principal before its first run. The shape is in `assets/sop.schema.json`; the worked example is `assets/daily-blog-post.yaml`.
 
-**Running the check.** In the Morndo repository: `npm run knowledge:sop-check -- <sop.yaml>`. Where this skill was copied on its own: run `npm install` in this skill's folder once (it installs the one package the check needs, pinned in `package.json`), then `node scripts/sop-check.mjs <sop.yaml>`. Node 20 or later. Exit 0 passes, 1 refused, 2 a bad call or anything unexpected.
+**Running the check.** In the Morndo repository: `npm run knowledge:sop-check -- <sop.yaml>`. Where this skill was copied on its own: run `npm install` in this skill's folder once (it installs the one package the check needs, pinned in `package.json`), then `node scripts/sop-check.mjs <sop.yaml>`. Node 20 or later. Exit 0 passes, 1 refused, 2 a bad call, a file it can't read, or anything unexpected. For an instance, add `--preferences ~/.config/morndo-knowledge/preferences.yaml --snapshots "${XDG_CACHE_HOME:-$HOME/.cache}/morndo-knowledge/models-dev"` (the directory models-dev writes to) so its `pref:<id>` and `models.dev@<date>` citations are resolved; without them each is checked for its form only, with an `unchecked-citation` warning. A file or directory that doesn't exist yet only warns while the SOP cites nothing in it. A snapshot counts only if it reads and was fetched on the cited date; a cited preference or snapshot the file holds but left out is refused with the reason.
 
 ## When to use
 
@@ -52,9 +52,10 @@ An SOP is a recurring job written down as data: what starts it, what each step d
 
 - Name a **Role** of the engine layer (`plan`, `research`, `review`, `validate`, `implement-backend`, and the rest) and a **model class**: `flagship`, `everyday` or `fast`. Never a model id: ids change every few weeks, and a template with one breaks for anyone without that vendor (K14). To run a given engine, put it in the Role's chain.
 - Add a **family rule** where independence matters: a judge from another family than the worker, as in `model: { class: fast, family: { other-than: [draft] } }`, a cheap model from another vendor than the writer. Model judges favour their own family's outputs.
-- Give every engine step a **why**: a pattern skill, a note (`notes/<id>`, one of the notes in `references/`), a preference (`pref:<id>`, instances only), the model snapshot (`models.dev@<date>`), or `no evidence: default`. A citation that resolves to nothing is refused; a note past its re-check date warns.
+- Give every engine step a **why**: a pattern skill, a note (`notes/<id>`, one of the notes in `references/`), a preference (`pref:<id>`, instances only), the model snapshot (`models.dev@<date>`), or `no evidence: default`. A citation that resolves to nothing is refused: a note must be one in `references/`, a preference one in the file given with `--preferences`, a snapshot one in the directory given with `--snapshots`. A note past its re-check date warns.
 - The class and the family rule are advisory. The Role's chain and auto routing decide what runs; each run's report says when what ran didn't meet them (K9).
 - A preference is shown as the user's, never as a fact. Its format is in `references/preferences.md`.
+- Once auto routing keeps a Scorecard (ADR-0020), a step's role group (its Role up to the first hyphen) and its class select this user's cells for engines of that class doing that kind of work; they are shown beside the step and any preference, never ranked by Knowledge (K9).
 
 ## Reporting and measuring
 
@@ -77,7 +78,8 @@ An SOP is a recurring job written down as data: what starts it, what each step d
 | `stop-required` | No stop rule, or one without its `when` and `then`. |
 | `budget-stop` | A budget without amounts in one currency (or 0), with `per_run` above `per_month`, without `on_exceed` of stop or ask; or an engine step under a budget of 0. |
 | `engine-why` | An engine step without a why. |
-| `why-resolves` | A citation that is no skill, note, preference, snapshot, or `no evidence: default`. |
+| `why-resolves` | A citation that is no skill, note, preference, snapshot, or `no evidence: default`; with `--preferences` or `--snapshots`, a preference or snapshot those don't hold. |
+| `preference-in-template` | A template that cites a preference (`pref:<id>`); only an instance may. |
 | `step-check` | A step without an output and a check. |
 | `no-model-id` | A model id where a class belongs, or a model on a tool step. |
 | `model-class` | A class that isn't one, or a family rule that points at no earlier engine step. |
@@ -89,7 +91,7 @@ An SOP is a recurring job written down as data: what starts it, what each step d
 | `done-required`, `report-citations`, `metrics-required` | No done checks; a report without its place or its citations; a metric without its name, source or cadence. |
 | `shape` | A field the SOP doesn't have, or no SOP id, version or steps. |
 
-It warns, and passes, on `stale-citation` (a note past its re-check date) and `outward-sounding` (a step declared local whose name or tool sounds outward).
+It warns, and passes, on `stale-citation` (a note past its re-check date), `outward-sounding` (a step declared local whose name or tool sounds outward), `unchecked-citation` (a preference or snapshot cited while no `--preferences` file or `--snapshots` directory was given, so only its form was checked), `preference-left-out` (an entry of the preferences file that `parsePreferences` refused, named by its place), and `no-preferences-file` or `no-snapshot-directory` (one given that doesn't exist, while the SOP cites nothing in it).
 
 ## Sources
 

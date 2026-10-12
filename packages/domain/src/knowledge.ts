@@ -2,26 +2,33 @@
 // steps that each name a Role and a model class (or a deterministic tool) and declare their effect, gates before
 // anything outward, stop rules, a budget, a report and metrics. This module judges a parsed SOP. It reads nothing and
 // keeps no clock: the caller passes the shipped skill names, the notes with their re-check dates, the engine layer's
-// roles, today's date and a way to tell whether a time zone exists.
+// roles, today's date and a way to tell whether a time zone exists, and, when the user gives them, what their preferences
+// file and model snapshot directory hold, which cited preferences and snapshots must then resolve to.
+import { isDate, isRec, PREFERENCE_ID, shown, text } from "./knowledge-guards.ts";
 
 export const MODEL_CLASSES = ["flagship", "everyday", "fast"] as const;
 export type ModelClass = (typeof MODEL_CLASSES)[number];
 
 export const SOP_RULES = [
   "shape", "trigger", "blanks-filled", "pattern-known", "step-kind", "role-known", "no-model-id", "model-class", "engine-why",
-  "why-resolves", "step-check", "effect-declared", "gate-before-outward", "gate-shape", "silence-never-approves",
+  "why-resolves", "preference-in-template", "step-check", "effect-declared", "gate-before-outward", "gate-shape", "silence-never-approves",
   "round-limit", "stop-required", "budget-stop", "done-required", "report-citations", "metrics-required",
 ] as const;
 export type SopRule = (typeof SOP_RULES)[number];
-export type SopWarning = "stale-citation" | "outward-sounding";
+export type SopWarning = "stale-citation" | "outward-sounding" | "unchecked-citation";
 
 export type SopFinding<R extends string = SopRule> = { rule: R; at: string; message: string };
+// What one of the user's files holds for citations: the preference ids or snapshot dates that resolve, and those it holds but
+// left out, each with why.
+export type CitationIndex = { usable: ReadonlySet<string>; leftOut: ReadonlyMap<string, string> };
 export type SopContext = {
   skills: readonly string[];
   notes: ReadonlyMap<string, string>; // note id -> its re-check date, YYYY-MM-DD
   roles: readonly string[];
   today: string; // YYYY-MM-DD
   isTimeZone: (tz: string) => boolean; // whether the runtime knows this IANA time zone
+  preferences?: CitationIndex; // the user's preferences file; without it, pref:<id> is checked for its form only
+  snapshots?: CitationIndex; // the user's model snapshots, by date; without them, models.dev@<date> is checked for its form only
 };
 export type SopVerdict = { refusals: SopFinding[]; warnings: SopFinding<SopWarning>[] };
 
@@ -50,18 +57,12 @@ const CRON_RANGES: readonly (readonly [number, number])[] = [[0, 59], [0, 23], [
 const BLANK = /<[^<>]+>/;
 const AMOUNT = /^(\d+(?:\.\d{1,2})?) ([A-Z]{3})$/;
 const ID = /^[a-z][a-z0-9-]*$/;
-const PREF = /^pref:[a-z0-9][a-z0-9-]*$/;
-const SNAPSHOT = /^models\.dev@\d{4}-\d{2}-\d{2}$/;
 const NO_EVIDENCE = "no evidence: default";
 
-type Rec = Record<string, unknown>;
 type Amount = { value: number; currency: string | null };
-const isRec = (x: unknown): x is Rec => typeof x === "object" && x !== null && !Array.isArray(x);
-const text = (x: unknown): x is string => typeof x === "string" && x.trim() !== "";
 const texts = (x: unknown): x is string[] => Array.isArray(x) && x.length > 0 && x.every(text);
 const oneOf = <T extends string>(list: readonly T[], x: unknown): x is T => (list as readonly unknown[]).includes(x);
 const rounds = (x: unknown) => typeof x === "number" && Number.isInteger(x) && x >= 1 && x <= MAX_ROUNDS;
-const shown = (x: unknown): string => (typeof x === "string" ? x : (JSON.stringify(x) ?? "nothing"));
 const blank = (x: unknown) => typeof x === "string" && BLANK.test(x);
 
 // A number with a currency ("5 USD"), or 0: nothing may be spent. Anything else ("unlimited", 5) is no amount.
@@ -83,6 +84,17 @@ export function posixCron(line: string): boolean {
       return a >= lo && b <= hi && a <= b;
     });
   });
+}
+
+// The id a pref:<id> citation names, or the date a models.dev@<date> one names: null when the citation isn't of that form.
+const citedPreference = (c: unknown): string | null => (typeof c === "string" && c.startsWith("pref:") && PREFERENCE_ID.test(c.slice("pref:".length)) ? c.slice("pref:".length) : null);
+const citedSnapshot = (c: unknown): string | null => (typeof c === "string" && c.startsWith("models.dev@") && isDate(c.slice("models.dev@".length)) ? c.slice("models.dev@".length) : null);
+
+// The preference ids and snapshot dates an SOP's steps cite, in the forms checkSop resolves: what a caller needs to read.
+export function sopCitations(doc: unknown): { preferences: string[]; snapshots: string[] } {
+  const steps: unknown[] = isRec(doc) && Array.isArray(doc.steps) ? doc.steps : [];
+  const why = steps.flatMap(s => (isRec(s) && Array.isArray(s.why) ? (s.why as unknown[]) : []));
+  return { preferences: why.flatMap(c => citedPreference(c) ?? []), snapshots: why.flatMap(c => citedSnapshot(c) ?? []) };
 }
 
 // Every string in the SOP that still holds a blank, with where it is: steps by id, other lists by position.
@@ -129,14 +141,28 @@ export function checkSop(doc: unknown, ctx: SopContext): SopVerdict {
   }
 
   const cite = (c: unknown, at: string) => {
-    if (typeof c === "string" && (c === NO_EVIDENCE || PREF.test(c) || SNAPSHOT.test(c) || ctx.skills.includes(c))) return;
-    if (typeof c === "string" && c.startsWith("notes/")) {
-      const due = ctx.notes.get(c.slice("notes/".length));
-      if (due === undefined) refuse("why-resolves", at, `${c} is not a note of the recurring-job skill`);
-      else if (ctx.today > due) warnings.push({ rule: "stale-citation", at, message: `${c} was due for a re-read on ${due}` });
-      return;
+    const unknown = () => refuse("why-resolves", at, `'${shown(c)}' cites nothing known: a skill, notes/<id>, pref:<id>, models.dev@<date> or '${NO_EVIDENCE}'`);
+    if (typeof c !== "string") return unknown();
+    if (template && c.startsWith("pref:")) {
+      return refuse("preference-in-template", at, "a template cites no preference: a preference is one person's, so only an instance may cite pref:<id> (K12)");
     }
-    refuse("why-resolves", at, `'${shown(c)}' cites nothing known: a skill, notes/<id>, pref:<id>, models.dev@<date> or '${NO_EVIDENCE}'`);
+    if (c === NO_EVIDENCE || ctx.skills.includes(c)) return;
+    // A preference or a snapshot resolves against the user's files when the caller has them; without them it is checked for
+    // its form only, and a warning says so.
+    const resolve = (index: CitationIndex | undefined, key: string, file: string, absent: string) => {
+      const why = index?.leftOut.get(key);
+      if (index === undefined) warnings.push({ rule: "unchecked-citation", at, message: `${c} is checked for its form only: no ${file} was given` });
+      else if (why !== undefined) refuse("why-resolves", at, `${c}: the ${file} left it out: ${why}`);
+      else if (!index.usable.has(key)) refuse("why-resolves", at, `${c} is no ${absent} of the ${file}`);
+    };
+    const pref = citedPreference(c);
+    if (pref !== null) return resolve(ctx.preferences, pref, "preferences file", "preference");
+    const fetched = citedSnapshot(c);
+    if (fetched !== null) return resolve(ctx.snapshots, fetched, "snapshot directory", "snapshot");
+    if (!c.startsWith("notes/")) return unknown();
+    const due = ctx.notes.get(c.slice("notes/".length));
+    if (due === undefined) refuse("why-resolves", at, `${c} is not a note of the recurring-job skill`);
+    else if (ctx.today > due) warnings.push({ rule: "stale-citation", at, message: `${c} was due for a re-read on ${due}` });
   };
 
   const steps: unknown[] = Array.isArray(doc.steps) ? (doc.steps as unknown[]) : [];

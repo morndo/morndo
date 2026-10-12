@@ -256,8 +256,8 @@ Both stay Preferences in the user's file; the Notes say what the sources show.
 **What it is.** models.dev is an open database of model specifications, prices and capabilities, kept as TOML files in its repository and served as JSON [S5]. Licence: MIT, read 2026-10-12 [S6]. On 2026-10-12 `https://models.dev/api.json` returned 226 providers and 8,474 provider-model entries in 5.4 MB, each with `limit` (context, output, sometimes input), `cost` per million tokens (input, output, cache read and write), release date and family [S7]. The repository had 30 commits on 2026-10-11 alone [S5]. `models.json` holds model-only facts and `catalog.json` both [S5].
 
 **How Morndo uses it.**
-- A refresh command downloads `api.json` to `~/.cache/morndo-knowledge/models-dev/<date>.json` with models.dev's licence text beside it. The repository ships no copy except a trimmed test fixture, which carries the licence notice too. A copy in the repository would add megabytes per refresh to a public history and change many times a day upstream.
-- The CLI shows a model's lineup entry, context, output limit and price with "models.dev, fetched *date*". Older than 30 days, it is shown with a warning (K6). Offline, the newest cached copy is used and its date shown.
+- `npm run knowledge:models -- refresh` (`knowledge/tools/models-dev/`) fetches `api.json` and models.dev's licence once, each request within 60 seconds (then exit 2), and writes a trimmed snapshot dated with the machine's real date to `$XDG_CACHE_HOME/morndo-knowledge/models-dev/<date>.json` (`~/.cache/...` when it is unset), through a temporary file renamed over it, so a broken write leaves the cache as it was, and removes temporary files older than ten minutes, which a refresh that died left behind: per model its provider, id, name, family, context, output limit, input and output price per million tokens and release date, with the source URL, the fetch date and the licence text. The trimming is pure (`trimModelsDev` in `packages/domain/src/knowledge-facts.ts`). The repository ships no copy: a copy would add megabytes per refresh to a public history and change many times a day upstream. The tests use a made-up fixture in `api.json`'s shape and a fake fetch, never the network.
+- `npm run knowledge:models -- show [provider[/model]]` prints the newest snapshot that reads with "models.dev, fetched *date*", and names each newer one it skipped. Older than 30 days, it is shown with a warning and still exits 0 (K6); dated after today (a wrong clock or a wrong file), it is shown with a warning too, never as fresh. Without a snapshot it says how to make one and fails nothing. `--today` is show's alone. An SOP's `models.dev@<date>` resolves against this directory when `sop-check --snapshots` is given it: the snapshot of that date must read, as show reads it, and say it was fetched that day.
 - It is community data, not the vendor's page. Example, read 2026-10-12: models.dev gives GPT-6 Astra an input limit of 922,000 tokens [S7]; OpenAI's model page shows a 1,050,000-token context and 128,000 output tokens and no separate input limit [S8]. So any value that moves money or permissions stays in the catalog (K13), and a Note that relies on a limit says which source it used.
 - It answers what a model is and costs, not what it is good at. Strength claims stay out of it (K15).
 
@@ -274,7 +274,9 @@ preferences:
     tasks: [write]
 ```
 
-Rendered: "Claude for long-form writing (your preference, 2026-10-11)", never as a fact (K4). Beside it the CLI shows the Scorecard's numbers for the same kind of task where they exist (ADR-0020): first-try approvals and edits needed, per model. That is what can turn a preference into evidence for this user; the shipped files never hold either (K12).
+Rendered: "Claude for long-form writing (your preference, 2026-10-11)", never as a fact (K4). Its shape is the recurring-job skill's `assets/preferences.schema.json`; `parsePreferences`, the authority, holds the same rules and that ids are unique, leaves a broken entry out with a refusal naming its place, and `renderPreference` shows it as its holder's. `sop-check --preferences` resolves an SOP's `pref:<id>` against the file. A shipped template never cites one (`sop-check` refuses it: `preference-in-template`), and no preferences file ships (K12).
+
+**The Scorecard link.** A step's role group (its Role up to the first hyphen, as ADR-0020 pools them) and its model class select this user's Scorecard cells: `scorecardFor` returns them sorted by entry, never by a score (K9), and refuses a class that isn't `flagship`, `everyday` or `fast`. ADR-0020 is still a proposal (PR #18), so the cells come through this port; showing them beside a step or a preference waits for its Scorecard. That record, first-try approvals and changes asked per model, is what can turn a preference into evidence for this user.
 
 ## 9. Use
 
@@ -294,7 +296,7 @@ Citations: a skill by name, a Note with its read date, `pref:<id>`, `models.dev@
 3. **SOP check (PR 2).** The blog template passes. Copies with the Gate removed, `on_silence` set to approve, `max_rounds` removed, no Stop rule, a Step without `check`, an engine Step without `why`, or a model id in a template each fail with the rule's name. A `tool` Step without `why` passes.
 4. **Model facts (PR 3).** The loader reads the fixture; a snapshot older than 30 days is marked stale and still shown; a missing snapshot says so and fails nothing; no code path reads a gate value from the snapshot (K13).
 5. **Preferences (PR 3).** A Preference renders with its holder and date and never in the place of a fact; a shipped file holding a Preference fails (K12).
-6. **K9 (PR 3).** The same route replayed with and without the knowledge files picks the same Candidate.
+6. **K9 and K13 (PR 3).** No source under `packages/*/src` or `apps/*/src` outside the knowledge modules names them, and none outside them names the model snapshot; each matcher is proven on a planted line. Until ADR-0020's replay exists in code, this stands in for replaying a route with and without the knowledge files: no routing or gate code can read them.
 
 ## 11. Build plan
 
@@ -302,7 +304,7 @@ Small stacked PRs:
 
 1. **Pattern skills.** The six `knowledge/skills/loop-*/SKILL.md` from section 5, `knowledge/README.md` with the install links, and the skill test (section 10.1). Done: the test passes with its negative controls; one skill loaded in Claude Code from the link; every source re-read on the day of the PR.
 2. **Recurring-job skill, `sop-check`, blog template.** `knowledge/skills/recurring-job/`, the check's pure rules in `packages/domain/src/knowledge.ts`, the Notes the template cites. Done: tests 10.3; Notes re-read on the day.
-3. **models.dev snapshot, Preferences file, Scorecard link.** The refresh command and loader, the overlay's `preferences.yaml`, and the Scorecard numbers beside a Preference (needs ADR-0020's Scorecard). Done: tests 10.4 to 10.6.
+3. **models.dev snapshot, Preferences file, Scorecard link.** `knowledge/tools/models-dev/` (refresh and show), `packages/domain/src/knowledge-facts.ts` (trimming, freshness, preferences, `scorecardFor`), the preferences schema, and the rule `preference-in-template`. Done: tests 10.4 to 10.6. Showing Scorecard numbers waits for ADR-0020.
 
 Later steps, each only when a need shows:
 - **Disagreement and Proposal aggregates** (first draft K5, K7, K8). A pull request already is a proposal; a Note lists sources that disagree.

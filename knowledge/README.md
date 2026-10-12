@@ -27,13 +27,17 @@ npm run knowledge:sop-check -- knowledge/skills/recurring-job/assets/daily-blog-
 # daily-blog-post: passes
 ```
 
-It exits 1 with one line per refusal, each naming its rule and step, and 2 on a bad call or anything unexpected, as one line. Its rules are pure, in `packages/domain/src/knowledge.ts`; the skill lists them. `--roles` names the engine layer's roles when they differ from the defaults; `--today` sets the date the notes' staleness is judged on.
+It exits 1 with one line per refusal, each naming its rule and step, and 2 on a bad call or anything unexpected, as one line. Its rules are pure, in `packages/domain/src/knowledge.ts`; the skill lists them. `--roles` names the engine layer's roles when they differ from the defaults; `--today` sets the date the notes' staleness is judged on; `--preferences <file>` and `--snapshots <dir>` resolve an instance's `pref:<id>` and `models.dev@<date>` citations, which without them are checked for their form only, with a warning; a snapshot counts only if it reads and was fetched on the cited date.
 
 `scripts/sop-check.mjs` is generated: `npm run knowledge:build` bundles `knowledge/tools/sop-check/` and the domain's rules into it, and a test fails when it differs from a fresh build. A copy of the skill runs it with Node 20 or later after `npm install` in the skill's folder, which installs the one package it leaves out (yaml, pinned in the skill's `package.json`).
 
 ## Notes
 
 The recurring-job skill's `references/` holds the notes its SOPs cite as `notes/<id>`, so a copied skill has them: per source a link, the date read, its basis (vendor-doc, vendor-claim, measured, study) and a sentence in our own words. No quotes are stored. A note past its `recheck` date warns in the tests and in `sop-check`, and never fails either.
+
+## Model facts
+
+`npm run knowledge:models -- refresh` fetches models.dev's model list once (MIT licence), each request within 60 seconds, and writes a trimmed snapshot dated today to `$XDG_CACHE_HOME/morndo-knowledge/models-dev/` (`~/.cache/...` when it is unset), whole or not at all, removing what a refresh that died left behind: provider, model, context, output limit, prices per million tokens and release date, with the source and the licence. `npm run knowledge:models -- show [provider[/model]]` prints the newest snapshot that reads, naming any newer one it skipped, with a warning once it is older than 30 days or if it is dated after today. Nothing in this repository holds a copy, and no code that routes or gates work reads it.
 
 ## Install
 
