@@ -21,8 +21,8 @@ describe("round 7, point 1: a store under another Reference never answers a requ
   }, "r1", T - DAY)).request;
   const answer = (kind: RequestKind, answered: string, confirmed: string) => {
     const r = answerStored(opened(kind), {
-      seen: 1, command: "c2", reference: answered, nodes: ["node-a"], expiry: kind === "renew" ? T + 30 * DAY : null,
-      confirmation: { reference: confirmed, node: "node-a", version: 2, at: T, renewed: kind === "renew" },
+      seen: 1, command: "c2", reference: answered, expiry: kind === "renew" ? T + 30 * DAY : null,
+      confirmations: [{ reference: confirmed, node: "node-a", version: 2, at: T, renewed: kind === "renew" }],
     }, T + 60_000);
     return r.ok ? r.value.request.state : r.error.problem;
   };

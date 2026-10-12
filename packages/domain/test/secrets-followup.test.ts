@@ -83,7 +83,7 @@ describe("follow-up 5: a renew is Stored only when its store names an Expiry lat
     node: "node-a", reference: REF, kind, waiter: { lane: "lane-a", workspace: null, purpose: "The token expired" }, proposed: nodeGrant,
   }, "r1", T)).request;
   const answer = (expiry: number | null) =>
-    ({ seen: 1, command: "c2", reference: REF, nodes: ["node-a"], expiry, confirmation: { reference: REF, node: "node-a", version: 2, at: T + 1, renewed: true } });
+    ({ seen: 1, command: "c2", reference: REF, expiry, confirmations: [{ reference: REF, node: "node-a", version: 2, at: T + 1, renewed: true }] });
   const problem = <T>(r: R<T>) => (r.ok ? "ok" : r.error.problem);
 
   it("a store that names no Expiry, or one that has passed, leaves the renew open", () => {

@@ -28,7 +28,8 @@ describe("encodings a value is indexed in (design §8.1)", () => {
     expect(of("hex")).toEqual([Buffer.from(SAMPLE).toString("hex"), Buffer.from(SAMPLE).toString("hex").toUpperCase()]);
     const strict = [...SAMPLE].map(b => /[A-Za-z0-9\-._~]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, "0")}`).join("");
     const quotePlus = [...SAMPLE].map(b => /[A-Za-z0-9_.\-~]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : b === 0x20 ? "+" : `%${b.toString(16).toUpperCase().padStart(2, "0")}`).join("");
-    const upper = [strict, encodeURIComponent(ascii(SAMPLE)), new URLSearchParams({ a: ascii(SAMPLE) }).toString().slice(2), quotePlus];
+    const quoteDefault = [...SAMPLE].map(b => /[A-Za-z0-9_.\-~/]/.test(String.fromCharCode(b)) ? String.fromCharCode(b) : `%${b.toString(16).toUpperCase().padStart(2, "0")}`).join("");
+    const upper = [strict, encodeURIComponent(ascii(SAMPLE)), new URLSearchParams({ a: ascii(SAMPLE) }).toString().slice(2), quotePlus, quoteDefault, encodeURI(ascii(SAMPLE))];
     const all = [...upper, ...upper.map(f => f.replace(/%[0-9A-F]{2}/g, m => m.toLowerCase()))];
     expect(of("percent").sort()).toEqual([...new Set(all)].sort());
     expect(of("json").sort()).toEqual([JSON.stringify(ascii(SAMPLE)).slice(1, -1), JSON.stringify(ascii(SAMPLE)).slice(1, -1).replace("é", "\\u00e9")].sort());

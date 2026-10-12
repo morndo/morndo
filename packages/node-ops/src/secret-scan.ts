@@ -15,13 +15,16 @@ const B64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_
 const HEX = "0123456789abcdef";
 // The characters each percent writer leaves alone (design §8.1, checked against each on 2026-10-12): RFC 3986's
 // unreserved ones (Python's quote with safe=""); encodeURIComponent, which also keeps ! ' ( ) *; the WHATWG form encoding
-// (URLSearchParams), which keeps * - . _ and writes a space as "+"; and Python's quote_plus, which keeps _ . - ~ and
-// writes a space as "+".
+// (URLSearchParams), which keeps * - . _ and writes a space as "+"; Python's quote_plus, which keeps _ . - ~ and writes a
+// space as "+"; Python's quote with its default safe "/", which keeps "/" too; and encodeURI, which keeps
+// ; / ? : @ & = + $ , # as well (T-94).
 const PERCENT_WRITERS = [
   { safe: /^[A-Za-z0-9\-._~]$/, plus: false },
   { safe: /^[A-Za-z0-9\-._~!'()*]$/, plus: false },
   { safe: /^[A-Za-z0-9*\-._]$/, plus: true },
   { safe: /^[A-Za-z0-9_.\-~]$/, plus: true },
+  { safe: /^[A-Za-z0-9_.\-~/]$/, plus: false },
+  { safe: /^[A-Za-z0-9\-_.!~*'();/?:@&=+$,#]$/, plus: false },
 ] as const;
 // At alignment a, the first LEAD[a] characters also depend on the bytes before the value.
 const LEAD = [0, 2, 3] as const;
@@ -119,11 +122,15 @@ export function encodedForms(value: Uint8Array): EncodedForm[] {
 export type Keyed = (bytes: Uint8Array) => Uint8Array;
 // The scanner's window, and the floor: a value under 8 bytes is not indexed (design §8.1), so every form is at least this.
 export const SCAN_WINDOW = 8;
+// The longest form the index file takes (parseIndex), and the largest value indexed. A control byte written as JSON's
+// \uXXXX is the widest form, six bytes for one, so every form of a value of VALUE_MAX_BYTES fits (review 2 of PR #40).
+export const INDEX_FORM_MAX = 1 << 20;
+export const VALUE_MAX_BYTES = 64 * 1024;
 // `head` is the keyed hash of the form's first SCAN_WINDOW bytes, `full` of the whole form, both hex.
 export type IndexEntry = {
   encoding: SecretEncoding; alignment: 0 | 1 | 2 | null; length: number; head: string; full: string; before: number; after: number;
 };
-export type Indexed = { kind: "indexed"; entries: IndexEntry[] } | { kind: "too_short" };
+export type Indexed = { kind: "indexed"; entries: IndexEntry[] } | { kind: "too_short" } | { kind: "too_large" };
 // Byte offsets in the stream, end exclusive.
 export type ScanRange = { start: number; end: number };
 // `settled`: no range found later starts before it, so the bytes before it can be passed on once the ranges are applied.
@@ -134,6 +141,7 @@ const PAD = 0x3d;   // "=": base64 padding after a form carries no bits, but a r
 
 export function indexValue(value: Uint8Array, keyed: Keyed): Indexed {
   if (value.length < SCAN_WINDOW) return { kind: "too_short" };
+  if (value.length > VALUE_MAX_BYTES) return { kind: "too_large" };
   const entries = encodedForms(value).map(f => ({
     encoding: f.encoding, alignment: f.alignment, length: f.bytes.length, head: hexOf(keyed(f.bytes.subarray(0, SCAN_WINDOW))),
     full: hexOf(keyed(f.bytes)), before: f.before, after: f.after,
@@ -220,21 +228,25 @@ export function scan(bytes: Uint8Array, entries: readonly IndexEntry[], keyed: K
 // A retired version stays indexed this long after its rotation or revocation.
 export const RETIRED_KEPT_MS = 30 * 86_400_000;
 export type IndexedVersion = { reference: string; version: number; retiredAt: number | null; entries: readonly IndexEntry[] };
-export type SecretIndex = { format: 1; versions: readonly IndexedVersion[] };
-export const emptySecretIndex = (): SecretIndex => ({ format: 1, versions: [] });
+// The highest version of a Reference that pruning dropped. Versions are never reused, so one at or under it is a replay.
+export type PrunedThrough = { reference: string; through: number };
+export type SecretIndex = { format: 1; versions: readonly IndexedVersion[]; pruned: readonly PrunedThrough[] };
+export const emptySecretIndex = (): SecretIndex => ({ format: 1, versions: [], pruned: [] });
 
 const sameVersion = (v: IndexedVersion, reference: string, version: number) => v.reference === reference && v.version === version;
 
 // A version's entries: added live, or put in place of the same (Reference, version). A retired version stays retired from
-// its first time, so adding it again can't restart its 30 days (T-88).
+// its first time, so adding it again can't restart its 30 days (T-88). One at or under the Reference's pruned mark is a
+// replay, since versions are never reused, and changes nothing (T-94).
 export function withVersion(index: SecretIndex, reference: string, version: number, entries: readonly IndexEntry[]): SecretIndex {
+  if (index.pruned.some(p => p.reference === reference && version <= p.through)) return index;
   const retiredAt = index.versions.find(v => sameVersion(v, reference, version))?.retiredAt ?? null;
-  return { format: 1, versions: [...index.versions.filter(v => !sameVersion(v, reference, version)), { reference, version, retiredAt, entries: [...entries] }] };
+  return { ...index, versions: [...index.versions.filter(v => !sameVersion(v, reference, version)), { reference, version, retiredAt, entries: [...entries] }] };
 }
 
 // Retiring again keeps the first time, so the 30 days can't be stretched.
 export function retireVersion(index: SecretIndex, reference: string, version: number, at: number): SecretIndex {
-  return { format: 1, versions: index.versions.map(v => sameVersion(v, reference, version) && v.retiredAt === null ? { ...v, retiredAt: at } : v) };
+  return { ...index, versions: index.versions.map(v => sameVersion(v, reference, version) && v.retiredAt === null ? { ...v, retiredAt: at } : v) };
 }
 
 const kept = (v: IndexedVersion, now: number) => v.retiredAt === null || now - v.retiredAt <= RETIRED_KEPT_MS;
@@ -242,7 +254,12 @@ const kept = (v: IndexedVersion, now: number) => v.retiredAt === null || now - v
 // What the scanner looks for now: every live version, and every retired one for 30 days.
 export const liveEntries = (index: SecretIndex, now: number): IndexEntry[] => index.versions.filter(v => kept(v, now)).flatMap(v => v.entries);
 
-export const pruneIndex = (index: SecretIndex, now: number): SecretIndex => ({ format: 1, versions: index.versions.filter(v => kept(v, now)) });
+// Drops what the 30 days no longer cover, and raises each such Reference's mark to the highest version dropped.
+export function pruneIndex(index: SecretIndex, now: number): SecretIndex {
+  const through = new Map(index.pruned.map(p => [p.reference, p.through]));
+  for (const v of index.versions) if (!kept(v, now)) through.set(v.reference, Math.max(through.get(v.reference) ?? 0, v.version));
+  return { format: 1, versions: index.versions.filter(v => kept(v, now)), pruned: [...through].map(([reference, n]) => ({ reference, through: n })) };
+}
 
 // The file's text: References, versions, times and keyed hashes, never a form.
 export const serializeIndex = (index: SecretIndex): string => `${JSON.stringify(index)}\n`;
@@ -259,7 +276,7 @@ function entryOf(x: unknown): IndexEntry | null {
   if (typeof encoding !== "string" || !ENCODINGS.includes(encoding)) return null;
   const base64 = encoding === "base64" || encoding === "base64url";
   if (base64 ? !(alignment === 0 || alignment === 1 || alignment === 2) : alignment !== null) return null;
-  if (!count(length, SCAN_WINDOW, 1 << 20) || !count(before, 0, 1) || !count(after, 0, 1)) return null;
+  if (!count(length, SCAN_WINDOW, INDEX_FORM_MAX) || !count(before, 0, 1) || !count(after, 0, 1)) return null;
   if (typeof head !== "string" || !HEX64.test(head) || typeof full !== "string" || !HEX64.test(full)) return null;
   return { encoding: encoding as SecretEncoding, alignment: alignment as 0 | 1 | 2 | null, length: length as number, head, full, before: before as number, after: after as number };
 }
@@ -274,11 +291,23 @@ function versionOf(x: unknown): IndexedVersion | null {
   return parsed.every(e => e !== null) ? { reference, version: version as number, retiredAt, entries: parsed as IndexEntry[] } : null;
 }
 
+function prunedOf(x: unknown): PrunedThrough | null {
+  if (!isRecord(x) || !keysAre(x, ["reference", "through"])) return null;
+  const { reference, through } = x;
+  if (typeof reference !== "string" || parseReference(reference) === null || !count(through, 1, Number.MAX_SAFE_INTEGER)) return null;
+  return { reference, through: through as number };
+}
+
 // The file's text back, or null: anything it doesn't expect, an unknown key included, refuses the whole file.
 export function parseIndex(text: string): SecretIndex | null {
   let doc: unknown;
   try { doc = JSON.parse(text); } catch { return null; }
-  if (!isRecord(doc) || !keysAre(doc, ["format", "versions"]) || doc.format !== 1 || !Array.isArray(doc.versions)) return null;
+  if (!isRecord(doc) || !keysAre(doc, ["format", "versions", "pruned"]) || doc.format !== 1) return null;
+  if (!Array.isArray(doc.versions) || !Array.isArray(doc.pruned)) return null;
   const versions = doc.versions.map(versionOf);
-  return versions.every(v => v !== null) ? { format: 1, versions: versions as IndexedVersion[] } : null;
+  const pruned = doc.pruned.map(prunedOf);
+  if (!versions.every(v => v !== null) || !pruned.every(p => p !== null)) return null;
+  // Each Reference once: two marks for one would leave which one holds to the reader.
+  if (new Set(pruned.map(p => (p as PrunedThrough).reference)).size !== pruned.length) return null;
+  return { format: 1, versions: versions as IndexedVersion[], pruned: pruned as PrunedThrough[] };
 }
