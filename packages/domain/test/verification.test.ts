@@ -39,6 +39,13 @@ describe("the claimants of a subject (V1)", () => {
     const assignments: Assignment[] = [{ task: taskKey(3), lane: "builder" }, { task: taskKey(3), lane: "tester" }];
     expect([...claimantsOf(c7, [], links, assignments)].sort()).toEqual(["builder", "tester"]);
   });
+  it("the task itself counts as linked to it: its own ever-assignees are claimants of the task (V1)", () => {
+    // T-12 was reviewer's, then builder's; builder claims the task: reviewer's own review of it raises nothing.
+    const t12 = { kind: "task" as const, key: taskKey(12) };
+    const claims: Claim[] = [{ id: "cl-1", seq: 1, at: NOW, subject: t12, revision: null, outcome: "done", lane: "builder" }];
+    const assignments: Assignment[] = [{ task: taskKey(12), lane: "reviewer" }, { task: taskKey(12), lane: "builder" }];
+    expect([...claimantsOf(t12, claims, [], assignments)].sort()).toEqual(["builder", "reviewer"]);
+  });
 });
 
 describe("independent producers (V1)", () => {

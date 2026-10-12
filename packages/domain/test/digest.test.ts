@@ -165,6 +165,17 @@ describe("the level ladder (DG2)", () => {
     });
     expect(one(d, "T-5")?.level).toBe("checked");
   });
+  it("a former assignee's review of its own task raises nothing: reassignment never buys independence (V1)", () => {
+    const t12 = task(12);
+    const d = digest({
+      states: [state(t12, { claimRound: NOW - 1 })],
+      claims: [claim({ subject: t12, lane: "builder" })],
+      assignments: [{ task: taskKey(12), lane: "reviewer" }, { task: taskKey(12), lane: "builder" }],
+      evidence: [evidence({ subject: t12, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW })],
+      events: [event("done", t12, 2, NOW)],
+    });
+    expect(one(d, "T-12")?.level).toBe("claimed");           // reviewer was T-12's assignee before builder
+  });
 });
 
 // ---- DG3: any failing evidence on the current revision, a revert, a rollback or a reopen shows failed
