@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DAY_MS, LATER_FAILED_MS, SECTIONS, STALE_LIMITS_DEFAULT, buildDigest, countedClaims, itemNew, markAllSeen,
-  mergeMarks, openedItem, staleConditions, subjectRef, subjectLevel, vetoDecision, weeklyView,
+  mergeMarks, openedItem, rootPasses, staleConditions, subjectRef, subjectLevel, vetoDecision, weeklyView,
   type Claim, type ClaimSource, type DigestEvent, type DigestEventKind, type DigestInput, type DigestItem,
   type DigestMark, type Evidence, type EvidenceKind, type EvidenceResult,
   type NeedsYouState, type Producer, type Revision, type Section, type SeenAt, type StaleCondition,
@@ -894,6 +894,25 @@ describe("the weekly count of claims (DG12)", () => {
     const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
     expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
     expect(row?.levels).toEqual([{ level: "reviewed", claims: 1, laterFailed: 0 }]);
+  });
+  it("the weekly view walks the root index once for a large history", () => {
+    const n = 80;
+    const claimSources: ClaimSource[] = [];
+    const claimFailures: WeeklyRecords["claimFailures"][number][] = [];
+    const links: WeeklyRecords["links"][number][] = [];
+    for (let i = 0; i < n; i++) {
+      const c = change("acme/web", i + 1);
+      const revision = rev(`sha-${i}`, null);
+      claimSources.push({ subject: c, revision, at: NOW + i, via: "filed" });
+      claimFailures.push({ subject: change("acme/other", i + 1), revision: rev(`other-${i}`, null), at: NOW + 10 * DAY, via: "evidence" });
+      links.push({ task: taskKey(1), target: c, by: "builder", at: NOW + n + i, seq: i });
+    }
+    const r = records({ claimSources, claimFailures, links });
+    const before = rootPasses();
+    const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
+    expect(row?.claims).toBe(n);
+    expect(row?.laterFailed).toBe(0);
+    expect(rootPasses() - before, "walks the root index once").toBe(1);
   });
   it("the weekly columns are counts of records: shipped, merged, reverted, done with its times, deploys, stuck", () => {
     const t1 = taskKey(1), t2 = taskKey(2), t3 = taskKey(3);

@@ -158,8 +158,13 @@ export function rootIndex(links: readonly LinkRecord[], claims: readonly Claim[]
   ].sort((a, b) => a.at - b.at);
 }
 
+// How many root maps have been built. The weekly view builds one for the whole history (DG9).
+let rootPassCount = 0;
+export function rootPasses(): number { return rootPassCount; }
+
 // The first task linked to a subject at or before `at`. A link filed later is not in the map (DG9, DG12).
 function mapAsOf(edges: readonly RootEdge[], at: number): Map<string, TaskKey> {
+  rootPassCount++;
   const map = new Map<string, TaskKey>();
   for (const e of edges) {
     if (e.at > at) break;
