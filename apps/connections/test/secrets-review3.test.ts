@@ -4,6 +4,10 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SecretMaterial } from "../src/adapters/secret-material.ts";
+import { AgeVault } from "../src/adapters/vault-age.ts";
+import { FileVault } from "../src/adapters/vault-file.ts";
+import { run } from "../src/cli.ts";
 import { secretIndexPath } from "../src/compose.ts";
 import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
 
@@ -50,5 +54,36 @@ describe("round 3, point 3: a lost index key is refused while the ledger holds a
     expect(r.stderr).toMatch(/index\.key is missing/);
     expect(existsSync(join(h.dir, "index.key"))).toBe(false);
     expect(sealed(h.vault)).toHaveLength(1);
+  });
+});
+
+// The Connections CLI (morndo-keys) on the same home, for the points about its vault/ directory.
+const CATALOG = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
+const KEY = "sk-ant-synthetic-test-key-0001";
+async function keys(env: NodeJS.ProcessEnv, args: string[], stdin = "") {
+  let stdout = "";
+  let stderr = "";
+  const code = await run(args, { ...env, MORNDO_CATALOG: CATALOG }, { stdin, stdout: t => { stdout += t; }, stderr: t => { stderr += t; } });
+  return { code, stdout, stderr };
+}
+const ADD = ["add", "credit", "--vendor", "anthropic", "--runtime", "claude", "--billing", "prepaid", "--budget", "10", "--expires", "1893456000000"];
+const plainKeys = (dir: string) => (existsSync(dir) ? readdirSync(dir).filter(n => n.startsWith("key-")).sort() : []);
+
+describe("round 3, point 6: removal works both ways in the shared vault directory", () => {
+  it("AgeVault.remove removes a plaintext file the plaintext vault wrote under the ref", async () => {
+    const h = home();
+    await new FileVault(h.vault).seal("key-example-1-aa", new SecretMaterial(new TextEncoder().encode("synthetic-connection-key")));
+    new AgeVault(h.vault, join(h.dir, "identity")).remove("key-example-1-aa");
+    expect(readdirSync(h.vault)).toEqual([]);
+  });
+  it("a key added on the plaintext vault, then rotated on the age vault: the old plaintext file is gone", async () => {
+    const h = home();
+    expect((await keys({ ...h.env, MORNDO_VAULT: "file" }, ADD, KEY)).code).toBe(0);
+    const before = plainKeys(h.vault);
+    expect(before).toHaveLength(1);
+    const r = await keys(h.env, ["rotate", "credit"], "sk-ant-synthetic-test-key-0003");
+    expect(r.code, r.stderr).toBe(0);
+    expect(plainKeys(h.vault).filter(n => !n.endsWith(".age") && !n.endsWith(".fingerprint"))).toEqual([]);
+    expect(existsSync(join(h.vault, before[0] ?? ""))).toBe(false);
   });
 });
