@@ -202,7 +202,10 @@ export function rootOf(s: SubjectRef, linked: ReadonlyMap<string, TaskKey>): Sub
   return t !== undefined ? { kind: "task", key: t } : s;
 }
 
-export function buildDigest(input: DigestInput): DigestResult {
+// A call count the tests pass in. One replay of a group's records increments it once (DG8).
+export type PassCount = { n: number };
+
+export function buildDigest(input: DigestInput, passes?: PassCount): DigestResult {
   const claimants = (s: SubjectRef) => claimantsOf(s, input.claims, input.links, input.assignments);
   const stateOf = (s: SubjectRef): SubjectState => {
     for (const st of input.states) if (sameSubject(st.subject, s)) return st;
@@ -289,6 +292,7 @@ export function buildDigest(input: DigestInput): DigestResult {
     const setsDiffer = (before: ReadonlySet<string>, after: ReadonlySet<string>): boolean =>
       before.size !== after.size || [...after].some(laneName => !before.has(laneName));
     const raisesItem = (record: LinkRecord | Assignment): boolean => {
+      if (passes) passes.n++;
       if ("target" in record) {
         const without = groupLinks.filter(l => l !== record);
         if (group.members.some(m => setsDiffer(

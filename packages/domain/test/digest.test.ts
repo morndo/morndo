@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   DAY_MS, LATER_FAILED_MS, SECTIONS, STALE_LIMITS_DEFAULT, buildDigest, countedClaims, itemNew, markAllSeen,
   mergeMarks, openedItem, rootIndex, rootPasses, staleConditions, subjectRef, subjectLevel, vetoDecision, weeklyView,
+  type PassCount,
   type Claim, type ClaimSource, type DigestEvent, type DigestEventKind, type DigestInput, type DigestItem,
   type DigestMark, type Evidence, type EvidenceKind, type EvidenceResult,
   type NeedsYouState, type Producer, type Revision, type Section, type SeenAt, type StaleCondition,
@@ -38,8 +39,8 @@ const event = (kind: DigestEventKind, subject: SubjectRef, seq: number, at: numb
 const state = (subject: SubjectRef, o: Partial<SubjectState> = {}): SubjectState => ({
   subject, revision: null, claimRound: null, deployedAt: null, reverted: false, rolledBack: false, reopened: false, title: null, ...o,
 });
-const digest = (o: Partial<DigestInput> = {}) =>
-  buildDigest({ now: NOW, newest: 10_000, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [], states: [], needsYou: [], stale: [], ...o });
+const digest = (o: Partial<DigestInput> = {}, passes?: PassCount) =>
+  buildDigest({ now: NOW, newest: 10_000, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [], states: [], needsYou: [], stale: [], ...o }, passes);
 const allItems = (d: { sections: { items: DigestItem[] }[] }) => d.sections.flatMap(s => s.items);
 const one = (d: ReturnType<typeof digest>, id: string) => allItems(d).find(i => i.id === id);
 const inSection = (d: ReturnType<typeof digest>, s: Section) => d.sections.find(x => x.section === s)?.items ?? [];
@@ -578,6 +579,87 @@ describe("new since the last look (DG8)", () => {
     const item = one(reassigned, "T-3");
     expect(item).toMatchObject({ level: "reviewed", seq: 9, fresh: false });
     expect(markAllSeen(mark, [{ id: "T-3", seq: item?.seq ?? 0, level: item?.level ?? null, section: item?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
+  });
+  it("two records that each look redundant still raise at the first one's sequence (DG8)", () => {
+    // Reviewer is assigned to T-12 at seq 40 and links #7, already grouped, at seq 50. Either record alone
+    // makes reviewer a claimant. The assignment is the one that changes what the principal sees.
+    const c7 = change("acme/web", 7);
+    const a1 = rev("sha-a1", "patch-1");
+    const d = digest({
+      mark: { seq: 30, seen: [] },
+      states: [state(c7, { revision: a1 })],
+      claims: [
+        claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 30 }),
+        claim({ subject: task(12), lane: "reviewer", seq: 5, at: NOW - 28 }),
+      ],
+      links: [
+        { task: taskKey(12), target: c7, by: "builder", at: NOW - 40, seq: 3 },
+        { task: taskKey(12), target: c7, by: "reviewer", at: NOW - MIN, seq: 50 },
+      ],
+      assignments: [{ task: taskKey(12), lane: "reviewer", seq: 40, at: NOW - 2 * MIN }],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 20 })],
+      events: [event("merged", c7, 8, NOW - 20)],
+      stale: [{ kind: "task_in_review", task: taskKey(12), since: NOW - 9 * HOUR }],
+    });
+    expect(one(d, "T-12"), "two records that each look redundant").toMatchObject({ level: "claimed", seq: 40, fresh: true });
+    // Two links that bring the same member in. Each one, dropped alone, still sees the other, so neither raises.
+    const brought = digest({
+      mark: { seq: 20, seen: [] },
+      states: [state(c7, { revision: a1 })],
+      links: [
+        { task: taskKey(4), target: c7, by: "builder", at: NOW - 5, seq: 30 },
+        { task: taskKey(4), target: c7, by: "builder", at: NOW - 4, seq: 40 },
+      ],
+      events: [event("opened_or_pushed", c7, 10, NOW - 10)],
+      stale: [{ kind: "task_in_review", task: taskKey(4), since: NOW - 9 * HOUR }],
+    });
+    expect(one(brought, "T-4"), "two records that each look redundant").toMatchObject({ seq: 30, fresh: true });
+  });
+  it("a link that brings a member in raises the sequence when a claim names some other task (DG8)", () => {
+    // The claim on #7 names T-99 and carries an earlier sequence. It does not put #7 on T-12.
+    // The link at seq 30 does, and that arrival is new.
+    const c7 = change("acme/web", 7);
+    const a1 = rev("sha-a1", "patch-1");
+    const d = digest({
+      mark: { seq: 20, seen: [] },
+      states: [state(c7, { revision: a1 })],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 20, at: NOW - 5, task: taskKey(99) })],
+      links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 30 }],
+      events: [event("opened_or_pushed", c7, 10, NOW - 10)],
+      stale: [{ kind: "task_in_review", task: taskKey(12), since: NOW - 9 * HOUR }],
+    });
+    expect(one(d, "T-12"), "a backfilled claim does not hide the link").toMatchObject({ seq: 30, fresh: true });
+  });
+  it("a second link that changes nothing the principal sees stays quiet (DG8)", () => {
+    const c7 = change("acme/web", 7);
+    const a1 = rev("sha-a1", "patch-1");
+    const d = digest({
+      mark: { seq: 8, seen: [{ id: "T-3", seq: 9, level: "reviewed", section: "stale_or_stuck" }] },
+      states: [state(c7, { revision: a1 })],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
+      links: [
+        { task: taskKey(3), target: c7, by: "builder", at: NOW - 20, seq: 3 },
+        { task: taskKey(3), target: c7, by: "builder", at: NOW - MIN, seq: 30 },
+      ],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
+      stale: [{ kind: "task_in_review", task: taskKey(3), since: NOW - 9 * HOUR }],
+    });
+    expect(one(d, "T-3"), "a no-op link stays quiet").toMatchObject({ level: "reviewed", seq: 9, fresh: false });
+  });
+  it("a large group is replayed in one pass", () => {
+    const links = [];
+    for (let i = 0; i < 40; i++) links.push({ task: taskKey(1), target: change("acme/web", i + 1), by: "builder", at: NOW - 50 + i, seq: i + 1 });
+    const passes: PassCount = { n: 0 };
+    const d = digest({
+      mark: { seq: 100, seen: [] },
+      states: [state(change("acme/web", 1), { revision: rev("sha-a1", null) })],
+      links,
+      assignments: [{ task: taskKey(1), lane: "reviewer", seq: 500, at: NOW }],
+      evidence: [evidence({ subject: change("acme/web", 1), revision: rev("sha-a1", null), kind: "review", result: "pass", producer: lane("reviewer"), seq: 80, at: NOW - 10 })],
+      stale: [{ kind: "task_in_review", task: taskKey(1), since: NOW - 9 * HOUR }],
+    }, passes);
+    expect(one(d, "T-1")).toMatchObject({ level: "claimed", seq: 500, fresh: true });
+    expect(passes.n, "one pass").toBe(1);
   });
 });
 
