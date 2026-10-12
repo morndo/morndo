@@ -358,6 +358,16 @@ describe("the line's time (§3.5)", () => {
     const needs = digest({ needsYou: [{ subject: a1, blocking: true, due: null, since: NOW - 2 * HOUR }] });
     expect(one(needs, "ask:ask-1")?.at).toBe(NOW - 2 * HOUR);
   });
+  it("an item's time is the newest of its records and its live conditions", () => {
+    // Needs you since 10:00, a stale review since 13:00, and no record after 09:00. The line shows 13:00.
+    const t4 = task(4);
+    const d = digest({
+      events: [event("done", t4, 2, NOW - 5 * HOUR)],
+      needsYou: [{ subject: t4, blocking: false, due: null, since: NOW - 4 * HOUR }],
+      stale: [{ kind: "task_in_review", task: taskKey(4), since: NOW - HOUR }],
+    });
+    expect(one(d, "T-4")?.at).toBe(NOW - HOUR);
+  });
 });
 
 // ---- DG6: needs you and stale are live conditions: they hold whatever the mark, and leave when they clear
