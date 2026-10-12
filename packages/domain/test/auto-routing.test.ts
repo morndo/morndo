@@ -25,7 +25,6 @@ const e = (text: string): Engine => {
 
 function cand(over: Partial<CandidateFacts> & { entry: string }): CandidateFacts {
   return {
-    entry: over.entry,
     connection: over.connection ?? over.entry.split(":")[0] ?? "c",
     kindOf: "subscription",
     family: "fam-a",

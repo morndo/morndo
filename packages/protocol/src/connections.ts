@@ -133,11 +133,11 @@ export const VendorPreset = z.strictObject({
   runtimes: z.array(runtime).check(z.minLength(1)),
   models,
   family: text(64),
-  families: z.array(z.strictObject({ pattern: text(80), family: text(64) })),
-  class: z.array(z.strictObject({
+  families: z.optional(z.array(z.strictObject({ pattern: text(80), family: text(64) }))),
+  class: z.optional(z.array(z.strictObject({
     pattern: text(80),
     class: z.enum(["flagship", "everyday", "fast", "unknown"]),
-  })),
+  }))),
   keyShapes: z.array(text(40)),
   spend: z.array(z.enum(["balance", "token-price", "manual", "provider"])),
   prices: z.array(z.strictObject({ at: text(32), model: text(80), input: z.number(), output: z.number() })),

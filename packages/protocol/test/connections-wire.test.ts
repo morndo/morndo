@@ -175,8 +175,7 @@ describe("vendor catalog", () => {
       if (preset.terms.revision === "unknown") expect(preset.terms.sources, preset.id).toEqual([]);
       else expect(preset.terms.sources[0], preset.id).toMatch(/^https:\/\//);
       expect(preset.isolation === null, preset.id).toBe(preset.custody === "engine-layer");
-      expect(Array.isArray(preset.families), preset.id).toBe(true);
-      expect(Array.isArray(preset.class), preset.id).toBe(true);
+      if (!preset.families || !preset.class) throw new Error(preset.id);
       expect(preset.families.some(row => row.pattern === "*"), preset.id).toBe(false);
     }
     const cursorFamilies = [
