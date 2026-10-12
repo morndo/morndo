@@ -1065,7 +1065,7 @@ export const CONTROLS: Control[] = [
     replace: `live?.since ?? staleCond?.since ?? 0`,
     run: ["packages/domain/test/digest.test.ts"], expect: "newest of its records and its live conditions" },
   { id: "dg8-claims-raise-seq", task: "DG8", file: "packages/domain/src/digest.ts",
-    find: `      addClaimant(subjectKey(c.subject), c.lane);\n`,
+    find: `for (const c of groupClaims) seq = Math.max(seq, c.seq);\n`,
     replace: ``,
     run: ["packages/domain/test/digest.test.ts"], expect: "a level drop after the mark is new again" },
   { id: "dg8-assignment-any-task", task: "DG8", file: "packages/domain/src/digest.ts",
