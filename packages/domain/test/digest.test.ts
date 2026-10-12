@@ -90,8 +90,8 @@ describe("the level ladder (DG2)", () => {
     const d = digest({
       states: [state(c7, { revision: a1 })],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
-      links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 1 }],
-      assignments: [{ task: taskKey(3), lane: "reviewer" }],
+      links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 1, seq: 0 }],
+      assignments: [{ task: taskKey(3), lane: "reviewer", seq: 0, at: 0 }],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer") })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
     });
@@ -170,7 +170,7 @@ describe("the level ladder (DG2)", () => {
     const d = digest({
       states: [state(t12, { claimRound: NOW - 1 })],
       claims: [claim({ subject: t12, lane: "builder" })],
-      assignments: [{ task: taskKey(12), lane: "reviewer" }, { task: taskKey(12), lane: "builder" }],
+      assignments: [{ task: taskKey(12), lane: "reviewer", seq: 0, at: 0 }, { task: taskKey(12), lane: "builder", seq: 0, at: 0 }],
       evidence: [evidence({ subject: t12, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW })],
       events: [event("done", t12, 2, NOW)],
     });
@@ -293,8 +293,8 @@ describe("items and sections (DG5)", () => {
         event("merged", c8, 6, NOW),
       ],
       links: [
-        { task: taskKey(1), target: c7, by: "builder", at: NOW - 10 * MIN },
-        { task: taskKey(1), target: prod, by: "builder", at: NOW - 10 * MIN },
+        { task: taskKey(1), target: c7, by: "builder", at: NOW - 10 * MIN, seq: 0 },
+        { task: taskKey(1), target: prod, by: "builder", at: NOW - 10 * MIN, seq: 0 },
       ],
     });
     expect(allItems(d).map(i => i.id).sort()).toEqual(["T-1", "acme/web#8"]);
@@ -325,8 +325,8 @@ describe("items and sections (DG5)", () => {
     const d = digest({
       events: [event("shipped", prodA, 3, NOW - 2 * MIN), event("shipped", prodB, 4, NOW - MIN)],
       links: [
-        { task: taskKey(1), target: prodA, by: "builder", at: NOW - 10 * MIN },
-        { task: taskKey(2), target: prodB, by: "builder", at: NOW - 9 * MIN },
+        { task: taskKey(1), target: prodA, by: "builder", at: NOW - 10 * MIN, seq: 0 },
+        { task: taskKey(2), target: prodB, by: "builder", at: NOW - 9 * MIN, seq: 0 },
       ],
     });
     expect(allItems(d).map(i => i.id).sort()).toEqual(["T-1", "T-2"]);
@@ -529,8 +529,8 @@ describe("rebuild determinism (DG9)", () => {
       events: [event("merged", c7, 3, NOW), event("done", t1, 4, NOW)],
       states: [state(c7, { revision: a1, title: "Add the digest" }), state(t1)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
-      links: [{ task: taskKey(1), target: c7, by: "builder", at: NOW - 1 }],
-      assignments: [{ task: taskKey(1), lane: "builder" }],
+      links: [{ task: taskKey(1), target: c7, by: "builder", at: NOW - 1, seq: 0 }],
+      assignments: [{ task: taskKey(1), lane: "builder", seq: 0, at: 0 }],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass" }),
         evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer") }),
@@ -679,7 +679,7 @@ describe("the weekly count of claims (DG12)", () => {
   });
   it("a claim on a task is one count with its linked change's claim, judged with the change's evidence (§3.1)", () => {
     const t12 = task(12);
-    const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN }];
+    const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }];
     const sources: ClaimSource[] = [
       { subject: c7, revision: a1, at: NOW, via: "filed" },
       { subject: t12, revision: a1, at: NOW + MIN, via: "review" },       // T-12 moved to review at #87's head
@@ -705,7 +705,7 @@ describe("the weekly count of claims (DG12)", () => {
       claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
       claimRounds: [{ subject: t12, at: NOW }],
       claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
-      links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN }],
+      links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
         evidence({ subject: c7, revision: a1, kind: "ci", result: "fail", at: NOW + 10 * DAY }),
@@ -728,9 +728,9 @@ describe("the weekly count of claims (DG12)", () => {
       claimRounds: [{ subject: t12, at: NOW }],
       claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
       links: [
-        { task: taskKey(12), target: c7, by: "builder", at: NOW - MIN },
-        { task: taskKey(12), target: c8, by: "builder", at: NOW - MIN },
-        { task: taskKey(12), target: prod, by: "builder", at: NOW - MIN },
+        { task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 },
+        { task: taskKey(12), target: c8, by: "builder", at: NOW - MIN, seq: 0 },
+        { task: taskKey(12), target: prod, by: "builder", at: NOW - MIN, seq: 0 },
       ],
       subjectStates: [state(c7, { revision: a1 }), state(c8, { revision: b1 }), state(prod, { revision: b1 })],
       evidence: [

@@ -24,26 +24,26 @@ describe("the claimants of a subject (V1)", () => {
   const a1 = rev("sha-a1", "patch-1");
   it("every lane that claimed it, linked it, or was ever assigned a linked task", () => {
     const claims: Claim[] = [{ id: "cl-1", seq: 1, at: NOW, subject: c7, revision: a1, outcome: "done", lane: "builder" }];
-    const links: LinkRecord[] = [{ task: taskKey(3), target: c7, by: "reviewer", at: NOW }];
-    const assignments: Assignment[] = [{ task: taskKey(3), lane: "builder" }, { task: taskKey(3), lane: "tester" }];
+    const links: LinkRecord[] = [{ task: taskKey(3), target: c7, by: "reviewer", seq: 1, at: NOW }];
+    const assignments: Assignment[] = [{ task: taskKey(3), lane: "builder", seq: 1, at: NOW }, { task: taskKey(3), lane: "tester", seq: 2, at: NOW }];
     expect([...claimantsOf(c7, claims, links, assignments)].sort()).toEqual(["builder", "reviewer", "tester"]);
   });
   it("a claim naming a task is itself the link: the task's ever-assignees are claimants", () => {
     const claims: Claim[] = [{ id: "cl-1", seq: 1, at: NOW, subject: c7, revision: a1, outcome: "done", lane: "builder", task: taskKey(4) }];
-    const assignments: Assignment[] = [{ task: taskKey(4), lane: "tester" }];
+    const assignments: Assignment[] = [{ task: taskKey(4), lane: "tester", seq: 1, at: NOW }];
     expect([...claimantsOf(c7, claims, [], assignments)].sort()).toEqual(["builder", "tester"]);
   });
   it("a reassignment does not make the old assignee independent", () => {
     // builder linked the change to T-3 and was assigned it, then it went to tester: both stay claimants.
-    const links: LinkRecord[] = [{ task: taskKey(3), target: c7, by: "builder", at: NOW }];
-    const assignments: Assignment[] = [{ task: taskKey(3), lane: "builder" }, { task: taskKey(3), lane: "tester" }];
+    const links: LinkRecord[] = [{ task: taskKey(3), target: c7, by: "builder", seq: 1, at: NOW }];
+    const assignments: Assignment[] = [{ task: taskKey(3), lane: "builder", seq: 1, at: NOW }, { task: taskKey(3), lane: "tester", seq: 2, at: NOW }];
     expect([...claimantsOf(c7, [], links, assignments)].sort()).toEqual(["builder", "tester"]);
   });
   it("the task itself counts as linked to it: its own ever-assignees are claimants of the task (V1)", () => {
     // T-12 was reviewer's, then builder's; builder claims the task: reviewer's own review of it raises nothing.
     const t12 = { kind: "task" as const, key: taskKey(12) };
     const claims: Claim[] = [{ id: "cl-1", seq: 1, at: NOW, subject: t12, revision: null, outcome: "done", lane: "builder" }];
-    const assignments: Assignment[] = [{ task: taskKey(12), lane: "reviewer" }, { task: taskKey(12), lane: "builder" }];
+    const assignments: Assignment[] = [{ task: taskKey(12), lane: "reviewer", seq: 1, at: NOW }, { task: taskKey(12), lane: "builder", seq: 2, at: NOW }];
     expect([...claimantsOf(t12, claims, [], assignments)].sort()).toEqual(["builder", "reviewer"]);
   });
 });

@@ -508,7 +508,7 @@ One list of everything that changed since the principal last looked, every line 
 | Producer | Who made the evidence: the hub's forge adapter (CI, deploy status), the manager, a lane, or the principal. | The lane named in the evidence's text. |
 | Level | Who has checked a subject at its current revision: claimed, checked, reviewed, verified live; or failed. | A Verdict. "Verified live" says one live check passed on this revision, and its chip says what it checked. The Verdict Verified needs Evidence for every Check of a Done-means (V1); the digest shows no Verdict until Done-means exists. |
 | Item | One line: a group of linked subjects (a task with its changes and deploys), its section, its level, its events since the mark, its evidence. | A stored summary. It is recomputed from records. |
-| Link | A record that a change or a deploy belongs to a task: filed with a claim or evidence that names both, or on its own (`morndo-verify link`), always under a token. | A task key found in a branch name or a title. |
+| Link | A record that a change or a deploy belongs to a task: filed with a claim or evidence that names both, or on its own (`morndo-verify link`), always under a token. It carries the hub's sequence number and the time it was filed, as a claim does. An assignment of a lane to a task does too: either one changes who the claimants are, and that raises the item (DG8). | A task key found in a branch name or a title. |
 | Mark | The hub's sequence number up to which the principal has seen the digest, on any Endpoint, with the items seen above it. | A Read mark of a Conversation; an Acknowledgement. |
 
 | # | Invariant |

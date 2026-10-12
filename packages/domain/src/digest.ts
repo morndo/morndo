@@ -244,9 +244,12 @@ export function buildDigest(input: DigestInput): DigestResult {
 
     const groupClaims = input.claims.filter(c => keys.has(subjectKey(c.subject))).sort((a, b) => a.at - b.at);
     const last = groupClaims[groupClaims.length - 1] ?? null;
-    // Claims are records too (DG8): a claim, or a claimant change that moves the level, raises the item's sequence
-    // past the mark, so the change shows the line as new again.
+    const groupLinks = input.links.filter(l => keys.has(subjectKey(l.target)));
+    const groupAssignments = root.kind === "task" ? input.assignments.filter(a => a.task === root.key) : [];
+    // Claims, links and assignments are records too (DG8): a claim, or a claimant change through a link or an
+    // assignment, raises the item's sequence past the mark, so the level drop shows as new again.
     const records = [...events, ...evidence, ...voided, ...groupClaims];
+    for (const raised of [...groupLinks, ...groupAssignments]) records.push(raised);
     const seq = records.reduce((m, r) => Math.max(m, r.seq), 0);
     const n = itemNew({ id: rootKey, seq, level, section }, input.mark);
     items.push({

@@ -60,8 +60,10 @@ export type Claim = {
 };
 
 // A task's link to a change or a deploy (§3.1): the only way a task groups its changes into one digest item (DG5).
-export type LinkRecord = { task: TaskKey; target: SubjectRef; by: string; at: number };
-export type Assignment = { task: TaskKey; lane: string };
+// `seq` and `at` are the hub sequence and the time it was filed, as on a claim: linking, or assigning a lane to the
+// task, changes the claimants and so can drop the level, and that change has to raise the item (DG8).
+export type LinkRecord = { task: TaskKey; target: SubjectRef; by: string; seq: number; at: number };
+export type Assignment = { task: TaskKey; lane: string; seq: number; at: number };
 
 export const NOTE_MAX = 140;
 const HTTPS_LINK = /^https:\/\/\S+$/;
