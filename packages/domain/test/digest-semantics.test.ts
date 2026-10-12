@@ -2,7 +2,7 @@
 // Names, repos and shas are made up. Q1 asserts sequence and fresh; Q2 asserts the weekly levels.
 import { describe, expect, it } from "vitest";
 import {
-  buildDigest, itemNew, markAllSeen, mergeMarks, weeklyView,
+  buildDigest, countedClaims, itemNew, markAllSeen, mergeMarks, weeklyView,
   type Claim, type ClaimFailure, type DigestEvent, type DigestInput, type DigestItem,
   type DigestMark, type Evidence, type Producer, type Revision, type SubjectRef, type SubjectState, type WeeklyRecords, type WeekWindow,
 } from "../src/index.ts";
@@ -715,5 +715,45 @@ describe("Rule 2: rounds, roots and which failure matches", () => {
       claims: [wcl(w7, A, "bld", NOW, { seq: 6, task: taskKey(2) })],
       claimFailures: [fail(task(1), null, NOW + 2 * DAY, "reopened")],
     }), "S64").toEqual({ claims: 1, laterFailed: 1, levels: ["claimed 1/1"] });
+  });
+  it("S65", () => {
+    // An unstamped claim joins the hand-over open at its sequence. It does not start another.
+    expect(levelsOf({
+      claims: [
+        wcl(t5, null, "bld", NOW, { via: "review", seq: 10, round: 10 }),
+        wcl(t5, null, "bld", NOW + 1000, { via: "lane_event", seq: 11 }),
+      ],
+      evidence: [wev(t5, null, "review", "pass", NOW + 5000, lane("rvw"))],
+    }), "S65").toEqual({ claims: 1, laterFailed: 0, levels: ["reviewed 1/0"] });
+  });
+  it("S66", () => {
+    // The held claim is the lowest sequence in the round. Evidence before that claim's clock is outside the round.
+    const first = NOW;
+    const skewed = NOW - 5000;
+    const claims = [
+      wcl(t5, null, "bld", first, { via: "review", seq: 20, round: 20 }),
+      wcl(t5, null, "bld", skewed, { via: "lane_event", seq: 21, round: 20 }),
+    ];
+    expect(countedClaims(claims, []), "S66").toEqual([{ subject: t5, revision: null, at: first }]);
+    expect(levelsOf({
+      claims,
+      evidence: [wev(t5, null, "review", "pass", skewed + 1000, lane("rvw"))],
+    }), "S66").toEqual({ claims: 1, laterFailed: 0, levels: ["claimed 1/0"] });
+  });
+  it("S67", () => {
+    // The link's sequence is before the claim, so the linking lane is a claimant even though its clock is after J.
+    expect(levelsOf({
+      links: [{ task: taskKey(12), target: w7, by: "rvw", seq: 3, at: NOW + 20 * DAY }],
+      claims: [wcl(w7, A, "bld", NOW, { seq: 6, task: taskKey(12) })],
+      evidence: [wev(w7, A, "review", "pass", NOW + DAY, lane("rvw"))],
+    }), "S67").toEqual({ claims: 1, laterFailed: 0, levels: ["claimed 1/0"] });
+  });
+  it("S68", () => {
+    // A round sequence and a clock are different numbers. The same digits must not collapse two hand-overs.
+    const claims = [
+      wcl(t5, null, "bld", NOW, { via: "review", seq: 10, round: 5 }),
+      wcl(t5, null, "bld", 5, { via: "lane_event", seq: 4 }),
+    ];
+    expect(countedClaims(claims, []), "S68").toHaveLength(2);
   });
 });
