@@ -4,8 +4,11 @@ import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Encrypter } from "age-encryption";
+import { NodeKeys } from "../src/adapters/node-keys.ts";
+import { AgeVault } from "../src/adapters/vault-age.ts";
 import { FileVault } from "../src/adapters/vault-file.ts";
-import { secretIndexPath } from "../src/compose.ts";
+import { openHome, secretIndexPath } from "../src/compose.ts";
 import { readSecretIndex } from "@morndo/node-ops";
 import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
 
@@ -91,5 +94,33 @@ describe("round 2, points 2 and 5: revoke and delete on the plaintext vault dest
   it("FileVault.remove refuses a ref it finds no file of, in either form", () => {
     const h = home();
     expect(() => new FileVault(h.vault).remove("s-00000000000000e1")).toThrow(/s-00000000000000e1/);
+  });
+});
+
+describe("round 2, point 9: the node keys refuse to remake a key while hashes made with it are on record, on every composition root", () => {
+  it("openHome's vault, built with no keys of its own, refuses to make a new fingerprint key while the ledger holds fingerprints", async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+    rmSync(join(h.dir, "fingerprint.key"));
+    const ref = (sealed(h.vault)[0] ?? "").replace(/\.age$/, "");
+    const opened = openHome(h.env);
+    try {
+      await expect(opened.vault.keyedFingerprint(ref)).rejects.toThrow(/fingerprint\.key is missing/);
+      const e = new Encrypter();
+      e.addRecipient(await new AgeVault(h.vault, join(h.dir, "identity")).recipient());
+      await expect(opened.vault.storeSealed("s-00000000000000f1", await e.encrypt(new TextEncoder().encode("synthetic-value-two"))))
+        .rejects.toThrow(/fingerprint\.key is missing/);
+    } finally {
+      opened.close();
+    }
+    expect(existsSync(join(h.dir, "fingerprint.key"))).toBe(false);
+    expect(existsSync(join(h.vault, "s-00000000000000f1.age"))).toBe(false);
+  });
+  it("NodeKeys given no records reads the home's: the index key is refused while the index holds hashes made with it", async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+    rmSync(join(h.dir, "index.key"));
+    expect(() => new NodeKeys(h.dir).index(new TextEncoder().encode("synthetic"))).toThrow(/index\.key is missing/);
+    expect(existsSync(join(h.dir, "index.key"))).toBe(false);
   });
 });
