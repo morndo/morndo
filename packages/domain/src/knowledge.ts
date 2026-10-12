@@ -12,7 +12,7 @@ export const SOP_RULES = [
   "stop-required", "budget-stop", "done-required", "report-citations", "metrics-required",
 ] as const;
 export type SopRule = (typeof SOP_RULES)[number];
-export type SopWarning = "stale-citation";
+export type SopWarning = "stale-citation" | "outward-sounding";
 
 export type SopFinding<R extends string = SopRule> = { rule: R; at: string; message: string };
 export type SopContext = {
@@ -20,6 +20,7 @@ export type SopContext = {
   notes: ReadonlyMap<string, string>; // note id -> its re-check date, YYYY-MM-DD
   roles: readonly string[];
   today: string; // YYYY-MM-DD
+  isTimeZone: (tz: string) => boolean; // whether the runtime knows this IANA time zone
 };
 export type SopVerdict = { refusals: SopFinding[]; warnings: SopFinding<SopWarning>[] };
 

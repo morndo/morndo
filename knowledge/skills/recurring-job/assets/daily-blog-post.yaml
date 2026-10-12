@@ -1,8 +1,10 @@
-# A daily blog post, as an SOP template. Blanks in <angle brackets> are filled by a user's instance.
+# A daily blog post, as an SOP template (kind: template). Blanks in <angle brackets> are filled by a user's instance,
+# which says kind: instance and may keep no blank.
 # Steps name a Role and a model class, never a model id; the Role's chain decides what runs.
 # Check it with: node knowledge/skills/recurring-job/scripts/sop-check.ts <this file>
 sop: daily-blog-post
 version: 1
+kind: template
 patterns: [loop-scheduled, loop-plan-execute-verify, loop-one-shot, loop-review-fix, loop-human-gate]
 trigger:
   schedule: { cron: "<cron, e.g. 0 7 * * 1-5>", timezone: "<IANA zone>" }
@@ -16,6 +18,7 @@ steps:
     role: research
     model: { class: flagship, family: any }
     options: { grounding: off }        # search-grounded output may not be modified or mixed into a post
+    effect: local
     why: [loop-plan-execute-verify, notes/search-grounding-terms]
     output: research.md, at least 5 sources, each with URL, publisher, date and the passage each claim will rest on
     check: tool link-check fetches every source; tool quote-check finds every passage in its source
@@ -23,6 +26,7 @@ steps:
     pattern: loop-plan-execute-verify
     role: plan
     model: { class: everyday, family: any }
+    effect: local
     why: [loop-plan-execute-verify]
     output: outline.md, each claim the post will make tied to a source in research.md
     check: every claim in outline.md names a source in research.md
@@ -30,6 +34,7 @@ steps:
     pattern: loop-plan-execute-verify
     role: plan
     model: { class: flagship, family: any }
+    effect: local
     why: [notes/writing-boards]          # an instance may add pref:<id>, shown as the user's preference
     output: draft.md in the style guide
     check: tool cite-check finds every source the draft cites in research.md
@@ -37,6 +42,7 @@ steps:
     pattern: loop-one-shot
     role: review
     model: { class: fast, family: { other-than: [draft] } }    # a cheap model from another vendor than the writer
+    effect: local
     why: [loop-review-fix]
     output: edited.md and a change list
     check: the change list accounts for every changed paragraph
@@ -45,6 +51,7 @@ steps:
     role: research
     model: { class: everyday, family: any }
     options: { grounding: off }
+    effect: local
     why: [notes/search-guidance, notes/search-grounding-terms]
     input: edited.md and tool search-console rows for related pages
     output: title, meta description, headings, internal links, structured data
@@ -53,6 +60,7 @@ steps:
     pattern: loop-review-fix
     role: validate
     model: { class: fast, family: { other-than: [draft, edit] } }
+    effect: local
     why: [loop-review-fix, notes/search-guidance]
     output: claims.json, each claim supported, unsupported or contradicted, with its source and passage
     check: tool quote-check finds every passage in its source; tool link-check gets 200 for every link; no claim is unsupported
@@ -82,7 +90,7 @@ stop:
   - { when: fact-check is past max_rounds, then: stop and report the post as not publishable, with no Ask }
   - { when: three runs in a row were dropped or expired, then: pause the SOP and ask the principal }
   - { when: the run has taken 2 h, then: stop and report what was done }
-budget: { per_run: "<default $5>", per_month: "<default $100>", on_exceed: stop }
+budget: { per_run: "<per run, e.g. 5 USD>", per_month: "<per month, e.g. 100 USD>", on_exceed: stop }
 report:
   to: manager
   holds: [URL or reason, cost per step, rounds, claim counts, citations]
