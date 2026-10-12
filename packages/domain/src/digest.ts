@@ -258,7 +258,12 @@ export function buildDigest(input: DigestInput): DigestResult {
     const groupClaims = input.claims.filter(c => keys.has(subjectKey(c.subject))).sort((a, b) => a.at - b.at);
     const last = groupClaims[groupClaims.length - 1] ?? null;
     const groupLinks = input.links.filter(l => keys.has(subjectKey(l.target)));
-    const groupAssignments = root.kind === "task" ? input.assignments.filter(a => a.task === root.key) : [];
+    // Claimants include every assignee of a task linked to a member, not only the root (DG8).
+    const linkedTasks = new Set<string>();
+    if (root.kind === "task") linkedTasks.add(root.key);
+    for (const l of groupLinks) linkedTasks.add(l.task);
+    for (const c of groupClaims) if (c.task !== undefined) linkedTasks.add(c.task);
+    const groupAssignments = input.assignments.filter(a => linkedTasks.has(a.task));
     // Claims, links and assignments are records too (DG8): a claim, or a claimant change through a link or an
     // assignment, raises the item's sequence past the mark, so the level drop shows as new again.
     const records: { seq: number; at: number }[] = [...events, ...evidence, ...voided, ...groupClaims];
