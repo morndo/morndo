@@ -471,12 +471,28 @@ export class Store {
     this.db.prepare("UPDATE decision_briefs SET state = 'open', asker_kind = 'manager', asker_name = ?, token_id = ?, drafted_by = ?, closed_at = NULL, resolution = NULL WHERE id = ? AND version = ?")
       .run(askerName, tokenId, draftedBy, id, version);
   }
+  // Forwarding a draft that names a list item: the open brief's id becomes that ref, so it joins the list item.
+  // A withdrawn or declined row already at that id does not block; the open brief is the next version.
+  claimForward(oldId: string, version: number, ref: string, askerName: string, tokenId: string, draftedBy: string): { id: string; version: number } {
+    const clash = this.brief(ref);
+    if (clash && clash.id !== oldId) {
+      const old = this.brief(oldId);
+      if (!old) return { id: oldId, version };
+      const next = clash.version + 1;
+      this.insertBrief({
+        ...old, id: ref, version: next, ref, state: "open", askerKind: "manager", askerName, tokenId,
+        draftedBy, resolution: null, closedAt: null,
+      });
+      this.setBriefState(oldId, old.version, "withdrawn", null, old.filedAt);
+      return { id: ref, version: next };
+    }
+    this.db.prepare(`UPDATE decision_briefs SET id = ?, ref = ?, state = 'open', asker_kind = 'manager', asker_name = ?, token_id = ?, drafted_by = ?, closed_at = NULL, resolution = NULL WHERE id = ? AND version = ?`)
+      .run(ref, ref, askerName, tokenId, draftedBy, oldId, version);
+    return { id: ref, version };
+  }
   brief(id: string): BriefRecord | null {
     const r = this.db.prepare("SELECT * FROM decision_briefs WHERE id = ? ORDER BY version DESC LIMIT 1").get(id) as Row | undefined;
     return r ? briefFrom(r) : null;
-  }
-  briefVersions(id: string): BriefRecord[] {
-    return (this.db.prepare("SELECT * FROM decision_briefs WHERE id = ? ORDER BY version").all(id) as Row[]).map(briefFrom);
   }
   currentBriefs(): BriefRecord[] {
     return (this.db.prepare(`SELECT * FROM decision_briefs AS b

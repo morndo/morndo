@@ -36,11 +36,11 @@ export type FileResult =
   | { ok: "filed"; id: string; version: number; warnings: Warning[] }
   | { ok: "dry"; warnings: Warning[] }
   | { ok: "refused"; problems: BriefProblem[] }
-  | { ok: false; problem: "bad_ref" | "ref_taken" | "too_many_open" | "not_allowed" };
+  | { ok: false; problem: "bad_ref" | "ref_taken" | "too_many_open" | "not_allowed" | "no_ledger" };
 
 export type BriefAction =
   | { ok: true; id: string; version: number; status: BriefState }
-  | { ok: false; problem: "unknown" | "not_allowed" | "reason_needed" | "too_long" | "bad_text" | "too_many_open" | "not_open" };
+  | { ok: false; problem: "unknown" | "not_allowed" | "reason_needed" | "too_long" | "bad_text" | "too_many_open" | "not_open" | "bad_ref" | "ref_taken" | "due_past" | "no_ledger" };
 
 export type BriefAnswer = { kind: "option"; key: string; label: string } | { kind: "words" } | null;
 export type BriefSummary = {
@@ -81,7 +81,10 @@ export class BriefService {
         this.#store.setBriefState(row.id, row.version, "expired", null, row.brief.due + HUB_TTL_MS);
         continue;
       }
-      if (row.state === "draft" || row.state === "declined" || row.state === "expired") continue;
+      // A draft the manager never forwarded was never an ask: not on the board, and not a settlement of a list item.
+      // A withdrawn or settled row is sighted only when the principal was the asker (he filed it, or it was forwarded).
+      const shown = row.state === "open" || (row.askerKind === "manager" && (row.state === "withdrawn" || row.state === "settled"));
+      if (!shown) continue;
       if ((row.state === "withdrawn" || row.state === "settled") && row.closedAt !== null && now - row.closedAt > KEEP_SETTLED_MS) continue;
       out.push(this.#sight(row));
     }
@@ -128,21 +131,22 @@ export class BriefService {
       return { ok: "refused", problems: errors };
     }
     const warnings = lint.problems.filter(p => p.level === "warning");
-    if (dry) return { ok: "dry", warnings };
     const brief = lint.brief;
-    if (brief.ref !== null && !REF.test(brief.ref)) return { ok: false, problem: "bad_ref" };
-    const ref = brief.ref;
-    if (previous && ref !== previous.ref) return { ok: false, problem: "bad_ref" };
     const state: BriefState = previous ? previous.state : who.kind === "worker" ? "draft" : "open";
+    // Only an open brief claims a ref. A draft keeps the ref in its text for a later forward, and holds no id.
+    const ref = state === "open" ? brief.ref : null;
+    if (dry) return { ok: "dry", warnings };
+    if (brief.ref !== null && !REF.test(brief.ref)) return { ok: false, problem: "bad_ref" };
+    if (previous && brief.ref !== previous.brief.ref) return { ok: false, problem: "bad_ref" };
     const result = this.#store.transaction(() => {
-      if (ref !== null && !previous && this.#store.brief(ref)) return { ok: false as const, problem: "ref_taken" as const };
+      const taken = ref !== null && !previous ? this.#store.brief(ref) : null;
+      if (taken && this.#holdsRef(taken)) return { ok: false as const, problem: "ref_taken" as const };
       const askerKind = previous?.askerKind ?? who.kind;
       const askerName = previous?.askerName ?? who.name;
       if (state === "open" && !previous && this.#store.openBriefCount(askerKind, askerName) >= MAX_OPEN) return { ok: false as const, problem: "too_many_open" as const };
       const n = ref === null && !previous ? this.#store.peekBriefNumber() : null;
       const id = previous?.id ?? ref ?? `d-${n}`;
-      if (!previous && this.#store.brief(id)) return { ok: false as const, problem: "ref_taken" as const };
-      const version = previous ? previous.version + 1 : 1;
+      const version = previous ? previous.version + 1 : (taken?.version ?? 0) + 1;
       const row: BriefRecord = {
         id, version, ref, askerKind, askerName, tokenId: who.token,
         filedByKind: previous?.filedByKind ?? who.kind, filedByName: previous?.filedByName ?? who.name,
@@ -202,11 +206,20 @@ export class BriefService {
     const row = this.#store.brief(id);
     if (!row) return { ok: false, problem: "unknown" };
     if (row.state !== "draft") return { ok: false, problem: "not_open" };
+    const ref = row.brief.ref;
+    if (ref !== null && !REF.test(ref)) return { ok: false, problem: "bad_ref" };
+    if (ref !== null) {
+      const taken = this.#store.brief(ref);
+      if (taken && this.#holdsRef(taken)) return { ok: false, problem: "ref_taken" };
+    }
     if (this.#store.openBriefCount("manager", this.#managerName) >= MAX_OPEN) return { ok: false, problem: "too_many_open" };
-    this.#store.forwardBrief(id, row.version, this.#managerName, who.token, row.askerName);
-    this.#audit("BriefForwarded", { ...row, version: row.version }, who, this.#now());
+    const claimed = ref === null
+      ? { id, version: row.version }
+      : this.#store.claimForward(id, row.version, ref, this.#managerName, who.token, row.askerName);
+    if (ref === null) this.#store.forwardBrief(id, row.version, this.#managerName, who.token, row.askerName);
+    this.#audit("BriefForwarded", { ...row, id: claimed.id, version: claimed.version }, who, this.#now());
     this.#refresh();
-    return { ok: true, id, version: row.version, status: "open" };
+    return { ok: true, id: claimed.id, version: claimed.version, status: "open" };
   }
 
   #close(actor: BoardActor, id: string, state: "withdrawn" | "settled", why: string | null, type: BriefAudit["type"], openOnly: boolean): BriefAction {
@@ -235,6 +248,11 @@ export class BriefService {
     if (t.length > WHY_CAP) return { problem: "too_long" };
     if (CONTROL.test(t)) return { problem: "bad_text" };
     return t;
+  }
+
+  // Open, settled and expired rows hold the ref. A draft never does, and neither does a withdrawn or declined row.
+  #holdsRef(row: BriefRecord): boolean {
+    return row.state !== "draft" && row.state !== "withdrawn" && row.state !== "declined";
   }
 
   #isAsker(row: BriefRecord, who: Filer): boolean {
