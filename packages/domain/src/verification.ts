@@ -60,8 +60,8 @@ export type Claim = {
 };
 
 // A task's link to a change or a deploy (§3.1): the only way a task groups its changes into one digest item (DG5).
-// `seq` and `at` are the hub sequence and the time it was filed, as on a claim. A link or an assignment raises the
-// item when it changes the claimants, or a link brings a member in (DG8). A repeat that changes neither does not.
+// `seq` and `at` are the hub sequence and the time it was filed, as on a claim. Replaying the group's records in
+// sequence order, a record raises the item when the members, claimants, level or section change (DG8).
 export type LinkRecord = { task: TaskKey; target: SubjectRef; by: string; seq: number; at: number };
 export type Assignment = { task: TaskKey; lane: string; seq: number; at: number };
 

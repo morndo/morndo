@@ -285,33 +285,141 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
     for (const l of groupLinks) linkedTasks.add(l.task);
     for (const c of groupClaims) if (c.task !== undefined) linkedTasks.add(c.task);
     const groupAssignments = input.assignments.filter(a => linkedTasks.has(a.task));
-    // Claims, links and assignments are records too (DG8). A claim always raises the sequence. A link or an
-    // assignment raises it only when it changes who the claimants are, or a link brings a member in: a repeat
-    // link, or assigning a lane that already claimed, changes nothing the principal sees and must not.
-    const records: { seq: number; at: number }[] = [...events, ...evidence, ...voided, ...groupClaims];
-    const setsDiffer = (before: ReadonlySet<string>, after: ReadonlySet<string>): boolean =>
-      before.size !== after.size || [...after].some(laneName => !before.has(laneName));
-    const raisesItem = (record: LinkRecord | Assignment): boolean => {
-      if (passes) passes.n++;
-      if ("target" in record) {
-        const without = groupLinks.filter(l => l !== record);
-        if (group.members.some(m => setsDiffer(
-          claimantsOf(m, input.claims, without, input.assignments),
-          claimantsOf(m, input.claims, groupLinks, input.assignments),
-        ))) return true;
-        const key = subjectKey(record.target);
-        const already = without.some(l => subjectKey(l.target) === key)
-          || input.claims.some(c => c.task !== undefined && subjectKey(c.subject) === key);
-        return !already;
-      }
-      const without = input.assignments.filter(a => a !== record);
-      return group.members.some(m => setsDiffer(
-        claimantsOf(m, input.claims, groupLinks, without),
-        claimantsOf(m, input.claims, groupLinks, input.assignments),
-      ));
+    // One pass, in sequence order (DG8). A record raises the item exactly when the members, claimants, level
+    // or section the principal would see differ from the record before it. A later record cannot make an
+    // earlier one look redundant.
+    const members = new Set<string>([rootKey]);
+    const refs = new Map<string, SubjectRef>([[rootKey, root]]);
+    const lanesOf = new Map<string, Set<string>>();
+    const tasksOf = new Map<string, Set<string>>();
+    const assignees = new Map<string, Set<string>>();
+    const queuedClaims = new Map<string, Claim[]>();
+    const queuedEvidence = new Map<string, Evidence[]>();
+    const queuedEvents = new Map<string, DigestEvent[]>();
+    const queue = <T>(map: Map<string, T[]>, k: string): T[] => {
+      let list = map.get(k);
+      if (list === undefined) { list = []; map.set(k, list); }
+      return list;
     };
-    for (const raised of [...groupLinks, ...groupAssignments].filter(raisesItem)) records.push(raised);
-    const seq = records.reduce((m, r) => Math.max(m, r.seq), 0);
+    const seenEvidence: Evidence[] = [];
+    const seenEvents: DigestEvent[] = [];
+    const revs = new Map<string, Revision>();
+    if (root.kind === "task") tasksOf.set(rootKey, new Set([root.key]));
+    const addClaimant = (k: string, laneName: string) => {
+      let set = lanesOf.get(k);
+      if (set === undefined) { set = new Set(); lanesOf.set(k, set); }
+      set.add(laneName);
+    };
+    const bindTask = (k: string, task: string) => {
+      let set = tasksOf.get(k);
+      if (set === undefined) { set = new Set(); tasksOf.set(k, set); }
+      if (set.has(task)) return;
+      set.add(task);
+      for (const laneName of assignees.get(task) ?? []) addClaimant(k, laneName);
+    };
+    const effectClaim = (c: Claim): void => {
+      addClaimant(subjectKey(c.subject), c.lane);
+      if (c.task !== undefined) bindTask(subjectKey(c.subject), c.task);
+    };
+    const ensureMember = (s: SubjectRef): void => {
+      const k = subjectKey(s);
+      if (members.has(k)) return;
+      members.add(k);
+      refs.set(k, s);
+      if (s.kind === "task") bindTask(k, s.key);
+      for (const c of queuedClaims.get(k) ?? []) effectClaim(c);
+      for (const e of queuedEvidence.get(k) ?? []) seenEvidence.push(e);
+      for (const e of queuedEvents.get(k) ?? []) seenEvents.push(e);
+      queuedClaims.delete(k);
+      queuedEvidence.delete(k);
+      queuedEvents.delete(k);
+    };
+    const viewNow = (): string => {
+      const memberIds = [...members].sort();
+      const who = memberIds.map(k => `${k}:${[...(lanesOf.get(k) ?? [])].sort().join(",")}`).join(";");
+      let shown: ItemLevel | null = null;
+      if (root.kind === "task" || root.kind === "change" || root.kind === "deploy") {
+        const linked = memberIds.map(k => refs.get(k)).filter((m): m is SubjectRef => m !== undefined && (m.kind === "change" || m.kind === "deploy"));
+        const levelOf = (m: SubjectRef): ItemLevel => {
+          const st = stateOf(m);
+          const revision = revs.get(subjectKey(m)) ?? st.revision;
+          return subjectLevel({ ...st, revision }, seenEvidence, lanesOf.get(subjectKey(m)) ?? new Set()).level;
+        };
+        if (root.kind === "task" && linked.length > 0) {
+          shown = "verified_live";
+          for (const m of linked) {
+            const sl = levelOf(m);
+            if (LEVEL_RANK[sl] < LEVEL_RANK[shown]) shown = sl;
+          }
+          if (stateOf(root).reopened) shown = "failed";
+        } else shown = levelOf(root);
+      }
+      const belongs: Section[] = [];
+      if (live !== null) belongs.push("needs_you");
+      if (staleCond !== null) belongs.push("stale_or_stuck");
+      for (const e of seenEvents) if (sinceMark(e)) belongs.push(sectionOfEvent(e.kind));
+      let shownSection = "";
+      for (const s of SECTIONS) if (belongs.includes(s)) { shownSection = s; break; }
+      return `${memberIds.join(",")}|${who}|${shown ?? ""}|${shownSection}`;
+    };
+    type Step = { seq: number | null; at: number; apply: () => void };
+    const steps: Step[] = [];
+    for (const e of events) steps.push({ seq: e.seq, at: e.at, apply: () => {
+      const k = subjectKey(e.subject);
+      if (members.has(k)) seenEvents.push(e);
+      else queue(queuedEvents, k).push(e);
+    } });
+    for (const e of evidence) steps.push({ seq: e.seq, at: e.at, apply: () => {
+      const k = subjectKey(e.subject);
+      if (members.has(k)) seenEvidence.push(e);
+      else queue(queuedEvidence, k).push(e);
+    } });
+    for (const c of groupClaims) steps.push({ seq: c.seq, at: c.at, apply: () => {
+      const k = subjectKey(c.subject);
+      const q = queuedClaims.get(k) ?? [];
+      q.push(c);
+      queuedClaims.set(k, q);
+      const brings = c.task !== undefined && root.kind === "task" && c.task === root.key;
+      if (brings) ensureMember(c.subject);
+      else if (members.has(k)) effectClaim(c);
+    } });
+    for (const l of groupLinks) steps.push({ seq: l.seq, at: l.at, apply: () => {
+      const brings = root.kind === "task" && l.task === root.key;
+      if (brings) ensureMember(l.target);
+      const k = subjectKey(l.target);
+      if (!members.has(k)) return;
+      addClaimant(k, l.by);
+      bindTask(k, l.task);
+    } });
+    for (const a of groupAssignments) steps.push({ seq: a.seq, at: a.at, apply: () => {
+      let set = assignees.get(a.task);
+      if (set === undefined) { set = new Set(); assignees.set(a.task, set); }
+      set.add(a.lane);
+      for (const [k, tasks] of tasksOf) if (tasks.has(a.task)) addClaimant(k, a.lane);
+    } });
+    for (const h of input.changeHeads ?? []) if (keys.has(subjectKey(h.subject))) steps.push({ seq: null, at: h.at, apply: () => {
+      revs.set(subjectKey(h.subject), h.revision);
+    } });
+    steps.sort((a, b) => {
+      if (a.seq !== null && b.seq !== null) return a.seq - b.seq || a.at - b.at;
+      return a.at - b.at;
+    });
+    if (passes) passes.n++;
+    let seq = 0;
+    let previous = viewNow();
+    const raisedAt: { seq: number; at: number }[] = [];
+    for (const step of steps) {
+      step.apply();
+      const next = viewNow();
+      if (next !== previous) {
+        if (step.seq !== null) {
+          seq = Math.max(seq, step.seq);
+          raisedAt.push({ seq: step.seq, at: step.at });
+        }
+        previous = next;
+      }
+    }
+    const records: { seq: number; at: number }[] = [...events, ...evidence, ...voided, ...groupClaims, ...raisedAt];
     const n = itemNew({ id: rootKey, seq, level, section }, input.mark);
     items.push({
       id: rootKey,
