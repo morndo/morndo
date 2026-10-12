@@ -1,7 +1,7 @@
 // sop-check, the command. Its logic (knowledge/tools/sop-check/cli.ts) through `run`: exit 0 passes, 1 refused, 2 for a
 // bad call or anything unexpected, one line and no stack. The shipped bundle (the skill's scripts/sop-check.mjs) as a user
 // runs it, from the repository and from a copy of the skills, and as the build makes it today. Then the skill's JSON
-// Schema against the domain's lists, the roles against the engine layer's, and the preferences example.
+// Schemas against the domain's lists, the roles against the engine layer's, and the preferences example.
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { BUDGET_ON_EXCEED, GATE_FIELDS, MODEL_CLASSES, SILENCE_OUTCOMES, SOP_FIELDS, SOP_KINDS, SOP_REQUIRED, STEP_EFFECTS, STEP_FIELDS } from "../packages/domain/src/knowledge.ts";
+import { PREFERENCE_FIELDS, parsePreferences, renderPreference } from "../packages/domain/src/knowledge-facts.ts";
 import { DEFAULT_ROLES, run } from "./tools/sop-check/cli.ts";
 
 const SKILL = "knowledge/skills/recurring-job";
@@ -134,13 +135,30 @@ describe("the SOP's JSON Schema", () => {
   });
 });
 
+describe("the preferences schema", () => {
+  // Read here, so a missing file fails this test, not the import.
+  const load = () => JSON.parse(readFileSync(join(SKILL, "assets/preferences.schema.json"), "utf8")) as Record<string, any>;
+  it("is JSON Schema 2020-12, closed at the top and on the item, and holds exactly the preference fields", () => {
+    const schema = load();
+    const item = schema.$defs.preference;
+    expect(schema.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
+    expect([schema.additionalProperties, item.additionalProperties]).toEqual([false, false]);
+    expect(Object.keys(item.properties).sort()).toEqual([...PREFERENCE_FIELDS].sort());
+    expect(item.required).toEqual([...PREFERENCE_FIELDS]);
+  });
+});
+
 describe("the preferences example", () => {
   it("parses, and each preference has its holder, its date and its words", () => {
     const doc = readFileSync(join(SKILL, "references/preferences.md"), "utf8");
     const yaml = /```yaml\n([\s\S]*?)```/.exec(doc)?.[1] ?? "";
-    const prefs = (parse(yaml) as { preferences: Record<string, unknown>[] }).preferences;
+    const file = parse(yaml) as { preferences: Record<string, unknown>[] };
+    const prefs = file.preferences;
     expect(prefs.length).toBeGreaterThan(0);
     for (const p of prefs) expect([typeof p.id, typeof p.holder, typeof p.on, typeof p.said, Array.isArray(p.tasks)]).toEqual(["string", "string", "string", "string", true]);
+    const judged = parsePreferences(file);
+    expect(judged.refusals).toEqual([]);
+    for (const p of judged.preferences) expect(doc).toContain(renderPreference(p));
     expect(doc).toContain("your preference");
   });
 });

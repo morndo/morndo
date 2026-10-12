@@ -225,6 +225,14 @@ describe("every other rule, one break each", () => {
   });
 });
 
+describe("a shipped template cites no preference (K12)", () => {
+  it("a template whose step cites a preference is refused; an instance may cite one", () => {
+    const cites = (sop: Sop) => { step(sop, "draft").why = ["notes/writing-boards", "pref:write-long"]; };
+    expect(broken(cites)).toEqual(["preference-in-template"]);
+    expect(brokenInstance(cites)).toEqual([]);
+  });
+});
+
 describe("the ubiquitous language", () => {
   it("docs/domain.md has the Knowledge context, its terms and the invariants this check enforces", () => {
     const doc = readFileSync(join(ROOT, "docs/domain.md"), "utf8");
