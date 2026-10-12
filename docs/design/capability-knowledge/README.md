@@ -58,7 +58,7 @@ A bounded context, **Knowledge**. Its shipped files live under `knowledge/` at t
 | Recurring-job skill | Shipped file | How to write an SOP, the SOP check, templates. | `knowledge/skills/recurring-job/` |
 | SOP | Aggregate, one per recurring job | Trigger, steps, gates, checks, stop rules, budget, report, metrics. Guards K10, K11, K14. | Templates in the skill's `assets/`; a user's instances in the overlay |
 | Model facts | Read model over an imported snapshot | Lineup, context, output limit, price per model, from models.dev, with the date fetched. Guards K13, K15. | `~/.cache/morndo-knowledge/models-dev/` |
-| Note | Shipped file | One topic: links, the date each was read, a sentence each in our own words, a re-check date. Guards K1, K3, K6. | `knowledge/notes/<topic>.md` |
+| Note | Shipped file | One topic: links, the date each was read, a sentence each in our own words, a re-check date. Guards K1, K3, K6. | the citing skill's `references/<topic>.md` |
 | Preference set | Aggregate, one per user | The user's Preferences. Guards K4, K12. | `~/.config/morndo-knowledge/preferences.yaml` |
 
 How it relates to the other contexts:
@@ -106,7 +106,7 @@ The numbers of the first draft are kept so reviews stay traceable.
 | K11 | Kept | An SOP run's report lists the Citations its Steps used, with their status (current or stale) at run time. |
 | K12 | Kept | Shipped knowledge holds no per-user data: no Preferences, subscriptions, quotas, Outcomes or SOP instances. |
 | K13 | Changed | A value the catalog holds (a terms revision, a price, a family, a class) is read by code only from the catalog. The models.dev snapshot is reference data and never overrides it. A test that the two agree is deferred (section 11). |
-| K14 | New | An SOP template names a Role and a model class with a family rule, never a model id. Only a user's instance may name a model, as that user's choice. |
+| K14 | New | An SOP names a Role and a model class with a family rule, never a model id. To run a given engine, the user puts it in the Role's chain. |
 | K15 | New | Lineup, context, output limit and price come from the models.dev snapshot with its fetch date, not from hand-written Notes. A Note that needs such a value cites the snapshot. |
 | K16 | New | Every shipped skill follows the Agent Skills specification: a `SKILL.md` whose `name` matches its directory and the format's character rules, a non-empty `description` of at most 1,024 characters, and `metadata` values that are strings [S1]. |
 
@@ -138,8 +138,9 @@ knowledge/
 │   ├── loop-human-gate/SKILL.md
 │   └── recurring-job/              PR 2
 │       ├── SKILL.md
-│       ├── scripts/sop-check.ts
-│       └── assets/daily-blog-post.sop.yaml
+│       ├── scripts/sop-check.mjs (generated from knowledge/tools/sop-check), package.json
+│       ├── assets/daily-blog-post.yaml, assets/sop.schema.json
+│       └── references/preferences.md
 └── notes/                          PR 2: the Notes the blog template cites
 ```
 
@@ -198,7 +199,7 @@ Two disagreements are kept as they are, in the skills too:
 
 ### 6.1 The skill
 
-`knowledge/skills/recurring-job/` holds: `SKILL.md` (how to turn a recurring job into an SOP: pick the Patterns, write the Steps, put the Gates and Stop rules, run the check, ask the principal before the first run), `scripts/sop-check.ts`, and `assets/` with templates. The daily blog post is the first template.
+`knowledge/skills/recurring-job/` holds: `SKILL.md` (when a job is worth making recurring, how to design it from the pattern skills, where the approval sits, how to choose engines, how to report and measure, and the check's rules), `scripts/sop-check.mjs` (a bundle of `knowledge/tools/sop-check/` and the domain's rules; a copied skill needs Node and `npm install` there for its one package, yaml), `assets/sop.schema.json` (the SOP's shape as JSON Schema 2020-12), `assets/daily-blog-post.yaml` (the first template) and `references/preferences.md` (the user's preferences format). The notes it cites are in its `references/`, so a copied skill has them.
 
 ### 6.2 The SOP file
 
@@ -206,116 +207,38 @@ Two disagreements are kept as they are, in the skills too:
 |---|---|---|
 | `sop`, `version` | Its id and version. A changed Step is a new version. | |
 | `patterns` | The pattern skills it composes, by name. | Each names a shipped skill. |
-| `trigger` | `schedule` (cron, time zone) or `event`. | One trigger. |
+| `trigger` | `schedule` (cron, time zone) or `event`. | Exactly one. |
 | `inputs` | What a run needs and where it comes from. | A missing input is a Stop rule, not an error. |
-| `steps[]` | `id`, `pattern`, then either `role` (an engine-layer Role) with `model: {class, family}`, or `tool` (a deterministic program); `why` (Citations), `input`, `output`, `check`; for a loop `max_rounds` and `on_fail`. | K10, K14. |
-| `gates[]` | `before` (a Step id), `who`, `shows`, `options`, `on_change`, `on_silence`. | `on_silence` never approves (K10). |
-| `stop` | Stop rules for the whole run. | At least one. |
-| `budget` | Most spend per run and per month. | Within the Connections' Budgets (ADR-0018). |
-| `report` | Where the run reports and what it holds. | Lists Citations (K11). |
-| `metrics` | What is measured across runs, from where, how often. | |
+| `steps[]` | `id`, `pattern`, then either `role` (an engine-layer Role) with `model: {class, family}` and `why` (Citations), or `tool` (a deterministic program); `effect` (`local`, `outward`, `irreversible`), `input`, `output`, `check`; for a loop `on_fail` (an earlier Step) and `max_rounds` (1 to 5). | K10, K14. |
+| `gates[]` | `before` (a Step id), `who` (the principal), `shows`, `options` (with `approve`), `on_change` (an earlier Step) and `max_changes`, `on_silence: {after, then}` with `then` expire, drop or pause. | Silence never approves (K10). |
+| `done` | The checks that make a run done. | At least one; never a model's opinion. |
+| `stop` | Stop rules for the whole run, each `{when, then}`. | At least one. |
+| `budget` | `per_run`, `per_month`, `on_exceed` (`stop` or `ask`). | Spending past it never goes on by itself; within the Connections' Budgets (ADR-0018). |
+| `report` | Where the run reports (`to`) and what it `holds`. | Holds the Citations (K11). |
+| `metrics` | Each with a `name`, where it comes `from` and how often (`every`). | At least one. |
 
-`model` in a template is a class and a family rule. It is advisory (K9): the Role's chain and auto routing decide what runs; the check warns at install when the Role's chain holds nothing of that class, and each run's report says when what ran didn't meet the family rule. A user's instance may name a model id; that is the user's choice, not shipped knowledge (K14).
+`model` is a class and a family rule. It is advisory (K9): the Role's chain and auto routing decide what runs, and each run's report says when what ran didn't meet the class or the family rule. To run a given engine, the user puts it in the Role's chain (K14).
 
 ### 6.3 The SOP check
 
-`sop-check <file>` refuses, naming the rule:
-- an outward `tool` Step (publish, post, send, push, pay) without a Gate before it;
-- a Gate whose `on_silence` approves;
-- a loop (`on_fail`) without `max_rounds`, or an SOP without a Stop rule or a budget;
-- a Step without `output` or `check`;
-- an engine Step without `why`, or a template Step that names a model id;
-- a `patterns` entry that is not a shipped skill.
+The rules are pure, in `packages/domain/src/knowledge.ts` (`checkSop`); `scripts/sop-check.mjs` reads the SOP, the skills installed beside it, the notes' re-check dates and the engine layer's roles, and prints one line per refusal with its rule and step. Exit 1 on a refusal, 2 on a bad call or anything unexpected. Its rules: `gate-before-outward`, `effect-declared` (every step says local, outward or irreversible; a word list only warns on a local step that sounds outward), `blanks-filled` (an instance, the default `kind`, keeps no `<blank>`; a template may), `silence-never-approves`, `gate-shape`, `round-limit`, `stop-required`, `budget-stop` (amounts in one currency, or 0, which allows only tool steps), `engine-why`, `why-resolves`, `step-check`, `no-model-id`, `model-class`, `role-known`, `step-kind`, `pattern-known`, `trigger` (in an instance, a five-field POSIX cron line and a known time zone), `done-required`, `report-citations`, `metrics-required`, `shape`. A test holds the JSON Schema's fields and enums equal to the domain's lists.
 
-It warns, without failing, on Citations whose Note is stale (K6).
+It warns, without failing, on each Citation of a note past its re-check date (K6).
 
 ### 6.4 Worked example: a daily blog post
 
-The template, `assets/daily-blog-post.sop.yaml`, shortened. Blanks (`<...>`) are filled by a user's instance.
+`assets/daily-blog-post.yaml`. Steps, each with its Role and class:
+- **research** (`research`, flagship, grounding off): sources with URL, publisher, date and the passage each claim rests on; checked by `link-check` and `quote-check`.
+- **outline** (`plan`, everyday): each claim tied to a source.
+- **draft** (`plan`, flagship): checked by `cite-check`; an instance may cite a Preference.
+- **edit** (`review`, fast, another family than the draft).
+- **search-pass** (`research`, everyday, grounding off): title, description, headings, internal links, structured data, from the site's own search data.
+- **fact-check** (`validate`, fast, another family than the draft and the edit; `loop-review-fix`, 2 rounds back to the draft): every passage found in its source, every link answering.
+- **publish** (tool `cms-publish`, `effect: outward`), after the principal's gate (approve, change once, drop; silence expires after 48 h).
 
-```yaml
-sop: daily-blog-post
-version: 1
-patterns: [loop-scheduled, loop-plan-execute-verify, loop-review-fix, loop-human-gate]
-trigger: { schedule: "<cron, e.g. 0 7 * * 1-5>", timezone: "<IANA zone>" }
-inputs:
-  topic: { from: "<board column or file>", one_per_run: true }
-  site: { search_console_property: "<property>", cms: "<publish target>" }
-  style: "<style guide file>"
-steps:
-  - id: research
-    pattern: loop-plan-execute-verify
-    role: research
-    model: { class: flagship, family: any }
-    why: [notes/source-rules, notes/search-grounding-terms]
-    output: research.md, at least 5 sources, each with URL, publisher and date
-    check: tool link-check fetches every source
-  - id: outline
-    pattern: loop-plan-execute-verify
-    role: plan
-    model: { class: everyday, family: any }
-    why: [no evidence: default]
-    output: outline.md, each claim tied to a source in research.md
-    check: every claim names a source in research.md
-  - id: draft
-    pattern: loop-plan-execute-verify
-    role: implement                                  # Q4
-    model: { class: flagship, family: any }
-    why: [notes/writing-boards]                      # an instance may add a Preference
-    output: draft.md in the style guide
-    check: tool cite-check finds every cited source in research.md
-  - id: edit
-    pattern: loop-one-shot
-    role: review
-    model: { class: fast, family: { other-than: [draft] } }   # a cheap model from another vendor than the writer
-    why: [loop-review-fix]
-    output: edited.md and a change list
-    check: the change list accounts for every changed paragraph
-  - id: seo
-    pattern: loop-one-shot
-    role: implement                                  # Q4
-    model: { class: everyday, family: any }
-    options: { grounding: off }                      # notes/search-grounding-terms
-    why: [notes/search-guidance, notes/search-grounding-terms]
-    input: edited.md and tool search-console rows for related pages
-    output: title, meta description, headings, internal links, structured data
-    check: title and description lengths, one H1, every internal link resolves, structured data validates
-  - id: fact-check
-    pattern: loop-review-fix
-    role: validate
-    model: { class: fast, family: { other-than: [draft, edit] } }
-    why: [loop-review-fix]
-    output: claims.json, each claim supported, unsupported or contradicted, with its source
-    check: tool link-check gets 200 for every source; every claim has a verdict
-    on_fail: draft
-    max_rounds: 2
-  - id: publish
-    tool: cms-publish
-    output: the public URL
-    check: the URL answers 200 and its content hash equals the approved version's
-gates:
-  - before: publish
-    who: principal
-    shows: [rendered post, title and description, claims.json, change list, cost, citations]
-    options: [approve, change, drop]
-    on_change: draft
-    on_silence: expire after 48 h, publish nothing, return the topic to the queue
-stop:
-  - no topic in the queue: skip the run and report it
-  - budget spent: stop and report what was done
-  - fact-check past max_rounds: stop, report "not publishable", no Ask
-  - three runs in a row dropped or expired: pause the SOP and ask the principal
-  - wall time: 2 h
-budget: { per_run: "<default $5>", per_month: "<default $100>" }
-report: { to: manager, holds: [URL or reason, cost per step, rounds, claim counts, citations with status] }
-metrics:
-  - approved first try, share of runs: from the gate's answers, weekly
-  - edits asked for at the gate: from the gate's answers, weekly
-  - cost per post: from Lease spend (ADR-0018), weekly
-  - clicks and impressions per post at 28 days: tool search-console, monthly
-```
+Stop rules: no topic, budget spent, fact-check past its rounds, three dropped runs in a row, two hours. Metrics: approved first try, changes asked at the gate, cost per post, clicks and impressions at 28 days.
 
-Why it looks as it does (the Notes it cites are written in PR 2, each a link, a read date and a sentence):
+Why it looks as it does (the notes it cites, in the skill's `references/`, each hold links, read dates and a sentence per source):
 - **Grounding off.** Gemini's API terms bar modifying grounded results or mixing them with other content without Google's written permission [S25]; a post is exactly that. Whether a grounded answer may serve as research notes is a question for counsel (Q10).
 - **A cadence is a ceiling, not a quota.** Google's spam policy counts generating many pages with AI tools without adding value for users as scaled content abuse [S26]; its guidance asks whether content is produced with extensive automation on many topics [S27]. So no topic means no post, and three dropped runs pause the SOP.
 - **The approval gate.** Google advises fact-checking and reviewing AI-generated content by hand before publishing [S28]; publishing is outward (K10, F4).
@@ -333,8 +256,8 @@ Both stay Preferences in the user's file; the Notes say what the sources show.
 **What it is.** models.dev is an open database of model specifications, prices and capabilities, kept as TOML files in its repository and served as JSON [S5]. Licence: MIT, read 2026-10-12 [S6]. On 2026-10-12 `https://models.dev/api.json` returned 226 providers and 8,474 provider-model entries in 5.4 MB, each with `limit` (context, output, sometimes input), `cost` per million tokens (input, output, cache read and write), release date and family [S7]. The repository had 30 commits on 2026-10-11 alone [S5]. `models.json` holds model-only facts and `catalog.json` both [S5].
 
 **How Morndo uses it.**
-- A refresh command downloads `api.json` to `~/.cache/morndo-knowledge/models-dev/<date>.json` with models.dev's licence text beside it. The repository ships no copy except a trimmed test fixture, which carries the licence notice too. A copy in the repository would add megabytes per refresh to a public history and change many times a day upstream.
-- The CLI shows a model's lineup entry, context, output limit and price with "models.dev, fetched *date*". Older than 30 days, it is shown with a warning (K6). Offline, the newest cached copy is used and its date shown.
+- `npm run knowledge:models -- refresh` (`knowledge/tools/models-dev/`) fetches `api.json` and models.dev's licence once, each request within 60 seconds (then exit 2), and writes a trimmed snapshot dated with the machine's real date to `$XDG_CACHE_HOME/morndo-knowledge/models-dev/<date>.json` (`~/.cache/...` when it is unset), through a temporary file renamed over it, so a broken write leaves the cache as it was, and removes temporary files older than ten minutes, which a refresh that died left behind: per model its provider, id, name, family, context, output limit, input and output price per million tokens and release date, with the source URL, the fetch date and the licence text. The trimming is pure (`trimModelsDev` in `packages/domain/src/knowledge-facts.ts`). The repository ships no copy: a copy would add megabytes per refresh to a public history and change many times a day upstream. The tests use a made-up fixture in `api.json`'s shape and a fake fetch, never the network.
+- `npm run knowledge:models -- show [provider[/model]]` prints the newest snapshot that reads with "models.dev, fetched *date*", and names each newer one it skipped. Older than 30 days, it is shown with a warning and still exits 0 (K6); dated after today (a wrong clock or a wrong file), it is shown with a warning too, never as fresh. Without a snapshot it says how to make one and fails nothing. `--today` is show's alone. An SOP's `models.dev@<date>` resolves against this directory when `sop-check --snapshots` is given it: the snapshot of that date must read, as show reads it, and say it was fetched that day.
 - It is community data, not the vendor's page. Example, read 2026-10-12: models.dev gives GPT-6 Astra an input limit of 922,000 tokens [S7]; OpenAI's model page shows a 1,050,000-token context and 128,000 output tokens and no separate input limit [S8]. So any value that moves money or permissions stays in the catalog (K13), and a Note that relies on a limit says which source it used.
 - It answers what a model is and costs, not what it is good at. Strength claims stay out of it (K15).
 
@@ -351,7 +274,9 @@ preferences:
     tasks: [write]
 ```
 
-Rendered: "Claude for long-form writing (your preference, 2026-10-11)", never as a fact (K4). Beside it the CLI shows the Scorecard's numbers for the same kind of task where they exist (ADR-0020): first-try approvals and edits needed, per model. That is what can turn a preference into evidence for this user; the shipped files never hold either (K12).
+Rendered: "Claude for long-form writing (your preference, 2026-10-11)", never as a fact (K4). Its shape is the recurring-job skill's `assets/preferences.schema.json`; `parsePreferences`, the authority, holds the same rules and that ids are unique, leaves a broken entry out with a refusal naming its place, and `renderPreference` shows it as its holder's. `sop-check --preferences` resolves an SOP's `pref:<id>` against the file. A shipped template never cites one (`sop-check` refuses it: `preference-in-template`), and no preferences file ships (K12).
+
+**The Scorecard link.** A step's role group (its Role up to the first hyphen, as ADR-0020 pools them) and its model class select this user's Scorecard cells: `scorecardFor` returns them sorted by entry, never by a score (K9), and refuses a class that isn't `flagship`, `everyday` or `fast`. ADR-0020 is still a proposal (PR #18), so the cells come through this port; showing them beside a step or a preference waits for its Scorecard. That record, first-try approvals and changes asked per model, is what can turn a preference into evidence for this user.
 
 ## 9. Use
 
@@ -371,7 +296,7 @@ Citations: a skill by name, a Note with its read date, `pref:<id>`, `models.dev@
 3. **SOP check (PR 2).** The blog template passes. Copies with the Gate removed, `on_silence` set to approve, `max_rounds` removed, no Stop rule, a Step without `check`, an engine Step without `why`, or a model id in a template each fail with the rule's name. A `tool` Step without `why` passes.
 4. **Model facts (PR 3).** The loader reads the fixture; a snapshot older than 30 days is marked stale and still shown; a missing snapshot says so and fails nothing; no code path reads a gate value from the snapshot (K13).
 5. **Preferences (PR 3).** A Preference renders with its holder and date and never in the place of a fact; a shipped file holding a Preference fails (K12).
-6. **K9 (PR 3).** The same route replayed with and without the knowledge files picks the same Candidate.
+6. **K9 and K13 (PR 3).** No source under `packages/*/src` or `apps/*/src` outside the knowledge modules names them, and none outside them names the model snapshot; each matcher is proven on a planted line. Until ADR-0020's replay exists in code, this stands in for replaying a route with and without the knowledge files: no routing or gate code can read them.
 
 ## 11. Build plan
 
@@ -379,7 +304,7 @@ Small stacked PRs:
 
 1. **Pattern skills.** The six `knowledge/skills/loop-*/SKILL.md` from section 5, `knowledge/README.md` with the install links, and the skill test (section 10.1). Done: the test passes with its negative controls; one skill loaded in Claude Code from the link; every source re-read on the day of the PR.
 2. **Recurring-job skill, `sop-check`, blog template.** `knowledge/skills/recurring-job/`, the check's pure rules in `packages/domain/src/knowledge.ts`, the Notes the template cites. Done: tests 10.3; Notes re-read on the day.
-3. **models.dev snapshot, Preferences file, Scorecard link.** The refresh command and loader, the overlay's `preferences.yaml`, and the Scorecard numbers beside a Preference (needs ADR-0020's Scorecard). Done: tests 10.4 to 10.6.
+3. **models.dev snapshot, Preferences file, Scorecard link.** `knowledge/tools/models-dev/` (refresh and show), `packages/domain/src/knowledge-facts.ts` (trimming, freshness, preferences, `scorecardFor`), the preferences schema, and the rule `preference-in-template`. Done: tests 10.4 to 10.6. Showing Scorecard numbers waits for ADR-0020.
 
 Later steps, each only when a need shows:
 - **Disagreement and Proposal aggregates** (first draft K5, K7, K8). A pull request already is a proposal; a Note lists sources that disagree.
@@ -394,7 +319,7 @@ Each has a recommended default; none blocks PR 1.
 
 - **Q1. Where the files live.** Default: `knowledge/` at the root (section 4.2). Move beside the catalog only if the hub's packaging needs it.
 - **Q3. A prior for the cold start.** Should anything in Knowledge rank a Candidate with no Outcomes yet? Default: no; ADR-0020's probation learns from this user's work.
-- **Q4. Roles for writing work.** The engine layer has no `write` or `seo` Role. Default: the template uses existing Roles (`implement` for the draft and the SEO pass, `review` for the edit, `validate` for the fact check). Add a Role only if a second recurring job needs one.
+- **Q4. Roles for writing work.** The engine layer has no `write` or `seo` Role. Default: the template uses existing Roles (`research` for the research and the search pass, `plan` for the outline and the draft, `review` for the edit, `validate` for the fact check). Add a Role only if a second recurring job needs one.
 - **Q5. What counts as a source.** Default: section 4.3 as written.
 - **Q7. Quotes in a public repository.** German law (§51 UrhG) allows a quote only to the extent its purpose justifies; whether a collection of quotes qualifies is a question for counsel. Default until answered: links, dates and our own words, no stored quotes.
 - **Q9. Disclosure on published posts.** Default: the blog template leaves disclosure that models helped write the post as a blank each user fills, suggested on.

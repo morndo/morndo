@@ -28,7 +28,7 @@ export default defineConfig({
       {
         test: {
           name: "units",
-          include: ["packages/*/test/**/*.test.ts", "apps/hub/test/**/*.test.ts", "apps/node-agent/test/**/*.test.ts", "apps/fleet/test/**/*.test.ts", "apps/board-cli/test/**/*.test.ts", "apps/connections/test/**/*.test.ts", "apps/web/test/**/*.test.ts", "scripts/**/*.test.ts"],
+          include: ["packages/*/test/**/*.test.ts", "apps/hub/test/**/*.test.ts", "apps/node-agent/test/**/*.test.ts", "apps/fleet/test/**/*.test.ts", "apps/board-cli/test/**/*.test.ts", "apps/connections/test/**/*.test.ts", "apps/web/test/**/*.test.ts", "scripts/**/*.test.ts", "knowledge/**/*.test.ts"],
           exclude: browserTests,
           // Many start a real hub, SQLite, tmux or TigerVNC: alone at load 7 the slowest took 3.6 to 4.0 s against Vitest's
           // 5 s default, so any load tipped them over (five such timeouts at load 18 to 23, each passing alone). 20 s
