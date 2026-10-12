@@ -113,7 +113,7 @@ function withoutLiterals(text: string): string {
 // The table a CREATE … INDEX names, unquoted.
 function indexedTable(body: string): string | null {
   const on = body.match(/\bON\s+([^\s(]+)\s*\(/i);
-  return on?.[1]?.replace(/^["'`\[]+|["'`\]]+$/g, "") ?? null;
+  return on?.[1]?.replace(/^["'`[]+|["'`\]]+$/g, "") ?? null;
 }
 
 // Splits a CREATE TABLE body on the commas that separate columns and constraints, not the ones inside parentheses.
@@ -136,7 +136,7 @@ function foreignKeyViolation(body: string, before: ReadonlySet<string>): string 
   for (const part of topLevelParts(withoutLiterals(body))) {
     const reference = part.match(/\bREFERENCES\s+([^\s(,]+)/i);
     if (!reference?.[1] || !ON_DELETE_RESTRICT_OR_CASCADE.test(part)) continue;
-    const table = reference[1].replace(/^["'`\[]+|["'`\]]+$/g, "");
+    const table = reference[1].replace(/^["'`[]+|["'`\]]+$/g, "");
     if (!before.has(table)) continue;
     const action = part.match(ON_DELETE_RESTRICT_OR_CASCADE)?.[1]?.toUpperCase() ?? "";
     return action === "CASCADE"
