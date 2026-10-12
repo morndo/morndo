@@ -188,7 +188,7 @@ export function requestTranscription(
     || typeof recording.id !== "string" || !TRANSCRIPTION_ID.test(recording.id)) {
     return err("bad_recording");
   }
-  if (!LANGUAGE_CHOICE.test(body.language)) return err("bad_language");
+  if (typeof body.language !== "string" || !LANGUAGE_CHOICE.test(body.language)) return err("bad_language");
   if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0 || body.sizeBytes > MAX_RECORDING_BYTES) return err("bad_size");
   const inFlight = existing.find(row => sameRecording(row.recording, recording) && row.language === body.language && open(row.state));
   if (inFlight) return ok(inFlight);
