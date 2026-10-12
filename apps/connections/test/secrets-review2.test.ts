@@ -5,11 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Encrypter } from "age-encryption";
+import type { Actor, SecretGrant } from "@morndo/domain";
+import { FileRefused } from "../src/adapters/file-mode.ts";
+import { SecretIndexWriter } from "../src/adapters/secret-index-writer.ts";
+import { CountingIds, ManualClock, MemoryIndex, MemoryRoots, MemorySecrets } from "../src/application/fakes.ts";
+import { SecretsService, type StoreRequest } from "../src/application/secrets-service.ts";
+import { MemorySealedStore } from "./sealed-store-fake.ts";
 import { NodeKeys } from "../src/adapters/node-keys.ts";
 import { AgeVault } from "../src/adapters/vault-age.ts";
 import { FileVault } from "../src/adapters/vault-file.ts";
 import { openHome, secretIndexPath } from "../src/compose.ts";
-import { readSecretIndex } from "@morndo/node-ops";
+import { IndexFileRefused, readSecretIndex } from "@morndo/node-ops";
 import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
 
 // Several real commands per test (age, SQLite, the index): seconds alone, more under load, as in round 1.
@@ -122,5 +128,67 @@ describe("round 2, point 9: the node keys refuse to remake a key while hashes ma
     rmSync(join(h.dir, "index.key"));
     expect(() => new NodeKeys(h.dir).index(new TextEncoder().encode("synthetic"))).toThrow(/index\.key is missing/);
     expect(existsSync(join(h.dir, "index.key"))).toBe(false);
+  });
+});
+
+describe("round 2, point 11: a failure in a store's cleanup never hides the store's own error", () => {
+  const T = 1_700_000_000_000;
+  const principal: Actor = { kind: "principal", command: "c1" };
+  const nodeGrant: SecretGrant = { subject: { kind: "node" }, modes: ["exec"], until: { kind: "open" } };
+  function world() {
+    const clock = new ManualClock(T);
+    const vault = new MemorySealedStore("fake1-node", undefined, () => clock.at);
+    const index = new MemoryIndex();
+    const service = new SecretsService({ clock, ids: new CountingIds(), vault, index, secrets: new MemorySecrets(), roots: new MemoryRoots() });
+    const request = (value: string): StoreRequest => ({
+      reference: REF, sealed: MemorySealedStore.seal(["fake1-node"], new TextEncoder().encode(value)), shape: null, grants: [nodeGrant],
+      expiry: null, destinations: [], renew: false,
+    });
+    return { vault, index, service, request };
+  }
+  it("the index write fails, then removing the new file fails: the error names both, and the index's stays its cause", async () => {
+    const w = world();
+    const original = new IndexFileRefused("mode", "/synthetic/secret-index.json");
+    w.index.write = () => { throw original; };
+    w.vault.remove = () => { throw new FileRefused("mode", "/synthetic/vault"); };
+    const error = await w.service.store(w.request("synthetic-value-one"), principal).then(() => null, (e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/secret-index\.json: mode/);
+    expect((error as Error).message).toMatch(/\/synthetic\/vault is looser/);
+    expect((error as Error).cause).toBe(original);
+  });
+  it("a refused store whose new file can't be removed returns the refusal, and names the file left", async () => {
+    const w = world();
+    expect((await w.service.store(w.request("synthetic-value-one"), principal)).ok).toBe(true);
+    w.vault.remove = () => { throw new FileRefused("mode", "/synthetic/vault"); };
+    const again = await w.service.store(w.request("synthetic-value-one"), principal);
+    expect(again).toEqual({ ok: false, error: { problem: "earlier", left: [expect.stringMatching(/vault: .*s-0002.*looser/)] } });
+  });
+  it("the command prints the store's own error, then the file left, and exits by the store's error (70: the index)", async () => {
+    const h = home();
+    const write = vi.spyOn(SecretIndexWriter.prototype, "write").mockImplementation(() => { throw new IndexFileRefused("mode", secretIndexPath(h.dir)); });
+    const remove = vi.spyOn(AgeVault.prototype, "remove").mockImplementation(() => { throw new FileRefused("mode", h.vault); });
+    try {
+      const r = await put(h.env, "synthetic-value-one");
+      expect(r.code).toBe(70);
+      expect(r.stderr).toMatch(/secret-index\.json: mode/);
+      expect(r.stderr).toMatch(/left to clean: vault: .*s-[0-9a-f]{16}.*looser/);
+    } finally {
+      write.mockRestore();
+      remove.mockRestore();
+    }
+  });
+  it("a refused put whose new file can't be removed prints the refusal and the file left (exit 1)", async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+    const remove = vi.spyOn(AgeVault.prototype, "remove").mockImplementation(() => { throw new FileRefused("mode", h.vault); });
+    try {
+      const r = await put(h.env, "synthetic-value-one");
+      expect(r.code).toBe(1);
+      expect(r.stderr).toMatch(/refused: earlier/);
+      expect(r.stderr).toMatch(/left to clean: vault: .*s-[0-9a-f]{16}.*looser/);
+    } finally {
+      remove.mockRestore();
+    }
   });
 });
