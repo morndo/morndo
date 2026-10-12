@@ -415,6 +415,20 @@ describe("the mark (DG7)", () => {
     expect(mark).toEqual({ seq: 3, seen: [x5] });                         // x was not displayed at 9: nothing passes it
     expect(itemNew(x9, mark)).toEqual({ fresh: true, changed: null });    // and its update stays new (DG8)
   });
+  it("a prior-seen item behind N more stops the mark when its level or section changed (DG7, DG8)", () => {
+    // The mark is {seq:3, seen:[x@5 reviewed]}. x is still @5 but now failed, and it sits behind "N more".
+    // y@7 is displayed. Covering x because the sequence matches would mark the failure seen.
+    const xSeen: SeenAt = { id: "x", seq: 5, level: "reviewed", section: "merged" };
+    const xFailed: SeenAt = { ...xSeen, level: "failed" };
+    const xMoved: SeenAt = { ...xSeen, section: "failed_or_rolled_back" };
+    const y: SeenAt = { id: "y", seq: 7, level: "claimed", section: "done" };
+    const level = markAllSeen({ seq: 3, seen: [xSeen] }, [xFailed, y], ["y"], 20);
+    expect(level.seq).toBe(3);
+    expect(itemNew(xFailed, level)).toEqual({ fresh: true, changed: "level" });
+    const section = markAllSeen({ seq: 3, seen: [xSeen] }, [xMoved, y], ["y"], 20);
+    expect(section.seq).toBe(3);
+    expect(itemNew(xMoved, section)).toEqual({ fresh: true, changed: "section" });
+  });
   it("opening an item marks that item seen and moves nothing else", () => {
     expect(openedItem({ seq: 4, seen: [] }, b)).toEqual({ seq: 4, seen: [b] });
     const again = openedItem({ seq: 4, seen: [b] }, { ...b, level: "failed" });
