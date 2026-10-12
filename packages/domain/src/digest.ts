@@ -522,10 +522,13 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords): Item
       claimants,
     ).level;
   };
+  const linked = linkMapOf(r.links, r.claims, judgeAt);
   const judged: SubjectRef[] = [];
   if (claim.subject.kind === "task" && claim.revision !== null) {
+    // DG5: a subject is rooted under its first task. A later link to this task does not make it part of the claim.
     const add = (t: SubjectRef, at: number) => {
-      if (at <= judgeAt && !judged.some(s => subjectKey(s) === subjectKey(t))) judged.push(t);
+      if (at > judgeAt || rootKeyOf(t, linked) !== subjectKey(claim.subject)) return;
+      if (!judged.some(s => subjectKey(s) === subjectKey(t))) judged.push(t);
     };
     for (const l of r.links) if (l.task === claim.subject.key) add(l.target, l.at);
     for (const c of r.claims) if (c.task === claim.subject.key) add(c.subject, c.at);
