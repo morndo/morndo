@@ -7,6 +7,7 @@ import { KEEP_SHAPE, USE_MODES, parseReference, type Actor, type GrantEnd, type 
 import { openSecrets, type SecretsHome } from "./compose.ts";
 import { FileRefused } from "./adapters/file-mode.ts";
 import { DatabaseFromFuture } from "./adapters/store-migrations.ts";
+import { IndexFileRefused } from "@morndo/node-ops";
 
 export type SecretsIo = {
   stdout: (text: string) => void;
@@ -19,6 +20,8 @@ export type SecretsIo = {
 
 const USAGE = 64;
 const REFUSED = 1;
+// Done, with something left to clean that the command names on stderr (review 4).
+const PARTIAL = 3;
 const FILES = 70;
 const BOOLEANS = new Set(["raw", "node"]);
 const VALUES = new Set(["lane", "workspace", "mode", "until", "expiry"]);
@@ -62,12 +65,13 @@ export async function runSecrets(argv: readonly string[], env: NodeJS.ProcessEnv
   try {
     const parsed = parse(argv);
     home = openSecrets(env);
-    home.service.sweep();
+    // The sweep never stops a command: an emergency disable or revoke must run with the index unreadable (review 3).
+    try { home.service.sweep(); } catch (error) { io.stderr(`warning: the startup sweep failed: ${error instanceof Error ? error.message : "failed"}\n`); }
     return await dispatch(home, parsed, io);
   } catch (error) {
     io.stderr(`${error instanceof Error ? error.message : "failed"}\n`);
     if (error instanceof Usage) return USAGE;
-    return error instanceof FileRefused || error instanceof DatabaseFromFuture ? FILES : REFUSED;
+    return error instanceof FileRefused || error instanceof DatabaseFromFuture || error instanceof IndexFileRefused ? FILES : REFUSED;
   } finally {
     home?.close();
   }
@@ -143,7 +147,7 @@ async function put(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<number>
   io.stdout(`stored ${ref} version ${r.value.version}\n`);
   if (r.value.sameAs.length > 0) io.stdout(`same value as ${r.value.sameAs.join(", ")}\n`);
   if (!r.value.indexed) io.stderr("warning: the value is under 8 bytes, so it is not indexed: output filtering can't find it\n");
-  return 0;
+  return leftOver(r.value.left, io);
 }
 
 async function workspace(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<number> {
@@ -164,10 +168,15 @@ async function confirmed(home: SecretsHome, io: SecretsIo, expected: string, pro
   return { kind: "principal", command: home.commandId() };
 }
 
-function answer(r: { ok: true } | { ok: false; error: { problem: string } }, io: SecretsIo, done: string): number {
+function answer(r: { ok: true; value: { left: readonly string[] } } | { ok: false; error: { problem: string } }, io: SecretsIo, done: string): number {
   if (!r.ok) throw new Refused(`refused: ${r.error.problem}`);
   io.stdout(`${done}\n`);
-  return 0;
+  return leftOver(r.value.left, io);
+}
+
+function leftOver(left: readonly string[], io: SecretsIo): number {
+  for (const item of left) io.stderr(`left to clean: ${item}\n`);
+  return left.length > 0 ? PARTIAL : 0;
 }
 
 function subjectOf(p: Parsed): GrantSubject {

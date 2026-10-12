@@ -29,6 +29,8 @@ export type Done = { left: readonly string[] };
 export type SecretsProblem = SecretProblem | SealedProblem | "not_repository" | "workspace_taken";
 export type SecretsRefusal = { problem: SecretsProblem };
 
+const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
 // The file of a version, if it still has one.
 const refOf = (vaults: readonly VaultRefRow[], reference: string, version: number) =>
   vaults.find(v => v.reference === reference && v.version === version)?.ref ?? null;
@@ -82,9 +84,11 @@ export class SecretsService {
       vault.remove(ref);
       return outcome;
     }
-    if (retiring !== null) this.#retire(request.reference, retiring);
-    if (replaced !== null) vault.remove(replaced);
-    return outcome;
+    // After the commit: each step runs whatever the one before it did, and a failure is named, not thrown (review 4).
+    const left: string[] = [];
+    if (retiring !== null) this.#retireOr(request.reference, retiring, left);
+    if (replaced !== null) this.#removeOr(replaced, left);
+    return ok({ ...outcome.value, left });
   }
 
   // Grants, Disable and Enable change metadata only; the domain judges widening (SC7).
@@ -167,7 +171,7 @@ export class SecretsService {
   // One domain change in one transaction. With `dropping`, the Reference's current version (if any) is retired in the
   // index and its file removed after the commit.
   #change(run: (dir: SecretDirectory) => Result<SecretDirectory, SecretRefusal>, dropping?: string): Result<Done, SecretsRefusal> {
-    const { secrets, vault } = this.#deps;
+    const { secrets } = this.#deps;
     let removed: string | null = null;
     let retiring: number | null = null;
     const result = secrets.write<Result<Done, SecretsRefusal>>(state => {
@@ -182,9 +186,24 @@ export class SecretsService {
       }
       return { next: { ...state, directory: r.value, vaults }, result: ok({ left: [] }) };
     });
-    if (result.ok && dropping !== undefined && retiring !== null) this.#retire(dropping, retiring);
-    if (result.ok && removed !== null) vault.remove(removed);
-    return result;
+    if (!result.ok) return result;
+    // After the commit, as for a store: the change stands whatever fails here, and each failure is named (review 4).
+    const left: string[] = [];
+    if (dropping !== undefined && retiring !== null) this.#retireOr(dropping, retiring, left);
+    if (removed !== null) this.#removeOr(removed, left);
+    return ok({ left });
+  }
+
+  #retireOr(reference: string, version: number, left: string[]): void {
+    try { this.#retire(reference, version); } catch (error) {
+      left.push(`index: version ${version} of ${reference} stays live in the index until a sweep can retire it (${messageOf(error)})`);
+    }
+  }
+
+  #removeOr(ref: string, left: string[]): void {
+    try { this.#deps.vault.remove(ref); } catch (error) {
+      left.push(`vault: the file of ${ref} is still there, and a sweep removes it once it can (${messageOf(error)})`);
+    }
   }
 
   // A version leaves the index's live set only after the commit that retired it, in a write transaction of its own, which
