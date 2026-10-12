@@ -50,13 +50,13 @@ async function nodesFor(mode: HubMode, specs: Record<string, NodeSpec>): Promise
   };
 }
 const until1 = async (ok: () => boolean, ms: number) => {
-  const end = Date.now() + ms;
-  while (!ok() && Date.now() < end) await new Promise(r => setTimeout(r, 5));
+  const end = performance.now() + ms;
+  while (!ok() && performance.now() < end) await new Promise(r => setTimeout(r, 5));
   return ok();
 };
 const watcher = (watching: string, seen: { text: string; at: number }[], events: FeedEvent[] = []): Listener => ({
   events: e => { events.push(...e); },
-  screen: (w, text) => { if (w === watching) seen.push({ text, at: Date.now() }); },
+  screen: (w, text) => { if (w === watching) seen.push({ text, at: performance.now() }); },
   messages: () => {}, history: () => {}, watching: () => watching,
 });
 
@@ -80,7 +80,7 @@ describe.each(HUB_MODES)("a node that never answers, %s hub", mode => {
     svc.subscribe(watcher(FAST, seen));
     svc.start(POLL);
     expect(await until1(() => svc?.screen(FAST) === "b: first", 5 * POLL)).toBe(true);
-    const changedAt = Date.now();
+    const changedAt = performance.now();
     fastScreen = "b: second";
     expect(await until1(() => seen.some(s => s.text === "b: second"), 10 * POLL)).toBe(true);
     const delay = (seen.find(s => s.text === "b: second")?.at ?? Infinity) - changedAt;
@@ -92,9 +92,9 @@ describe.each(HUB_MODES)("a node that never answers, %s hub", mode => {
     fastScreen = "b: first";
     nodes = await nodesFor(mode, specs());
     svc = new ObservationService(nodes.tmux, 60_000, Date.now, { nodeWaitMs: 200, nodeStates: nodes.nodeStates });
-    const t0 = Date.now();
+    const t0 = performance.now();
     await svc.poll();
-    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(performance.now() - t0).toBeLessThan(1000);
     expect(svc.screen(FAST)).toBe("b: first");
     expect(svc.screen(SLOW)).toBeUndefined();
   });
@@ -108,9 +108,9 @@ describe.each(HUB_MODES)("node states, %s hub", mode => {
     });
     await nodes.setState("a", "stale");
     svc = new ObservationService(nodes.tmux, 60_000, Date.now, { nodeStates: nodes.nodeStates, nodeWaitMs: 5_000 });
-    const t0 = Date.now();
+    const t0 = performance.now();
     await svc.poll();
-    expect(Date.now() - t0).toBeLessThan(1000);                        // skipped at once: no wait for node "a"
+    expect(performance.now() - t0).toBeLessThan(1000);                        // skipped at once: no wait for node "a"
     expect(nodes.calls.map(c => c.node)).toEqual(["b"]);
     await nodes.setState("b", "offline");
     await svc.poll();
