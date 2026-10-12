@@ -2,10 +2,11 @@
 // derived from its Picks. Pure. Availability never reorders a chain. No vendor is named here.
 import { MAX_CHAIN, engineText, type Engine } from "./engines.ts";
 import type { Kind } from "./connections.ts";
+import { changeEffect, dailyCapFor, DEFAULT_AUTO_SETTINGS, reserveFor, roleGroup, type AutoChange, type AutoSettings } from "./auto-routing.ts";
 import { err, ok, type Result } from "./shared.ts";
 
 export type Mode = "subscriptions-first" | "keys-first" | "subscriptions-only" | "keys-only" | "custom";
-export type Priority = { mode: Mode; order: readonly string[] };
+export type Priority = { mode: Mode; order: readonly string[]; auto?: boolean };
 export type Override = "follow" | "own" | "hand";
 export type Listed = { name: string; kind: Kind; models: readonly string[]; efforts: readonly string[] | null };
 
@@ -19,6 +20,7 @@ export type RoleRoute = {
   writtenRisk: readonly string[] | null;
   seenChain: readonly string[] | null;
   seenRisk: readonly string[] | null;
+  auto: boolean;
 };
 
 export type RouteEvent =
@@ -27,10 +29,17 @@ export type RouteEvent =
   | { type: "PicksChanged"; role: string; at: number; command: string | null }
   | { type: "ChainProjected"; role: string; at: number; chain: readonly string[] }
   | { type: "ChainDrifted"; role: string; at: number }
-  | { type: "ChainKept"; role: string; at: number };
+  | { type: "ChainKept"; role: string; at: number }
+  | { type: "AutoSwitched"; scope: "global" | "role"; role: string | null; on: boolean; at: number; command: string }
+  | { type: "AutoSettingsChanged"; setting: "task-ceiling" | "save-line" | "daily-cap" | "reserve"; name: string | null; from: number; to: number; at: number; command: string };
 
-export type Policy = { priority: Priority; roles: readonly RoleRoute[]; events: readonly RouteEvent[] };
-export const emptyPolicy = (): Policy => ({ priority: { mode: "subscriptions-first", order: [] }, roles: [], events: [] });
+export type Policy = { priority: Priority; roles: readonly RoleRoute[]; events: readonly RouteEvent[]; autoSettings: AutoSettings };
+export const emptyPolicy = (): Policy => ({
+  priority: { mode: "subscriptions-first", order: [], auto: false },
+  roles: [],
+  events: [],
+  autoSettings: { ...DEFAULT_AUTO_SETTINGS, dailyCaps: {}, reserves: {} },
+});
 
 export type RouteProblem = "duplicate" | "unknown" | "empty" | "too_long" | "fit" | "principal" | "missing" | "same" | "copied";
 
@@ -143,7 +152,8 @@ export function setPriority(policy: Policy, priority: Priority, listed: readonly
   if (!who.ok) return who;
   const order = checkOrder(priority.order, listed.map(l => l.name));
   if (!order.ok) return order;
-  const next: Policy = { ...policy, priority: { ...priority, order: order.value }, events: [...policy.events, { type: "PriorityChanged", at, command }] };
+  const auto = priority.auto ?? policy.priority.auto ?? false;
+  const next: Policy = { ...policy, priority: { mode: priority.mode, order: order.value, auto }, events: [...policy.events, { type: "PriorityChanged", at, command }] };
   for (const row of next.roles) {
     const usesGlobal = row.override === "follow" || (row.override === "own" && row.priority === null);
     if (!usesGlobal) continue;
@@ -229,7 +239,10 @@ export function setRole(
 
 export function ensureRole(policy: Policy, role: string): Policy {
   if (policy.roles.some(r => r.role === role)) return policy;
-  const row: RoleRoute = { role, override: "hand", priority: null, picks: [], riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null };
+  const row: RoleRoute = {
+    role, override: "hand", priority: null, picks: [], riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null,
+    auto: roleGroup(role) === "implement",
+  };
   return { ...policy, roles: [...policy.roles, row] };
 }
 
@@ -396,6 +409,75 @@ function alreadyKept(policy: Policy, role: string): boolean {
     if (event.type === "ChainProjected" || event.type === "PicksChanged") return false;
   }
   return false;
+}
+
+export type AutoAuthority = "session" | "step-up";
+export type AutoProblem = { problem: "step-up" | "principal" | "missing" };
+
+function allow(effect: "session" | "step-up", authority: AutoAuthority, command: string): Result<true, AutoProblem> {
+  if (!command) return err({ problem: "principal" });
+  if (effect === "step-up" && authority !== "step-up") return err({ problem: "step-up" });
+  return ok(true);
+}
+
+export function setGlobalAuto(policy: Policy, on: boolean, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if ((policy.priority.auto ?? false) === on) return ok(policy);
+  const allowed = allow(changeEffect({ kind: "global-auto", on }), authority, command);
+  if (!allowed.ok) return allowed;
+  const event: RouteEvent = { type: "AutoSwitched", scope: "global", role: null, on, at, command };
+  return ok({ ...policy, priority: { ...policy.priority, auto: on }, events: [...policy.events, event] });
+}
+
+export function setRoleAuto(policy: Policy, role: string, on: boolean, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  const row = policy.roles.find(item => item.role === role);
+  if (!row) return err({ problem: "missing" });
+  if (row.auto === on) return ok(policy);
+  const allowed = allow(changeEffect({ kind: "role-auto", on, plainStartsOnKey: false }), authority, command);
+  if (!allowed.ok) return allowed;
+  const event: RouteEvent = { type: "AutoSwitched", scope: "role", role, on, at, command };
+  const roles = policy.roles.map(item => item.role === role ? { ...item, auto: on } : item);
+  return ok({ ...policy, roles, events: [...policy.events, event] });
+}
+
+function putSetting(
+  policy: Policy, change: AutoChange, authority: AutoAuthority, command: string, at: number,
+  apply: (settings: AutoSettings) => AutoSettings, event: RouteEvent,
+): Result<Policy, AutoProblem> {
+  const allowed = allow(changeEffect(change), authority, command);
+  if (!allowed.ok) return allowed;
+  return ok({ ...policy, autoSettings: apply(policy.autoSettings), events: [...policy.events, event] });
+}
+
+export function setTaskCeiling(policy: Policy, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  const from = policy.autoSettings.taskCeiling;
+  if (from === to) return ok(policy);
+  return putSetting(policy, { kind: "task-ceiling", from, to }, authority, command, at,
+    settings => ({ ...settings, taskCeiling: to }),
+    { type: "AutoSettingsChanged", setting: "task-ceiling", name: null, from, to, at, command });
+}
+
+export function setSaveLine(policy: Policy, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  const from = policy.autoSettings.saveLine;
+  if (from === to) return ok(policy);
+  return putSetting(policy, { kind: "save-line", from, to }, authority, command, at,
+    settings => ({ ...settings, saveLine: to }),
+    { type: "AutoSettingsChanged", setting: "save-line", name: null, from, to, at, command });
+}
+
+export function setDailyCap(policy: Policy, name: string, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  const from = dailyCapFor(policy.autoSettings, name);
+  if (from === to) return ok(policy);
+  return putSetting(policy, { kind: "daily-cap", from, to }, authority, command, at,
+    settings => ({ ...settings, dailyCaps: { ...settings.dailyCaps, [name]: to } }),
+    { type: "AutoSettingsChanged", setting: "daily-cap", name, from, to, at, command });
+}
+
+export function setReserve(policy: Policy, role: string, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  const from = reserveFor(policy.autoSettings, role);
+  if (from === to) return ok(policy);
+  return putSetting(policy, { kind: "reserve", from, to }, authority, command, at,
+    settings => ({ ...settings, reserves: { ...settings.reserves, [role]: to } }),
+    { type: "AutoSettingsChanged", setting: "reserve", name: role, from, to, at, command });
 }
 
 export function stillNamed(policy: Policy, name: string): boolean {
