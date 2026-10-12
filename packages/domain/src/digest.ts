@@ -509,6 +509,8 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, edges
   // A task claim names one revision (§3.1). Each linked change is judged at its own head, and a deploy at the
   // revision in its subject: the claim's sha is not theirs, so their evidence must not be voided against it.
   const revisionOf = (s: SubjectRef): Revision | null => {
+    // A claim about this change names its own revision. The subject's later head must not void that week's evidence.
+    if (claim.subject.kind === "change" && subjectKey(s) === subjectKey(claim.subject)) return claim.revision;
     const recorded = s.kind === "deploy"
       ? { sha: s.sha, patchId: null }
       : r.subjectStates.find(st => subjectKey(st.subject) === subjectKey(s))?.revision ?? null;
