@@ -41,6 +41,7 @@ export class SecretsService {
     const sealed = await vault.storeSealed(ref, request.sealed);
     if (!sealed.ok) return err({ problem: sealed.problem });
     let replaced: string | null = null;
+    let retiring: number | null = null;
     let outcome: Result<Stored, SecretsRefusal>;
     try {
       const prepared = await index.prepare(ref);
@@ -58,11 +59,8 @@ export class SecretsService {
         // The store's own event is the first new one; it names the other References that hold the same value.
         const event = placed.value.events[state.directory.events.length];
         const sameAs = event && "sameAs" in event ? event.sameAs : [];
-        index.write({
-          add: { reference: request.reference, version, prepared },
-          retire: before === null ? [] : [{ reference: request.reference, version: before }],
-          at,
-        });
+        index.write({ add: { reference: request.reference, version, prepared }, retire: [], at });
+        retiring = before;
         replaced = before === null ? null : refOf(state.vaults, request.reference, before);
         const vaults = state.vaults.map(v => v.reference === request.reference && v.version === before ? { ...v, ref: null } : v);
         const next: SecretsState = { ...state, directory: placed.value, vaults: [...vaults, { reference: request.reference, version, ref }] };
@@ -76,6 +74,7 @@ export class SecretsService {
       vault.remove(ref);
       return outcome;
     }
+    if (retiring !== null) this.#retire(request.reference, retiring);
     if (replaced !== null) vault.remove(replaced);
     return outcome;
   }
@@ -139,16 +138,19 @@ export class SecretsService {
     return this.#deps.secrets.load().workspaces;
   }
 
-  // D2: a crash between the vault write and the commit can leave a file no version refers to. The sweep removes those,
-  // inside a write transaction, so no store commits meanwhile; a store checks inside its own transaction that its file
-  // is still there.
+  // D2: a crash between the vault write and the commit can leave a file no version refers to, and one between a commit
+  // and its retirement in the index leaves a version live there. The sweep removes those files and retires every version
+  // the ledger no longer holds current (retiring again keeps the first time), inside a write transaction, so no store
+  // commits meanwhile; a store checks inside its own transaction that its file is still there.
   sweep(): string[] {
-    const { secrets, vault } = this.#deps;
+    const { secrets, vault, index, clock } = this.#deps;
     return secrets.write(state => {
       const kept = new Set<string>();
       for (const v of state.vaults) if (v.ref !== null) kept.add(v.ref);
       const gone = vault.refs("s-").filter(ref => !kept.has(ref));
       for (const ref of gone) vault.remove(ref);
+      const retire = state.directory.ledger.filter(e => e.state !== "current").map(e => ({ reference: e.reference, version: e.version }));
+      if (retire.length > 0) index.write({ add: null, retire, at: clock.now() });
       return { next: null, result: gone };
     });
   }
@@ -156,22 +158,35 @@ export class SecretsService {
   // One domain change in one transaction. With `dropping`, the Reference's current version (if any) is retired in the
   // index and its file removed after the commit.
   #change(run: (dir: SecretDirectory) => Result<SecretDirectory, SecretRefusal>, dropping?: string): Result<null, SecretsRefusal> {
-    const { secrets, index, vault, clock } = this.#deps;
+    const { secrets, vault } = this.#deps;
     let removed: string | null = null;
+    let retiring: number | null = null;
     const result = secrets.write<Result<null, SecretsRefusal>>(state => {
       const r = run(state.directory);
       if (!r.ok) return { next: null, result: err({ problem: r.error.problem }) };
       let vaults = state.vaults;
       const version = dropping === undefined ? null : findSecret(state.directory, dropping)?.current?.number ?? null;
       if (dropping !== undefined && version !== null) {
-        index.write({ add: null, retire: [{ reference: dropping, version }], at: clock.now() });
+        retiring = version;
         removed = refOf(vaults, dropping, version);
         vaults = vaults.map(v => v.reference === dropping && v.version === version ? { ...v, ref: null } : v);
       }
       return { next: { ...state, directory: r.value, vaults }, result: ok(null) };
     });
+    if (result.ok && dropping !== undefined && retiring !== null) this.#retire(dropping, retiring);
     if (result.ok && removed !== null) vault.remove(removed);
     return result;
+  }
+
+  // A version leaves the index's live set only after the commit that retired it, in a write transaction of its own, which
+  // keeps index writes one at a time. A rolled-back change thus never retires a live version; a crash between the commit
+  // and this write leaves it live, filtering more, until the next sweep retires it.
+  #retire(reference: string, version: number): void {
+    const { secrets, index, clock } = this.#deps;
+    secrets.write(() => {
+      index.write({ add: null, retire: [{ reference, version }], at: clock.now() });
+      return { next: null, result: null };
+    });
   }
 }
 

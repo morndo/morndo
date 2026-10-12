@@ -63,7 +63,10 @@ describe("a store: seal under a fresh ref, then the check, the index and the sav
     w.clock.at = T + 5;
     const r = await w.service.store(w.request("synthetic-value-two", { shape: { keep: true } }), principal);
     expect(r.ok && r.value.version).toBe(2);
-    expect(w.index.changes.at(-1)).toEqual({ add: { reference: REF, version: 2, prepared: { short: false } }, retire: [{ reference: REF, version: 1 }], at: T + 5 });
+    expect(w.index.changes.slice(-2)).toEqual([
+      { add: { reference: REF, version: 2, prepared: { short: false } }, retire: [], at: T + 5 },
+      { add: null, retire: [{ reference: REF, version: 1 }], at: T + 5 },
+    ]);
     expect([...w.vault.files.keys()]).toEqual(["s-0002"]);
     expect(w.secrets.state.vaults).toEqual([{ reference: REF, version: 1, ref: null }, { reference: REF, version: 2, ref: "s-0002" }]);
   });

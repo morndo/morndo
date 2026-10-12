@@ -1265,7 +1265,7 @@ export const CONTROLS: Control[] = [
     find: "    } catch (error) {\n      vault.remove(ref);\n", replace: "    } catch (error) {\n",
     run: ["apps/connections/test/secrets-service.test.ts"], expect: "leaves no new vault file" },
   { id: "sp2b-store-index-first", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
-    find: "        index.write({\n", replace: "        void ({\n",
+    find: "        index.write({ add: { reference: request.reference, version, prepared }, retire: [], at });\n", replace: "",
     run: ["apps/connections/test/secrets-service.test.ts"], expect: "criterion 19" },
   { id: "sp2b-store-old-file", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
     find: "    if (replaced !== null) vault.remove(replaced);\n", replace: "",
@@ -1277,7 +1277,7 @@ export const CONTROLS: Control[] = [
     find: "    if (result.ok && removed !== null) vault.remove(removed);\n", replace: "",
     run: ["apps/connections/test/secrets-service.test.ts"], expect: "revoke removes the vault file" },
   { id: "sp2b-revoke-retires-index", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
-    find: "        index.write({ add: null, retire: [{ reference: dropping, version }], at: clock.now() });\n", replace: "",
+    find: "    if (result.ok && dropping !== undefined && retiring !== null) this.#retire(dropping, retiring);\n", replace: "",
     run: ["apps/connections/test/secrets-service.test.ts"], expect: "retires the version in the index" },
   { id: "sp2b-workspace-principal", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
     find: "    if (actor.kind !== \"principal\" || !actor.command) return err({ problem: \"principal\" });\n    const root", replace: "    const root",
@@ -1303,6 +1303,15 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-roots-common-dir", task: "secrets-pr2b", file: "apps/connections/src/adapters/git-workspaces.ts", find: "\"--git-common-dir\"", replace: "\"--git-dir\"", run: ["apps/connections/test/git-workspaces.test.ts"], expect: "app/.git/worktrees/app-second" },
   { id: "sp2b-roots-env", task: "secrets-pr2b", file: "apps/connections/src/adapters/git-workspaces.ts", find: "env: withoutGitVariables(process.env),", replace: "env: process.env,", run: ["apps/connections/test/git-workspaces.test.ts"], expect: "expected 'app/.git' to be 'other/.git'" },
   { id: "sp2b-roots-null", task: "secrets-pr2b", file: "apps/connections/src/adapters/git-workspaces.ts", find: "catch { return null; }", replace: "catch { return \"\"; }", run: ["apps/connections/test/git-workspaces.test.ts"], expect: "expected '' to be null" },
+  { id: "sp2b-retire-after-commit", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "        retiring = before;\n", replace: "        index.write({ add: null, retire: before === null ? [] : [{ reference: request.reference, version: before }], at });\n",
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "leaves version 1 live in the index" },
+  { id: "sp2b-store-retires-old", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "    if (retiring !== null) this.#retire(request.reference, retiring);\n", replace: "",
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "retires version 1 in the index" },
+  { id: "sp2b-sweep-reconciles", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "      if (retire.length > 0) index.write({ add: null, retire, at: clock.now() });\n", replace: "",
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "the sweep retires what the ledger no longer holds current" },
 ];
 
 // ---- the runner
