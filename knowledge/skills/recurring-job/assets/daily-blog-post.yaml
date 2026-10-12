@@ -1,0 +1,93 @@
+# A daily blog post, as an SOP template. Blanks in <angle brackets> are filled by a user's instance.
+# Steps name a Role and a model class, never a model id; the Role's chain decides what runs.
+# Check it with: node knowledge/skills/recurring-job/scripts/sop-check.ts <this file>
+sop: daily-blog-post
+version: 1
+patterns: [loop-scheduled, loop-plan-execute-verify, loop-one-shot, loop-review-fix, loop-human-gate]
+trigger:
+  schedule: { cron: "<cron, e.g. 0 7 * * 1-5>", timezone: "<IANA zone>" }
+inputs:
+  topic: { from: "<board column or file>", one_per_run: true }
+  site: { search_console_property: "<property>", cms: "<publish target>" }
+  style: "<style guide file>"
+steps:
+  - id: research
+    pattern: loop-plan-execute-verify
+    role: research
+    model: { class: flagship, family: any }
+    options: { grounding: off }        # search-grounded output may not be modified or mixed into a post
+    why: [loop-plan-execute-verify, notes/search-grounding-terms]
+    output: research.md, at least 5 sources, each with URL, publisher, date and the passage each claim will rest on
+    check: tool link-check fetches every source; tool quote-check finds every passage in its source
+  - id: outline
+    pattern: loop-plan-execute-verify
+    role: plan
+    model: { class: everyday, family: any }
+    why: [loop-plan-execute-verify]
+    output: outline.md, each claim the post will make tied to a source in research.md
+    check: every claim in outline.md names a source in research.md
+  - id: draft
+    pattern: loop-plan-execute-verify
+    role: plan
+    model: { class: flagship, family: any }
+    why: [notes/writing-boards]          # an instance may add pref:<id>, shown as the user's preference
+    output: draft.md in the style guide
+    check: tool cite-check finds every source the draft cites in research.md
+  - id: edit
+    pattern: loop-one-shot
+    role: review
+    model: { class: fast, family: { other-than: [draft] } }    # a cheap model from another vendor than the writer
+    why: [loop-review-fix]
+    output: edited.md and a change list
+    check: the change list accounts for every changed paragraph
+  - id: search-pass
+    pattern: loop-one-shot
+    role: research
+    model: { class: everyday, family: any }
+    options: { grounding: off }
+    why: [notes/search-guidance, notes/search-grounding-terms]
+    input: edited.md and tool search-console rows for related pages
+    output: title, meta description, headings, internal links, structured data
+    check: title and description within length, one H1, every internal link resolves, structured data validates
+  - id: fact-check
+    pattern: loop-review-fix
+    role: validate
+    model: { class: fast, family: { other-than: [draft, edit] } }
+    why: [loop-review-fix, notes/search-guidance]
+    output: claims.json, each claim supported, unsupported or contradicted, with its source and passage
+    check: tool quote-check finds every passage in its source; tool link-check gets 200 for every link; no claim is unsupported
+    on_fail: draft
+    max_rounds: 2
+  - id: publish
+    pattern: loop-one-shot
+    tool: cms-publish
+    effect: outward
+    output: the public URL
+    check: the URL answers 200 and its content hash equals the approved version's
+gates:
+  - before: publish
+    who: principal
+    shows: [rendered post, title and description, claims.json, change list, cost, citations]
+    options: [approve, change, drop]
+    on_change: draft
+    max_changes: 1
+    on_silence: { after: 48h, then: expire }    # publish nothing, return the topic to the queue
+done:
+  - publish.check passed
+  - every claim in claims.json is supported
+  - the report was delivered
+stop:
+  - { when: no topic in the queue, then: skip the run and report it }
+  - { when: the budget is spent, then: stop and report what was done }
+  - { when: fact-check is past max_rounds, then: stop and report the post as not publishable, with no Ask }
+  - { when: three runs in a row were dropped or expired, then: pause the SOP and ask the principal }
+  - { when: the run has taken 2 h, then: stop and report what was done }
+budget: { per_run: "<default $5>", per_month: "<default $100>", on_exceed: stop }
+report:
+  to: manager
+  holds: [URL or reason, cost per step, rounds, claim counts, citations]
+metrics:
+  - { name: approved first try, from: the gate's answers, every: week }
+  - { name: changes asked at the gate, from: the gate's answers, every: week }
+  - { name: cost per post, from: lease spend, every: week }
+  - { name: clicks and impressions per post at 28 days, from: tool search-console, every: month }
