@@ -168,7 +168,8 @@ const base64Chunk = () => z.base64().check(z.maxLength(4 * Math.ceil(LIMITS.chun
 const nonce = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{22,86}$/));
 // An Ed25519 signature (64 bytes) and an Ed25519 public key as SPKI DER (44 bytes), base64 (Node's `sign(null, …)`,
 // `export({ format: "der", type: "spki" })`; https://nodejs.org/docs/latest-v24.x/api/crypto.html, read 2026-10-06).
-const signature = () => z.string().check(z.regex(/^[A-Za-z0-9+/]{86}==$/));
+export const ED25519_SIGNATURE = /^[A-Za-z0-9+/]{86}==$/;
+const signature = () => z.string().check(z.regex(ED25519_SIGNATURE));
 const ed25519Spki = () => z.string().check(z.regex(/^MCowBQYDK2VwAyEA[A-Za-z0-9+/]{43}=$/));
 const joinCode = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{22}$/));   // 128 bits, base64url
 // An idempotency key, namespaced by its client ("hub:…", "kira:…", "lanes:…").
