@@ -1174,9 +1174,13 @@ export const CONTROLS: Control[] = [
     replace: ``,
     run: ["packages/domain/test/digest.test.ts"], expect: "pushed again" },
   { id: "dg12-own-head", task: "DG12", file: "packages/domain/src/digest.ts",
-    find: `    const recorded = s.kind === "deploy"\n      ? { sha: s.sha, patchId: null }\n      : r.subjectStates.find(st => subjectKey(st.subject) === subjectKey(s))?.revision ?? null;\n    return recorded ?? claim.revision;`,
+    find: `    const recorded = r.subjectStates.find(st => subjectKey(st.subject) === subjectKey(s))?.revision ?? null;\n    return recorded ?? claim.revision;`,
     replace: `    return claim.revision;`,
     run: ["packages/domain/test/digest.test.ts"], expect: "at its own head" },
+  { id: "dg12-change-head", task: "DG12", file: "packages/domain/src/digest.ts",
+    find: `      if (h.at > judgeAt || subjectKey(h.subject) !== subjectKey(s)) continue;\n`,
+    replace: `      if (subjectKey(h.subject) !== subjectKey(s)) continue;\n`,
+    run: ["packages/domain/test/digest.test.ts"], expect: "does not rewrite a provisional week" },
 ];
 
 // ---- the runner

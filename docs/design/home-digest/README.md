@@ -86,8 +86,10 @@ Added to `docs/domain.md` when ADR-0025 is accepted. The domain module (`package
 | stale or stuck | Stale or stuck | Computed (section 6.3). Never a lane's own report. |
 | shipped | Shipped | A deploy status `success` for an environment at a revision that contains a merged change [S26], or a deploy record filed through the agents' door. |
 | merged | Merged | The forge: the pull request's `merged`, `merged_at` and `merge_commit_sha` [S25]. |
-| opened or pushed | Opened or pushed | The forge: a pull request opened, its head SHA changed, or a commit pushed straight to a default branch (shown with "no pull request, no review"). |
+| opened or pushed | Opened or pushed | The forge: a pull request opened, its head SHA changed, or a commit pushed straight to a default branch (shown with "no pull request, no review"). A head SHA change is also filed as a change head `{ subject, revision, at }`. |
 | done | Done | A board event moving a task to done, with its Actor (B6). |
+
+A change head is `{ subject, revision, at }`. The forge adapter files one when it reports that a pull request's head SHA changed. The live subject state keeps the current head. A weekly level uses the latest change head whose `at` is at or before the moment being judged (DG12), not that live head.
 
 Whether a deploy's revision contains a change is an ancestry question for the forge (its compare endpoint). The exact call is checked against the forge's documentation when the adapter is built.
 
@@ -184,7 +186,7 @@ type DigestItem = {
 | DG9 | A rebuild of the digest from the stores gives the same items, levels and counts. Section counts are counts of items; weekly counts are counts of records. |
 | DG10 | Stale and stuck are computed from records and side effects (section 6.3), never from a worker's own report. Their limits come from config. |
 | DG11 | The digest grants and starts nothing (O4, B8, C6): seeing, marking, opening, and a veto are not a Mandate, a Decision, an Acknowledgement, a Verdict or a board move. A veto is a Command (AC7) that sends the manager a message naming the decision. |
-| DG12 | A claim is counted once per root subject and revision, at the earliest of its sources (a claim filed, a task moved to review, a lane event that said done). It counts as later failed when, within 14 days, failing evidence lands on that revision, its merge is reverted, its deploy is rolled back, or its task is reopened. It is counted in the claim's week, under the level its item showed just before the failure; a claim that held is counted under the level its item showed when the 14 days ended. |
+| DG12 | A claim is counted once per root subject and revision, at the earliest of its sources (a claim filed, a task moved to review, a lane event that said done). It counts as later failed when, within 14 days, failing evidence lands on that revision, its merge is reverted, its deploy is rolled back, or its task is reopened. It is counted in the claim's week, under the level its item showed just before the failure; a claim that held is counted under the level its item showed when the 14 days ended. A linked change is judged at the latest change head (`{ subject, revision, at }`, section 3.2) filed at or before that moment, not at the live head. |
 
 ## 4. Since you last looked: the mark
 

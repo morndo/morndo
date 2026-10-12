@@ -557,14 +557,19 @@ const medianOf = (sorted: readonly number[]): number | null =>
 // without one on its own claim round. A revert, a rollback or a reopen was not failed just before it landed, so the
 // ladder runs without those flags.
 function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, first: ReadonlyMap<string, FirstRoot>): ItemLevel {
-  // A task claim names one revision (§3.1). Each linked change is judged at its own head, and a deploy at the
-  // revision in its subject: the claim's sha is not theirs, so their evidence must not be voided against it.
+  // A task claim names one revision (§3.1). Each linked change is judged at the latest head filed at or before
+  // this moment, and a deploy at the revision in its subject: the claim's sha is not theirs.
   const revisionOf = (s: SubjectRef): Revision | null => {
     // A claim about this change names its own revision. The subject's later head must not void that week's evidence.
     if (claim.subject.kind === "change" && subjectKey(s) === subjectKey(claim.subject)) return claim.revision;
-    const recorded = s.kind === "deploy"
-      ? { sha: s.sha, patchId: null }
-      : r.subjectStates.find(st => subjectKey(st.subject) === subjectKey(s))?.revision ?? null;
+    if (s.kind === "deploy") return { sha: s.sha, patchId: null };
+    let filed: ChangeHead | null = null;
+    for (const h of r.changeHeads) {
+      if (h.at > judgeAt || subjectKey(h.subject) !== subjectKey(s)) continue;
+      if (filed === null || h.at >= filed.at) filed = h;
+    }
+    if (filed !== null) return filed.revision;
+    const recorded = r.subjectStates.find(st => subjectKey(st.subject) === subjectKey(s))?.revision ?? null;
     return recorded ?? claim.revision;
   };
   const levelOn = (s: SubjectRef): ItemLevel => {
