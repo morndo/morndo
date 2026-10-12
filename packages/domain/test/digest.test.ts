@@ -815,6 +815,19 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
   });
+  it("a change claim stays at its own revision when the change is pushed again", () => {
+    // Claimed and reviewed at sha A. A week later the change's head is sha B. The past week stays reviewed.
+    const b2 = rev("sha-b2", "patch-2");
+    const r = records({
+      claimSources: [{ subject: c7, revision: a1, at: NOW, via: "filed" }],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", at: NOW })],
+      subjectStates: [state(c7, { revision: b2 })],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW + DAY })],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
+    expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
+    expect(row?.levels).toEqual([{ level: "reviewed", claims: 1, laterFailed: 0 }]);
+  });
   it("the weekly columns are counts of records: shipped, merged, reverted, done with its times, deploys, stuck", () => {
     const t1 = taskKey(1), t2 = taskKey(2), t3 = taskKey(3);
     const r = records({
