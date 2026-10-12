@@ -278,9 +278,10 @@ export type SeenAt = { id: string; seq: number; level: ItemLevel | null; section
 export type DigestMark = { seq: number; seen: readonly SeenAt[] };
 
 // DG7: "Mark all seen" covers the lines the device displayed and the folded Opened section — never a line behind
-// "N more". Walking from the mark, it advances across every item that was displayed or already seen above, stops at
-// the first that was not, and never passes the hub's newest sequence. Items displayed behind that gap are recorded
-// as seen above the mark, with what they showed.
+// "N more". Walking from the mark, it advances across every item that was displayed, or already seen above at the
+// sequence it shows now (DG8: an item seen at an older sequence was not covered at this one), stops at the first
+// that was not, and never passes the hub's newest sequence. Items displayed behind that gap are recorded as seen
+// above the mark, with what they showed.
 export function markAllSeen(mark: DigestMark | null, items: readonly SeenAt[], covered: readonly string[], newest: number): DigestMark {
   const base = mark?.seq ?? 0;
   const shown = new Set(covered);
@@ -289,7 +290,8 @@ export function markAllSeen(mark: DigestMark | null, items: readonly SeenAt[], c
   const walked: SeenAt[] = [];
   for (const it of [...items].sort((a, b) => a.seq - b.seq || (a.id < b.id ? -1 : 1))) {
     if (it.seq <= base) continue;
-    if (!shown.has(it.id) && !prior.has(it.id)) break;
+    const seenAt = prior.get(it.id);
+    if (!shown.has(it.id) && (seenAt === undefined || seenAt.seq !== it.seq)) break;
     walked.push(it);
     seq = it.seq;
   }
