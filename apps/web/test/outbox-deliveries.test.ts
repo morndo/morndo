@@ -77,6 +77,23 @@ describe("waiting, and Cancel (ruling 83)", () => {
     expect((await store.all())[0]?.delivery?.state).toBe("given_up");
   });
 
+  it("Cancel tapped again while the first is on its way asks the hub once (staging QA, 2026-10-12: three asks)", async () => {
+    answer = waiting;
+    const o = outbox();
+    const r = await o.enqueue(cmd);
+    await flush();
+    const asked: (() => void)[] = [];
+    const answerNow = () => { for (const a of asked) a(); };
+    cancelled = () => new Promise(res => asked.push(() => res({ kind: "cancelled", delivery: { state: "given_up", waiting: null, why: "cancelled" } })));
+    const taps = [o.cancel(r.id), o.cancel(r.id), o.cancel(r.id)];
+    await flush();
+    answerNow();
+    expect(await Promise.all(taps)).toEqual(["cancelled", "cancelled", "cancelled"]);
+    expect(cancels).toBe(1);
+    expect(await o.cancel(r.id)).toBeNull();                         // done: not cancellable any more, nothing asked
+    expect(cancels).toBe(1);
+  });
+
   it("too late, typed meanwhile: it says it was typed, and Cancel is gone", async () => {
     answer = waiting;
     const o = outbox();

@@ -66,6 +66,7 @@ export class Outbox {
   #waiters = new Set<() => void>();                // runners waiting for the connection, a timer, or a change
   #inFlight = new Map<string, AbortController>();  // the POST of each record being sent
   #spent = new Set<string>();                      // echoes that already ended an entry
+  #cancelling = new Map<string, Promise<CancelOutcome["kind"] | null>>();   // a Cancel on its way, per record
   #echoing: Promise<void> = Promise.resolve();     // echo matching runs one call at a time
   #disk: Promise<void> = Promise.resolve();        // writes for a record stay in order
   #stopped = false;
@@ -188,7 +189,16 @@ export class Outbox {
 
   // The principal's Cancel of a message the manager's queue still holds, not typed yet (ruling 83): the hub withdraws it
   // there, and the record says where it stands (Not delivered: cancelled). Too late: it was typed meanwhile, and says so.
-  async cancel(id: string): Promise<CancelOutcome["kind"] | null> {
+  // Tapped again while the first is on its way, it is the same one: the hub is asked once (staging QA, 2026-10-12).
+  cancel(id: string): Promise<CancelOutcome["kind"] | null> {
+    const going = this.#cancelling.get(id);
+    if (going) return going;
+    const once = this.#cancelOnce(id).finally(() => this.#cancelling.delete(id));
+    this.#cancelling.set(id, once);
+    return once;
+  }
+
+  async #cancelOnce(id: string): Promise<CancelOutcome["kind"] | null> {
     const r = this.#records.get(id);
     if (!r || !canCancel(r) || !this.#cancel) return null;
     const c = await this.#cancel(r);
