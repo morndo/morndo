@@ -84,9 +84,9 @@ describe("Flight", () => {
   it("returns when the wait is bounded, even if work is still running", async () => {
     const flight = new Flight();
     const end = flight.begin({ kind: "pane.send", id: "stuck" });
-    const started = Date.now();
+    const started = performance.now();
     await flight.idle(30);
-    expect(Date.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(1000);
     expect(flight.list()).toHaveLength(1);
     end();
     expect(flight.list()).toEqual([]);

@@ -32,9 +32,9 @@ export const refusal = (code: ErrorCode, message: string = code): Reply => ({ ok
 export const LOST: Reply = refusal("uncertain", "the connection to the node dropped");
 
 export async function until(f: () => boolean | Promise<boolean>, ms = 5000): Promise<void> {
-  const end = Date.now() + ms;
+  const end = performance.now() + ms;
   while (!(await f())) {
-    if (Date.now() > end) throw new Error(`not within ${ms} ms`);
+    if (performance.now() > end) throw new Error(`not within ${ms} ms`);
     await new Promise(r => setTimeout(r, 20));
   }
 }
