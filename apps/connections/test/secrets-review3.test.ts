@@ -1,9 +1,10 @@
 // Review round 3 of PR #40 (board T-94): one block per point, each written failing before its fix. Real age vault,
 // real database and the real commands where the point is about them. Values, References and names are synthetic.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { NodeKeys } from "../src/adapters/node-keys.ts";
 import { SecretMaterial } from "../src/adapters/secret-material.ts";
 import { AgeVault } from "../src/adapters/vault-age.ts";
 import { FileVault } from "../src/adapters/vault-file.ts";
@@ -160,5 +161,21 @@ describe("round 3, point 4: stdin's chunks are zeroed when the stream fails midw
     await expect(stdinValue(failing())).rejects.toThrow(/EIO/);
     expect(handed).toHaveLength(2);
     expect(handed.every(c => c.every(b => b === 0))).toBe(true);
+  });
+});
+
+describe("round 3, points 2 and 9: node keys take their records from the root, and open no database of their own", () => {
+  it("NodeKeys, AgeVault and FileVault can't be built without them: a type error, and a TypeError at construction", () => {
+    const h = home();
+    // @ts-expect-error: the records are required
+    expect(() => new NodeKeys(h.dir)).toThrow(TypeError);
+    // @ts-expect-error: the keys are required
+    expect(() => new AgeVault(h.vault, join(h.dir, "identity"))).toThrow(TypeError);
+    // @ts-expect-error: the keys are required
+    expect(() => new FileVault(h.vault)).toThrow(TypeError);
+  });
+  it("the keys adapter imports no store: it can't open the database behind a root's back", () => {
+    const source = readFileSync(join(import.meta.dirname, "../src/adapters/node-keys.ts"), "utf8");
+    expect(source).not.toMatch(/secrets-sqlite|store-sqlite|SqliteSecrets|better-sqlite3/);
   });
 });
