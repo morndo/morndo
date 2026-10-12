@@ -478,6 +478,8 @@ A queued job has a position and a reason: `class` when the limit is full, `load`
 
 One attempt to turn one Recording into Text, on the hub's own machine, through a Transcriber plugin the default install does not include. Code in `packages/domain/src/transcription.ts`; the queue decision it shares with Jobs is in `packages/domain/src/queue.ts`. The domain decides the states, the caps and the queue. It reads no audio, starts no engine and keeps no clock.
 
+The wire is `packages/protocol/src/transcription.ts`: plugin protocol 1 and the HTTP bodies. `probe --json` and `run --json` are each one JSON document. A wrong protocol, a document that does not fit, or JSON that does not parse is `bad_output`. `POST /api/transcriptions` names the attempt, the Recording and the language choice. The view and the cancel body carry no filesystem path. The transcription field of `/api/me` is `false`, or the engine, model, languages and `maxSeconds` the probe reported. A fixture plugin and the contract suite against an in-memory Transcriber live under `packages/protocol/test/` until the hub speaks the port.
+
 | Term | Means | Is not |
 |---|---|---|
 | Recording | An audio file the principal uploaded or recorded (an audio Upload), or an audio Attachment an agent sent. Known by its upload id or its hub file id. | A Transcript (Observation's word for a session log). |
@@ -557,6 +559,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 | Agent CLI status line (its JSON, posted by the lane's status-line script to `/api/agent/usage` with an agent token) | `rate_limits.*` and `context_window.used_percentage` to a Report for the account the call names (U1); everything else in the document is dropped |
 | Agents' board command (`morndo-board`, over `/api/agent/board` with an agent token) | a lane's command line to one change of one Task by one Actor (B1); the hub's refusal to one line the agent can act on |
 | Node job supervisor (`morndo-node`) | a class limit and an optional load or memory reading to the domain's queue decision (J5); a process exit to one Outcome; a completion to one Notice. The domain never sees a pid, a unit name, or `/proc`. |
+| Transcription plugin (protocol 1, `packages/protocol`) | `probe --json` and `run --json` to a Capability and an EngineText. A document that is not protocol 1 is `bad_output`. The domain never sees the plugin's JSON. |
 | Event store | persistence and replay (the scorer reads raw trial logs through it) |
 | Engine layer's CLI (engine-layer `bin/engines`) | its roles, providers and resolver output (JSON) to Roles, Engines and Availability; a save to `set` and `other-provider --effective` calls; its refusal (exit 2) to "refused" with its words; a shape it doesn't know to "unavailable", never a guess; a CLI older than engine-layer 9f3a28c (no `other-provider --effective`) to "unsupported" (R1, R2, R5) |
 | Vendor catalog (`packages/protocol/catalog/vendors.json`) | a preset's id, runtimes, terms and isolation floor to the values Connections and the routing policy take. The domain never names a vendor |
