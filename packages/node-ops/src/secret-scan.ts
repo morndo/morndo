@@ -130,7 +130,7 @@ export const VALUE_MAX_BYTES = 64 * 1024;
 export type IndexEntry = {
   encoding: SecretEncoding; alignment: 0 | 1 | 2 | null; length: number; head: string; full: string; before: number; after: number;
 };
-export type Indexed = { kind: "indexed"; entries: IndexEntry[] } | { kind: "too_short" };
+export type Indexed = { kind: "indexed"; entries: IndexEntry[] } | { kind: "too_short" } | { kind: "too_large" };
 // Byte offsets in the stream, end exclusive.
 export type ScanRange = { start: number; end: number };
 // `settled`: no range found later starts before it, so the bytes before it can be passed on once the ranges are applied.
@@ -141,6 +141,7 @@ const PAD = 0x3d;   // "=": base64 padding after a form carries no bits, but a r
 
 export function indexValue(value: Uint8Array, keyed: Keyed): Indexed {
   if (value.length < SCAN_WINDOW) return { kind: "too_short" };
+  if (value.length > VALUE_MAX_BYTES) return { kind: "too_large" };
   const entries = encodedForms(value).map(f => ({
     encoding: f.encoding, alignment: f.alignment, length: f.bytes.length, head: hexOf(keyed(f.bytes.subarray(0, SCAN_WINDOW))),
     full: hexOf(keyed(f.bytes)), before: f.before, after: f.after,
@@ -275,7 +276,7 @@ function entryOf(x: unknown): IndexEntry | null {
   if (typeof encoding !== "string" || !ENCODINGS.includes(encoding)) return null;
   const base64 = encoding === "base64" || encoding === "base64url";
   if (base64 ? !(alignment === 0 || alignment === 1 || alignment === 2) : alignment !== null) return null;
-  if (!count(length, SCAN_WINDOW, 1 << 20) || !count(before, 0, 1) || !count(after, 0, 1)) return null;
+  if (!count(length, SCAN_WINDOW, INDEX_FORM_MAX) || !count(before, 0, 1) || !count(after, 0, 1)) return null;
   if (typeof head !== "string" || !HEX64.test(head) || typeof full !== "string" || !HEX64.test(full)) return null;
   return { encoding: encoding as SecretEncoding, alignment: alignment as 0 | 1 | 2 | null, length: length as number, head, full, before: before as number, after: after as number };
 }

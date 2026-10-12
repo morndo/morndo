@@ -1425,6 +1425,15 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-r6-on-record", task: "secrets-pr2b", file: "apps/connections/src/compose.ts",
     find: "() => !existsSync(secretIndexPath(dir)) && secrets.load().directory.ledger.length === 0", replace: "() => true",
     run: ["apps/connections/test/secrets-review1.test.ts"], expect: "gone after a store" },
+  { id: "sp2b-r2-vault-too-large", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
+    find: "      if (plain.length > VALUE_MAX_BYTES) return { ok: false, problem: \"too_large\" };\n", replace: "",
+    run: ["apps/connections/test/sealed-store-contract.test.ts", "apps/connections/test/secrets-review1.test.ts"], expect: "too_large" },
+  { id: "sp2b-r2-index-too-large", task: "secrets-pr2b", file: "packages/node-ops/src/secret-scan.ts",
+    find: "  if (value.length > VALUE_MAX_BYTES) return { kind: \"too_large\" };\n", replace: "",
+    run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "too_large" },
+  { id: "sp2b-r2-limits-agree", task: "secrets-pr2b", file: "packages/node-ops/src/secret-scan.ts",
+    find: "count(length, SCAN_WINDOW, INDEX_FORM_MAX)", replace: "count(length, SCAN_WINDOW, 6 * VALUE_MAX_BYTES - 1)",
+    run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "reads back" },
 ];
 
 // ---- the runner

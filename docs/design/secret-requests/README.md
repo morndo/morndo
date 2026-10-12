@@ -440,6 +440,7 @@ As built in PR 2a (T-88, `packages/node-ops/src/secret-scan.ts`):
   - Padding carries no bits, so one core serves padded and unpadded text.
   - A hit's range also takes the one character on each side that carries bits of both the value and a neighbour, plus up to two `=`. Redacting it leaves no bit of the value.
 - Identical forms are kept once.
+- **A value is at most 64 KiB** (`VALUE_MAX_BYTES`): a control byte written as JSON's `\uXXXX` is the widest form, six bytes for one, so every form of such a value fits what the index file's parser takes (1 MiB, `INDEX_FORM_MAX`). The vault refuses a larger value as `too_large` before writing anything; the card's field already stops at 16 KiB (5.2). Found by the PR #40 review (a 600 KB value made the index unreadable), decided on T-94.
 - **The streaming scanner** holds back the bytes from the first position it hasn't checked. It checks a position once the longest match from it could have arrived, and checks every position left at the end of the stream. Each step says up to where the bytes are settled.
 - **A retired version** is kept while now minus its retirement is at most 30 days. Retiring it again keeps the first time. Pruning keeps, per Reference, the highest version it dropped; versions are never reused, so adding one at or under that mark is a replay and indexes nothing (decided on T-94).
 - **The index file** is JSON: References, versions, retirement times, keyed hashes and the pruned marks, parsed strictly, with an unknown key refusing the whole file.

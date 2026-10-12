@@ -27,6 +27,7 @@ export class SecretIndexWriter implements IndexWriter {
 
   async prepare(ref: string): Promise<PreparedIndex> {
     const indexed = indexValue((await this.#vault.open(ref)).bytes(), this.#keyed);
+    if (indexed.kind === "too_large") throw new Error("the value is over VALUE_MAX_BYTES, so the index can't hold it; the vault refuses it before this");
     const prepared: PreparedIndex = Object.freeze({ short: indexed.kind === "too_short" });
     this.#prepared.set(prepared, indexed.kind === "indexed" ? indexed.entries : null);
     return prepared;

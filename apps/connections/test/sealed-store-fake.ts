@@ -2,6 +2,7 @@
 // and carrying the value in base64, so the checks the real vault makes (one recipient stanza, this node's own) can be
 // made the same way. The keyed fingerprint is HMAC-SHA-256 under a key of this fake node.
 import { createHmac } from "node:crypto";
+import { VALUE_MAX_BYTES } from "@morndo/node-ops";
 import type { SealedProblem, SealedStore } from "../src/application/ports.ts";
 
 export class MemorySealedStore implements SealedStore {
@@ -27,6 +28,7 @@ export class MemorySealedStore implements SealedStore {
     if (!doc) return { ok: false, problem: "not_age" };
     if (doc.to.length !== 1) return { ok: false, problem: "stanzas" };
     if (doc.to[0] !== this.#recipient) return { ok: false, problem: "foreign" };
+    if (doc.value.length > VALUE_MAX_BYTES) return { ok: false, problem: "too_large" };
     this.files.set(ref, new Uint8Array(sealed));
     this.writtenAt.set(ref, this.#now());
     return { ok: true, fingerprint: this.#fingerprint(doc.value) };

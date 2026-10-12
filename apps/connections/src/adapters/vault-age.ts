@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { Decrypter, Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
+import { VALUE_MAX_BYTES } from "@morndo/node-ops";
 import { assertPrivate, readPrivate, refuseBareHome, writeNew, writePrivate, writePrivatePair } from "./file-mode.ts";
 import { NodeKeys } from "./node-keys.ts";
 import { fingerprintOf, refsIn, secretPath } from "./secret-ref.ts";
@@ -92,6 +93,8 @@ export class AgeVault implements Vault, SealedStore {
     let plain: Uint8Array;
     try { plain = await decrypter.decrypt(sealed, "uint8array"); } catch { return { ok: false, problem: "foreign" }; }
     try {
+      // The index couldn't hold every form of a larger value, so it is refused before anything is written (review 2).
+      if (plain.length > VALUE_MAX_BYTES) return { ok: false, problem: "too_large" };
       const fingerprint = this.#keys.fingerprint(plain);
       writePrivate(this.#file(ref), sealed, this.#uid);
       return { ok: true, fingerprint };
