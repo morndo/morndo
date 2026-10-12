@@ -10,7 +10,9 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, describe, expect, it } from "vitest";
 import { parse, stringify } from "yaml";
 import { BUDGET_ON_EXCEED, GATE_FIELDS, MODEL_CLASSES, SILENCE_OUTCOMES, SOP_FIELDS, SOP_KINDS, SOP_REQUIRED, STEP_EFFECTS, STEP_FIELDS } from "../packages/domain/src/knowledge.ts";
-import { PREFERENCE_FIELDS, PREFERENCE_ID, parsePreferences, renderPreference } from "../packages/domain/src/knowledge-facts.ts";
+import { PREFERENCE_FIELDS, parsePreferences, renderPreference } from "../packages/domain/src/knowledge-facts.ts";
+import { PREFERENCE_ID } from "../packages/domain/src/knowledge-guards.ts";
+import { cacheDirOf } from "./tools/models-dev/cli.ts";
 import { DEFAULT_ROLES, run } from "./tools/sop-check/cli.ts";
 
 const SKILL = "knowledge/skills/recurring-job";
@@ -42,7 +44,8 @@ const instanceCiting = (name: string, why: string[]) =>
     const draft = (s.steps as Record<string, unknown>[]).find(x => x.id === "draft");
     if (draft) draft.why = why;
   });
-// A preferences file with one preference and one broken entry, and a snapshot directory with one snapshot.
+// A preferences file with one preference and one broken entry, and a snapshot directory with one snapshot, one file that is
+// no JSON, one whose fetched date isn't its name's, and a file that is no snapshot.
 const PREFERENCES = join(tmp, "preferences.yaml");
 writeFileSync(PREFERENCES, stringify({ preferences: [
   { id: "write-long", holder: "principal", on: "2026-10-11", said: "Acme models for long-form writing.", tasks: ["draft"] },
@@ -50,7 +53,10 @@ writeFileSync(PREFERENCES, stringify({ preferences: [
 ] }));
 const SNAPSHOTS = join(tmp, "models-dev");
 mkdirSync(SNAPSHOTS);
-writeFileSync(join(SNAPSHOTS, "2026-10-12.json"), "{}\n");
+const snapshot = (fetched: string) => `${JSON.stringify({ source: "https://models.dev/api.json", fetched, licence: "MIT", models: [] })}\n`;
+writeFileSync(join(SNAPSHOTS, "2026-10-12.json"), snapshot("2026-10-12"));
+writeFileSync(join(SNAPSHOTS, "2026-10-10.json"), "{\n  \"source\": \"https://models.dev/api.js");
+writeFileSync(join(SNAPSHOTS, "2026-10-11.json"), snapshot("2026-09-01"));
 writeFileSync(join(SNAPSHOTS, "notes.txt"), "not a snapshot\n");
 const node = (script: string, ...args: string[]) => {
   const r = spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
@@ -101,12 +107,12 @@ describe("run: exit codes and lines", () => {
 
 describe("run: a cited preference or snapshot", () => {
   const LEFT_OUT = "warning  preference-left-out  preferences[1]  on must be a real date, YYYY-MM-DD";
-  it("resolves pref:<id> against --preferences: a preference of the file passes, one the file doesn't hold is refused", async () => {
+  it("resolves pref:<id> against --preferences: a preference of the file passes, one it left out is refused with the entry's refusal", async () => {
     expect(await runIo([instanceCiting("pref-known", ["pref:write-long"]), "--today", "2026-10-12", "--preferences", PREFERENCES])).toEqual({
       code: 0, out: [LEFT_OUT, "daily-blog-post: passes"], err: [],
     });
     expect(await runIo([instanceCiting("pref-unknown", ["pref:broken-date"]), "--today", "2026-10-12", "--preferences", PREFERENCES])).toEqual({
-      code: 1, out: ["refused  why-resolves  steps.draft  pref:broken-date is no preference of the preferences file", LEFT_OUT, "daily-blog-post: 1 refusal"], err: [],
+      code: 1, out: ["refused  why-resolves  steps.draft  pref:broken-date: the preferences file left it out: on must be a real date, YYYY-MM-DD", LEFT_OUT, "daily-blog-post: 1 refusal"], err: [],
     });
   });
   it("resolves models.dev@<date> against --snapshots: a snapshot of that date passes, another date is refused", async () => {
@@ -115,6 +121,33 @@ describe("run: a cited preference or snapshot", () => {
     });
     const r = await runIo([instanceCiting("snap-unknown", ["models.dev@2026-10-01"]), "--today", "2026-10-12", "--snapshots", SNAPSHOTS]);
     expect([r.code, r.out[0]]).toEqual([1, "refused  why-resolves  steps.draft  models.dev@2026-10-01 is no snapshot of the snapshot directory"]);
+  });
+  it("counts a snapshot only if it reads and was fetched on the cited date, as models-dev show would read it", async () => {
+    const r = await runIo([instanceCiting("snap-broken", ["models.dev@2026-10-10", "models.dev@2026-10-11"]), "--today", "2026-10-12", "--snapshots", SNAPSHOTS]);
+    expect(r.code).toBe(1);
+    expect(r.out).toEqual([
+      expect.stringMatching(/^refused {2}why-resolves {2}steps\.draft {2}models\.dev@2026-10-10: the snapshot directory left it out: 2026-10-10\.json: not JSON: .+$/),
+      "refused  why-resolves  steps.draft  models.dev@2026-10-11: the snapshot directory left it out: 2026-10-11.json was fetched 2026-09-01",
+      "daily-blog-post: 2 refusals",
+    ]);
+  });
+  it("a --preferences file or --snapshots directory that doesn't exist only warns while the SOP cites none, and is a bad call once it cites one", async () => {
+    const missing = join(tmp, "missing.yaml");
+    const noDir = join(tmp, "no-such-dir");
+    expect(await runIo([TEMPLATE, "--today", "2026-10-12", "--preferences", missing, "--snapshots", noDir])).toEqual({
+      code: 0, err: [],
+      out: [
+        `warning  no-preferences-file  --preferences  ${missing} doesn't exist; the SOP cites no preference`,
+        `warning  no-snapshot-directory  --snapshots  ${noDir} doesn't exist; the SOP cites no snapshot`,
+        "daily-blog-post: passes",
+      ],
+    });
+    expect(await runIo([instanceCiting("cites-missing-pref", ["pref:write-long"]), "--today", "2026-10-12", "--preferences", missing])).toEqual({
+      code: 2, out: [], err: [`sop-check: ${missing} doesn't exist, and the SOP cites pref:write-long`],
+    });
+    expect(await runIo([instanceCiting("cites-missing-snap", ["models.dev@2026-10-12"]), "--today", "2026-10-12", "--snapshots", noDir])).toEqual({
+      code: 2, out: [], err: [`sop-check: ${noDir} doesn't exist, and the SOP cites models.dev@2026-10-12`],
+    });
   });
   it("without them, checks each for its form only and says so", async () => {
     expect(await runIo([instanceCiting("unchecked", ["pref:write-long", "models.dev@2026-10-12"]), "--today", "2026-10-12"])).toEqual({
@@ -126,13 +159,26 @@ describe("run: a cited preference or snapshot", () => {
       ],
     });
   });
-  it("exits 2 with one line on a preferences file it can't read or that isn't YAML, a snapshot directory it can't read, or a flag without its value", async () => {
+  it("exits 2 with one line on a preferences file that isn't YAML, a snapshot directory that is a file, or a flag without its value", async () => {
     const notYaml = join(tmp, "not-yaml-preferences.yaml");
     writeFileSync(notYaml, "preferences: [unclosed");
-    for (const extra of [["--preferences", join(tmp, "missing.yaml")], ["--preferences", notYaml], ["--snapshots", join(tmp, "no-such-dir")], ["--preferences"], ["--snapshots"]]) {
+    for (const extra of [["--preferences", notYaml], ["--snapshots", PREFERENCES], ["--preferences"], ["--snapshots"]]) {
       const r = await runIo([TEMPLATE, "--today", "2026-10-12", ...extra]);
       expect([extra, r.code, r.err.length, r.out]).toEqual([extra, 2, 1, []]);
     }
+  });
+});
+
+describe("the skill's instructions", () => {
+  // The --snapshots path SKILL.md gives, as a POSIX shell expands it, with and without XDG_CACHE_HOME.
+  const expanded = (env: Record<string, string>) => {
+    const path = /--snapshots "([^"]+)"/.exec(readFileSync(join(SKILL, "SKILL.md"), "utf8"))?.[1] ?? "";
+    return spawnSync("sh", ["-c", `printf %s "${path}"`], { env: { PATH: process.env.PATH ?? "", ...env }, encoding: "utf8" }).stdout;
+  };
+  it("name the snapshot directory as models-dev computes it", () => {
+    expect(expanded({ HOME: "/srv/user" })).toBe(cacheDirOf({}, "/srv/user"));
+    expect(expanded({ HOME: "/srv/user", XDG_CACHE_HOME: "/data/cache" })).toBe(cacheDirOf({ XDG_CACHE_HOME: "/data/cache" }, "/srv/user"));
+    expect(cacheDirOf({ XDG_CACHE_HOME: "/data/cache" }, "/srv/user")).toBe("/data/cache/morndo-knowledge/models-dev");
   });
 });
 

@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { checkSop, SOP_REQUIRED, SOP_RULES, type SopContext } from "../src/knowledge.ts";
+import { checkSop, SOP_REQUIRED, SOP_RULES, sopCitations, type SopContext } from "../src/knowledge.ts";
 import { parsePreferences } from "../src/knowledge-facts.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
@@ -244,26 +244,41 @@ describe("a cited preference or snapshot resolves against the user's files when 
     const v = checkSop(sop, ctx);
     return { refusals: v.refusals.map(r => [r.rule, r.at, r.message]), warnings: v.warnings.map(w => [w.rule, w.at, w.message]) };
   };
-  it("pref:<id> resolves to a preference of the given file; one the file doesn't hold is refused", () => {
-    const ctx: SopContext = { ...CTX, preferences: new Set(["write-long"]) };
+  it("pref:<id> resolves to a preference of the given file; one the file doesn't hold is refused, one it left out says why", () => {
+    const ctx: SopContext = { ...CTX, preferences: { usable: new Set(["write-long"]), leftOut: new Map([["search-pass-acme", "holder is a non-empty string"]]) } };
     expect(found(citing(["pref:write-long"]), ctx)).toEqual({ refusals: [], warnings: [] });
-    expect(found(citing(["pref:does-not-exist"]), ctx)).toEqual({
-      refusals: [["why-resolves", "steps.draft", "pref:does-not-exist is no preference of the preferences file"]], warnings: [],
+    expect(found(citing(["pref:does-not-exist", "pref:search-pass-acme"]), ctx)).toEqual({
+      refusals: [
+        ["why-resolves", "steps.draft", "pref:does-not-exist is no preference of the preferences file"],
+        ["why-resolves", "steps.draft", "pref:search-pass-acme: the preferences file left it out: holder is a non-empty string"],
+      ],
+      warnings: [],
     });
   });
-  it("models.dev@<date> resolves to a snapshot of the given cache; a date it doesn't hold, or no real date, is refused", () => {
-    const ctx: SopContext = { ...CTX, snapshots: new Set(["2026-10-12"]) };
+  it("models.dev@<date> resolves to a snapshot of the given cache; a date it doesn't hold, one it left out, or no real date, is refused", () => {
+    const ctx: SopContext = { ...CTX, snapshots: { usable: new Set(["2026-10-12"]), leftOut: new Map([["2026-10-11", "2026-10-11.json was fetched 2026-09-01"]]) } };
     expect(found(citing(["models.dev@2026-10-12"]), ctx)).toEqual({ refusals: [], warnings: [] });
-    expect(found(citing(["models.dev@2026-10-01"]), ctx)).toEqual({
-      refusals: [["why-resolves", "steps.draft", "models.dev@2026-10-01 is no snapshot of the snapshot directory"]], warnings: [],
+    expect(found(citing(["models.dev@2026-10-01", "models.dev@2026-10-11"]), ctx)).toEqual({
+      refusals: [
+        ["why-resolves", "steps.draft", "models.dev@2026-10-01 is no snapshot of the snapshot directory"],
+        ["why-resolves", "steps.draft", "models.dev@2026-10-11: the snapshot directory left it out: 2026-10-11.json was fetched 2026-09-01"],
+      ],
+      warnings: [],
     });
     expect(found(citing(["models.dev@2026-02-30"]), ctx).refusals.map(r => r[0])).toEqual(["why-resolves"]);
+  });
+  it("sopCitations lists the preferences and snapshots the steps cite, in the forms the check resolves, and nothing else", () => {
+    const sop = citing(["pref:write-long", "models.dev@2026-10-12", "pref:Bad", "models.dev@2026-02-30", "notes/writing-boards"]);
+    step(sop, "edit").why = ["pref:search-pass-acme", "loop-review-fix"];
+    expect(sopCitations(sop)).toEqual({ preferences: ["write-long", "search-pass-acme"], snapshots: ["2026-10-12"] });
+    expect(sopCitations(copy())).toEqual({ preferences: [], snapshots: [] });
+    expect(sopCitations("not an SOP")).toEqual({ preferences: [], snapshots: [] });
   });
   it("pref:<id> has its form exactly when parsePreferences takes the id: one id rule", () => {
     const ids = ["write-long", "2-write", "a", "Write-long", "-write", "write_long", "write long", ""];
     const entry = (id: string) => ({ id, holder: "principal", on: "2026-10-11", said: "Acme.", tasks: ["draft"] });
     const kept = parsePreferences({ preferences: ids.map(entry) }).preferences.map(p => p.id);
-    const cited = ids.filter(id => found(citing([`pref:${id}`]), { ...CTX, preferences: new Set(ids) }).refusals.length === 0);
+    const cited = ids.filter(id => found(citing([`pref:${id}`]), { ...CTX, preferences: { usable: new Set(ids), leftOut: new Map() } }).refusals.length === 0);
     expect(cited).toEqual(kept);
   });
   it("without the file, each is checked for its form only, and a warning says so", () => {

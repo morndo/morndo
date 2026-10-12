@@ -110,6 +110,18 @@ describe("parsePreferences", () => {
       refusals: [{ at: "preferences[0]", message: twice }, { at: "preferences[2]", message: twice }],
     });
   });
+  it("an entry refused for another reason never makes a valid one with its id a duplicate", () => {
+    expect(parsePreferences({ preferences: [WRITE_LONG, { ...WRITE_LONG, rank: 1 }, { ...WRITE_LONG, on: "2026-02-30" }] })).toEqual({
+      preferences: [WRITE_LONG],
+      refusals: [{ at: "preferences[1]", message: expect.stringContaining("'rank'") }, { at: "preferences[2]", message: "on must be a real date, YYYY-MM-DD" }],
+    });
+  });
+  it("a refusal names the id of the entry it left out, when the entry has one, so a citation of it can say why", () => {
+    expect(parsePreferences({ preferences: [{ ...WRITE_LONG, holder: " " }, { holder: "principal" }] }).refusals).toEqual([
+      { at: "preferences[0]", id: "write-long", message: "holder is a non-empty string" },
+      { at: "preferences[1]", message: expect.any(String) },
+    ]);
+  });
   it("a doc that is not a mapping with a preferences list is one refusal, at preferences", () => {
     expect(parsePreferences("nothing")).toEqual({ preferences: [], refusals: [{ at: "preferences", message: expect.any(String) }] });
   });

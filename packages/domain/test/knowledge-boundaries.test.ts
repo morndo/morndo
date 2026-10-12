@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import * as domain from "../src/index.ts";
+import * as guards from "../src/knowledge-guards.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 // The one hook that reads the repository gets a minute of its own, so a loaded machine slows it without failing it; the
@@ -118,6 +119,9 @@ describe("the domain's index", () => {
   it("exports the knowledge-facts module", () => {
     const exported = domain as unknown as Record<string, unknown>;
     expect([typeof exported.trimModelsDev, typeof exported.parsePreferences, typeof exported.scorecardFor]).toEqual(["function", "function", "function"]);
+  });
+  it("exports nothing of the shared guards, which stay internal to the Knowledge modules", () => {
+    expect(Object.keys(guards).filter(k => k in domain)).toEqual([]);
   });
 });
 

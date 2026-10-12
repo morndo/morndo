@@ -4,7 +4,7 @@
 // with a filter, a warning past SNAPSHOT_STALE_DAYS or for a date after today that never fails (K6) and `?` for a missing value.
 // The net is a fake that records the URLs it serves, so nothing here reaches models.dev. Then main.ts, as sop-check's, sets the
 // exit code, and hands the real fetch its deadline.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -45,6 +45,7 @@ const call = async (args: readonly string[], cacheDir: string, api: Api = {}, ex
   const out: string[] = [];
   const err: string[] = [];
   const urls: string[] = [];
+  const cancelled: string[] = [];
   const io: Io = {
     out: l => out.push(l), err: l => err.push(l), cacheDir, today: "2026-10-12",
     fetch: (url, signal) => {
@@ -53,11 +54,13 @@ const call = async (args: readonly string[], cacheDir: string, api: Api = {}, ex
       if (url === LICENCE_URL) return Promise.resolve({ ok: true, status: 200, text: async () => LICENCE });
       if (api.stall === "headers") return stalled(signal);
       if (api.stall === "body") return Promise.resolve({ ok: true, status: 200, text: () => stalled(signal) });
-      return Promise.resolve({ ok: api.ok ?? true, status: api.ok === false ? 503 : 200, text: async () => api.text ?? FIXTURE });
+      const body = { cancel: async () => { cancelled.push(url); } };
+      return Promise.resolve({ ok: api.ok ?? true, status: api.ok === false ? 503 : 200, text: async () => api.text ?? FIXTURE, body });
     },
     ...extra,
   };
-  return { code: await run(args, io), out, err, urls };
+  const code = await run(args, io);
+  return cancelled.length > 0 ? { code, out, err, urls, cancelled } : { code, out, err, urls };
 };
 const written = (dir: string) => (existsSync(dir) ? readdirSync(dir).sort() : []);
 const snapshotText = (fetched: string, models: unknown[]) => `${JSON.stringify({ ...SNAPSHOT, fetched, models }, null, 2)}\n`;
@@ -73,12 +76,13 @@ describe("refresh", () => {
     expect(readFileSync(path, "utf8")).toBe(`${JSON.stringify(SNAPSHOT, null, 2)}\n`);
     expect(r.out).toEqual([`models.dev: 3 models from 2 providers, fetched 2026-10-12, written to ${path}`]);
   });
-  it("a 503 from api.json writes nothing and fails with one line", async () => {
+  it("a 503 from api.json writes nothing and fails with one line, and cancels the body it won't read", async () => {
     const dir = join(tmp, "down");
     const r = await call(["refresh"], dir, { ok: false });
     expect([r.code, r.out, r.err.length]).toEqual([2, [], 1]);
     expect(r.err[0]).toMatch(/^models-dev: /);
     expect(existsSync(dir) ? readdirSync(dir) : []).toEqual([]);
+    expect(r.cancelled).toEqual([API_URL]);
   });
   it("a fetch that throws fails the same way", async () => {
     const r = await call(["refresh"], join(tmp, "offline"), { offline: true });
@@ -111,6 +115,15 @@ describe("refresh", () => {
     expect([r.code, r.out, r.err.length]).toEqual([2, [], 1]);
     expect(written(dir)).toEqual(["2026-09-01.json"]);
     expect(readFileSync(join(dir, "2026-09-01.json"), "utf8")).toBe(earlier);
+  });
+  it("removes the temporary files a refresh that died left behind, and keeps one a refresh may still be writing", async () => {
+    const dir = join(tmp, "leftovers");
+    mkdirSync(dir, { recursive: true });
+    for (const f of ["2026-10-11.json.4242.tmp", "2026-10-12.json.4343.tmp", "notes.txt"]) writeFileSync(join(dir, f), "partial");
+    const hourAgo = new Date(Date.now() - 3_600_000);
+    utimesSync(join(dir, "2026-10-11.json.4242.tmp"), hourAgo, hourAgo);
+    expect((await call(["refresh"], dir)).code).toBe(0);
+    expect(written(dir)).toEqual(["2026-10-12.json", "2026-10-12.json.4343.tmp", "notes.txt"]);
   });
   it("dates its snapshot with the real today: --today is show's alone, so refresh with it is a bad call that fetches and writes nothing", async () => {
     const dir = join(tmp, "forged-date");
@@ -159,8 +172,8 @@ describe("show", () => {
     expect([r.code, r.err]).toEqual([0, []]);
     expect(r.out).toEqual([
       `models.dev, fetched 2026-10-01, from ${API_URL}`,
-      expect.stringMatching(/^warning {2}skipped-snapshot {2}2026-10-12\.json {2}is not JSON: .+; showing 2026-10-01\.json$/),
-      expect.stringMatching(/^warning {2}skipped-snapshot {2}2026-10-11\.json {2}fetched must be a real date.*; showing 2026-10-01\.json$/),
+      expect.stringMatching(/^warning {2}skipped-snapshot {2}2026-10-12\.json {2}not JSON: .+; using 2026-10-01\.json$/),
+      expect.stringMatching(/^warning {2}skipped-snapshot {2}2026-10-11\.json {2}fetched must be a real date.*; using 2026-10-01\.json$/),
       PRO_LINE,
     ]);
   });
@@ -173,12 +186,32 @@ describe("show", () => {
       out: [`models.dev, fetched 2026-10-13, from ${API_URL}`, "warning  future-snapshot  fetched 2026-10-13, 1 day after today, 2026-10-12: check this machine's clock and the snapshot's date", ...FACTS],
     });
   });
+  it("says which snapshots it skipped even when the filter then matches nothing", async () => {
+    const dir = join(tmp, "skipped-unmatched");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "2026-10-01.json"), snapshotText("2026-10-01", [PRO_FACT]));
+    writeFileSync(join(dir, "2026-10-12.json"), "{");
+    expect(await call(["show", "nobody"], dir)).toEqual({
+      code: 1, urls: [],
+      out: [expect.stringMatching(/^warning {2}skipped-snapshot {2}2026-10-12\.json {2}not JSON: .+; using 2026-10-01\.json$/)],
+      err: ["models-dev: no model matches 'nobody'"],
+    });
+  });
   it("a snapshot file that is not JSON is exit 2, one line", async () => {
     const dir = join(tmp, "corrupt");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "2026-10-12.json"), "{");
     const r = await call(["show"], dir);
     expect([r.code, r.out, r.err.length]).toEqual([2, [], 1]);
+  });
+  it("when no snapshot reads, the one line names the newest and why it doesn't", async () => {
+    const dir = join(tmp, "none-reads");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "2026-10-11.json"), "{");
+    writeFileSync(join(dir, "2026-10-12.json"), "[]\n");
+    expect(await call(["show"], dir)).toEqual({
+      code: 2, out: [], urls: [], err: [`models-dev: none of the 2 snapshots in ${dir} reads; the newest, 2026-10-12.json: a snapshot is a mapping`],
+    });
   });
 });
 
