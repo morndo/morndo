@@ -122,6 +122,7 @@ const SAMPLE = [
   "# not a heading",
   "",
   "<img src=x onerror=alert(1)>",
+  "",
   "See [the quote](http://example.com/quote).",
 ].join("\n");
 

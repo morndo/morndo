@@ -20,6 +20,20 @@ export function renderMarkdown(text: string): string {
   });
 }
 
+// The brief's own subset (ADR-0023 DB7, design §6.6). What lint accepts, this shows; headings, raw HTML, images and
+// any link that is not https are dropped here even though lint already refused them. The tag list is the allowlist:
+// a test keeps it equal to the subset.
+export const BRIEF_MARKDOWN_TAGS = ["p", "br", "strong", "em", "del", "code", "pre", "ul", "ol", "li", "blockquote", "a", "table", "thead", "tbody", "tr", "th", "td"] as const;
+
+export function renderBriefMarkdown(text: string): string {
+  const html = marked.parse(text, { async: false });
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [...BRIEF_MARKDOWN_TAGS],
+    ALLOWED_ATTR: ["href", "target", "rel"],
+    ALLOWED_URI_REGEXP: /^https:/i,
+  });
+}
+
 // "STATUS: DONE …" at the start of an agent's answer becomes a pill (agents in this system lead with it). The rule is
 // the domain's, so the catch-up's "Says done" and the chat's pill read it the same way.
 export { statusOf } from "@morndo/domain";
