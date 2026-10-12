@@ -74,15 +74,45 @@ const USERINFO_LINK = /^https:\/\/[^/?#]*@/;
 // A whole parameter-name word, case-insensitive. "signature" is its own word so X-Amz-Signature is refused and
 // "design" is not; "authorization" is its own word so "author" is not.
 const CREDENTIAL_WORD = /^(?:token|key|secret|password|passwd|pwd|sig|signature|auth|authorization|credential)$/i;
+// A name that ends with one of these is a credential even when camelCase did not split it. Plain "key" is not in
+// the list: keyword= would match it, and the run-together forms below cover apikey and its cousins.
+const CREDENTIAL_SUFFIX = /(?:token|secret|password|passwd|pwd|signature|credential|credentials)$/i;
+const RUN_TOGETHER_KEY = /^(?:apikey|accesskey|privatekey|secretkey|sessionkey|clientkey)$/i;
 
 const decodeName = (raw: string): string => {
   try { return decodeURIComponent(raw); } catch { return raw; }
 };
 
-// The name, percent-decoded, split on anything that is not a letter or a digit. One piece must be a credential word.
+// accessToken → access, Token; AWSAccessKeyId → AWS, Access, Key, Id; key2 → key, 2.
+const splitCamel = (part: string): string[] => {
+  const pieces: string[] = [];
+  let start = 0;
+  const isUpper = (c: string) => c >= "A" && c <= "Z";
+  const isLower = (c: string) => c >= "a" && c <= "z";
+  const isDigit = (c: string) => c >= "0" && c <= "9";
+  const isLetter = (c: string) => isUpper(c) || isLower(c);
+  for (let i = 1; i < part.length; i++) {
+    const prev = part[i - 1] ?? "";
+    const cur = part[i] ?? "";
+    const next = part[i + 1] ?? "";
+    const boundary = (isLower(prev) || isDigit(prev)) && isUpper(cur)
+      || isUpper(prev) && isUpper(cur) && isLower(next)
+      || isLetter(prev) && isDigit(cur)
+      || isDigit(prev) && isLetter(cur);
+    if (boundary) { pieces.push(part.slice(start, i)); start = i; }
+  }
+  pieces.push(part.slice(start));
+  return pieces;
+};
+
+// The name, percent-decoded. A piece split on punctuation, camelCase or a digit boundary must be a credential
+// word, or the whole name ends with one (other than plain "key"), or it is a known run-together form (apikey).
 const nameCarriesCredential = (raw: string): boolean => {
   const name = decodeName(raw);
-  return name.split(/[^A-Za-z0-9]+/).some(part => CREDENTIAL_WORD.test(part));
+  const lower = name.toLowerCase();
+  if (RUN_TOGETHER_KEY.test(lower)) return true;
+  if (CREDENTIAL_SUFFIX.test(name)) return true;
+  return name.split(/[^A-Za-z0-9]+/).flatMap(splitCamel).some(part => CREDENTIAL_WORD.test(part));
 };
 
 const pairNames = (segment: string): string[] => {
