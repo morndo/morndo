@@ -2,7 +2,7 @@
 // api.json trimmed to one fact per provider and model, with nulls where a value is missing, empty or negative; a stored snapshot
 // re-validated; freshness past SNAPSHOT_STALE_DAYS; the preferences file parsed with one refusal per broken entry and rendered as its
 // holder's view, never as a fact (K4); and an SOP step's model class linked to its role group's Scorecard cells, sorted by entry and
-// never by a score (K9). The module is a stub, so every test here fails by assertion until it is implemented.
+// never by a score (K9).
 import { describe, expect, it } from "vitest";
 import {
   freshness, parsePreferences, readSnapshot, renderPreference, roleGroup, scorecardFor, trimModelsDev,
@@ -79,6 +79,9 @@ describe("parsePreferences", () => {
       preferences: [SEARCH_ACME],
       refusals: [{ at: "preferences[0]", message: expect.any(String) }],
     });
+  });
+  it("an entry that speaks to no task breaks", () => {
+    expect(parsePreferences({ preferences: [{ ...WRITE_LONG, tasks: [] }] }).refusals).toEqual([{ at: "preferences[0]", message: "tasks is a non-empty list of task names" }]);
   });
   it("a field the file does not have breaks the entry", () => {
     expect(parsePreferences({ preferences: [{ ...WRITE_LONG, rank: 1 }] })).toEqual({ preferences: [], refusals: [{ at: "preferences[0]", message: expect.any(String) }] });
