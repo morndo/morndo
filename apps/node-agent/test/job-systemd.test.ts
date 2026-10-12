@@ -29,8 +29,8 @@ const showValue = (unit: string, prop: string): string =>
 
 // Stop and reset one unit this drill created. Never a glob: other lanes run real morndo-job units on this user manager.
 function releaseUnit(unit: string): void {
-  const end = Date.now() + 8_000;
-  while (Date.now() < end) {
+  const end = performance.now() + 8_000;
+  while (performance.now() < end) {
     if (showValue(unit, "LoadState") === "not-found") return;
     try { execFileSync("systemctl", ["--user", "reset-failed", unit], { timeout: 10_000, stdio: "ignore" }); } catch { /* not failed */ }
     try { execFileSync("systemctl", ["--user", "stop", unit], { timeout: 20_000, stdio: "ignore" }); } catch { /* already gone */ }
@@ -59,9 +59,9 @@ function openDrill(): { slice: string; close: () => void } {
   const child: ChildProcess = spawn("systemd-run", [
     "--user", "--scope", "--collect", "--unit", name, "--slice", `${name}.slice`, "--", "sleep", "infinity",
   ], { stdio: "ignore" });
-  const end = Date.now() + 5_000;
+  const end = performance.now() + 5_000;
   let active = false;
-  while (Date.now() < end) {
+  while (performance.now() < end) {
     const state = execFileSync("systemctl", ["--user", "show", "-p", "ActiveState", "--value", `${name}.scope`], { encoding: "utf8" }).trim();
     if (state === "active") { active = true; break; }
     execFileSync("sleep", ["0.05"]);
@@ -817,9 +817,9 @@ describe("systemd event loop", () => {
     const env = slowSystemctl(h.home);
     let ran = false;
     setTimeout(() => { ran = true; }, 20);
-    const started = Date.now();
+    const started = performance.now();
     const pending = showUnit(`missing${randomBytes(4).toString("hex")}`, env);
-    expect(Date.now() - started).toBeLessThan(100);
+    expect(performance.now() - started).toBeLessThan(100);
     await wait(50);
     expect(ran).toBe(true);
     expect(await pending).toMatchObject({ kind: "found" });
@@ -834,9 +834,9 @@ describe("systemd event loop", () => {
     const b = await start([process.execPath, "-e", STAY, markerB]);
     expect(await until(() => existsSync(markerA) && existsSync(markerB))).toBe(true);
     const blind = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: slowSystemctl(home) } });
-    const began = Date.now();
+    const began = performance.now();
     await blind.sweep();
-    const elapsed = Date.now() - began;
+    const elapsed = performance.now() - began;
     const stamps = readFileSync(join(home, "slow.log"), "utf8").trim().split("\n").map(Number);
     expect(stamps.length).toBeGreaterThanOrEqual(2);
     expect(Math.max(...stamps) - Math.min(...stamps)).toBeLessThan(200_000_000);
@@ -931,14 +931,14 @@ describe.skipIf(!bus.ok)("systemd duration", () => {
   it("uses the unit's own start and exit, not the time the agent was down", async () => {
     const { store, start, sup, opts, drill, slot } = await systemdRig();
     const id = await start([process.execPath, "-e", "setTimeout(() => process.exit(0), 1500)"]);
-    const began = Date.now();
+    const began = performance.now();
     sup.close();
     expect(await until(() => showValue(unitOf(id), "ExecMainCode") === "1", 8000)).toBe(true);
     await wait(3000);
     slot.sup = await openJobSupervisor(store, opts, { slice: drill.slice, probe: () => ({ ok: true }) });
     await slot.sup.sweep();
     const job = store.get(id);
-    const elapsed = Date.now() - began;
+    const elapsed = performance.now() - began;
     expect(job?.outcome).toBe("exited");
     expect(job?.exitCode).toBe(0);
     expect(job?.durationMs ?? 0).toBeGreaterThanOrEqual(1000);

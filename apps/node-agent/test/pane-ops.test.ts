@@ -261,9 +261,9 @@ describe("pane.send with a tmux that stalls at the paste", () => {
     const saved = process.env.PATH;
     process.env.PATH = `${bin}:${saved}`;
     try {
-      const t0 = Date.now();
+      const t0 = performance.now();
       const first = await send("first", "hub:v31a", {}, lane.workerId, h, 10_000);
-      expect(Date.now() - t0).toBeLessThan(6500);
+      expect(performance.now() - t0).toBeLessThan(6500);
       expect(first).toMatchObject({ ok: false, error: { code: "internal", executed: "maybe" } });
       const second = await send("second", "hub:v31b", {}, lane.workerId, h, 10_000);
       expect(second).toMatchObject({ ok: true, result: { problem: null } });
@@ -297,9 +297,9 @@ describe("pane.send with a tmux that stalls at the paste", () => {
     const saved = process.env.PATH;
     process.env.PATH = `${bin}:${saved}`;
     try {
-      const t0 = Date.now();
+      const t0 = performance.now();
       const first = await send("typed once", "hub:killed-late", {}, lane.workerId, h, 2000);
-      expect(Date.now() - t0).toBeGreaterThan(2000);                     // answered after the deadline, at the kill
+      expect(performance.now() - t0).toBeGreaterThan(2000);                     // answered after the deadline, at the kill
       expect(first).toMatchObject({ ok: false, error: { code: "internal", executed: "maybe" } });
       expect(h.doneKeys.status("hub:killed-late")).toMatchObject({ state: "started" });
       expect(await until(() => submitted(join(home.home, "a")).length === 1)).toBe(true);
