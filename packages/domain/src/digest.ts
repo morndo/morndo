@@ -147,6 +147,25 @@ const bareState = (subject: SubjectRef): SubjectState =>
 // task groups its changes — and everything else is its own root.
 type Group = { root: SubjectRef; members: SubjectRef[] };
 
+// The first task ever linked to a subject (a link record, or a claim naming both, §3.3): its root, in time order.
+export function linkMapOf(links: readonly LinkRecord[], claims: readonly Claim[]): Map<string, TaskKey> {
+  const map = new Map<string, TaskKey>();
+  const all = [
+    ...links.map(l => ({ target: l.target, task: l.task, at: l.at })),
+    ...claims.filter(c => c.task !== undefined).map(c => ({ target: c.subject, task: c.task as TaskKey, at: c.at })),
+  ].sort((a, b) => a.at - b.at);
+  for (const l of all) if (!map.has(subjectKey(l.target))) map.set(subjectKey(l.target), l.task);
+  return map;
+}
+
+// DG5's root, as a key: the linked task for a change or a deploy, the subject itself otherwise. DG12 counts and
+// matches claims per root subject and revision, so a change and the task it is linked to are one.
+const rootKeyOf = (s: SubjectRef, linked: ReadonlyMap<string, TaskKey>): string => {
+  if (s.kind === "task") return subjectKey(s);
+  const t = linked.get(subjectKey(s));
+  return t !== undefined ? t : subjectKey(s);
+};
+
 export function buildDigest(input: DigestInput): DigestResult {
   const claimants = (s: SubjectRef) => claimantsOf(s, input.claims, input.links, input.assignments);
   const stateOf = (s: SubjectRef): SubjectState => {
@@ -156,12 +175,7 @@ export function buildDigest(input: DigestInput): DigestResult {
   // The first look (no mark) shows the last 24 hours (§4); after that, the mark decides (DG7).
   const sinceMark = (e: DigestEvent) => (input.mark !== null ? e.seq > input.mark.seq : e.at >= input.now - DAY_MS);
 
-  const linkOf = new Map<string, TaskKey>();
-  const allLinks = [
-    ...input.links.map(l => ({ target: l.target, task: l.task, at: l.at })),
-    ...input.claims.filter(c => c.task !== undefined).map(c => ({ target: c.subject, task: c.task as TaskKey, at: c.at })),
-  ].sort((a, b) => a.at - b.at);
-  for (const l of allLinks) if (!linkOf.has(subjectKey(l.target))) linkOf.set(subjectKey(l.target), l.task);
+  const linkOf = linkMapOf(input.links, input.claims);
   const rootOf = (s: SubjectRef): SubjectRef => {
     if (s.kind === "task") return s;
     const t = linkOf.get(subjectKey(s));
@@ -410,11 +424,13 @@ export type ClaimSource = { subject: SubjectRef; revision: Revision | null; at: 
 export type ClaimFailure = { subject: SubjectRef; revision: Revision | null; at: number; via: "evidence" | "reverted" | "rolled_back" | "reopened" };
 export type CountedClaim = { subject: SubjectRef; revision: Revision | null; at: number };
 
-// DG12: counted once per root subject and revision, at the earliest of its sources.
-export function countedClaims(sources: readonly ClaimSource[]): CountedClaim[] {
+// DG12: counted once per root subject and revision, at the earliest of its sources. A claim filed on the change and
+// the same revision claimed when its task moved to review are one count: the root is the linked task (DG5).
+export function countedClaims(sources: readonly ClaimSource[], links: readonly LinkRecord[] = [], claims: readonly Claim[] = []): CountedClaim[] {
+  const linked = linkMapOf(links, claims);
   const byKey = new Map<string, CountedClaim>();
   for (const s of [...sources].sort((a, b) => a.at - b.at)) {
-    const key = `${subjectKey(s.subject)}@${s.revision?.sha ?? "-"}`;
+    const key = `${rootKeyOf(s.subject, linked)}@${s.revision?.sha ?? "-"}`;
     if (!byKey.has(key)) byKey.set(key, { subject: s.subject, revision: s.revision, at: s.at });
   }
   return [...byKey.values()];
@@ -456,33 +472,54 @@ const nearestRank = (sorted: readonly number[], p: number): number | null =>
 const medianOf = (sorted: readonly number[]): number | null =>
   sorted.length === 0 ? null : (sorted[Math.floor((sorted.length - 1) / 2)] ?? null);
 
-// The level a claim's item showed at a moment (DG12): the same ladder, fed only the records from before it. A revert,
-// a rollback or a reopen was not failed just before it landed, so the ladder runs without those flags.
+// The level a claim's item showed at a moment (DG12): the same ladder, fed only the records from before it. A claim
+// about a task with a revision (a board or lane-event claim, §3.1) is about the heads of its linked changes, so it is
+// judged on those subjects at that revision — a task with changes shows the lowest of theirs (§3.4) — and a task
+// without one on its own claim round. A revert, a rollback or a reopen was not failed just before it landed, so the
+// ladder runs without those flags.
 function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords): ItemLevel {
-  const key = subjectKey(claim.subject);
-  let round: number | null = null;
-  for (const c of r.claimRounds) if (subjectKey(c.subject) === key && c.at <= judgeAt) round = Math.max(round ?? c.at, c.at);
-  let deployed: number | null = null;
-  for (const d of r.deploysOf) if (subjectKey(d.subject) === key && d.at <= judgeAt) deployed = deployed === null ? d.at : Math.max(deployed, d.at);
-  const claimants = claimantsOf(claim.subject, r.claims.filter(c => c.at <= judgeAt), r.links.filter(l => l.at <= judgeAt), r.assignments);
-  return subjectLevel(
-    {
-      subject: claim.subject, title: null, revision: claim.revision,
-      claimRound: claim.revision === null ? round : null, deployedAt: deployed,
-      reverted: false, rolledBack: false, reopened: false,
-    },
-    r.evidence.filter(e => e.at < judgeAt),
-    claimants,
-  ).level;
+  const levelOn = (s: SubjectRef): ItemLevel => {
+    const key = subjectKey(s);
+    let round: number | null = null;
+    for (const c of r.claimRounds) if (subjectKey(c.subject) === key && c.at <= judgeAt) round = Math.max(round ?? c.at, c.at);
+    let deployed: number | null = null;
+    for (const d of r.deploysOf) if (subjectKey(d.subject) === key && d.at <= judgeAt) deployed = deployed === null ? d.at : Math.max(deployed, d.at);
+    const claimants = claimantsOf(s, r.claims.filter(c => c.at <= judgeAt), r.links.filter(l => l.at <= judgeAt), r.assignments);
+    return subjectLevel(
+      {
+        subject: s, title: null, revision: claim.revision,
+        claimRound: claim.revision === null ? round : null, deployedAt: deployed,
+        reverted: false, rolledBack: false, reopened: false,
+      },
+      r.evidence.filter(e => e.at < judgeAt),
+      claimants,
+    ).level;
+  };
+  const judged: SubjectRef[] = [];
+  if (claim.subject.kind === "task" && claim.revision !== null) {
+    const add = (t: SubjectRef, at: number) => {
+      if (at <= judgeAt && !judged.some(s => subjectKey(s) === subjectKey(t))) judged.push(t);
+    };
+    for (const l of r.links) if (l.task === claim.subject.key) add(l.target, l.at);
+    for (const c of r.claims) if (c.task === claim.subject.key) add(c.subject, c.at);
+  }
+  const ladder = judged.length > 0 ? judged : [claim.subject];
+  let level: ItemLevel = "verified_live";
+  for (const s of ladder) {
+    const lvl = levelOn(s);
+    if (LEVEL_RANK[lvl] < LEVEL_RANK[level]) level = lvl;             // §3.4: a task shows the lowest of its changes
+  }
+  return level;
 }
 
 export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: number): WeeklyRow[] {
-  const counted = countedClaims(r.claimSources);
+  const linked = linkMapOf(r.links, r.claims);
+  const counted = countedClaims(r.claimSources, r.links, r.claims);
   return weeks.map(w => {
     const inWeek = (at: number) => at >= w.start && at < w.end;
     const weekClaims = counted.filter(c => inWeek(c.at));
     const failureOf = (c: CountedClaim) => r.claimFailures.find(f =>
-      subjectKey(f.subject) === subjectKey(c.subject) && f.at >= c.at && f.at - c.at <= LATER_FAILED_MS
+      rootKeyOf(f.subject, linked) === rootKeyOf(c.subject, linked) && f.at >= c.at && f.at - c.at <= LATER_FAILED_MS
       && (f.revision === null ? c.revision === null : c.revision !== null && revisionCovers(f.revision, c.revision))) ?? null;
     const levels = new Map<ItemLevel, LevelHeld>();
     for (const c of weekClaims) {
