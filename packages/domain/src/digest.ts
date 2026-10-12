@@ -147,29 +147,42 @@ const bareState = (subject: SubjectRef): SubjectState =>
 // task groups its changes — and everything else is its own root.
 type Group = { root: SubjectRef; members: SubjectRef[] };
 
-// The first task linked to a subject at or before `at` (a link record, or a claim naming both, §3.3): its root, in
-// time order. A link filed later is not in the map, so a closed week does not change when someone links afterwards
-// (DG9, DG12). Omit `at` for the digest as it stands now.
-export function linkMapOf(links: readonly LinkRecord[], claims: readonly Claim[], at = Number.POSITIVE_INFINITY): Map<string, TaskKey> {
-  const map = new Map<string, TaskKey>();
-  const all = [
-    ...links.map(l => ({ target: l.target, task: l.task, at: l.at })),
-    ...claims.filter(c => c.task !== undefined).map(c => ({ target: c.subject, task: c.task as TaskKey, at: c.at })),
+// One link edge, sorted by time: the first task that claims a subject (DG5). Built once per weekly view and shared
+// by grouping's map, the claim count and the failure match.
+export type RootEdge = { key: string; task: TaskKey; at: number };
+
+export function rootIndex(links: readonly LinkRecord[], claims: readonly Claim[]): RootEdge[] {
+  return [
+    ...links.map(l => ({ key: subjectKey(l.target), task: l.task, at: l.at })),
+    ...claims.filter(c => c.task !== undefined).map(c => ({ key: subjectKey(c.subject), task: c.task as TaskKey, at: c.at })),
   ].sort((a, b) => a.at - b.at);
-  for (const l of all) {
-    if (l.at > at) break;
-    if (!map.has(subjectKey(l.target))) map.set(subjectKey(l.target), l.task);
+}
+
+// The first task linked to a subject at or before `at`. A link filed later is not in the map (DG9, DG12).
+function mapAsOf(edges: readonly RootEdge[], at: number): Map<string, TaskKey> {
+  const map = new Map<string, TaskKey>();
+  for (const e of edges) {
+    if (e.at > at) break;
+    if (!map.has(e.key)) map.set(e.key, e.task);
   }
   return map;
 }
 
-// DG5's root, as a key: the linked task for a change or a deploy, the subject itself otherwise. DG12 counts and
-// matches claims per root subject and revision, so a change and the task it is linked to are one.
-const rootKeyOf = (s: SubjectRef, linked: ReadonlyMap<string, TaskKey>): string => {
-  if (s.kind === "task") return subjectKey(s);
+// The first task linked to a subject at or before `at` (a link record, or a claim naming both, §3.3). Omit `at`
+// for the digest as it stands now.
+export function linkMapOf(links: readonly LinkRecord[], claims: readonly Claim[], at = Number.POSITIVE_INFINITY): Map<string, TaskKey> {
+  return mapAsOf(rootIndex(links, claims), at);
+}
+
+// DG5's one root rule, shared by grouping and by the weekly count: a task is its own root; a change or a deploy is
+// rooted under the first task linked to it, or is its own root when nothing is.
+export function rootOf(s: SubjectRef, linked: ReadonlyMap<string, TaskKey>): SubjectRef {
+  if (s.kind === "task") return s;
   const t = linked.get(subjectKey(s));
-  return t !== undefined ? t : subjectKey(s);
-};
+  return t !== undefined ? { kind: "task", key: t } : s;
+}
+
+const rootKeyOf = (s: SubjectRef, linked: ReadonlyMap<string, TaskKey>): string => subjectKey(rootOf(s, linked));
 
 export function buildDigest(input: DigestInput): DigestResult {
   const claimants = (s: SubjectRef) => claimantsOf(s, input.claims, input.links, input.assignments);
@@ -181,15 +194,10 @@ export function buildDigest(input: DigestInput): DigestResult {
   const sinceMark = (e: DigestEvent) => (input.mark !== null ? e.seq > input.mark.seq : e.at >= input.now - DAY_MS);
 
   const linkOf = linkMapOf(input.links, input.claims);
-  const rootOf = (s: SubjectRef): SubjectRef => {
-    if (s.kind === "task") return s;
-    const t = linkOf.get(subjectKey(s));
-    return t !== undefined ? { kind: "task", key: t } : s;
-  };
 
   const groups = new Map<string, Group>();
   const addSubject = (s: SubjectRef) => {
-    const root = rootOf(s);
+    const root = rootOf(s, linkOf);
     const k = subjectKey(root);
     let g = groups.get(k);
     if (g === undefined) { g = { root, members: [root] }; groups.set(k, g); }
@@ -445,10 +453,11 @@ export type CountedClaim = { subject: SubjectRef; revision: Revision | null; at:
 
 // DG12: counted once per root subject and revision, at the earliest of its sources. A claim filed on the change and
 // the same revision claimed when its task moved to review are one count: the root is the linked task (DG5).
-export function countedClaims(sources: readonly ClaimSource[], links: readonly LinkRecord[] = [], claims: readonly Claim[] = []): CountedClaim[] {
+export function countedClaims(sources: readonly ClaimSource[], links: readonly LinkRecord[] = [], claims: readonly Claim[] = [], index?: readonly RootEdge[]): CountedClaim[] {
+  const edges = index ?? rootIndex(links, claims);
   const byKey = new Map<string, CountedClaim>();
   for (const s of [...sources].sort((a, b) => a.at - b.at)) {
-    const linked = linkMapOf(links, claims, s.at);
+    const linked = mapAsOf(edges, s.at);
     const key = `${rootKeyOf(s.subject, linked)}@${s.revision?.sha ?? "-"}`;
     if (!byKey.has(key)) byKey.set(key, { subject: s.subject, revision: s.revision, at: s.at });
   }
@@ -496,7 +505,7 @@ const medianOf = (sorted: readonly number[]): number | null =>
 // judged on those subjects at that revision — a task with changes shows the lowest of theirs (§3.4) — and a task
 // without one on its own claim round. A revert, a rollback or a reopen was not failed just before it landed, so the
 // ladder runs without those flags.
-function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords): ItemLevel {
+function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, edges: readonly RootEdge[]): ItemLevel {
   // A task claim names one revision (§3.1). Each linked change is judged at its own head, and a deploy at the
   // revision in its subject: the claim's sha is not theirs, so their evidence must not be voided against it.
   const revisionOf = (s: SubjectRef): Revision | null => {
@@ -522,7 +531,7 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords): Item
       claimants,
     ).level;
   };
-  const linked = linkMapOf(r.links, r.claims, judgeAt);
+  const linked = mapAsOf(edges, judgeAt);
   const judged: SubjectRef[] = [];
   if (claim.subject.kind === "task" && claim.revision !== null) {
     // DG5: a subject is rooted under its first task. A later link to this task does not make it part of the claim.
@@ -543,19 +552,20 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords): Item
 }
 
 export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: number): WeeklyRow[] {
-  const counted = countedClaims(r.claimSources, r.links, r.claims);
+  const edges = rootIndex(r.links, r.claims);
+  const counted = countedClaims(r.claimSources, [], [], edges);
   return weeks.map(w => {
     const inWeek = (at: number) => at >= w.start && at < w.end;
     const weekClaims = counted.filter(c => inWeek(c.at));
     const failureOf = (c: CountedClaim) => r.claimFailures.find(f => {
-      const linked = linkMapOf(r.links, r.claims, f.at);
+      const linked = mapAsOf(edges, f.at);
       return rootKeyOf(f.subject, linked) === rootKeyOf(c.subject, linked) && f.at >= c.at && f.at - c.at <= LATER_FAILED_MS
         && (f.revision === null ? c.revision === null : c.revision !== null && revisionCovers(f.revision, c.revision));
     }) ?? null;
     const levels = new Map<ItemLevel, LevelHeld>();
     for (const c of weekClaims) {
       const f = failureOf(c);
-      const level = levelHeld(c, f === null ? Math.min(c.at + LATER_FAILED_MS, now) : f.at, r);
+      const level = levelHeld(c, f === null ? Math.min(c.at + LATER_FAILED_MS, now) : f.at, r, edges);
       const row = levels.get(level) ?? { level, claims: 0, laterFailed: 0 };
       row.claims++;
       if (f !== null) row.laterFailed++;
