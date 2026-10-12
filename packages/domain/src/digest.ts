@@ -529,7 +529,11 @@ export type WeeklyRecords = {
   assignments: readonly Assignment[];
   evidence: readonly Evidence[];
   subjectStates: readonly SubjectState[];
+  changeHeads: readonly ChangeHead[];      // a change's head when the forge reported it (§3.2)
 };
+// A change's head at a time (§3.2): filed when the forge reports the head SHA changed. The weekly level uses the
+// latest one at or before the moment it judges, not the live head.
+export type ChangeHead = { subject: SubjectRef; revision: Revision; at: number };
 export type LevelHeld = { level: ItemLevel; claims: number; laterFailed: number };
 export type WeeklyRow = {
   week: string;

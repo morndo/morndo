@@ -700,7 +700,7 @@ describe("the weekly count of claims (DG12)", () => {
   });
   const records = (o: Partial<WeeklyRecords> = {}): WeeklyRecords => ({
     shipped: [], merged: [], reverted: [], done: [], deploys: [], deploysOf: [], stuck: [],
-    claimSources: [], claimRounds: [], claimFailures: [], claims: [], links: [], assignments: [], evidence: [], subjectStates: [],
+    claimSources: [], claimRounds: [], claimFailures: [], claims: [], links: [], assignments: [], evidence: [], subjectStates: [], changeHeads: [],
     ...o,
   });
   const week = (start = NOW, end = NOW + 7 * DAY): WeekWindow => ({ week: "w-40", start, end });
@@ -873,6 +873,27 @@ describe("the weekly count of claims (DG12)", () => {
         evidence({ subject: c8, revision: b1, kind: "ci", result: "pass", at: NOW + DAY }),
         evidence({ subject: prod, revision: b1, kind: "deploy", result: "pass", at: NOW + DAY }),
       ],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
+    expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
+    expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
+  });
+  it("a later push of a linked change does not rewrite a provisional week", () => {
+    // T-12 was claimed with #7 at head A, and CI passed on A. The forge then filed head B, after the moment
+    // the week is judged. The live subject state is already B. The week stays checked.
+    const t12 = task(12);
+    const b2 = rev("sha-b2", "patch-2");
+    const r = records({
+      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
+      claimRounds: [{ subject: t12, at: NOW }],
+      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }],
+      subjectStates: [state(c7, { revision: b2 })],
+      changeHeads: [
+        { subject: c7, revision: b2, at: NOW + 20 * DAY },
+        { subject: c7, revision: a1, at: NOW },
+      ],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
     });
     const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
     expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
