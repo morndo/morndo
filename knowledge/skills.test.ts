@@ -5,11 +5,12 @@
 // skill that warns and still passes (K6), and guards whose Catches name the skill's own failure modes and whose rule is
 // one docs/domain.md defines. The negative controls are the same checks on broken copies.
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 
-const SKILLS = "knowledge/skills";
+const ROOT = resolve(import.meta.dirname, "..");
+const SKILLS = join(ROOT, "knowledge/skills");
 const FIELDS = new Set(["name", "description", "license", "allowed-tools", "metadata", "compatibility"]);
 const PATTERN_SECTIONS = ["When to use", "When not to use", "Failure modes", "Guards", "Sources"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -190,6 +191,19 @@ Anything else.
 const SAMPLE = new Set(["loop-sample"]);
 const errorsOf = (text: string, dir = "loop-sample", day = "2026-10-12") => checkSkill(dir, text, day, SAMPLE).errors;
 
+describe("the design and the skills", () => {
+  it("list the same failure modes for each loop pattern (design, section 5.2)", () => {
+    const design = readFileSync(join(ROOT, "docs/design/capability-knowledge/README.md"), "utf8");
+    for (const dir of LOOPS) {
+      const row = design.split("\n").find(l => l.startsWith(`| \`${dir}\``)) ?? "";
+      const inDesign = [...(cellsOf(row)[3] ?? "").matchAll(/`([^`]+)`/g)].map(m => m[1]).sort();
+      const body = readFileSync(join(SKILLS, dir, "SKILL.md"), "utf8");
+      const inSkill = (sections(body.replace(/\r\n?/g, "\n")).get("Failure modes") ?? []).map(l => /^- \*\*([^*]+?):\*\*/.exec(l)?.[1]).filter(x => x !== undefined).sort();
+      expect([dir, inDesign]).toEqual([dir, inSkill]);
+    }
+  });
+});
+
 describe("negative controls: a broken copy is refused", () => {
   it("the unbroken sample passes, so each refusal below is the break's", () => {
     expect(errorsOf(GOOD)).toEqual([]);
@@ -247,6 +261,17 @@ describe("negative controls: a broken copy is refused", () => {
   it("a guard citing a rule docs/domain.md doesn't define, or an ADR instead of the rule", () => {
     expect(errorsOf(GOOD.replace("None yet.", "V99: made up."))).toEqual(["guard cites V99, which docs/domain.md doesn't define"]);
     expect(errorsOf(GOOD.replace("None yet.", "The other-provider rule (ADR-0013)."))).toEqual(["guard cites an ADR; cite the rule as docs/domain.md states it"]);
+  });
+  it("a guard that names no rule, in prose that merely starts like a glossary word", () => {
+    expect(errorsOf(GOOD.replace("None yet.", "Some prose."))).toEqual(["guard names no rule of docs/domain.md, nor 'None yet.': Some prose."]);
+    expect(errorsOf(GOOD.replace("None yet.", "Checked by hand."))).toEqual(["guard names no rule of docs/domain.md, nor 'None yet.': Checked by hand."]);
+  });
+  it("a source tag is not a rule id, and ids in the middle of prose are not citations", () => {
+    expect(errorsOf(GOOD.replace("None yet.", "S10: a source tag."))).toEqual(["guard cites S10, which docs/domain.md doesn't define"]);
+    expect(errorsOf(GOOD.replace("None yet.", "CN11: no new lease once spend reaches the budget, measured at P95 on an H100."))).toEqual([]);
+  });
+  it("a failure mode that no guard catches", () => {
+    expect(errorsOf(GOOD.replace("- **looping:** it loops.", "- **looping:** it loops.\n- **drift:** it drifts."))).toEqual(["failure mode 'drift' has no guard"]);
   });
   it("a guard citing a real rule id or a docs/domain.md glossary entry passes", () => {
     expect(errorsOf(GOOD.replace("None yet.", "V3: a claimed revision that changes anything a Check depends on (for example, weakens the test) is refuted."))).toEqual([]);
