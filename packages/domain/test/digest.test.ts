@@ -815,6 +815,20 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
   });
+  it("an assignment filed later does not make a past reviewer a claimant", () => {
+    // Reviewer was independent in week 1. Assigning them in week 3 must not drop that week's level.
+    const t12 = task(12);
+    const r = records({
+      claimSources: [{ subject: t12, revision: null, at: NOW, via: "review" }],
+      claimRounds: [{ subject: t12, at: NOW }],
+      claims: [claim({ subject: t12, lane: "builder", at: NOW })],
+      evidence: [evidence({ subject: t12, kind: "review", result: "pass", producer: lane("reviewer"), at: NOW + DAY })],
+      assignments: [{ task: taskKey(12), lane: "reviewer", seq: 30, at: NOW + 21 * DAY }],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 22 * DAY);
+    expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
+    expect(row?.levels).toEqual([{ level: "reviewed", claims: 1, laterFailed: 0 }]);
+  });
   it("a change claim stays at its own revision when the change is pushed again", () => {
     // Claimed and reviewed at sha A. A week later the change's head is sha B. The past week stays reviewed.
     const b2 = rev("sha-b2", "patch-2");
