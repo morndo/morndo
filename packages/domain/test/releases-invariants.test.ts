@@ -55,7 +55,7 @@ describe("RL1 verified before unpacked", () => {
     expect(judgeVerification({ ...allTrue, manifest_digest: false })).toEqual({ ok: false, error: "manifest_digest" });
   });
   it("negative control: a missing check is a failed check — no flag skips one", () => {
-    const { feed_seq: gone, ...rest } = allTrue;
+    const { feed_seq: _gone, ...rest } = allTrue;
     expect(judgeVerification(rest)).toEqual({ ok: false, error: "feed_seq" });
   });
   it("negative control: --to with no ChannelFeed entry never stages (every install goes through one)", () => {
