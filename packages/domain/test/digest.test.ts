@@ -981,6 +981,42 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
   });
+  it("a pull request opened at A stays checked when a push to B is filed on day 20", () => {
+    // The opening head is not a change-head record: only the push to B is. The live state is already B.
+    // The week is judged on day 8, while the claim and the link still name A.
+    const t12 = task(12);
+    const b2 = rev("sha-b2", "patch-2");
+    const r = records({
+      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
+      claimRounds: [{ subject: t12, at: NOW }],
+      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }],
+      subjectStates: [state(c7, { revision: b2 })],
+      changeHeads: [{ subject: c7, revision: b2, at: NOW + 20 * DAY }],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
+    expect(row?.levels, "opened at A").toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
+  });
+  it("a lane-event claim with no revision is judged at the change head, and with no head stays claimed", () => {
+    const head = records({
+      claimSources: [{ subject: c7, revision: null, at: NOW, via: "lane_event" }],
+      claims: [claim({ subject: c7, revision: null, lane: "builder", at: NOW })],
+      subjectStates: [state(c7, { revision: rev("sha-b2", "patch-2") })],
+      changeHeads: [{ subject: c7, revision: a1, at: NOW }],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
+    });
+    const [withHead] = weeklyView(head, [week()], NOW + 8 * DAY);
+    expect(withHead?.levels, "revision unknown").toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
+    const none = records({
+      claimSources: [{ subject: c7, revision: null, at: NOW, via: "lane_event" }],
+      claims: [claim({ subject: c7, lane: "builder", at: NOW })],
+      subjectStates: [state(c7, { revision: a1 })],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
+    });
+    const [without] = weeklyView(none, [week()], NOW + 8 * DAY);
+    expect(without?.levels, "revision unknown").toEqual([{ level: "claimed", claims: 1, laterFailed: 0 }]);
+  });
   it("an assignment filed later does not make a past reviewer a claimant", () => {
     // Reviewer was independent in week 1. Assigning them in week 3 must not drop that week's level.
     const t12 = task(12);
