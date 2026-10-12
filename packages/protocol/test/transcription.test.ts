@@ -33,6 +33,15 @@ describe("plugin protocol 1", () => {
     expect(src).toContain("export type Transcriber ");
   });
 
+  it("refuses a segment that ends before it starts or runs past the duration", () => {
+    const inverted = { ...RUN, segments: [{ startMs: 5000, endMs: 10, text: "x" }] };
+    expect(parseRun(JSON.stringify(inverted))).toEqual({ ok: false, error: "bad_output" });
+    const past = { ...RUN, durationMs: 1000, segments: [{ startMs: 0, endMs: 1001, text: "x" }] };
+    expect(parseRun(JSON.stringify(past))).toEqual({ ok: false, error: "bad_output" });
+    const edge = { ...RUN, durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "x" }] };
+    expect(parseRun(JSON.stringify(edge))).toEqual({ ok: true, value: edge });
+  });
+
   it("reads a ready probe and a run that names its segments", () => {
     expect(parseProbe(JSON.stringify(PROBE))).toEqual({ ok: true, value: PROBE });
     expect(parseRun(`${JSON.stringify(RUN)}\n`)).toEqual({ ok: true, value: RUN });
