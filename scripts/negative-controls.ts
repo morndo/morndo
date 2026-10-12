@@ -1476,6 +1476,9 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-r12-index-zeroed", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts",
     find: " finally { bytes.fill(0); }", replace: " finally { void bytes; }",
     run: ["apps/connections/test/secrets-review1.test.ts"], expect: "zeroes the bytes it opened" },
+  { id: "sp2b-r13-reader-flags", task: "secrets-pr2b", file: "packages/node-ops/src/secret-index-file.ts",
+    find: "    fd = openSync(path, INDEX_OPEN_FLAGS);", replace: "    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);",
+    run: ["packages/node-ops/test/secret-index-file-review.test.ts"], expect: "killed by the timeout" },
 ];
 
 // ---- the runner
