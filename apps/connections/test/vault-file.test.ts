@@ -9,6 +9,7 @@ import { SecretMaterial } from "../src/adapters/secret-material.ts";
 import type { Vault } from "../src/adapters/vault.ts";
 import { AgeVault } from "../src/adapters/vault-age.ts";
 import { FileVault } from "../src/adapters/vault-file.ts";
+import { keysBeside } from "./fixtures/keys.ts";
 
 const secret = new TextEncoder().encode("synthetic-key-0123456789ab");
 const fingerprint = createHash("sha256").update(secret).digest("hex").slice(0, 12);
@@ -19,7 +20,7 @@ describe("vault-file", () => {
 
   it("round-trips a secret and reports the sha-256 prefix", async () => {
     dir = mkdtempSync(join(tmpdir(), "morndo-vault-file-"));
-    const vault: Vault = new FileVault(dir);
+    const vault: Vault = new FileVault(dir, keysBeside(dir));
     expect(vault.has("ref-a")).toBe(false);
     const sealed = vault.seal("ref-a", new SecretMaterial(secret));
     expect(sealed).toBeInstanceOf(Promise);
@@ -38,7 +39,7 @@ describe("vault-file", () => {
 
   it("uses the same async calls as the age vault", async () => {
     dir = mkdtempSync(join(tmpdir(), "morndo-vault-file-"));
-    const vaults: Vault[] = [new FileVault(join(dir, "files")), new AgeVault(join(dir, "age"), join(dir, "identity"))];
+    const vaults: Vault[] = [new FileVault(join(dir, "files"), keysBeside(join(dir, "files"))), new AgeVault(join(dir, "age"), join(dir, "identity"), keysBeside(join(dir, "identity")))];
     for (const vault of vaults) {
       const sealed = vault.seal("ref-a", new SecretMaterial(secret));
       expect(sealed).toBeInstanceOf(Promise);
@@ -50,7 +51,7 @@ describe("vault-file", () => {
 
   it("refuses a 0644 file without reading it", async () => {
     dir = mkdtempSync(join(tmpdir(), "morndo-vault-file-"));
-    const vault = new FileVault(dir);
+    const vault = new FileVault(dir, keysBeside(dir));
     await vault.seal("ref-a", new SecretMaterial(secret));
     chmodSync(join(dir, "ref-a"), 0o644);
     let reason = "";
@@ -69,7 +70,7 @@ describe("vault-file", () => {
     mkdirSync(vaultDir);
     chmodSync(vaultDir, 0o755);
     let reason = "";
-    try { await new FileVault(vaultDir).seal("ref-a", new SecretMaterial(secret)); } catch (error) {
+    try { await new FileVault(vaultDir, keysBeside(vaultDir)).seal("ref-a", new SecretMaterial(secret)); } catch (error) {
       reason = error instanceof FileRefused ? error.reason : "other";
     }
     expect(reason).toBe("mode");
@@ -80,7 +81,7 @@ describe("vault-file", () => {
     dir = mkdtempSync(join(tmpdir(), "morndo-vault-file-"));
     chmodSync(dir, 0o755);
     let reason = "";
-    try { await new FileVault(dir, 0).seal("ref-a", new SecretMaterial(secret)); } catch (error) {
+    try { await new FileVault(dir, keysBeside(dir, 0), 0).seal("ref-a", new SecretMaterial(secret)); } catch (error) {
       reason = error instanceof FileRefused ? error.reason : "other";
     }
     expect(reason).toBe("owner");
@@ -96,8 +97,8 @@ describe("vault-file", () => {
     const previous = process.env.HOME;
     process.env.HOME = dir;
     try {
-      await expect(new FileVault(dir).seal("ref-a", new SecretMaterial(secret))).rejects.toThrow(/home directory/);
-      await expect(new FileVault(config).seal("ref-a", new SecretMaterial(secret))).rejects.toThrow(/\.config/);
+      await expect(new FileVault(dir, keysBeside(dir)).seal("ref-a", new SecretMaterial(secret))).rejects.toThrow(/home directory/);
+      await expect(new FileVault(config, keysBeside(config)).seal("ref-a", new SecretMaterial(secret))).rejects.toThrow(/\.config/);
       expect(readdirSync(dir)).toEqual([".config"]);
       expect(readdirSync(config)).toEqual([]);
     } finally { process.env.HOME = previous; }
@@ -105,8 +106,8 @@ describe("vault-file", () => {
 
   it("refuses a file owned by someone else", async () => {
     dir = mkdtempSync(join(tmpdir(), "morndo-vault-file-"));
-    await new FileVault(dir).seal("ref-a", new SecretMaterial(secret));
-    const other = new FileVault(dir, 0);
+    await new FileVault(dir, keysBeside(dir)).seal("ref-a", new SecretMaterial(secret));
+    const other = new FileVault(dir, keysBeside(dir, 0), 0);
     let reason = "";
     try { await other.open("ref-a"); } catch (error) {
       reason = error instanceof FileRefused ? error.reason : "other";
