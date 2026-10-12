@@ -27,7 +27,7 @@
   import { displayName, status } from "./rows.ts";
   import { followKeyboard } from "./keyboard.ts";
   import { bindWatch, pinnedToEnd } from "./watch.ts";
-  import { deviceDrafts } from "../../drafts.ts";
+  import { deviceDrafts, leftAfterSend } from "../../drafts.ts";
   import { ABSENT_MANAGER, sentTo } from "../../manager.ts";
 
   let { feed, worker, outgoing, pendingFiles = {}, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCancel, onEchoes, screen = false }: {
@@ -147,15 +147,16 @@
     note = null;
     const uploads = readyIds;
     const attached = files.filter(f => f.status === "ready").map((f): SentFile => ({ name: f.name, kind: f.kind, size: f.size }));
-    const sentFiles = files;
+    const sentFiles = files, typed = text;                             // what goes: anything added during the check stays
     try {
       if (!verifiedFresh && navigator.onLine !== false && !(await verify())) { note = "Not sent: the passkey check didn't finish. Your message is still here."; return; }
       const written = seen ?? worker.waitingOn ?? "none";
       drafts.sent(worker.id);
-      text = "";
-      files = [];
+      text = leftAfterSend(text, typed);
+      files = files.filter(f => !sentFiles.includes(f));
+      if (text.trim()) drafts.typed(worker.id, worker.name, text, seen);
       try { await onQueue({ worker: worker.id, workerName: worker.name, text: body, uploads, files: attached, seen: written }); }
-      catch { text = body; files = sentFiles; note = "Couldn't keep the message on this device. It is back in the box."; return; }
+      catch { text = text.trim() ? `${body}\n\n${text}` : body; files = [...sentFiles, ...files]; note = "Couldn't keep the message on this device. It is back in the box."; return; }
       atBottom = true;
       void tick().then(() => { if (scroller) scroller.scrollTop = scroller.scrollHeight; });
     } finally { busy = false; input?.focus(); }

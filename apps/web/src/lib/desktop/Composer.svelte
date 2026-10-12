@@ -14,7 +14,7 @@
   import { beginAttachments, fileSize, fileType, settleAttachment, type AttachmentRow, type SentFile } from "../attach.ts";
   import { explain, uploadFile } from "../api.ts";
   import { stepUp as verify } from "../stepup.ts";
-  import { deviceDrafts } from "../drafts.ts";
+  import { deviceDrafts, leftAfterSend } from "../drafts.ts";
   import { MAX_TEXT } from "../outbox/state.ts";
 
   let { target, targetName, conversation = target, working, waitingOn, verifiedAt, stepUpMs, onQueue, onVerified, onSecurity, edit = null, onEdited = () => {}, inputEl = $bindable(null),
@@ -119,6 +119,7 @@
   async function send() {
     const body = text.trim();
     if (!canSend || verifying) return;
+    const typed = text, sentShots = shots;                             // what goes: anything added during the check stays
     // The worker's own name (its conversation), not the one shown ("Manager"): the hub checks it against the pane (M2).
     const to = target, toName = conversation, written = seen ?? waitingOn ?? "none";
     const uploads = readyIds;
@@ -137,16 +138,21 @@
       }
       verifying = false;
     }
-    // The box is free at once (a second Enter must not send the same text twice); if the message couldn't be written
-    // down on this device, it comes back into the box, never lost (review M6).
-    const sentShots = shots;
+    // The box is free at once (a second Enter must not send the same text twice), but for what was written in it while
+    // the check was open; if the message couldn't be written down on this device, it comes back into the box, never lost
+    // (review M6).
     drafts.sent(target);                                               // a save still pending can't bring it back
-    if (!destroyed) { text = ""; shots = []; inputEl?.focus(); }
+    if (!destroyed) {
+      text = leftAfterSend(text, typed);
+      shots = shots.filter(s => !sentShots.includes(s));
+      if (text.trim()) drafts.typed(target, conversation, text, seen);
+      inputEl?.focus();
+    }
     try { await onQueue({ target: to, targetName: toName, text: body, uploads, images, files, seen: written, ...(held ? { held } : {}) }); }
     catch (e) {
       if (destroyed) return;
       text = text.trim() ? `${body}\n\n${text}` : body;
-      if (!shots.length) shots = sentShots;
+      shots = [...sentShots, ...shots];
       note = `Couldn't keep the message on this device: ${explain(e)} It is back in the box.`;
     }
   }
