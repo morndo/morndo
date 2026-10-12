@@ -19,7 +19,7 @@ const DAY = 86_400_000;
 const T0 = Date.UTC(2026, 9, 12);
 const enc = (s: string) => new TextEncoder().encode(s);
 
-// A vault that answers each ref with its bytes, and notes every open.
+// A vault that answers each ref with a fresh copy of its bytes, as the age vault's open does, and notes every open.
 function fakeVault(values: ReadonlyMap<string, Uint8Array>) {
   const opened: string[] = [];
   return {
@@ -28,7 +28,8 @@ function fakeVault(values: ReadonlyMap<string, Uint8Array>) {
       opened.push(ref);
       const bytes = values.get(ref);
       if (!bytes) throw new Error(`no vault file ${ref}`);
-      return { bytes: () => bytes };
+      const copy = new Uint8Array(bytes);
+      return { bytes: () => copy };
     },
   };
 }

@@ -1290,8 +1290,8 @@ export const CONTROLS: Control[] = [
     run: ["apps/connections/test/secrets-service.test.ts"], expect: "keeps the rest" },
   { id: "sp2b-store-not-swept", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
     find: "        if (!vault.has(ref)) throw new Error(`the vault file ${ref} was swept before its store committed`);\n", replace: "",
-    run: ["apps/connections/test/secrets-service.test.ts"], expect: "swept before its commit" },  { id: "sp2b-index-keyed", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts", find: "indexValue((await this.#vault.open(ref)).bytes(), this.#keyed)", replace: "indexValue((await this.#vault.open(ref)).bytes(), b => { const o = new Uint8Array(32); o.set(b.subarray(0, 32)); return o; })", run: ["apps/connections/test/secret-index-writer.test.ts"], expect: "expected [ 'hex/null' ] to deeply equal []" },
-  { id: "sp2b-index-open-once", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts", find: "const indexed = indexValue(", replace: "await this.#vault.open(ref); const indexed = indexValue(", run: ["apps/connections/test/secret-index-writer.test.ts"], expect: "expected [ 's-a', 's-a' ] to deeply equal [ 's-a' ]" },
+    run: ["apps/connections/test/secrets-service.test.ts"], expect: "swept before its commit" },  { id: "sp2b-index-keyed", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts", find: "try { indexed = indexValue(bytes, this.#keyed); }", replace: "try { indexed = indexValue(bytes, b => { const o = new Uint8Array(32); o.set(b.subarray(0, 32)); return o; }); }", run: ["apps/connections/test/secret-index-writer.test.ts"], expect: "to deeply equal []" },
+  { id: "sp2b-index-open-once", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts", find: "    const bytes = (await this.#vault.open(ref)).bytes();", replace: "    await this.#vault.open(ref);\n    const bytes = (await this.#vault.open(ref)).bytes();", run: ["apps/connections/test/secret-index-writer.test.ts"], expect: "expected [ 's-a', 's-a' ] to deeply equal [ 's-a' ]" },
   { id: "sp2b-index-short", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts", find: "Object.freeze({ short: indexed.kind === \"too_short\" })", replace: "Object.freeze({ short: false })", run: ["apps/connections/test/secret-index-writer.test.ts"], expect: "expected false to be true" },
   { id: "sp2b-index-foreign", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts", find: "if (entries === undefined) throw new Error(\"the index writer refuses a prepared index it did not make\");", replace: "", run: ["apps/connections/test/secret-index-writer.test.ts"], expect: "to throw error matching /did not make/" },
   { id: "sp2b-index-read-first", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts", find: "let index = readSecretIndex(this.#path, this.#uid);", replace: "let index = readSecretIndex(`${this.#path}.none`, this.#uid);", run: ["apps/connections/test/secret-index-writer.test.ts"], expect: "expected 'wrote' to be 'mode'" },
@@ -1470,6 +1470,12 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-r10-grease-exact", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
     find: "const GREASE = /^[!-~]{1,8}-grease$/;", replace: "const GREASE = /grease/;",
     run: ["apps/connections/test/secrets-review1.test.ts"], expect: "any other second stanza still counts" },
+  { id: "sp2b-r12-stdin-zeroed", task: "secrets-pr2b", file: "apps/connections/src/secrets-cli.ts",
+    find: "  try { return await putValue(home, p, io); } finally { io.stdin?.fill(0); }", replace: "  return await putValue(home, p, io);",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "zeroes the stdin buffer" },
+  { id: "sp2b-r12-index-zeroed", task: "secrets-pr2b", file: "apps/connections/src/adapters/secret-index-writer.ts",
+    find: " finally { bytes.fill(0); }", replace: " finally { void bytes; }",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "zeroes the bytes it opened" },
 ];
 
 // ---- the runner

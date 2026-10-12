@@ -11,7 +11,9 @@ async function stdinBytes(): Promise<Uint8Array | null> {
   if (process.stdin.isTTY) return null;
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
-  return new Uint8Array(Buffer.concat(chunks));
+  const bytes = new Uint8Array(Buffer.concat(chunks));
+  for (const chunk of chunks) chunk.fill(0);
+  return bytes;
 }
 
 function confirm(prompt: string): Promise<string | null> {

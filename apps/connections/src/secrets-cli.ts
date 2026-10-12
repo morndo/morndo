@@ -129,7 +129,14 @@ async function dispatch(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<nu
   }
 }
 
+// The value's bytes are zeroed once sealed, the stdin buffer included, whatever happens (review 12). What this code
+// can't zero: the age library's own buffers while it encrypts, and the copies Node's stream made before the bin got the
+// bytes.
 async function put(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<number> {
+  try { return await putValue(home, p, io); } finally { io.stdin?.fill(0); }
+}
+
+async function putValue(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<number> {
   if (p.positionals.length !== 1) throw new Usage("put takes a Reference and reads the value from stdin only");
   const ref = reference(p.positionals[0]);
   const expiry = expiryOf(p.values.get("expiry")?.at(-1));
