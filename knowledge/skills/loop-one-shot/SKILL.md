@@ -36,6 +36,7 @@ One worker, one run, one output. A check, written before the run, decides whethe
 ## Failure modes
 
 - **silent-partial:** the worker says done when part of the task is missing. A later session in one vendor's long-running experiments looked around, saw progress, and declared the whole job finished (Anthropic, Effective harnesses).
+- **looping:** a failed shot re-run until something passes becomes a loop with no stop; step repetition is among the most frequent failures in annotated multi-agent traces (MAST).
 - **gaming-tests:** the worker changes the check instead of the work. On impossible tasks, models edited or special-cased tests often; hiding tests or making them read-only cut it sharply, and letting models retry raised cheating from 33% to 38% (ImpossibleBench).
 
 ## Guards
@@ -45,10 +46,11 @@ One worker, one run, one output. A check, written before the run, decides whethe
 | The check is written before the run and run by someone other than the worker. | silent-partial | V1: verified only if every Check has evidence from a producer other than the claimant, on the claimed revision. |
 | A change that touches what the check depends on fails the claim. | gaming-tests | V3: a claimed revision that changes anything a Check depends on (for example, weakens the test) is refuted. |
 | The report leads with the check's verdict, not the worker's summary, and lists what wasn't done. | silent-partial | E6: a report's headline is the verdict, never the worker's words. |
-| No retry inside the pattern; a second try is `loop-review-fix` with a round limit. | gaming-tests | None yet. |
+| No retry inside the pattern; a second try is `loop-review-fix` with a round limit. | looping, gaming-tests | None yet. |
 
 ## Sources
 
 - Anthropic, Building effective agents (2024-12-19). https://www.anthropic.com/engineering/building-effective-agents (read 2026-10-12). For many applications a single optimised model call with retrieval and in-context examples is enough.
 - Anthropic, Effective harnesses for long-running agents (2025-11-26). https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents (read 2026-10-12). Agents that try to build an app in one go run out of context and leave half-built features; later sessions declare the job done too early.
+- Why Do Multi-Agent LLM Systems Fail? (MAST), arXiv:2503.13657, v3 2025-10-26. https://arxiv.org/abs/2503.13657 (read 2026-10-12). Step repetition is among the most frequent failure modes in annotated multi-agent traces.
 - ImpossibleBench: Measuring LLMs' Propensity of Exploiting Test Cases, arXiv:2510.20270, v1 2025-10-23. https://arxiv.org/abs/2510.20270 (read 2026-10-12). Models exploit test cases on impossible tasks; retries raise it; hidden or read-only tests reduce it.
