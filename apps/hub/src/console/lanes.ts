@@ -53,11 +53,11 @@ export function processIo(): LanesIo {
 }
 
 export const USAGE = `usage: morndo lanes [--json]
-       morndo lanes peek <lane> [--lines N] [--json]
-       morndo lanes send <lane> <text | -> [--id ID] [--wait SECONDS] [--direct] [--json]
-       morndo lanes keys <lane> <key>...
+       morndo lanes peek <lane | worker id> [--lines N] [--json]
+       morndo lanes send <lane | worker id> <text | -> [--id ID] [--wait SECONDS] [--direct] [--json]
+       morndo lanes keys <lane | worker id> <key>...
        morndo lanes start <name> --cwd DIR [--node NODE] [--account A] [--resume SESSION] [--prompt TEXT] [--json]
-       morndo lanes stop <lane> [--kill]
+       morndo lanes stop <lane | worker id> [--kill]
        morndo lanes status <delivery id> [--json]
        morndo lanes events [--json]
 send - reads the text from stdin. Keys are tmux key names: ${KEY_NAMES.join(" ")}.
@@ -160,11 +160,23 @@ async function lanesNow(client: FleetClient): Promise<LaneRow[]> {
   return rows.sort((a, b) => a.name.localeCompare(b.name) || a.node.localeCompare(b.node));
 }
 
-// One lane by name: exactly one online window of that name, else a refusal (no such lane, or two windows claim it).
+// A lane named by its worker ID (node.server.pane, as `morndo lanes` lists it): the way to reach one of two windows that
+// share a name, which the fleet never routes by name (lane_conflict).
+const isWorkerId = (arg: string) => parseWorkerId(arg) !== null;
+
+// One lane by name or worker ID: exactly one online window, else a refusal (no such lane, or two windows claim the name).
 async function laneNamed(client: FleetClient, name: string): Promise<LaneRow & { workerId: string }> {
+  if (isWorkerId(name)) {
+    const row = (await lanesNow(client)).find(l => l.workerId === name);
+    if (!row) throw new NotDone(`refused: no_pane: no lane with worker ID ${name}`);
+    if (!row.online) throw new NotDone(`refused: node_offline: ${name} is on a node that isn't online`);
+    return { ...row, workerId: name };
+  }
   const named = (await lanesNow(client)).filter(l => l.name === name);
   const online = named.filter((l): l is LaneRow & { workerId: string } => l.online && l.workerId !== null);
-  if (named.length > 1 || named.some(l => l.conflict)) throw new NotDone(`refused: lane_conflict: two windows are named "${name}"`);
+  if (named.length > 1 || named.some(l => l.conflict)) {
+    throw new NotDone(`refused: lane_conflict: two windows are named "${name}"; name one by its worker ID (morndo lanes lists them)`);
+  }
   const lane = online[0];
   if (!lane) throw new NotDone(named.length ? `refused: node_offline: "${name}" is on a node that isn't online` : `refused: no_pane: no lane "${name}"`);
   return lane;
@@ -195,9 +207,12 @@ async function peek(client: FleetClient, io: LanesIo, rest: string[], v: Values)
   return EXIT.ok;
 }
 
-// A delivery's id: the one given (namespaced "lanes:" unless it names its client), or a new one.
+// An id as given, namespaced "lanes:" unless it names its client: --id and status take the same form.
+const namespaced = (given: string) => /^[a-z]+:/.test(given) ? given : `lanes:${given}`;
+
+// A delivery's id: the one given, or a new one.
 function deliveryId(given: string | undefined): string {
-  const id = given === undefined ? `lanes:${randomUUID()}` : /^[a-z]+:/.test(given) ? given : `lanes:${given}`;
+  const id = given === undefined ? `lanes:${randomUUID()}` : namespaced(given);
   if (id.length > LIMITS.maxDeliveryId) throw new Usage(`--id is at most ${LIMITS.maxDeliveryId} characters, its client's name included`);
   return id;
 }
@@ -224,7 +239,7 @@ async function send(client: FleetClient, io: LanesIo, rest: string[], v: Values)
   let d: Delivery;
   let queued = false;
   try {
-    d = await client.deliver({ id, lane: name, text });
+    d = await client.deliver(isWorkerId(name) ? { id, workerId: name, text } : { id, lane: name, text });
     queued = true;
     const end = Date.now() + waitS * 1000;
     while (waitS > 0 && !FINAL_DELIVERY_STATES.has(d.state) && Date.now() < end) {
@@ -315,7 +330,10 @@ async function stop(client: FleetClient, io: LanesIo, rest: string[], v: Values)
   if (!name) throw new Usage("stop needs a lane");
   none(more, "stop");
   const mode = v.kill ? "kill" : "exit";
-  const r = await client.op({ lane: name }, "lane.stop", { name, mode }, { key: `lanes:stop:${randomUUID()}`, timeoutMs: LIMITS.laneStopWaitMs + 15_000 });
+  // By worker ID: routed to its node, which stops its window of that name.
+  const lane = isWorkerId(name) ? await laneNamed(client, name) : null;
+  const r = await client.op(lane ? { workerId: lane.workerId } : { lane: name }, "lane.stop", { name: lane?.window ?? name, mode },
+    { key: `lanes:stop:${randomUUID()}`, timeoutMs: LIMITS.laneStopWaitMs + 15_000 });
   // Not seen to close or reach its shell within its 30 s: it may still be stopping. --kill may follow (a new key).
   if (!r.ok && r.error.code === "uncertain") {
     await io.err(`${refusedLine(r.error)}\n${name} may still be stopping; morndo lanes stop ${name} --kill closes its window`);
@@ -330,8 +348,8 @@ async function status(client: FleetClient, io: LanesIo, rest: string[], v: Value
   const [id, ...more] = rest;
   if (!id) throw new Usage("status needs a delivery id");
   none(more, "status");
-  const d = await client.delivery(id);
-  if (!d) throw new NotDone(`no delivery ${id}`);
+  const d = await client.delivery(namespaced(id));
+  if (!d) throw new NotDone(`no delivery ${namespaced(id)}`);
   await io.out(v.json ? JSON.stringify(d) : `${describe(d)}${d.stale ? " (its node isn't answering: as last heard)" : ""}`);
   return codeOf(d, false);
 }

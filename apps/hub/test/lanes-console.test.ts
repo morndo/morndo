@@ -267,6 +267,35 @@ describe("morndo lanes: keys, start, stop, status, events", () => {
     expect(denied.err).toContain("refused: denied");                          // the refusal's code, on stderr
   });
 
+  // QA on two machines (PR #34): a window named by hand on a second node puts a name in conflict, and the fleet's refusal
+  // says to address one by its worker ID. Every command that takes a lane takes one, and routes to that node.
+  it("a worker ID names one of two windows that share a name: peek, send, keys and stop reach it; the name alone is refused", async () => {
+    await fleet.close();
+    const mac = memoryBackend({ "%0": { name: "alpha", cwd: "/m/alpha", screen: "m1\nm2\n❯ ", sessionId: "s-m2", status: "idle", pid: 5151 } });
+    fleet = await startFakeFleet({ nodes: [localNode("pc", "aaaaaaaa", backend), localNode("mac", "bbbbbbbb", mac)] });
+    const byName = await lanes(["peek", "alpha"]);
+    expect(byName.code).toBe(4);
+    expect(byName.err).toContain("name one by its worker ID");
+    expect((await lanes(["send", "alpha", "x"])).code).toBe(4);                       // lane_conflict, by the fleet
+    expect((await lanes(["peek", "mac.bbbbbbbb.0", "--lines", "2"])).out).toBe("m2\n❯ \n");
+    expect((await lanes(["send", "mac.bbbbbbbb.0", "to the mac's alpha"])).code).toBe(0);
+    expect(fleet.deliveryCalls.at(-1)).toMatchObject({ lane: null, workerId: "mac.bbbbbbbb.0", text: "to the mac's alpha" });
+    expect((await lanes(["keys", "mac.bbbbbbbb.0", "Escape"])).code).toBe(0);
+    expect(mac.keyNamesTyped).toEqual([{ pane: "%0", names: ["Escape"] }]);
+    expect(backend.keyNamesTyped).toEqual([]);                                       // negative control: not the pc's alpha
+    fleet.intercept("lane.stop", async () => ({ ok: true, result: { ok: true } }));
+    expect((await lanes(["stop", "mac.bbbbbbbb.0"])).code).toBe(0);
+    expect(fleet.calls.filter(c => c.op === "lane.stop").at(-1)).toMatchObject({ target: { workerId: "mac.bbbbbbbb.0" }, args: { name: "alpha", mode: "exit" } });
+    expect((await lanes(["peek", "mac.bbbbbbbb.9"])).err).toContain("no lane with worker ID mac.bbbbbbbb.9");
+  });
+
+  it("status takes the id as --id took it: a bare id is lanes:<id>", async () => {
+    await lanes(["send", "manager", "x", "--id", "s2"]);
+    expect(await lanes(["status", "s2"])).toMatchObject({ code: 0, out: "lanes:s2: queued\n" });
+    expect(await lanes(["status", "lanes:s2"])).toMatchObject({ code: 0, out: "lanes:s2: queued\n" });
+    expect((await lanes(["status", "nope"])).err).toContain("no delivery lanes:nope");
+  });
+
   it("status: a delivery's state; given up or unknown is 4", async () => {
     await lanes(["send", "manager", "x", "--id", "s1"]);
     expect(await lanes(["status", "lanes:s1"])).toMatchObject({ code: 0, out: "lanes:s1: queued\n" });

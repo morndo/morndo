@@ -61,12 +61,12 @@ Every lane of every node, for anyone with the fleet's socket. It is a subcommand
 | Command | What |
 |---|---|
 | `morndo lanes [--json]` | every lane: name, node, worker id, window, session status, pid, folder, title |
-| `morndo lanes peek <lane> [--lines N] [--json]` | its screen's last lines (default 40) |
-| `morndo lanes send <lane> <text \| -> [--json]` | a delivery to the lane (`-` reads the text from stdin as is; `--id` chooses its id). It prints the state and returns, or with `--wait <s>` waits that long for `delivered`. `--direct` types at once (`pane.send`), for a lane without Claude Code; `--id` then names its key. |
-| `morndo lanes keys <lane> <key…>` | keys by name (`Enter`, `Escape`, `C-c`, `Up`, the digits, …) |
+| `morndo lanes peek <lane \| worker id> [--lines N] [--json]` | its screen's last lines (default 40) |
+| `morndo lanes send <lane \| worker id> <text \| -> [--json]` | a delivery to the lane (`-` reads the text from stdin as is; `--id` chooses its id). It prints the state and returns, or with `--wait <s>` waits that long for `delivered`. `--direct` types at once (`pane.send`), for a lane without Claude Code; `--id` then names its key. |
+| `morndo lanes keys <lane \| worker id> <key…>` | keys by name (`Enter`, `Escape`, `C-c`, `Up`, the digits, …) |
 | `morndo lanes start <name> --cwd <dir> [--node <n>] [--account <a>] [--resume <session>] [--prompt <text>] [--json]` | a new lane, run by the node's launcher; the prompt is typed once Claude Code can take it. `--json` prints the result, with `waiting: "trust"` when Claude Code asks to trust the folder. |
-| `morndo lanes stop <lane> [--kill]` | `/exit`, typed as a delivery is; `--kill` closes the window, also after an exit that timed out. The node's protected lanes (the manager) are refused. |
-| `morndo lanes status <delivery id> [--json]` | a delivery's state |
+| `morndo lanes stop <lane \| worker id> [--kill]` | `/exit`, typed as a delivery is; `--kill` closes the window, also after an exit that timed out. The node's protected lanes (the manager) are refused. |
+| `morndo lanes status <delivery id> [--json]` | a delivery's state; an id without a client's name is read as `lanes:<id>`, as `--id` writes it |
 | `morndo lanes events [--json]` | lane events as they happen |
 
 | Exit | Meaning |

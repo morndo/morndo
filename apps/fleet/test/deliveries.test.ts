@@ -127,6 +127,29 @@ describe("POST /v1/deliveries", () => {
     expect(sent(pc)).toEqual([]);
   });
 
+  it("says which field a refused body breaks, so a client can fix it", async () => {
+    const fleet = await startTestFleet();
+    const pc = await nodeWith(fleet, "pc", ["api"]);
+    const cases: [Record<string, unknown>, string][] = [
+      [{ id: "no-namespace", lane: "api", text: "x" }, "id must start with the client's name"],
+      [{ id: "Kira:1", lane: "api", text: "x" }, "id must start with the client's name"],
+      [{ id: "k:", lane: "api", text: "x" }, "id must start with the client's name"],
+      [{ id: "k:a\u0007", lane: "api", text: "x" }, "id must not hold a control character"],
+      [{ id: `k:${"a".repeat(200)}`, lane: "api", text: "x" }, "id is at most 200 characters"],
+      [{ id: "k:1#2", lane: "api", text: "x" }, "must not end in \"#\" and digits"],
+      [{ id: "k:1", lane: "api", text: "" }, "text is empty"],
+      [{ id: "k:1", lane: "api", text: "x".repeat(8001) }, "text is at most 8000 characters"],
+      [{ id: "k:1", lane: "api", text: "x", ttlMs: 0 }, "ttlMs is from 1 to"],
+      [{ id: "k:1", workerId: "nope", text: "x" }, "workerId isn't a worker ID"],
+    ];
+    for (const [body, words] of cases) {
+      const r = await post(fleet, body);
+      expect(r, JSON.stringify(body).slice(0, 60)).toMatchObject({ status: 400, body: { ok: false, error: { code: "bad_args", executed: "no" } } });
+      expect((r.body as { error: { message: string } }).error.message, JSON.stringify(body).slice(0, 60)).toContain(words);
+    }
+    expect(sent(pc)).toEqual([]);
+  });
+
   it("POST /v1/op refuses lane.deliver and delivery.cancel: deliveries go through /v1/deliveries", async () => {
     const fleet = await startTestFleet();
     const pc = await nodeWith(fleet, "pc", ["api"]);
