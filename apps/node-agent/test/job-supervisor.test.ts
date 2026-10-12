@@ -716,7 +716,7 @@ describe("child supervisor", () => {
   });
 
   // /proc/stat prints the boot time in whole seconds, here 990 ms short of the boot clock's own. A process that started
-  // 50 ms before the spawn stamp is inside the window all the same. Ticks are USER_HZ, 100 a second.
+  // 50 ms before the spawn stamp is inside the window all the same. The tick rate and ps are given, not the host's.
   it("records a start inside the spawn window when btime is most of a second short", () => {
     const { dir } = rig();
     const bootS = 1_791_300_000;
@@ -730,7 +730,7 @@ describe("child supervisor", () => {
       "/proc/uptime": `${((nowMs - bootMs) / 1000).toFixed(2)} 1.00\n`,
       "/proc/sys/kernel/random/boot_id": "0f6c1b52-7a3e-4c55-9d1e-2b8f4a6c9e10\n",
     };
-    const io = { read: (path: string) => proc[path] ?? null, now: () => nowMs };
+    const io = { read: (path: string) => proc[path] ?? null, now: () => nowMs, hz: 100, ps: () => null };
     resetProcessStartCache();
     try {
       writeProcessFile(join(dir, "born.at"), 4242, startedMs + 50, io);
