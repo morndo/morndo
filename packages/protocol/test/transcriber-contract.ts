@@ -28,6 +28,10 @@ export type ContractSubject = {
 };
 
 const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
+
+function leaked(error: unknown, sentence: string): boolean {
+  return JSON.stringify(error).includes(sentence);
+}
 const HEARD: EngineText = {
   language: "de", durationMs: 5200, segments: [{ startMs: 0, endMs: 5200, text: SENTENCE }],
 };
@@ -92,7 +96,17 @@ export function transcriberContract(make: () => ContractSubject): void {
       expect(outcome.kind).toBe("error");
       if (outcome.kind !== "error") return;
       expect(outcome.error).toMatchObject({ name: "AbortError" });
-      expect(JSON.stringify(outcome.error)).not.toContain(SENTENCE);
+      expect(leaked(outcome.error, SENTENCE)).toBe(false);
+    });
+
+    it("the leak check reads an error's message and its stack, which stringify skips", () => {
+      const loud = new Error(SENTENCE);
+      expect(JSON.stringify(loud)).not.toContain(SENTENCE);
+      expect(leaked(loud, SENTENCE)).toBe(true);
+      const stacked = new Error("aborted");
+      stacked.stack = `at run (${SENTENCE})`;
+      expect(stacked.message).not.toContain(SENTENCE);
+      expect(leaked(stacked, SENTENCE)).toBe(true);
     });
 
     it("a timeout aborts the run with no text, and a process group it started is gone", async () => {
@@ -110,7 +124,7 @@ export function transcriberContract(make: () => ContractSubject): void {
       expect(outcome.kind).toBe("error");
       if (outcome.kind !== "error") return;
       expect(outcome.error).toMatchObject({ name: "AbortError" });
-      expect(JSON.stringify(outcome.error)).not.toContain(SENTENCE);
+      expect(leaked(outcome.error, SENTENCE)).toBe(false);
       if (group) {
         expect(pids.length > 0).toBe(true);
         expect(await until(() => pids.every(pid => !alive(pid)), 2000)).toBe(true);
