@@ -320,7 +320,6 @@ describe("items and sections (DG5)", () => {
     expect(one(older, "acme/web#7")).toBeUndefined();
   });
   it("a deploy is an environment at a revision: a later deploy of the same env groups under its own task (§3.1)", () => {
-    const t1 = task(1), t2 = task(2);
     const prodA = { kind: "deploy", repo: "acme/web", env: "prod", sha: "sha-a1" } as SubjectRef;
     const prodB = { kind: "deploy", repo: "acme/web", env: "prod", sha: "sha-b2" } as SubjectRef;
     const d = digest({
