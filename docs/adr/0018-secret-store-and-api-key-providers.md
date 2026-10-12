@@ -69,7 +69,7 @@
    - Only metadata crosses the fleet. A key is added on the machine, from stdin.
 9. **If Q2 is yes, subscriptions run through the same gate** (PR 6, one provider at a time, with the old command as rollback).
    - The launcher strips every inherited API-key variable, points the CLI at its own config directory or the command used before (`claude-as` on this box), and checks the CLI's auth method at start. A subscription run therefore never bills a key.
-   - Usage windows (ADR-0016) are shown beside it and decide nothing.
+   - Usage windows (ADR-0016) are shown beside it and decide nothing. ADR-0020 amends this sentence: under Auto a window may rank, fence or exclude a candidate, and it still grants nothing.
 10. **Budgets and expiry.**
     - Spend is append-only. Warnings fire once at 50/80/95 % and 7/2/1 days. A headless Claude Code run is capped at its reservation with `--max-budget-usd` [S2]. Interactive and Codex runs have no in-run cap; where the vendor reports nothing, such a run is charged its whole reservation when it closes, until a manual figure replaces it.
     - Widening is judged by effect: a Connection may afterwards run at all, in more workspaces, spend more, run longer, or run with less isolation. It is the principal's (hub step-up, or a typed confirmation at the machine). Narrowing is anyone's, turning a Connection off included. Revoking is the principal's, since it can't be undone.
