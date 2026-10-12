@@ -223,3 +223,24 @@ describe("round 3, point 7: the sweep retires only versions the index still hold
     expect(w.index.changes.at(-1)).toEqual({ add: null, retire: [{ reference: REF, version: 1 }], at: T + 5 });
   });
 });
+
+describe("round 3, point 8: the vault-refs save rule is one pure helper, used by the fake and by SQLite", () => {
+  const src = (path: string) => readFileSync(join(import.meta.dirname, "../src", path), "utf8");
+  it("neither store keeps a copy of the rule: both import the helper", () => {
+    for (const path of ["application/fakes.ts", "adapters/secrets-sqlite.ts"]) {
+      expect(src(path), path).not.toMatch(/names no ledger entry/);
+      expect(src(path), path).toMatch(/savedVaultRefs/);
+    }
+  });
+  it("the helper: one row per ledger entry, a row left out keeps its ref, a new one has none, a bad row is refused", async () => {
+    const { savedVaultRefs } = await import("../src/application/vault-refs.ts");
+    const entry = (reference: string, version: number) => ({ reference, version, fingerprint: "aaaaaaaaaaaa", state: "current" as const });
+    const state = (ledger: ReturnType<typeof entry>[], vaults: { reference: string; version: number; ref: string | null }[]) =>
+      ({ directory: { held: [], ledger, events: [] }, vaults, workspaces: [] });
+    const before = state([entry(REF, 1)], [{ reference: REF, version: 1, ref: "s-0001" }]);
+    expect(savedVaultRefs(before, state([entry(REF, 1), entry(OTHER, 1)], []))).toEqual([
+      { reference: REF, version: 1, ref: "s-0001" }, { reference: OTHER, version: 1, ref: null },
+    ]);
+    expect(() => savedVaultRefs(before, state([entry(REF, 1)], [{ reference: OTHER, version: 1, ref: "s-0009" }]))).toThrow(/names no ledger entry/);
+  });
+});
