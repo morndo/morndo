@@ -133,4 +133,14 @@ describe("the records' own guards", () => {
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?monkey=1" })))).toBe("ok");
     expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: "https://ci.acme.test/runs/9?keyword=x" })))).toBe("ok");
   });
+  it("a camelCase or run-together credential name such as accessToken is refused, and design, author, monkey and keyword are kept (§3.3)", () => {
+    const bad = ["accessToken", "apiKey", "apikey", "AWSAccessKeyId", "refreshToken", "clientSecret", "sessionToken"];
+    for (const name of bad) {
+      const link = `https://ci.acme.test/x?${name}=abc`;
+      expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link }))), link).toBe("bad_link");
+    }
+    for (const name of ["design", "author", "monkey", "keyword"]) {
+      expect(problem(checkEvidence(ev({ subject: c7, revision: a1, link: `https://ci.acme.test/x?${name}=a` })))).toBe("ok");
+    }
+  });
 });
