@@ -23,25 +23,27 @@ const fleetWorkers = Math.min(4, Math.max(2, Math.floor(availableParallelism() /
 // test (2,300 single-row commits, two tests) took 71 s and 219 s on this box's /tmp at idle IO priority (ionice -c3, as
 // scripts/flake-loop.sh runs) and 402 s and 292 s at the normal priority npm test has (IO pressure 72 %), all past its
 // 20 s window; on a tmpfs, 0.9 s for the whole file (2026-10-12).
-// Those tests check the code, not the disk, so on Linux each run's TMPDIR is a directory of its own,
-// morndo-test-<pid>-<random>, in the user's runtime directory ($XDG_RUNTIME_DIR, /run/user/<uid>) when that is a tmpfs
+// Those tests check the code, not the disk, so on Linux each project's TMPDIR in a run is a directory of its own,
+// morndo-test-<pid>-<random>-<project>, in the user's runtime directory ($XDG_RUNTIME_DIR, /run/user/<uid>) when that is a tmpfs
 // (TMPFS_MAGIC 0x01021994, statfs(2)) we can write with 1 GiB free: the same files and the same fsync calls, which
-// return at once there. test/run-scratch.ts makes it before the first test and removes it, with whatever the tests left
-// in it, after the last, passed or not. Not /dev/shm: the agent refuses a job, lane or file under /dev (denyRoots), as
+// return at once there. The project's globalSetup (test/run-scratch.ts) makes it before the project's first test and
+// removes it, with whatever the tests left in it, after its last, passed or not; no project depends on when another's
+// teardown runs. Not /dev/shm: the agent refuses a job, lane or file under /dev (denyRoots), as
 // it should. With less room, a TMPDIR the caller set, or elsewhere, tmpdir() is as before. `env` reaches each test
 // file's process.env before it is imported, and the processes it starts (https://vitest.dev/config/env.html, v5.0.3,
 // read 2026-10-12).
-function ramScratch(): Record<string, string> {
+function ramScratch(): string | null {
   const run = process.env.XDG_RUNTIME_DIR;
-  if (process.env.TMPDIR || process.platform !== "linux" || !run) return {};
+  if (process.env.TMPDIR || process.platform !== "linux" || !run) return null;
   try {
     const fs = statfsSync(run);
-    if (fs.type !== 0x01021994 || fs.bavail * fs.bsize < 2 ** 30) return {};
+    if (fs.type !== 0x01021994 || fs.bavail * fs.bsize < 2 ** 30) return null;
     accessSync(run, constants.W_OK);
-    return { TMPDIR: join(run, `morndo-test-${process.pid}-${randomBytes(4).toString("hex")}`) };
-  } catch { return {}; }
+    return join(run, `morndo-test-${process.pid}-${randomBytes(4).toString("hex")}`);
+  } catch { return null; }
 }
-const scratch = ramScratch();
+const scratchBase = ramScratch();
+const scratch = (project: string): Record<string, string> => (scratchBase ? { TMPDIR: `${scratchBase}-${project}` } : {});
 // A web test file is a Chromium test when it imports playwright, or a module under apps/web/test that does, at any
 // depth: static, side-effect or dynamic imports, either quote style, subfolders. `import type` and comments don't
 // count. A file this misses and that launches Chromium anyway fails at once in the units project
@@ -75,7 +77,7 @@ export default defineConfig({
           // gives room for the setup; what each test checks keeps its own window (a socket closed within 3 s, say).
           testTimeout: 20_000,
           hookTimeout: 20_000,
-          env: scratch,
+          env: scratch("units"),
           globalSetup: ["test/run-scratch.ts"],
           setupFiles: ["test/units-without-chromium.ts"],
           sequence: { groupOrder: 0 },
@@ -84,8 +86,8 @@ export default defineConfig({
       // Their hooks start Vite and a browser, or close them: 60 s, not Vitest's 10 (review M2: two timed out at load 17).
       // A test that loads its page itself compiles the app cold: 4 files at once beside 16 busy CPU loops, those took
       // 3.8 s (median), 7.4 s (p90), up to 11.9 s (142 tests, 2026-10-12); a third went past Vitest's 5 s. 20 s, as units.
-      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, testTimeout: 20_000, hookTimeout: 60_000, env: scratch, globalSetup: ["test/run-scratch.ts"], sequence: { groupOrder: 1 } } },
-      { test: { name: "fleet", include: ["test/fleet/**/*.test.ts"], maxWorkers: fleetWorkers, testTimeout: 120_000, hookTimeout: 60_000, env: scratch, globalSetup: ["test/run-scratch.ts"], sequence: { groupOrder: 2 } } },
+      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, testTimeout: 20_000, hookTimeout: 60_000, env: scratch("chromium"), globalSetup: ["test/run-scratch.ts"], sequence: { groupOrder: 1 } } },
+      { test: { name: "fleet", include: ["test/fleet/**/*.test.ts"], maxWorkers: fleetWorkers, testTimeout: 120_000, hookTimeout: 60_000, env: scratch("fleet"), globalSetup: ["test/run-scratch.ts"], sequence: { groupOrder: 2 } } },
     ],
   },
 });

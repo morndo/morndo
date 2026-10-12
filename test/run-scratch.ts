@@ -1,13 +1,13 @@
-// The run's own scratch directory (vitest.config.ts, ramScratch: TMPDIR=$XDG_RUNTIME_DIR/morndo-test-<pid>-<random>),
-// a globalSetup of every project. Made before the first test, removed after the last with whatever the tests left in
-// it, whether they passed or not: Vitest 5.0.3 runs every project's globalSetup before any test and every teardown
-// after all of them, a failed run included (seen 2026-10-12). The first teardown removes it; the others find it gone.
-// A run killed before its teardown leaves its directory; the next run removes those whose process is gone.
+// A project's own scratch directory in a run (vitest.config.ts, ramScratch:
+// TMPDIR=$XDG_RUNTIME_DIR/morndo-test-<pid>-<random>-<project>), as that project's globalSetup: made before its first
+// test, removed after its last with whatever the tests left in it, whether they passed or not. Each project removes
+// only its own, so the order Vitest runs teardowns in doesn't matter. A run killed before its teardown leaves its
+// directories; the next run removes those whose process is gone.
 import { mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { TestProject } from "vitest/node";
 
-const OURS = /^morndo-test-(\d+)-[0-9a-f]+$/;
+const OURS = /^morndo-test-(\d+)-[0-9a-f]+(?:-[a-z]+)?$/;
 
 export default function setup(project: TestProject): () => void {
   const dir = project.config.env.TMPDIR;
