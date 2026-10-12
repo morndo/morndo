@@ -68,10 +68,48 @@ export type Assignment = { task: TaskKey; lane: string; seq: number; at: number 
 export const NOTE_MAX = 140;
 const HTTPS_LINK = /^https:\/\/\S+$/;
 const ATTACHMENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
-// §3.3: "nothing that could carry credentials" — no userinfo in the authority, and no query parameter whose name
-// says it is one (token, key, secret, password, sig, …; presigned forms like X-Amz-Signature included).
+// §3.3: "nothing that could carry credentials" — no userinfo in the authority, and no parameter whose whole name
+// says it is one (token, key, secret, password, sig, signature, …; presigned forms like X-Amz-Signature included).
 const USERINFO_LINK = /^https:\/\/[^/?#]*@/;
-const CREDENTIAL_PARAM = /[?&][a-z0-9_-]*(?:token|key|secret|password|passwd|pwd|sig|auth|credential)[a-z0-9_-]*=/i;
+// A whole parameter-name word, case-insensitive. "signature" is its own word so X-Amz-Signature is refused and
+// "design" is not; "authorization" is its own word so "author" is not.
+const CREDENTIAL_WORD = /^(?:token|key|secret|password|passwd|pwd|sig|signature|auth|authorization|credential)$/i;
+
+const decodeName = (raw: string): string => {
+  try { return decodeURIComponent(raw); } catch { return raw; }
+};
+
+// The name, percent-decoded, split on anything that is not a letter or a digit. One piece must be a credential word.
+const nameCarriesCredential = (raw: string): boolean => {
+  const name = decodeName(raw);
+  return name.split(/[^A-Za-z0-9]+/).some(part => CREDENTIAL_WORD.test(part));
+};
+
+const pairNames = (segment: string): string[] => {
+  const names: string[] = [];
+  for (const part of segment.split(/[&;]/)) {
+    const eq = part.indexOf("=");
+    if (eq > 0) names.push(part.slice(0, eq));
+  }
+  return names;
+};
+
+// Query, fragment and ';' parameters. Node's URL keeps ';' in the pathname and leaves the fragment out of
+// searchParams (https://nodejs.org/docs/latest-v24.x/api/url.html, read 2026-10-12), so both are read here.
+// %74 in a query name is "t" once decoded, the same decoding searchParams applies.
+const credentialParam = (link: string): boolean => {
+  let url: URL;
+  try { url = new URL(link); } catch { return false; }
+  const names = [
+    ...pairNames(url.search.slice(1)),
+    ...pairNames(url.hash.slice(1)),
+  ];
+  for (const seg of url.pathname.split("/")) {
+    const semi = seg.indexOf(";");
+    if (semi !== -1) names.push(...pairNames(seg.slice(semi + 1)));
+  }
+  return names.some(nameCarriesCredential);
+};
 export type RecordProblem = "empty" | "too_long" | "bad_link" | "bad_counts" | "bad_name";
 
 // The guards on the records themselves, at the edge where they are filed. The digest recomputes from what is stored,
@@ -79,7 +117,7 @@ export type RecordProblem = "empty" | "too_long" | "bad_link" | "bad_counts" | "
 // A link that may be stored: an attachment id, or an https URL without userinfo and without a query parameter
 // named like a credential (§3.3).
 const safeLink = (link: string): boolean =>
-  ATTACHMENT_ID.test(link) ? true : HTTPS_LINK.test(link) && !USERINFO_LINK.test(link) && !CREDENTIAL_PARAM.test(link);
+  ATTACHMENT_ID.test(link) ? true : HTTPS_LINK.test(link) && !USERINFO_LINK.test(link) && !credentialParam(link);
 
 export function checkClaim(c: Claim): Result<Claim, RecordProblem> {
   if (c.lane === "") return err("empty");
