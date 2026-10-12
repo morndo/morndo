@@ -245,9 +245,9 @@ describe("round 2, points 3, 4 and 7: no copy of the value this code makes outli
     e.addRecipient(await vault.recipient());
     expect((await vault.storeSealed("s-00000000000000a4", await e.encrypt(new TextEncoder().encode("synthetic-value-four")))).ok).toBe(true);
     const outputs: Uint8Array[] = [];
-    const real = Decrypter.prototype.decrypt;
+    const real = Reflect.get(Decrypter.prototype, "decrypt") as (...a: unknown[]) => Promise<unknown>;
     const spy = vi.spyOn(Decrypter.prototype, "decrypt").mockImplementation(async function (this: Decrypter, ...args: unknown[]) {
-      const out: unknown = await (real as (...a: unknown[]) => Promise<unknown>).apply(this, args);
+      const out: unknown = await real.apply(this, args);
       if (out instanceof Uint8Array) outputs.push(out);
       return out as never;
     });
