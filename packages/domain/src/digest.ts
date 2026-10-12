@@ -116,6 +116,7 @@ export type DigestInput = {
   links: readonly LinkRecord[];
   assignments: readonly Assignment[];
   states: readonly SubjectState[];
+  changeHeads?: readonly ChangeHead[];    // a change's head when the forge reported it (§3.2); the replay applies them in time
   needsYou: readonly NeedsYouState[];     // live conditions only: an ask still open (DG6, C1)
   stale: readonly StaleCondition[];       // computed by staleConditions, never reported by a lane (DG10)
 };
@@ -158,17 +159,14 @@ export function rootIndex(links: readonly LinkRecord[], claims: readonly Claim[]
   ].sort((a, b) => a.at - b.at);
 }
 
-// How many times the weekly root index has been walked. One walk serves every claim and failure (DG9).
-let rootPassCount = 0;
-export function rootPasses(): number { return rootPassCount; }
-
 type FirstRoot = { task: TaskKey; at: number };
 
-// The first link for each subject, once. Its root at time t is that task when the link was already filed (DG5, DG12).
-function firstRoots(edges: readonly RootEdge[]): Map<string, FirstRoot> {
-  rootPassCount++;
+// The first link for each subject, once. The list is sorted here: a caller that hands the edges over in the
+// wrong order still roots at the earliest link (DG5, DG12). One walk serves every claim and failure.
+function firstRoots(edges: readonly RootEdge[], passes?: PassCount): Map<string, FirstRoot> {
+  if (passes) passes.n++;
   const map = new Map<string, FirstRoot>();
-  for (const e of edges) if (!map.has(e.key)) map.set(e.key, { task: e.task, at: e.at });
+  for (const e of [...edges].sort((a, b) => a.at - b.at)) if (!map.has(e.key)) map.set(e.key, { task: e.task, at: e.at });
   return map;
 }
 
@@ -618,9 +616,9 @@ function countFrom(sources: readonly ClaimSource[], first: ReadonlyMap<string, F
   return [...byKey.values()];
 }
 
-export function countedClaims(sources: readonly ClaimSource[], edges: readonly RootEdge[]): CountedClaim[] {
-  const first = firstRoots(edges);
-  return countFrom(sources, first);
+export function countedClaims(sources: readonly ClaimSource[], links: readonly LinkRecord[], claims: readonly Claim[], passes?: PassCount): CountedClaim[] {
+  const edges = rootIndex(links, claims);
+  return countFrom(sources, firstRoots(edges, passes));
 }
 
 // An ISO week in the principal's zone, from the edge: the domain counts, the edge draws the windows.
@@ -750,8 +748,8 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, first
   return level;
 }
 
-export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: number): WeeklyRow[] {
-  const first = firstRoots(rootIndex(r.links, r.claims));
+export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: number, passes?: PassCount): WeeklyRow[] {
+  const first = firstRoots(rootIndex(r.links, r.claims), passes);
   const heads = indexChangeHeads(r);
   const counted = countFrom(r.claimSources, first);
   return weeks.map(w => {
