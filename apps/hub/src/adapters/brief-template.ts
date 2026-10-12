@@ -22,11 +22,16 @@ const ORDER = [
   "Decision",
   "Evidence",
 ] as const;
-const OPTIONAL = new Set<string>(["If no decision by the due date", "Evidence"]);
 const KNOWN = new Set<string>(ORDER);
 const FRONT = new Set(["topic", "due", "minutes", "recommend", "blocking", "project", "task", "ref"]);
 const LABEL = /^(Alternative|Main uncertainty|Note|Assumptions|Downside case|Risk|Control|Limits|Needs fresh approval|Review point):\s*(.*)$/;
 const LISTS = new Set(["Assumptions", "Limits"]);
+const NO_LABELS = new Set<string>();
+const ASK_LABELS = new Set(["Alternative", "Main uncertainty"]);
+const WHY_LABELS = new Set(["Assumptions", "Downside case"]);
+const RISK_LABELS = new Set(["Risk", "Control"]);
+const AUTH_LABELS = new Set(["Limits", "Needs fresh approval", "Review point"]);
+const NOTE_LABELS = new Set(["Note"]);
 
 const problem = (code: string, where: string, text: string): BriefProblem => ({ level: "error", code, where, text });
 
@@ -43,7 +48,7 @@ function isRule(line: string): boolean {
 
 // A labelled line, then its continuation (wrapped prose joined with a space; a list stays items). The prose before
 // the first label is the section's own text.
-function splitLabels(body: string): { prose: string; labels: Map<string, string>; lists: Map<string, string[]> } {
+function splitLabels(body: string, allowed: ReadonlySet<string>): { prose: string; labels: Map<string, string>; lists: Map<string, string[]> } {
   const labels = new Map<string, string>();
   const lists = new Map<string, string[]>();
   const prose: string[] = [];
@@ -51,7 +56,7 @@ function splitLabels(body: string): { prose: string; labels: Map<string, string>
   let mode: "prose" | "label" | "list" = "prose";
   for (const line of body.split("\n")) {
     const m = LABEL.exec(line.trim());
-    if (m) {
+    if (m && allowed.has(m[1] ?? "")) {
       current = m[1] ?? "";
       const rest = (m[2] ?? "").trim();
       if (LISTS.has(current)) {
@@ -67,6 +72,13 @@ function splitLabels(body: string): { prose: string; labels: Map<string, string>
       const item = /^[-*]\s+(.*)$/.exec(line.trim());
       if (item) { lists.get(current)?.push((item[1] ?? "").trim()); continue; }
       if (!line.trim()) continue;
+      // A wrapped list item is indented (GFM). It stays on the item. A new paragraph ends the list.
+      if (/^\s+\S/.test(line)) {
+        const items = lists.get(current);
+        const last = items?.length ? items.length - 1 : -1;
+        if (items && last >= 0) items[last] = `${items[last]} ${line.trim()}`.trim();
+        continue;
+      }
       mode = "prose";
       current = null;
     }
@@ -108,11 +120,13 @@ function decisionOptions(body: string): { key: string; label: string }[] {
   return out;
 }
 
-function evidenceOf(body: string): { label: string; url: string }[] {
+function evidenceOf(body: string, problems: BriefProblem[]): { label: string; url: string }[] {
   const out: { label: string; url: string }[] = [];
   for (const line of body.split("\n")) {
+    if (!line.trim()) continue;
     const m = /^[-*]\s+\[([^\]]*)\]\(([^)]*)\)\s*$/.exec(line.trim());
     if (m) out.push({ label: (m[1] ?? "").trim(), url: (m[2] ?? "").trim() });
+    else problems.push(problem("bad_evidence", "evidence", `an evidence line is "- [label](https://…)", not ${JSON.stringify(line.trim())}`));
   }
   return out;
 }
@@ -197,22 +211,24 @@ export function parseBriefMarkdown(text: string): ParsedTemplate {
       problems.push(problem("unknown_section", s.title, `"${s.title}" is out of order; keep the template's headings in their order`));
     }
     last = at;
-    fill(draft, s.title, s.body);
-  }
-  for (const title of ORDER) {
-    if (OPTIONAL.has(title)) continue;
-    if (!h2.some(s => s.title === title)) {
-      // Left absent: lintBrief names the missing section. Nothing to add here.
-    }
+    fill(draft, s.title, s.body, problems);
   }
   checkColumns(draft, problems);
   return { draft, problems };
 }
 
-function fill(draft: Record<string, unknown>, title: string, raw: string): void {
+function labelsFor(title: string): ReadonlySet<string> {
+  if (title === "The ask") return ASK_LABELS;
+  if (title === "Why the recommendation") return WHY_LABELS;
+  if (title === "Main risk and control") return RISK_LABELS;
+  if (title === "What approval authorizes") return AUTH_LABELS;
+  return NO_LABELS;
+}
+
+function fill(draft: Record<string, unknown>, title: string, raw: string, problems: BriefProblem[]): void {
   if (title === "Options compared") {
     const table = parseTable(raw);
-    const labels = splitLabels(table ? table.rest : raw);
+    const labels = splitLabels(table ? table.rest : raw, NOTE_LABELS);
     const note = labels.labels.get("Note");
     draft.comparison = {
       ...(table ? { rows: table.rows.map(r => ({ factor: r.factor, cells: r.cells })) } : {}),
@@ -226,10 +242,10 @@ function fill(draft: Record<string, unknown>, title: string, raw: string): void 
     return;
   }
   if (title === "Evidence") {
-    draft.evidence = evidenceOf(raw);
+    draft.evidence = evidenceOf(raw, problems);
     return;
   }
-  const { prose, labels, lists } = splitLabels(raw);
+  const { prose, labels, lists } = splitLabels(raw, labelsFor(title));
   if (title === "The ask") {
     draft.ask = {
       ...(prose ? { text: prose } : {}),
