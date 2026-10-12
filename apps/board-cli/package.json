@@ -7,7 +7,8 @@
     "typecheck": "tsc -p ."
   },
   "bin": {
-    "morndo-board": "./src/main.ts"
+    "morndo-board": "./src/main.ts",
+    "morndo-decide": "./src/decide-main.ts"
   },
   "dependencies": {
     "@morndo/domain": "0.0.0"
