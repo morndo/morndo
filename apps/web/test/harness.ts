@@ -51,44 +51,57 @@ export async function startWeb(html = DESKTOP_PAGE): Promise<Web> {
 // machine's interfaces, though the page only talks to 127.0.0.1 (crbug.com/974711, closed as won't fix). Where other
 // work creates and removes container networks, a bridge's address does so every few seconds. A page whose modules were
 // cut that way still fires load but mounts nothing, and its test reads an empty page or waits out its timeout: seen
-// 2026-10-12, every module request of two pages failing in the same millisecond, as a container network went away. So
-// each page of a steady() browser loads again when one of its goto's or reload's requests failed that way, and only
-// then; any other failure stands. One container's start or stop is a burst of address changes, and a load at once
-// after a cut was cut again, 3 times running in 5 of 50 runs beside two container churners: so it waits 250 ms, then
-// twice as long each time, up to 5 loads in all (3.75 s of waiting). browser.newPage() makes its context with
-// newContext too.
+// 2026-10-12, every module request of two pages failing in the same millisecond, as a container network went away.
+// So a steady() browser's page.goto loads again when that load itself was cut: the document request failed that way,
+// or a request failed that way and a module script of the page failed to load (its own fetch or one it imports), so
+// none of the page's code ran and loading again repeats nothing. Any other failure stands, as does a cut that left the
+// modules whole: a request after the page started (a lazy chunk, a fetch) fails in the test as before, out of this
+// guard's reach. reload() is never repeated: a test reloads to see what the page kept. Up to 4 loads, 250 ms, 500 ms
+// and 1 s apart (1.75 s in all, within the test's 20 s): one container's start or stop is a burst of address changes,
+// and a load at once after a cut was cut again (5 of 50 runs beside two container churners).
+// browser.newPage() makes its context with newContext too.
 export function steady(browser: Browser): Browser {
   const newContext = browser.newContext.bind(browser);
   browser.newContext = async (...args) => {
     const context = await newContext(...args);
     const newPage = context.newPage.bind(context);
-    context.newPage = async () => reloadsWhenCut(await newPage());
+    context.newPage = async () => loadsAgainWhenCut(await newPage());
     return context;
   };
   return browser;
 }
 
 const CUT = "net::ERR_NETWORK_CHANGED";
-const LOADS = 5;
-function reloadsWhenCut(page: Page): Page {
-  for (const name of ["goto", "reload"] as const) {
-    const load = page[name].bind(page) as (...args: unknown[]) => ReturnType<Page["reload"]>;
-    page[name] = (async (...args: unknown[]) => {
-      for (let attempt = 1; ; attempt++) {
-        let cut = false;
-        const failed = (r: PageRequest) => { if (r.failure()?.errorText === CUT) cut = true; };
-        page.on("requestfailed", failed);
-        try {
-          const response = await load(...args);
-          if (!cut || attempt === LOADS) return response;
-        } catch (e) {
-          if ((!cut && !String(e).includes(CUT)) || attempt === LOADS) throw e;
-        } finally { page.off("requestfailed", failed); }
-        console.warn(`${CUT} cut this page's ${name} (load ${attempt}): loading it again`);
-        await new Promise(resolve => { setTimeout(resolve, 250 * 2 ** (attempt - 1)); });
+const PAUSES = [250, 500, 1000];
+// In each document of the page: a module script that could not be loaded fires error at its element (HTML, "execute
+// the script element"); errors of the page's own code do not.
+const MODULES_FAILED = `addEventListener("error", e => {
+  if (e.target instanceof HTMLScriptElement && e.target.type === "module") globalThis.__morndoModulesFailed = true;
+}, true);`;
+
+async function loadsAgainWhenCut(page: Page): Promise<Page> {
+  await page.addInitScript({ content: MODULES_FAILED });
+  const goto = page.goto.bind(page);
+  page.goto = (async (url: string, options?: Parameters<Page["goto"]>[1]) => {
+    for (let load = 0; ; load++) {
+      let cut = false;
+      const failed = (r: PageRequest) => { if (r.failure()?.errorText === CUT) cut = true; };
+      page.on("requestfailed", failed);
+      let response: Awaited<ReturnType<Page["goto"]>> | undefined;
+      try {
+        response = await goto(url, options);
+      } catch (e) {
+        if (!String(e).includes(CUT) || load === PAUSES.length) throw e;
+      } finally { page.off("requestfailed", failed); }
+      if (response !== undefined) {
+        if (!cut || load === PAUSES.length) return response;
+        const modulesFailed = await page.evaluate(() => (globalThis as { __morndoModulesFailed?: boolean }).__morndoModulesFailed === true);
+        if (!modulesFailed) return response;
       }
-    }) as never;
-  }
+      console.warn(`${CUT} cut this page's load ${load + 1}: loading it again`);
+      await new Promise(resolve => { setTimeout(resolve, PAUSES[load]); });
+    }
+  }) as Page["goto"];
   return page;
 }
 
