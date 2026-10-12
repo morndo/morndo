@@ -135,9 +135,9 @@ export class BriefService {
     const state: BriefState = previous ? previous.state : who.kind === "worker" ? "draft" : "open";
     // Only an open brief claims a ref. A draft keeps the ref in its text for a later forward, and holds no id.
     const ref = state === "open" ? brief.ref : null;
+    const early = this.#filingRefusal(brief, state, ref, previous, who);
+    if (early) return early;
     if (dry) return { ok: "dry", warnings };
-    if (brief.ref !== null && !REF.test(brief.ref)) return { ok: false, problem: "bad_ref" };
-    if (previous && brief.ref !== previous.brief.ref) return { ok: false, problem: "bad_ref" };
     const result = this.#store.transaction(() => {
       const taken = ref !== null && !previous ? this.#store.brief(ref) : null;
       if (taken && this.#holdsRef(taken)) return { ok: false as const, problem: "ref_taken" as const };
@@ -255,6 +255,22 @@ export class BriefService {
   // Open, settled and expired rows hold the ref. A draft never does, and neither does a withdrawn or declined row.
   #holdsRef(row: BriefRecord): boolean {
     return row.state !== "draft" && row.state !== "withdrawn" && row.state !== "declined";
+  }
+
+  // The checks filing and a dry run share. A dry run returns after them and writes nothing.
+  #filingRefusal(brief: DecisionBrief, state: BriefState, ref: string | null, previous: BriefRecord | null, who: Filer): FileResult | null {
+    if (brief.ref !== null && !REF.test(brief.ref)) return { ok: false, problem: "bad_ref" };
+    if (previous && brief.ref !== previous.brief.ref) return { ok: false, problem: "bad_ref" };
+    const taken = ref !== null && !previous ? this.#store.brief(ref) : null;
+    if (taken && this.#holdsRef(taken)) return { ok: false, problem: "ref_taken" };
+    const askerKind = previous?.askerKind ?? who.kind;
+    const askerName = previous?.askerName ?? who.name;
+    if (state === "open" && !previous && this.#openCount(askerKind, askerName) >= MAX_OPEN) return { ok: false, problem: "too_many_open" };
+    return null;
+  }
+
+  #openCount(kind: "manager" | "worker", name: string): number {
+    return this.#store.openBriefCount(kind, name);
   }
 
   #isAsker(row: BriefRecord, who: Filer): boolean {
