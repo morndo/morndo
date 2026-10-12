@@ -752,6 +752,29 @@ describe("the weekly count of claims (DG12)", () => {
       { level: "checked", claims: 1, laterFailed: 1 },
     ]);
   });
+  it("a change rooted under another task is not judged as part of this task's claim (DG5)", () => {
+    // #9 was linked to T-4 first and later to T-12 as well. The digest groups it under T-4. T-12's weekly level
+    // is not pulled down by #9's failing evidence.
+    const t12 = task(12);
+    const c9 = change("acme/web", 9);
+    const links = [
+      { task: taskKey(4), target: c9, by: "builder", at: NOW - 2 * MIN, seq: 1 },
+      { task: taskKey(12), target: c9, by: "builder", at: NOW - MIN, seq: 2 },
+    ];
+    const grouped = digest({ events: [event("opened_or_pushed", c9, 3, NOW)], links });
+    expect(one(grouped, "T-4")?.subjects).toContainEqual(c9);
+    expect(one(grouped, "T-12")).toBeUndefined();
+    const r = records({
+      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
+      claimRounds: [{ subject: t12, at: NOW }],
+      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      links,
+      subjectStates: [state(c9, { revision: a1 })],
+      evidence: [evidence({ subject: c9, revision: a1, kind: "ci", result: "fail", at: NOW + DAY })],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
+    expect(row?.levels).toEqual([{ level: "claimed", claims: 1, laterFailed: 0 }]);
+  });
   it("each linked change and deploy is judged at its own head, not at the task claim's revision", () => {
     // T-12 moved to review at #7's head a1, and is also linked to #8 at b1 and to a deploy of b1.
     // Forge CI passed on both heads. Judging #8 and the deploy at a1 voids that evidence.
