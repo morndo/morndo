@@ -37,7 +37,8 @@ export function alertWords(a: AlertWire): AlertWords {
     case "delivery_waiting": {
       const minutes = num(d.minutes);
       const why = STATE[str(d.state, "")] ?? WAITING[str(d.reason, "")] ?? "it wasn't taken yet";
-      return { title: `A message to ${str(d.lane, "a lane")} has waited ${minutes ?? "some"} min`, detail: `It goes in once it can: ${why}.`, urgent: urgentAlert(a) };
+      const lane = str(d.lane, "a lane");
+      return { title: `A message to ${lane === "manager" ? "the manager" : lane} has waited ${minutes ?? "some"} min`, detail: `It goes in once it can: ${why}.`, urgent: urgentAlert(a) };
     }
     case "lane_conflict": return {
       title: `Two windows are named ${str(d.name, "the same")}`,

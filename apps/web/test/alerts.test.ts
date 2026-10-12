@@ -21,7 +21,9 @@ describe("alert words", () => {
   it("marks the urgent ones by the protocol's rule", () => {
     for (const k of ALERT_KINDS) expect(alertWords(a(k)).urgent, k).toBe(urgentAlert(a(k)));
     expect(alertWords(a("delivery_waiting", { minutes: 15, reason: "menu_open", lane: "manager" }))).toMatchObject({
-      title: "A message to manager has waited 15 min", detail: "It goes in once it can: a menu is open in its terminal.", urgent: true });
+      title: "A message to the manager has waited 15 min", detail: "It goes in once it can: a menu is open in its terminal.", urgent: true });
+    expect(alertWords(a("delivery_waiting", { minutes: 2, reason: "no_pane", lane: "alpha" }))).toMatchObject({
+      title: "A message to alpha has waited 2 min", detail: "It goes in once it can: it has no window.", urgent: false });
   });
   it("unseen: newer than his mark", () => {
     expect(unseen([a("x", {}, 5), a("y", {}, 3)], 4)).toBe(1);
