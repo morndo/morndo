@@ -3,7 +3,7 @@
 // takes the arguments, the environment, a fetch, a file reader and a way to learn this lane's name.
 // Exit codes, as morndo-board: 0 done, 1 the hub (or the lint) refused, 2 usage, 3 the hub can't be reached.
 import { lintBrief, briefMarkdown, type BriefProblem, type DecisionBrief } from "@morndo/domain";
-import { BRIEF_TEMPLATE, parseBriefMarkdown } from "../../hub/src/adapters/brief-template.ts";
+import { BRIEF_TEMPLATE, parseBriefMarkdown } from "@morndo/protocol";
 import { parseArgs } from "./cli.ts";
 import { decidePromptFor } from "./prompt.ts";
 
@@ -14,6 +14,7 @@ export type Io = {
   out: (line: string) => void;
   err: (line: string) => void;
   now?: () => number;
+  timeZone?: string;
 };
 export type Env = { MORNDO_HUB?: string | undefined; MORNDO_AGENT_TOKEN?: string | undefined; MORNDO_LANE?: string | undefined };
 
@@ -98,7 +99,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       const path = rest[0];
       if (!path) throw new Usage("usage: morndo-decide lint <file.md|->");
       const raw = await io.read(path);
-      const parsed = flags.json === true ? { draft: JSON.parse(raw) as unknown, problems: [] as BriefProblem[] } : parseBriefMarkdown(raw);
+      const parsed = flags.json === true ? { draft: JSON.parse(raw) as unknown, problems: [] as BriefProblem[] } : parseBriefMarkdown(raw, io.timeZone ?? "UTC");
       const lint = lintBrief(parsed.draft, (io.now ?? Date.now)());
       const errors = [...parsed.problems.filter(p => p.level === "error"), ...lint.problems.filter(p => p.level === "error")];
       const warnings = errors.length ? [] : lint.problems.filter(p => p.level === "warning");
