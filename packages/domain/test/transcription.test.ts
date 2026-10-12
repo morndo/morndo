@@ -70,6 +70,8 @@ describe("requesting a transcription", () => {
     expect(requestTranscription([], ask({ id: 42 as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
     expect(requestTranscription([], ask({ recording: { kind: "upload", id: 7 as unknown as string } }), AT, READY))
       .toEqual({ ok: false, error: "bad_recording" });
+    // An array stringifies to "de", and RegExp.test would accept that. The language has to be a string first.
+    expect(requestTranscription([], ask({ language: ["de"] as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
   });
   it("queues one attempt, waiting for a slot, with no outcome and no text", () => {
     expect(live()).toMatchObject({
