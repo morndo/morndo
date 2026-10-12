@@ -357,6 +357,14 @@ describe("the mark (DG7)", () => {
     expect(markAllSeen({ seq: 5, seen: [c] }, items, ["a", "b"], 9)).toEqual({ seq: 9, seen: [] });
     expect(markAllSeen({ seq: 4, seen: [] }, items, ["a"], 9)).toEqual({ seq: 5, seen: [] });   // stops at b
   });
+  it("an item seen at an older sequence is a gap: the walk stops at it, unseen at its new sequence (DG8)", () => {
+    const x5: SeenAt = { id: "x", seq: 5, level: "claimed", section: "merged" };
+    const x9: SeenAt = { ...x5, seq: 9 };                                 // a new event moved x, behind "N more"
+    const y: SeenAt = { id: "y", seq: 11, level: "claimed", section: "done" };
+    const mark = markAllSeen({ seq: 3, seen: [x5] }, [x9, y], [], 20);
+    expect(mark).toEqual({ seq: 3, seen: [x5] });                         // x was not displayed at 9: nothing passes it
+    expect(itemNew(x9, mark)).toEqual({ fresh: true, changed: null });    // and its update stays new (DG8)
+  });
   it("opening an item marks that item seen and moves nothing else", () => {
     expect(openedItem({ seq: 4, seen: [] }, b)).toEqual({ seq: 4, seen: [b] });
     const again = openedItem({ seq: 4, seen: [b] }, { ...b, level: "failed" });
