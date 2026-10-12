@@ -41,7 +41,8 @@ describe("knowledge never routes (K9)", () => {
 
 describe("the snapshot never feeds a gate (K13)", () => {
   const banned = ["models.dev", "models-dev", "trimModelsDev", "readSnapshot"];
-  const allowed = ["packages/domain/src/knowledge-facts.ts", "packages/domain/src/index.ts"];
+  // knowledge.ts names the citation form models.dev@<date>; it reads no snapshot.
+  const allowed = ["packages/domain/src/knowledge-facts.ts", "packages/domain/src/knowledge.ts", "packages/domain/src/index.ts"];
   it("no source outside knowledge-facts names the snapshot's source or its reader", () => {
     expect(offenders(packageSources(), banned, allowed)).toEqual([]);
   });
