@@ -462,6 +462,21 @@ describe("new since the last look (DG8)", () => {
     });
     expect(one(d, "acme/web#7")).toMatchObject({ fresh: true, changed: "level" });
   });
+  it("a claim or a claimant change raises the item's sequence: a level drop after the mark is new again", () => {
+    const t12 = task(12);
+    const d = digest({
+      mark: { seq: 15, seen: [] },                        // the mark passed the item; its seen entry was dropped
+      states: [state(t12, { claimRound: NOW - 10 })],
+      claims: [
+        claim({ subject: t12, lane: "builder", seq: 5, at: NOW - 9 }),
+        claim({ subject: t12, lane: "reviewer", seq: 20, at: NOW - MIN }),   // the reviewer claims: its review stops counting
+      ],
+      evidence: [evidence({ subject: t12, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
+      events: [event("done", t12, 8, NOW - 8)],
+      stale: [{ kind: "task_in_review", task: taskKey(12), since: NOW - 9 * HOUR }],   // keeps the line listed
+    });
+    expect(one(d, "T-12")).toMatchObject({ level: "claimed", fresh: true, changed: null });
+  });
 });
 
 // ---- DG9: a rebuild gives the same answer; counts are counts
