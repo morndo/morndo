@@ -716,6 +716,42 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row).toMatchObject({ claims: 1, laterFailed: 1 });
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 1 }]);
   });
+  it("a link filed after a claim does not change how that week was counted (DG9, DG12)", () => {
+    // Week 1 counted #7 and T-12 as two claims. Three weeks later someone links them. A rebuild still counts two,
+    // and the failure on #7 does not fail T-12's claim.
+    const t12 = task(12);
+    const sources: ClaimSource[] = [
+      { subject: c7, revision: a1, at: NOW, via: "filed" },
+      { subject: t12, revision: a1, at: NOW, via: "review" },
+    ];
+    const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW + 21 * DAY, seq: 40 }];
+    expect(countedClaims(sources, links)).toEqual([
+      { subject: c7, revision: a1, at: NOW },
+      { subject: t12, revision: a1, at: NOW },
+    ]);
+    const r = records({
+      claimSources: sources,
+      claimRounds: [{ subject: t12, at: NOW }],
+      claims: [
+        claim({ subject: c7, revision: a1, lane: "builder", at: NOW }),
+        claim({ subject: t12, revision: a1, lane: "builder", at: NOW }),
+      ],
+      links,
+      subjectStates: [state(c7, { revision: a1 })],
+      evidence: [
+        evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
+        evidence({ subject: c7, revision: a1, kind: "ci", result: "fail", at: NOW + 10 * DAY }),
+      ],
+      claimFailures: [{ subject: c7, revision: a1, at: NOW + 10 * DAY, via: "evidence" }],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 22 * DAY);
+    expect(row?.claims).toBe(2);
+    expect(row?.laterFailed).toBe(1);
+    expect(row?.levels).toEqual([
+      { level: "claimed", claims: 1, laterFailed: 0 },
+      { level: "checked", claims: 1, laterFailed: 1 },
+    ]);
+  });
   it("each linked change and deploy is judged at its own head, not at the task claim's revision", () => {
     // T-12 moved to review at #7's head a1, and is also linked to #8 at b1 and to a deploy of b1.
     // Forge CI passed on both heads. Judging #8 and the deploy at a1 voids that evidence.
