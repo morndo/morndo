@@ -193,12 +193,14 @@ export function buildDigest(input: DigestInput): DigestResult {
     // DG6: needs you and stale are live conditions — they hold whatever the mark, and leave only when they clear.
     const live = input.needsYou.find(n => keys.has(subjectKey(n.subject))) ?? null;
     const staleCond = input.stale.find(c => keys.has(subjectKey(staleSubject(c)))) ?? null;
-    // DG5: the first section, in the attention order, that a live condition or one of its events since the mark
-    // belongs to.
+    // DG5: the first section, in the attention order (§5), that a live condition of its own or one of its events
+    // since the mark belongs to — a decision or a failure outranks a stale condition; needs you outranks both.
+    const belongs: Section[] = [];
+    if (live !== null) belongs.push("needs_you");
+    if (staleCond !== null) belongs.push("stale_or_stuck");
+    for (const e of trail) belongs.push(sectionOfEvent(e.kind));
     let section: Section | null = null;
-    if (live !== null) section = "needs_you";
-    else if (staleCond !== null) section = "stale_or_stuck";
-    else for (const s of SECTIONS) { if (trail.some(e => sectionOfEvent(e.kind) === s)) { section = s; break; } }
+    for (const s of SECTIONS) if (belongs.includes(s)) { section = s; break; }
     if (section === null) continue;
 
     const evidence: Evidence[] = [], voided: Evidence[] = [];
