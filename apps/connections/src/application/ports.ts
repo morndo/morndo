@@ -139,6 +139,9 @@ export type SealedStore = {
   // Opens nothing.
   has(ref: string): boolean;
   keyedFingerprint(ref: string): Promise<string | null>;
+  // Removes the ref's file, the age vault's sealed form included where the plaintext vault shares its directory. The
+  // plaintext vault refuses a ref it finds no file of, so a destroy run on it can't pass over a value it doesn't see; the
+  // age vault, which sees every form it writes, passes over one already gone (round 2, points 2 and 5).
   remove(ref: string): void;
   // The refs it holds that start with `prefix` and whose file was last written before `writtenBefore` (ms since the
   // epoch), for the startup sweep (D2).

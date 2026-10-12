@@ -7,6 +7,11 @@ export function fingerprintOf(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex").slice(0, 12);
 }
 
+// The age vault's names in a vault directory, which the plaintext vault shares: the sealed file, and its fingerprint mark.
+// Here, so the plaintext vault can remove a sealed file without a copy of them (round 2, points 2 and 5).
+export const SEALED_SUFFIX = ".age";
+export const MARK_SUFFIX = `${SEALED_SUFFIX}.fingerprint`;
+
 export function secretPath(dir: string, ref: string, suffix = ""): string {
   if (!SECRET_REF.test(ref)) throw new Error("refused ref");
   return join(dir, `${ref}${suffix}`);

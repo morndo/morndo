@@ -11,12 +11,10 @@ import { Decrypter, Encrypter, generateX25519Identity, identityToRecipient } fro
 import { VALUE_MAX_BYTES } from "@morndo/node-ops";
 import { assertPrivate, readPrivate, refuseBareHome, writeNew, writePrivate, writePrivatePair } from "./file-mode.ts";
 import { NodeKeys } from "./node-keys.ts";
-import { fingerprintOf, refsIn, secretPath } from "./secret-ref.ts";
+import { MARK_SUFFIX, SEALED_SUFFIX, fingerprintOf, refsIn, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
 import type { SealedProblem, SealedStore } from "../application/ports.ts";
 import type { Vault } from "./vault.ts";
-
-const SUFFIX = ".age";
 
 export class AgeVault implements Vault, SealedStore {
   readonly #dir: string;
@@ -107,7 +105,7 @@ export class AgeVault implements Vault, SealedStore {
   refs(prefix: string, writtenBefore: number): readonly string[] {
     if (!existsSync(this.#dir)) return [];
     assertPrivate(this.#dir, "dir", this.#uid);
-    return refsIn(readdirSync(this.#dir), prefix, SUFFIX).filter(ref => writtenAt(this.#file(ref)) < writtenBefore);
+    return refsIn(readdirSync(this.#dir), prefix, SEALED_SUFFIX).filter(ref => writtenAt(this.#file(ref)) < writtenBefore);
   }
 
   async keyedFingerprint(ref: string): Promise<string | null> {
@@ -148,11 +146,11 @@ export class AgeVault implements Vault, SealedStore {
   }
 
   #file(ref: string): string {
-    return secretPath(this.#dir, ref, ".age");
+    return secretPath(this.#dir, ref, SEALED_SUFFIX);
   }
 
   #mark(ref: string): string {
-    return `${this.#file(ref)}.fingerprint`;
+    return secretPath(this.#dir, ref, MARK_SUFFIX);
   }
 }
 

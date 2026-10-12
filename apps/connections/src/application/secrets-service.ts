@@ -202,7 +202,7 @@ export class SecretsService {
 
   #removeOr(ref: string, left: string[]): void {
     try { this.#deps.vault.remove(ref); } catch (error) {
-      left.push(`vault: the file of ${ref} is still there, and a sweep removes it once it can (${messageOf(error)})`);
+      left.push(`vault: the file of ${ref} was not removed (${messageOf(error)}); a sweep on the age vault removes one no version refers to`);
     }
   }
 
