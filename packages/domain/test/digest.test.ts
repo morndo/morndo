@@ -39,24 +39,12 @@ const claim = (o: Partial<Claim> & { subject: SubjectRef; lane: string }): Claim
 };
 const event = (kind: DigestEventKind, subject: SubjectRef, seq: number, at: number): DigestEvent =>
   ({ kind, subject, seq, at, origin: `${kind}:${subjectRef(subject)}:${seq}` });
-const headOnState = new WeakMap<SubjectState, Revision>();
-const state = (subject: SubjectRef, o: Partial<SubjectState> & { revision?: Revision | null } = {}): SubjectState => {
-  const { revision, ...rest } = o;
-  const st: SubjectState = { subject, claimRound: null, deployedAt: null, reverted: false, rolledBack: false, reopened: false, title: null, ...rest };
-  if (revision != null) headOnState.set(st, revision);
-  return st;
-};
-const digest = (o: Partial<DigestInput> = {}, passes?: PassCount) => {
-  // A change's evidence counts only after a forge head (Rule 1). Tests that name a revision on the subject and
-  // do not file heads themselves get that head, so the level assertion stays the one the record supports.
-  const filed = o.changeHeads !== undefined;
-  const changeHeads = [...(o.changeHeads ?? [])];
-  if (!filed) for (const s of o.states ?? []) {
-    const revision = headOnState.get(s);
-    if (s.subject.kind === "change" && revision !== undefined) changeHeads.push({ subject: s.subject, revision, seq: 1, at: 0 });
-  }
-  return buildDigest({ now: NOW, newest: 10_000, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [], states: [], needsYou: [], stale: [], ...o, changeHeads }, passes);
-};
+const state = (subject: SubjectRef, o: Partial<SubjectState> = {}): SubjectState => ({
+  subject, claimRound: null, deployedAt: null, reverted: false, rolledBack: false, reopened: false, title: null, ...o,
+});
+const head = (subject: SubjectRef, revision: Revision) => ({ subject, revision, seq: 1, at: 0 });
+const digest = (o: Partial<DigestInput> = {}, passes?: PassCount) =>
+  buildDigest({ now: NOW, newest: 10_000, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [], states: [], needsYou: [], stale: [], changeHeads: [], ...o }, passes);
 const allItems = (d: { sections: { items: DigestItem[] }[] }) => d.sections.flatMap(s => s.items);
 const one = (d: ReturnType<typeof digest>, id: string) => allItems(d).find(i => i.id === id);
 const inSection = (d: ReturnType<typeof digest>, s: Section) => d.sections.find(x => x.section === s)?.items ?? [];
@@ -68,9 +56,10 @@ describe("derived from records (DG1)", () => {
   const a1 = rev("sha-a1", "patch-1");
   it("a lane's words show as a quoted claim, capped at 140, and set neither level, section nor verb", () => {
     const d = digest({
-      states: [state(c7, { revision: a1, title: "Add the digest" })],
+      states: [state(c7, { title: "Add the digest" })],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", note: "SHIPPED! everything verified green, trust me " + "x".repeat(150) })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
+      changeHeads: [head(c7, a1)],
     });
     const item = one(d, "acme/web#7");
     expect(item?.section).toBe("opened_or_pushed");          // the section came from the event, not the words
@@ -95,30 +84,33 @@ describe("the level ladder (DG2)", () => {
   const a1 = rev("sha-a1", "patch-1");
   it("a claimant's own CI link does not raise the level; it is shown, attached by the claimant", () => {
     const d = digest({
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", producer: lane("builder") })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "acme/web#7")?.level).toBe("claimed");
     expect(one(d, "acme/web#7")?.evidence).toHaveLength(1);
   });
   it("a lane ever assigned the linked task is a claimant too: its review does not raise", () => {
     const d = digest({
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
       links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 1, seq: 0 }],
       assignments: [{ task: taskKey(3), lane: "reviewer", seq: 0, at: 0 }],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer") })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "T-3")?.level).toBe("claimed");           // the linked task roots the item (DG5)
   });
   it("the forge's CI raises it to checked, another lane's review to reviewed; the highest holds", () => {
     const base = {
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       events: [event("merged", c7, 2, NOW)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
+      changeHeads: [head(c7, a1)],
     };
     const ciOnly = digest({ ...base, evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass" })] });
     expect(one(ciOnly, "acme/web#7")?.level).toBe("checked");
@@ -130,9 +122,10 @@ describe("the level ladder (DG2)", () => {
   });
   it("a lane that later claims stops its earlier evidence counting: the level is computed from current records", () => {
     const base = {
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       events: [event("merged", c7, 2, NOW)],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer") })],
+      changeHeads: [head(c7, a1)],
     };
     expect(one(digest({ ...base, claims: [claim({ subject: c7, revision: a1, lane: "builder" })] }), "acme/web#7")?.level).toBe("reviewed");
     expect(one(digest({ ...base, claims: [
@@ -142,34 +135,40 @@ describe("the level ladder (DG2)", () => {
   });
   it("on a change nobody claimed or linked, a lane's evidence counts for nothing; the forge's still does", () => {
     const d = digest({
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", producer: lane("builder") })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "acme/web#7")?.level).toBe("claimed");
     const withForge = digest({
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", producer: lane("builder") }),
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass" }),
       ],
       events: [event("opened_or_pushed", c7, 2, NOW)],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(withForge, "acme/web#7")?.level).toBe("checked");
   });
   it("verified live: only from another producer, and only once the deploy containing the revision has landed", () => {
     const base = { claims: [claim({ subject: c7, revision: a1, lane: "builder" })], events: [event("merged", c7, 2, NOW)] };
-    const before = digest({ ...base, states: [state(c7, { revision: a1, deployedAt: NOW + 10 })],
-      evidence: [evidence({ subject: c7, revision: a1, kind: "live", result: "pass", producer: lane("reviewer"), at: NOW + 5 })] });
+    const before = digest({ ...base, states: [state(c7, { deployedAt: NOW + 10 })],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "live", result: "pass", producer: lane("reviewer"), at: NOW + 5 })], changeHeads: [head(c7, a1)],
+    });
     expect(one(before, "acme/web#7")?.level).toBe("claimed");        // before the deploy: not a live check of it
-    const after = digest({ ...base, states: [state(c7, { revision: a1, deployedAt: NOW + 10 })],
-      evidence: [evidence({ subject: c7, revision: a1, kind: "live", result: "pass", producer: lane("reviewer"), at: NOW + 20 })] });
+    const after = digest({ ...base, states: [state(c7, { deployedAt: NOW + 10 })],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "live", result: "pass", producer: lane("reviewer"), at: NOW + 20 })], changeHeads: [head(c7, a1)],
+    });
     expect(one(after, "acme/web#7")?.level).toBe("verified_live");
-    const own = digest({ ...base, states: [state(c7, { revision: a1, deployedAt: NOW + 10 })],
-      evidence: [evidence({ subject: c7, revision: a1, kind: "live", result: "pass", producer: lane("builder"), at: NOW + 20 })] });
+    const own = digest({ ...base, states: [state(c7, { deployedAt: NOW + 10 })],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "live", result: "pass", producer: lane("builder"), at: NOW + 20 })], changeHeads: [head(c7, a1)],
+    });
     expect(one(own, "acme/web#7")?.level).toBe("claimed");           // the claimant's own live check raises nothing
-    const shot = digest({ ...base, states: [state(c7, { revision: a1, deployedAt: NOW + 10 })],
-      evidence: [evidence({ subject: c7, revision: a1, kind: "screenshot", result: "pass", producer: lane("reviewer"), at: NOW + 20 })] });
+    const shot = digest({ ...base, states: [state(c7, { deployedAt: NOW + 10 })],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "screenshot", result: "pass", producer: lane("reviewer"), at: NOW + 20 })], changeHeads: [head(c7, a1)],
+    });
     expect(one(shot, "acme/web#7")?.level).toBe("verified_live");
   });
   it("a task with no change of its own climbs the same ladder on its own evidence", () => {
@@ -202,21 +201,23 @@ describe("failure (DG3)", () => {
   const a1 = rev("sha-a1", "patch-1");
   it("a failing check beats a passing review", () => {
     const d = digest({
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer") }),
         evidence({ subject: c7, revision: a1, kind: "ci", result: "fail" }),
       ],
       events: [event("merged", c7, 2, NOW)],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "acme/web#7")?.level).toBe("failed");
   });
   it("a red run on an unclaimed change in progress shows failed, not Failed: work in progress", () => {
     const d = digest({
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "fail" })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "acme/web#7")?.level).toBe("failed");
     expect(one(d, "acme/web#7")?.section).toBe("opened_or_pushed");
@@ -224,14 +225,15 @@ describe("failure (DG3)", () => {
   });
   it("a reverted change and a rolled-back deploy stay failed while their cause is current", () => {
     const reverted = digest({
-      states: [state(c7, { revision: a1, reverted: true })],
+      states: [state(c7, { reverted: true })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer") })],
       events: [event("rolled_back", c7, 2, NOW)],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(reverted, "acme/web#7")?.level).toBe("failed");
     const prod = deploy("acme/web", "prod", "sha-a1");
     const rolledBack = digest({
-      states: [state(prod, { revision: a1, rolledBack: true })],
+      states: [state(prod, { rolledBack: true })],
       events: [event("rolled_back", prod, 2, NOW)],
     });
     expect(one(rolledBack, "acme/web:prod@sha-a1")?.level).toBe("failed");
@@ -263,10 +265,11 @@ describe("voiding on a new revision (DG4)", () => {
   it("a new push voids the level: earlier evidence stays visible, struck through", () => {
     const old = rev("sha-a1", "patch-1");
     const d = digest({
-      states: [state(c7, { revision: rev("sha-b2", "patch-2") })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: old, lane: "builder" })],
       evidence: [evidence({ subject: c7, revision: old, kind: "ci", result: "pass" })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
+      changeHeads: [head(c7, rev("sha-b2", "patch-2"))],
     });
     expect(one(d, "acme/web#7")?.level).toBe("claimed");
     expect(one(d, "acme/web#7")?.voided).toHaveLength(1);
@@ -274,10 +277,11 @@ describe("voiding on a new revision (DG4)", () => {
   });
   it("the same patch id keeps it: a rebase is the same change", () => {
     const d = digest({
-      states: [state(c7, { revision: rev("sha-b2", "patch-9") })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: rev("sha-a1", "patch-9"), lane: "builder" })],
       evidence: [evidence({ subject: c7, revision: rev("sha-a1", "patch-9"), kind: "ci", result: "pass" })],
       events: [event("opened_or_pushed", c7, 2, NOW)],
+      changeHeads: [head(c7, rev("sha-b2", "patch-9"))],
     });
     expect(one(d, "acme/web#7")?.level).toBe("checked");
   });
@@ -490,10 +494,11 @@ describe("new since the last look (DG8)", () => {
     const a1 = rev("sha-a1", "patch-1");
     const d = digest({
       mark: { seq: 7, seen: [seen] },
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
       events: [event("merged", c7, 7, NOW - MIN), event("failed", c7, 8, NOW)],   // the fail evidence is a failed event (§3.2)
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "fail", seq: 8 })],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "acme/web#7")).toMatchObject({ fresh: true, changed: "level" });
   });
@@ -519,11 +524,12 @@ describe("new since the last look (DG8)", () => {
     const a1 = rev("sha-a1", "patch-1");
     const reviewed: Partial<DigestInput> = {
       mark: { seq: 15, seen: [] },
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
       events: [event("merged", c7, 8, NOW - 8)],
       stale: [{ kind: "task_in_review", task: taskKey(3), since: NOW - 9 * HOUR }],
+      changeHeads: [head(c7, a1)],
     };
     const linked = digest({
       ...reviewed,
@@ -544,7 +550,7 @@ describe("new since the last look (DG8)", () => {
     const a1 = rev("sha-a1", "patch-1");
     const d = digest({
       mark: { seq: 15, seen: [] },
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
       links: [
         { task: taskKey(1), target: c7, by: "builder", at: NOW - 20, seq: 3 },
@@ -554,6 +560,7 @@ describe("new since the last look (DG8)", () => {
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
       events: [event("merged", c7, 8, NOW - 8)],
       stale: [{ kind: "task_in_review", task: taskKey(1), since: NOW - 9 * HOUR }],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "T-1")).toMatchObject({ level: "claimed", seq: 20, fresh: true });
   });
@@ -566,10 +573,11 @@ describe("new since the last look (DG8)", () => {
     const mark: DigestMark = { seq: 8, seen: [seen] };
     const base: Partial<DigestInput> = {
       mark,
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
       stale: [{ kind: "task_in_review", task: taskKey(3), since: NOW - 9 * HOUR }],
+      changeHeads: [head(c7, a1)],
     };
     const relinked = digest({
       ...base,
@@ -598,7 +606,7 @@ describe("new since the last look (DG8)", () => {
     const a1 = rev("sha-a1", "patch-1");
     const d = digest({
       mark: { seq: 30, seen: [] },
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [
         claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 30 }),
         claim({ subject: task(12), lane: "reviewer", seq: 5, at: NOW - 28 }),
@@ -611,18 +619,20 @@ describe("new since the last look (DG8)", () => {
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 20 })],
       events: [event("merged", c7, 8, NOW - 20)],
       stale: [{ kind: "task_in_review", task: taskKey(12), since: NOW - 9 * HOUR }],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "T-12"), "two records that each look redundant").toMatchObject({ level: "claimed", seq: 40, fresh: true });
     // Two links that bring the same member in. Each one, dropped alone, still sees the other, so neither raises.
     const brought = digest({
       mark: { seq: 20, seen: [] },
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       links: [
         { task: taskKey(4), target: c7, by: "builder", at: NOW - 5, seq: 30 },
         { task: taskKey(4), target: c7, by: "builder", at: NOW - 4, seq: 40 },
       ],
       events: [event("opened_or_pushed", c7, 10, NOW - 10)],
       stale: [{ kind: "task_in_review", task: taskKey(4), since: NOW - 9 * HOUR }],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(brought, "T-4"), "two records that each look redundant").toMatchObject({ seq: 30, fresh: true });
   });
@@ -632,11 +642,12 @@ describe("new since the last look (DG8)", () => {
     const a1 = rev("sha-a1", "patch-1");
     const d = digest({
       mark: { seq: 15, seen: [] },
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 20, at: NOW - 5, task: taskKey(99) })],
       links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 30 }],
       events: [event("opened_or_pushed", c7, 10, NOW - 10)],
       stale: [{ kind: "task_in_review", task: taskKey(99), since: NOW - 9 * HOUR }],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "T-99"), "the lowest sequence is the root").toMatchObject({ seq: 20, fresh: true });
     expect(one(d, "T-12"), "a later link does not move it").toBeUndefined();
@@ -646,7 +657,7 @@ describe("new since the last look (DG8)", () => {
     const a1 = rev("sha-a1", "patch-1");
     const d = digest({
       mark: { seq: 8, seen: [{ id: "T-3", seq: 9, level: "reviewed" }] },
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
       links: [
         { task: taskKey(3), target: c7, by: "builder", at: NOW - 20, seq: 3 },
@@ -654,6 +665,7 @@ describe("new since the last look (DG8)", () => {
       ],
       evidence: [evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer"), seq: 9, at: NOW - 8 })],
       stale: [{ kind: "task_in_review", task: taskKey(3), since: NOW - 9 * HOUR }],
+      changeHeads: [head(c7, a1)],
     });
     expect(one(d, "T-3"), "a no-op link stays quiet").toMatchObject({ level: "reviewed", seq: 9, fresh: false });
   });
@@ -663,11 +675,12 @@ describe("new since the last look (DG8)", () => {
     const passes: PassCount = { n: 0 };
     const d = digest({
       mark: { seq: 100, seen: [] },
-      states: [state(change("acme/web", 1), { revision: rev("sha-a1", null) })],
+      states: [state(change("acme/web", 1))],
       links,
       assignments: [{ task: taskKey(1), lane: "reviewer", seq: 500, at: NOW }],
       evidence: [evidence({ subject: change("acme/web", 1), revision: rev("sha-a1", null), kind: "review", result: "pass", producer: lane("reviewer"), seq: 80, at: NOW - 10 })],
       stale: [{ kind: "task_in_review", task: taskKey(1), since: NOW - 9 * HOUR }],
+      changeHeads: [head(change("acme/web", 1), rev("sha-a1", null))],
     }, passes);
     expect(one(d, "T-1")).toMatchObject({ level: "claimed", seq: 500, fresh: true });
     expect(passes.n, "one pass").toBe(1);
@@ -680,11 +693,11 @@ describe("new since the last look (DG8)", () => {
     const b2 = rev("sha-b2", "patch-2");
     const d = digest({
       mark: { seq: 15, seen: [] },
-      states: [state(c7, { revision: b2 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 30 })],
       links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 40, seq: 3 }],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", seq: 9, at: NOW - 20 })],
-      changeHeads: [
+       changeHeads: [
         { subject: c7, revision: a1, at: NOW - 40, seq: 2 },
         { subject: c7, revision: b2, at: NOW, seq: 20 },
       ],
@@ -698,11 +711,11 @@ describe("new since the last look (DG8)", () => {
     const seen: SeenAt = { id: "T-3", seq: 9, level: "checked" };
     const d = digest({
       mark: { seq: 8, seen: [seen] },
-      states: [state(c7, { revision: a1 })],
+      states: [state(c7)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 30 })],
       links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 40, seq: 3 }],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", seq: 9, at: NOW - 20 })],
-      changeHeads: [
+       changeHeads: [
         { subject: c7, revision: a1, at: NOW - 40, seq: 2 },
         { subject: c7, revision: a1, at: NOW, seq: 30 },
       ],
@@ -722,7 +735,7 @@ describe("rebuild determinism (DG9)", () => {
     const input = {
       mark: { seq: 2, seen: [] } as DigestMark,
       events: [event("merged", c7, 3, NOW), event("done", t1, 4, NOW)],
-      states: [state(c7, { revision: a1, title: "Add the digest" }), state(t1)],
+      states: [state(c7, { title: "Add the digest" }), state(t1)],
       claims: [claim({ subject: c7, revision: a1, lane: "builder" })],
       links: [{ task: taskKey(1), target: c7, by: "builder", at: NOW - 1, seq: 0 }],
       assignments: [{ task: taskKey(1), lane: "builder", seq: 0, at: 0 }],
@@ -731,6 +744,7 @@ describe("rebuild determinism (DG9)", () => {
         evidence({ subject: c7, revision: a1, kind: "review", result: "pass", producer: lane("reviewer") }),
       ],
       needsYou: [{ subject: task(2), blocking: true, due: null, since: NOW - MIN }],
+      changeHeads: [head(c7, a1)],
     };
     expect(digest(input)).toEqual(digest(input));
   });
@@ -834,15 +848,16 @@ describe("the weekly count of claims (DG12)", () => {
     const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }];
     expect(countedClaims(claims, links), "one root input").toEqual([{ subject: c7, revision: a1, at: NOW }]);
   });
-  it("counted once per root subject and revision, at the earliest of its sources", () => {
+  it("counted once per root subject and revision, at the lowest sequence", () => {
     const b2 = rev("sha-b2", "patch-2");
     const claims = [
       claim({ subject: c7, revision: a1, at: NOW + 1, lane: "builder" }),
       claim({ subject: c7, revision: a1, at: NOW, lane: "builder", via: "review" }),
       claim({ subject: c7, revision: b2, at: NOW + 2, lane: "builder", via: "lane_event" }),
     ];
+    // The review's clock is earlier, and its sequence is later. Sequence decides which claim is held.
     expect(countedClaims(claims, [])).toEqual([
-      { subject: c7, revision: a1, at: NOW },
+      { subject: c7, revision: a1, at: NOW + 1 },
       { subject: c7, revision: rev("sha-b2", "patch-2"), at: NOW + 2 },
     ]);
   });

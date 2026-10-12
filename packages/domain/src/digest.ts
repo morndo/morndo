@@ -160,14 +160,14 @@ export function rootIndex(links: readonly LinkRecord[], claims: readonly Claim[]
   return edges.sort((a, b) => a.seq - b.seq || a.at - b.at);
 }
 
-type FirstRoot = { task: TaskKey; at: number; seq: number };
+type FirstRoot = { task: TaskKey; seq: number };
 
 // The first link for each subject, once. rootIndex already sorted by sequence, so this walk does not sort again
 // (DG5, DG12). One walk serves every claim and failure.
 function firstRoots(edges: readonly RootEdge[], passes?: PassCount): Map<string, FirstRoot> {
   if (passes) passes.n++;
   const map = new Map<string, FirstRoot>();
-  for (const e of edges) if (!map.has(e.key)) map.set(e.key, { task: e.task, at: e.at, seq: e.seq });
+  for (const e of edges) if (!map.has(e.key)) map.set(e.key, { task: e.task, seq: e.seq });
   return map;
 }
 
@@ -178,19 +178,11 @@ function rootKeyAt(first: ReadonlyMap<string, FirstRoot>, s: SubjectRef, seq: nu
   return hit !== undefined && hit.seq <= seq ? hit.task : subjectKey(s);
 }
 
-// The first task linked to a subject at or below `seq` (DG5, NEW 2.5a).
-function mapAsOf(edges: readonly RootEdge[], seq: number): Map<string, TaskKey> {
+// The first task linked to each subject, as the records stand (DG5). A claim's own root is rootKeyAt, by sequence.
+export function linkMapOf(links: readonly LinkRecord[], claims: readonly Claim[]): Map<string, TaskKey> {
   const map = new Map<string, TaskKey>();
-  for (const e of edges) {
-    if (e.seq > seq) continue;
-    if (!map.has(e.key)) map.set(e.key, e.task);
-  }
+  for (const e of rootIndex(links, claims)) if (!map.has(e.key)) map.set(e.key, e.task);
   return map;
-}
-
-// The first task linked to a subject at or below `seq`. Omit `seq` for the digest as it stands now.
-export function linkMapOf(links: readonly LinkRecord[], claims: readonly Claim[], seq = Number.POSITIVE_INFINITY): Map<string, TaskKey> {
-  return mapAsOf(rootIndex(links, claims), seq);
 }
 
 // DG5's one root rule, shared by grouping and by the weekly count: a task is its own root; a change or a deploy is
@@ -630,20 +622,33 @@ function revisionsOf(c: Claim): readonly ClaimRevision[] {
   return [{ subject: c.subject, revision: c.revision }];
 }
 
-type HeldClaim = CountedClaim & { entries: readonly ClaimRevision[]; root: string; round: number | null };
+type HeldClaim = CountedClaim & { entries: readonly ClaimRevision[]; root: string; round: number | null; seq: number };
 
-// DG12: counted once per root and per set of revisions, at the earliest source. A task with no change has one round
-// per hand-over: the claims that share its round count once, at the first of them (NEW 2.2b). The root is the first
-// link at or below the claim's sequence (NEW 2.5a).
+// The hand-over a task claim with no entries belongs to. A stamped round is that sequence. A claim with no round
+// joins the hand-over open at its sequence — the latest stamped round at or below it — and never starts one.
+function joinedRound(c: Claim, claims: readonly Claim[]): number | null {
+  if (revisionsOf(c).length > 0) return null;
+  if (c.round != null) return c.round;
+  let open: number | null = null;
+  for (const other of claims) {
+    if (other.round == null || revisionsOf(other).length > 0 || !sameSubject(other.subject, c.subject)) continue;
+    if (other.round <= c.seq && (open === null || other.round > open)) open = other.round;
+  }
+  return open;
+}
+
+// DG12: counted once per root and per set of revisions, at the lowest sequence. A task with no change has one round
+// per hand-over (NEW 2.2b). The root is the first link at or below the claim's sequence (NEW 2.5a). Sequence decides
+// which claim is held and which round it is; a clock cannot stand in for either.
 function countFrom(claims: readonly Claim[], first: ReadonlyMap<string, FirstRoot>): HeldClaim[] {
   const byKey = new Map<string, HeldClaim>();
-  for (const s of [...claims].sort((a, b) => a.at - b.at)) {
+  for (const s of [...claims].sort((a, b) => a.seq - b.seq || a.at - b.at)) {
     const entries = revisionsOf(s);
     const root = rootKeyAt(first, s.subject, s.seq);
-    const round = entries.length === 0 ? (s.round ?? null) : null;
-    const set = entries.length === 0 ? `#${round ?? s.at}` : entries.map(e => `${subjectKey(e.subject)}@${e.revision?.sha ?? "-"}`).sort().join("+");
+    const round = joinedRound(s, claims);
+    const set = entries.length === 0 ? (round !== null ? `r${round}` : `s${s.seq}`) : entries.map(e => `${subjectKey(e.subject)}@${e.revision?.sha ?? "-"}`).sort().join("+");
     const key = `${root}|${set}`;
-    if (!byKey.has(key)) byKey.set(key, { subject: s.subject, revision: s.revision, at: s.at, entries, root, round });
+    if (!byKey.has(key)) byKey.set(key, { subject: s.subject, revision: s.revision, at: s.at, entries, root, round, seq: s.seq });
   }
   return [...byKey.values()];
 }
@@ -689,11 +694,27 @@ const nearestRank = (sorted: readonly number[], p: number): number | null =>
 const medianOf = (sorted: readonly number[]): number | null =>
   sorted.length === 0 ? null : (sorted[Math.floor((sorted.length - 1) / 2)] ?? null);
 
-// The next hand-over on this task: a later claim of another round. Claims that share this round are one hand-over
-// (NEW 2.2b). A row that names no round still ends at the task's next claim.
-function roundUntil(claim: { subject: SubjectRef; at: number; round: number | null }, claims: readonly Claim[]): number {
-  const next = claims.filter(c => sameSubject(c.subject, claim.subject) && c.at > claim.at && (claim.round === null || c.round !== claim.round)).sort((a, b) => a.at - b.at)[0];
+// The clock of the next hand-over on this task. The next hand-over is the next claim in sequence that starts one:
+// a different stamped round, or, for a claim that joined none, the next claim on the task. An unstamped claim does
+// not end the round it joined (NEW 2.2b).
+function roundUntil(claim: { subject: SubjectRef; seq: number; round: number | null }, claims: readonly Claim[]): number {
+  let next: Claim | undefined;
+  for (const c of claims) {
+    if (!sameSubject(c.subject, claim.subject) || c.seq <= claim.seq || revisionsOf(c).length > 0) continue;
+    const startsNext = claim.round === null || (c.round != null && c.round !== claim.round);
+    if (!startsNext) continue;
+    if (next === undefined || c.seq < next.seq) next = c;
+  }
   return next?.at ?? Number.POSITIVE_INFINITY;
+}
+
+// Links and claims count as claimants by sequence. Anything at or below the claim's sequence already happened, whatever
+// its clock. A later sequence counts only when its clock sits between the claim and J, so a skewed early clock cannot
+// smuggle in a record the hub has not reached, and a skewed late clock cannot hide one it has.
+function claimantBound(seq: number, at: number, judgeAt: number, rows: readonly { seq: number; at: number }[]): number {
+  let bound = seq;
+  for (const row of rows) if (row.seq > seq && row.at >= at && row.at <= judgeAt) bound = Math.max(bound, row.seq);
+  return bound;
 }
 
 // The level a claim showed, from the revisions it carries (DG12). Evidence is taken from before the failure, or
@@ -706,7 +727,8 @@ function levelHeld(claim: HeldClaim, judgeAt: number, r: WeeklyRecords): ItemLev
     if (entry.revision === null && entry.subject.kind !== "task") return "claimed";
     let deployed: number | null = null;
     for (const d of r.deploysOf) if (sameSubject(d.subject, entry.subject) && d.at <= until) deployed = deployed === null ? d.at : Math.max(deployed, d.at);
-    const claimants = claimantsOf(entry.subject, r.claims.filter(c => c.at <= judgeAt), r.links.filter(l => l.at <= judgeAt), r.assignments.filter(a => a.at <= judgeAt));
+    const bound = claimantBound(claim.seq, claim.at, judgeAt, [...r.claims, ...r.links]);
+    const claimants = claimantsOf(entry.subject, r.claims.filter(c => c.seq <= bound), r.links.filter(l => l.seq <= bound), r.assignments.filter(a => a.at <= judgeAt));
     return subjectLevel(
       {
         subject: entry.subject, title: null, revision: entry.revision,
@@ -733,20 +755,21 @@ function levelHeld(claim: HeldClaim, judgeAt: number, r: WeeklyRecords): ItemLev
 export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: number, passes?: PassCount): WeeklyRow[] {
   const first = firstRoots(rootIndex(r.links, r.claims), passes);
   const counted = countFrom(r.claims, first);
+  const roundEnd = new Map(counted.map(c => [c, roundUntil(c, r.claims)]));
+  const failureOf = new Map(counted.map(c => [c, r.claimFailures.find(f => {
+    if (!(f.at >= c.at && f.at - c.at <= LATER_FAILED_MS)) return false;
+    if (f.via === "reopened") return f.subject.kind === "task" && subjectKey(f.subject) === c.root;
+    // A task with no entries fails on evidence filed against the task itself, inside its round (NEW 2.6a).
+    if (c.entries.length === 0) return f.via === "evidence" && f.revision === null && sameSubject(f.subject, c.subject) && f.at < (roundEnd.get(c) ?? Number.POSITIVE_INFINITY);
+    // A deploy's own failure fails only a claim that carries that deploy (NEW 2.6b). Not the root task.
+    return c.entries.some(e => sameSubject(e.subject, f.subject) && (e.revision === null ? f.revision === null : f.revision !== null && revisionCovers(f.revision, e.revision)));
+  }) ?? null]));
   return weeks.map(w => {
     const inWeek = (at: number) => at >= w.start && at < w.end;
     const weekClaims = counted.filter(c => inWeek(c.at));
-    const failureOf = (c: HeldClaim) => r.claimFailures.find(f => {
-      if (!(f.at >= c.at && f.at - c.at <= LATER_FAILED_MS)) return false;
-      if (f.via === "reopened") return f.subject.kind === "task" && subjectKey(f.subject) === c.root;
-      // A task with no entries fails on evidence filed against the task itself, inside its round (NEW 2.6a).
-      if (c.entries.length === 0) return f.via === "evidence" && f.revision === null && sameSubject(f.subject, c.subject) && f.at < roundUntil(c, r.claims);
-      // A deploy's own failure fails only a claim that carries that deploy (NEW 2.6b). Not the root task.
-      return c.entries.some(e => sameSubject(e.subject, f.subject) && (e.revision === null ? f.revision === null : f.revision !== null && revisionCovers(f.revision, e.revision)));
-    }) ?? null;
     const levels = new Map<ItemLevel, LevelHeld>();
     for (const c of weekClaims) {
-      const f = failureOf(c);
+      const f = failureOf.get(c) ?? null;
       const level = levelHeld(c, f === null ? Math.min(c.at + LATER_FAILED_MS, now) : f.at, r);
       const row = levels.get(level) ?? { level, claims: 0, laterFailed: 0 };
       row.claims++;
@@ -772,7 +795,7 @@ export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: 
       done: done.length,
       timeToDoneMs: times.length === 0 ? null : { median: medianOf(times) ?? 0, p90: nearestRank(times, 0.9) ?? 0 },
       claims: weekClaims.length,
-      laterFailed: weekClaims.filter(c => failureOf(c) !== null).length,
+      laterFailed: weekClaims.filter(c => failureOf.get(c) != null).length,
       levels: [...levels.values()].sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level]),
       failedDeploys: r.deploys.filter(d => inWeek(d.at) && d.failed).length,
       recoveryMs: medianOf(recoveries.sort((a, b) => a - b)),
