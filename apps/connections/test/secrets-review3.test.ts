@@ -9,7 +9,7 @@ import { AgeVault } from "../src/adapters/vault-age.ts";
 import { FileVault } from "../src/adapters/vault-file.ts";
 import { run } from "../src/cli.ts";
 import { secretIndexPath } from "../src/compose.ts";
-import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
+import { runSecrets, stdinValue, type SecretsIo } from "../src/secrets-cli.ts";
 
 // Several real commands per test (age, SQLite, the index): seconds alone, more under load, as in rounds 1 and 2.
 vi.setConfig({ testTimeout: 60_000 });
@@ -143,5 +143,22 @@ describe("round 3, point 1: a committed rotation is never reported as failed whe
     expect(now).toHaveLength(1);
     expect(now[0]).not.toBe(old);
     expect((await keys(env, ["rotate", "credit"], "sk-ant-synthetic-test-key-0004")).code).toBe(0);
+  });
+});
+
+describe("round 3, point 4: stdin's chunks are zeroed when the stream fails midway", () => {
+  it("two chunks read, then the stream errors: the read fails and both chunks are zeroed", async () => {
+    const handed: Uint8Array[] = [];
+    async function* failing() {
+      for (const text of ["synthetic-", "value-four"]) {
+        const chunk = new TextEncoder().encode(text);
+        handed.push(chunk);
+        yield chunk;
+      }
+      throw new Error("EIO: the pipe failed");
+    }
+    await expect(stdinValue(failing())).rejects.toThrow(/EIO/);
+    expect(handed).toHaveLength(2);
+    expect(handed.every(c => c.every(b => b === 0))).toBe(true);
   });
 });
