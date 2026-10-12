@@ -20,12 +20,12 @@ describe("engines spawn", () => {
     dirs.push(dir);
     const pidFile = join(dir, "pid");
     const stop = new AbortController();
-    const t0 = Date.now();
+    const t0 = performance.now();
     const run = runEngines(process.execPath, ["-e", `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 10000)`], process.env, stop.signal);
     while (!existsSync(pidFile) || !readFileSync(pidFile, "utf8")) await new Promise(r => setTimeout(r, 10));
     stop.abort();
     await expect(run).rejects.toThrow(/was stopped/);
-    expect(Date.now() - t0).toBeLessThan(5000);
+    expect(performance.now() - t0).toBeLessThan(5000);
     expect(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0)).toThrow();          // gone, and reaped
     await expect(runEngines(process.execPath, ["-e", ""], process.env, stop.signal)).rejects.toThrow(/was stopped/);   // not started
   });
