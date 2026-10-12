@@ -15,11 +15,30 @@ const FIELDS = new Set(["name", "description", "license", "allowed-tools", "meta
 const PATTERN_SECTIONS = ["When to use", "When not to use", "Failure modes", "Guards", "Sources"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY = 86_400_000;
-// The rule ids docs/domain.md defines (table rows such as "| V3 |", list items such as "**R1**") and the terms of its
-// glossaries (the first column of its tables), which a guard may name instead, as the other-provider rule has no id.
-const DOMAIN = readFileSync("docs/domain.md", "utf8");
-const RULE_IDS = new Set([...DOMAIN.matchAll(/^\| ([A-Z]{1,3}\d+) \||\*\*([A-Z]{1,3}\d+)\*\*/gm)].map(m => m[1] ?? m[2] ?? ""));
-const TERMS = [...DOMAIN.matchAll(/^\| ([A-Z][^|]*?) \|/gm)].map(m => m[1] ?? "").filter(t => !/^[A-Z]{1,3}\d+$/.test(t) && t !== "Term");
+// What docs/domain.md defines, read when a check first needs it, so a missing file fails a test instead of the import:
+// the rule ids of its rule tables (rows under a "| # |" header) and of its rule lists ("- **R1**"), and the terms of
+// its glossaries (the first column under a "| Term |" header), which a guard may cite as "Term (docs/domain.md, ...)",
+// as the other-provider rule has no id.
+let domain: { ids: Set<string>; terms: string[] } | undefined;
+function domainRules() {
+  if (domain) return domain;
+  const ids = new Set<string>();
+  const terms: string[] = [];
+  let table = "";
+  for (const line of readFileSync(join(ROOT, "docs/domain.md"), "utf8").split("\n")) {
+    if (!line.startsWith("|")) table = "";
+    else if (/^\| # \|/.test(line)) table = "rules";
+    else if (/^\| Term(s)? \|/.test(line)) table = "terms";
+    else if (!/^\|[-| ]+\|$/.test(line)) {
+      const first = /^\| ([^|]+?) \|/.exec(line)?.[1] ?? "";
+      if (table === "rules" && /^[A-Z]{1,3}\d+$/.test(first)) ids.add(first);
+      if (table === "terms" && first) terms.push(first);
+    }
+    const listed = /^- \*\*([A-Z]{1,3}\d+)\*\*/.exec(line)?.[1];
+    if (listed) ids.add(listed);
+  }
+  return (domain = { ids, terms });
+}
 
 type Result = { errors: string[]; warnings: string[] };
 
@@ -117,20 +136,25 @@ function checkSkill(dir: string, text: string, today: string, known: Set<string>
     if (gap <= 0 || gap > 90) errors.push(`morndo-recheck must fall 1 to 90 days after ${read}, is ${gap} days`);
     if (today > recheck) warnings.push(`${dir} is stale: its sources were due for a re-read on ${recheck}`);
   }
+  const caught = new Set<string>();
   const modes = new Set((secs.get("Failure modes") ?? []).map(l => /^- \*\*([^*]+?):\*\*/.exec(l)?.[1]).filter(x => x !== undefined));
   for (const row of (secs.get("Guards") ?? []).filter(l => l.trimStart().startsWith("|")).slice(2)) {
     const cells = cellsOf(row);
+    for (const c of (cells[1] ?? "").split(",").map(x => x.trim()).filter(Boolean)) caught.add(c);
     if (cells.length !== 3 || cells.some(c => !c)) {
       errors.push(`guard row needs a guard, what it catches and the Morndo rule (or 'None yet.'): ${row.slice(0, 80)}`);
       continue;
     }
     const [, catches = "", rule = ""] = cells;
     for (const c of catches.split(",").map(x => x.trim())) if (!modes.has(c)) errors.push(`guard catches '${c}', which is not a failure mode of this skill`);
-    const ids = rule.match(/\b[A-Z]{1,3}\d+\b/g) ?? [];
+    // A rule id is cited at the start of the cell or of a clause after "; " ("J2: ...; J3: ..."); ids inside prose aren't.
+    const ids = rule.split("; ").map(clause => /^([A-Z]{1,3}\d+)\b/.exec(clause)?.[1]).filter(x => x !== undefined);
+    const { ids: known, terms } = domainRules();
     if (/\bADR-\d+/.test(rule)) errors.push("guard cites an ADR; cite the rule as docs/domain.md states it");
-    else if (ids.length) for (const id of ids.filter(i => !RULE_IDS.has(i))) errors.push(`guard cites ${id}, which docs/domain.md doesn't define`);
-    else if (rule !== "None yet." && !TERMS.some(t => rule.toLowerCase().startsWith(t.toLowerCase()))) errors.push(`guard names no rule of docs/domain.md, nor 'None yet.': ${rule.slice(0, 60)}`);
+    else if (ids.length) for (const id of ids.filter(i => !known.has(i))) errors.push(`guard cites ${id}, which docs/domain.md doesn't define`);
+    else if (rule !== "None yet." && !terms.some(t => rule.startsWith(`${t} (docs/domain.md`))) errors.push(`guard names no rule of docs/domain.md, nor 'None yet.': ${rule.slice(0, 60)}`);
   }
+  for (const m of modes) if (!caught.has(m)) errors.push(`failure mode '${m}' has no guard`);
   for (const [, ref = ""] of body.matchAll(/`(loop-[a-z-]+)`/g)) if (!known.has(ref)) errors.push(`refers to a skill that doesn't exist: ${ref}`);
   return { errors, warnings };
 }
@@ -256,7 +280,7 @@ describe("negative controls: a broken copy is refused", () => {
     expect(errorsOf(GOOD.replace("  morndo-kind: loop-pattern\n", ""))).toEqual(["a loop-* skill must declare morndo-kind: loop-pattern"]);
   });
   it("a guard that catches a failure mode the skill doesn't list", () => {
-    expect(errorsOf(GOOD.replace("| looping | None yet. |", "| drift | None yet. |"))).toEqual(["guard catches 'drift', which is not a failure mode of this skill"]);
+    expect(errorsOf(GOOD.replace("| looping | None yet. |", "| drift | None yet. |"))).toEqual(["guard catches 'drift', which is not a failure mode of this skill", "failure mode 'looping' has no guard"]);
   });
   it("a guard citing a rule docs/domain.md doesn't define, or an ADR instead of the rule", () => {
     expect(errorsOf(GOOD.replace("None yet.", "V99: made up."))).toEqual(["guard cites V99, which docs/domain.md doesn't define"]);
