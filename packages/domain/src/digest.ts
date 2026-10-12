@@ -244,12 +244,15 @@ export function buildDigest(input: DigestInput): DigestResult {
 
     const groupClaims = input.claims.filter(c => keys.has(subjectKey(c.subject))).sort((a, b) => a.at - b.at);
     const last = groupClaims[groupClaims.length - 1] ?? null;
-    const seq = [...events, ...evidence, ...voided].reduce((m, r) => Math.max(m, r.seq), 0);
+    // Claims are records too (DG8): a claim, or a claimant change that moves the level, raises the item's sequence
+    // past the mark, so the change shows the line as new again.
+    const records = [...events, ...evidence, ...voided, ...groupClaims];
+    const seq = records.reduce((m, r) => Math.max(m, r.seq), 0);
     const n = itemNew({ id: rootKey, seq, level, section }, input.mark);
     items.push({
       id: rootKey,
       seq,
-      at: [...events, ...evidence, ...voided].reduce((m, r) => Math.max(m, r.at), live?.since ?? staleCond?.since ?? 0),   // §3.5: the newest record's time, never now
+      at: records.reduce((m, r) => Math.max(m, r.at), live?.since ?? staleCond?.since ?? 0),   // §3.5: the newest record's time, never now
       section,
       level,
       title: group.members.map(m => stateOf(m).title).find(t => t !== null) ?? null,
