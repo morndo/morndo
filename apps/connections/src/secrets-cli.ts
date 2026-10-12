@@ -4,6 +4,7 @@
 // them (SC7). No command prints a value: they print References, versions, metadata and events.
 import { createHash } from "node:crypto";
 import { KEEP_SHAPE, USE_MODES, parseReference, type Actor, type GrantEnd, type GrantSubject, type UseMode } from "@morndo/domain";
+import { LeftBehind } from "./application/secrets-service.ts";
 import { openSecrets, type SecretsHome } from "./compose.ts";
 import { FileRefused } from "./adapters/file-mode.ts";
 import { DatabaseFromFuture } from "./adapters/store-migrations.ts";
@@ -27,7 +28,14 @@ const BOOLEANS = new Set(["raw", "node"]);
 const VALUES = new Set(["lane", "workspace", "mode", "until", "expiry"]);
 
 class Usage extends Error {}
-class Refused extends Error {}
+// `left`: what a refused command left to clean (round 2, point 11).
+class Refused extends Error {
+  readonly left: readonly string[];
+  constructor(message: string, left: readonly string[] = []) {
+    super(message);
+    this.left = left;
+  }
+}
 
 type Parsed = { cmd: string; positionals: string[]; flags: Set<string>; values: Map<string, string[]> };
 
@@ -69,9 +77,12 @@ export async function runSecrets(argv: readonly string[], env: NodeJS.ProcessEnv
     try { home.service.sweep(); } catch (error) { io.stderr(`warning: the startup sweep failed: ${error instanceof Error ? error.message : "failed"}\n`); }
     return await dispatch(home, parsed, io);
   } catch (error) {
-    io.stderr(`${error instanceof Error ? error.message : "failed"}\n`);
-    if (error instanceof Usage) return USAGE;
-    return error instanceof FileRefused || error instanceof DatabaseFromFuture || error instanceof IndexFileRefused ? FILES : REFUSED;
+    // A store whose cleanup failed too is reported by its own error, then what it left (round 2, point 11).
+    const cause = error instanceof LeftBehind ? error.cause : error;
+    io.stderr(`${cause instanceof Error ? cause.message : "failed"}\n`);
+    if (error instanceof LeftBehind || error instanceof Refused) leftOver(error.left, io);
+    if (cause instanceof Usage) return USAGE;
+    return cause instanceof FileRefused || cause instanceof DatabaseFromFuture || cause instanceof IndexFileRefused ? FILES : REFUSED;
   } finally {
     home?.close();
   }
@@ -150,7 +161,7 @@ async function putValue(home: SecretsHome, p: Parsed, io: SecretsIo): Promise<nu
   try { sealed = await home.sealForNode(value); } finally { value.fill(0); }
   if (sealed === null) throw new Refused("refused: plaintext_vault: this node's vault would keep the value as plaintext; migrate to the age vault first");
   const r = await home.service.store({ reference: ref, sealed, shape: KEEP_SHAPE, grants: [], expiry, destinations: [], renew: false }, actor);
-  if (!r.ok) throw new Refused(`refused: ${r.error.problem}`);
+  if (!r.ok) throw new Refused(`refused: ${r.error.problem}`, r.error.left);
   io.stdout(`stored ${ref} version ${r.value.version}\n`);
   if (r.value.sameAs.length > 0) io.stdout(`same value as ${r.value.sameAs.join(", ")}\n`);
   if (!r.value.indexed) io.stderr("warning: the value is under 8 bytes, so it is not indexed: output filtering can't find it\n");
@@ -175,8 +186,10 @@ async function confirmed(home: SecretsHome, io: SecretsIo, expected: string, pro
   return { kind: "principal", command: home.commandId() };
 }
 
-function answer(r: { ok: true; value: { left: readonly string[] } } | { ok: false; error: { problem: string } }, io: SecretsIo, done: string): number {
-  if (!r.ok) throw new Refused(`refused: ${r.error.problem}`);
+function answer(
+  r: { ok: true; value: { left: readonly string[] } } | { ok: false; error: { problem: string; left?: readonly string[] } }, io: SecretsIo, done: string,
+): number {
+  if (!r.ok) throw new Refused(`refused: ${r.error.problem}`, r.error.left);
   io.stdout(`${done}\n`);
   return leftOver(r.value.left, io);
 }

@@ -27,9 +27,21 @@ export type Stored = {
 };
 export type Done = { left: readonly string[] };
 export type SecretsProblem = SecretProblem | SealedProblem | "not_repository" | "workspace_taken";
-export type SecretsRefusal = { problem: SecretsProblem };
+// `left` names a refused store's new file that couldn't be removed (round 2, point 11).
+export type SecretsRefusal = { problem: SecretsProblem; left?: readonly string[] };
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+// A store that failed, and whose new vault file couldn't be removed either: the store's own error stays the cause, and
+// the file is named as left to clean, so neither hides the other (round 2, point 11).
+export class LeftBehind extends Error {
+  readonly left: readonly string[];
+  constructor(cause: unknown, left: readonly string[]) {
+    super(`${messageOf(cause)}; left to clean: ${left.join("; ")}`, { cause });
+    this.name = "LeftBehind";
+    this.left = left;
+  }
+}
 
 // The file of a version, if it still has one.
 const refOf = (vaults: readonly VaultRefRow[], reference: string, version: number) =>
@@ -77,12 +89,14 @@ export class SecretsService {
         return { next, result: ok({ reference: request.reference, version, at, sameAs, indexed: !prepared.short, renewed: request.renew, left: [] }) };
       });
     } catch (error) {
-      vault.remove(ref);
-      throw error;
+      const left: string[] = [];
+      this.#removeOr(ref, left);
+      throw left.length > 0 ? new LeftBehind(error, left) : error;
     }
     if (!outcome.ok) {
-      vault.remove(ref);
-      return outcome;
+      const left: string[] = [];
+      this.#removeOr(ref, left);
+      return left.length > 0 ? err({ ...outcome.error, left }) : outcome;
     }
     // After the commit: each step runs whatever the one before it did, and a failure is named, not thrown (review 4).
     const left: string[] = [];
