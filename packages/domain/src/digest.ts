@@ -668,21 +668,51 @@ const medianOf = (sorted: readonly number[]): number | null =>
 // judged on those subjects at that revision — a task with changes shows the lowest of theirs (§3.4) — and a task
 // without one on its own claim round. A revert, a rollback or a reopen was not failed just before it landed, so the
 // ladder runs without those flags.
-function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, first: ReadonlyMap<string, FirstRoot>): ItemLevel {
-  // A task claim names one revision (§3.1). Each linked change is judged at the latest head filed at or before
-  // this moment, and a deploy at the revision in its subject: the claim's sha is not theirs.
-  const revisionOf = (s: SubjectRef): Revision | null => {
-    // A claim about this change names its own revision. The subject's later head must not void that week's evidence.
-    if (claim.subject.kind === "change" && subjectKey(s) === subjectKey(claim.subject)) return claim.revision;
-    if (s.kind === "deploy") return { sha: s.sha, patchId: null };
-    let filed: ChangeHead | null = null;
-    for (const h of r.changeHeads) {
-      if (h.at > judgeAt || subjectKey(h.subject) !== subjectKey(s)) continue;
-      if (filed === null || h.at >= filed.at) filed = h;
+// Change heads for one weekly view, indexed by subject and sorted by time. A link or the first claim files the
+// opening head: a task claim's revision, at the claim's time, for each change already linked to it that has no
+// earlier head on record (DG12). Built once; levelHeld does not walk the lists again.
+function indexChangeHeads(r: WeeklyRecords): Map<string, ChangeHead[]> {
+  const map = new Map<string, ChangeHead[]>();
+  const add = (h: ChangeHead) => {
+    const k = subjectKey(h.subject);
+    const list = map.get(k);
+    if (list === undefined) map.set(k, [h]);
+    else list.push(h);
+  };
+  for (const h of r.changeHeads) add(h);
+  for (const c of r.claims) {
+    if (c.subject.kind !== "task" || c.revision === null) continue;
+    for (const l of r.links) {
+      if (l.task !== c.subject.key || l.at > c.at || l.target.kind !== "change") continue;
+      const known = r.changeHeads.some(h => subjectKey(h.subject) === subjectKey(l.target) && h.at <= c.at);
+      if (known) continue;
+      add({ subject: l.target, revision: c.revision, at: c.at });
     }
-    if (filed !== null) return filed.revision;
-    const recorded = r.subjectStates.find(st => subjectKey(st.subject) === subjectKey(s))?.revision ?? null;
-    return recorded ?? claim.revision;
+  }
+  for (const list of map.values()) list.sort((a, b) => a.at - b.at);
+  return map;
+}
+
+// The latest head at or before judgeAt, or, if the change had not been filed yet, the earliest head after it.
+// Never the live head (DG12).
+function revisionAsOf(heads: readonly ChangeHead[] | undefined, judgeAt: number): Revision | null {
+  if (heads === undefined) return null;
+  let before: ChangeHead | null = null;
+  let after: ChangeHead | null = null;
+  for (const h of heads) {
+    if (h.at <= judgeAt) before = h;
+    else if (after === null) after = h;
+  }
+  return (before ?? after)?.revision ?? null;
+}
+
+function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, first: ReadonlyMap<string, FirstRoot>, heads: ReadonlyMap<string, readonly ChangeHead[]>): ItemLevel {
+  // A change claim that names a revision is judged at that revision. Anything else is judged at the head the
+  // index holds for that moment. A deploy is judged at the revision in its subject.
+  const revisionOf = (s: SubjectRef): Revision | null => {
+    if (claim.subject.kind === "change" && subjectKey(s) === subjectKey(claim.subject) && claim.revision !== null) return claim.revision;
+    if (s.kind === "deploy") return { sha: s.sha, patchId: null };
+    return revisionAsOf(heads.get(subjectKey(s)), judgeAt);
   };
   const levelOn = (s: SubjectRef): ItemLevel => {
     const key = subjectKey(s);
@@ -722,6 +752,7 @@ function levelHeld(claim: CountedClaim, judgeAt: number, r: WeeklyRecords, first
 
 export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: number): WeeklyRow[] {
   const first = firstRoots(rootIndex(r.links, r.claims));
+  const heads = indexChangeHeads(r);
   const counted = countFrom(r.claimSources, first);
   return weeks.map(w => {
     const inWeek = (at: number) => at >= w.start && at < w.end;
@@ -733,7 +764,7 @@ export function weeklyView(r: WeeklyRecords, weeks: readonly WeekWindow[], now: 
     const levels = new Map<ItemLevel, LevelHeld>();
     for (const c of weekClaims) {
       const f = failureOf(c);
-      const level = levelHeld(c, f === null ? Math.min(c.at + LATER_FAILED_MS, now) : f.at, r, first);
+      const level = levelHeld(c, f === null ? Math.min(c.at + LATER_FAILED_MS, now) : f.at, r, first, heads);
       const row = levels.get(level) ?? { level, claims: 0, laterFailed: 0 };
       row.claims++;
       if (f !== null) row.laterFailed++;

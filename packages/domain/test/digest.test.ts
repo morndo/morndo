@@ -949,6 +949,10 @@ describe("the weekly count of claims (DG12)", () => {
         { task: taskKey(12), target: c8, by: "builder", at: NOW - MIN, seq: 0 },
         { task: taskKey(12), target: prod, by: "builder", at: NOW - MIN, seq: 0 },
       ],
+      changeHeads: [
+        { subject: c7, revision: a1, at: NOW - MIN },
+        { subject: c8, revision: b1, at: NOW - MIN },
+      ],
       subjectStates: [state(c7, { revision: a1 }), state(c8, { revision: b1 }), state(prod, { revision: b1 })],
       evidence: [
         evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
