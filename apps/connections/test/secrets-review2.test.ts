@@ -1,6 +1,6 @@
 // Review round 2 of PR #40 (board T-94): one block per point, each written failing before its fix. Real age vault,
 // real database and the real commands where the point is about them. Values, References and names are synthetic.
-import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -190,5 +190,26 @@ describe("round 2, point 11: a failure in a store's cleanup never hides the stor
     } finally {
       remove.mockRestore();
     }
+  });
+});
+
+describe("round 2, point 8: a node key missing or malformed is a file problem: exit 70, not a refusal", () => {
+  for (const name of ["fingerprint.key", "index.key"]) {
+    it(`${name} gone while hashes made with it are on record: put exits 70 and names the file`, async () => {
+      const h = home();
+      expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+      rmSync(join(h.dir, name));
+      const r = await put(h.env, "synthetic-value-two", OTHER);
+      expect(r.code).toBe(70);
+      expect(r.stderr).toMatch(new RegExp(`${name.replace(".", "\\.")} is missing`));
+    });
+  }
+  it("a fingerprint key of the wrong length: put exits 70", async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+    writeFileSync(join(h.dir, "fingerprint.key"), new Uint8Array(16), { mode: 0o600 });
+    const r = await put(h.env, "synthetic-value-two", OTHER);
+    expect(r.code).toBe(70);
+    expect(r.stderr).toMatch(/fingerprint\.key is not a 32-byte key/);
   });
 });
