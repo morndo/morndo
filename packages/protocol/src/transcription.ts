@@ -39,9 +39,12 @@ const seconds = () => z.int().check(z.gte(1), z.lte(MAX_RECORDING_SECONDS));
 // The probe may offer more. A day is the bound; the hub still keeps the lower of the two (domain effectiveMaxSeconds).
 const PROBE_MAX_SECONDS = 24 * 60 * 60;
 const probeSeconds = () => z.int().check(z.gte(1), z.lte(PROBE_MAX_SECONDS));
+// Whisper's multilingual set is about 99 codes (design §5: "multi" or the list the engine reports). 128 sits above
+// that full list. An empty list is not a list of languages.
+const MAX_LISTED_LANGUAGES = 128;
 const languages = z.union([
   z.literal("multi"),
-  z.array(code()).check(z.minLength(1), z.maxLength(64)),
+  z.array(code()).check(z.minLength(1), z.maxLength(MAX_LISTED_LANGUAGES)),
 ]);
 
 const probeReady = z.strictObject({
