@@ -308,6 +308,18 @@ describe("items and sections (DG5)", () => {
     const older = digest({ events: [event("opened_or_pushed", c7, 2, NOW - 25 * HOUR)] });
     expect(one(older, "acme/web#7")).toBeUndefined();
   });
+  it("a decision or a failure since the mark outranks a stale condition; needs you outranks both (§5 order)", () => {
+    const t12 = task(12);
+    const inReview = { kind: "task_in_review" as const, task: taskKey(12), since: NOW - 9 * HOUR };
+    expect(one(digest({ stale: [inReview], events: [event("rolled_back", t12, 8, NOW)] }), "T-12")?.section).toBe("failed_or_rolled_back");
+    expect(one(digest({ stale: [inReview], events: [event("decided_for_you", t12, 8, NOW)] }), "T-12")?.section).toBe("decided_for_you");
+    expect(one(digest({
+      stale: [inReview],
+      needsYou: [{ subject: t12, blocking: false, due: null, since: NOW - MIN }],
+      events: [event("failed", t12, 8, NOW)],
+    }), "T-12")?.section).toBe("needs_you");
+    expect(one(digest({ stale: [inReview], events: [event("shipped", t12, 8, NOW)] }), "T-12")?.section).toBe("stale_or_stuck");
+  });
 });
 
 // ---- DG6: needs you and stale are live conditions: they hold whatever the mark, and leave when they clear
