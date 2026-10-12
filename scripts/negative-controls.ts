@@ -1449,6 +1449,12 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-r4-partial-exit", task: "secrets-pr2b", file: "apps/connections/src/secrets-cli.ts",
     find: "  return left.length > 0 ? PARTIAL : 0;", replace: "  return 0;",
     run: ["apps/connections/test/secrets-review1.test.ts"], expect: "exit 3" },
+  { id: "sp2b-r7-stdin-put-only", task: "secrets-pr2b", file: "apps/connections/src/secrets-main.ts",
+    find: "process.argv[2] === \"put\" ? await stdinBytes() : null", replace: "await stdinBytes()",
+    run: ["apps/connections/test/secrets-bin.test.ts"], expect: "a pipe that never closes" },
+  { id: "sp2b-r11-exit-code", task: "secrets-pr2b", file: "apps/connections/src/secrets-main.ts",
+    find: "  confirm,\n});\n", replace: "  confirm,\n});\nprocess.exit(process.exitCode);\n",
+    run: ["apps/connections/test/secrets-bin.test.ts"], expect: "20001" },
 ];
 
 // ---- the runner
