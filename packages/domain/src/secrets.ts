@@ -105,7 +105,8 @@ export type RequestEvent =
   | { type: "SecretRequestRejected"; request: string; at: number; command: string; reason: string | null }
   | { type: "SecretRequestExpired"; request: string; at: number };
 export type RequestProblem = "bad_reference" | "bad_purpose" | "bad_grant" | "bad_node" | "bad_lane" | "bad_workspace" | "principal"
-  | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open" | "full" | "expiry";
+  | "answered" | "expired" | "changed" | "kind" | "node" | "not_waiting" | "open" | "full" | "expiry" | "clock" | "not_renewed"
+  | "reference";
 export type RequestRefusal = { problem: RequestProblem };
 export type RequestChange = { request: SecretRequest; events: readonly RequestEvent[] };
 export type RequestLimit = "lane-open" | "lane-day" | "node-open" | "node-day" | "request-waiters";
@@ -221,25 +222,44 @@ export function answerGranted(req: SecretRequest, a: Answer, now: number): Resul
   return ok({ request, events: [{ type: "SecretRequestGranted", request: req.id, at: now, command: a.command }] });
 }
 
-// SR8: Stored only once the requester's node confirmed; `version` is the Secret's version there and `storedAt` its time
-// of the store by its own clock, both from that confirmation; `expiry` the Expiry the store sent (null: none). The node
-// refuses a renew that doesn't extend its Expiry before it stores anything (renewSecret); here a renew whose store named
-// none, or one not later than the node's time of the store, is never marked Stored. That is the node's own comparison,
-// so the hub's clock can't leave a renewed request open (T-83); the hub's clock decides only the request's own expiry.
+// A node's confirmation of a store (SecretsStoreResult, and the node it came from): the Reference it stored under, the
+// version, its time of the store by its own clock, and whether the renew rule held there (renewSecret).
+export type StoreConfirmation = { reference: string; node: string; version: number; at: number; renewed: boolean };
+// How far a node's time of the store may lie outside the hub's window, from the request's opening to the hub's now.
+export const CONFIRMATION_SKEW_MS = 5 * 60_000;
+
+// SR8: Stored only with the requester node's own confirmation among them (T-85). `confirmations` are those of every node
+// that confirmed, and the event's nodes are theirs, so no node is named without one (T-94); `expiry` is the Expiry the
+// store sent (null: none). The renew rule is each node's (renewSecret, before anything is stored), so a renew needs every
+// confirming node's `renewed`, and the Expiry later than each node's time of the store, the same comparison kept as a
+// check that each confirmation is consistent (T-83; review 8 of PR #40). Each node's time must lie within the hub's
+// window, so a node's wrong clock or a made-up time can't pass (T-85); the hub's clock otherwise decides only the
+// request's own expiry.
 export function answerStored(
-  req: SecretRequest, a: Answer & { reference: string; version: number; nodes: readonly string[]; expiry: number | null; storedAt: number },
+  req: SecretRequest, a: Answer & { reference: string; expiry: number | null; confirmations: readonly StoreConfirmation[] },
   now: number,
 ): Result<RequestChange, RequestRefusal> {
   const p = checkAnswer(req, a.seen, a.command, now);
   if (p) return refuseRequest(p);
   if (req.kind === "access") return refuseRequest("kind");
-  if (req.kind === "renew" && !(typeof a.expiry === "number" && Number.isFinite(a.expiry) && a.expiry > a.storedAt)) return refuseRequest("expiry");
   if (parseReference(a.reference) === null) return refuseRequest("bad_reference");
-  if (!a.nodes.includes(req.node) || !Number.isSafeInteger(a.version) || a.version < 1) return refuseRequest("node");
+  const all = a.confirmations;
+  const nodes = all.map(x => x.node);
+  const c = all.find(x => x.node === req.node);
+  if (c === undefined || !eachOnce(nodes) || !all.every(x => Number.isSafeInteger(x.version) && x.version >= 1)) return refuseRequest("node");
+  // Each confirmation is for the store this answer made, under the Reference it names (T-88), every node's alike (T-94). A
+  // rotate or renew is about the request's own Secret; a new one may be stored under the Reference chosen on the card (SR6).
+  if (!all.every(x => x.reference === a.reference) || (req.kind !== "new" && a.reference !== req.reference)) return refuseRequest("reference");
+  if (!all.every(x => Number.isFinite(x.at) && x.at >= req.openedAt - CONFIRMATION_SKEW_MS && x.at <= now + CONFIRMATION_SKEW_MS)) return refuseRequest("clock");
+  // A renew holds on every node the answer names, not only the requester's (review 8 of PR #40).
+  if (req.kind === "renew" && !all.every(x => x.renewed)) return refuseRequest("not_renewed");
+  // The renew's Expiry, in one place: named, a time, and later than each node's time of the store (T-88, T-94).
+  const expiry = a.expiry;
+  if (req.kind === "renew" && !(typeof expiry === "number" && Number.isFinite(expiry) && all.every(x => expiry > x.at))) return refuseRequest("expiry");
   const request: SecretRequest = { ...req, state: "stored", answer: { kind: "stored", at: now, command: a.command, reason: null } };
   return ok({
     request,
-    events: [{ type: "SecretRequestStored", request: req.id, reference: a.reference, nodes: [...a.nodes], version: a.version, at: now, command: a.command }],
+    events: [{ type: "SecretRequestStored", request: req.id, reference: a.reference, nodes, version: c.version, at: now, command: a.command }],
   });
 }
 
@@ -307,7 +327,9 @@ export function checkFingerprint(ledger: readonly LedgerEntry[], reference: stri
 export const hostsOk = (hosts: readonly string[]) =>
   hosts.length <= DESTINATIONS_MAX && eachOnce(hosts) && hosts.every(h => DESTINATION_HOST.test(h));
 
-const keepsShape = (s: ShapeInput): s is typeof KEEP_SHAPE => typeof s === "object" && s !== null && s.keep;
+// Exactly KEEP_SHAPE: keep is true, and no other key rides along (T-85).
+const keepsShape = (s: ShapeInput): s is typeof KEEP_SHAPE =>
+  typeof s === "object" && s !== null && (s.keep as unknown) === true && Object.keys(s).length === 1;
 // Checked as it comes off the wire or an adapter, so anything but the three forms, undefined included, is refused.
 const shapeOk = (s: ShapeInput) => s === null || (typeof s === "string" ? SHAPE_ID.test(s) : keepsShape(s));
 
@@ -321,7 +343,20 @@ function inputProblem(input: StoreInput): SecretProblem | null {
   return null;
 }
 
-type Placed = { secret: Secret; ledger: readonly LedgerEntry[]; version: number; sameAs: readonly string[]; expiryChanged: boolean };
+type Placed = {
+  secret: Secret; ledger: readonly LedgerEntry[]; version: number; sameAs: readonly string[]; expiryChanged: boolean; rotation: boolean;
+};
+
+// The renew rule (design §5.3, step 6), the one place it is checked: a renew rotates a Secret this node holds and that is
+// active, to an Expiry later than now and than the current one. The node holds the Expiry, so it decides before anything
+// is stored, and the request stays open (SR8). Decided on T-80; missing and the input first on T-83; status on T-85.
+function renewProblem(before: Secret | null, expiry: number | null, at: number): SecretProblem | null {
+  if (!before) return "missing";
+  // A renew never revives a revoked value, and a disabled Secret would be reported renewed while every Use is refused.
+  if (before.status !== "active") return before.status;
+  if (expiry === null || !(expiry > at)) return "renew_expiry";
+  return before.expiry !== null && !(expiry > before.expiry) ? "renew_expiry" : null;
+}
 
 // SC9: only a later Expiry clears the warnings, whoever sets it; none at all counts as later. A store keeps the old
 // Expiry when it names none, so for a store this means one named and later.
@@ -330,13 +365,16 @@ const clearsWarnings = (before: number | null, after: number | null) => before !
 // A store under a new Reference creates the Secret; under an existing one it is a Rotation, which keeps its Grants and
 // Destinations, and its Expiry unless it names one (docs/domain.md, "Expiry on a Rotation or a transfer"). A named Expiry
 // replaces the old one and clears the warnings only when later; a store never removes one. A stated shape, none included,
-// replaces the old one, so nothing looks for a format the value no longer has; KEEP_SHAPE keeps it. The ledger decides first.
-function place(dir: SecretDirectory, input: StoreInput, command: string, at: number): Result<Placed, SecretRefusal> {
+// replaces the old one, so nothing looks for a format the value no longer has; KEEP_SHAPE keeps it. The input is checked
+// first, then a renew's rule, then the ledger.
+function place(dir: SecretDirectory, input: StoreInput, command: string, at: number, as: "store" | "renew"): Result<Placed, SecretRefusal> {
   const p = inputProblem(input);
   if (p) return refuse(p);
+  const before = findSecret(dir, input.reference);
+  const r = as === "renew" ? renewProblem(before, input.expiry, at) : null;
+  if (r) return refuse(r);
   const check = checkFingerprint(dir.ledger, input.reference, input.fingerprint);
   if (check.kind === "refuse") return refuse(check.reason);
-  const before = findSecret(dir, input.reference);
   // The ledger outlives a Delete, so numbering continues from it: (Reference, version) names one value forever. The
   // Secret's own versions count too, so a ledger that lacks them can't make a number come round again.
   const numbers = [...dir.ledger.filter(e => e.reference === input.reference).map(e => e.version), ...(before?.versions.map(v => v.number) ?? [])];
@@ -359,7 +397,7 @@ function place(dir: SecretDirectory, input: StoreInput, command: string, at: num
         destinations: [...input.destinations], expiry: input.expiry, shape: keepsShape(input.shape) ? null : input.shape, warned: [],
       };
   const expiryChanged = before !== null && input.expiry !== null && input.expiry !== before.expiry;
-  return ok({ secret, ledger, version: number, sameAs: check.sameAs, expiryChanged });
+  return ok({ secret, ledger, version: number, sameAs: check.sameAs, expiryChanged, rotation: before !== null });
 }
 
 function withSecret(dir: SecretDirectory, secret: Secret, events: readonly SecretEvent[], ledger = dir.ledger): SecretDirectory {
@@ -373,39 +411,30 @@ function withSecret(dir: SecretDirectory, secret: Secret, events: readonly Secre
 const expiryEvent = (changed: boolean, reference: string, at: number, command: string): SecretEvent[] =>
   changed ? [{ type: "ExpiryChanged", reference, at, command }] : [];
 
-export function storeSecret(dir: SecretDirectory, input: StoreInput, actor: Actor, at: number): Result<SecretDirectory, SecretRefusal> {
+function storeAs(dir: SecretDirectory, input: StoreInput, actor: Actor, at: number, as: "store" | "renew"): Result<SecretDirectory, SecretRefusal> {
   const command = commandOf(actor);
   if (!command) return refuse("principal");
-  const rotation = findSecret(dir, input.reference) !== null;
-  const placed = place(dir, input, command, at);
+  const placed = place(dir, input, command, at, as);
   if (!placed.ok) return placed;
-  const { secret, ledger, version, sameAs, expiryChanged } = placed.value;
+  const { secret, ledger, version, sameAs, expiryChanged, rotation } = placed.value;
   const event: SecretEvent = { type: rotation ? "SecretRotated" : "SecretStored", reference: input.reference, version, at, command, sameAs };
   return ok(withSecret(dir, secret, [event, ...expiryEvent(expiryChanged, input.reference, at, command)], ledger));
 }
 
-// A store that answers a renew request (secrets.store names its kind; design §5.3, step 6). The node holds the Expiry, so
-// it decides here, before anything is stored: a renew names an Expiry later than now and than the current one. Anything
-// else is refused as renew_expiry, and the request stays open (SR8). Decided on T-80 (review round 4). Renewing is a
-// Rotation of a Secret this node holds, so a Reference it doesn't hold is refused as missing, not stored new. The input
-// is checked first, as a store's is, so a refusal names its real problem (T-83).
-export function renewSecret(dir: SecretDirectory, input: StoreInput, actor: Actor, at: number): Result<SecretDirectory, SecretRefusal> {
-  if (!commandOf(actor)) return refuse("principal");
-  const p = inputProblem(input);
-  if (p) return refuse(p);
-  if (input.expiry === null || !(input.expiry > at)) return refuse("renew_expiry");
-  const before = findSecret(dir, input.reference);
-  if (!before) return refuse("missing");
-  if (before.expiry !== null && !(input.expiry > before.expiry)) return refuse("renew_expiry");
-  return storeSecret(dir, input, actor, at);
-}
+export const storeSecret = (dir: SecretDirectory, input: StoreInput, actor: Actor, at: number): Result<SecretDirectory, SecretRefusal> =>
+  storeAs(dir, input, actor, at, "store");
+
+// A store that answers a renew request (secrets.store names its kind; design §5.3, step 6): a store held to the renew rule
+// (renewProblem), so a refusal names its real problem and nothing is stored.
+export const renewSecret = (dir: SecretDirectory, input: StoreInput, actor: Actor, at: number): Result<SecretDirectory, SecretRefusal> =>
+  storeAs(dir, input, actor, at, "renew");
 
 // SC11: the target stores a transferred value as its own Secret, through its own ledger.
 export function receiveTransfer(dir: SecretDirectory, input: StoreInput & { from: string }, actor: Actor, at: number): Result<SecretDirectory, SecretRefusal> {
   const command = commandOf(actor);
   if (!command) return refuse("principal");
   if (!NODE_LABEL.test(input.from)) return refuse("bad_node");
-  const placed = place(dir, input, command, at);
+  const placed = place(dir, input, command, at, "store");
   if (!placed.ok) return placed;
   const { secret, ledger, version, sameAs, expiryChanged } = placed.value;
   const event: SecretEvent = { type: "SecretTransferred", reference: input.reference, version, at, command, from: input.from, sameAs };

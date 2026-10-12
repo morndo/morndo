@@ -116,7 +116,7 @@ describe("SR4: one answer, withdrawal by the last waiting lane, expiry after 7 d
     expect(rejected.state).toBe("rejected");
     expect(rejected.answer).toEqual({ kind: "rejected", at: T + 1, command: "c2", reason: "Use the shared key" });
     expect(problem(answerRejected(rejected, { seen: 1, command: "c3", reason: null }, T + 2))).toBe("answered");
-    expect(problem(answerStored(rejected, { seen: 1, command: "c3", reference: REF, version: 1, nodes: ["node-a"], expiry: null, storedAt: T + 2 }, T + 2))).toBe("answered");
+    expect(problem(answerStored(rejected, { seen: 1, command: "c3", reference: REF, expiry: null, confirmations: [{ reference: REF, node: "node-a", version: 1, at: T + 2, renewed: false }] }, T + 2))).toBe("answered");
   });
   it("an earlier withdrawal takes only that lane off; the last one withdraws the request", () => {
     const two = value(joinRequest(opened(), { lane: "lane-b", workspace: null, purpose: "Deploy" }, T + 1)).request;
@@ -159,21 +159,21 @@ describe("SR6: an answer names the version it saw", () => {
 
 describe("SR8: Stored only on the requester node's confirmation; the answer fits the kind", () => {
   it("is Stored when the confirming nodes include the requester's node", () => {
-    const r = value(answerStored(opened(), { seen: 1, command: "c2", reference: REF, version: 1, nodes: ["node-a", "node-b"], expiry: null, storedAt: T + 1 }, T + 1));
+    const r = value(answerStored(opened(), { seen: 1, command: "c2", reference: REF, expiry: null, confirmations: [{ reference: REF, node: "node-a", version: 1, at: T + 1, renewed: false }, { reference: REF, node: "node-b", version: 1, at: T + 1, renewed: false }] }, T + 1));
     expect(r.request.state).toBe("stored");
     expect(r.events).toEqual([{ type: "SecretRequestStored", request: "r1", reference: REF, nodes: ["node-a", "node-b"], version: 1, at: T + 1, command: "c2" }]);
   });
   it("is refused while the requester's node hasn't confirmed", () => {
-    expect(problem(answerStored(opened(), { seen: 1, command: "c2", reference: REF, version: 1, nodes: ["node-b"], expiry: null, storedAt: T + 1 }, T + 1))).toBe("node");
+    expect(problem(answerStored(opened(), { seen: 1, command: "c2", reference: REF, expiry: null, confirmations: [{ reference: REF, node: "node-b", version: 1, at: T + 1, renewed: false }] }, T + 1))).toBe("node");
   });
   it("records the Reference the card stored under, which may differ from the asked one", () => {
-    const r = value(answerStored(opened(), { seen: 1, command: "c2", reference: "secret://shared/payments-test", version: 2, nodes: ["node-a"], expiry: null, storedAt: T + 1 }, T + 1));
+    const r = value(answerStored(opened(), { seen: 1, command: "c2", reference: "secret://shared/payments-test", expiry: null, confirmations: [{ reference: "secret://shared/payments-test", node: "node-a", version: 2, at: T + 1, renewed: false }] }, T + 1));
     expect(r.events[0]).toMatchObject({ reference: "secret://shared/payments-test", version: 2 });
-    expect(problem(answerStored(opened(), { seen: 1, command: "c2", reference: "nope", version: 1, nodes: ["node-a"], expiry: null, storedAt: T + 1 }, T + 1))).toBe("bad_reference");
+    expect(problem(answerStored(opened(), { seen: 1, command: "c2", reference: "nope", expiry: null, confirmations: [{ reference: "nope", node: "node-a", version: 1, at: T + 1, renewed: false }] }, T + 1))).toBe("bad_reference");
   });
   it("an access request is granted, never stored; any other kind is stored, never granted", () => {
     const access = opened({ kind: "access" });
-    expect(problem(answerStored(access, { seen: 1, command: "c2", reference: REF, version: 1, nodes: ["node-a"], expiry: null, storedAt: T + 1 }, T + 1))).toBe("kind");
+    expect(problem(answerStored(access, { seen: 1, command: "c2", reference: REF, expiry: null, confirmations: [{ reference: REF, node: "node-a", version: 1, at: T + 1, renewed: false }] }, T + 1))).toBe("kind");
     expect(value(answerGranted(access, { seen: 1, command: "c2" }, T + 1)).request.state).toBe("granted");
     expect(problem(answerGranted(opened(), { seen: 1, command: "c2" }, T + 1))).toBe("kind");
   });
@@ -209,7 +209,7 @@ describe("SR11: a request grants nothing", () => {
   it("every event of a request's life is a request event", () => {
     const a = value(openRequest(ask(), "r1", T));
     const b = value(joinRequest(a.request, { lane: "lane-b", workspace: null, purpose: "Deploy" }, T + 1));
-    const c = value(answerStored(b.request, { seen: 2, command: "c2", reference: REF, version: 1, nodes: ["node-a"], expiry: null, storedAt: T + 2 }, T + 2));
+    const c = value(answerStored(b.request, { seen: 2, command: "c2", reference: REF, expiry: null, confirmations: [{ reference: REF, node: "node-a", version: 1, at: T + 2, renewed: false }] }, T + 2));
     const types = [...a.events, ...b.events, ...c.events].map(e => e.type);
     expect(types).toEqual(["SecretRequested", "SecretRequestJoined", "SecretRequestStored"]);
     for (const t of types) expect(t).not.toMatch(/Mandate|Decision|Task|Board/);

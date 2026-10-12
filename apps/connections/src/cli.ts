@@ -452,9 +452,14 @@ async function rotate(home: Opened, name: string, io: Io): Promise<number> {
   await home.seal(ref, text);
   const rotated = await home.connections.rotate(name, ref, ACTOR);
   if (!rotated.ok) { home.vault.remove(ref); return done(rotated, io); }
-  home.vault.remove(current.ref);
+  // The rotation is committed: an old file that can't be removed, or is gone already, is named as left to clean, never
+  // thrown in place of the rotation (round 3, point 1).
+  let left: string | null = null;
+  try { home.vault.remove(current.ref); } catch (error) { left = error instanceof Error ? error.message : "failed"; }
   io.stdout(`${JSON.stringify({ fingerprint: await home.vault.fingerprint(ref) })}\n`);
-  return 0;
+  if (left === null) return 0;
+  io.stderr(`left to clean: vault: ${left}\n`);
+  return PARTIAL;
 }
 
 async function probe(home: Opened, name: string, io: Io, body: (connection: Connection) => Promise<number>): Promise<number> {
@@ -517,6 +522,9 @@ function view(connection: Connection): { name: string; kind: string; vendor: str
   const fingerprint = connection.kind === "api-key" && connection.custody === "morndo" ? connection.fingerprint : null;
   return { name: connection.name, kind: connection.kind, vendor: connection.vendor, runtime: connection.runtime, status: connection.status, fingerprint };
 }
+
+// Done, with something left to clean that the command names on stderr, as morndo-secrets says it.
+const PARTIAL = 3;
 
 function done(result: { ok: true } | { ok: false; error: { problem: string; role?: string; exit?: number } }, io: Io): number {
   if (result.ok) return 0;
