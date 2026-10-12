@@ -323,6 +323,7 @@
   .md :global(ul), .md :global(ol) { margin: 2px 0 6px; padding-left: 22px; }
   .md :global(code) { font: 12px/18px var(--mono, monospace); padding: 1px 3px; border-radius: 3px; background: var(--code-bg); }
   .md :global(pre) { margin: 0 0 8px; padding: 8px 10px; overflow: auto; border-radius: 6px; background: var(--pre-bg, var(--code-bg)); }
+  a, a:visited { color: var(--link); }
   .md :global(a) { color: var(--link); }
   .md :global(blockquote) { margin: 0 0 8px; padding-left: 12px; border-left: 3px solid var(--border); color: var(--muted); }
   table.compare { width: 100%; border-collapse: collapse; font: 400 13px/18px var(--font, sans-serif); }
