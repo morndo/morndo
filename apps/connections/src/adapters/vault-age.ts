@@ -101,10 +101,10 @@ export class AgeVault implements Vault, SealedStore {
   }
 
   // The refs of the files in the vault directory that start with `prefix`, for the startup sweep.
-  refs(prefix: string, _writtenBefore: number): readonly string[] {
+  refs(prefix: string, writtenBefore: number): readonly string[] {
     if (!existsSync(this.#dir)) return [];
     assertPrivate(this.#dir, "dir", this.#uid);
-    return refsIn(readdirSync(this.#dir), prefix, SUFFIX);
+    return refsIn(readdirSync(this.#dir), prefix, SUFFIX).filter(ref => writtenAt(this.#file(ref)) < writtenBefore);
   }
 
   async keyedFingerprint(ref: string): Promise<string | null> {
@@ -171,6 +171,11 @@ export function recipientStanzas(file: Uint8Array): number | null {
     at = end + 1;
   }
   return null;
+}
+
+// A file's last write, or +Infinity when it is gone already: a file being replaced or removed is not the sweep's.
+function writtenAt(path: string): number {
+  try { return statSync(path).mtimeMs; } catch { return Number.POSITIVE_INFINITY; }
 }
 
 function markOf(plain: Uint8Array, cipher: Uint8Array): Uint8Array {

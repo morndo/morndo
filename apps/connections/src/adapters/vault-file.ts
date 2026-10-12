@@ -1,14 +1,12 @@
 // Plain files at 0600, one per secret ref. The migration adapter (design section 5).
-import { existsSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { assertPrivate, readPrivate, writePrivate } from "./file-mode.ts";
 import { NodeKeys } from "./node-keys.ts";
-import { fingerprintOf, refsIn, secretPath } from "./secret-ref.ts";
+import { fingerprintOf, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
 import type { SealedProblem, SealedStore } from "../application/ports.ts";
 import type { Vault } from "./vault.ts";
-
-const SUFFIX = "";
 
 export class FileVault implements Vault, SealedStore {
   readonly #dir: string;
@@ -48,11 +46,10 @@ export class FileVault implements Vault, SealedStore {
     return { ok: false, problem: "plaintext_vault" };
   }
 
-  // The refs of the files in the vault directory that start with `prefix`, for the startup sweep.
-  refs(prefix: string, _writtenBefore: number): readonly string[] {
-    if (!existsSync(this.#dir)) return [];
-    assertPrivate(this.#dir, "dir", this.#uid);
-    return refsIn(readdirSync(this.#dir), prefix, SUFFIX);
+  // The plaintext vault never holds a sealed file (D1), so it lists none: its sweep must never touch the age vault's
+  // files, which share the directory (review 1).
+  refs(_prefix: string, _writtenBefore: number): readonly string[] {
+    return [];
   }
 
   async keyedFingerprint(ref: string): Promise<string | null> {

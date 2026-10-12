@@ -1,5 +1,6 @@
 // Wires the store, the vault and the services. The plaintext type stays in this file.
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Encrypter } from "age-encryption";
 import type { EngineSettings, Runtime } from "./application/ports.ts";
@@ -116,10 +117,11 @@ export const secretIndexPath = (dir: string) => join(dir, "secret-index.json");
 
 export function openSecrets(env: NodeJS.ProcessEnv): SecretsHome {
   const dir = env.MORNDO_CONNECTIONS_HOME ?? join(env.HOME ?? "", ".config/morndo-connections");
-  const keys = new NodeKeys(dir);
+  const secrets = new SqliteSecrets(join(dir, "connections.db"));
+  // A node key may be made only while no fingerprint or index entry made with it is on record (review 6).
+  const keys = new NodeKeys(dir, undefined, () => !existsSync(secretIndexPath(dir)) && secrets.load().directory.ledger.length === 0);
   const age = env.MORNDO_VAULT === "file" ? null : new AgeVault(join(dir, "vault"), join(dir, "identity"), undefined, keys);
   const vault = age ?? new FileVault(join(dir, "vault"), undefined, keys);
-  const secrets = new SqliteSecrets(join(dir, "connections.db"));
   const random = (prefix: string) => `${prefix}${randomBytes(8).toString("hex")}`;
   const service = new SecretsService({
     clock: { now: () => Date.now() }, ids: { next: random }, vault,

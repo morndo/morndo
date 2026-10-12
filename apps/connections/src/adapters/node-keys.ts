@@ -12,9 +12,13 @@ const KEY_BYTES = 32;
 export class NodeKeys {
   readonly #dir: string;
   readonly #uid: number;
-  constructor(dir: string, uid?: number, _mayCreate?: () => boolean) {
+  readonly #mayCreate: () => boolean;
+  // `mayCreate` says whether a missing key may be made: only while nothing made with it is on record (review 6). A new
+  // key would let a revoked value in again under a new fingerprint and blind the output filter to every indexed value.
+  constructor(dir: string, uid?: number, mayCreate: () => boolean = () => true) {
     this.#dir = dir;
     this.#uid = uid ?? process.getuid?.() ?? -1;
+    this.#mayCreate = mayCreate;
   }
 
   // The keyed fingerprint (SC2): the first 12 hex characters of HMAC-SHA-256 under the fingerprint key.
@@ -30,7 +34,12 @@ export class NodeKeys {
   // Read each time, so a key file loosened or swapped since is refused, not used from memory.
   #key(name: string): Uint8Array {
     const path = join(this.#dir, name);
-    if (!existsSync(path)) writeNew(path, new Uint8Array(randomBytes(KEY_BYTES)), this.#uid);
+    if (!existsSync(path)) {
+      if (!this.#mayCreate()) {
+        throw new Error(`${path} is missing while hashes made with it are on record: restore it from where the identity is kept; a new key would let a revoked value in again and blind the output filter`);
+      }
+      writeNew(path, new Uint8Array(randomBytes(KEY_BYTES)), this.#uid);
+    }
     const key = readPrivate(path, this.#uid);
     if (key.length !== KEY_BYTES) throw new Error(`${path} is not a ${KEY_BYTES}-byte key`);
     return key;

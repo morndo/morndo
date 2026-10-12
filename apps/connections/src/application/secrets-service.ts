@@ -13,8 +13,8 @@ import type {
 } from "./ports.ts";
 
 // How long an unreferenced vault file is left alone: a store writes its file before its transaction, so a younger one may
-// belong to a store in progress in another process (review 5).
-export const SWEEP_GRACE_MS = 0;
+// belong to a store still running in another command (review 5).
+export const SWEEP_GRACE_MS = 60 * 60_000;
 
 export type SecretsDeps = { clock: Clock; ids: Ids; vault: SealedStore; index: IndexWriter; secrets: SecretsDirectory; roots: WorkspaceRoots };
 export type StoreRequest = {
@@ -143,7 +143,8 @@ export class SecretsService {
   }
 
   // D2: a crash between the vault write and the commit can leave a file no version refers to, and one between a commit
-  // and its retirement in the index leaves a version live there. The sweep removes those files and retires every version
+  // and its retirement in the index leaves a version live there. The sweep removes those files once they are older than
+  // the grace period, so never one of a store still running elsewhere (review 5), and retires every version
   // the ledger no longer holds current (retiring again keeps the first time), inside a write transaction, so no store
   // commits meanwhile; a store checks inside its own transaction that its file is still there.
   sweep(): string[] {
@@ -151,7 +152,7 @@ export class SecretsService {
     return secrets.write(state => {
       const kept = new Set<string>();
       for (const v of state.vaults) if (v.ref !== null) kept.add(v.ref);
-      const gone = vault.refs("s-", clock.now()).filter(ref => !kept.has(ref));
+      const gone = vault.refs("s-", clock.now() - SWEEP_GRACE_MS).filter(ref => !kept.has(ref));
       for (const ref of gone) vault.remove(ref);
       const retire = state.directory.ledger.filter(e => e.state !== "current").map(e => ({ reference: e.reference, version: e.version }));
       if (retire.length > 0) index.write({ add: null, retire, at: clock.now() });

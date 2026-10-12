@@ -1234,8 +1234,8 @@ export const CONTROLS: Control[] = [
     run: ["packages/node-ops/test/secret-scan-check.test.ts"], expect: "encodeURI" },
   // ---- PR 2b (board T-94): node custody, PLAN steps 5 to 13, each guard removed once.
   { id: "sp2b-key-one-winner", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
-    find: "if (!existsSync(path)) writeNew(path, new Uint8Array(randomBytes(KEY_BYTES)), this.#uid);\n    const key = readPrivate(path, this.#uid);",
-    replace: "const made = new Uint8Array(randomBytes(KEY_BYTES));\n    const key = existsSync(path) ? readPrivate(path, this.#uid) : (writeNew(path, made, this.#uid), made);",
+    find: "      writeNew(path, new Uint8Array(randomBytes(KEY_BYTES)), this.#uid);\n    }\n    const key = readPrivate(path, this.#uid);",
+    replace: "      const made = new Uint8Array(randomBytes(KEY_BYTES));\n      writeNew(path, made, this.#uid);\n      return made;\n    }\n    const key = readPrivate(path, this.#uid);",
     run: ["apps/connections/test/node-keys.test.ts"], expect: "racing" },
   { id: "sp2b-key-length", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
     find: "    if (key.length !== KEY_BYTES) throw new Error(`${path} is not a ${KEY_BYTES}-byte key`);\n", replace: "",
@@ -1408,6 +1408,23 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-workspace-root", task: "secrets-pr2b", file: "apps/connections/src/adapters/store-migrations.ts",
     find: "root TEXT NOT NULL UNIQUE,", replace: "root TEXT NOT NULL,",
     run: ["apps/connections/test/secrets-sqlite.test.ts"], expect: "threw SQLITE_CONSTRAINT_UNIQUE" },
+  // ---- PR #40 review round 1 (board T-94), each new guard removed once.
+  { id: "sp2b-r1-file-vault-lists-none", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-file.ts",
+    find: "  refs(_prefix: string, _writtenBefore: number): readonly string[] {\n    return [];",
+    replace: "  refs(_prefix: string, _writtenBefore: number): readonly string[] {\n    return process.getBuiltinModule(\"node:fs\").readdirSync(this.#dir).filter((n: string) => n.startsWith(_prefix));",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "MORNDO_VAULT=file" },
+  { id: "sp2b-r5-grace", task: "secrets-pr2b", file: "apps/connections/src/application/secrets-service.ts",
+    find: "vault.refs(\"s-\", clock.now() - SWEEP_GRACE_MS)", replace: "vault.refs(\"s-\", clock.now())",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "older than the grace period" },
+  { id: "sp2b-r5-written-before", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
+    find: ".filter(ref => writtenAt(this.#file(ref)) < writtenBefore)", replace: "",
+    run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "to deeply equal []" },
+  { id: "sp2b-r6-may-create", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
+    find: "      if (!this.#mayCreate()) {", replace: "      if (false) {",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "is missing" },
+  { id: "sp2b-r6-on-record", task: "secrets-pr2b", file: "apps/connections/src/compose.ts",
+    find: "() => !existsSync(secretIndexPath(dir)) && secrets.load().directory.ledger.length === 0", replace: "() => true",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "gone after a store" },
 ];
 
 // ---- the runner
