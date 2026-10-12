@@ -49,6 +49,14 @@ export const CONNECTION_WORDS = {
   signIn: { claude: "claude auth login", codex: "codex login", cursor: "agent login" },
   addLine: "morndo-keys add",
   runtimes: { claude: "Claude Code", codex: "Codex", cursor: "Cursor agent" },
+  auto: {
+    label: "Auto: Morndo picks per task, among each Role's chain, and says why",
+    fallbackOrder: "Fallback order",
+    on: "On",
+    off: "Off",
+    hand: "Hand: Auto doesn't route this Role. Its chain runs as you set it.",
+    drifted: "Changed outside Morndo: Auto waits until you re-apply or keep it as hand.",
+  },
 } as const;
 
 const repo = z.strictObject({ allow: z.array(text(200)), deny: z.array(text(200)) });
@@ -90,6 +98,7 @@ export const LeaseView = z.strictObject({
 });
 
 export const PolicyView = z.strictObject({
+  auto: z.boolean(),
   mode: z.enum(["subscriptions-first", "keys-first", "subscriptions-only", "keys-only", "custom"]),
   order: z.array(name()),
   roles: z.array(z.strictObject({
@@ -100,6 +109,7 @@ export const PolicyView = z.strictObject({
     picks: z.array(text(200)),
     riskPicks: z.nullable(z.array(text(200))),
     drifted: z.boolean(),
+    auto: z.boolean(),
   })),
 });
 
@@ -123,6 +133,11 @@ export const VendorPreset = z.strictObject({
   runtimes: z.array(runtime).check(z.minLength(1)),
   models,
   family: text(64),
+  families: z.array(z.strictObject({ pattern: text(80), family: text(64) })),
+  class: z.array(z.strictObject({
+    pattern: text(80),
+    class: z.enum(["flagship", "everyday", "fast", "unknown"]),
+  })),
   keyShapes: z.array(text(40)),
   spend: z.array(z.enum(["balance", "token-price", "manual", "provider"])),
   prices: z.array(z.strictObject({ at: text(32), model: text(80), input: z.number(), output: z.number() })),
@@ -165,6 +180,7 @@ export const RoleRow = z.strictObject({
   chain: z.array(text(200)),
   drifted: z.boolean(),
   first: z.nullable(text(200)),
+  auto: z.optional(z.boolean()),
 });
 export const AlertRow = z.strictObject({
   kind: z.literal("connection"),
@@ -180,6 +196,13 @@ export const CatalogChoice = z.strictObject({
   termsSources: z.array(z.url()),
   isolation: z.nullable(z.enum(["none", "rules", "os"])),
 });
+const autoSettings = z.strictObject({
+  on: z.boolean(),
+  taskCeiling: z.number(),
+  saveLine: z.number(),
+  dailyCaps: z.record(name(), z.number()),
+  reserves: z.record(name(), z.number()),
+});
 export const ConnectionsPage = z.strictObject({
   version: z.int(),
   connections: z.array(ConnectionRow),
@@ -188,9 +211,38 @@ export const ConnectionsPage = z.strictObject({
   roles: z.array(RoleRow),
   alerts: z.array(AlertRow),
   catalog: z.array(CatalogChoice),
+  auto: z.optional(autoSettings),
 });
 
-export const PriorityCommand = z.strictObject({ version: z.int(), mode, order: z.array(name()) });
+const reasonCode = z.string().check(z.regex(/^[a-z0-9-]{1,64}$/));
+const reason = z.strictObject({
+  code: reasonCode,
+  stage: z.enum(["rules", "declined"]),
+  n: z.optional(z.number()),
+  name: z.optional(reasonCode),
+});
+export const AutoPickView = z.strictObject({
+  route: text(32),
+  tier: z.enum(["routine", "standard", "hard"]),
+  pick: z.nullable(text(200)),
+  chain: z.array(text(200)),
+  stage: z.enum(["rules", "decider"]),
+  rulesPick: z.nullable(text(200)),
+  reasons: z.array(reason),
+  excluded: z.array(z.strictObject({ entry: text(200), reason })),
+  ranked: z.array(text(200)),
+});
+export const RouteAnswer = z.discriminatedUnion("auto", [
+  z.strictObject({ route: text(32), auto: z.literal(true), chain: z.array(text(200)) }),
+  z.strictObject({
+    route: text(32),
+    auto: z.literal(false),
+    reason: z.enum(["off", "role-off", "hand", "drifted", "none-eligible"]),
+    chain: z.array(text(200)),
+  }),
+]);
+
+export const PriorityCommand = z.strictObject({ version: z.int(), mode, order: z.array(name()), auto: z.optional(z.boolean()) });
 export const RoleCommand = z.strictObject({
   version: z.int(),
   role: text(64),
@@ -219,6 +271,8 @@ export type LeaseView = z.output<typeof LeaseView>;
 export type PolicyView = z.output<typeof PolicyView>;
 export type VendorPreset = z.output<typeof VendorPreset>;
 export type ConnectionsPage = z.output<typeof ConnectionsPage>;
+export type AutoPickView = z.output<typeof AutoPickView>;
+export type RouteAnswer = z.output<typeof RouteAnswer>;
 export type PriorityCommand = z.output<typeof PriorityCommand>;
 export type RoleCommand = z.output<typeof RoleCommand>;
 export type RevokeCommand = z.output<typeof RevokeCommand>;
