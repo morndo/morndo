@@ -66,10 +66,19 @@ export type Assignment = { task: TaskKey; lane: string };
 export const NOTE_MAX = 140;
 const HTTPS_LINK = /^https:\/\/\S+$/;
 const ATTACHMENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+// §3.3: "nothing that could carry credentials" — no userinfo in the authority, and no query parameter whose name
+// says it is one (token, key, secret, password, sig, …; presigned forms like X-Amz-Signature included).
+const USERINFO_LINK = /^https:\/\/[^/?#]*@/;
+const CREDENTIAL_PARAM = /[?&][a-z0-9_-]*(?:token|key|secret|password|passwd|pwd|sig|auth|credential)[a-z0-9_-]*=/i;
 export type RecordProblem = "empty" | "too_long" | "bad_link" | "bad_counts" | "bad_name";
 
 // The guards on the records themselves, at the edge where they are filed. The digest recomputes from what is stored,
 // so a record that never passes these still shows (struck through, capped); these keep the stores clean.
+// A link that may be stored: an attachment id, or an https URL without userinfo and without a query parameter
+// named like a credential (§3.3).
+const safeLink = (link: string): boolean =>
+  ATTACHMENT_ID.test(link) ? true : HTTPS_LINK.test(link) && !USERINFO_LINK.test(link) && !CREDENTIAL_PARAM.test(link);
+
 export function checkClaim(c: Claim): Result<Claim, RecordProblem> {
   if (c.lane === "") return err("empty");
   if (!LANE_NAME.test(c.lane)) return err("bad_name");
@@ -81,7 +90,7 @@ export function checkClaim(c: Claim): Result<Claim, RecordProblem> {
 export function checkEvidence(e: Evidence): Result<Evidence, RecordProblem> {
   if (!LANE_NAME.test(e.producer.name)) return err("bad_name");
   if (e.note !== undefined && e.note.length > NOTE_MAX) return err("too_long");
-  if (e.link !== undefined && !HTTPS_LINK.test(e.link) && !ATTACHMENT_ID.test(e.link)) return err("bad_link");
+  if (e.link !== undefined && !safeLink(e.link)) return err("bad_link");
   if (e.counts !== undefined && e.kind !== "tests") return err("bad_counts");
   return ok(e);
 }
