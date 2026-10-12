@@ -338,13 +338,18 @@ export function itemNew(item: SeenAt, mark: DigestMark | null): { fresh: boolean
   return { fresh, changed };
 }
 
-// §4: two devices racing keep the larger value, and both sets of items seen above it.
+// §4: two devices racing keep the larger value, and both sets of items seen above it — and an item seen on both
+// keeps its newer entry, whichever mark carries it.
 export function mergeMarks(a: DigestMark | null, b: DigestMark | null): DigestMark | null {
   if (a === null) return b;
   if (b === null) return a;
   const seq = Math.max(a.seq, b.seq);
   const seen = new Map<string, SeenAt>();
-  for (const s of [...a.seen, ...b.seen]) if (s.seq > seq) seen.set(s.id, s);
+  for (const s of [...a.seen, ...b.seen]) {
+    if (s.seq <= seq) continue;
+    const prior = seen.get(s.id);
+    if (prior === undefined || s.seq > prior.seq) seen.set(s.id, s);
+  }
   return { seq, seen: [...seen.values()] };
 }
 
