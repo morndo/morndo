@@ -42,11 +42,11 @@ const hd = (seq: number, subject: SubjectRef, revision: Revision) =>
   ({ subject, revision, seq, at: atOf(seq) });
 const evt = (seq: number, kind: DigestEvent["kind"], subject: SubjectRef): DigestEvent =>
   ({ kind, subject, seq, at: atOf(seq), origin: `${kind}:${seq}` });
-const st = (subject: SubjectRef, revision: Revision | null = null): SubjectState =>
-  ({ subject, title: null, revision, claimRound: null, deployedAt: null, reverted: false, rolledBack: false, reopened: false });
+const st = (subject: SubjectRef): SubjectState =>
+  ({ subject, title: null, claimRound: null, deployedAt: null, reverted: false, rolledBack: false, reopened: false });
 const stale = (n: number) => ({ kind: "task_in_review" as const, task: taskKey(n), since: NOW - 9 * HOUR });
-const seen = (id: string, seq: number, level: DigestItem["level"], section: DigestItem["section"]): DigestMark["seen"][number] =>
-  ({ id, seq, level, section });
+const seen = (id: string, seq: number, level: DigestItem["level"]): DigestMark["seen"][number] =>
+  ({ id, seq, level });
 
 const dg = (o: Partial<DigestInput>) => buildDigest({
   now: NOW, newest: 10_000, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [],
@@ -56,7 +56,7 @@ const items = (d: ReturnType<typeof dg>) => d.sections.flatMap(s => s.items);
 const one = (d: ReturnType<typeof dg>, id: string) => items(d).find(i => i.id === id);
 
 const base = (t: number, evidence: Evidence[] = [ev(9, w7, A, "review", "pass", lane("rvw"))]): Partial<DigestInput> => ({
-  changeHeads: [hd(2, w7, A)], states: [st(w7, A)], links: [ln(3, t, w7, "bld")], claims: [cl(4, w7, A, "bld")], evidence, stale: [stale(t)],
+  changeHeads: [hd(2, w7, A)], states: [st(w7)], links: [ln(3, t, w7, "bld")], claims: [cl(4, w7, A, "bld")], evidence, stale: [stale(t)],
 });
 
 const WEEK: WeekWindow[] = [{ week: "w1", start: NOW - DAY, end: NOW + 6 * DAY }];
@@ -103,7 +103,7 @@ describe("Rule 1: new since the mark", () => {
       ...base(1, [ev(9, w7, A, "ci", "pass")]),
       assignments: [asg(6, 1, "bld"), asg(30, 1, "bld")],
       links: [ln(3, 1, w7, "bld"), ln(31, 1, w7, "bld")],
-      mark: { seq: 8, seen: [seen("T-1", 9, "checked", "stale_or_stuck")] },
+      mark: { seq: 8, seen: [seen("T-1", 9, "checked")] },
     });
     expect(one(d, "T-1"), "N04").toMatchObject({ seq: 9, fresh: false });
   });
@@ -111,13 +111,13 @@ describe("Rule 1: new since the mark", () => {
     const d = dg({
       ...base(1, [ev(9, w7, A, "ci", "pass")]),
       assignments: [asg(30, 1, "oth")],
-      mark: { seq: 8, seen: [seen("T-1", 9, "checked", "stale_or_stuck")] },
+      mark: { seq: 8, seen: [seen("T-1", 9, "checked")] },
     });
     expect(one(d, "T-1"), "N05").toMatchObject({ seq: 9, fresh: false });
   });
   it("N06", () => {
     const d = dg({
-      states: [st(w7, A)], changeHeads: [hd(2, w7, A)],
+      states: [st(w7)], changeHeads: [hd(2, w7, A)],
       links: [ln(3, 12, w7, "bld"), ln(50, 12, w7, "rvw")],
       claims: [cl(4, w7, A, "bld"), cl(5, task(12), null, "rvw")],
       events: [evt(8, "merged", w7)],
@@ -137,7 +137,7 @@ describe("Rule 1: new since the mark", () => {
   });
   it("N08", () => {
     const d = dg({
-      states: [st(w7, A)], changeHeads: [hd(2, w7, A)],
+      states: [st(w7)], changeHeads: [hd(2, w7, A)],
       events: [evt(10, "opened_or_pushed", w7)],
       links: [ln(30, 12, w7, "bld")],
       claims: [cl(40, w7, A, "bld", { task: taskKey(99) })],
@@ -148,7 +148,7 @@ describe("Rule 1: new since the mark", () => {
   it("N09", () => {
     // Sequence and time agree, which is what the hub stamps (SQ10). The claim is first, so the root is T-99.
     const d = dg({
-      states: [st(w7, A)],
+      states: [st(w7)],
       claims: [cl(20, w7, A, "bld", { task: taskKey(99) })],
       links: [ln(30, 12, w7, "bld")],
       events: [evt(10, "opened_or_pushed", w7)],
@@ -182,7 +182,7 @@ describe("Rule 1: new since the mark", () => {
   it("N12", () => {
     const d = dg({
       events: [evt(7, "failed", w1), evt(9, "failed", w1)],
-      mark: { seq: 5, seen: [seen("acme/web#1", 7, "claimed", "failed_or_rolled_back")] },
+      mark: { seq: 5, seen: [seen("acme/web#1", 7, "claimed")] },
     });
     expect(one(d, "acme/web#1"), "N12").toMatchObject({ seq: 9, fresh: true });
   });
@@ -190,8 +190,8 @@ describe("Rule 1: new since the mark", () => {
     const d = dg({
       claims: [cl(4, w1, A, "bld"), cl(12, w1, B, "bld")],
       events: [evt(7, "failed", w1)],
-      states: [st(w1, B)],
-      mark: { seq: 5, seen: [seen("acme/web#1", 7, "claimed", "failed_or_rolled_back")] },
+      states: [st(w1)],
+      mark: { seq: 5, seen: [seen("acme/web#1", 7, "claimed")] },
     });
     expect(one(d, "acme/web#1"), "N13").toMatchObject({ seq: 12, fresh: true });
   });
@@ -202,7 +202,7 @@ describe("Rule 1: new since the mark", () => {
     expect(item, "the mark never enters").toMatchObject({ seq: 9, fresh: true });
     const marked = markAllSeen(
       { seq: 5, seen: [] },
-      [{ id: "acme/web#1", seq: item?.seq ?? 0, level: item?.level ?? null, section: item?.section ?? "merged" }],
+      [{ id: "acme/web#1", seq: item?.seq ?? 0, level: item?.level ?? null }],
       ["acme/web#1"],
       100,
     );
@@ -213,13 +213,13 @@ describe("Rule 1: new since the mark", () => {
   it("N15", () => {
     const d = dg({
       events: [evt(7, "failed", w1), evt(12, "merged", w1)],
-      mark: { seq: 10, seen: [seen("acme/web#1", 12, "claimed", "failed_or_rolled_back")] },
+      mark: { seq: 10, seen: [seen("acme/web#1", 12, "claimed")] },
     });
     expect(one(d, "acme/web#1"), "N15").toMatchObject({ seq: 12, fresh: false });
   });
   it("N16", () => {
     const d = dg({
-      states: [st(w7, B)],
+      states: [st(w7)],
       links: [ln(3, 3, w7, "bld")],
       claims: [cl(4, w7, A, "bld")],
       evidence: [ev(9, w7, A, "ci", "pass")],
@@ -231,7 +231,7 @@ describe("Rule 1: new since the mark", () => {
   });
   it("N17", () => {
     const d = dg({
-      states: [st(w7, B)],
+      states: [st(w7)],
       links: [ln(3, 3, w7, "bld")],
       claims: [cl(4, w7, A, "bld")],
       evidence: [ev(9, w7, A, "ci", "pass")],
@@ -242,19 +242,19 @@ describe("Rule 1: new since the mark", () => {
   });
   it("N18", () => {
     const d = dg({
-      states: [st(w7, A)],
+      states: [st(w7)],
       links: [ln(3, 3, w7, "bld")],
       claims: [cl(4, w7, A, "bld")],
       evidence: [ev(9, w7, A, "ci", "pass")],
       changeHeads: [hd(2, w7, A), hd(30, w7, A)],
       stale: [stale(3)],
-      mark: { seq: 8, seen: [seen("T-3", 9, "checked", "stale_or_stuck")] },
+      mark: { seq: 8, seen: [seen("T-3", 9, "checked")] },
     });
     expect(one(d, "T-3"), "N18").toMatchObject({ seq: 9, fresh: false });
   });
   it("N19", () => {
     const d = dg({
-      states: [st(w7, A2)],
+      states: [st(w7)],
       links: [ln(3, 3, w7, "bld")],
       claims: [cl(4, w7, A, "bld")],
       evidence: [ev(9, w7, A, "ci", "pass")],
@@ -266,7 +266,7 @@ describe("Rule 1: new since the mark", () => {
   });
   it("N20", () => {
     const d = dg({
-      states: [st(w7, B)],
+      states: [st(w7)],
       links: [ln(3, 3, w7, "bld")],
       claims: [cl(4, w7, A, "bld")],
       evidence: [ev(30, w7, A, "ci", "pass")],
@@ -278,7 +278,7 @@ describe("Rule 1: new since the mark", () => {
   });
   it("N21", () => {
     const d = dg({
-      states: [st(w7, A)],
+      states: [st(w7)],
       links: [ln(3, 3, w7, "bld")],
       claims: [cl(4, w7, A, "bld")],
       evidence: [ev(9, w7, A, "tests", "pass", lane("bld"))],
@@ -289,7 +289,7 @@ describe("Rule 1: new since the mark", () => {
   });
   it("N22", () => {
     const d = dg({
-      states: [st(w8, B)], changeHeads: [hd(2, w8, B)],
+      states: [st(w8)], changeHeads: [hd(2, w8, B)],
       evidence: [ev(9, w8, B, "ci", "pass")],
       links: [ln(20, 1, w8, "bld")],
       stale: [stale(1)], mark: { seq: 15, seen: [] },
@@ -298,7 +298,7 @@ describe("Rule 1: new since the mark", () => {
   });
   it("N23", () => {
     const d = dg({
-      states: [st(w9, A)], changeHeads: [hd(2, w9, A)],
+      states: [st(w9)], changeHeads: [hd(2, w9, A)],
       links: [ln(3, 4, w9, "bld"), ln(20, 12, w9, "oth")],
       claims: [cl(4, w9, A, "bld")],
       evidence: [ev(9, w9, A, "review", "pass", lane("rvw"))],
@@ -322,30 +322,30 @@ describe("Rule 1: new since the mark", () => {
     const d = dg({
       links: [ln(3, 3, w7, "bld")],
       events: [evt(6, "merged", w7), evt(8, "stale_or_stuck", task(3))],
-      mark: { seq: 5, seen: [seen("T-3", 8, "claimed", "stale_or_stuck")] },
+      mark: { seq: 5, seen: [seen("T-3", 8, "claimed")] },
     });
     expect(one(d, "T-3"), "N25").toMatchObject({ seq: 8, fresh: false, section: "merged" });
   });
   it("N26", () => {
     const mark = markAllSeen(
-      { seq: 3, seen: [seen("x", 5, "reviewed", "merged")] },
+      { seq: 3, seen: [seen("x", 5, "reviewed")] },
       [
-        { id: "x", seq: 5, level: "failed", section: "failed_or_rolled_back" },
-        { id: "y", seq: 7, level: "checked", section: "merged" },
+        { id: "x", seq: 5, level: "failed" },
+        { id: "y", seq: 7, level: "checked" },
       ],
       ["y"],
       100,
     );
     expect(mark.seq, "N26").toBe(3);
-    expect(itemNew({ id: "x", seq: 5, level: "failed", section: "failed_or_rolled_back" }, mark).fresh, "N26").toBe(true);
+    expect(itemNew({ id: "x", seq: 5, level: "failed" }, mark).fresh, "N26").toBe(true);
   });
   it("N27", () => {
     const mark = mergeMarks(
-      { seq: 10, seen: [seen("X", 12, null, "merged")] },
-      { seq: 10, seen: [seen("X", 11, null, "merged")] },
+      { seq: 10, seen: [seen("X", 12, null)] },
+      { seq: 10, seen: [seen("X", 11, null)] },
     );
-    expect(mark?.seen, "N27").toEqual([seen("X", 12, null, "merged")]);
-    expect(itemNew({ id: "X", seq: 12, level: null, section: "merged" }, mark).fresh, "N27").toBe(false);
+    expect(mark?.seen, "N27").toEqual([seen("X", 12, null)]);
+    expect(itemNew({ id: "X", seq: 12, level: null }, mark).fresh, "N27").toBe(false);
   });
 });
 
@@ -555,7 +555,7 @@ const bothWeeks = (o: Partial<WeeklyRecords>, now = NOW + 30 * DAY) =>
 describe("Rule 1: a change head is required", () => {
   it("S51", () => {
     const d = dg({
-      states: [st(w7, A)],
+      states: [st(w7)],
       links: [ln(3, 7, w7, "bld")],
       claims: [cl(4, w7, A, "bld")],
       evidence: [ev(9, w7, A, "review", "pass", lane("rvw"))],
@@ -573,7 +573,7 @@ describe("Rule 1: a change head is required", () => {
   });
   it("S52", () => {
     const d = dg({
-      states: [st(w7, A)],
+      states: [st(w7)],
       links: [ln(3, 7, w7, "bld")],
       claims: [cl(4, w7, A, "bld")],
       evidence: [ev(9, w7, A, "review", "pass", lane("rvw"))],
@@ -707,7 +707,7 @@ describe("Rule 2: rounds, roots and which failure matches", () => {
       claims: [cl(6, w7, A, "bld", { task: taskKey(2), at: atOf(6) - DAY })],
       events: [evt(1, "opened_or_pushed", w7)],
       changeHeads: [hd(2, w7, A)],
-      states: [st(w7, A)],
+      states: [st(w7)],
     });
     expect(one(d, "T-1")?.subjects, "S64").toContainEqual(w7);
     expect(levelsOf({

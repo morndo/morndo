@@ -39,15 +39,22 @@ const claim = (o: Partial<Claim> & { subject: SubjectRef; lane: string }): Claim
 };
 const event = (kind: DigestEventKind, subject: SubjectRef, seq: number, at: number): DigestEvent =>
   ({ kind, subject, seq, at, origin: `${kind}:${subjectRef(subject)}:${seq}` });
-const state = (subject: SubjectRef, o: Partial<SubjectState> = {}): SubjectState => ({
-  subject, revision: null, claimRound: null, deployedAt: null, reverted: false, rolledBack: false, reopened: false, title: null, ...o,
-});
+const headOnState = new WeakMap<SubjectState, Revision>();
+const state = (subject: SubjectRef, o: Partial<SubjectState> & { revision?: Revision | null } = {}): SubjectState => {
+  const { revision, ...rest } = o;
+  const st: SubjectState = { subject, claimRound: null, deployedAt: null, reverted: false, rolledBack: false, reopened: false, title: null, ...rest };
+  if (revision != null) headOnState.set(st, revision);
+  return st;
+};
 const digest = (o: Partial<DigestInput> = {}, passes?: PassCount) => {
   // A change's evidence counts only after a forge head (Rule 1). Tests that name a revision on the subject and
   // do not file heads themselves get that head, so the level assertion stays the one the record supports.
   const filed = o.changeHeads !== undefined;
   const changeHeads = [...(o.changeHeads ?? [])];
-  if (!filed) for (const s of o.states ?? []) if (s.subject.kind === "change" && s.revision !== null) changeHeads.push({ subject: s.subject, revision: s.revision, seq: 1, at: 0 });
+  if (!filed) for (const s of o.states ?? []) {
+    const revision = headOnState.get(s);
+    if (s.subject.kind === "change" && revision !== undefined) changeHeads.push({ subject: s.subject, revision, seq: 1, at: 0 });
+  }
   return buildDigest({ now: NOW, newest: 10_000, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [], states: [], needsYou: [], stale: [], ...o, changeHeads }, passes);
 };
 const allItems = (d: { sections: { items: DigestItem[] }[] }) => d.sections.flatMap(s => s.items);
@@ -411,9 +418,9 @@ describe("live conditions (DG6)", () => {
 // ---- DG7: the mark moves only forward, and never past a line the device did not show
 
 describe("the mark (DG7)", () => {
-  const a: SeenAt = { id: "a", seq: 5, level: "claimed", section: "opened_or_pushed" };
-  const b: SeenAt = { id: "b", seq: 7, level: "checked", section: "merged" };
-  const c: SeenAt = { id: "c", seq: 9, level: "claimed", section: "done" };
+  const a: SeenAt = { id: "a", seq: 5, level: "claimed" };
+  const b: SeenAt = { id: "b", seq: 7, level: "checked" };
+  const c: SeenAt = { id: "c", seq: 9, level: "claimed" };
   const items = [a, b, c];
   it("mark all seen covers what was displayed: it stops at the first line that was not, keeping that one unseen", () => {
     expect(markAllSeen({ seq: 4, seen: [] }, items, ["a", "c"], 9)).toEqual({ seq: 5, seen: [c] });
@@ -428,9 +435,9 @@ describe("the mark (DG7)", () => {
     expect(markAllSeen({ seq: 4, seen: [] }, items, ["a"], 9)).toEqual({ seq: 5, seen: [] });   // stops at b
   });
   it("an item seen at an older sequence is a gap: the walk stops at it, unseen at its new sequence (DG8)", () => {
-    const x5: SeenAt = { id: "x", seq: 5, level: "claimed", section: "merged" };
+    const x5: SeenAt = { id: "x", seq: 5, level: "claimed" };
     const x9: SeenAt = { ...x5, seq: 9 };                                 // a new event moved x, behind "N more"
-    const y: SeenAt = { id: "y", seq: 11, level: "claimed", section: "done" };
+    const y: SeenAt = { id: "y", seq: 11, level: "claimed" };
     const mark = markAllSeen({ seq: 3, seen: [x5] }, [x9, y], [], 20);
     expect(mark).toEqual({ seq: 3, seen: [x5] });                         // x was not displayed at 9: nothing passes it
     expect(itemNew(x9, mark)).toEqual({ fresh: true, changed: null });    // and its update stays new (DG8)
@@ -438,17 +445,12 @@ describe("the mark (DG7)", () => {
   it("a prior-seen item behind N more stops the mark when its level or section changed (DG7, DG8)", () => {
     // The mark is {seq:3, seen:[x@5 reviewed]}. x is still @5 but now failed, and it sits behind "N more".
     // y@7 is displayed. Covering x because the sequence matches would mark the failure seen.
-    const xSeen: SeenAt = { id: "x", seq: 5, level: "reviewed", section: "merged" };
+    const xSeen: SeenAt = { id: "x", seq: 5, level: "reviewed" };
     const xFailed: SeenAt = { ...xSeen, level: "failed" };
-    const xMoved: SeenAt = { ...xSeen, section: "failed_or_rolled_back" };
-    const y: SeenAt = { id: "y", seq: 7, level: "claimed", section: "done" };
+    const y: SeenAt = { id: "y", seq: 7, level: "claimed" };
     const level = markAllSeen({ seq: 3, seen: [xSeen] }, [xFailed, y], ["y"], 20);
     expect(level.seq).toBe(3);
     expect(itemNew(xFailed, level)).toEqual({ fresh: true, changed: "level" });
-    // Rule 1.7: the section is never compared, so a section change does not stop the mark.
-    const section = markAllSeen({ seq: 3, seen: [xSeen] }, [xMoved, y], ["y"], 20);
-    expect(section.seq).toBe(7);
-    expect(itemNew(xMoved, section)).toEqual({ fresh: false, changed: null });
   });
   it("opening an item marks that item seen and moves nothing else", () => {
     expect(openedItem({ seq: 4, seen: [] }, b)).toEqual({ seq: 4, seen: [b] });
@@ -456,16 +458,16 @@ describe("the mark (DG7)", () => {
     expect(again).toEqual({ seq: 4, seen: [{ ...b, level: "failed" }] });
   });
   it("two devices racing keep the larger value, and both sets of items seen above it", () => {
-    const x: SeenAt = { id: "x", seq: 6, level: "claimed", section: "merged" };
-    const y: SeenAt = { id: "y", seq: 8, level: null, section: "needs_you" };
+    const x: SeenAt = { id: "x", seq: 6, level: "claimed" };
+    const y: SeenAt = { id: "y", seq: 8, level: null };
     expect(mergeMarks({ seq: 5, seen: [x] }, { seq: 7, seen: [y] })).toEqual({ seq: 7, seen: [y] });
     expect(mergeMarks(null, { seq: 7, seen: [y] })).toEqual({ seq: 7, seen: [y] });
     expect(mergeMarks({ seq: 7, seen: [y] }, null)).toEqual({ seq: 7, seen: [y] });
     expect(mergeMarks(null, null)).toBeNull();
   });
   it("an item seen on both devices keeps its newer entry, whichever mark carries it (§4)", () => {
-    const x5: SeenAt = { id: "x", seq: 5, level: "claimed", section: "done" };
-    const x8: SeenAt = { ...x5, seq: 8, level: "checked", section: "merged" };
+    const x5: SeenAt = { id: "x", seq: 5, level: "claimed" };
+    const x8: SeenAt = { ...x5, seq: 8, level: "checked" };
     expect(mergeMarks({ seq: 3, seen: [x8] }, { seq: 2, seen: [x5] })).toEqual({ seq: 3, seen: [x8] });
     expect(mergeMarks({ seq: 3, seen: [x5] }, { seq: 2, seen: [x8] })).toEqual({ seq: 3, seen: [x8] });
   });
@@ -474,16 +476,14 @@ describe("the mark (DG7)", () => {
 // ---- DG8: new while above the mark and unseen; changed after seen, new again
 
 describe("new since the last look (DG8)", () => {
-  const seen: SeenAt = { id: "acme/web#7", seq: 7, level: "checked", section: "merged" };
+  const seen: SeenAt = { id: "acme/web#7", seq: 7, level: "checked" };
   it("new while its sequence is above the mark and unseen; seen at that sequence, it is not", () => {
     expect(itemNew({ ...seen, seq: 8 }, { seq: 5, seen: [] })).toEqual({ fresh: true, changed: null });
     expect(itemNew(seen, { seq: 7, seen: [seen] })).toEqual({ fresh: false, changed: null });
     expect(itemNew({ ...seen, seq: 6 }, { seq: 7, seen: [] })).toEqual({ fresh: false, changed: null });   // below the mark
   });
-  it("a level or section that changed after it was seen makes it new again, with what changed", () => {
+  it("a level that changed after it was seen makes it new again, with what changed", () => {
     expect(itemNew({ ...seen, level: "failed" }, { seq: 7, seen: [seen] })).toEqual({ fresh: true, changed: "level" });
-    // Rule 1.7: a section change alone is not news.
-    expect(itemNew({ ...seen, section: "failed_or_rolled_back" }, { seq: 7, seen: [seen] })).toEqual({ fresh: false, changed: null });
   });
   it("the digest says it of its items: a failing check after the mark marks the line changed", () => {
     const c7 = change("acme/web", 7);
@@ -562,7 +562,7 @@ describe("new since the last look (DG8)", () => {
     // principal sees. The item stays at the review's sequence, so Mark all seen is not blocked behind N more.
     const c7 = change("acme/web", 7);
     const a1 = rev("sha-a1", "patch-1");
-    const seen: SeenAt = { id: "T-3", seq: 9, level: "reviewed", section: "stale_or_stuck" };
+    const seen: SeenAt = { id: "T-3", seq: 9, level: "reviewed" };
     const mark: DigestMark = { seq: 8, seen: [seen] };
     const base: Partial<DigestInput> = {
       mark,
@@ -580,7 +580,7 @@ describe("new since the last look (DG8)", () => {
     });
     const again = one(relinked, "T-3");
     expect(again).toMatchObject({ level: "reviewed", seq: 9, fresh: false });
-    expect(markAllSeen(mark, [{ id: "T-3", seq: again?.seq ?? 0, level: again?.level ?? null, section: again?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
+    expect(markAllSeen(mark, [{ id: "T-3", seq: again?.seq ?? 0, level: again?.level ?? null }], [], 100).seq).toBe(9);
     const reassigned = digest({
       ...base,
       claims: [...(base.claims ?? []), claim({ subject: task(3), lane: "builder", seq: 5, at: NOW - 9 })],
@@ -589,7 +589,7 @@ describe("new since the last look (DG8)", () => {
     });
     const item = one(reassigned, "T-3");
     expect(item).toMatchObject({ level: "reviewed", seq: 9, fresh: false });
-    expect(markAllSeen(mark, [{ id: "T-3", seq: item?.seq ?? 0, level: item?.level ?? null, section: item?.section ?? "stale_or_stuck" }], [], 100).seq).toBe(9);
+    expect(markAllSeen(mark, [{ id: "T-3", seq: item?.seq ?? 0, level: item?.level ?? null }], [], 100).seq).toBe(9);
   });
   it("two records that each look redundant still raise at the first one's sequence (DG8)", () => {
     // Reviewer is assigned to T-12 at seq 40 and links #7, already grouped, at seq 50. Either record alone
@@ -645,7 +645,7 @@ describe("new since the last look (DG8)", () => {
     const c7 = change("acme/web", 7);
     const a1 = rev("sha-a1", "patch-1");
     const d = digest({
-      mark: { seq: 8, seen: [{ id: "T-3", seq: 9, level: "reviewed", section: "stale_or_stuck" }] },
+      mark: { seq: 8, seen: [{ id: "T-3", seq: 9, level: "reviewed" }] },
       states: [state(c7, { revision: a1 })],
       claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 10 })],
       links: [
@@ -695,7 +695,7 @@ describe("new since the last look (DG8)", () => {
   it("a change head that leaves the level as it was stays quiet (DG8)", () => {
     const c7 = change("acme/web", 7);
     const a1 = rev("sha-a1", "patch-1");
-    const seen: SeenAt = { id: "T-3", seq: 9, level: "checked", section: "stale_or_stuck" };
+    const seen: SeenAt = { id: "T-3", seq: 9, level: "checked" };
     const d = digest({
       mark: { seq: 8, seen: [seen] },
       states: [state(c7, { revision: a1 })],
@@ -792,7 +792,7 @@ describe("no powers of its own (DG11)", () => {
       now: NOW, newest: 10, mark: { seq: 2, seen: [] }, events: [event("merged", c7, 3, NOW)],
       states: [state(c7, { title: "Add the digest" })], claims: [claim({ subject: c7, lane: "builder" })],
       links: [], assignments: [], evidence: [], needsYou: [{ subject: c7, blocking: true, due: null, since: NOW }],
-      stale: [{ kind: "lane_busy", lane: "builder", since: NOW - MIN }],
+      stale: [{ kind: "lane_busy", lane: "builder", since: NOW - MIN }], changeHeads: [],
     };
     const before = JSON.stringify(input);
     buildDigest(input);
@@ -927,13 +927,13 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 1 }]);
   });
   it("a link filed after a claim does not change how that week was counted (DG9, DG12)", () => {
-    // Both claims name #7 at A. The link is filed three weeks later, so at filing #7 is still its own root and the
-    // two claims stay two. The failure matches both, because both name that revision.
+    // Both claims name #7 at A. The link's sequence is after both claims, so at filing #7 is still its own root
+    // and the two claims stay two (NEW 2.5a). The failure matches both, because both name that revision.
     const t12 = task(12);
     const same = [{ subject: c7, revision: a1 }];
     const claims = [
-      claim({ subject: c7, revision: a1, lane: "builder", at: NOW, revisions: same }),
-      claim({ subject: t12, revision: a1, lane: "builder", at: NOW, via: "review", revisions: same }),
+      claim({ subject: c7, revision: a1, lane: "builder", at: NOW, seq: 4, revisions: same }),
+      claim({ subject: t12, revision: a1, lane: "builder", at: NOW, via: "review", seq: 5, revisions: same }),
     ];
     const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW + 21 * DAY, seq: 40 }];
     expect(countedClaims(claims, links)).toEqual([
@@ -1125,10 +1125,10 @@ describe("level names (§3.4)", () => {
   const c7 = change("acme/web", 7);
   const a1 = rev("sha-a1", "patch-1");
   it("claimed with no evidence, checked by a check, reviewed by a review, verified live by a live check", () => {
-    expect(subjectLevel(state(c7, { revision: a1 }), [], new Set()).level).toBe("claimed");
-    expect(subjectLevel(state(c7, { revision: a1 }), [evidence({ subject: c7, revision: a1, kind: "tests", result: "pass" })], new Set()).level).toBe("checked");
-    expect(subjectLevel(state(c7, { revision: a1 }), [evidence({ subject: c7, revision: a1, kind: "review", result: "pass" })], new Set()).level).toBe("reviewed");
-    expect(subjectLevel(state(c7, { revision: a1, deployedAt: 0 }), [evidence({ subject: c7, revision: a1, kind: "live", result: "pass" })], new Set()).level).toBe("verified_live");
+    expect(subjectLevel({ ...state(c7), revision: a1 }, [], new Set()).level).toBe("claimed");
+    expect(subjectLevel({ ...state(c7), revision: a1 }, [evidence({ subject: c7, revision: a1, kind: "tests", result: "pass" })], new Set()).level).toBe("checked");
+    expect(subjectLevel({ ...state(c7), revision: a1 }, [evidence({ subject: c7, revision: a1, kind: "review", result: "pass" })], new Set()).level).toBe("reviewed");
+    expect(subjectLevel({ ...state(c7, { deployedAt: 0 }), revision: a1 }, [evidence({ subject: c7, revision: a1, kind: "live", result: "pass" })], new Set()).level).toBe("verified_live");
     expect(SECTIONS).toEqual(["needs_you", "decided_for_you", "failed_or_rolled_back", "stale_or_stuck", "shipped", "merged", "done", "opened_or_pushed"]);
     expect(LATER_FAILED_MS).toBe(14 * DAY);
     expect(DAY_MS).toBe(DAY);
