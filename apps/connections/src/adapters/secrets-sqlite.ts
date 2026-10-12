@@ -11,6 +11,7 @@ import Database from "better-sqlite3";
 import { isDeepStrictEqual } from "node:util";
 import type { LedgerEntry, Secret, SecretEvent, SecretGrant, SecretStatus, SecretVersion } from "@morndo/domain";
 import type { SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRow } from "../application/ports.ts";
+import { savedVaultRefs } from "../application/vault-refs.ts";
 import { openConnectionsDb } from "./store-sqlite.ts";
 
 type SecretsHooks = { beforeSave?: () => void };
@@ -19,8 +20,6 @@ type SecretRow = {
   warned: string; destinations: string; versions: string;
 };
 type LedgerRow = { reference: string; version: number; keyed_fingerprint: string; state: LedgerEntry["state"]; vault_ref: string | null };
-
-const key = (reference: string, version: number) => JSON.stringify([reference, version]);
 
 function toSecret(row: SecretRow, grants: readonly SecretGrant[]): Secret {
   const versions = JSON.parse(row.versions) as SecretVersion[];
@@ -52,18 +51,6 @@ function ledgerGrows(stored: readonly LedgerEntry[], next: readonly LedgerEntry[
     if (!a || !b || a.reference !== b.reference || a.version !== b.version || a.fingerprint !== b.fingerprint) return false;
   }
   return true;
-}
-
-// Each vault row names one ledger entry, once; an entry no row names has no vault ref.
-function vaultRefs(ledger: readonly LedgerEntry[], vaults: readonly VaultRefRow[]): Map<string, string | null> {
-  const known = new Set(ledger.map(e => key(e.reference, e.version)));
-  const refs = new Map<string, string | null>();
-  for (const v of vaults) {
-    const k = key(v.reference, v.version);
-    if (!known.has(k) || refs.has(k)) throw new Error(`the vault ref for ${v.reference} version ${v.version} names no ledger entry, or names one twice`);
-    refs.set(k, v.ref);
-  }
-  return refs;
 }
 
 export class SqliteSecrets implements SecretsDirectory {
@@ -155,7 +142,8 @@ export class SqliteSecrets implements SecretsDirectory {
     const dir = next.directory;
     if (!extendsEvents(was.events, dir.events)) throw new Error("secret events are append-only: the next state drops or changes a stored event");
     if (!ledgerGrows(was.ledger, dir.ledger)) throw new Error("the fingerprint ledger only grows: the next state drops, moves or changes a stored entry");
-    const refs = vaultRefs(dir.ledger, next.vaults);
+    // One row per ledger entry by the port's save rule, the one the fake uses too (round 3, point 8).
+    const refs = savedVaultRefs(before, next);
     for (const s of dir.held) {
       const current = s.current;
       if (current !== null && !isDeepStrictEqual(s.versions.find(v => v.number === current.number), current)) {
@@ -170,10 +158,8 @@ export class SqliteSecrets implements SecretsDirectory {
       for (const g of s.grants) this.#insertGrant.run(s.reference, JSON.stringify(g));
     }
     for (const [i, e] of dir.ledger.entries()) {
-      const k = key(e.reference, e.version);
       const old = was.ledger[i];
-      // A row the change names sets the ref, null clearing it; an entry it leaves out keeps the stored one (review 9).
-      const ref = refs.has(k) ? refs.get(k) ?? null : old ? before.vaults[i]?.ref ?? null : null;
+      const ref = refs[i]?.ref ?? null;
       if (!old) this.#insertVersion.run(e.reference, e.version, e.fingerprint, e.state, ref);
       else if (old.state !== e.state || before.vaults[i]?.ref !== ref) this.#updateVersion.run(e.state, ref, e.reference, e.version);
     }
