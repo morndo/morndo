@@ -400,8 +400,9 @@ describe("RL12 a halted rollout stays halted", () => {
   it("negative control: one machine's rollback halts the Version for every other machine", async () => {
     const { beginRollout, haltRollout, nodeMayApply, resumeRollout, DEFAULT_SOAK_MINUTES } = await import("../src/releases.ts");
     const cpCommitted = NOW - (DEFAULT_SOAK_MINUTES + 5) * MIN;
-    const rollout = { version: v("0.5.0"), controlPlaneCommittedAt: cpCommitted, soakMinutes: DEFAULT_SOAK_MINUTES,
-      halted: false, haltedBy: null as string | null, nodes: {} as Record<string, { jitterUntil: number | null }> };
+    const rollout = beginRollout({
+      version: v("0.5.0"), controlPlaneCommittedAt: cpCommitted, soakMinutes: DEFAULT_SOAK_MINUTES,
+    });
     const args = { node: "node-a", controlPlane: v("0.5.0"), now: NOW };
     expect(nodeMayApply({ rollout, ...args })).toEqual({ ok: true, value: "apply" });
     const halted = haltRollout(rollout, "node-b");
