@@ -455,6 +455,16 @@ describe("stale conditions (DG10)", () => {
     const short = staleConditions(facts({ lanes: [{ name: "builder", workingSince: NOW - 44 * MIN, lastSideEffectAt: null }] }), STALE_LIMITS_DEFAULT, NOW);
     expect(short).toEqual([]);
   });
+  it("the clock restarts at the latest side effect: one early effect does not hold the window open forever", () => {
+    // Working since 09:00, one commit at 09:01, then nothing until 14:00 (§6.3: none of them in the window).
+    const since = NOW - 5 * HOUR + MIN + STALE_LIMITS_DEFAULT.busyMs;
+    const lanes = [{ name: "builder", workingSince: NOW - 5 * HOUR, lastSideEffectAt: NOW - 5 * HOUR + MIN }];
+    expect(staleConditions(facts({ lanes }), STALE_LIMITS_DEFAULT, NOW)).toEqual([{ kind: "lane_busy", lane: "builder", since }]);
+    expect(staleConditions(facts({ lanes }), STALE_LIMITS_DEFAULT, since - MIN)).toEqual([]);
+    const tasks = [{ key: taskKey(7), blockedSince: null, reviewSince: null, doingSince: NOW - 25 * HOUR, lastActivityAt: NOW - 25 * HOUR + 5 * MIN }];
+    expect(staleConditions(facts({ tasks }), STALE_LIMITS_DEFAULT, NOW))
+      .toEqual([{ kind: "task_quiet", task: taskKey(7), since: NOW - 25 * HOUR + 5 * MIN + STALE_LIMITS_DEFAULT.quietMs }]);
+  });
   it("a blocked task, a review left waiting, a quiet task and a queued job each have their limit", () => {
     const t2 = taskKey(2);
     const found = staleConditions(facts({
