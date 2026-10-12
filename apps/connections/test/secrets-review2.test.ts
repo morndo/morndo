@@ -1,10 +1,11 @@
 // Review round 2 of PR #40 (board T-94): one block per point, each written failing before its fix. Real age vault,
 // real database and the real commands where the point is about them. Values, References and names are synthetic.
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { Encrypter } from "age-encryption";
+import { Decrypter, Encrypter } from "age-encryption";
 import type { Actor, SecretGrant } from "@morndo/domain";
 import { FileRefused } from "../src/adapters/file-mode.ts";
 import { SecretIndexWriter } from "../src/adapters/secret-index-writer.ts";
@@ -16,7 +17,7 @@ import { AgeVault } from "../src/adapters/vault-age.ts";
 import { FileVault } from "../src/adapters/vault-file.ts";
 import { openHome, secretIndexPath } from "../src/compose.ts";
 import { IndexFileRefused, readSecretIndex } from "@morndo/node-ops";
-import { runSecrets, type SecretsIo } from "../src/secrets-cli.ts";
+import { runSecrets, stdinValue, type SecretsIo } from "../src/secrets-cli.ts";
 
 // Several real commands per test (age, SQLite, the index): seconds alone, more under load, as in round 1.
 vi.setConfig({ testTimeout: 60_000 });
@@ -211,5 +212,67 @@ describe("round 2, point 8: a node key missing or malformed is a file problem: e
     const r = await put(h.env, "synthetic-value-two", OTHER);
     expect(r.code).toBe(70);
     expect(r.stderr).toMatch(/fingerprint\.key is not a 32-byte key/);
+  });
+});
+
+describe("round 2, points 3, 4 and 7: no copy of the value this code makes outlives its zeroing", () => {
+  const find = (haystack: Uint8Array, needle: Uint8Array) => {
+    for (let i = 0; i + needle.length <= haystack.length; i++) if (needle.every((b, j) => haystack[i + j] === b)) return i;
+    return -1;
+  };
+  it("point 3: stdin's bytes leave no copy in Node's shared buffer pool once the value is zeroed", async () => {
+    const value = new TextEncoder().encode(`synthetic-${randomBytes(12).toString("hex")}`);
+    const handed: Buffer[] = [];
+    async function* chunks() {
+      for (const part of [value.subarray(0, 10), value.subarray(10)]) {
+        const chunk = Buffer.alloc(part.length);
+        chunk.set(part);
+        handed.push(chunk);
+        yield chunk;
+      }
+    }
+    const bytes = await stdinValue(chunks());
+    expect(bytes).toEqual(value);
+    bytes.fill(0);
+    expect(handed.every(c => c.every(b => b === 0))).toBe(true);
+    // The pool small Buffers are cut from (Buffer.allocUnsafe and Buffer.concat take from it under 4 KiB).
+    expect(find(new Uint8Array(Buffer.allocUnsafe(1).buffer), value)).toBe(-1);
+  });
+  it("point 4: AgeVault.open zeroes what the library decrypted, so the index writer and keyedFingerprint leave none behind", async () => {
+    const h = home();
+    const vault = new AgeVault(h.vault, join(h.dir, "identity"));
+    const e = new Encrypter();
+    e.addRecipient(await vault.recipient());
+    expect((await vault.storeSealed("s-00000000000000a4", await e.encrypt(new TextEncoder().encode("synthetic-value-four")))).ok).toBe(true);
+    const outputs: Uint8Array[] = [];
+    const real = Decrypter.prototype.decrypt;
+    const spy = vi.spyOn(Decrypter.prototype, "decrypt").mockImplementation(async function (this: Decrypter, ...args: unknown[]) {
+      const out: unknown = await (real as (...a: unknown[]) => Promise<unknown>).apply(this, args);
+      if (out instanceof Uint8Array) outputs.push(out);
+      return out as never;
+    });
+    try {
+      const keys = new NodeKeys(h.dir);
+      await new SecretIndexWriter(secretIndexPath(h.dir), b => keys.index(b), vault).prepare("s-00000000000000a4");
+      expect(await vault.keyedFingerprint("s-00000000000000a4")).toMatch(/^[0-9a-f]{12}$/);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(outputs).toHaveLength(2);
+    for (const out of outputs) expect(out.every(b => b === 0)).toBe(true);
+  });
+  it("point 7: a put that fails before it runs (a usage error) zeroes the stdin buffer", async () => {
+    const h = home();
+    const stdin = new TextEncoder().encode("synthetic-value-to-zero\n");
+    expect(await runSecrets(["put", REF, "--yes"], h.env, { stdout: () => {}, stderr: () => {}, stdin, confirm: async () => REF })).toBe(64);
+    expect(stdin.every(b => b === 0)).toBe(true);
+  });
+  it("point 7: a put whose home won't open (a loose directory) zeroes the stdin buffer", async () => {
+    const h = home();
+    mkdirSync(h.dir);
+    chmodSync(h.dir, 0o755);
+    const stdin = new TextEncoder().encode("synthetic-value-to-zero\n");
+    expect(await runSecrets(["put", REF], h.env, { stdout: () => {}, stderr: () => {}, stdin, confirm: async () => REF })).toBe(70);
+    expect(stdin.every(b => b === 0)).toBe(true);
   });
 });
