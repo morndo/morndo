@@ -5,7 +5,7 @@
 // (https://zod.dev/api, read 2026-10-13). Unknown keys on a plugin document fail; they are not dropped.
 import {
   LANGUAGE_CHOICE, LANGUAGE_CODE, MAX_RECORDING_SECONDS, MAX_TEXT_BYTES, QUEUE_REASONS, TRANSCRIPTION_ID,
-  TX_PROBLEMS, TX_STATES, TX_TERMINAL, err, ok, type Result, type TranscriptionProblem,
+  TX_PROBLEMS, TX_STATES, TX_TERMINAL, err, ok, type EngineText, type Result, type TranscriptionProblem,
 } from "@morndo/domain";
 import * as z from "./z.ts";
 
@@ -13,6 +13,25 @@ export const PLUGIN_PROTOCOL = 1;
 
 // Design §5. Zero is not a problem: the answer is the JSON. Two is usage, which is engine, as is any other code.
 export const PLUGIN_EXIT = { usage: 2, unreadable: 3, too_long: 4, not_ready: 5 } as const;
+
+// The port the hub calls (design §4). It lives here so the contract suite and the hub share one type. The hub's
+// ports module can re-export it. language is a domain LANGUAGE_CHOICE, checked before the call.
+export type TranscriberProbe =
+  | { ready: true; engine: string; engineVersion: string; model: string; languages: "multi" | readonly string[]; maxSeconds: number }
+  | { ready: false; reason: "missing" | "not_ready" | "protocol"; detail: string };
+
+export type TranscribeInput = {
+  path: string;
+  language: string;
+  threads: number;
+  maxSeconds: number;
+  signal: AbortSignal;
+};
+
+export type Transcriber = {
+  probe(): Promise<TranscriberProbe>;
+  transcribe(input: TranscribeInput): Promise<Result<EngineText, TranscriptionProblem>>;
+};
 
 export function problemFromExit(code: number): TranscriptionProblem | null {
   if (code === 0) return null;
