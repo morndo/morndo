@@ -1,9 +1,9 @@
 // Plain files at 0600, one per secret ref. The migration adapter (design section 5).
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { assertPrivate, readPrivate, writePrivate } from "./file-mode.ts";
 import { NodeKeys } from "./node-keys.ts";
-import { MARK_SUFFIX, SEALED_SUFFIX, fingerprintOf, secretPath } from "./secret-ref.ts";
+import { fingerprintOf, removeRef, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
 import type { SealedProblem, SealedStore } from "../application/ports.ts";
 import type { Vault } from "./vault.ts";
@@ -57,18 +57,11 @@ export class FileVault implements Vault, SealedStore {
     return this.#keys.fingerprint((await this.open(ref)).bytes());
   }
 
-  // The ref's value, whichever vault wrote it: the plaintext file, or the age vault's sealed file (and its mark), which
-  // share this directory, so a revoke or delete run on this vault still destroys a value the age vault holds (round 2,
-  // points 2 and 5). A ref with neither is refused, never passed over: the caller must learn that nothing was removed.
+  // Every file of the ref, whichever vault wrote it, so a revoke or delete run on this vault still destroys a value the
+  // age vault holds (round 2, points 2 and 5; secret-ref.ts removeRef). A ref with no value file is refused, never passed
+  // over: the caller must learn that nothing was removed.
   remove(ref: string): void {
-    const values = [this.#path(ref), secretPath(this.#dir, ref, SEALED_SUFFIX)].filter(path => existsSync(path));
-    if (values.length === 0) throw new Error(`no file of ${ref} in ${this.#dir}, plaintext or sealed: nothing was removed`);
-    for (const path of [...values, secretPath(this.#dir, ref, MARK_SUFFIX)]) {
-      if (!existsSync(path)) continue;
-      assertPrivate(this.#dir, "dir", this.#uid);
-      assertPrivate(path, "file", this.#uid);
-      unlinkSync(path);
-    }
+    removeRef(this.#dir, ref, this.#uid, "refuse");
   }
 
   #path(ref: string): string {

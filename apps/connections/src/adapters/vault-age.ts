@@ -5,13 +5,13 @@
 // checked 2026-10-10. There is no synchronous call, so this awaits the library. Each call is
 // its own promise: a failure cannot wake or stall the next one, and no worker is left behind.
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 import { Decrypter, Encrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
 import { VALUE_MAX_BYTES } from "@morndo/node-ops";
 import { assertPrivate, readPrivate, refuseBareHome, writeNew, writePrivate, writePrivatePair } from "./file-mode.ts";
 import { NodeKeys } from "./node-keys.ts";
-import { MARK_SUFFIX, SEALED_SUFFIX, fingerprintOf, refsIn, secretPath } from "./secret-ref.ts";
+import { MARK_SUFFIX, SEALED_SUFFIX, fingerprintOf, refsIn, removeRef, secretPath } from "./secret-ref.ts";
 import { SecretMaterial } from "./secret-material.ts";
 import type { SealedProblem, SealedStore } from "../application/ports.ts";
 import type { Vault } from "./vault.ts";
@@ -66,13 +66,9 @@ export class AgeVault implements Vault, SealedStore {
     return fingerprintOf(plain);
   }
 
+  // Every file of the ref, a plaintext one the plaintext vault wrote included (round 3, point 6; secret-ref.ts removeRef).
   remove(ref: string): void {
-    for (const path of [this.#file(ref), this.#mark(ref)]) {
-      if (!existsSync(path)) continue;
-      assertPrivate(this.#dir, "dir", this.#uid);
-      assertPrivate(path, "file", this.#uid);
-      unlinkSync(path);
-    }
+    removeRef(this.#dir, ref, this.#uid, "pass");
   }
 
   // The node's age recipient (age1…), from its identity, made on first use.
