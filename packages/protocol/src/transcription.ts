@@ -34,7 +34,11 @@ const REASONS = QUEUE_REASONS;
 // What a not-ready probe may name. "model" and "ffmpeg" are the two the design names; a short token still prints
 // in doctor, and a path does not fit.
 const missingItem = () => z.string().check(z.regex(/^[a-z][a-z0-9_-]{0,31}$/));
+// What /api/me publishes: the hub's cap, already the lower of the setting and the probe (effectiveMaxSeconds).
 const seconds = () => z.int().check(z.gte(1), z.lte(MAX_RECORDING_SECONDS));
+// The probe may offer more. A day is the bound; the hub still keeps the lower of the two (domain effectiveMaxSeconds).
+const PROBE_MAX_SECONDS = 24 * 60 * 60;
+const probeSeconds = () => z.int().check(z.gte(1), z.lte(PROBE_MAX_SECONDS));
 const languages = z.union([
   z.literal("multi"),
   z.array(code()).check(z.minLength(1), z.maxLength(64)),
@@ -47,7 +51,7 @@ const probeReady = z.strictObject({
   engineVersion: text(32),
   model: text(128),
   languages,
-  maxSeconds: seconds(),
+  maxSeconds: probeSeconds(),
   missing: z.array(missingItem()).check(z.maxLength(0)),
 });
 const probeAbsent = z.strictObject({
