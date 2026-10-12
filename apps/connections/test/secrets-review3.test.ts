@@ -4,7 +4,11 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Actor, SecretGrant } from "@morndo/domain";
 import { NodeKeys } from "../src/adapters/node-keys.ts";
+import { CountingIds, ManualClock, MemoryIndex, MemoryRoots, MemorySecrets } from "../src/application/fakes.ts";
+import { SecretsService, type StoreRequest } from "../src/application/secrets-service.ts";
+import { MemorySealedStore } from "./sealed-store-fake.ts";
 import { SecretMaterial } from "../src/adapters/secret-material.ts";
 import { AgeVault } from "../src/adapters/vault-age.ts";
 import { FileVault } from "../src/adapters/vault-file.ts";
@@ -178,5 +182,44 @@ describe("round 3, points 2 and 9: node keys take their records from the root, a
   it("the keys adapter imports no store: it can't open the database behind a root's back", () => {
     const source = readFileSync(join(import.meta.dirname, "../src/adapters/node-keys.ts"), "utf8");
     expect(source).not.toMatch(/secrets-sqlite|store-sqlite|SqliteSecrets|better-sqlite3/);
+  });
+});
+
+describe("round 3, point 7: the sweep retires only versions the index still holds live", () => {
+  const T = 1_700_000_000_000;
+  const principal: Actor = { kind: "principal", command: "c1" };
+  const nodeGrant: SecretGrant = { subject: { kind: "node" }, modes: ["exec"], until: { kind: "open" } };
+  function world() {
+    const clock = new ManualClock(T);
+    const vault = new MemorySealedStore("fake1-node", undefined, () => clock.at);
+    const index = new MemoryIndex();
+    const service = new SecretsService({ clock, ids: new CountingIds(), vault, index, secrets: new MemorySecrets(), roots: new MemoryRoots() });
+    const request = (value: string, over: Partial<StoreRequest> = {}): StoreRequest => ({
+      reference: REF, sealed: MemorySealedStore.seal(["fake1-node"], new TextEncoder().encode(value)), shape: null, grants: [nodeGrant],
+      expiry: null, destinations: [], renew: false, ...over,
+    });
+    return { clock, index, service, request };
+  }
+  it("after a rotation whose retirement landed, a sweep writes nothing to the index", async () => {
+    const w = world();
+    expect((await w.service.store(w.request("synthetic-value-one"), principal)).ok).toBe(true);
+    w.clock.at = T + 5;
+    expect((await w.service.store(w.request("synthetic-value-two", { shape: { keep: true } }), principal)).ok).toBe(true);
+    const before = w.index.changes.length;
+    w.service.sweep();
+    w.service.sweep();
+    expect(w.index.changes).toHaveLength(before);
+  });
+  it("a version a failed retirement left live is retired by the next sweep", async () => {
+    const w = world();
+    expect((await w.service.store(w.request("synthetic-value-one"), principal)).ok).toBe(true);
+    const write = w.index.write.bind(w.index);
+    w.index.write = change => { if (change.add === null) throw new Error("index refused: mode"); write(change); };
+    w.clock.at = T + 5;
+    const r = await w.service.store(w.request("synthetic-value-two", { shape: { keep: true } }), principal);
+    expect(r.ok && r.value.left).toEqual([expect.stringMatching(/index: version 1/)]);
+    w.index.write = write;
+    w.service.sweep();
+    expect(w.index.changes.at(-1)).toEqual({ add: null, retire: [{ reference: REF, version: 1 }], at: T + 5 });
   });
 });
