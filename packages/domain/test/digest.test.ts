@@ -661,6 +661,44 @@ describe("new since the last look (DG8)", () => {
     expect(one(d, "T-1")).toMatchObject({ level: "claimed", seq: 500, fresh: true });
     expect(passes.n, "one pass").toBe(1);
   });
+  it("a push that voids the evidence raises the sequence, so the item is new again (DG8)", () => {
+    // The mark passed the checked item and dropped its seen entry. CI passed on head A. A later push files
+    // head B, the live revision, and that evidence no longer counts. Only the push's sequence makes it new.
+    const c7 = change("acme/web", 7);
+    const a1 = rev("sha-a1", "patch-1");
+    const b2 = rev("sha-b2", "patch-2");
+    const d = digest({
+      mark: { seq: 15, seen: [] },
+      states: [state(c7, { revision: b2 })],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 30 })],
+      links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 40, seq: 3 }],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", seq: 9, at: NOW - 20 })],
+      changeHeads: [
+        { subject: c7, revision: a1, at: NOW - 40, seq: 2 },
+        { subject: c7, revision: b2, at: NOW, seq: 20 },
+      ],
+      stale: [{ kind: "task_in_review", task: taskKey(3), since: NOW - 9 * HOUR }],
+    });
+    expect(one(d, "T-3"), "a push that voids the evidence").toMatchObject({ level: "claimed", seq: 20, fresh: true });
+  });
+  it("a change head that leaves the level as it was stays quiet (DG8)", () => {
+    const c7 = change("acme/web", 7);
+    const a1 = rev("sha-a1", "patch-1");
+    const seen: SeenAt = { id: "T-3", seq: 9, level: "checked", section: "stale_or_stuck" };
+    const d = digest({
+      mark: { seq: 8, seen: [seen] },
+      states: [state(c7, { revision: a1 })],
+      claims: [claim({ subject: c7, revision: a1, lane: "builder", seq: 4, at: NOW - 30 })],
+      links: [{ task: taskKey(3), target: c7, by: "builder", at: NOW - 40, seq: 3 }],
+      evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", seq: 9, at: NOW - 20 })],
+      changeHeads: [
+        { subject: c7, revision: a1, at: NOW - 40, seq: 2 },
+        { subject: c7, revision: a1, at: NOW, seq: 30 },
+      ],
+      stale: [{ kind: "task_in_review", task: taskKey(3), since: NOW - 9 * HOUR }],
+    });
+    expect(one(d, "T-3"), "a head that changes nothing stays quiet").toMatchObject({ level: "checked", seq: 9, fresh: false });
+  });
 });
 
 // ---- DG9: a rebuild gives the same answer; counts are counts
