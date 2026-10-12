@@ -187,3 +187,21 @@ describe("review point 3: disable and revoke work while the index file is unread
     expect(sealed(h.vault)).toHaveLength(1);
   });
 });
+
+describe("review point 9: a save never clears a vault ref the change didn't name", () => {
+  it("a change that leaves the vault rows out keeps every stored ref; one that names a row with none clears it", async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+    const secrets = new SqliteSecrets(join(h.dir, "connections.db"));
+    try {
+      const stored = secrets.load().vaults;
+      expect(stored.map(v => v.ref?.slice(0, 2))).toEqual(["s-"]);
+      secrets.write(state => ({ next: { ...state, vaults: [] }, result: null }));
+      expect(secrets.load().vaults).toEqual(stored);
+      secrets.write(state => ({ next: { ...state, vaults: stored.map(v => ({ ...v, ref: null })) }, result: null }));
+      expect(secrets.load().vaults.map(v => v.ref)).toEqual([null]);
+    } finally {
+      secrets.close();
+    }
+  });
+});
