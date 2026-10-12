@@ -150,8 +150,11 @@ describe("the recovery table (§6.6, verbatim)", () => {
         current: v(row.current ?? "0.4.3"), preUpdate, target, lockHeld: true });
       expect(r.ok, row.name).toBe(true);
       if (!r.ok) continue;
-      for (const to of implies[r.value.act] ?? [])
-        expect(updateCanMove(standsIn[row.mark ?? ""], to), `${row.name}: ${standsIn[row.mark ?? ""]} -> ${to}`).toBe(true);
+      for (const to of implies[r.value.act] ?? []) {
+        const from = standsIn[row.mark ?? ""];
+        if (from === undefined) throw new Error(`${row.name}: ${row.mark ?? ""} is not a state`);
+        expect(updateCanMove(from, to), `${row.name}: ${from} -> ${to}`).toBe(true);
+      }
     }
   });
 });
