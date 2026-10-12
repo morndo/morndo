@@ -20,7 +20,7 @@ const DAY = 24 * HOUR;
 const rev = (sha: string, patchId: string | null = null): Revision => ({ sha, patchId });
 const task = (n: number): SubjectRef => ({ kind: "task", key: taskKey(n) });
 const change = (repo: string, n: number): SubjectRef => ({ kind: "change", repo, n });
-const deploy = (repo: string, env: string): SubjectRef => ({ kind: "deploy", repo, env });
+const deploy = (repo: string, env: string, sha: string): SubjectRef => ({ kind: "deploy", repo, env, sha });
 const ask = (id: string): SubjectRef => ({ kind: "ask", id });
 
 const FORGE: Producer = { kind: "forge", name: "forge-1" };
@@ -212,13 +212,13 @@ describe("failure (DG3)", () => {
       events: [event("rolled_back", c7, 2, NOW)],
     });
     expect(one(reverted, "acme/web#7")?.level).toBe("failed");
-    const prod = deploy("acme/web", "prod");
+    const prod = deploy("acme/web", "prod", "sha-a1");
     const rolledBack = digest({
       states: [state(prod, { revision: a1, rolledBack: true })],
       events: [event("rolled_back", prod, 2, NOW)],
     });
-    expect(one(rolledBack, "acme/web:prod")?.level).toBe("failed");
-    expect(one(rolledBack, "acme/web:prod")?.section).toBe("failed_or_rolled_back");
+    expect(one(rolledBack, "acme/web:prod@sha-a1")?.level).toBe("failed");
+    expect(one(rolledBack, "acme/web:prod@sha-a1")?.section).toBe("failed_or_rolled_back");
   });
   it("a reopened task is failed until it is accepted as done again, then its level is recomputed", () => {
     const t5 = task(5);
@@ -284,7 +284,7 @@ describe("items and sections (DG5)", () => {
     const t1 = task(1);
     const c7 = change("acme/web", 7);
     const c8 = change("acme/web", 8);
-    const prod = deploy("acme/web", "prod");
+    const prod = deploy("acme/web", "prod", "sha-a1");
     const d = digest({
       events: [
         event("merged", c7, 3, NOW - 3 * MIN),

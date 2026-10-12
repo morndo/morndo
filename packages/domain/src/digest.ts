@@ -19,7 +19,7 @@ export type SubjectKind = (typeof SUBJECT_KINDS)[number];
 export type SubjectRef =
   | { kind: "task"; key: TaskKey }
   | { kind: "change"; repo: string; n: number }
-  | { kind: "deploy"; repo: string; env: string }
+  | { kind: "deploy"; repo: string; env: string; sha: string }   // §3.1: an environment at a revision
   | { kind: "ask"; id: string }
   | { kind: "decision"; id: string }
   | { kind: "lane"; name: string }

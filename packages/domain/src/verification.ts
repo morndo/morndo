@@ -133,7 +133,7 @@ export function subjectKey(subject: SubjectRef): string {
   switch (subject.kind) {
     case "task": return subject.key;
     case "change": return `${subject.repo}#${subject.n}`;
-    case "deploy": return `${subject.repo}:${subject.env}`;
+    case "deploy": return `${subject.repo}:${subject.env}@${subject.sha}`;   // §3.1: an environment at a revision
     case "ask": return `ask:${subject.id}`;
     case "decision": return `decision:${subject.id}`;
     case "lane": return `lane:${subject.name}`;
