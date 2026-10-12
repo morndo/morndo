@@ -45,11 +45,11 @@ A lead splits the work into parts, workers do the parts in parallel, and the lea
 | Guard | Catches | Morndo rule |
 |---|---|---|
 | A task description per worker: objective, output format, tools and sources, boundaries. | duplicated or missing work | None yet. |
-| A lock per part. | overwrites, duplicated work | None yet. |
+| A lock per part. | overwrites, duplicated or missing work | None yet. |
 | A cap on concurrent workers; further ones wait in order. | cost-blowup | J5: a job class runs at most its configured limit; the rest stay queued in order. |
 | One budget for the whole fan-out. | cost-blowup | CN11: no new lease once spend and reservations reach the budget. |
 | Parts in equals parts out; a part with no result counts as unverified, not passed. | silent-partial | V4: missing evidence gives Unverified. |
-| Each worker's result checked by someone other than that worker. | silent-partial | V1: verified only with evidence from a producer other than the claimant. |
+| Each worker's result checked by someone other than that worker. | silent-partial | V1: verified only if every Check has evidence from a producer other than the claimant, on the claimed revision. |
 
 ## Sources
 

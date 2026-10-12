@@ -1,8 +1,9 @@
 // Every shipped skill against the Agent Skills specification (https://agentskills.io/specification, read 2026-10-12) and
 // its reference validator (skills-ref, src/skills_ref/validator.py at 547831f3a2, read the same day): the fields a
 // SKILL.md may have, the name and length rules, metadata as a map of strings. Then Morndo's own rules for a loop pattern
-// (ADR-0026): the sections each must have, dated sources (K1), a re-check at most 90 days after the reads (K2), and a
-// stale skill that warns and still passes (K6). The negative controls are the same checks on broken copies.
+// (ADR-0026): the sections each must have, dated sources (K1), a re-check at most 90 days after the reads (K2), a stale
+// skill that warns and still passes (K6), and guards whose Catches name the skill's own failure modes and whose rule is
+// one docs/domain.md defines. The negative controls are the same checks on broken copies.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,22 +14,48 @@ const FIELDS = new Set(["name", "description", "license", "allowed-tools", "meta
 const PATTERN_SECTIONS = ["When to use", "When not to use", "Failure modes", "Guards", "Sources"];
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY = 86_400_000;
+// The rule ids docs/domain.md defines (table rows such as "| V3 |", list items such as "**R1**") and the terms of its
+// glossaries (the first column of its tables), which a guard may name instead, as the other-provider rule has no id.
+const DOMAIN = readFileSync("docs/domain.md", "utf8");
+const RULE_IDS = new Set([...DOMAIN.matchAll(/^\| ([A-Z]{1,3}\d+) \||\*\*([A-Z]{1,3}\d+)\*\*/gm)].map(m => m[1] ?? m[2] ?? ""));
+const TERMS = [...DOMAIN.matchAll(/^\| ([A-Z][^|]*?) \|/gm)].map(m => m[1] ?? "").filter(t => !/^[A-Z]{1,3}\d+$/.test(t) && t !== "Term");
 
 type Result = { errors: string[]; warnings: string[] };
 
-function sections(body: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const part of body.split(/^## /m).slice(1)) {
-    const nl = part.indexOf("\n");
-    out.set(part.slice(0, nl).trim(), part.slice(nl + 1));
+// A date in YYYY-MM-DD that is on the calendar: Date.parse gives NaN for month 13 and rolls 02-30 over to 03-02.
+function onCalendar(s: string): boolean {
+  if (!DATE.test(s)) return false;
+  const [y = 0, m = 0, d = 0] = s.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === m - 1 && t.getUTCDate() === d;
+}
+const realDate = (s: unknown): s is string => typeof s === "string" && onCalendar(s);
+
+// "## " headings outside fenced code split the body; each section keeps only its lines outside fences.
+function sections(body: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  let current: string[] | undefined;
+  let fence = "";
+  for (const line of body.split("\n")) {
+    const f = /^\s*(```|~~~)/.exec(line)?.[1];
+    if (f && (!fence || fence === f)) {
+      fence = fence ? "" : f;
+      continue;
+    }
+    if (fence) continue;
+    if (line.startsWith("## ")) out.set(line.slice(3).trim(), (current = []));
+    else current?.push(line);
   }
   return out;
 }
 
+// Table cells split on pipes that aren't escaped; "\|" stays in its cell as "|".
+const cellsOf = (row: string) => row.trim().replace(/^\|/, "").replace(/(?<!\\)\|$/, "").split(/(?<!\\)\|/).map(c => c.replace(/\\\|/g, "|").trim());
+
 function checkSkill(dir: string, text: string, today: string, known: Set<string>): Result {
   const errors: string[] = [];
   const warnings: string[] = [];
-  const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text);
+  const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n"));
   if (!m) return { errors: ["SKILL.md must start with YAML front matter between --- lines"], warnings };
   const [, head = "", body = ""] = m;
   let fm: unknown;
@@ -62,6 +89,7 @@ function checkSkill(dir: string, text: string, today: string, known: Set<string>
   if (body.split("\n").length > 500) errors.push("SKILL.md body is longer than 500 lines");
 
   const md = (typeof meta === "object" && meta !== null ? meta : {}) as Record<string, unknown>;
+  if (dir.startsWith("loop-") && md["morndo-kind"] !== "loop-pattern") return { errors: [...errors, "a loop-* skill must declare morndo-kind: loop-pattern"], warnings };
   if (md["morndo-kind"] !== "loop-pattern") return { errors, warnings };
 
   // A loop pattern: Morndo's own rules on top of the specification.
@@ -70,26 +98,37 @@ function checkSkill(dir: string, text: string, today: string, known: Set<string>
   for (const s of PATTERN_SECTIONS) if (!secs.has(s)) errors.push(`missing section '## ${s}'`);
   const read = md["morndo-sources-read"];
   const recheck = md["morndo-recheck"];
-  if (typeof read !== "string" || !DATE.test(read)) errors.push("morndo-sources-read must be a date, YYYY-MM-DD");
-  if (typeof recheck !== "string" || !DATE.test(recheck)) errors.push("morndo-recheck must be a date, YYYY-MM-DD");
-  const sources = (secs.get("Sources") ?? "").split("\n").filter(l => l.startsWith("- "));
+  if (!realDate(read)) errors.push("morndo-sources-read must be a real calendar date, YYYY-MM-DD");
+  if (!realDate(recheck)) errors.push("morndo-recheck must be a real calendar date, YYYY-MM-DD");
+  const sources = (secs.get("Sources") ?? []).filter(l => l.startsWith("- "));
   if (secs.has("Sources") && sources.length === 0) errors.push("Sources lists nothing");
   const dates: string[] = [];
   for (const line of sources) {
-    const d = /\(read (\d{4}-\d{2}-\d{2})\)/.exec(line);
-    if (!/https:\/\/\S+/.test(line) || !d) errors.push(`source without a URL and a read date: ${line.slice(0, 80)}`);
-    else dates.push(d[1] ?? "");
+    const d = /\(read (\d{4}-\d{2}-\d{2})\)/.exec(line)?.[1];
+    if (!/https:\/\/\S+/.test(line) || d === undefined) errors.push(`source without a URL and a read date: ${line.slice(0, 80)}`);
+    else if (!onCalendar(d)) errors.push(`source read date ${d} is not a real calendar date`);
+    else dates.push(d);
   }
-  if (typeof read === "string" && DATE.test(read) && typeof recheck === "string" && DATE.test(recheck)) {
+  if (realDate(read) && realDate(recheck)) {
     const oldest = [...dates].sort()[0];
     if (oldest && oldest !== read) errors.push(`morndo-sources-read is ${read}, the oldest source was read ${oldest}`);
     const gap = (Date.parse(recheck) - Date.parse(read)) / DAY;
     if (gap <= 0 || gap > 90) errors.push(`morndo-recheck must fall 1 to 90 days after ${read}, is ${gap} days`);
     if (today > recheck) warnings.push(`${dir} is stale: its sources were due for a re-read on ${recheck}`);
   }
-  for (const row of (secs.get("Guards") ?? "").split("\n").filter(l => l.startsWith("|")).slice(2)) {
-    const cells = row.split("|").slice(1, -1).map(c => c.trim());
-    if (cells.length !== 3 || cells.some(c => !c)) errors.push(`guard row needs a guard, what it catches and the Morndo rule (or 'None yet.'): ${row.slice(0, 80)}`);
+  const modes = new Set((secs.get("Failure modes") ?? []).map(l => /^- \*\*([^*]+?):\*\*/.exec(l)?.[1]).filter(x => x !== undefined));
+  for (const row of (secs.get("Guards") ?? []).filter(l => l.trimStart().startsWith("|")).slice(2)) {
+    const cells = cellsOf(row);
+    if (cells.length !== 3 || cells.some(c => !c)) {
+      errors.push(`guard row needs a guard, what it catches and the Morndo rule (or 'None yet.'): ${row.slice(0, 80)}`);
+      continue;
+    }
+    const [, catches = "", rule = ""] = cells;
+    for (const c of catches.split(",").map(x => x.trim())) if (!modes.has(c)) errors.push(`guard catches '${c}', which is not a failure mode of this skill`);
+    const ids = rule.match(/\b[A-Z]{1,3}\d+\b/g) ?? [];
+    if (/\bADR-\d+/.test(rule)) errors.push("guard cites an ADR; cite the rule as docs/domain.md states it");
+    else if (ids.length) for (const id of ids.filter(i => !RULE_IDS.has(i))) errors.push(`guard cites ${id}, which docs/domain.md doesn't define`);
+    else if (rule !== "None yet." && !TERMS.some(t => rule.toLowerCase().startsWith(t.toLowerCase()))) errors.push(`guard names no rule of docs/domain.md, nor 'None yet.': ${rule.slice(0, 60)}`);
   }
   for (const [, ref = ""] of body.matchAll(/`(loop-[a-z-]+)`/g)) if (!known.has(ref)) errors.push(`refers to a skill that doesn't exist: ${ref}`);
   return { errors, warnings };

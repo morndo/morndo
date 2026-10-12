@@ -36,19 +36,19 @@ One worker, one run, one output. A check, written before the run, decides whethe
 ## Failure modes
 
 - **silent-partial:** the worker says done when part of the task is missing. A later session in one vendor's long-running experiments looked around, saw progress, and declared the whole job finished (Anthropic, Effective harnesses).
-- **gaming-tests:** the worker changes the check instead of the work. On impossible tasks, models edited or special-cased tests often; hiding tests or making them read-only cut it sharply (ImpossibleBench).
+- **gaming-tests:** the worker changes the check instead of the work. On impossible tasks, models edited or special-cased tests often; hiding tests or making them read-only cut it sharply, and letting models retry raised cheating from 33% to 38% (ImpossibleBench).
 
 ## Guards
 
 | Guard | Catches | Morndo rule |
 |---|---|---|
-| The check is written before the run and run by someone other than the worker. | silent-partial | V1: verified only with evidence from a producer other than the claimant, on the claimed revision. |
-| A change that touches what the check depends on fails the claim. | gaming-tests | V3: a claimed revision that weakens a check is refuted. |
+| The check is written before the run and run by someone other than the worker. | silent-partial | V1: verified only if every Check has evidence from a producer other than the claimant, on the claimed revision. |
+| A change that touches what the check depends on fails the claim. | gaming-tests | V3: a claimed revision that changes anything a Check depends on (for example, weakens the test) is refuted. |
 | The report leads with the check's verdict, not the worker's summary, and lists what wasn't done. | silent-partial | E6: a report's headline is the verdict, never the worker's words. |
-| No retry inside the pattern; a second try is `loop-review-fix` with a round limit. | looping | None yet. |
+| No retry inside the pattern; a second try is `loop-review-fix` with a round limit. | gaming-tests | None yet. |
 
 ## Sources
 
 - Anthropic, Building effective agents (2024-12-19). https://www.anthropic.com/engineering/building-effective-agents (read 2026-10-12). For many applications a single optimised model call with retrieval and in-context examples is enough.
 - Anthropic, Effective harnesses for long-running agents (2025-11-26). https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents (read 2026-10-12). Agents that try to build an app in one go run out of context and leave half-built features; later sessions declare the job done too early.
-- Zhong, Raghunathan, Carlini, ImpossibleBench, arXiv:2510.20270, v1 2025-10-23. https://arxiv.org/abs/2510.20270 (read 2026-10-12). Models exploit test cases on impossible tasks; hidden or read-only tests reduce it.
+- ImpossibleBench: Measuring LLMs' Propensity of Exploiting Test Cases, arXiv:2510.20270, v1 2025-10-23. https://arxiv.org/abs/2510.20270 (read 2026-10-12). Models exploit test cases on impossible tasks; retries raise it; hidden or read-only tests reduce it.

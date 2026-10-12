@@ -38,6 +38,7 @@ A timer starts a run; each run takes a fresh input, does bounded work, checks it
 
 - **looping:** a loop with no stop runs until someone ends it; one vendor's harness looped its agent forever by design (Anthropic, Building a C compiler). Long-running agents fall into tangential loops they rarely recover from (Vending-Bench). Step repetition and not recognising completion are frequent multi-agent failures (MAST).
 - **drift:** run after run, the output wanders from what was asked; agents go off the rails on longer tasks (Anthropic, Harness design).
+- **silent-partial:** a run that ends early, or whose process vanishes, reads as a quiet success unless its end is recorded; premature termination is one of the failure modes in annotated multi-agent traces (MAST).
 - **cost-blowup:** an unattended loop spends without anyone looking; multi-agent systems use about 15 times the tokens of a chat (Anthropic, multi-agent research system).
 
 ## Guards
@@ -58,7 +59,7 @@ A timer starts a run; each run takes a fresh input, does bounded work, checks it
 - OpenAI, A practical guide to building agents (PDF). https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf (read 2026-10-12). Exit conditions including a maximum number of turns; failure thresholds that escalate to a person.
 - OpenAI Agents SDK, Running agents. https://openai.github.io/openai-agents-python/running_agents/ (read 2026-10-12). `max_turns` and `MaxTurnsExceeded`; the default of 10 is `DEFAULT_MAX_TURNS` in `src/agents/run_config.py` on the main branch, read the same day (package version 0.23.1 on PyPI).
 - Anthropic, Building a C compiler with a team of parallel Claudes (2026-02-05). https://www.anthropic.com/engineering/building-c-compiler (read 2026-10-12). An unattended agent loop that never stops on its own.
-- Backlund, Petersson, Vending-Bench, arXiv:2502.15840, 2025-02-20. https://arxiv.org/abs/2502.15840 (read 2026-10-12). Long runs derail into loops they rarely recover from.
-- Cemri et al., Why Do Multi-Agent LLM Systems Fail? (MAST), arXiv:2503.13657, v3 2025-10-26. https://arxiv.org/abs/2503.13657 (read 2026-10-12). Step repetition 15.7%, missed task completion 12.4%.
+- Vending-Bench: A Benchmark for Long-Term Coherence of Autonomous Agents, arXiv:2502.15840, 2025-02-20. https://arxiv.org/abs/2502.15840 (read 2026-10-12). Long runs derail into loops they rarely recover from.
+- Why Do Multi-Agent LLM Systems Fail? (MAST), arXiv:2503.13657, v3 2025-10-26. https://arxiv.org/abs/2503.13657 (read 2026-10-12). Step repetition 15.7%, missed task completion 12.4%, premature termination.
 - Anthropic, Harness design for long-running application development (2026-03-24). https://www.anthropic.com/engineering/harness-design-long-running-apps (read 2026-10-12). Agents go off the rails on longer tasks.
 - Anthropic, How we built our multi-agent research system (2025-06-13). https://www.anthropic.com/engineering/multi-agent-research-system (read 2026-10-12). Multi-agent systems use about 15 times the tokens of a chat.

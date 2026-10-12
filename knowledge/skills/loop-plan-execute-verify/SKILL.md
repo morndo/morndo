@@ -43,8 +43,8 @@ A plan names the steps and the check for each, before work starts. The worker do
 
 | Guard | Catches | Morndo rule |
 |---|---|---|
-| Done-means written and frozen before work; checks run by someone other than the worker. | silent-partial | V1: verified only with evidence from a producer other than the claimant. |
-| A step that weakens a check fails the claim. | gaming-tests | V3: a claimed revision that changes what a check depends on is refuted. |
+| Done-means written and frozen before work; checks run by someone other than the worker. | silent-partial | V1: verified only if every Check has evidence from a producer other than the claimant, on the claimed revision. |
+| A step that changes anything its check depends on fails the claim. | gaming-tests | V3: a claimed revision that changes anything a Check depends on (for example, weakens the test) is refuted. |
 | A feature list the worker can only mark, one feature at a time. | silent-partial, drift | None yet. |
 | Progress in a file; a fresh session per step reads it instead of a long conversation. | drift | None yet. |
 | The final verdict is on the end state and the goal, and leads the report. | silent-partial | E6: a report's headline is the verdict, never the worker's words. |
@@ -57,5 +57,5 @@ A plan names the steps and the check for each, before work starts. The worker do
 - Anthropic, Effective harnesses for long-running agents (2025-11-26). https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents (read 2026-10-12). A feature list in JSON, one feature at a time, progress kept in files; later sessions declare the job done too early.
 - Anthropic, Effective context engineering for AI agents (2025-09-29). https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents (read 2026-10-12). Recall falls as the context fills; note-taking outside the context.
 - Anthropic, How we built our multi-agent research system (2025-06-13). https://www.anthropic.com/engineering/multi-agent-research-system (read 2026-10-12). Evaluate the end state of agents that change state over many turns.
-- Cemri et al., Why Do Multi-Agent LLM Systems Fail? (MAST), arXiv:2503.13657, v3 2025-10-26. https://arxiv.org/abs/2503.13657 (read 2026-10-12). Failure taxonomy; a high-level objective check raised task success by 15.6% in one system.
-- Zhong, Raghunathan, Carlini, ImpossibleBench, arXiv:2510.20270, v1 2025-10-23. https://arxiv.org/abs/2510.20270 (read 2026-10-12). Models edit or special-case tests to pass.
+- Why Do Multi-Agent LLM Systems Fail? (MAST), arXiv:2503.13657, v3 2025-10-26. https://arxiv.org/abs/2503.13657 (read 2026-10-12). Failure taxonomy; a high-level objective check raised task success by 15.6% in one system.
+- ImpossibleBench: Measuring LLMs' Propensity of Exploiting Test Cases, arXiv:2510.20270, v1 2025-10-23. https://arxiv.org/abs/2510.20270 (read 2026-10-12). Models edit or special-case tests to pass.

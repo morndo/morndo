@@ -35,7 +35,7 @@ The `loop-` prefix keeps these from colliding with skills of your own, such as a
 
 ## Check
 
-`npm test -- knowledge` runs `knowledge/skills.test.ts`: every skill against the specification's rules, the sections each pattern must have, and dated sources.
+`npm test -- knowledge` runs `knowledge/skills.test.ts`: every skill against the specification's rules, the sections each pattern must have, dated sources, and guards that name the skill's own failure modes and a rule docs/domain.md defines.
 
 The specification's reference validator gives a second opinion. Its PyPI package `skills-ref` (0.1.1, checked 2026-10-12) installs the command as `agentskills`:
 
