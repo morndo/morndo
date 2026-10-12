@@ -539,3 +539,181 @@ describe("Rule 2: which revision a claim is judged at", () => {
     }), "W23").toEqual({ claims: 1, laterFailed: 1, levels: ["checked 1/1"] });
   });
 });
+
+const WEEKS: WeekWindow[] = [
+  { week: "w1", start: NOW - DAY, end: NOW + 6 * DAY },
+  { week: "w2", start: NOW + 6 * DAY, end: NOW + 13 * DAY },
+];
+const bothWeeks = (o: Partial<WeeklyRecords>, now = NOW + 30 * DAY) =>
+  weeklyView({ ...blank(), ...o }, WEEKS, now).map(row => ({
+    week: row.week,
+    claims: row.claims,
+    laterFailed: row.laterFailed,
+    levels: row.levels.map(l => `${l.level} ${l.claims}/${l.laterFailed}`).sort(),
+  }));
+
+describe("Rule 1: a change head is required", () => {
+  it("S51", () => {
+    const d = dg({
+      states: [st(w7, A)],
+      links: [ln(3, 7, w7, "bld")],
+      claims: [cl(4, w7, A, "bld")],
+      evidence: [ev(9, w7, A, "review", "pass", lane("rvw"))],
+      stale: [stale(7)],
+      changeHeads: [],
+      mark: { seq: 5, seen: [] },
+    });
+    expect(one(d, "T-7"), "S51").toMatchObject({ seq: 9, fresh: true, level: "claimed" });
+    expect(one(d, "T-7")?.voided, "S51").toHaveLength(1);
+    // @ts-expect-error changeHeads is required: a call that omits it does not compile (NEW 1.5a)
+    const _omitted: DigestInput = {
+      now: NOW, newest: 1, mark: null, events: [], evidence: [], claims: [], links: [], assignments: [], states: [], needsYou: [], stale: [],
+    };
+    void _omitted;
+  });
+  it("S52", () => {
+    const d = dg({
+      states: [st(w7, A)],
+      links: [ln(3, 7, w7, "bld")],
+      claims: [cl(4, w7, A, "bld")],
+      evidence: [ev(9, w7, A, "review", "pass", lane("rvw"))],
+      stale: [stale(7)],
+      changeHeads: [hd(12, w7, A)],
+      mark: { seq: 10, seen: [] },
+    });
+    expect(one(d, "T-7"), "S52").toMatchObject({ seq: 12, fresh: true, level: "reviewed" });
+  });
+});
+
+describe("Rule 2: rounds, roots and which failure matches", () => {
+  const t5 = task(5);
+  const t6 = task(6);
+  const t8 = task(8);
+  const t9 = task(9);
+  const t10 = task(10);
+  it("S53", () => {
+    expect(levelsOf({
+      claims: [wcl(t5, null, "bld", NOW, { via: "review", round: 1 })],
+      evidence: [wev(t5, null, "tests", "pass", NOW + HOUR, MGR), wev(t5, null, "review", "fail", NOW + DAY, lane("rvw"))],
+      claimFailures: [fail(t5, null, NOW + DAY, "evidence")],
+    }), "S53").toEqual({ claims: 1, laterFailed: 1, levels: ["checked 1/1"] });
+  });
+  it("S54", () => {
+    expect(levelsOf({
+      claims: [
+        wcl(t5, null, "bld", NOW, { via: "review", round: 1 }),
+        wcl(t5, null, "bld", NOW + 3 * DAY, { via: "review", round: 2 }),
+      ],
+      evidence: [wev(t5, null, "tests", "pass", NOW + HOUR, MGR), wev(t5, null, "review", "fail", NOW + 5 * DAY, lane("rvw"))],
+      claimFailures: [fail(t5, null, NOW + 5 * DAY, "evidence")],
+    }), "S54").toEqual({ claims: 2, laterFailed: 1, levels: ["checked 1/0", "claimed 1/1"] });
+  });
+  it("S55", () => {
+    expect(levelsOf({
+      claims: [
+        wcl(t6, null, "bld", NOW, { via: "review", round: 1 }),
+        wcl(t6, null, "bld", NOW + MIN, { via: "lane_event", round: 1 }),
+      ],
+      evidence: [wev(t6, null, "review", "pass", NOW + HOUR, lane("rvw"))],
+    }), "S55").toEqual({ claims: 1, laterFailed: 0, levels: ["reviewed 1/0"] });
+  });
+  it("S56", () => {
+    const edge = NOW + 6 * DAY;
+    expect(bothWeeks({
+      claims: [
+        wcl(t6, null, "bld", edge - MIN, { via: "lane_event", round: 1 }),
+        wcl(t6, null, "bld", edge + MIN, { via: "review", round: 1 }),
+      ],
+      evidence: [wev(t6, null, "tests", "pass", edge - 30_000, MGR)],
+    }), "S56").toEqual([
+      { week: "w1", claims: 1, laterFailed: 0, levels: ["checked 1/0"] },
+      { week: "w2", claims: 0, laterFailed: 0, levels: [] },
+    ]);
+  });
+  it("S57", () => {
+    expect(levelsOf({
+      assignments: [{ task: taskKey(8), lane: "la", seq: 1, at: NOW - DAY }],
+      claims: [
+        wcl(t8, null, "la", NOW, { via: "review", round: 1 }),
+        wcl(t8, null, "la", NOW + 3 * DAY, { via: "review", round: 2 }),
+        wcl(t8, null, "rvw", NOW + 5 * DAY, { via: "filed", round: 3 }),
+      ],
+      evidence: [wev(t8, null, "review", "pass", NOW + DAY, lane("rvw"))],
+    }), "S57").toEqual({ claims: 3, laterFailed: 0, levels: ["claimed 3/0"] });
+  });
+  it("S58", () => {
+    expect(levelsOf({
+      assignments: [{ task: taskKey(8), lane: "la", seq: 1, at: NOW - DAY }, { task: taskKey(8), lane: "rvw", seq: 2, at: NOW + 5 * DAY }],
+      claims: [
+        wcl(t8, null, "la", NOW, { via: "review", round: 1 }),
+        wcl(t8, null, "la", NOW + 3 * DAY, { via: "review", round: 2 }),
+      ],
+      evidence: [wev(t8, null, "review", "pass", NOW + DAY, lane("rvw"))],
+    }), "S58").toEqual({ claims: 2, laterFailed: 0, levels: ["claimed 2/0"] });
+  });
+  it("S59", () => {
+    const prod = deploy("acme/web", "prod", A.sha);
+    const base59 = {
+      links: [wln(9, w7, NOW - DAY)],
+      claims: [wcl(t9, null, "bld", NOW, { via: "review", revisions: [{ subject: w7, revision: A }] })],
+      evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
+    };
+    expect(levelsOf({ ...base59, claimFailures: [fail(prod, rev(A.sha), NOW + 3 * DAY, "rolled_back")] }), "S59").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
+    expect(levelsOf({
+      ...base59,
+      claimFailures: [fail(prod, rev(A.sha), NOW + 3 * DAY, "rolled_back"), fail(w7, A, NOW + 3 * DAY, "rolled_back")],
+    }), "S59").toEqual({ claims: 1, laterFailed: 1, levels: ["checked 1/1"] });
+  });
+  it("S60", () => {
+    const prod = deploy("acme/web", "prod", A.sha);
+    expect(levelsOf({
+      links: [wln(9, w7, NOW - DAY), wln(9, prod, NOW - DAY)],
+      claims: [wcl(t9, null, "bld", NOW, { via: "review", revisions: [{ subject: w7, revision: A }, { subject: prod, revision: rev(A.sha) }] })],
+      evidence: [wev(w7, A, "ci", "pass", NOW + DAY)],
+      claimFailures: [fail(prod, rev(A.sha), NOW + 3 * DAY, "rolled_back")],
+    }), "S60").toEqual({ claims: 1, laterFailed: 1, levels: ["checked 1/1"] });
+  });
+  it("S61", () => {
+    const prod = deploy("acme/web", "prod", A.sha);
+    expect(levelsOf({
+      links: [wln(9, w7, NOW - DAY), wln(9, w8, NOW - DAY)],
+      claims: [wcl(w8, B, "bld", NOW, { task: taskKey(9) })],
+      evidence: [wev(w8, B, "ci", "pass", NOW + DAY)],
+      claimFailures: [fail(prod, rev(A.sha), NOW + 3 * DAY, "rolled_back"), fail(w7, A, NOW + 3 * DAY, "rolled_back")],
+    }), "S61").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
+  });
+  it("S62", () => {
+    const pm = deploy("acme/api", "prod", "sha-m");
+    expect(levelsOf({
+      links: [wln(10, pm, NOW - DAY)],
+      claims: [wcl(t10, null, "bld", NOW, { via: "review", revisions: [{ subject: pm, revision: rev("sha-m") }] })],
+      evidence: [wev(pm, rev("sha-m"), "deploy", "pass", NOW + DAY)],
+      claimFailures: [fail(pm, rev("sha-m"), NOW + 2 * DAY, "rolled_back")],
+    }), "S62").toEqual({ claims: 1, laterFailed: 1, levels: ["checked 1/1"] });
+  });
+  it("S63", () => {
+    expect(levelsOf({
+      links: [{ task: taskKey(1), target: w7, by: "bld", seq: 5, at: NOW + DAY }],
+      claims: [
+        wcl(w7, A, "bld", NOW, { seq: 6 }),
+        wcl(task(1), null, "bld", NOW + HOUR, { via: "review", seq: 7, revisions: [{ subject: w7, revision: A }] }),
+      ],
+      evidence: [wev(w7, A, "ci", "pass", NOW + 2 * DAY)],
+    }), "S63").toEqual({ claims: 1, laterFailed: 0, levels: ["checked 1/0"] });
+  });
+  it("S64", () => {
+    const d = dg({
+      links: [{ task: taskKey(1), target: w7, by: "bld", seq: 5, at: atOf(5) + DAY }],
+      claims: [cl(6, w7, A, "bld", { task: taskKey(2), at: atOf(6) - DAY })],
+      events: [evt(1, "opened_or_pushed", w7)],
+      changeHeads: [hd(2, w7, A)],
+      states: [st(w7, A)],
+    });
+    expect(one(d, "T-1")?.subjects, "S64").toContainEqual(w7);
+    expect(levelsOf({
+      links: [{ task: taskKey(1), target: w7, by: "bld", seq: 5, at: NOW + DAY }],
+      claims: [wcl(w7, A, "bld", NOW, { seq: 6, task: taskKey(2) })],
+      claimFailures: [fail(task(1), null, NOW + 2 * DAY, "reopened")],
+    }), "S64").toEqual({ claims: 1, laterFailed: 1, levels: ["claimed 1/1"] });
+  });
+});

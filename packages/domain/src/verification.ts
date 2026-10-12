@@ -59,6 +59,7 @@ export type Claim = {
   lane: string;
   via?: ClaimVia;                         // filed, moved to review, or a lane event that said done (DG12)
   revisions?: readonly ClaimRevision[];   // the revisions it was made at, filled in by the hub (DG12)
+  round?: number | null;                  // a task with no change: the sequence of that round's first claim (DG12)
   task?: TaskKey;                         // counts as the task's link to this subject (§3.3)
   note?: string;
 };
