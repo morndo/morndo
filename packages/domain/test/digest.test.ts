@@ -998,8 +998,8 @@ describe("the weekly count of claims (DG12)", () => {
         { task: taskKey(12), target: prod, by: "builder", at: NOW - MIN, seq: 0 },
       ],
       changeHeads: [
-        { subject: c7, revision: a1, at: NOW - MIN },
-        { subject: c8, revision: b1, at: NOW - MIN },
+        { subject: c7, revision: a1, at: NOW - MIN, seq: 1 },
+        { subject: c8, revision: b1, at: NOW - MIN, seq: 1 },
       ],
       subjectStates: [state(c7, { revision: a1 }), state(c8, { revision: b1 }), state(prod, { revision: b1 })],
       evidence: [
@@ -1024,8 +1024,8 @@ describe("the weekly count of claims (DG12)", () => {
       links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }],
       subjectStates: [state(c7, { revision: b2 })],
       changeHeads: [
-        { subject: c7, revision: b2, at: NOW + 20 * DAY },
-        { subject: c7, revision: a1, at: NOW },
+        { subject: c7, revision: b2, at: NOW + 20 * DAY, seq: 2 },
+        { subject: c7, revision: a1, at: NOW, seq: 1 },
       ],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
     });
@@ -1044,7 +1044,7 @@ describe("the weekly count of claims (DG12)", () => {
       claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
       links: [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }],
       subjectStates: [state(c7, { revision: b2 })],
-      changeHeads: [{ subject: c7, revision: b2, at: NOW + 20 * DAY }],
+      changeHeads: [{ subject: c7, revision: b2, at: NOW + 20 * DAY, seq: 2 }],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
     });
     const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
@@ -1055,7 +1055,7 @@ describe("the weekly count of claims (DG12)", () => {
       claimSources: [{ subject: c7, revision: null, at: NOW, via: "lane_event" }],
       claims: [claim({ subject: c7, revision: null, lane: "builder", at: NOW })],
       subjectStates: [state(c7, { revision: rev("sha-b2", "patch-2") })],
-      changeHeads: [{ subject: c7, revision: a1, at: NOW }],
+      changeHeads: [{ subject: c7, revision: a1, at: NOW, seq: 1 }],
       evidence: [evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY })],
     });
     const [withHead] = weeklyView(head, [week()], NOW + 8 * DAY);

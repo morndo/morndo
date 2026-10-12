@@ -116,7 +116,7 @@ export type DigestInput = {
   links: readonly LinkRecord[];
   assignments: readonly Assignment[];
   states: readonly SubjectState[];
-  changeHeads?: readonly ChangeHead[];    // a change's head when the forge reported it (§3.2); the replay applies them in time
+  changeHeads?: readonly ChangeHead[];    // a change's head when the forge reported it, with its sequence (§3.2, DG8)
   needsYou: readonly NeedsYouState[];     // live conditions only: an ask still open (DG6, C1)
   stale: readonly StaleCondition[];       // computed by staleConditions, never reported by a lane (DG10)
 };
@@ -367,7 +367,9 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
       if (members.has(k)) seenEvents.push(e);
       else queue(queuedEvents, k).push(e);
     } });
-    for (const e of evidence) steps.push({ seq: e.seq, at: e.at, apply: () => {
+    // Every piece of evidence, including what the live head has voided. The revision at this step decides whether
+    // it counts, so a later head can drop the level (DG4, DG8).
+    for (const e of input.evidence) if (keys.has(subjectKey(e.subject))) steps.push({ seq: e.seq, at: e.at, apply: () => {
       const k = subjectKey(e.subject);
       if (members.has(k)) seenEvidence.push(e);
       else queue(queuedEvidence, k).push(e);
@@ -395,7 +397,7 @@ export function buildDigest(input: DigestInput, passes?: PassCount): DigestResul
       set.add(a.lane);
       for (const [k, tasks] of tasksOf) if (tasks.has(a.task)) addClaimant(k, a.lane);
     } });
-    for (const h of input.changeHeads ?? []) if (keys.has(subjectKey(h.subject))) steps.push({ seq: null, at: h.at, apply: () => {
+    for (const h of input.changeHeads ?? []) if (keys.has(subjectKey(h.subject))) steps.push({ seq: h.seq, at: h.at, apply: () => {
       revs.set(subjectKey(h.subject), h.revision);
     } });
     steps.sort((a, b) => {
@@ -641,9 +643,9 @@ export type WeeklyRecords = {
   subjectStates: readonly SubjectState[];
   changeHeads: readonly ChangeHead[];      // a change's head when the forge reported it (§3.2)
 };
-// A change's head at a time (§3.2): filed when the forge reports the head SHA changed. The weekly level uses the
-// latest one at or before the moment it judges, not the live head.
-export type ChangeHead = { subject: SubjectRef; revision: Revision; at: number };
+// A change's head at a time (§3.2): filed when the forge reports the head SHA changed, with the hub's sequence
+// number, like a claim (DG8). The weekly level uses the latest one at or before the moment it judges, not the live head.
+export type ChangeHead = { subject: SubjectRef; revision: Revision; seq: number; at: number };
 export type LevelHeld = { level: ItemLevel; claims: number; laterFailed: number };
 export type WeeklyRow = {
   week: string;
@@ -684,7 +686,7 @@ function indexChangeHeads(r: WeeklyRecords): Map<string, ChangeHead[]> {
       if (l.task !== c.subject.key || l.at > c.at || l.target.kind !== "change") continue;
       const known = r.changeHeads.some(h => subjectKey(h.subject) === subjectKey(l.target) && h.at <= c.at);
       if (known) continue;
-      add({ subject: l.target, revision: c.revision, at: c.at });
+      add({ subject: l.target, revision: c.revision, seq: c.seq, at: c.at });
     }
   }
   for (const list of map.values()) list.sort((a, b) => a.at - b.at);
