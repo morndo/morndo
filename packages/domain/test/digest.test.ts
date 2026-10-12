@@ -319,6 +319,21 @@ describe("items and sections (DG5)", () => {
     const older = digest({ events: [event("opened_or_pushed", c7, 2, NOW - 25 * HOUR)] });
     expect(one(older, "acme/web#7")).toBeUndefined();
   });
+  it("a deploy is an environment at a revision: a later deploy of the same env groups under its own task (§3.1)", () => {
+    const t1 = task(1), t2 = task(2);
+    const prodA = { kind: "deploy", repo: "acme/web", env: "prod", sha: "sha-a1" } as SubjectRef;
+    const prodB = { kind: "deploy", repo: "acme/web", env: "prod", sha: "sha-b2" } as SubjectRef;
+    const d = digest({
+      events: [event("shipped", prodA, 3, NOW - 2 * MIN), event("shipped", prodB, 4, NOW - MIN)],
+      links: [
+        { task: taskKey(1), target: prodA, by: "builder", at: NOW - 10 * MIN },
+        { task: taskKey(2), target: prodB, by: "builder", at: NOW - 9 * MIN },
+      ],
+    });
+    expect(allItems(d).map(i => i.id).sort()).toEqual(["T-1", "T-2"]);
+    expect(one(d, "T-1")?.events.map(e => e.subject)).toEqual([prodA]);
+    expect(one(d, "T-2")?.events.map(e => e.subject)).toEqual([prodB]);
+  });
   it("a decision or a failure since the mark outranks a stale condition; needs you outranks both (§5 order)", () => {
     const t12 = task(12);
     const inReview = { kind: "task_in_review" as const, task: taskKey(12), since: NOW - 9 * HOUR };
