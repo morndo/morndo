@@ -62,6 +62,15 @@ describe("plugin protocol 1", () => {
     expect(RunDocument.safeParse({ ...RUN, language: "pt-BR" }).success).toBe(true);
   });
 
+  it("accepts a languages list the size of the Whisper set, and refuses one past the bound", () => {
+    const codeAt = (i: number) => "abcdefghijklmnopqrstuvwxyz"[Math.floor(i / 26)]! + "abcdefghijklmnopqrstuvwxyz"[i % 26]!;
+    const ninetyNine = Array.from({ length: 99 }, (_, i) => codeAt(i));
+    const listed = { ...PROBE, languages: ninetyNine };
+    expect(parseProbe(JSON.stringify(listed))).toEqual({ ok: true, value: listed });
+    const tooMany = Array.from({ length: 129 }, (_, i) => codeAt(i));
+    expect(parseProbe(JSON.stringify({ ...PROBE, languages: tooMany }))).toEqual({ ok: false, error: "bad_output" });
+  });
+
   it("accepts a probe that offers more than the recording cap; the hub keeps the lower", () => {
     const high = { ...PROBE, maxSeconds: 1800 };
     expect(parseProbe(JSON.stringify(high))).toEqual({ ok: true, value: high });
