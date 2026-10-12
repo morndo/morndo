@@ -760,6 +760,19 @@ describe("no powers of its own (DG11)", () => {
 describe("the weekly count of claims (DG12)", () => {
   const c7 = change("acme/web", 7);
   const a1 = rev("sha-a1", "patch-1");
+  it("counted claims root from the links even when those are not in time order", () => {
+    // The later task is listed first. The earlier link is the root, so the two sources are one claim.
+    const t1 = task(1);
+    const sources: ClaimSource[] = [
+      { subject: c7, revision: a1, at: 20, via: "filed" },
+      { subject: t1, revision: a1, at: 21, via: "review" },
+    ];
+    const links = [
+      { task: taskKey(2), target: c7, by: "builder", at: 50, seq: 5 },
+      { task: taskKey(1), target: c7, by: "builder", at: 10, seq: 1 },
+    ];
+    expect(countedClaims(sources, links, []), "never trusted to be sorted").toEqual([{ subject: c7, revision: a1, at: 20 }]);
+  });
   it("counted claims take one root input: links are not overridden by an empty index", () => {
     const t12 = task(12);
     const sources: ClaimSource[] = [
