@@ -161,6 +161,10 @@ export class AgeVault implements Vault, SealedStore {
 // with "-" (C2SP age.md, https://github.com/C2SP/C2SP/blob/main/age.md, read 2026-10-12). Exactly one is Morndo's rule,
 // not age's: each copy is then readable by one node only (design §6).
 const VERSION_LINE = new TextEncoder().encode("age-encryption.org/v1\n");
+// A grease stanza is no recipient: rage adds one to every header without scrypt, typed "<1 to 8 printable characters>-grease"
+// (age-core/src/format.rs, grease_the_joint), and identities "MUST ignore unrecognized stanzas" (C2SP age.md); both read
+// 2026-10-12 (review 10). Any other second stanza counts, a type this code doesn't know included.
+const GREASE = /^[!-~]{1,8}-grease$/;
 export function recipientStanzas(file: Uint8Array): number | null {
   if (file.length < VERSION_LINE.length || !VERSION_LINE.every((b, i) => file[i] === b)) return null;
   const text = new TextDecoder("latin1");
@@ -170,7 +174,7 @@ export function recipientStanzas(file: Uint8Array): number | null {
     if (end < 0) return null;
     const line = text.decode(file.subarray(at, end));
     if (line.startsWith("--- ")) return count;
-    if (line.startsWith("-> ")) count++;
+    if (line.startsWith("-> ") && !GREASE.test(line.slice(3).split(" ")[0] ?? "")) count++;
     at = end + 1;
   }
   return null;

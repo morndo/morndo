@@ -1464,6 +1464,12 @@ export const CONTROLS: Control[] = [
   { id: "sp2b-r9-keep-untouched-ref", task: "secrets-pr2b", file: "apps/connections/src/adapters/secrets-sqlite.ts",
     find: "refs.has(k) ? refs.get(k) ?? null : old ? before.vaults[i]?.ref ?? null : null", replace: "refs.get(k) ?? null",
     run: ["apps/connections/test/secrets-review1.test.ts"], expect: "review point 9" },
+  { id: "sp2b-r10-grease-ignored", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
+    find: " && !GREASE.test(line.slice(3).split(\" \")[0] ?? \"\")", replace: "",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "grease stanza is one recipient" },
+  { id: "sp2b-r10-grease-exact", task: "secrets-pr2b", file: "apps/connections/src/adapters/vault-age.ts",
+    find: "const GREASE = /^[!-~]{1,8}-grease$/;", replace: "const GREASE = /grease/;",
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "any other second stanza still counts" },
 ];
 
 // ---- the runner
