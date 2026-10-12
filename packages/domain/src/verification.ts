@@ -94,22 +94,26 @@ const pairNames = (segment: string): string[] => {
   return names;
 };
 
-// Query, fragment and ';' parameters. Node's URL keeps ';' in the pathname and leaves the fragment out of
-// searchParams (https://nodejs.org/docs/latest-v24.x/api/url.html, read 2026-10-12), so both are read here.
-// %74 in a query name is "t" once decoded, the same decoding searchParams applies.
+// Query, fragment and ';' parameters. Checked against Node's URL (https://nodejs.org/docs/latest-v24.x/api/url.html,
+// read 2026-10-12): ';' stays in the path, and the fragment is not a query. The domain tsconfig has no URL lib, so
+// the three parts are split here the same way. %74 in a name is "t" once decoded.
 const credentialParam = (link: string): boolean => {
-  let url: URL;
-  try { url = new URL(link); } catch { return false; }
-  const names = [
-    ...pairNames(url.search.slice(1)),
-    ...pairNames(url.hash.slice(1)),
-  ];
-  for (const seg of url.pathname.split("/")) {
+  const hashAt = link.indexOf("#");
+  const hash = hashAt === -1 ? "" : link.slice(hashAt + 1);
+  const beforeHash = hashAt === -1 ? link : link.slice(0, hashAt);
+  const queryAt = beforeHash.indexOf("?");
+  const query = queryAt === -1 ? "" : beforeHash.slice(queryAt + 1);
+  const beforeQuery = queryAt === -1 ? beforeHash : beforeHash.slice(0, queryAt);
+  const slash = beforeQuery.indexOf("/", beforeQuery.indexOf("://") + 3);
+  const pathname = slash === -1 ? "" : beforeQuery.slice(slash);
+  const names = [...pairNames(query), ...pairNames(hash)];
+  for (const seg of pathname.split("/")) {
     const semi = seg.indexOf(";");
     if (semi !== -1) names.push(...pairNames(seg.slice(semi + 1)));
   }
   return names.some(nameCarriesCredential);
 };
+
 export type RecordProblem = "empty" | "too_long" | "bad_link" | "bad_counts" | "bad_name";
 
 // The guards on the records themselves, at the edge where they are filed. The digest recomputes from what is stored,
