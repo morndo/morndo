@@ -43,8 +43,8 @@ const broken = (change: (sop: Sop) => void, from: () => Sop = copy) => {
   return rulesOf(sop);
 };
 const brokenInstance = (change: (sop: Sop) => void) => broken(change, instance);
-const addStep = (sop: Sop, s: Record<string, unknown>) => {
-  sop.steps.splice(sop.steps.findIndex(x => x.id === "publish"), 0, { output: "out.md", check: "the file exists", ...s } as Step);
+const addStep = (sop: Sop, s: Record<string, unknown> & { id: string }) => {
+  sop.steps.splice(sop.steps.findIndex(x => x.id === "publish"), 0, { output: "out.md", check: "the file exists", ...s });
 };
 
 describe("the daily-blog-post template", () => {
