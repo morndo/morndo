@@ -100,7 +100,7 @@ export const RunDocument = z.strictObject({
     endMs: ms(),
     text: z.string().check(z.maxLength(MAX_TEXT_BYTES)),
   })).check(z.maxLength(10_000)),
-});
+}).check(z.refine(doc => doc.segments.every(seg => seg.endMs >= seg.startMs && seg.endMs <= doc.durationMs)));
 export type RunDocument = z.output<typeof RunDocument>;
 
 function jsonValue(stdout: string): Result<unknown, "bad_output"> {
