@@ -217,7 +217,7 @@ export class BriefService {
       const taken = this.#store.brief(ref);
       if (taken && this.#holdsRef(taken)) return { ok: false, problem: "ref_taken" };
     }
-    if (this.#store.openBriefCount("manager", this.#managerName) >= MAX_OPEN) return { ok: false, problem: "too_many_open" };
+    if (this.#openCount("manager", this.#managerName) >= MAX_OPEN) return { ok: false, problem: "too_many_open" };
     const claimed = ref === null
       ? { id, version: row.version }
       : this.#store.claimForward(id, row.version, ref, this.#managerName, who.token, row.askerName);
@@ -274,6 +274,7 @@ export class BriefService {
   }
 
   #openCount(kind: "manager" | "worker", name: string): number {
+    this.#refresh();
     return this.#store.openBriefCount(kind, name);
   }
 
