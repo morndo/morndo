@@ -1,7 +1,7 @@
 // Review round 1 of PR #40 (board T-94): one block per point, each written failing before its fix. Real age vault,
 // real database and the real bin where the point is about them. Values, References and names are synthetic.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, rmSync, utimesSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -155,3 +155,35 @@ describe("review point 2: a value too large for the index is refused at put, bef
   });
 });
 
+
+describe("review point 3: disable and revoke work while the index file is unreadable, and say so", () => {
+  const unreadable = async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+    expect((await put(h.env, "synthetic-value-two")).code).toBe(0);
+    chmodSync(secretIndexPath(h.dir), 0o644);
+    return h;
+  };
+  it("disable narrows at once; the sweep's index problem is a warning", async () => {
+    const h = await unreadable();
+    const r = await cli(h.env, ["disable", REF]);
+    expect(r.code, r.stderr).toBe(0);
+    expect(r.stderr).toMatch(/warning: .*sweep.*mode/);
+    expect((await cli(h.env, ["list"])).stdout).toContain("\"status\":\"disabled\"");
+  });
+  it("revoke narrows and destroys the value, then reports the index left to fix (exit 3)", async () => {
+    const h = await unreadable();
+    const r = await cli(h.env, ["revoke", REF], { typed: REF });
+    expect(r.code, r.stderr).toBe(3);
+    expect(r.stdout).toContain("revoked");
+    expect(r.stderr).toMatch(/left to clean: .*index/);
+    expect(sealed(h.vault)).toEqual([]);
+    expect((await cli(h.env, ["list"])).stdout).toContain("\"status\":\"revoked\"");
+  });
+  it("a store with the index unreadable is refused as a file problem (exit 70) and stores nothing", async () => {
+    const h = await unreadable();
+    const r = await put(h.env, "synthetic-value-three", OTHER);
+    expect(r.code).toBe(70);
+    expect(sealed(h.vault)).toHaveLength(1);
+  });
+});

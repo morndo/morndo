@@ -32,7 +32,7 @@ describe("a store: seal under a fresh ref, then the check, the index and the sav
   it("stores version 1, with its vault ref recorded and its index entries written before it returns (criterion 19)", async () => {
     const w = world();
     const r = await w.service.store(w.request("synthetic-value-one"), principal);
-    expect(r).toEqual({ ok: true, value: { reference: REF, version: 1, at: T, sameAs: [], indexed: true, renewed: false } });
+    expect(r).toEqual({ ok: true, value: { reference: REF, version: 1, at: T, sameAs: [], indexed: true, renewed: false, left: [] } });
     expect([...w.vault.files.keys()]).toEqual(["s-0001"]);
     expect(w.secrets.state.vaults).toEqual([{ reference: REF, version: 1, ref: "s-0001" }]);
     expect(w.index.changes).toEqual([{ add: { reference: REF, version: 1, prepared: { short: false } }, retire: [], at: T }]);
@@ -140,30 +140,30 @@ describe("the lifecycle (SC7, SC8)", () => {
   });
   it("grant and ungrant: widening is the principal's, narrowing anyone's", () => stored().then(w => {
     expect(w.service.grant(REF, laneGrant, { kind: "operator" })).toEqual({ ok: false, error: { problem: "principal" } });
-    expect(w.service.grant(REF, laneGrant, principal)).toEqual({ ok: true, value: null });
+    expect(w.service.grant(REF, laneGrant, principal)).toEqual({ ok: true, value: { left: [] } });
     expect(w.service.list()[0]?.grants).toHaveLength(2);
-    expect(w.service.ungrant(REF, { kind: "lane", lane: "lane-a" }, { kind: "operator" })).toEqual({ ok: true, value: null });
+    expect(w.service.ungrant(REF, { kind: "lane", lane: "lane-a" }, { kind: "operator" })).toEqual({ ok: true, value: { left: [] } });
     expect(w.service.ungrant(REF, { kind: "lane", lane: "lane-a" }, principal)).toEqual({ ok: false, error: { problem: "missing" } });
   }));
   it("disable is anyone's (SC7); enable is the principal's", () => stored().then(w => {
-    expect(w.service.disable(REF, { kind: "operator" })).toEqual({ ok: true, value: null });
+    expect(w.service.disable(REF, { kind: "operator" })).toEqual({ ok: true, value: { left: [] } });
     expect(w.service.list()[0]?.status).toBe("disabled");
     expect(w.service.enable(REF, { kind: "operator" })).toEqual({ ok: false, error: { problem: "principal" } });
-    expect(w.service.enable(REF, principal)).toEqual({ ok: true, value: null });
+    expect(w.service.enable(REF, principal)).toEqual({ ok: true, value: { left: [] } });
     expect(w.service.disable("secret://example-app/nope", principal)).toEqual({ ok: false, error: { problem: "missing" } });
   }));
   it("revoke removes the vault file, retires the version in the index, and keeps the Reference (SC8)", () => stored().then(w => {
     w.clock.at = T + 9;
     expect(w.service.revoke(REF, { kind: "operator" })).toEqual({ ok: false, error: { problem: "principal" } });
     expect(w.vault.files.size).toBe(1);
-    expect(w.service.revoke(REF, principal)).toEqual({ ok: true, value: null });
+    expect(w.service.revoke(REF, principal)).toEqual({ ok: true, value: { left: [] } });
     expect(w.vault.files.size).toBe(0);
     expect(w.index.changes.at(-1)).toEqual({ add: null, retire: [{ reference: REF, version: 1 }], at: T + 9 });
     expect(w.secrets.state.vaults).toEqual([{ reference: REF, version: 1, ref: null }]);
     expect(w.service.list()[0]).toMatchObject({ reference: REF, status: "revoked", version: null });
   }));
   it("delete removes the Reference and its file; the ledger keeps the value refused", () => stored().then(async w => {
-    expect(w.service.delete(REF, principal)).toEqual({ ok: true, value: null });
+    expect(w.service.delete(REF, principal)).toEqual({ ok: true, value: { left: [] } });
     expect(w.vault.files.size).toBe(0);
     expect(w.service.list()).toEqual([]);
     expect(w.index.changes.at(-1)?.retire).toEqual([{ reference: REF, version: 1 }]);
@@ -258,5 +258,40 @@ describe("a rolled-back change never retires a live version in the index", () =>
     w.clock.at = T + 50;
     w.service.sweep();
     expect(w.index.changes).toEqual([{ add: null, retire: [{ reference: REF, version: 1 }], at: T + 50 }]);
+  });
+});
+
+// ---- Review round 1 of PR #40, point 4: what fails after a commit is reported as left to clean, and the rest still runs.
+
+describe("a failure after the commit is a partial success: the change stands, what is left is named", () => {
+  const failRetire = (w: ReturnType<typeof world>) => {
+    const write = w.index.write.bind(w.index);
+    w.index.write = change => { if (change.retire.length > 0) throw new Error("index refused: mode"); write(change); };
+  };
+  it("a rotation whose retirement fails still removes the old file and names the index", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    failRetire(w);
+    const r = await w.service.store(w.request("synthetic-value-two", { shape: { keep: true } }), principal);
+    expect(r.ok && r.value.version).toBe(2);
+    expect(r.ok && r.value.left).toEqual([expect.stringMatching(/index: .*version 1.*index refused: mode/)]);
+    expect([...w.vault.files.keys()]).toEqual(["s-0002"]);
+  });
+  it("a revoke whose retirement fails still destroys the value and names the index", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    failRetire(w);
+    const r = w.service.revoke(REF, principal);
+    expect(r).toEqual({ ok: true, value: { left: [expect.stringMatching(/index: .*version 1/)] } });
+    expect(w.vault.files.size).toBe(0);
+    expect(w.service.list()[0]?.status).toBe("revoked");
+  });
+  it("a file the vault won't remove is named, and the change stands", async () => {
+    const w = world();
+    await w.service.store(w.request("synthetic-value-one"), principal);
+    w.vault.remove = () => { throw new Error("vault refused: owner"); };
+    const r = w.service.delete(REF, principal);
+    expect(r).toEqual({ ok: true, value: { left: [expect.stringMatching(/vault: .*s-0001.*vault refused: owner/)] } });
+    expect(w.service.list()).toEqual([]);
   });
 });

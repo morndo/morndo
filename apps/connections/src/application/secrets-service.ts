@@ -21,7 +21,11 @@ export type StoreRequest = {
   reference: string; sealed: Uint8Array; shape: ShapeInput; grants: readonly SecretGrant[]; expiry: number | null;
   destinations: readonly string[]; renew: boolean;
 };
-export type Stored = { reference: string; version: number; at: number; sameAs: readonly string[]; indexed: boolean; renewed: boolean };
+// `left` names what failed after the commit: the change stands, and a later sweep or the principal cleans it up (review 4).
+export type Stored = {
+  reference: string; version: number; at: number; sameAs: readonly string[]; indexed: boolean; renewed: boolean; left: readonly string[];
+};
+export type Done = { left: readonly string[] };
 export type SecretsProblem = SecretProblem | SealedProblem | "not_repository" | "workspace_taken";
 export type SecretsRefusal = { problem: SecretsProblem };
 
@@ -68,7 +72,7 @@ export class SecretsService {
         replaced = before === null ? null : refOf(state.vaults, request.reference, before);
         const vaults = state.vaults.map(v => v.reference === request.reference && v.version === before ? { ...v, ref: null } : v);
         const next: SecretsState = { ...state, directory: placed.value, vaults: [...vaults, { reference: request.reference, version, ref }] };
-        return { next, result: ok({ reference: request.reference, version, at, sameAs, indexed: !prepared.short, renewed: request.renew }) };
+        return { next, result: ok({ reference: request.reference, version, at, sameAs, indexed: !prepared.short, renewed: request.renew, left: [] }) };
       });
     } catch (error) {
       vault.remove(ref);
@@ -84,29 +88,29 @@ export class SecretsService {
   }
 
   // Grants, Disable and Enable change metadata only; the domain judges widening (SC7).
-  grant(reference: string, grant: SecretGrant, actor: Actor): Result<null, SecretsRefusal> {
+  grant(reference: string, grant: SecretGrant, actor: Actor): Result<Done, SecretsRefusal> {
     return this.#change(dir => grantSecret(dir, reference, grant, actor, this.#deps.clock.now()));
   }
 
-  ungrant(reference: string, subject: GrantSubject, actor: Actor): Result<null, SecretsRefusal> {
+  ungrant(reference: string, subject: GrantSubject, actor: Actor): Result<Done, SecretsRefusal> {
     return this.#change(dir => ungrantSecret(dir, reference, subject, actor, this.#deps.clock.now()));
   }
 
-  disable(reference: string, actor: Actor): Result<null, SecretsRefusal> {
+  disable(reference: string, actor: Actor): Result<Done, SecretsRefusal> {
     return this.#change(dir => disableSecret(dir, reference, actor, this.#deps.clock.now()));
   }
 
-  enable(reference: string, actor: Actor): Result<null, SecretsRefusal> {
+  enable(reference: string, actor: Actor): Result<Done, SecretsRefusal> {
     return this.#change(dir => enableSecret(dir, reference, actor, this.#deps.clock.now()));
   }
 
   // SC8: Revoke and Delete destroy the current value on this node. Its version is retired in the index (kept 30 days), its
   // file's ref is cleared in the same transaction, and the file is removed after the commit.
-  revoke(reference: string, actor: Actor): Result<null, SecretsRefusal> {
+  revoke(reference: string, actor: Actor): Result<Done, SecretsRefusal> {
     return this.#change(dir => revokeSecret(dir, reference, actor, this.#deps.clock.now()), reference);
   }
 
-  delete(reference: string, actor: Actor): Result<null, SecretsRefusal> {
+  delete(reference: string, actor: Actor): Result<Done, SecretsRefusal> {
     return this.#change(dir => deleteSecret(dir, reference, actor, this.#deps.clock.now()), reference);
   }
 
@@ -162,11 +166,11 @@ export class SecretsService {
 
   // One domain change in one transaction. With `dropping`, the Reference's current version (if any) is retired in the
   // index and its file removed after the commit.
-  #change(run: (dir: SecretDirectory) => Result<SecretDirectory, SecretRefusal>, dropping?: string): Result<null, SecretsRefusal> {
+  #change(run: (dir: SecretDirectory) => Result<SecretDirectory, SecretRefusal>, dropping?: string): Result<Done, SecretsRefusal> {
     const { secrets, vault } = this.#deps;
     let removed: string | null = null;
     let retiring: number | null = null;
-    const result = secrets.write<Result<null, SecretsRefusal>>(state => {
+    const result = secrets.write<Result<Done, SecretsRefusal>>(state => {
       const r = run(state.directory);
       if (!r.ok) return { next: null, result: err({ problem: r.error.problem }) };
       let vaults = state.vaults;
@@ -176,7 +180,7 @@ export class SecretsService {
         removed = refOf(vaults, dropping, version);
         vaults = vaults.map(v => v.reference === dropping && v.version === version ? { ...v, ref: null } : v);
       }
-      return { next: { ...state, directory: r.value, vaults }, result: ok(null) };
+      return { next: { ...state, directory: r.value, vaults }, result: ok({ left: [] }) };
     });
     if (result.ok && dropping !== undefined && retiring !== null) this.#retire(dropping, retiring);
     if (result.ok && removed !== null) vault.remove(removed);

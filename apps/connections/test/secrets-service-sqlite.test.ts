@@ -36,7 +36,7 @@ describe("the Secrets service over the real store", () => {
   it("criterion 12: a value revoked under one Reference is refused under any other, and survives a reopen", async () => {
     const w = world();
     expect((await w.service.store(w.request("synthetic-value-one"), principal)).ok).toBe(true);
-    expect(w.service.revoke(REF, principal)).toEqual({ ok: true, value: null });
+    expect(w.service.revoke(REF, principal)).toEqual({ ok: true, value: { left: [] } });
     w.secrets.close();
     const reopened = new SqliteSecrets(w.db);
     const service = new SecretsService({ clock: new ManualClock(T + 1), ids: new CountingIds(), vault: w.vault, index: new MemoryIndex(), secrets: reopened, roots: new MemoryRoots() });
