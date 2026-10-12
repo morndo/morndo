@@ -78,6 +78,24 @@ describe("what raises a Notification (N2)", () => {
     await tick(1000);
     expect(sent.at(-1)?.payload).toEqual({ kind: 0, decisions: 1, workers: 1, linked: 0, alerts: 0 });   // the muted worker isn't counted
   });
+  it("every kind's Topic is one a push service takes: at most 32 URL-safe Base64 characters, a length that decodes (Apple refused the 5-character \"alert\" with 400 BadWebPushTopic, 2026-10-12)", async () => {
+    const topicsOf: string[] = [];
+    const all = new NotificationService({ store, alerts: () => 1, send: async (_s, _p, o) => { topicsOf.push(o.topic); return { status: 201 }; } });
+    all.board([]);
+    all.board([decision("t-1")]);
+    all.worker("%1", false, null, true);
+    all.worker("%1", true, null);
+    all.linked();
+    all.alert(true);
+    await vi.advanceTimersByTimeAsync(5000); await all.settled();
+    all.stop();
+    const topics = [...new Set(topicsOf)].sort();
+    expect(topics).toHaveLength(4);
+    for (const t of topics) {
+      expect(t, t).toMatch(/^[A-Za-z0-9_-]{1,32}$/);                  // RFC 8030 section 5.4
+      expect(t.length % 4, `${t}: a Base64 length`).not.toBe(1);       // 4n+1 never decodes; Apple checks it
+    }
+  });
   it("a device linked (AC13)", async () => {
     svc.linked();
     await tick(1000);

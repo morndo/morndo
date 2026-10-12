@@ -16,12 +16,14 @@ export type PushStore = {
 export type Timers = { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(id: unknown): void };
 
 // How long a push service keeps it for an offline device, and how urgently it delivers (RFC 8030 sections 5.2, 5.3).
-// The topic is the kind's name: a newer one of the same kind replaces one still waiting there (section 5.4).
+// The topic is the kind's name: a newer one of the same kind replaces one still waiting there (section 5.4). At most 32
+// URL-safe Base64 characters, of a length that decodes as Base64: Apple's push service refused "alert" (5 characters)
+// with 400 BadWebPushTopic (2026-10-12), so the alerts' topic is "alerts".
 const OPTIONS: Record<NotificationKind, PushOptions> = {
   decision: { ttlSeconds: 12 * 3600, topic: "decision", urgency: "high" },
   worker: { ttlSeconds: 3600, topic: "worker", urgency: "normal" },
   linked: { ttlSeconds: 3600, topic: "linked", urgency: "high" },
-  alert: { ttlSeconds: 6 * 3600, topic: "alert", urgency: "high" },
+  alert: { ttlSeconds: 6 * 3600, topic: "alerts", urgency: "high" },
 };
 const delivered = (status: number) => status >= 200 && status < 300;
 
