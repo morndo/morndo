@@ -67,12 +67,12 @@ Added to `docs/domain.md` when ADR-0025 is accepted. The domain module (`package
 | Subject | What a line is about: a task (`T-12`), a change (`owner/repo#87`, a pull request at a revision), a deploy (an environment at a revision), an ask, a decision taken for the principal, a lane, or a job. | A message. |
 | Revision | The commit a claim or a check is about (a SHA), with its patch id. | A branch name. |
 | Event | One fact about a subject from one record, with its record's time and the hub's sequence number: needs you, decided for you, failed or rolled back, stale or stuck, shipped, merged, opened or pushed, done. | A summary. |
-| Claim | A lane's statement that an outcome holds on a revision: done, merged, shipped, fixed. Filed through the agents' door, or read from the board (a task moved to review) or a lane event (its last answer said done). A board or lane-event claim is about the task (for a lane event, the task that lane has in progress, B5; none, and it is counted as unattached and shown nowhere), and its revisions are the heads of the task's linked changes when it was made. | Evidence (V1). |
+| Claim | A lane's statement that an outcome holds on a revision: done, merged, shipped, fixed. Filed through the agents' door (`via` filed), read from the board (a task moved to review, `via` review), or read from a lane event (its last answer said done, `via` lane_event). Each of those is one claim row, with a sequence and a time. The row carries `revisions`: for a change, the revision the lane named, or that change's head then if it named none; for a task, each change rooted under the task then, at its head then, including a deploy linked then. A task with no change carries `round`, the sequence of that round's first claim. A board or lane-event claim is about the task (for a lane event, the task that lane has in progress, B5; none, and it is counted as unattached and shown nowhere). | Evidence (V1). |
 | Evidence | The result of one check on one revision, with its producer: a CI run, test counts, a review, a live check, a screenshot, a deploy status. | Output the claimant produced about itself. |
 | Producer | Who made the evidence: the hub's forge adapter (CI, deploy status), the manager, a lane, or the principal. | The lane named in the evidence's text. |
 | Level | Who has checked a subject at its current revision: claimed, checked, reviewed, verified live; or failed. | A Verdict. "Verified live" says one live check passed on this revision, and its chip says what it checked. The Verdict Verified needs Evidence for every Check of a Done-means (V1); the digest shows no Verdict until Done-means exists. |
 | Item | One line: a group of linked subjects (a task with its changes and deploys), its section, its level, its events since the mark, its evidence. | A stored summary. It is recomputed from records. |
-| Link | A record that a change or a deploy belongs to a task: filed with a claim or evidence that names both, or on its own (`morndo-verify link`), always under a token. | A task key found in a branch name or a title. |
+| Link | A record that a change or a deploy belongs to a task: filed with a claim or evidence that names both, or on its own (`morndo-verify link`), always under a token. The hub stamps its sequence and its time together. The first link is the lowest sequence (DG5). | A task key found in a branch name or a title. |
 | Mark | The hub's sequence number up to which the principal has seen the digest, on any Endpoint, with the items seen above it. | A Read mark of a Conversation; an Acknowledgement. |
 
 ### 3.2 Events: where each comes from
@@ -86,8 +86,10 @@ Added to `docs/domain.md` when ADR-0025 is accepted. The domain module (`package
 | stale or stuck | Stale or stuck | Computed (section 6.3). Never a lane's own report. |
 | shipped | Shipped | A deploy status `success` for an environment at a revision that contains a merged change [S26], or a deploy record filed through the agents' door. |
 | merged | Merged | The forge: the pull request's `merged`, `merged_at` and `merge_commit_sha` [S25]. |
-| opened or pushed | Opened or pushed | The forge: a pull request opened, its head SHA changed, or a commit pushed straight to a default branch (shown with "no pull request, no review"). |
+| opened or pushed | Opened or pushed | The forge: a pull request opened, its head SHA changed, or a commit pushed straight to a default branch (shown with "no pull request, no review"). A head SHA change is also filed as a change head `{ subject, revision, seq, at }`. |
 | done | Done | A board event moving a task to done, with its Actor (B6). |
+
+A change head is `{ subject, revision, seq, at }`, and the digest's input lists them: an empty list when there are none, never an omitted one. The forge adapter files one the first time it sees a change (opened, or the first poll of a newly watched repo) and on every head change. It shares the sequence of the opened or pushed event that comes with it. Links and claims file no heads. A change with no head on record has no revision: its evidence is struck through and raises nothing until a head arrives, and that head then raises the item. The digest does not read a revision off the live subject. Replaying the group's records, a head raises the item only when it changes the line (DG8): the subjects with the revision shown for each, the level, and the chips. The weekly view does not read change heads. A claim is judged at the revisions stored on its row (DG12).
 
 Whether a deploy's revision contains a change is an ancestry question for the forge (its compare endpoint). The exact call is checked against the forge's documentation when the adapter is built.
 
@@ -121,7 +123,7 @@ The claimants of a subject are every lane that filed a claim on it or linked it,
 
 A change nobody claimed or linked has no known author: the forge account is shared by every lane on a machine. Lane-produced evidence on it doesn't count; only the forge's own, the manager's and the principal's do. The lanes' prompt block says to claim a change when opening it, so this is the exception.
 
-A task with no change has no SHA. Its evidence binds to the task's claim round instead: the time of its last move to review. A new move to review voids it, as a new push does for a change (DG4).
+A task with no change has no SHA and its claim row has no revision entries. It has one round per hand-over: the claims from the first one after the task was last sent back until it is next sent back, whatever their source. Sent back means moved out of review to anything but done, or out of done. The hub stamps `round`, the sequence of that round's first claim, on each of those rows. A claim that names no round joins the hand-over open at its sequence and never starts one. The round counts once, at its lowest sequence. Its evidence runs from that claim's clock to the next hand-over's first claim. Sequence decides the round and which claim is held. A new round voids the earlier one for the level, as a new push does for a change (DG4).
 
 **V3 is only partly reachable.** V3 refutes a claim whose revision changes what a Check depends on; that needs a Done-means, which doesn't exist yet. Until then one rule stands in: a change that edits the forge's CI configuration doesn't get `ci` evidence counted for itself; the chip says "the change edits its own CI". A change that weakens a test is caught only by a reviewer.
 
@@ -137,7 +139,7 @@ A task with no change has no SHA. Its evidence binds to the task's claim round i
 
 - The level shown is the highest reached; the chips list every piece of evidence, so "verified live" with no review is visible as such.
 - A new revision drops the level to what exists for that revision. Evidence for an earlier revision stays visible, struck through, with "pushed again after the last check". A revision with the same patch id (a rebase) keeps its evidence, as the verdict ledger does today.
-- A task's level is the lowest level of its linked changes, or its own evidence when it has no change.
+- A task's level is the lowest level of its linked changes. A deploy is not a ladder member: a change reaches verified live through an independent passing live check on a deploy that contains its revision (SQ11). A task with no change uses its own evidence.
 - Asks, decisions, lanes and jobs carry no level; their line says what they are (Decision, Your step, Decided, Stuck, Waiting).
 
 The same ladder in the vocabularies that already exist, so importers and the manager's instructions map one to one:
@@ -155,7 +157,7 @@ The same ladder in the vocabularies that already exist, so importers and the man
 ```ts
 type DigestItem = {
   id: string;                        // stable: the root subject's ref
-  seq: number;                       // the hub sequence of its newest event or evidence
+  seq: number;                       // the highest sequence of the records that raised it
   section: Section;
   subjects: SubjectRef[];            // root first: a task, then its changes, then their deploys
   level: Level | null;               // null for asks, decisions, lanes, jobs
@@ -177,18 +179,18 @@ type DigestItem = {
 | DG2 | An item's level is the highest level whose evidence is on the subject's current revision and comes from a producer other than its claimants. A claimant's own evidence never raises it (V1). |
 | DG3 | Any failing evidence on the current revision, a revert, a rollback or a reopen shows the item as failed, whatever else passed (V2). Failed lasts while its cause is current: a new revision clears failing evidence (DG4); a reverted change and a rolled-back deploy stay failed; a reopened task is failed until it is accepted as done again, then its level is recomputed. The failure stays in the trail and in DG12's count. Placement in the Failed section follows section 3.2. |
 | DG4 | A new revision without the same patch id voids earlier evidence for the level. The voided evidence stays visible as voided. |
-| DG5 | One item per root subject. A task groups its linked changes and their deploys. The item sits in the first section, in the order of section 5, that a live condition of its own (DG6) or one of its events since the mark belongs to; its other events form its trail. |
-| DG6 | Needs you and Stale or stuck are live state: an item stays while its condition holds and leaves when it clears, whatever the mark. A Needs you item leaves only by being answered, settled or expired (C1). |
-| DG7 | The mark only moves forward. "Mark all seen" names the items the device covered: every line it displayed, and the items of a section folded by design (Opened or pushed), whose fold line shows their count and kinds. Items behind "N more" are not covered. The hub marks those items seen and moves the mark to the highest sequence number below which every item is seen; it never passes an item that wasn't covered, nor the hub's newest. Kept on the hub and told to every Endpoint (O7, C7). |
-| DG8 | An item is new while its sequence number is above the mark and it has not been seen (opened, or covered by Mark all seen) at that sequence number. An item whose level, result or section changed after it was seen is new again, with what changed. |
+| DG5 | One item per root subject. A task groups its linked changes and their deploys. The first link is the lowest sequence; the hub stamps a link's sequence and time together. A claim's root is that first link at or below the claim's own sequence. A task the claim itself names counts as such a link. Time sets the week, not the root. The item sits in the first section, in the order of section 5, that a live condition of its own (DG6) or one of its events since the mark belongs to; its other events form its trail. A needs-you or stale event places its item only while that condition holds. |
+| DG6 | Needs you and Stale or stuck are live state: an item stays while its condition holds and leaves when it clears, whatever the mark. A Needs you item leaves only by being answered, settled or expired (C1). The end of a live condition is a trail entry and raises nothing. |
+| DG7 | The mark only moves forward. "Mark all seen" names the items the device covered: every line it displayed, and the items of a section folded by design (Opened or pushed), whose fold line shows their count and kinds. Items behind "N more" are not covered. A prior-seen item is covered only when both its sequence and its level match; the section is never compared. The hub marks those items seen and moves the mark to the highest sequence number below which every item is seen; it never passes an item that wasn't covered, nor the hub's newest. Kept on the hub and told to every Endpoint (O7, C7). |
+| DG8 | An item is new while its sequence is above the mark and it was not seen at that sequence, or while its level differs from the level it was seen at. Its sequence is the highest among its events, evidence and claims, and among the links, assignments and change heads that changed its line when they were replayed in sequence order against the records before them. The line is its subjects with their revisions, its level, and its chips. Neither the mark nor the section enters the sequence. |
 | DG9 | A rebuild of the digest from the stores gives the same items, levels and counts. Section counts are counts of items; weekly counts are counts of records. |
 | DG10 | Stale and stuck are computed from records and side effects (section 6.3), never from a worker's own report. Their limits come from config. |
 | DG11 | The digest grants and starts nothing (O4, B8, C6): seeing, marking, opening, and a veto are not a Mandate, a Decision, an Acknowledgement, a Verdict or a board move. A veto is a Command (AC7) that sends the manager a message naming the decision. |
-| DG12 | A claim is counted once per root subject and revision, at the earliest of its sources (a claim filed, a task moved to review, a lane event that said done). It counts as later failed when, within 14 days, failing evidence lands on that revision, its merge is reverted, its deploy is rolled back, or its task is reopened. It is counted in the claim's week, under the level its item showed just before the failure; a claim that held is counted under the level its item showed when the 14 days ended. |
+| DG12 | A claim is judged at the revisions it was made at. The claim row carries them, filled in by the hub when it files the claim: a change claim's named revision, or the change's head then; for a task claim, each change rooted under the task then, at its head then, and a deploy linked then. Never a later head, never the live head. Its root is the first link at or below its own sequence. A claim is counted once per root and set of revisions, at the lowest sequence of its sources. A task with no change has one round per hand-over, stamped on the row, and that round counts once at its lowest sequence. It counts as later failed when, within 14 days, failing evidence lands on one of its revisions, a change it names is reverted, a deploy it carries is rolled back, or its task is reopened. A claim with no entries fails on failing evidence against the task itself, with no revision, inside its round, or on a reopen. A deploy's failure record fails the claims that carry that deploy, not every claim under the deploy's root task. Its level is the level of those revisions computed from records before the failure, or at the end of the 14 days. Links and claims count as claimants by sequence: at or below the claim, and later sequences whose clock falls between the claim and that moment. Assignments are read up to that moment. Only a round's evidence is limited to the round. A round is keyed by its sequence (`r`), and a claim that joins none by its own sequence (`s`), so a clock cannot collide with a round. A revision the hub could not learn stays unknown, and the claim counts as claimed. |
 
 ## 4. Since you last looked: the mark
 
-- **One mark per principal**, on the hub, as a sequence number: the digest's own counter, which grows by one with every event or evidence the hub records, plus the items seen above it. Not a time. Evidence arrives late (a review lands an hour after the merge it is about) and node clocks differ (FL13). A sequence number makes "new since the mark" exact.
+- **One mark per principal**, on the hub, as a sequence number: the digest's own counter, which grows by one with every event or evidence the hub records, plus the items seen above it. Not a time. Evidence arrives late (a review lands an hour after the merge it is about) and node clocks differ (FL13). A sequence number makes "new since the mark" exact. A seen entry matches an item on its sequence and its level. The section is never compared (DG8). The mark itself never enters an item's sequence.
 - **What moves it:**
   - "Mark all seen" covers what the device displayed: every line on screen, and the folded Opened or pushed section, whose line gives its count and kinds. Items behind "N more" are not covered; the button says how many ("Mark all seen · 2 not shown"). The hub marks the covered items seen and moves the mark up to the first item that isn't (DG7, as C5). An item that arrived while the principal was reading stays new.
   - Opening an item (its task, lane, brief or evidence) marks that item seen.
@@ -258,17 +260,19 @@ The hub keeps its own copy of every fact it lists (`digest_events`), because lan
 
 | Record | Written by | Through | Fields |
 |---|---|---|---|
-| `claims` | A lane's worker token | `morndo-verify claim` | subject, revision, outcome, the lane, a task to link, a note of at most 140 characters |
+| `claims` | A lane's worker token; the hub, for a board move or a lane event | `morndo-verify claim`; the projection | subject, revision, outcome, the lane, `via` (`filed`, `review` or `lane_event`), `revisions` (each change at the head then), a task to link, a note of at most 140 characters, sequence, time |
 | `evidence` | The manager's or a lane's token; the forge adapter | `morndo-verify record`, `morndo-verify review`, `morndo-verify live`; the adapter | section 3.3 |
 | `decision_log` | The manager's token only | `morndo-decide log` (a verb on ADR-0023's command) | what, why, undo, reversible, linked subjects, by |
-| `links` | Any token | `morndo-verify link T-12 owner/repo#87`, or a claim or evidence naming both | task, change or deploy, by, at. The only way a task groups its changes. |
+| `links` | Any token | `morndo-verify link T-12 owner/repo#87`, or a claim or evidence naming both | task, change or deploy, by, sequence, time. The hub stamps the sequence and the time together. The only way a task groups its changes. |
 | `deploys` | Any token; the forge adapter | `morndo-verify deploy` | environment, repo, revision, url, by |
 | `forge_facts` | The forge adapter | polling | pull requests, check runs, deployments, default-branch commits per watched repo |
 | `digest_events`, `digest_seen`, `digest_weeks` | The hub | the projection | section 4, section 7 |
 
 The commands live in `apps/board-cli` beside `morndo-board`, with the same tokens, environment, exit codes and one-line refusals (ADR-0015). Their prompt block tells a lane when to claim, and the manager when to record a check or a decision; a test keeps `docs/agents/verify.md` equal to the printed block.
 
-**The forge adapter** (`apps/hub/src/adapters/forge-github.ts`, behind a `Forge` port so other forges can follow) polls the repos named in the hub's settings and in any claim, evidence or task link:
+**Later-failed records.** A revert names the change at its merged head. A rollback is one failure per contained change, at that change's merged revision, plus one on the deploy. A reopen names the task only.
+
+**The forge adapter** (`apps/hub/src/adapters/forge-github.ts`, behind a `Forge` port so other forges can follow) polls the repos named in the hub's settings and in any claim, evidence or task link. It files a change head the first time it sees a change and on every head change, sharing the sequence of the opened or pushed event. Before the hub files a claim, it refreshes the named changes' heads and files any new head before the claim. The adapter is outside the domain module. It polls:
 - every minute for repos with an open subject, every 10 minutes otherwise;
 - with conditional requests, since a `304` does not count against the primary rate limit when the request is authorised [S23];
 - webhooks are what the forge recommends [S23], but a hub on a home machine usually has no public address; they can replace polling later without changing the domain;
@@ -291,7 +295,7 @@ Limits come from the hub's config, with these defaults:
 
 **The side-effect probe** is a typed fleet operation, `lane.sideEffects`, answered by the node from the lane's working directory: the time of the last commit, a hash of the working tree's status, how many commits are ahead of upstream, and the head SHA. The node runs git itself; no command line crosses the fleet (FL14). The hub asks for lanes that have been Working for 15 minutes or more, every 5 minutes.
 
-A condition becomes an event when its limit is crossed, at that time, so it is "new since the mark" once. It stays listed while it holds (DG6), and its end is recorded in the item's trail.
+A condition becomes an event when its limit is crossed, at that time, with a sequence, so it is "new since the mark" once. The domain input carries that event. A `since` time alone does not place the item. It stays listed while it holds (DG6), and its end is a trail entry that raises nothing.
 
 A worker's open question or menu is not here: under O6 every one of them needs the principal, so it is in Needs you, with its age. A lane event doesn't say whom a question is for, so the digest can't tell a question meant for the manager from one meant for the principal.
 
@@ -307,14 +311,16 @@ ISO weeks in the principal's time zone (a setting, by default the hub's): the cu
 | Done | Tasks accepted as done | |
 | Time to done | A task's first move to in progress, to its acceptance: median and 90th percentile | The nearest DORA measure is change lead time [S11]. |
 | Claims | Claims filed, tasks moved to review, lane events that said done | |
-| Later failed | Claims of that week that later failed (DG12) | Counts beside every rate. |
+| Later failed | Claims of that week that later failed (DG12): failing evidence on a stored revision, a revert of a named change at its merged head, a rollback filed once per contained change and once on the deploy, a reopen of the root task, or, for a task with no change, failing evidence on the task itself inside its round. A deploy's failure record fails only claims that carry that deploy | Counts beside every rate. |
 | Failed deploys | Deploys followed by a rollback, a failure status or a failed live check, of all deploys | DORA's change fail rate [S11]. |
 | Recovery | Time from a failed deploy to the next successful one on that environment | DORA's failed deployment recovery time [S11]. |
 | Stuck flags | Stale or stuck items raised, and how many cleared within 15 minutes with nobody acting: no message from the principal or the manager to that lane, and no board move by either, before it cleared | A false-alarm count, for tuning the limits: false alarms are what make people stop looking [S19]. |
 
 **Inputs first** [S1]: the head of the view shows the share of done or shipped items that were reviewed or verified live, the median hours an ask waited on the principal, and how many items went stale. Shipped, merged and done follow, with instability beside them [S11, S13].
 
-**How each level held up** (the trust measure): for the closed weeks, the claims by the level their item showed (DG12), how many later failed, and the rate. This tells the principal how much each level has been worth on this system, which is what calibrated trust needs [S17]. It is labelled experimental, as DORA's history shows a plausible measure can fail validation [S12].
+The weekly view reads claims, links, assignments, evidence, deploys and failures. It reads no change heads and no live subject state.
+
+**How each level held up** (the trust measure): for the closed weeks, the claims by the level their stored revisions showed (DG12), how many later failed, and the rate. This tells the principal how much each level has been worth on this system, which is what calibrated trust needs [S17]. It is labelled experimental, as DORA's history shows a plausible measure can fail validation [S12].
 
 **By engine and model, not by lane**: claims and later failures per engine and model, so the principal can see which model's word holds. No ranking of lanes [S11].
 
@@ -397,3 +403,22 @@ All read on 2026-10-12. Quotes and notes on each are kept with the research note
 - [S26] GitHub REST API, deployment statuses: states `error`, `failure`, `inactive`, `in_progress`, `queued`, `pending`, `success`. https://docs.github.com/en/rest/deployments/statuses
 - [S27] git-revert (page last updated in git 2.54.0): the default message starts "This reverts \<full-object-name-of-the-commit-being-reverted\>." https://git-scm.com/docs/git-revert
 - [S28] GitHub Docs, reverting a pull request: "creates a new pull request that reverts the original merge commit." https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/incorporating-changes-from-a-pull-request/reverting-a-pull-request
+
+## 12. Decisions
+
+Accepted 2026-10-12, from the semantics note's SQ1 to SQ12.
+
+| # | Answer |
+|---|---|
+| SQ1 | A claimant change nobody can see does not raise the item. The line is the subjects, the level and the chips. |
+| SQ2 | A needs-you or stale event places its item only while the condition holds. After that it is a trail entry, and the end raises nothing. |
+| SQ3 | The hub refreshes the named changes' heads before it files a claim, and files any new head first. The domain stores the revisions on the claim. The forge call belongs to the adapter. |
+| SQ4 | A change linked after the task claim is not part of that claim. |
+| SQ5 | A filed task claim that names a revision is matched to the linked change whose head is that sha. If none matches, the hub refuses. |
+| SQ6 | A change claim is judged on its change alone, and counted apart from the task claim unless their revision sets are equal. |
+| SQ7 | A reopen fails every counted claim rooted under the task in the 14 days before it, whatever the revision. |
+| SQ8 | A rollback is one failure per contained change, at that change's merged revision, plus one on the deploy. The domain matches those records. It does not infer ancestry. |
+| SQ9 | There is no fallback to a later head. A revision the hub could not learn stays claimed. |
+| SQ10 | The first link is the lowest sequence, in the digest and in the weekly view. The hub stamps sequence and time together. |
+| SQ11 | Deploys are not ladder members of a task. A change reaches verified live through an independent passing live check on a deploy that contains its revision. |
+| SQ12 | CI evidence is filed once the runs have concluded. |
