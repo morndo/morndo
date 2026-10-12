@@ -1,7 +1,7 @@
-// Process start from /proc/<pid>/stat field 22 plus btime, and from `ps -o lstart=` when /proc yields nothing.
+// Process start from /proc/<pid>/stat field 22 plus btime or /proc/uptime, and from `ps -o lstart=` when /proc yields nothing.
 import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it } from "vitest";
-import { processIdentity, processStartedMs, resetProcessStartCache, startMsFromProc, startTicksFromStat } from "../src/pid.ts";
+import { processIdentity, processStartedMs, resetProcessStartCache, startMsFromProc, startMsFromUptime, startTicksFromStat } from "../src/pid.ts";
 
 const STAT = "7 (a proc) S " + Array.from({ length: 18 }, () => "0").join(" ") + " 18872294";
 const BOOT = "cpu 1\nbtime 1791293952\n";
@@ -14,6 +14,17 @@ describe("process start", () => {
     expect(startMsFromProc(STAT, BOOT, 100)).toBe(START_MS);
     expect(startMsFromProc("7 (no close", BOOT, 100)).toBeNull();
     expect(startMsFromProc(STAT, "cpu 1\n", 100)).toBeNull();
+  });
+
+  // STAT started 188722.94 s after boot; /proc/uptime read 200 ms later says 188723.14, beside the wall clock NOW.
+  it("turns starttime ticks and uptime into ms from the wall clock read beside it", () => {
+    const NOW = 1_791_500_000_123;
+    expect(startMsFromUptime(STAT, "188723.14 9000.00\n", 100, NOW)).toBe(NOW - 200);
+    expect(startMsFromUptime(STAT, "188723.14", 100, NOW)).toBe(NOW - 200);
+    expect(startMsFromUptime("7 (no close", "188723.14 1.00\n", 100, NOW)).toBeNull();
+    for (const bad of ["", "\n", "x 1.00", "-1.00 1.00", "1e3 1.00"]) expect(startMsFromUptime(STAT, bad, 100, NOW)).toBeNull();
+    expect(startMsFromUptime(STAT, "188723.14 1.00\n", 0, NOW)).toBeNull();
+    expect(startMsFromUptime(STAT, "188723.14 1.00\n", 100, Number.NaN)).toBeNull();
   });
 
   it("reads this process from /proc and does not call ps", async () => {

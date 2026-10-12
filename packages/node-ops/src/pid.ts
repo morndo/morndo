@@ -48,6 +48,19 @@ export function startMsFromProc(stat: string, procStat: string, hz: number): num
   return boot * 1000 + Math.round((ticks * 1000) / hz);
 }
 
+// When the process started, in ms since the epoch, from its age on the boot clock: the first field of /proc/uptime less
+// its starttime, both CLOCK_BOOTTIME, taken from `nowMs`, the wall clock read beside /proc/uptime. The kernel prints
+// uptime to the hundredth of a second and starttime in ticks, so this is good to about 10 ms; btime is whole seconds
+// (getboottime64 printed as tv_sec), so startMsFromProc can be up to a second early.
+// fs/proc/uptime.c, fs/proc/array.c, fs/proc/stat.c, kernel/time/timekeeping.c (Linux v6.12, read 2026-10-12);
+// https://man7.org/linux/man-pages/man5/proc_uptime.5.html (read 2026-10-12).
+export function startMsFromUptime(stat: string, uptime: string, hz: number, nowMs: number): number | null {
+  const ticks = startTicksFromStat(stat);
+  const field = uptime.trim().split(/\s+/)[0] ?? "";
+  if (ticks === null || !/^\d+(\.\d+)?$/.test(field) || !Number.isInteger(hz) || hz <= 0 || !Number.isFinite(nowMs)) return null;
+  return nowMs - Math.round(Number(field) * 1000 - (ticks * 1000) / hz);
+}
+
 export function lstartMs(text: string): number | null {
   const ms = Date.parse(text.trim());
   return Number.isFinite(ms) ? ms : null;

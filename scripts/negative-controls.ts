@@ -1745,6 +1745,10 @@ export const CONTROLS: Control[] = [
     find: `if (entry.revision === null && entry.subject.kind !== "task") return "claimed";\n`,
     replace: `if (entry.revision === null && entry.subject.kind !== "task") return "checked";\n`,
     run: ["packages/domain/test/digest-semantics.test.ts"], expect: "never the live head" },
+  // ---- Job spawn window (board T-110): the window checked on the btime start again, which is up to a second early.
+  { id: "t110-spawn-window-btime", task: "T-110", file: "apps/node-agent/src/ops/job-identity.ts",
+    find: "Math.abs((exact ?? started) - spawnedAt)", replace: "Math.abs(started - spawnedAt)",
+    run: ["apps/node-agent/test/job-supervisor.test.ts"], expect: "btime is most of a second short" },
 ];
 
 // ---- the runner

@@ -6,7 +6,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
-import { processAlive, processIdentity, processStartedMs, startMsFromProc, type ProcessIdentity } from "@morndo/node-ops";
+import { processAlive, processIdentity, processStartedMs, startMsFromProc, startMsFromUptime, type ProcessIdentity } from "@morndo/node-ops";
 
 // How long a pid file may exist before its start record is written. Inside this window the pid is left alone.
 export const START_RECORD_GRACE_MS = 5_000;
@@ -72,14 +72,27 @@ function observedStartMs(pid: number, read: (path: string) => string | null): nu
   } catch { return null; }
 }
 
-// Writes the identity before returning. A start outside the spawn window is a reused pid and is not recorded.
+// The start to about 10 ms, from the process's age on the boot clock (startMsFromUptime), or null without /proc.
+function exactStartMs(pid: number, read: (path: string) => string | null, now: () => number): number | null {
+  const hz = ticksPerSec();
+  const stat = read(`/proc/${pid}/stat`);
+  const uptime = read("/proc/uptime");
+  const at = now();
+  if (hz === null || stat === null || uptime === null) return null;
+  return startMsFromUptime(stat, uptime, hz, at);
+}
+
+// Writes the identity before returning. A start outside the spawn window is a reused pid and is not recorded. The
+// window is checked on the exact start where /proc gives one: the btime start is up to a second early, which is the
+// whole window. A start record with no identity keeps the btime or ps start, the one sameProcess compares it with.
 export function writeProcessFile(path: string, pid: number, spawnedAt: number, io: ProcessFileIo = {}): void {
   const read = io.read ?? readText;
   const before = processIdentity(pid, read);
   const started = observedStartMs(pid, read);
+  const exact = exactStartMs(pid, read, io.now ?? Date.now);
   const after = processIdentity(pid, read);
   if (before && after && (before.ticks !== after.ticks || before.bootId !== after.bootId)) return;
-  if (started === null || Math.abs(started - spawnedAt) > SPAWN_WINDOW_MS) return;
+  if (started === null || Math.abs((exact ?? started) - spawnedAt) > SPAWN_WINDOW_MS) return;
   const ident = before ?? after;
   const text = ident ? JSON.stringify(ident) : JSON.stringify({ lstart: started });
   writeFileSync(path, text, { mode: 0o600 });
