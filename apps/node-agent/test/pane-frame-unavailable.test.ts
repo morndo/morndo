@@ -17,7 +17,7 @@ beforeEach(async () => {
   expect(await until(() => t.tmux("capture-pane", "-p", "-t", "=main:0").includes("❯"))).toBe(true);
   workerId = (await h.inventory.refresh()).panes[0]?.workerId ?? "";
 });
-afterEach(() => { h.close(); t.kill(); home.cleanup(); });
+afterEach(async () => { h.close(); await t.kill(); home.cleanup(); });
 
 describe("pane.frame while tmux does not answer", () => {
   it("a stalled tmux (SIGSTOP) is timeout, executed no; a frame comes back with tmux", async () => {

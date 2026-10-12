@@ -12,7 +12,7 @@ import { isolatedTmux, type TestTmux } from "./isolated-tmux.ts";
 
 let t: TestTmux;
 beforeEach(() => { t = isolatedTmux(); });
-afterEach(() => { t.kill(); });
+afterEach(() => t.kill());
 
 describe("tmuxArgv", () => {
   it("always passes -u, and -L only for a named socket", () => {
@@ -59,27 +59,39 @@ describe("tmuxLiteral", () => {
     t.tmux("rename-window", "-t", w, "r#{session_name}");
     expect(nameOf(w)).toBe("rmain");
   });
-  it("a directory arrives as asked for, and a #(…) in it runs nothing; unescaped, tmux expands it (negative control)", () => {
+  it("a directory arrives as asked for, and a #(…) in it runs nothing; unescaped, tmux expands it and its job lands here (negative control)", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "morndo-literal-")));
-    const odd = [join(dir, "a#{session_name}b"), join(dir, "#(touch m)")];
-    for (const d of odd) mkdirSync(d);
+    // A #(…) job runs in the working directory of the tmux client whose command expanded it (seen on tmux 3.4); the
+    // server's cwd and its HOME are the candidates another version could pick instead. All of them are pinned to
+    // dir: this test's client runs from dir, and the server — started by the first command below — inherits HOME=dir,
+    // so the unescaped control's touch lands in dir whatever picks the directory, never the one the suite runs in.
+    const back = process.cwd();
     const home = process.env.HOME;
+    process.chdir(dir);
+    process.env.HOME = dir;
     try {
-      process.env.HOME = dir;                                           // the server's HOME: where a #(…) job would run
+      const odd = [join(dir, "a#{session_name}b"), join(dir, "#(touch m)")];
+      for (const d of odd) mkdirSync(d);
       t.tmux("new-session", "-d", "-s", "main", "-n", "base", "-c", dir, "sleep 600");
-      if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
       const startIn = (cwd: string) => {
         const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-c", cwd, "sleep 600").trim();
         return t.tmux("display-message", "-p", "-t", pane, "#{pane_start_path}").replace(/\n$/, "");
       };
+      const m = join(dir, "m");
+      const settle = (ms: number) => {
+        for (let i = 0; i < ms / 50 && !existsSync(m); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+      };
       for (const d of odd) expect(startIn(tmuxLiteral(d)), d).toBe(d);
+      settle(500);
+      expect(existsSync(m)).toBe(false);                               // escaped, no job ran, though one would land here
       expect(startIn(odd[0] ?? "")).toBe(join(dir, "amainb"));
-      expect(startIn(odd[1] ?? "")).not.toBe(odd[1]);
-      for (let i = 0; i < 10 && !existsSync(join(dir, "m")); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-      expect(existsSync(join(dir, "m"))).toBe(false);
+      expect(startIn(odd[1] ?? "")).not.toBe(odd[1]);                  // unescaped, tmux expands it
+      settle(5000);
+      expect(existsSync(m)).toBe(true);                                // and its job really ran, in dir: the absent m above means something
     } finally {
+      process.chdir(back);
       if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true });                   // after the job has landed: nothing races this removal
     }
   });
   it("a directory ending in ; arrives as asked for", () => {
@@ -97,13 +109,13 @@ describe("tmuxLiteral", () => {
 });
 
 describe("isolatedTmux (the shared test helper)", () => {
-  it("kill() returns once the server is gone, so a new one starts at once on the same socket, and leaves no socket file", () => {
+  it("kill() returns once the server is gone, so a new one starts at once on the same socket, and leaves no socket file", async () => {
     const file = join(process.env.TMUX_TMPDIR || "/tmp", `tmux-${process.getuid?.() ?? 0}`, t.socket);
     for (let i = 0; i < 5; i++) {
       t.tmux("new-session", "-d", "-s", "main", "sleep 600");
       const pid = Number(t.tmux("display-message", "-p", "-t", "=main", "#{pid}").trim());
       expect(existsSync(file)).toBe(true);
-      t.kill();
+      await t.kill();
       expect(() => process.kill(pid, 0), `server ${pid}`).toThrow();    // the server process itself has exited
       expect(() => execFileSync("tmux", ["-L", t.socket, "list-sessions"], { stdio: "pipe" })).toThrow();
       expect(existsSync(file)).toBe(false);
@@ -116,7 +128,8 @@ describe("tmuxFailure", () => {
     Object.assign(new Error("tmux failed"), { code, killed: false, signal: null, stderr, ...extra });
   it("is absent only for exit 1 with tmux's own words for no server, no session, no pane", () => {
     for (const stderr of ["can't find window: main\n", "can't find session: main\n", "can't find pane: %9\n",
-      "no server running on /tmp/tmux-501/x\n", "error connecting to /tmp/tmux-501/x (No such file or directory)\n",
+      "no server running on /tmp/tmux-501/x\n", "no current target\n",
+      "error connecting to /tmp/tmux-501/x (No such file or directory)\n",
       "error connecting to /tmp/tmux-501/x (Connection refused)\n"]) {
       expect(tmuxFailure(exit(1, stderr)), stderr).toBe("absent");
     }

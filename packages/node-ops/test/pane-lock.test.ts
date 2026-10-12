@@ -21,10 +21,10 @@ describe("pane lock", () => {
     const other = spawn("flock", ["-x", path, "-c", "echo held; sleep 3"], { stdio: ["ignore", "pipe", "ignore"] });
     await new Promise(r => other.stdout.once("data", r));
     let ran = false;
-    const t = Date.now();
+    const t = performance.now();
     expect(await paneLock(path, 1)(async () => { ran = true; })).toBe("busy");
     expect(ran).toBe(false);
-    expect(Date.now() - t).toBeGreaterThanOrEqual(900);
+    expect(performance.now() - t).toBeGreaterThanOrEqual(900);
     await new Promise(r => other.once("exit", r));
     expect(await paneLock(path, 1)(async () => "free")).toBe("free");
   }, 10_000);

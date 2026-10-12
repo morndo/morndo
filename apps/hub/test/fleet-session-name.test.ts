@@ -23,8 +23,8 @@ let home: { home: string; cleanup: () => void };
 let h: Harness | undefined;
 const saved = { TMUX: process.env.TMUX, TMUX_PANE: process.env.TMUX_PANE };
 beforeAll(() => { delete process.env.TMUX; delete process.env.TMUX_PANE; t = isolatedTmux(); home = tempHome("session-name-"); });
-afterAll(() => {
-  h?.close(); t.kill(); home.cleanup();
+afterAll(async () => {
+  h?.close(); await t.kill(); home.cleanup();
   if (saved.TMUX !== undefined) process.env.TMUX = saved.TMUX;
   if (saved.TMUX_PANE !== undefined) process.env.TMUX_PANE = saved.TMUX_PANE;
 });

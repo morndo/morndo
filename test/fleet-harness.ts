@@ -43,7 +43,7 @@ const ALL_OPS: OpName[] = [...OP_NAMES];
 
 // ---- bookkeeping: everything started here is stopped by stopAll(), or by the exit hook below if a test file dies.
 const procs = new Set<Proc>();
-const servers = new Map<string, () => void>();   // tmux socket name → kill (waits, then removes the socket file)
+const servers = new Map<string, () => Promise<void>>();   // tmux socket name → kill (waits, then removes the socket file)
 const dirs = new Set<string>();
 const closers: (() => void | Promise<void>)[] = [];
 
@@ -56,8 +56,8 @@ const tmuxEnv = (): NodeJS.ProcessEnv => { const env = { ...process.env }; delet
 
 // Kills every tmux server the way isolatedTmux().kill() does (waits until it is gone, then removes its socket file under
 // /tmp/tmux-<uid>/), whatever else failed.
-function killServers(): void {
-  for (const kill of [...servers.values()]) { try { kill(); } catch { /* already gone */ } }
+async function killServers(): Promise<void> {
+  await Promise.all([...servers.values()].map(async kill => { try { await kill(); } catch { /* already gone */ } }));
   servers.clear();
 }
 // Failure-safe: the tmux servers are killed and the temp dirs removed even if closing something or stopping a process
@@ -67,14 +67,16 @@ export async function stopAll(): Promise<void> {
     for (const close of closers.splice(0).reverse()) { try { await close(); } catch { /* already gone */ } }
     await Promise.all([...procs].map(p => p.stop()));
   } finally {
-    killServers();
+    await killServers();
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
     dirs.clear();
   }
 }
 process.once("exit", () => {
   for (const p of procs) { try { p.child.kill("SIGKILL"); } catch { /* gone */ } }
-  killServers();
+  // An exit handler can't wait, so only killServers' synchronous part runs: each server is sent kill-server. Nothing
+  // waits for a server to exit or removes its socket file; stopAll() does both.
+  void killServers();
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 });
 
@@ -145,7 +147,7 @@ function startProc(name: string, args: string[], env: NodeJS.ProcessEnv, log: st
 // (a window name, a new session's name, the start directory) goes through tmuxLiteral ("#" as "##"), and a pane is
 // targeted by its %N, never by a window name; and the shared isolatedTmux, whose kill() waits until the server is gone,
 // so a drill can start a new one at once.
-export type TmuxServer = { socket: string; run(...args: string[]): string; has(session: string): boolean; stamp(): string | null; kill(): void };
+export type TmuxServer = { socket: string; run(...args: string[]): string; has(session: string): boolean; stamp(): string | null; kill(): Promise<void> };
 export function tmuxServer(): TmuxServer {
   const t = isolatedTmux();
   servers.set(t.socket, () => t.kill());
@@ -158,7 +160,7 @@ export function tmuxServer(): TmuxServer {
       const r = quiet(["show-options", "-gqv", "@morndo-server"]);
       return r.status === 0 && r.stdout.trim() ? r.stdout.trim() : null;
     },
-    kill: () => { t.kill(); },   // stays registered: a server recreated on this socket is stopped by stopAll too
+    kill: () => { return t.kill(); },   // stays registered: a server recreated on this socket is stopped by stopAll too
   };
 }
 

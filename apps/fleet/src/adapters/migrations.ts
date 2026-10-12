@@ -198,6 +198,8 @@ export const MIGRATIONS: readonly Migration[] = [
   },
 ];
 
+export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
+
 // Runs every migration newer than the database's user_version, in order, in one IMMEDIATE transaction that ends by
 // setting user_version to the newest one. Throws DatabaseFromFuture, changing nothing, if the database is newer.
 export function migrate(db: Database.Database, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {
