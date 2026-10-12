@@ -363,19 +363,23 @@ export type StaleCondition =
   | { kind: "delivery_uncertain"; lane: string; since: number };
 
 // A condition becomes an event when its limit is crossed, at that time, and stays listed while it holds (DG6, DG10).
+// §6.3 asks for none of the side effects in the window, so the clock starts at the latest one: an effect right after
+// the work began holds the window open only for its own limit, not forever.
 export function staleConditions(facts: StaleFacts, limits: StaleLimits, now: number): StaleCondition[] {
   const out: StaleCondition[] = [];
   for (const l of facts.lanes) {
-    if (l.workingSince !== null && now >= l.workingSince + limits.busyMs && (l.lastSideEffectAt === null || l.lastSideEffectAt <= l.workingSince))
-      out.push({ kind: "lane_busy", lane: l.name, since: l.workingSince + limits.busyMs });
+    if (l.workingSince === null) continue;
+    const since = Math.max(l.workingSince, l.lastSideEffectAt ?? 0) + limits.busyMs;
+    if (now >= since) out.push({ kind: "lane_busy", lane: l.name, since });
   }
   for (const t of facts.tasks) {
     if (t.blockedSince !== null && now >= t.blockedSince + limits.blockedMs)
       out.push({ kind: "task_blocked", task: t.key, since: t.blockedSince + limits.blockedMs });
     if (t.reviewSince !== null && now >= t.reviewSince + limits.reviewMs)
       out.push({ kind: "task_in_review", task: t.key, since: t.reviewSince + limits.reviewMs });
-    if (t.doingSince !== null && now >= t.doingSince + limits.quietMs && (t.lastActivityAt === null || t.lastActivityAt <= t.doingSince))
-      out.push({ kind: "task_quiet", task: t.key, since: t.doingSince + limits.quietMs });
+    if (t.doingSince === null) continue;
+    const quietSince = Math.max(t.doingSince, t.lastActivityAt ?? 0) + limits.quietMs;
+    if (now >= quietSince) out.push({ kind: "task_quiet", task: t.key, since: quietSince });
   }
   for (const j of facts.jobs) {
     if (j.queuedSince !== null && now >= j.queuedSince + limits.queuedJobMs)
