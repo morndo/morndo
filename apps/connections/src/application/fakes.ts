@@ -3,7 +3,7 @@ import { emptyDirectory, emptyPolicy, emptySecretDirectory, type Directory, type
 import type { VendorPreset } from "@morndo/protocol";
 import { chainHolders } from "./providers.ts";
 import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type ModelLister, type ModelRow, type ProcId, type Processes, type ProviderEntry, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
-import type { IndexChange, IndexWriter, Ids, PreparedIndex, SecretsDirectory, SecretsState, WorkspaceRoots } from "./ports.ts";
+import type { IndexChange, IndexWriter, Ids, PreparedIndex, SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRoots } from "./ports.ts";
 
 export class ManualClock implements Clock {
   at: number;
@@ -191,6 +191,25 @@ export class CountingIds implements Ids {
 
 const copyState = (s: SecretsState): SecretsState => JSON.parse(JSON.stringify(s)) as SecretsState;
 
+// The vault rows as a save keeps them (the port's rule, as SqliteSecrets applies it): one per ledger entry; a row the
+// change names sets the ref, null clearing it; an entry it leaves out keeps its stored ref, a new one has none; a row that
+// names no entry, or one twice, is refused (round 2, point 6).
+function savedVaults(before: SecretsState, next: SecretsState): VaultRefRow[] {
+  const key = (reference: string, version: number) => JSON.stringify([reference, version]);
+  const known = new Set(next.directory.ledger.map(e => key(e.reference, e.version)));
+  const named = new Map<string, string | null>();
+  for (const v of next.vaults) {
+    const k = key(v.reference, v.version);
+    if (!known.has(k) || named.has(k)) throw new Error(`the vault ref for ${v.reference} version ${v.version} names no ledger entry, or names one twice`);
+    named.set(k, v.ref);
+  }
+  const stored = new Map(before.vaults.map(v => [key(v.reference, v.version), v.ref]));
+  return next.directory.ledger.map(e => {
+    const k = key(e.reference, e.version);
+    return { reference: e.reference, version: e.version, ref: named.has(k) ? named.get(k) ?? null : stored.get(k) ?? null };
+  });
+}
+
 // One state; a write runs on a copy and lands only if the change returns without throwing, as the store's transaction.
 export class MemorySecrets implements SecretsDirectory {
   state: SecretsState = { directory: emptySecretDirectory(), vaults: [], workspaces: [] };
@@ -201,7 +220,7 @@ export class MemorySecrets implements SecretsDirectory {
   write<T>(change: (state: SecretsState) => { next: SecretsState | null; result: T }): T {
     const { next, result } = change(copyState(this.state));
     if (next && this.failNextSave) { this.failNextSave = false; throw new Error("the save failed"); }
-    if (next) { this.state = copyState(next); this.writes += 1; }
+    if (next) { this.state = copyState({ ...next, vaults: savedVaults(this.state, next) }); this.writes += 1; }
     return result;
   }
 }

@@ -169,7 +169,9 @@ export type SecretsState = { directory: SecretDirectory; vaults: readonly VaultR
 export type SecretsDirectory = {
   load(): SecretsState;
   // One BEGIN IMMEDIATE transaction: `change` reads the state as committed now; a `next` it returns is saved before the
-  // commit, and a throw rolls everything back. So the ledger check and the insert are one write (SC2).
+  // commit, and a throw rolls everything back. So the ledger check and the insert are one write (SC2). The vault rows of
+  // `next` set the refs they name, null clearing one; a version they leave out keeps its stored ref, and a new one has
+  // none; a row that names no ledger entry, or one twice, is refused (review 9; round 2, point 6).
   write<T>(change: (state: SecretsState) => { next: SecretsState | null; result: T }): T;
 };
 
