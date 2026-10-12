@@ -73,11 +73,21 @@ const ATTACHMENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const USERINFO_LINK = /^https:\/\/[^/?#]*@/;
 // A whole parameter-name word, case-insensitive. "signature" is its own word so X-Amz-Signature is refused and
 // "design" is not; "authorization" is its own word so "author" is not.
-const CREDENTIAL_WORD = /^(?:token|key|secret|password|passwd|pwd|sig|signature|auth|authorization|credential)$/i;
-// A name that ends with one of these is a credential even when camelCase did not split it. Plain "key" is not in
-// the list: keyword= would match it, and the run-together forms below cover apikey and its cousins.
-const CREDENTIAL_SUFFIX = /(?:token|secret|password|passwd|pwd|signature|credential|credentials)$/i;
-const RUN_TOGETHER_KEY = /^(?:apikey|accesskey|privatekey|secretkey|sessionkey|clientkey)$/i;
+const CREDENTIAL_WORD = /^(?:token|key|secret|password|passwd|pwd|sig|signature|auth|authorization|credential)s?$/i;
+// The whole lowercased name. "key" is included: subscriptionkey ends with it. keyword does not, and monkey is
+// allowlisted below because the ordinary word happens to end in key.
+const CREDENTIAL_SUFFIX = /(?:keys?|tokens?|secrets?|password|passwd|pwd|signature|credentials?)$/i;
+const RUN_TOGETHER_KEY = /^(?:apikey|apikeys|accesskey|accesskeyid|privatekey|secretkey|sessionkey|clientkey|subscriptionkey)$/i;
+// Known parameter names that contain a credential word and are not secrets. When unsure, refuse: a name has to be
+// listed here to be kept.
+const HARMLESS_NAME: Readonly<Record<string, string>> = {
+  pagetoken: "pageToken: a pagination cursor",
+  nextpagetoken: "nextPageToken: a pagination cursor",
+  sortkey: "sortKey: which field a list is ordered by",
+  cachekey: "cacheKey: a cache entry's name",
+  primarykey: "primaryKey: a database column",
+  monkey: "monkey: an ordinary word that ends in key",
+};
 
 const decodeName = (raw: string): string => {
   try { return decodeURIComponent(raw); } catch { return raw; }
@@ -110,8 +120,9 @@ const splitCamel = (part: string): string[] => {
 const nameCarriesCredential = (raw: string): boolean => {
   const name = decodeName(raw);
   const lower = name.toLowerCase();
+  if (Object.hasOwn(HARMLESS_NAME, lower)) return false;
   if (RUN_TOGETHER_KEY.test(lower)) return true;
-  if (CREDENTIAL_SUFFIX.test(name)) return true;
+  if (CREDENTIAL_SUFFIX.test(lower)) return true;
   return name.split(/[^A-Za-z0-9]+/).flatMap(splitCamel).some(part => CREDENTIAL_WORD.test(part));
 };
 
