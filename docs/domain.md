@@ -450,13 +450,13 @@ A read model, like Observation: what each connected account has used of its rate
 | Term | Means | Is not |
 |---|---|---|
 | Account | A subscription the lanes run on, by the name the principal gives it. | A device, an Endpoint, a lane. |
-| Window | One rate limit of an account: the 5-hour, the weekly, or a gateway's spend limit, as a percentage used and when it resets. | A quota the hub measures. |
+| Window | One rate limit of an account: the 5-hour, the weekly, a gateway's spend limit, or a window the account names itself (its label, the percentage used, and when it resets). | A quota the hub measures. |
 | Report | One status line's JSON from one session, under an agent token, named for an account. | A claim about work. |
 
 | # | Invariant |
 |---|---|
 | U1 | A Report is taken only under an agent token (B1), for the account the call names (none: the default account), with the lane the token acts as. Nothing in a conversation's text is a Report. |
-| U2 | Per account, the newest Report sets the windows. A window a Report lacks is kept until its reset time has passed, then dropped (the CLI drops it then too). A Report older than the account's last never moves the windows, though its session is noted. |
+| U2 | Per account, the newest Report sets the windows. A window a Report lacks is kept until its reset time has passed, then dropped (the CLI drops it then too). A Report older than the account's last never moves the windows, though its session is noted. A Report may name its own windows (`limits`) instead of the 5-hour and the weekly; an empty list does not. A bad named row is dropped and does not reject the Report, and an on-demand line is cut to its limit. A Report that doesn't leaves those named windows as they were until each reset passes, and then the 5-hour and weekly rows show again. On-demand state goes when those named windows do. The notice counts a named card's spend meter as well as its named windows. |
 | U3 | A session counts as reporting for 10 minutes after its last Report; the account keeps each session's last context used. |
 | U4 | Usage grants and decides nothing (as O4): no Mandate, Decision, Verdict or engine choice follows from it. The engines' availability stays the engine layer's (ADR-0013). |
 

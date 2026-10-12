@@ -1,7 +1,7 @@
 // Application service for the Usage context (ADR-0016): the status-line reports the agents' sessions post, kept per
 // account (U1 to U3), the latest state of every account on disk, and the whole pushed to every live feed when a report
 // changed what is shown. Usage decides nothing (U4): nothing here touches an Escalation, the engines or a Mandate.
-import { ACCOUNT_NAME, DEFAULT_ACCOUNT, accountNow, applyReport, type AccountUsage, type BoardActor, type UsageReport } from "@morndo/domain";
+import { ACCOUNT_NAME, DEFAULT_ACCOUNT, accountNow, applyReport, takeNamed, type AccountUsage, type BoardActor, type NamedWindow, type UsageReport } from "@morndo/domain";
 import type { UsageReportBody } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 
@@ -19,13 +19,30 @@ export function reportFrom(body: UsageReportBody, account: string, actor: BoardA
   const spendRaw = rl?.spend_limit ?? null;
   const spendWin = win(spendRaw);
   const ctx = body.context_window?.used_percentage;
+  const limits = namedLimits(body.limits);
   return {
     account, sessionId: body.session_id, lane: actor.kind === "principal" ? null : actor.name, at,
     model: body.model?.display_name ?? body.model?.id ?? null,
     contextUsed: typeof ctx === "number" && Number.isFinite(ctx) ? ctx : null,
     fiveHour: win(rl?.five_hour), sevenDay: win(rl?.seven_day),
     spend: spendWin ? { ...spendWin, usedUsd: num(spendRaw?.used_usd), limitUsd: num(spendRaw?.limit_usd), period: spendRaw?.period ?? null } : null,
+    limits, onDemand: limits ? (typeof body.on_demand === "string" ? body.on_demand : null) : null,
   };
+}
+// Translate the wire rows and let the domain drop a bad one and cap what remains. No second label rule or cap here.
+function namedLimits(raw: UsageReportBody["limits"]): NamedWindow[] | null {
+  if (raw == null) return null;
+  const rows: NamedWindow[] = [];
+  for (const w of raw) {
+    if (w == null) continue;
+    rows.push({
+      label: typeof w.label === "string" ? w.label : "",
+      usedPercentage: typeof w.used_percentage === "number" ? w.used_percentage : Number.NaN,
+      resetsAt: typeof w.resets_at === "number" && Number.isFinite(w.resets_at) ? w.resets_at * 1000 : null,
+      resetsOn: typeof w.resets_on === "string" ? w.resets_on : null,
+    });
+  }
+  return takeNamed(rows);
 }
 const num = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
