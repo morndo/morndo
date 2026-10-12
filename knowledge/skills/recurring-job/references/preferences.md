@@ -20,11 +20,11 @@ preferences:
     tasks: [search-pass]
 ```
 
-`id` is lowercase letters, digits and hyphens. `on` is a quoted date, so every YAML reader keeps it as text.
+`id` is lowercase letters, digits and hyphens. `on` is a quoted date, so every YAML reader keeps it as text. The file's shape is `assets/preferences.schema.json`, and Morndo reads it with parsePreferences, a broken entry being left out with a refusal naming its place.
 
 ## How it is used
 
 - An SOP instance may cite a preference in a step's `why`: `why: [notes/writing-boards, pref:write-long]`. A shipped template never does, since a preference is one person's.
-- It is always shown as the holder's view, with its date: **Acme models for long-form writing (your preference, 2026-10-11)**. Never as "Acme writes best", never in a list of facts.
+- It is always shown as the holder's view, with its date: **Acme models for long-form writing. (your preference, 2026-10-11)**, **Acme for the search pass. (your preference, 2026-10-11)**. Never as "Acme writes best", never in a list of facts.
 - A preference doesn't route. The step still names a Role and a model class; to run a given vendor, the user puts it in that Role's chain (K9).
-- Beside it, once auto routing keeps a Scorecard (ADR-0020), Morndo shows this user's own results for that kind of step: first-try approvals at the gate and the changes asked for, per model. That record is what can turn a preference into evidence for this user. It stays a preference until then, and is never deleted for disagreeing with a board.
+- The step's role group and model class select this user's Scorecard cells once auto routing keeps them (ADR-0020); they are shown beside the step and any preference, sorted by entry, never ranked by Knowledge (K9). A template never cites a preference (sop-check refuses it: preference-in-template).

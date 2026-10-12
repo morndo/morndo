@@ -494,6 +494,8 @@ Loop patterns and the recurring-job procedure, shipped as Agent Skills under `kn
 | Citation | Why a step runs as it does: a skill, `notes/<id>`, `pref:<id>`, `models.dev@<date>`, or `no evidence: default`. | A pasted quote. |
 | Note | A short file in a skill's references: per source a link, the date read, its basis and a sentence in our words, and a re-check date. | A quote store; a ranking. |
 | Preference | A user's stated view, with its holder, date and words, kept in the user's own file. | A fact. |
+| Model snapshot | A dated, trimmed copy of models.dev's model list in the user's cache: provider, model, context, output limit, prices per million tokens, release date, with its source and licence. Stale after 30 days: shown with a warning, never a failure. | A vendor's own page; a value the gate enforces (K13). |
+| Scorecard cell | What auto routing records of this user's own runs, per engine, role group and model class (ADR-0020). A step's role group and class select the cells shown beside it. | A ranking made by Knowledge (K9). |
 
 | # | Invariant |
 |---|---|
@@ -503,9 +505,11 @@ Loop patterns and the recurring-job procedure, shipped as Agent Skills under `kn
 | K10 | Every step declares its Effect and has an output and a Check. An outward or irreversible step comes after a Gate whose silence never approves. Every loop and every change loop has a round limit, the SOP at least one Stop rule, and spending past its Budget stops or asks. Every engine step cites why. |
 | K11 | An SOP's report names where it goes and holds the Citations its steps used. |
 | K12 | Shipped knowledge holds no per-user data: no Preferences, no Instances. |
+| K13 | No code that grants, fences or prices a lease reads the model snapshot; the catalog stays the one source of what the gate enforces. |
 | K14 | An SOP names a Role and a Model class, never a model id. To run a given engine, the user puts it in the Role's chain. |
+| K15 | Lineup, context, output limit and price come from the model snapshot with its fetch date, not from hand-written notes. |
 
-Rules the check refuses by, each naming its step: `effect-declared`, `gate-before-outward`, `silence-never-approves`, `gate-shape`, `round-limit`, `stop-required`, `budget-stop`, `engine-why`, `why-resolves`, `step-check`, `no-model-id`, `model-class`, `role-known`, `step-kind`, `pattern-known`, `trigger`, `blanks-filled`, `done-required`, `report-citations`, `metrics-required`, `shape`. It warns on `stale-citation` and on `outward-sounding` (a local step whose name or tool sounds outward).
+Rules the check refuses by, each naming its step: `effect-declared`, `gate-before-outward`, `silence-never-approves`, `gate-shape`, `round-limit`, `stop-required`, `budget-stop`, `engine-why`, `why-resolves`, `preference-in-template`, `step-check`, `no-model-id`, `model-class`, `role-known`, `step-kind`, `pattern-known`, `trigger`, `blanks-filled`, `done-required`, `report-citations`, `metrics-required`, `shape`. It warns on `stale-citation` and on `outward-sounding` (a local step whose name or tool sounds outward).
 
 ## On the phone: chats, status, and a digest after an absence ([ADR-0011](adr/0011-phone-chat-app.md))
 

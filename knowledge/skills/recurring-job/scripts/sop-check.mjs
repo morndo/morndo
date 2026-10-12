@@ -105,6 +105,10 @@ function checkSop(doc, ctx) {
     else for (const p of doc.patterns) if (!oneOf(ctx.skills, p)) refuse("pattern-known", "patterns", `'${shown(p)}' is not a shipped skill`);
   }
   const cite = (c, at) => {
+    if (typeof c === "string" && template && c.startsWith("pref:")) {
+      refuse("preference-in-template", at, "a template cites no preference: a preference is one person's, so only an instance may cite pref:<id> (K12)");
+      return;
+    }
     if (typeof c === "string" && (c === NO_EVIDENCE || PREF.test(c) || SNAPSHOT.test(c) || ctx.skills.includes(c))) return;
     if (typeof c === "string" && c.startsWith("notes/")) {
       const due = ctx.notes.get(c.slice("notes/".length));

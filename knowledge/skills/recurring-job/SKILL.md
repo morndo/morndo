@@ -55,6 +55,7 @@ An SOP is a recurring job written down as data: what starts it, what each step d
 - Give every engine step a **why**: a pattern skill, a note (`notes/<id>`, one of the notes in `references/`), a preference (`pref:<id>`, instances only), the model snapshot (`models.dev@<date>`), or `no evidence: default`. A citation that resolves to nothing is refused; a note past its re-check date warns.
 - The class and the family rule are advisory. The Role's chain and auto routing decide what runs; each run's report says when what ran didn't meet them (K9).
 - A preference is shown as the user's, never as a fact. Its format is in `references/preferences.md`.
+- Once auto routing keeps a Scorecard (ADR-0020), a step's role group (its Role up to the first hyphen) and its class select this user's cells for engines of that class doing that kind of work; they are shown beside the step and any preference, never ranked by Knowledge (K9).
 
 ## Reporting and measuring
 
@@ -78,6 +79,7 @@ An SOP is a recurring job written down as data: what starts it, what each step d
 | `budget-stop` | A budget without amounts in one currency (or 0), with `per_run` above `per_month`, without `on_exceed` of stop or ask; or an engine step under a budget of 0. |
 | `engine-why` | An engine step without a why. |
 | `why-resolves` | A citation that is no skill, note, preference, snapshot, or `no evidence: default`. |
+| `preference-in-template` | A template that cites a preference (`pref:<id>`); only an instance may. |
 | `step-check` | A step without an output and a check. |
 | `no-model-id` | A model id where a class belongs, or a model on a tool step. |
 | `model-class` | A class that isn't one, or a family rule that points at no earlier engine step. |

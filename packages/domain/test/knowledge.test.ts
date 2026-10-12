@@ -199,7 +199,7 @@ describe("every other rule, one break each", () => {
     expect(broken(s => { step(s, "draft").why = ["a hunch"]; })).toEqual(["why-resolves"]);
   });
   it("a why may cite a skill, a note, a preference, the model snapshot, or say there is no evidence", () => {
-    expect(broken(s => { step(s, "draft").why = ["loop-review-fix", "notes/writing-boards", "pref:write-long", "models.dev@2026-10-12", "no evidence: default"]; })).toEqual([]);
+    expect(brokenInstance(s => { step(s, "draft").why = ["loop-review-fix", "notes/writing-boards", "pref:write-long", "models.dev@2026-10-12", "no evidence: default"]; })).toEqual([]);
   });
   it("a pattern that isn't a shipped skill", () => {
     expect(broken(s => { s.patterns = ["loop-scheduled", "loop-forever"]; })).toEqual(["pattern-known"]);

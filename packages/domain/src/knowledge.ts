@@ -9,7 +9,7 @@ export type ModelClass = (typeof MODEL_CLASSES)[number];
 
 export const SOP_RULES = [
   "shape", "trigger", "blanks-filled", "pattern-known", "step-kind", "role-known", "no-model-id", "model-class", "engine-why",
-  "why-resolves", "step-check", "effect-declared", "gate-before-outward", "gate-shape", "silence-never-approves",
+  "why-resolves", "preference-in-template", "step-check", "effect-declared", "gate-before-outward", "gate-shape", "silence-never-approves",
   "round-limit", "stop-required", "budget-stop", "done-required", "report-citations", "metrics-required",
 ] as const;
 export type SopRule = (typeof SOP_RULES)[number];
@@ -129,6 +129,10 @@ export function checkSop(doc: unknown, ctx: SopContext): SopVerdict {
   }
 
   const cite = (c: unknown, at: string) => {
+    if (typeof c === "string" && template && c.startsWith("pref:")) {
+      refuse("preference-in-template", at, "a template cites no preference: a preference is one person's, so only an instance may cite pref:<id> (K12)");
+      return;
+    }
     if (typeof c === "string" && (c === NO_EVIDENCE || PREF.test(c) || SNAPSHOT.test(c) || ctx.skills.includes(c))) return;
     if (typeof c === "string" && c.startsWith("notes/")) {
       const due = ctx.notes.get(c.slice("notes/".length));
