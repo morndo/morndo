@@ -1111,7 +1111,7 @@ export const CONTROLS: Control[] = [
   { id: "dg5-root-index-once", task: "DG5", file: "packages/domain/src/digest.ts",
     find: `  const first = firstRoots(edges);\n`,
     replace: `  const first = firstRoots([]);\n`,
-    run: ["packages/domain/test/digest.test.ts"], expect: "one root index" },
+    run: ["packages/domain/test/digest.test.ts"], expect: "one root input" },
   { id: "dg5-first-link-claim", task: "DG5", file: "packages/domain/src/digest.ts",
     find: `|| rootKeyAt(first, t, judgeAt) !== subjectKey(claim.subject)`,
     replace: ``,
