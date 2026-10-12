@@ -127,3 +127,21 @@ describe("round 3, point 5: removal reports exactly what it removed and what is 
     expect(r.stderr).not.toMatch(/was not removed/);
   });
 });
+
+describe("round 3, point 1: a committed rotation is never reported as failed when its old file can't be removed", () => {
+  it("plaintext vault, the old file gone: rotate prints the new fingerprint, names the old file left to clean, exit 3", async () => {
+    const h = home();
+    const env = { ...h.env, MORNDO_VAULT: "file" };
+    expect((await keys(env, ADD, KEY)).code).toBe(0);
+    const [old] = plainKeys(h.vault);
+    rmSync(join(h.vault, old ?? ""));
+    const r = await keys(env, ["rotate", "credit"], "sk-ant-synthetic-test-key-0003");
+    expect(r.code, r.stderr).toBe(3);
+    expect((JSON.parse(r.stdout) as { fingerprint: string }).fingerprint).toMatch(/^[0-9a-f]{12}$/);
+    expect(r.stderr).toMatch(new RegExp(`left to clean: vault: no file of ${old}`));
+    const now = plainKeys(h.vault);
+    expect(now).toHaveLength(1);
+    expect(now[0]).not.toBe(old);
+    expect((await keys(env, ["rotate", "credit"], "sk-ant-synthetic-test-key-0004")).code).toBe(0);
+  });
+});
