@@ -87,13 +87,15 @@ export function checkEvidence(e: Evidence): Result<Evidence, RecordProblem> {
 }
 
 // The claimants of a subject (§3.3): every lane that filed a claim on it or linked it, and every lane ever assigned a
-// task linked to it — a reassignment does not make the old assignee independent. A claim naming a task is itself the
-// link. Computed from the current records each time, so a lane that claims later stops its earlier evidence counting.
+// task linked to it — a reassignment does not make the old assignee independent. The subject task itself is one of its
+// linked tasks, so its own ever-assignees are its claimants. A claim naming a task is itself the link. Computed from
+// the current records each time, so a lane that claims later stops its earlier evidence counting.
 export function claimantsOf(subject: SubjectRef, claims: readonly Claim[], links: readonly LinkRecord[], assignments: readonly Assignment[]): ReadonlySet<string> {
   const ref = subjectKey(subject);
   const lanes = new Set<string>();
   for (const c of claims) if (subjectKey(c.subject) === ref) lanes.add(c.lane);
   const tasks = new Set<string>();
+  if (subject.kind === "task") tasks.add(subject.key);
   for (const l of links) if (subjectKey(l.target) === ref) { lanes.add(l.by); tasks.add(l.task); }
   for (const c of claims) if (c.task !== undefined && subjectKey(c.subject) === ref) tasks.add(c.task);
   for (const a of assignments) if (tasks.has(a.task)) lanes.add(a.lane);
