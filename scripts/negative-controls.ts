@@ -1421,7 +1421,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/connections/test/sealed-store-contract.test.ts"], expect: "to deeply equal []" },
   { id: "sp2b-r6-may-create", task: "secrets-pr2b", file: "apps/connections/src/adapters/node-keys.ts",
     find: "      if (!this.#mayCreate()) {", replace: "      if (false) {",
-    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "is missing" },
+    run: ["apps/connections/test/secrets-review1.test.ts"], expect: "makes no new key" },
   { id: "sp2b-r6-on-record", task: "secrets-pr2b", file: "apps/connections/src/compose.ts",
     find: "() => !existsSync(secretIndexPath(dir)) && secrets.load().directory.ledger.length === 0", replace: "() => true",
     run: ["apps/connections/test/secrets-review1.test.ts"], expect: "gone after a store" },
