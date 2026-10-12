@@ -260,7 +260,7 @@ export function buildDigest(input: DigestInput): DigestResult {
     items.push({
       id: rootKey,
       seq,
-      at: records.reduce((m, r) => Math.max(m, r.at), live?.since ?? staleCond?.since ?? 0),   // §3.5: the newest record's time, never now
+      at: Math.max(records.reduce((m, r) => Math.max(m, r.at), 0), live?.since ?? 0, staleCond?.since ?? 0),   // §3.5: newest of the records and the live conditions, never now
       section,
       level,
       title: group.members.map(m => stateOf(m).title).find(t => t !== null) ?? null,
