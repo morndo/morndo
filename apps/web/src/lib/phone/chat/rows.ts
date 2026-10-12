@@ -77,7 +77,9 @@ export type ChatListRow = {
 // (each its own conversation on screen); their read mark is shared (O7). A muted lane shows no count.
 export function chatRows(o: {
   workers: readonly RosterEntry[]; chats: Readonly<Record<string, ChatRowWire>>; decisions: readonly DecisionItem[]; muted: readonly string[]; now: number;
+  managerQueue?: boolean | null;                    // the hub's queue for the manager: what its not-running row says
 }): ChatListRow[] {
+  const absent = o.managerQueue ? "Not running; what you write waits for it" : "Not running; start it to message it";
   const rows = o.workers.map(w => {
     const c = o.chats[w.id];
     const asks = o.decisions.filter(d => d.status === "open" && d.need === "decision" && d.asker.workerId === w.id);
@@ -86,7 +88,7 @@ export function chatRows(o: {
     const st = status(w, asks, c?.answer ?? null, o.now, replied);
     return {
       worker: w.id, name: w.name, display: displayName(w.name), lastAt: c?.lastAt ?? w.lastMessageAt,
-      preview: w.id === ABSENT_MANAGER ? "Not running: a message waits for it" : c ? preview(c.last) : w.title ?? "", unread: muted ? 0 : c?.unread ?? 0, muted,
+      preview: w.id === ABSENT_MANAGER ? absent : c ? preview(c.last) : w.title ?? "", unread: muted ? 0 : c?.unread ?? 0, muted,
       needsYou: st.kind === "waits", active: w.state === "active" && !w.offline, offline: w.offline, status: st,
     };
   });

@@ -137,7 +137,7 @@
 
   // The chat list (H1, H2): asked for when the feed is current, and again (at most every 2 s) when a lane spoke, a mark
   // moved or the roster changed; each row's status from the roster and the board.
-  const rows = $derived(chatRows({ workers: feed.roster, chats: feed.chats, decisions: feed.decisions, muted: feed.muted, now }));
+  const rows = $derived(chatRows({ workers: feed.roster, chats: feed.chats, decisions: feed.decisions, muted: feed.muted, now, managerQueue: feed.managerQueue }));
   // The fleet's alerts he hasn't seen yet: a badge on Status, where they are.
   const newAlerts = $derived(unseen(feed.alerts, feed.reads[SEEN_MARK]));
   const unreadChats = $derived(feed.primed ? rows.filter(r => r.unread > 0).length : 0);

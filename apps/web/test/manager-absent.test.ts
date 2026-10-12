@@ -21,10 +21,13 @@ describe("the manager's chat across a restart", () => {
 });
 
 describe("its row", () => {
-  it("is pinned first and says it isn't running", () => {
-    const rows = chatRows({ workers: [lane("%1", "alpha"), absentManager()], chats: {}, decisions: [], muted: [], now: 1 });
+  it("is pinned first and says it isn't running, and whether a message can wait for it", () => {
+    const rows = chatRows({ workers: [lane("%1", "alpha"), absentManager()], chats: {}, decisions: [], muted: [], now: 1, managerQueue: true });
     expect(rows.map(r => r.name)).toEqual(["manager", "alpha"]);
-    expect(rows[0]).toMatchObject({ worker: ABSENT_MANAGER, preview: "Not running: a message waits for it", status: { label: "Not running" } });
+    expect(rows[0]).toMatchObject({ worker: ABSENT_MANAGER, preview: "Not running; what you write waits for it", status: { label: "Not running" } });
+    // Staging QA, 2026-10-12: it said "a message waits for it" with none waiting, and with the queue off.
+    const off = chatRows({ workers: [absentManager()], chats: {}, decisions: [], muted: [], now: 1, managerQueue: false });
+    expect(off[0]?.preview).toBe("Not running; start it to message it");
   });
 });
 
