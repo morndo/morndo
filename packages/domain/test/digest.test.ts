@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DAY_MS, LATER_FAILED_MS, SECTIONS, STALE_LIMITS_DEFAULT, buildDigest, countedClaims, itemNew, markAllSeen,
-  mergeMarks, openedItem, rootPasses, staleConditions, subjectRef, subjectLevel, vetoDecision, weeklyView,
+  mergeMarks, openedItem, rootIndex, rootPasses, staleConditions, subjectRef, subjectLevel, vetoDecision, weeklyView,
   type Claim, type ClaimSource, type DigestEvent, type DigestEventKind, type DigestInput, type DigestItem,
   type DigestMark, type Evidence, type EvidenceKind, type EvidenceResult,
   type NeedsYouState, type Producer, type Revision, type Section, type SeenAt, type StaleCondition,
@@ -684,7 +684,7 @@ describe("the weekly count of claims (DG12)", () => {
       { subject: t12, revision: a1, at: NOW + MIN, via: "review" },
     ];
     const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW - MIN, seq: 0 }];
-    expect(countedClaims(sources, links, [], []), "one root input").toEqual([{ subject: c7, revision: a1, at: NOW }]);
+    expect(countedClaims(sources, rootIndex(links, [])), "one root input").toEqual([{ subject: c7, revision: a1, at: NOW }]);
   });
   it("counted once per root subject and revision, at the earliest of its sources", () => {
     const sources: ClaimSource[] = [
@@ -692,7 +692,7 @@ describe("the weekly count of claims (DG12)", () => {
       { subject: c7, revision: a1, at: NOW, via: "review" },
       { subject: c7, revision: rev("sha-b2", "patch-2"), at: NOW + 2, via: "lane_event" },
     ];
-    expect(countedClaims(sources)).toEqual([
+    expect(countedClaims(sources, [])).toEqual([
       { subject: c7, revision: a1, at: NOW },
       { subject: c7, revision: rev("sha-b2", "patch-2"), at: NOW + 2 },
     ]);
@@ -756,10 +756,10 @@ describe("the weekly count of claims (DG12)", () => {
       { subject: c7, revision: a1, at: NOW, via: "filed" },
       { subject: t12, revision: a1, at: NOW + MIN, via: "review" },       // T-12 moved to review at #87's head
     ];
-    expect(countedClaims(sources, links)).toEqual([{ subject: c7, revision: a1, at: NOW }]);
+    expect(countedClaims(sources, rootIndex(links, []))).toEqual([{ subject: c7, revision: a1, at: NOW }]);
     // The same root index grouping would build: weekly counting accepts it and does not sort the links again.
     const index = [{ key: subjectRef(c7), task: taskKey(12), at: NOW - MIN }];
-    expect(countedClaims(sources, [], [], index), "one root index").toEqual([{ subject: c7, revision: a1, at: NOW }]);
+    expect(countedClaims(sources, index), "one root index").toEqual([{ subject: c7, revision: a1, at: NOW }]);
     const r = records({
       claimSources: sources,
       claimRounds: [{ subject: t12, at: NOW + MIN }],
@@ -800,7 +800,7 @@ describe("the weekly count of claims (DG12)", () => {
       { subject: t12, revision: a1, at: NOW, via: "review" },
     ];
     const links = [{ task: taskKey(12), target: c7, by: "builder", at: NOW + 21 * DAY, seq: 40 }];
-    expect(countedClaims(sources, links)).toEqual([
+    expect(countedClaims(sources, rootIndex(links, []))).toEqual([
       { subject: c7, revision: a1, at: NOW },
       { subject: t12, revision: a1, at: NOW },
     ]);

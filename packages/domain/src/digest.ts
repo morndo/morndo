@@ -506,9 +506,9 @@ function countFrom(sources: readonly ClaimSource[], first: ReadonlyMap<string, F
   return [...byKey.values()];
 }
 
-export function countedClaims(sources: readonly ClaimSource[], links: readonly LinkRecord[] = [], claims: readonly Claim[] = [], index?: readonly RootEdge[]): CountedClaim[] {
-  const edges = index ?? rootIndex(links, claims);
-  return countFrom(sources, firstRoots(edges));
+export function countedClaims(sources: readonly ClaimSource[], edges: readonly RootEdge[]): CountedClaim[] {
+  const first = firstRoots(edges);
+  return countFrom(sources, first);
 }
 
 // An ISO week in the principal's zone, from the edge: the domain counts, the edge draws the windows.
