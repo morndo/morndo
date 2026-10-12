@@ -140,8 +140,9 @@ export type SealedStore = {
   has(ref: string): boolean;
   keyedFingerprint(ref: string): Promise<string | null>;
   remove(ref: string): void;
-  // The refs it holds that start with `prefix`, for the startup sweep (D2).
-  refs(prefix: string): readonly string[];
+  // The refs it holds that start with `prefix` and whose file was last written before `writtenBefore` (ms since the
+  // epoch), for the startup sweep (D2).
+  refs(prefix: string, writtenBefore: number): readonly string[];
 };
 
 // A value's index entries, computed once from its vault file (keyed hashes only); `short` when it is under 8 bytes and

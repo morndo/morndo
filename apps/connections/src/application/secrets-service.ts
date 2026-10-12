@@ -12,6 +12,10 @@ import type {
   Clock, Ids, IndexWriter, SealedProblem, SealedStore, SecretsDirectory, SecretsState, VaultRefRow, WorkspaceRoots, WorkspaceRow,
 } from "./ports.ts";
 
+// How long an unreferenced vault file is left alone: a store writes its file before its transaction, so a younger one may
+// belong to a store in progress in another process (review 5).
+export const SWEEP_GRACE_MS = 0;
+
 export type SecretsDeps = { clock: Clock; ids: Ids; vault: SealedStore; index: IndexWriter; secrets: SecretsDirectory; roots: WorkspaceRoots };
 export type StoreRequest = {
   reference: string; sealed: Uint8Array; shape: ShapeInput; grants: readonly SecretGrant[]; expiry: number | null;
@@ -147,7 +151,7 @@ export class SecretsService {
     return secrets.write(state => {
       const kept = new Set<string>();
       for (const v of state.vaults) if (v.ref !== null) kept.add(v.ref);
-      const gone = vault.refs("s-").filter(ref => !kept.has(ref));
+      const gone = vault.refs("s-", clock.now()).filter(ref => !kept.has(ref));
       for (const ref of gone) vault.remove(ref);
       const retire = state.directory.ledger.filter(e => e.state !== "current").map(e => ({ reference: e.reference, version: e.version }));
       if (retire.length > 0) index.write({ add: null, retire, at: clock.now() });

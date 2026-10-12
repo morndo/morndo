@@ -174,13 +174,17 @@ for (const adapter of ADAPTERS) {
         if (s.files) expect(existsSync(s.files.vault) ? readdirSync(s.files.vault) : []).toEqual([]);
       });
     }
-    it("lists the refs it holds with a prefix, and nothing else (the startup sweep, D2)", async () => {
+    it("lists the sealed refs it holds with a prefix, written before a time, and nothing else (the startup sweep, D2)", async () => {
       const s = await adapter.make();
       await s.plant("s-0014");
       await s.plant("other-ref");
-      expect(s.store.refs("s-")).toEqual(["s-0014"]);
+      const later = Date.now() + 60_000;
+      // The plaintext vault never holds a sealed file, so it lists none: its sweep must not touch the age vault's (review 1).
+      expect(s.store.refs("s-", later)).toEqual(adapter.sealing ? ["s-0014"] : []);
+      // A file written after the time is a store that may still be in progress (review 5).
+      expect(s.store.refs("s-", Date.now() - 60_000)).toEqual([]);
       s.store.remove("s-0014");
-      expect(s.store.refs("s-")).toEqual([]);
+      expect(s.store.refs("s-", later)).toEqual([]);
     });
     it("criterion 7: has opens nothing: with the identity gone it still answers, and makes none", async () => {
       const s = await adapter.make();

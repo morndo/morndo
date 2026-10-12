@@ -101,7 +101,7 @@ export class AgeVault implements Vault, SealedStore {
   }
 
   // The refs of the files in the vault directory that start with `prefix`, for the startup sweep.
-  refs(prefix: string): readonly string[] {
+  refs(prefix: string, _writtenBefore: number): readonly string[] {
     if (!existsSync(this.#dir)) return [];
     assertPrivate(this.#dir, "dir", this.#uid);
     return refsIn(readdirSync(this.#dir), prefix, SUFFIX);

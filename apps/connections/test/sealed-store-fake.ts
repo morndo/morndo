@@ -6,11 +6,14 @@ import type { SealedProblem, SealedStore } from "../src/application/ports.ts";
 
 export class MemorySealedStore implements SealedStore {
   readonly files = new Map<string, Uint8Array>();
+  readonly writtenAt = new Map<string, number>();
   readonly #recipient: string;
   readonly #key: Uint8Array;
-  constructor(recipient = "fake1-node-a", key = new Uint8Array(32).fill(9)) {
+  readonly #now: () => number;
+  constructor(recipient = "fake1-node-a", key = new Uint8Array(32).fill(9), now: () => number = () => Date.now()) {
     this.#recipient = recipient;
     this.#key = key;
+    this.#now = now;
   }
 
   recipient(): string { return this.#recipient; }
@@ -25,6 +28,7 @@ export class MemorySealedStore implements SealedStore {
     if (doc.to.length !== 1) return { ok: false, problem: "stanzas" };
     if (doc.to[0] !== this.#recipient) return { ok: false, problem: "foreign" };
     this.files.set(ref, new Uint8Array(sealed));
+    this.writtenAt.set(ref, this.#now());
     return { ok: true, fingerprint: this.#fingerprint(doc.value) };
   }
 
@@ -38,7 +42,9 @@ export class MemorySealedStore implements SealedStore {
 
   remove(ref: string): void { this.files.delete(ref); }
 
-  refs(prefix: string): readonly string[] { return [...this.files.keys()].filter(r => r.startsWith(prefix)); }
+  refs(prefix: string, writtenBefore: number): readonly string[] {
+    return [...this.files.keys()].filter(r => r.startsWith(prefix) && (this.writtenAt.get(r) ?? 0) < writtenBefore).sort();
+  }
 
   async open(ref: string): Promise<{ bytes(): Uint8Array }> {
     const file = this.files.get(ref);

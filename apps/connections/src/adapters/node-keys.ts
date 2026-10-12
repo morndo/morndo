@@ -12,7 +12,7 @@ const KEY_BYTES = 32;
 export class NodeKeys {
   readonly #dir: string;
   readonly #uid: number;
-  constructor(dir: string, uid?: number) {
+  constructor(dir: string, uid?: number, _mayCreate?: () => boolean) {
     this.#dir = dir;
     this.#uid = uid ?? process.getuid?.() ?? -1;
   }

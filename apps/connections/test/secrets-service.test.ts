@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { type Actor, type SecretGrant } from "@morndo/domain";
 import { CountingIds, ManualClock, MemoryIndex, MemoryRoots, MemorySecrets } from "../src/application/fakes.ts";
-import { SecretsService, type StoreRequest } from "../src/application/secrets-service.ts";
+import { SWEEP_GRACE_MS, SecretsService, type StoreRequest } from "../src/application/secrets-service.ts";
 import { MemorySealedStore } from "./sealed-store-fake.ts";
 
 const T = 1_700_000_000_000;
@@ -16,10 +16,10 @@ const nodeGrant: SecretGrant = { subject: { kind: "node" }, modes: ["exec"], unt
 const text = (s: string) => new TextEncoder().encode(s);
 
 function world() {
-  const vault = new MemorySealedStore("fake1-node");
+  const clock = new ManualClock(T);
+  const vault = new MemorySealedStore("fake1-node", undefined, () => clock.at);
   const index = new MemoryIndex(async ref => (await vault.open(ref)).bytes().length < 8);
   const secrets = new MemorySecrets();
-  const clock = new ManualClock(T);
   const service = new SecretsService({ clock, ids: new CountingIds(), vault, index, secrets, roots: new MemoryRoots() });
   const request = (value: string, over: Partial<StoreRequest> = {}): StoreRequest => ({
     reference: REF, sealed: MemorySealedStore.seal(["fake1-node"], text(value)), shape: null, grants: [nodeGrant], expiry: null,
@@ -214,13 +214,17 @@ describe("the startup sweep (D2)", () => {
     const w = world();
     await w.service.store(w.request("synthetic-value-one"), principal);
     await w.vault.storeSealed("s-9999", MemorySealedStore.seal(["fake1-node"], text("synthetic-left-over")));
+    // Within the grace period it may be a store in progress elsewhere (review 5); past it, it is left over.
+    expect(w.service.sweep()).toEqual([]);
+    w.clock.at = T + SWEEP_GRACE_MS + 1;
     expect(w.service.sweep()).toEqual(["s-9999"]);
     expect([...w.vault.files.keys()]).toEqual(["s-0001"]);
   });
   it("a store whose file was swept before its commit fails and saves nothing", async () => {
     const w = world();
     const prepare = w.index.prepare.bind(w.index);
-    w.index.prepare = async ref => { const p = await prepare(ref); w.service.sweep(); return p; };
+    // A store stuck longer than the grace period: its file may be swept, and its own transaction then finds it gone.
+    w.index.prepare = async ref => { const p = await prepare(ref); w.clock.at = T + SWEEP_GRACE_MS + 1; w.service.sweep(); return p; };
     await expect(w.service.store(w.request("synthetic-value-one"), principal)).rejects.toThrow(/swept/);
     expect(w.secrets.writes).toBe(0);
   });
