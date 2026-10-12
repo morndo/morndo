@@ -677,6 +677,33 @@ describe("the weekly count of claims (DG12)", () => {
     expect(row).toMatchObject({ claims: 1, laterFailed: 1 });
     expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 1 }]);
   });
+  it("each linked change and deploy is judged at its own head, not at the task claim's revision", () => {
+    // T-12 moved to review at #7's head a1, and is also linked to #8 at b1 and to a deploy of b1.
+    // Forge CI passed on both heads. Judging #8 and the deploy at a1 voids that evidence.
+    const t12 = task(12);
+    const c8 = change("acme/web", 8);
+    const b1 = rev("sha-b1", "patch-2");
+    const prod = deploy("acme/web", "prod", "sha-b1");
+    const r = records({
+      claimSources: [{ subject: t12, revision: a1, at: NOW, via: "review" }],
+      claimRounds: [{ subject: t12, at: NOW }],
+      claims: [claim({ subject: t12, revision: a1, lane: "builder", at: NOW })],
+      links: [
+        { task: taskKey(12), target: c7, by: "builder", at: NOW - MIN },
+        { task: taskKey(12), target: c8, by: "builder", at: NOW - MIN },
+        { task: taskKey(12), target: prod, by: "builder", at: NOW - MIN },
+      ],
+      subjectStates: [state(c7, { revision: a1 }), state(c8, { revision: b1 }), state(prod, { revision: b1 })],
+      evidence: [
+        evidence({ subject: c7, revision: a1, kind: "ci", result: "pass", at: NOW + DAY }),
+        evidence({ subject: c8, revision: b1, kind: "ci", result: "pass", at: NOW + DAY }),
+        evidence({ subject: prod, revision: b1, kind: "deploy", result: "pass", at: NOW + DAY }),
+      ],
+    });
+    const [row] = weeklyView(r, [week()], NOW + 8 * DAY);
+    expect(row).toMatchObject({ claims: 1, laterFailed: 0 });
+    expect(row?.levels).toEqual([{ level: "checked", claims: 1, laterFailed: 0 }]);
+  });
   it("the weekly columns are counts of records: shipped, merged, reverted, done with its times, deploys, stuck", () => {
     const t1 = taskKey(1), t2 = taskKey(2), t3 = taskKey(3);
     const r = records({
