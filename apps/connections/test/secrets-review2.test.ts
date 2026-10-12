@@ -1,7 +1,7 @@
 // Review round 2 of PR #40 (board T-94): one block per point, each written failing before its fix. Real age vault,
 // real database and the real commands where the point is about them. Values, References and names are synthetic.
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -274,5 +274,20 @@ describe("round 2, points 3, 4 and 7: no copy of the value this code makes outli
     const stdin = new TextEncoder().encode("synthetic-value-to-zero\n");
     expect(await runSecrets(["put", REF], h.env, { stdout: () => {}, stderr: () => {}, stdin, confirm: async () => REF })).toBe(70);
     expect(stdin.every(b => b === 0)).toBe(true);
+  });
+});
+
+describe("round 2, point 12: a sweep that changes nothing in the index doesn't rewrite it", () => {
+  it("after a rotation, list and log leave the index file as it is; the next store still writes it", async () => {
+    const h = home();
+    expect((await put(h.env, "synthetic-value-one")).code).toBe(0);
+    expect((await put(h.env, "synthetic-value-two")).code).toBe(0);
+    const before = statSync(secretIndexPath(h.dir), { bigint: true });
+    for (const args of [["list"], ["log"]]) expect((await cli(h.env, args)).code).toBe(0);
+    const after = statSync(secretIndexPath(h.dir), { bigint: true });
+    expect([after.ino, after.mtimeNs]).toEqual([before.ino, before.mtimeNs]);
+    expect((await put(h.env, "synthetic-value-three", OTHER)).code).toBe(0);
+    // A rename can reuse the freed inode number, so the time tells the write apart.
+    expect(statSync(secretIndexPath(h.dir), { bigint: true }).mtimeNs).not.toBe(before.mtimeNs);
   });
 });
