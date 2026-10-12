@@ -474,6 +474,43 @@ One command an agent starts on one node. It keeps running after that turn and re
 
 A queued job has a position and a reason: `class` when the limit is full, `load` or `memory` when the guard is over the line, `guard_unknown` when a configured guard cannot be read. The guard is off unless the policy sets it. It never settles a running job.
 
+## Knowledge: what the orchestrator reads to plan work ([ADR-0026](adr/0026-capability-knowledge.md))
+
+Loop patterns and the recurring-job procedure, shipped as Agent Skills under `knowledge/skills/`, and the SOPs a user writes with them. The SOP check is pure, in `packages/domain/src/knowledge.ts`: the caller passes the installed skills, the notes and their re-check dates, the engine layer's roles, today's date and a time-zone test, and, when the user gives them, the ids in their preferences file and the dates of their model snapshots. Design: [`docs/design/capability-knowledge/README.md`](design/capability-knowledge/README.md).
+
+| Term | Means | Is not |
+|---|---|---|
+| Pattern | A named agent loop shipped as a skill (`loop-one-shot`, `loop-review-fix`, ...): when to use it, when not, its failure modes and the guards that catch them. | An SOP; a rule the check enforces. |
+| SOP | A recurring job as data: a trigger, steps, gates, done checks, stop rules, a budget, a report and metrics. | A brief; a Job (one run of one command). |
+| Template | An SOP marked `kind: template`, shared as a starting point. It may keep blanks in angle brackets. | Something that runs. |
+| Instance | An SOP a user runs: `kind: instance`, the default. No blank left, a POSIX cron line, a known time zone. | A Job. |
+| Step | One stage of an SOP: a Role and a model class (an engine step) or a deterministic tool; its output, its Check and its Effect. | A lane; a model. |
+| Effect | What a step does to the world: `local`, `outward` (leaves the user's machines) or `irreversible`. Declared on every step. | A guess from the step's name. |
+| Gate | A point before an outward or irreversible step that waits for the principal's Decision. Silence never approves. | A review by another model. |
+| Stop rule | A condition and what then happens: no input, the budget spent, a loop past its rounds. | A timeout alone. |
+| Budget amount | A number with a currency, such as `5 USD`, or 0: nothing may be spent. | Unlimited. |
+| Model class | `flagship`, `everyday` or `fast`, as auto routing takes it from the vendor's words. | A model id. |
+| Family rule | `any`, or `other-than` earlier engine steps: a judge from another family than the worker. | The other-provider rule of Engines, though it serves the same end. |
+| Citation | Why a step runs as it does: a skill, `notes/<id>`, `pref:<id>`, `models.dev@<date>`, or `no evidence: default`. A preference or snapshot resolves against the user's file or cache when the check is given them (a snapshot only if it reads and was fetched on that date; one left out is refused with the reason); without them only its form is checked, and the check warns. | A pasted quote. |
+| Note | A short file in a skill's references: per source a link, the date read, its basis and a sentence in our words, and a re-check date. | A quote store; a ranking. |
+| Preference | A user's stated view, with its holder, date and words, kept in the user's own file under an id no other entry of the file uses. | A fact. |
+| Model snapshot | A dated, trimmed copy of models.dev's model list in the user's cache: provider, model, context, output limit, prices per million tokens, release date, with its source and licence. Stale after 30 days, and an anomaly when dated after today: both shown with a warning, never a failure, and a snapshot dated after today is never fresh. | A vendor's own page; a value the gate enforces (K13). |
+| Scorecard cell | What auto routing records of this user's own runs, per engine, role group and model class (ADR-0020). A step's role group and class select the cells shown beside it. | A ranking made by Knowledge (K9). |
+
+| # | Invariant |
+|---|---|
+| K4 | A Preference is shown as its holder's, with its date, never as a fact. |
+| K6 | A Note or skill past its re-check date is stale: shown and cited as stale, warned about, never dropped, never a failure. |
+| K9 | Knowledge grants nothing. It never admits, excludes, fences or ranks a candidate engine; a step's class and family rule are advisory, and the Role's chain decides what runs. |
+| K10 | Every step declares its Effect and has an output and a Check. An outward or irreversible step comes after a Gate whose silence never approves. Every loop and every change loop has a round limit, the SOP at least one Stop rule, and spending past its Budget stops or asks. Every engine step cites why. |
+| K11 | An SOP's report names where it goes and holds the Citations its steps used. |
+| K12 | Shipped knowledge holds no per-user data: no Preferences, no Instances. |
+| K13 | No code that grants, fences or prices a lease reads the model snapshot; the catalog stays the one source of what the gate enforces. |
+| K14 | An SOP names a Role and a Model class, never a model id. To run a given engine, the user puts it in the Role's chain. |
+| K15 | Lineup, context, output limit and price come from the model snapshot with its fetch date, not from hand-written notes. |
+
+Rules the check refuses by, each naming its step: `effect-declared`, `gate-before-outward`, `silence-never-approves`, `gate-shape`, `round-limit`, `stop-required`, `budget-stop`, `engine-why`, `why-resolves`, `preference-in-template`, `step-check`, `no-model-id`, `model-class`, `role-known`, `step-kind`, `pattern-known`, `trigger`, `blanks-filled`, `done-required`, `report-citations`, `metrics-required`, `shape`. It warns on `stale-citation`, on `outward-sounding` (a local step whose name or tool sounds outward) and on `unchecked-citation` (a preference or snapshot it could only check for form).
+
 ## On the phone: chats, status, and a digest after an absence ([ADR-0011](adr/0011-phone-chat-app.md))
 
 Since ADR-0011 the phone's catch-up holds decision cards only (C2 and C3's update cards are no longer made there). Updates wait in each lane's chat; a digest sums them up only after a real absence.
@@ -543,6 +580,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Fleet supplies Observation and Steering* (customer and supplier). Observation reads workers, screens and transcripts through it. A Command (S5) and the delivery of a Decision (E8) reach a pane as keyed operations, so neither is typed twice across a dropped connection (FL7). The Hook bus feeds the chat bot, a subscriber, which turns hook events into Escalations through its own adapter.
 - *Engines is downstream of Connections* (customer and supplier). A connection name is the provider name the routing policy orders. Connections never reads the routing policy, and no spend figure decides anything but the lease gate (CN15).
 - *Connections stands beside Usage*. Usage shows a subscription's windows. It does not grant a lease.
+- *Knowledge stands beside Engines*. An SOP step names a Role and a Model class; the Role's chain and auto routing decide what runs, and nothing in Knowledge ranks or excludes an engine (K9). A Gate is answered through Escalation as a Decision; a run starts as a Job.
 
 **Anti-corruption layers** (adapters translate; the domain never sees a vendor payload):
 
@@ -563,4 +601,5 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 | Node job supervisor (`morndo-node`) | a class limit and an optional load or memory reading to the domain's queue decision (J5); a process exit to one Outcome; a completion to one Notice. The domain never sees a pid, a unit name, or `/proc`. |
 | Event store | persistence and replay (the scorer reads raw trial logs through it) |
 | Engine layer's CLI (engine-layer `bin/engines`) | its roles, providers and resolver output (JSON) to Roles, Engines and Availability; a save to `set` and `other-provider --effective` calls; its refusal (exit 2) to "refused" with its words; a shape it doesn't know to "unavailable", never a guess; a CLI older than engine-layer 9f3a28c (no `other-provider --effective`) to "unsupported" (R1, R2, R5) |
+| SOP files and skill folders (`knowledge/`, the `sop-check` command) | an SOP's YAML to the plain data the check judges; the skills beside the recurring-job skill to the names of installed patterns; a note's front matter to its id and re-check date; the runtime's time-zone data to a yes or no. The domain never parses YAML |
 | Vendor catalog (`packages/protocol/catalog/vendors.json`) | a preset's id, runtimes, terms and isolation floor to the values Connections and the routing policy take. The domain never names a vendor |
