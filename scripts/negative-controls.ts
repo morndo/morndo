@@ -976,8 +976,9 @@ export const CONTROLS: Control[] = [
   { id: "pr12-max-file-bytes-from-limits", task: "pr12", file: "packages/node-ops/src/file-rules.ts",
     find: "MAX_FILE_BYTES = LIMITS.maxFileBytes;", replace: "MAX_FILE_BYTES = 25 << 20;",
     run: ["packages/node-ops/test/limits-one-definition.test.ts"], expect: "MAX_FILE_BYTES = LIMITS" },
+  // ADR-0019 §11.1: a newer database is refused when its floor is above what this program knows, not merely when user_version is.
   { id: "pr12-kit-migrate-refuses-future", task: "pr12", file: "packages/service-kit/src/migrate.ts",
-    find: "if (first > known) throw refuse(first, known);", replace: "if (first > known) return { from: first, to: first };",
+    find: "if (schemaFloor(db, first) > known) throw refuse(first, known);", replace: "if (schemaFloor(db, first) > known) return { from: first, to: first };",
     run: ["packages/service-kit/test/service-kit.test.ts"], expect: "future 5 1" },
   { id: "pr12-follow-parallel", task: "pr12", file: "apps/hub/src/application/observation-service.ts",
     find: "const FOLLOW_PARALLEL = 4;", replace: "const FOLLOW_PARALLEL = 1;",
