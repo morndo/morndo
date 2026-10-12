@@ -162,7 +162,7 @@ switch (cmd) {
       inbox: queue,
       briefs: () => filed.briefs?.sightings() ?? [],
     });
-    const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane });
+    const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
     filed.briefs = briefs;
     const remote = new RemoteService({
       store, terminal: ports.terminal, policy: () => access.policy(),

@@ -59,16 +59,18 @@ export class BriefService {
   #now: () => number;
   #managerName: string;
   #managerWorkerId: () => string | null;
+  #hasLedger: boolean;
 
   constructor(p: {
     store: Store; escalations: EscalationService; managerName: string;
-    managerWorkerId?: () => string | null; now?: () => number;
+    managerWorkerId?: () => string | null; now?: () => number; hasLedger?: boolean;
   }) {
     this.#store = p.store;
     this.#escalations = p.escalations;
     this.#now = p.now ?? Date.now;
     this.#managerName = p.managerName;
     this.#managerWorkerId = p.managerWorkerId ?? (() => null);
+    this.#hasLedger = p.hasLedger ?? false;
   }
 
   // Open briefs the principal should see, and ones the asker has closed (so the Ask leaves the list now, not seven
@@ -210,6 +212,7 @@ export class BriefService {
     if (lintBrief(row.brief, now).problems.some(p => p.code === "due_past")) return { ok: false, problem: "due_past" };
     const ref = row.brief.ref;
     if (ref !== null && !REF.test(ref)) return { ok: false, problem: "bad_ref" };
+    if (ref !== null && !this.#hasLedger) return { ok: false, problem: "no_ledger" };
     if (ref !== null) {
       const taken = this.#store.brief(ref);
       if (taken && this.#holdsRef(taken)) return { ok: false, problem: "ref_taken" };
@@ -260,6 +263,7 @@ export class BriefService {
   // The checks filing and a dry run share. A dry run returns after them and writes nothing.
   #filingRefusal(brief: DecisionBrief, state: BriefState, ref: string | null, previous: BriefRecord | null, who: Filer): FileResult | null {
     if (brief.ref !== null && !REF.test(brief.ref)) return { ok: false, problem: "bad_ref" };
+    if (brief.ref !== null && !this.#hasLedger) return { ok: false, problem: "no_ledger" };
     if (previous && brief.ref !== previous.brief.ref) return { ok: false, problem: "bad_ref" };
     const taken = ref !== null && !previous ? this.#store.brief(ref) : null;
     if (taken && this.#holdsRef(taken)) return { ok: false, problem: "ref_taken" };
