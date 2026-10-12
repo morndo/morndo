@@ -104,6 +104,12 @@ describe("the shipped skills", () => {
   it("are the six loop patterns, each a directory with a SKILL.md", () => {
     expect(dirs).toEqual(LOOPS);
   });
+  it("every loop-* skill declares morndo-kind: loop-pattern, so the pattern rules can't be skipped by a typo", () => {
+    for (const dir of dirs.filter(d => d.startsWith("loop-"))) {
+      const head = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(join(SKILLS, dir, "SKILL.md"), "utf8").replace(/^\uFEFF/, ""))?.[1] ?? "";
+      expect([dir, (parse(head) as { metadata?: Record<string, unknown> }).metadata?.["morndo-kind"]]).toEqual([dir, "loop-pattern"]);
+    }
+  });
   it.each(dirs)("%s meets the specification and the pattern rules", dir => {
     const r = checkSkill(dir, readFileSync(join(SKILLS, dir, "SKILL.md"), "utf8"), today, known);
     expect(r.errors).toEqual([]);
@@ -187,6 +193,35 @@ describe("negative controls: a broken copy is refused", () => {
   });
   it("a reference to a pattern that doesn't exist", () => {
     expect(errorsOf(GOOD.replace("Anything else.", "Use `loop-missing`."))).toEqual(["refers to a skill that doesn't exist: loop-missing"]);
+  });
+  it("a date that matches YYYY-MM-DD but isn't on the calendar", () => {
+    expect(errorsOf(GOOD.replace('morndo-recheck: "2027-01-10"', 'morndo-recheck: "2027-13-01"'))).toEqual(["morndo-recheck must be a real calendar date, YYYY-MM-DD"]);
+    expect(errorsOf(GOOD.replaceAll("2026-10-12", "2026-02-30"))).toContain("morndo-sources-read must be a real calendar date, YYYY-MM-DD");
+  });
+  it("a loop-* skill whose kind is misspelt or missing", () => {
+    expect(errorsOf(GOOD.replace("morndo-kind: loop-pattern", "morndo-kind: loop-patern"))).toEqual(["a loop-* skill must declare morndo-kind: loop-pattern"]);
+    expect(errorsOf(GOOD.replace("  morndo-kind: loop-pattern\n", ""))).toEqual(["a loop-* skill must declare morndo-kind: loop-pattern"]);
+  });
+  it("a guard that catches a failure mode the skill doesn't list", () => {
+    expect(errorsOf(GOOD.replace("| looping | None yet. |", "| drift | None yet. |"))).toEqual(["guard catches 'drift', which is not a failure mode of this skill"]);
+  });
+  it("a guard citing a rule docs/domain.md doesn't define, or an ADR instead of the rule", () => {
+    expect(errorsOf(GOOD.replace("None yet.", "V99: made up."))).toEqual(["guard cites V99, which docs/domain.md doesn't define"]);
+    expect(errorsOf(GOOD.replace("None yet.", "The other-provider rule (ADR-0013)."))).toEqual(["guard cites an ADR; cite the rule as docs/domain.md states it"]);
+  });
+  it("a guard citing a real rule id or a docs/domain.md glossary entry passes", () => {
+    expect(errorsOf(GOOD.replace("None yet.", "V3: a claimed revision that changes anything a Check depends on (for example, weakens the test) is refuted."))).toEqual([]);
+    expect(errorsOf(GOOD.replace("None yet.", "Other-provider rule (docs/domain.md, Engines): the reviewer's model comes from another family."))).toEqual([]);
+  });
+  it("CRLF line ends and a byte-order mark parse like LF", () => {
+    expect(errorsOf(`\uFEFF${GOOD.replace(/\n/g, "\r\n")}`)).toEqual([]);
+  });
+  it("a heading inside a fenced code block is not a section", () => {
+    const fenced = GOOD.replace("## When not to use\nAnything else.\n\n", "").replace("Tests.", "Tests.\n\n```md\n## When not to use\n```");
+    expect(errorsOf(fenced)).toEqual(["missing section '## When not to use'"]);
+  });
+  it("an escaped pipe inside a guard cell is part of the cell", () => {
+    expect(errorsOf(GOOD.replace("| A round limit. |", "| A round limit \\| a cap. |"))).toEqual([]);
   });
   it("past its re-check date a skill warns and still passes", () => {
     const r = checkSkill("loop-sample", GOOD, "2027-01-11", SAMPLE);
