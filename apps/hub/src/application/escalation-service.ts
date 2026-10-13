@@ -5,8 +5,8 @@
 // adapters, read through Observation; nothing is decided from them, O4).
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_POLICY, Escalations, answered, askFromBrief, askVersion, escalationId, mayCommand, refusal, sameDecision, viaFor,
-  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type DecisionBrief, type EndpointId, type Escalation, type Message, type Sighting,
+  DEFAULT_POLICY, Escalations, answered, askFromBrief, askVersion, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
+  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type DecisionBrief, type EndpointId, type Escalation, type Message, type SessionId, type Sighting,
 } from "@morndo/domain";
 import type { BriefSighting } from "./brief-service.ts";
 import { menuEscalationId } from "@morndo/protocol";
@@ -719,7 +719,7 @@ export class EscalationService {
         this.#store.saveDecision(id, q.value);
         // The same request after the seen window, or a restart, is a duplicate (review #29.4), as a typed answer's
         // done row is. Without the row, check() refuses it as already_answered.
-        if (this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request })) this.#store.finishQueued(k);
+        if (this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) this.#store.finishQueued(k);
         this.#seen.set(key, now);
         log.info(`answer to ${e.id} queued for the manager${queued.duplicate ? " (already in its inbox)" : ""}`);
         this.#notify();
@@ -739,7 +739,7 @@ export class EscalationService {
       const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);
       if (other) return other;
       // Written before the first await, as a send's is: a hub that stops while this is typed leaves it "started".
-      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request })) return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
+      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
       let outcome: SendOutcome;
       // A node that may have typed it (SendInDoubt): "uncertain", the hub's 409, never a 500 the app reads as a refusal
       // (final review I1), and kept for its repeat with the store it went to. Any other throw keeps its row too (below).
@@ -796,7 +796,7 @@ export class EscalationService {
         : await this.#settle(other.key, other.workerId);
       if (settled === null) continue;
       if (!settled.ok && settled.problem === "duplicate") {
-        this.#typedEarlier(a, id, other.key.slice(prefix.length));
+        this.#typedEarlier(other, id, other.key.slice(prefix.length));
         return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
       }
       log.warn(`answer to ${id} refused: another answer to it is in doubt (its node can't say it never typed it)`);
@@ -805,14 +805,25 @@ export class EscalationService {
     return null;
   }
 
+  // Who sent the answer a row in doubt holds (A1): the endpoint its request names ("<endpoint>:<request id>", a UUID,
+  // no colon in it), and the session under it when this hub wrote the row down. Null when the row names no request.
+  #requesterOf(row: SendRow): { endpointId: EndpointId; sessionId: SessionId | null } | null {
+    const at = row.request?.indexOf(":") ?? -1;
+    if (at <= 0) return null;
+    return { endpointId: endpointId(row.request!.slice(0, at)), sessionId: row.requestSession === null ? null : sessionId(row.requestSession) };
+  }
+
   // An answer found typed at the asker (an answer in doubt that its node had typed): his Decision (E8), once, as it was
-  // decided: its option, labelled from the ask, or words, whose digest its key carries (their length isn't kept).
-  #typedEarlier(a: Authenticated, id: string, part: string) {
+  // decided: its option, labelled from the ask, or words, whose digest its key carries (their length isn't kept). The
+  // row it was found under names whose answer it was, not whoever's repeat settled it (review of PR #55).
+  #typedEarlier(row: SendRow, id: string, part: string) {
+    const requester = this.#requesterOf(row);
+    if (!requester) { log.warn(`answer to ${id} found typed but its row names no requester; not recorded`); return; }
     const e = this.#x.get(id);
     if (!e || e.status !== "open") return;
     const option = part.startsWith("option:") ? part.slice("option:".length) : null;
     const decided: DecidedChoice = option === null ? { kind: "words" } : { kind: "option", key: option, label: e.options.find(o => o.key === option)?.label ?? option };
-    const r = this.#x.recordTyped(id, decided, { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
+    const r = this.#x.recordTyped(id, decided, requester, this.#now());
     if (!r.ok) { log.warn(`answer to ${id} found typed but not recorded: ${r.error}`); return; }
     const decision = this.#x.get(id)?.decision;
     if (decision) this.#store.saveDecision(id, decision);

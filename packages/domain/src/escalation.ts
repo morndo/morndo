@@ -106,7 +106,7 @@ export type AnswerRefusal =
 
 export type EscalationAnswered = {
   type: "EscalationAnswered"; escalationId: EscalationId; choice: DecidedChoice;
-  endpointId: EndpointId; sessionId: SessionId; at: number;
+  endpointId: EndpointId; sessionId: SessionId | null; at: number;
 };
 
 export const LEDGER_GRACE_MS = 10 * 60_000;          // E10: the manager may post buttons before it files the item
@@ -361,8 +361,10 @@ export class Escalations {
 
   // Takes a Decision found typed at the asker after the fact: an answer in doubt that its node had typed (fleet core
   // §3.1), learnt while another answer to the same ask arrived (E8). It was judged when it was given, so only E8, E10
-  // and E11 are checked now (refusal); its choice is as it was decided, words without their text (E9).
-  recordTyped(id: string, decided: DecidedChoice, by: { endpointId: EndpointId; sessionId: SessionId }, now: number): Result<EscalationAnswered, AnswerRefusal> {
+  // and E11 are checked now (refusal); its choice is as it was decided, words without their text (E9). `by` is the
+  // endpoint whose answer it was, which a row in doubt names; its session may no longer be known (null: a row from
+  // before sessions were kept, A1).
+  recordTyped(id: string, decided: DecidedChoice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number): Result<EscalationAnswered, AnswerRefusal> {
     const e = this.#items.get(id as EscalationId);
     const r = refusal(e, now);
     if (r || !e) return err(r ?? "unknown");
@@ -380,5 +382,5 @@ export function sameDecision(a: Decision | null | undefined, b: Decision): boole
 
 // The record of a Decision taken here (its provenance, A1); `at` is when it reached the asker.
 export function answered(id: EscalationId, d: Decision): EscalationAnswered {
-  return { type: "EscalationAnswered", escalationId: id, choice: d.choice, endpointId: d.endpointId as EndpointId, sessionId: d.sessionId as SessionId, at: d.delivery?.at ?? d.at };
+  return { type: "EscalationAnswered", escalationId: id, choice: d.choice, endpointId: d.endpointId as EndpointId, sessionId: d.sessionId, at: d.delivery?.at ?? d.at };
 }

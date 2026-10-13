@@ -203,6 +203,12 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS decision_briefs_state ON decision_briefs (state, asker_kind, asker_name);
     `),
   },
+  {
+    version: 20,
+    name: "sends.request_session: the session an escalation answer was sent under, so a row in doubt settled later is recorded with its own sender's provenance (A1; review of PR #55)",
+    compat: "additive",
+    up: db => { if (!hasColumn(db, "sends", "request_session")) db.exec("ALTER TABLE sends ADD COLUMN request_session TEXT"); },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

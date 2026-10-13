@@ -178,13 +178,24 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
       "queued_at", "state", "updated_at",
     ]);
     expect(tables(db)).not.toContain("decision_briefs");
-    expect(migrate(db)).toEqual({ from: 18, to: 19 });
+    expect(migrate(db, MIGRATIONS.slice(0, 19))).toEqual({ from: 18, to: 19 });
     expect(columns(db, "decision_briefs")).toEqual([
       "id", "version", "ref", "asker_kind", "asker_name", "token_id", "filed_by_kind", "filed_by_name",
       "brief", "state", "filed_at", "resolution", "drafted_by", "closed_at",
     ]);
     expect(() => MIGRATIONS[17]?.up(db)).not.toThrow();
     expect(() => MIGRATIONS[18]?.up(db)).not.toThrow();
+  });
+
+  // The session an escalation answer was sent under (review of PR #55): on sends, so a row in doubt settled later is
+  // recorded with its own sender's provenance.
+  it("migration 20 keeps the session a sends row's request was sent under", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 19));
+    expect(columns(db, "sends")).not.toContain("request_session");
+    expect(migrate(db)).toEqual({ from: 19, to: 20 });
+    expect(columns(db, "sends")).toContain("request_session");
+    expect(() => MIGRATIONS[19]?.up(db)).not.toThrow();
   });
 
   it("the Store migrates the database it opens", () => {
