@@ -1,7 +1,6 @@
 // The answer the card and the brief both read. Kept per decision on the panel, so closing the brief does not drop an
 // answer that may have been typed.
 import { MAY_HAVE_GONE, endsDoubt } from "../catchup/answer.ts";
-import { rememberSend } from "../sent-here.ts";
 import {
   back, noteClosed, openSession, pick, settledElsewhere, showNew,
   type AnswerBody, type AnswerProblem, type AnswerState, type AskOutcome,
@@ -107,7 +106,6 @@ export class AnswerSession {
     this.again = null;
     this.sent = true;
     this.#keepSent = this.live.version !== sentFor;
-    rememberSend(this.live.id, requestId, sentFor);
     this.mode = "idle";
     this.picked = null;
     this.words = "";

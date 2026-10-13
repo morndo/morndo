@@ -60,6 +60,11 @@ export type Sighting = { ask: Ask; source: SourceState; answered: SeenAnswer | n
 
 export type Choice = { kind: "option"; key: string } | { kind: "words"; text: string };
 export type DecidedChoice = { kind: "option"; key: string; label: string } | { kind: "words" };
+// A choice as a Decision keeps it (E9): an option with the label `options` give it (its key when they don't), or
+// words, never their text. The one place a Decision's label is looked up (round 4.8 of the PR #55 review).
+export function decidedChoice(choice: { kind: "option"; key: string } | { kind: "words" }, options: readonly { key: string; label: string }[]): DecidedChoice {
+  return choice.kind === "option" ? { kind: "option", key: choice.key, label: options.find(o => o.key === choice.key)?.label ?? choice.key } : { kind: "words" };
+}
 
 // A Decision for the manager goes through its inbox (the box's queue for its terminal, ADR-0010): "queued" until the
 // inbox reports it in the manager's conversation, then "delivered". Absent: it reached the asker when it was taken
@@ -69,12 +74,27 @@ export type Delivery = { state: "queued" | "delivered"; at: number | null };
 export type Decision = {
   choice: DecidedChoice;
   at: number;
-  // Absent when the record didn't say, including a via this app doesn't know. That is not "elsewhere".
+  // The hub's own provenance, as recorded: "here" when the hub accepted the answer (endpointId names the client whose
+  // request it was), "elsewhere" when it was only seen at the asker's end. What one client is told is derived per
+  // client (viaFor): when an endpoint is named, the viewer decides and this stored value never reaches the wire; the
+  // stored "elsewhere" passes through only while no endpoint is named — the same answer for every viewer — and a
+  // stored "here" with no endpoint reaches no one at all (absent: the hub can no longer say whose it was).
   via?: "here" | "elsewhere" | undefined;
   endpointId: EndpointId | null;
   sessionId: SessionId | null;
   delivery?: Delivery | undefined;
 };
+
+// Where a Decision stands for the endpoint reading it — the via the feed and the board send, one value per client:
+// "here" when that endpoint's request accepted it (the record names it), "elsewhere" when another endpoint did, or the
+// answer was only seen at the asker's end (typed there by hand: no client of ours). Absent when the record names no
+// endpoint and wasn't seen elsewhere: the hub took it, but can no longer say for which client. Absent is not
+// "elsewhere", and it never drops the item.
+export function viaFor(d: Decision | null, viewer: EndpointId | null): "here" | "elsewhere" | undefined {
+  if (!d) return undefined;
+  if (d.endpointId !== null) return d.endpointId === viewer ? "here" : "elsewhere";
+  return d.via === "elsewhere" ? "elsewhere" : undefined;
+}
 
 export type EscalationStatus = "open" | "answered" | "settled" | "expired";
 
@@ -93,7 +113,7 @@ export type AnswerRefusal =
 
 export type EscalationAnswered = {
   type: "EscalationAnswered"; escalationId: EscalationId; choice: DecidedChoice;
-  endpointId: EndpointId; sessionId: SessionId; at: number;
+  endpointId: EndpointId; sessionId: SessionId | null; at: number;
 };
 
 export const LEDGER_GRACE_MS = 10 * 60_000;          // E10: the manager may post buttons before it files the item
@@ -118,6 +138,10 @@ export function askVersion(a: Pick<Ask, "askedAt" | "messageId" | "title" | "con
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return `v${h.toString(16).padStart(8, "0")}${s.length.toString(16)}`;
 }
+
+// Which asking of an Ask an answer was given for: the message that asked it or, with none, when it was asked. Every
+// answer key carries it (the hub's answerKey), so an answer typed for one asking is never taken for the next (E11).
+export const askIdentity = (a: { messageId: string | null; askedAt: number }) => a.messageId ?? `t${a.askedAt}`;
 
 // Why a Decision can't be taken now, or null if it can (E8, E10, E11). The choice itself is checked in `check`.
 export function refusal(e: Escalation | undefined, now: number): AnswerRefusal | null {
@@ -282,9 +306,13 @@ export class Escalations {
     return ok(e);
   }
 
-  // Takes the principal's Decision once it reached the asker. The option's label comes from the ask, never the request.
-  record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId }, now: number): Result<EscalationAnswered, AnswerRefusal> {
-    const c = this.#take(id, choice, by, now);
+  // Takes the principal's Decision once it reached the asker. The option's label comes from the ask, never the request:
+  // `shown`, the options as the ask showed them when the answer was typed, when the caller kept them (E9; the ask may
+  // have been restated since, round 5.2 of the PR #55 review); its own otherwise. Which choices it takes is still the
+  // ask's own (check). `by` is the endpoint whose answer it was: the caller, or the requester a row in doubt names (its
+  // session may no longer be known, A1).
+  record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number, shown?: readonly { key: string; label: string }[]): Result<EscalationAnswered, AnswerRefusal> {
+    const c = this.#take(id, choice, by, now, undefined, shown);
     if (!c.ok) return c;
     const e = c.value;
     return ok(answered(e.id, e.decision!));
@@ -333,14 +361,11 @@ export class Escalations {
     return true;
   }
 
-  #take(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId }, now: number, delivery?: Delivery): Result<Escalation, AnswerRefusal> {
+  #take(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number, delivery?: Delivery, shown?: readonly { key: string; label: string }[]): Result<Escalation, AnswerRefusal> {
     const c = this.check(id, choice, now);
     if (!c.ok) return c;
     const e = c.value;
-    const decided: DecidedChoice = choice.kind === "option"
-      ? { kind: "option", key: choice.key, label: e.options.find(o => o.key === choice.key)?.label ?? choice.key }
-      : { kind: "words" };
-    e.decision = { choice: decided, at: now, via: "here", endpointId: by.endpointId, sessionId: by.sessionId, ...(delivery ? { delivery } : {}) };
+    e.decision = { choice: decidedChoice(choice, shown ?? e.options), at: now, via: "here", endpointId: by.endpointId, sessionId: by.sessionId, ...(delivery ? { delivery } : {}) };
     e.status = "answered";
     e.askedAgain = false;
     return ok(e);
@@ -348,8 +373,10 @@ export class Escalations {
 
   // Takes a Decision found typed at the asker after the fact: an answer in doubt that its node had typed (fleet core
   // §3.1), learnt while another answer to the same ask arrived (E8). It was judged when it was given, so only E8, E10
-  // and E11 are checked now (refusal); its choice is as it was decided, words without their text (E9).
-  recordTyped(id: string, decided: DecidedChoice, by: { endpointId: EndpointId; sessionId: SessionId }, now: number): Result<EscalationAnswered, AnswerRefusal> {
+  // and E11 are checked now (refusal); its choice is as it was decided, words without their text (E9). `by` is the
+  // endpoint whose answer it was, which a row in doubt names; its session may no longer be known (null: a row from
+  // before sessions were kept, A1).
+  recordTyped(id: string, decided: DecidedChoice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number): Result<EscalationAnswered, AnswerRefusal> {
     const e = this.#items.get(id as EscalationId);
     const r = refusal(e, now);
     if (r || !e) return err(r ?? "unknown");
@@ -357,6 +384,16 @@ export class Escalations {
     e.status = "answered";
     e.askedAgain = false;
     return ok({ type: "EscalationAnswered", escalationId: e.id, choice: decided, endpointId: by.endpointId, sessionId: by.sessionId, at: now });
+  }
+
+  // An answer found typed at the asker for an earlier asking of the ask (`asked`, askIdentity): asked again since, or
+  // no longer held here. Recorded with its provenance (A1), as it was decided, and never this Escalation's Decision: it
+  // doesn't answer the question as it stands (E11, E12). Null when this Escalation still is that asking: the answer is
+  // then the ask's own Decision, taken under E8 by record or recordTyped, never recorded beside it.
+  recordEarlier(id: string, asked: string, decided: DecidedChoice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number): EscalationAnswered | null {
+    const e = this.#items.get(id as EscalationId);
+    if (e && askIdentity(e) === asked) return null;
+    return { type: "EscalationAnswered", escalationId: escalationId(id), choice: decided, endpointId: by.endpointId, sessionId: by.sessionId, at: now };
   }
 }
 
@@ -367,5 +404,5 @@ export function sameDecision(a: Decision | null | undefined, b: Decision): boole
 
 // The record of a Decision taken here (its provenance, A1); `at` is when it reached the asker.
 export function answered(id: EscalationId, d: Decision): EscalationAnswered {
-  return { type: "EscalationAnswered", escalationId: id, choice: d.choice, endpointId: d.endpointId as EndpointId, sessionId: d.sessionId as SessionId, at: d.delivery?.at ?? d.at };
+  return { type: "EscalationAnswered", escalationId: id, choice: d.choice, endpointId: d.endpointId as EndpointId, sessionId: d.sessionId, at: d.delivery?.at ?? d.at };
 }

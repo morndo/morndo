@@ -5,7 +5,6 @@
 // still arrives. No answer of the hub's own is an unknown outcome, never "nothing was answered".
 import { api, ApiError, explain } from "../api.ts";
 import { REFUSALS } from "../desktop/decisions.ts";
-import { rememberSend } from "../sent-here.ts";
 import type { Body } from "./run.ts";
 
 export const ANSWER_TIMEOUT_MS = 15_000;
@@ -41,7 +40,6 @@ export async function postAnswer(id: string, body: Body, seen: string, requestId
   const timer = setTimeout(() => abort.abort(), timeoutMs);
   try {
     await post(`/api/escalations/${encodeURIComponent(id)}/answer`, { ...body, requestId, ...(seen ? { seen } : {}) }, abort.signal);
-    rememberSend(id, requestId, seen);
     return { ok: true };
   } catch (e) {
     // The hub's own word (a code it chose) is a refusal; a proxy's page, a reset, a timeout: nobody knows.

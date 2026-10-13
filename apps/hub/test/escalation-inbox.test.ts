@@ -3,12 +3,12 @@
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { endpointId, sessionId, type Message } from "@morndo/domain";
 import { Store } from "../src/adapters/store.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
 import { managerInbox, inboxKey, SENDER } from "../src/adapters/manager-inbox.ts";
-import { EscalationService, type Watch } from "../src/application/escalation-service.ts";
+import { EscalationService, answerKey, type Watch } from "../src/application/escalation-service.ts";
 import type { Authenticated } from "../src/application/access-service.ts";
 
 const T0 = Date.UTC(2026, 9, 4, 14);
@@ -267,5 +267,27 @@ describe("a decision for the manager goes into its inbox", () => {
     expect((await s.answer(auth(), "ny-176", { kind: "option", key: "hold" }, "req-1")).ok).toBe(true);
     expect(sent).toEqual([{ pane: "%0", text: "[tap ny-176] hold (Hold)" }]);
     expect(answers()).toHaveLength(1);
+  });
+
+  // The earlier answers to the ask are settled once per answer (round 5.6 of the PR #55 review), before the inbox and
+  // the typed path alike: an inbox that can't be written falls back to typing, and the typed path does not settle them
+  // a second time. Here another choice's answer is in doubt, and its node never started it.
+  it("an inbox that can't be written: typed directly, the ask's earlier answers settled once", async () => {
+    const other = answerKey("ny-176", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "hold" });
+    store.startAnswer(other, T0 - 1000, { workerId: "%0", request: "desk:r0", label: "Hold" });
+    store.setSendStore(other, "st-0");
+    const inbox = managerInbox(inboxDir, () => now);
+    const s = new EscalationService({
+      watch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async (pane, text) => { sent.push({ pane, text }); return { problem: null, typedAt: now }; },
+      settle: async key => { store.dropSend(key); return null; },                               // never started there
+      inbox: { ...inbox, enqueue: () => { throw new Error("ENOSPC: no space left on device"); } },
+    });
+    s.poll();
+    const ofAsk = vi.spyOn(store, "answersOfAsk");
+    expect((await s.answer(auth(), "ny-176", { kind: "option", key: "deploy-morndo" }, "req-1")).ok).toBe(true);
+    expect(sent).toEqual([{ pane: "%0", text: "[tap ny-176] deploy-morndo (Go live after the review)" }]);
+    expect(answers()).toHaveLength(1);
+    expect(ofAsk).toHaveBeenCalledTimes(1);
   });
 });
