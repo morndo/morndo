@@ -47,17 +47,18 @@ describe("metadata a recording carries", () => {
   const u64le = (n: number) => Buffer.concat([u32le(n % 2 ** 32), u32le(Math.floor(n / 2 ** 32))]);
   const mp4Box = (type: string, ...body: Buffer[]) =>
     Buffer.concat([u32be(8 + body.reduce((n, p) => n + p.length, 0)), Buffer.from(type, "latin1"), ...body]);
-  // An m4a the way a recorder writes one: moov with mvhd and a udta holding the iOS location atom and a title.
+  // An m4a the way a recorder writes one: moov with an mvhd (v0: 4 header bytes, two dates, 1000ths of a second)
+  // and a udta holding the iOS location atom and a title.
   const m4aMemo = () => Buffer.concat([
     mp4Box("ftyp", Buffer.from("M4A ", "latin1")),
-    mp4Box("moov", mp4Box("mvhd", Buffer.alloc(24, 1)),
+    mp4Box("moov", mp4Box("mvhd", Buffer.concat([Buffer.alloc(8), u32be(1000), u32be(5000)])),
       mp4Box("udta", mp4Box("©xyz", Buffer.from("52.5200;13.4050", "latin1")), mp4Box("©nam", Buffer.from("memo at home", "latin1")))),
     mp4Box("mdat", Buffer.from("the audio itself", "latin1")),
   ]);
   const syncsafe = (n: number) => Buffer.from([(n >>> 21) & 0x7f, (n >>> 14) & 0x7f, (n >>> 7) & 0x7f, n & 0x7f]);
   const mp3Memo = () => {
     const frame = Buffer.concat([Buffer.from("TIT2", "latin1"), u32be(9), Buffer.from([0, 0]), Buffer.from("memo at home", "latin1"), Buffer.from([0])]);
-    const tag = Buffer.concat([Buffer.from("ID3", "latin1"), Buffer.from([4, 0]), syncsafe(frame.length), frame]);
+    const tag = Buffer.concat([Buffer.from("ID3", "latin1"), Buffer.from([4, 0, 0]), syncsafe(frame.length), frame]);   // ver, rev, flags, size
     const audio = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(500, 1)]);
     return Buffer.concat([tag, audio, Buffer.from("TAG", "latin1"), Buffer.alloc(125)]);   // and an ID3v1 tail
   };
@@ -68,9 +69,18 @@ describe("metadata a recording carries", () => {
     const data = Buffer.concat([Buffer.from("data", "latin1"), u32le(8000), Buffer.alloc(8000, 1)]);
     return Buffer.concat([Buffer.from("RIFF", "latin1"), u32le(4 + fmt.length + list.length + data.length), Buffer.from("WAVE", "latin1"), fmt, list, data]);
   };
-  const oggPage = (type: number, granule: number, payload: Buffer) => Buffer.concat([
-    Buffer.from("OggS", "latin1"), Buffer.from([0, type]), u64le(granule), Buffer.alloc(12), Buffer.from([1, payload.length]), payload,
-  ]);
+  // A page the way a muxer writes one, checksum and all: the CRC field sits at offset 22 (RFC 3533 §5), computed
+  // over the page with its own field zeroed.
+  const oggCrc: number[] = [];
+  for (let n = 0; n < 256; n++) { let c = n << 24; for (let k = 0; k < 8; k++) c = c & 0x80000000 ? (c << 1) ^ 0x04c11db7 : c << 1; oggCrc[n] = c >>> 0; }
+  const crcOf = (b: Buffer) => { let c = 0; for (let i = 0; i < b.length; i++) c = (((c << 8) >>> 0) ^ oggCrc[((c >>> 24) ^ b[i]!) & 0xff]!) >>> 0; return c; };
+  const oggPage = (type: number, granule: number, payload: Buffer) => {
+    const page = Buffer.concat([
+      Buffer.from("OggS", "latin1"), Buffer.from([0, type]), u64le(granule), Buffer.alloc(12), Buffer.from([1, payload.length]), payload,
+    ]);
+    page.writeUInt32LE(crcOf(page), 22);
+    return page;
+  };
   const opusMemo = () => Buffer.concat([
     oggPage(2, 0, Buffer.concat([Buffer.from([0x7f]), Buffer.from("OpusHead", "latin1"), Buffer.alloc(11)])),
     oggPage(0, 0, Buffer.concat([Buffer.from("OpusTags", "latin1"), u32le(8), Buffer.from("libtests", "latin1"), u32le(1), u32le(10), Buffer.from("where=home", "latin1")])),
@@ -103,15 +113,17 @@ describe("metadata a recording carries", () => {
     expect(audioDurationMs({ head: out, size: out.length })).toBe(1000);
   });
   it("ogg: a comment header page is blanked in place, framing and checksum intact, the audio pages untouched", () => {
-    // CRC-32/MPEG-2 (Ogg's, RFC 3533 §5): check value for the nine digits is 0x0376e6e7.
+    // Ogg's CRC (RFC 3533 §5): the poly of CRC-32/MPEG-2 but with the register starting at 0, not 0xFFFFFFFF —
+    // so the check value for the nine digits is 0x89a1897f, not the catalog's 0x0376e6e7.
     const table: number[] = [];
     for (let n = 0; n < 256; n++) { let c = n << 24; for (let k = 0; k < 8; k++) c = c & 0x80000000 ? (c << 1) ^ 0x04c11db7 : c << 1; table[n] = c >>> 0; }
-    const crc32mpeg = (b: Uint8Array, at: number, end: number) => { let c = 0; for (let i = at; i < end; i++) c = (((c << 8) >>> 0) ^ table[((c >>> 24) ^ b[i]!) & 0xff]) >>> 0; return c; };
-    expect(crc32mpeg(Buffer.from("123456789"), 0, 9)).toBe(0x0376e6e7);
+    const crc32mpeg = (b: Uint8Array, at: number, end: number) => { let c = 0; for (let i = at; i < end; i++) c = (((c << 8) >>> 0) ^ table[((c >>> 24) ^ b[i]!) & 0xff]!) >>> 0; return c; };
+    expect(crc32mpeg(Buffer.from("123456789"), 0, 9)).toBe(0x89a1897f);
     const out = stripMetadata(opusMemo(), "ogg");
     const latin = Buffer.from(out).toString("latin1");
-    expect(latin).not.toMatch(/OpusTags|libtests|where=home/);
+    expect(latin).not.toMatch(/libtests|where=home/);         // the vendor string and the comments go
     expect(latin).toMatch(/OpusHead/);
+    expect(latin).toMatch(/OpusTags/);                        // the magic that names the header stays, as OpusHead's does
     expect(audioDurationMs({ head: out, size: out.length })).toBe(5000);      // the last page's granule survives
     for (let i = 0; i + 28 <= out.length;) {                                   // every page still checksums
       if (Buffer.from(out.subarray(i, i + 4)).toString("latin1") !== "OggS") throw new Error("page walk lost the framing");
