@@ -15,7 +15,7 @@ import { packTree, type TreeFile } from "./archive.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
-import { artifactName, buildManifest, declaredSchemas, protocolRange } from "./manifest.ts";
+import { artifactName, buildManifest, declaredSchemas, protocolRange, schemaFrom } from "./manifest.ts";
 import { BUNDLED_NODE, newerNode24, nodeTarball } from "./node-pin.ts";
 import { sha256Sums } from "./checksums.ts";
 import { allowedSignerLine, FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes, verifyBytes } from "./sign.ts";
@@ -104,6 +104,14 @@ describe("file list and manifest", () => {
       connections: { version: 2, floor: 0 },
     });
     expect(protocolRange()).toEqual({ agent: [1, 1], clientApi: [1, 1] });
+  });
+
+  it("reads the schema version and floor from the migration list", () => {
+    expect(schemaFrom([
+      { version: 1, compat: "additive" },
+      { version: 2, compat: "breaking" },
+      { version: 3, compat: "additive" },
+    ])).toEqual({ version: 3, floor: 2 });
   });
 
   it("builds a Manifest the wire accepts, artifacts ordered by platform", () => {

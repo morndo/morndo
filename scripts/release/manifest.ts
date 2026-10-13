@@ -1,44 +1,34 @@
-// manifest.json, the release key's document (design §9.6). Schema versions and floors are read
-// from the migration sources, the same rule service-kit uses: the floor is the highest breaking
-// migration, or 0 when every migration so far is additive. Importing those modules would load
-// better-sqlite3 through the service-kit barrel; the sources are enough, and the test pins the numbers.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+// manifest.json, the release key's document (design §9.6). Schema versions and floors come from
+// the migration lists, the same rule service-kit uses: the floor is the highest breaking
+// migration, or 0 when every migration so far is additive.
 import type { DatabaseName, Platform, ProtocolRange, SchemaInfo } from "@morndo/domain";
 import { CLIENT_API, FLEET_PROTO, ManifestSchema } from "@morndo/protocol";
+import { MIGRATIONS as connectionMigrations } from "../../apps/connections/src/adapters/store-migrations.ts";
+import { MIGRATIONS as fleetMigrations } from "../../apps/fleet/src/adapters/migrations.ts";
+import { MIGRATIONS as hubMigrations } from "../../apps/hub/src/adapters/migrations.ts";
+import { MIGRATIONS as nodeMigrations } from "../../apps/node-agent/src/db/migrations.ts";
 import { canonicalJson, isoUtc } from "./json.ts";
 
-const SOURCES: Record<DatabaseName, string> = {
-  hub: "apps/hub/src/adapters/migrations.ts",
-  fleet: "apps/fleet/src/adapters/migrations.ts",
-  node: "apps/node-agent/src/db/migrations.ts",
-  connections: "apps/connections/src/adapters/store-migrations.ts",
-};
+type SchemaMigration = { version: number; compat: "additive" | "breaking" };
 
-const MIGRATION = /version:\s*(\d+),[\s\S]*?compat:\s*"(additive|breaking)"/g;
-
-export function declaredSchemas(root = join(import.meta.dirname, "../..")): Record<DatabaseName, SchemaInfo> {
-  return {
-    hub: schemaOf(readFileSync(join(root, SOURCES.hub), "utf8")),
-    fleet: schemaOf(readFileSync(join(root, SOURCES.fleet), "utf8")),
-    node: schemaOf(readFileSync(join(root, SOURCES.node), "utf8")),
-    connections: schemaOf(readFileSync(join(root, SOURCES.connections), "utf8")),
-  };
-}
-
-export function schemaOf(source: string): SchemaInfo {
-  const found = [...source.matchAll(MIGRATION)];
-  if (found.length === 0) throw new Error("no migrations in source");
+export function schemaFrom(migrations: readonly SchemaMigration[]): SchemaInfo {
+  if (migrations.length === 0) throw new Error("no migrations");
   let version = 0;
   let floor = 0;
-  for (const match of found) {
-    const n = Number(match[1]);
-    const compat = match[2];
-    if (!Number.isInteger(n) || (compat !== "additive" && compat !== "breaking")) throw new Error("migration source");
-    version = n;
-    if (compat === "breaking" && n > floor) floor = n;
+  for (const migration of migrations) {
+    if (migration.version > version) version = migration.version;
+    if (migration.compat === "breaking" && migration.version > floor) floor = migration.version;
   }
   return { version, floor };
+}
+
+export function declaredSchemas(): Record<DatabaseName, SchemaInfo> {
+  return {
+    hub: schemaFrom(hubMigrations),
+    fleet: schemaFrom(fleetMigrations),
+    node: schemaFrom(nodeMigrations),
+    connections: schemaFrom(connectionMigrations),
+  };
 }
 
 export function protocolRange(): ProtocolRange {
