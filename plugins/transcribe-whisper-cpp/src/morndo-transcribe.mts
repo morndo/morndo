@@ -15,20 +15,32 @@ const EXIT = { usage: 2, unreadable: 3, tooLong: 4, notReady: 5, engine: 1 } as 
 const scratches = new Set<string>();
 const children = new Set<ChildProcess>();
 
+export function sweepScratch(dirs: Set<string>, remove: (dir: string) => void): void {
+  for (const dir of [...dirs]) {
+    try {
+      remove(dir);
+      dirs.delete(dir);
+    } catch {
+      // This dir stays in the set. The next one is still removed.
+    }
+  }
+}
+
 function dropScratch(dir: string): void {
-  if (!scratches.delete(dir)) return;
+  if (!scratches.has(dir)) return;
   rmSync(dir, { recursive: true, force: true });
+  scratches.delete(dir);
 }
 
 function clearScratch(): void {
-  for (const dir of [...scratches]) dropScratch(dir);
+  sweepScratch(scratches, (dir) => rmSync(dir, { recursive: true, force: true }));
 }
 
 function onStop(signal: NodeJS.Signals): void {
   for (const child of children) {
     try { child.kill("SIGTERM"); } catch { /* already gone */ }
   }
-  try { clearScratch(); } catch { /* a stuck temp dir must not replace the signal's exit */ }
+  clearScratch();
   process.exit(signal === "SIGINT" ? 130 : 143);
 }
 

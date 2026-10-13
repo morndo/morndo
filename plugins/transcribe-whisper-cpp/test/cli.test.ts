@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseProbe, parseRun } from "@morndo/protocol";
-import { commandOnPath, main } from "../src/morndo-transcribe.mts";
+import { commandOnPath, main, sweepScratch } from "../src/morndo-transcribe.mts";
 import { contractSubject } from "./host.ts";
 import { pcmWav } from "./audio.ts";
 
@@ -340,6 +340,17 @@ EOF
       else process.env.PATH = previousPath;
       rmSync(watch, { recursive: true, force: true });
     }
+  });
+
+  it("a failed clip removal does not skip the other clips", () => {
+    const dirs = new Set(["/clip/a", "/clip/b"]);
+    const tried: string[] = [];
+    sweepScratch(dirs, (dir) => {
+      tried.push(dir);
+      if (dir === "/clip/a") throw new Error("EBUSY");
+    });
+    expect(tried).toEqual(["/clip/a", "/clip/b"]);
+    expect([...dirs]).toEqual(["/clip/a"]);
   });
 
   live("SIGTERM removes the converted clip before the process exits", async () => {
