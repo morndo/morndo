@@ -6,8 +6,9 @@
 //   with none, engine-layer README; the hub's adapters/engines-cli.ts reads the same answer).
 // - `policy.engines.defaultRole` is the role of a start that names neither, except a resume (it goes on as the session it
 //   resumes) and a protected lane (the orchestrator restarting itself).
-// - The engine layer's kill switch (`<cli> option enabled`, false) turns roles off: a default role is not applied, and a
-//   start that names a role or an engine is refused.
+// - The engine layer's kill switch (`<cli> option enabled`: on only when it prints `true`, read as the hub reads it,
+//   node-ops enginesEnabledOf) turns roles off: a default role is not applied, and a start that names a role or an
+//   engine is refused. Output that isn't JSON is an engine layer that doesn't answer.
 // Fail closed: a role nothing can fill now, a provider with no launch command here, a node without an engine layer, or a
 // resolver that doesn't answer refuse the start. Nothing falls back quietly to `launch`. The answer names what ran and,
 // for a role, what the resolver passed over first; the fleet raises engine_fallback when that list isn't empty.
@@ -17,7 +18,7 @@
 // command without `{account}` is refused for a named engine, as for `launch`; for a role, whose pick the caller can't know,
 // it goes only to a command that takes one. `resume` adds `--resume <session>`.
 import { parseEngine, type Engine } from "@morndo/domain";
-import { EnginesError, enginesText, runEngines } from "@morndo/node-ops";
+import { EnginesError, enginesEnabledOf, enginesText, runEngines } from "@morndo/node-ops";
 import type { ErrorCode, LaneEngine, OpArgs } from "@morndo/protocol";
 import type { Launch, Policy } from "../config.ts";
 
@@ -50,8 +51,7 @@ const refuse = (code: ErrorCode, message: string): Refusal => ({ refused: { code
 export function engineLayer(env: NodeJS.ProcessEnv = process.env): EngineLayer {
   return {
     async enabled(cli) {
-      const out = enginesText(await runEngines(cli, ["option", "enabled"], env)).trim();
-      return out !== "false";
+      return enginesEnabledOf(enginesText(await runEngines(cli, ["option", "enabled"], env)));
     },
     async resolve(cli, role) {
       const text = enginesText(await runEngines(cli, ["resolve", role, "--json"], env), [0, 3]);
