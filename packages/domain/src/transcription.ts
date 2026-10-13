@@ -97,7 +97,8 @@ export const TX_TERMINAL = ["done", "failed", "timed_out", "cancelled", "lost"] 
 export const TX_STATES = ["queued", "starting", "running", ...TX_TERMINAL] as const;
 export type TranscriptionState = (typeof TX_STATES)[number];
 export type TxOutcome = (typeof TX_TERMINAL)[number];
-export type TranscriptionProblem = "unreadable" | "too_long" | "not_ready" | "bad_output" | "engine";
+export const TX_PROBLEMS = ["unreadable", "too_long", "not_ready", "bad_output", "engine"] as const;
+export type TranscriptionProblem = (typeof TX_PROBLEMS)[number];
 
 // The Text one attempt produced: the joined words, the language the engine settled on, the engine and model that
 // made them, and whether the principal edited them (TX7). It grants nothing by itself (TX8).
@@ -147,9 +148,14 @@ export type EndReport = {
 
 export type TranscriptionRequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size";
 
-const TX_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/;
-// `auto`, or a language code with optional subtags (`de`, `pt-br`). Not case-free: `DE` is not a code.
-const LANGUAGE = /^(auto|[a-z]{2,3}(-[A-Za-z0-9]{1,8})*)$/;
+// The caller's id for an attempt or a Recording. The same shape as a job id: one run of letters, digits and a few
+// marks, so a path cannot be one.
+export const TRANSCRIPTION_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/;
+// A language the engine settled on (`de`, `pt-BR`). Not `auto`, and not case-free: `DE` is not a code.
+// The choice is that body, or `auto`. One body, so the two patterns cannot drift.
+const LANGUAGE_CODE_BODY = "[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*";
+export const LANGUAGE_CODE = new RegExp(`^${LANGUAGE_CODE_BODY}$`);
+export const LANGUAGE_CHOICE = new RegExp(`^(?:auto|${LANGUAGE_CODE_BODY})$`);
 
 // The one question both contexts ask of it (TX9, S1): present means a ready Transcriber, and a malformed
 // `present` counts as absent.
@@ -177,13 +183,13 @@ export function requestTranscription(
   if (!capabilityReady(capability)) return err("no_capability");
   // The pattern is for strings only: `test` would read a missing id as "undefined" and a number as its digits, and
   // a row keyed by such an id would answer for every other (TX5's queue is keyed by id).
-  if (typeof body.id !== "string" || !TX_ID.test(body.id)) return err("bad_id");
+  if (typeof body.id !== "string" || !TRANSCRIPTION_ID.test(body.id)) return err("bad_id");
   const recording = body.recording;
   if (!recording || (recording.kind !== "upload" && recording.kind !== "attachment")
-    || typeof recording.id !== "string" || !TX_ID.test(recording.id)) {
+    || typeof recording.id !== "string" || !TRANSCRIPTION_ID.test(recording.id)) {
     return err("bad_recording");
   }
-  if (!LANGUAGE.test(body.language)) return err("bad_language");
+  if (typeof body.language !== "string" || !LANGUAGE_CHOICE.test(body.language)) return err("bad_language");
   if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0 || body.sizeBytes > MAX_RECORDING_BYTES) return err("bad_size");
   const inFlight = existing.find(row => sameRecording(row.recording, recording) && row.language === body.language && open(row.state));
   if (inFlight) return ok(inFlight);
@@ -294,11 +300,11 @@ export function effectiveMaxSeconds(configured: number, pluginMaxSeconds: number
   return Math.min(configured, pluginMaxSeconds);
 }
 
-const utf8Len = (s: string): number => {
+export function utf8ByteLength(s: string): number {
   let n = 0;
   for (const ch of s) n += utf8Bytes(ch);
   return n;
-};
+}
 
 // TX7, TextEdited (3.5): the engine's words are never overwritten. An edit is kept beside them, trimmed and within
 // the Text cap, and the result is marked `edited`. The Recording stays; the Text grants nothing (TX8).
@@ -307,7 +313,7 @@ export type EditProblem = "not_done" | "bad_text";
 export function editText(tx: Transcription, text: string): Result<Transcription, EditProblem> {
   if (tx.state !== "done" || tx.text === null) return err("not_done");
   const clean = text.trim();
-  if (clean === "" || utf8Len(clean) > MAX_TEXT_BYTES) return err("bad_text");
+  if (clean === "" || utf8ByteLength(clean) > MAX_TEXT_BYTES) return err("bad_text");
   // Going back to the engine's words takes the edit away: they are the words again, unmarked. Words identical to
   // the engine's were never an edit, and an edit that returns to them no longer is one either.
   if (clean === tx.text.text) {

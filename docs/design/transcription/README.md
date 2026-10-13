@@ -1,6 +1,6 @@
 # Transcription: voice messages and audio files become text on the user's own machine, through an optional plugin (design v1, 2026-10-11)
 
-**Phase: design only.** This document and [ADR-0021](../../adr/0021-optional-transcription-plugin.md). No product code yet.
+**Phase: building.** This document and [ADR-0021](../../adr/0021-optional-transcription-plugin.md). The domain (step 1) and the protocol, fixture and contract suite (step 2) are in the tree. The hub and the plugin package are not.
 
 The principal speaks into the phone, and a lane receives text. An audio file an agent sends can be read as well as played. All of it happens on a machine the user runs. None of it is installed unless the user asks for it.
 
@@ -133,11 +133,13 @@ queued(position, reason) ─▶ starting ─▶ running ─▶ done | failed(pro
 ```
 packages/domain/src/transcription.ts         pure: types, TX1–TX9, sniffAudio, state moves, queue via the shared rule
 packages/protocol/src/transcription.ts       zod: plugin protocol 1 (probe, run) and the web API bodies
+packages/protocol/test/fixtures/fake-transcribe.mjs   a protocol-1 plugin made of fixed answers, for tests
+packages/protocol/test/memory-transcriber.ts scripted answers and a manual clock, for the contract suite
+packages/protocol/test/transcriber-contract.ts  the suite the hub's process host will run too
 apps/hub/src/application/ports.ts            + Transcriber
 apps/hub/src/application/transcription-service.ts   queue, timeouts, cancel, restart -> lost, Capability cache
 apps/hub/src/adapters/transcriber-process.ts the plugin host: spawn, parse, kill
 apps/hub/src/adapters/store.ts               + migration: transcriptions table
-apps/hub/test/fixtures/fake-transcribe.mjs   a protocol-1 plugin made of fixed answers, for tests
 plugins/transcribe-whisper-cpp/              NOT a workspace: its own package.json, lockfile, LICENSES/, CI job
 ```
 
@@ -165,7 +167,7 @@ export type Transcriber = {
 | Adapter | Where | Ships in the default install |
 |---|---|---|
 | `ProcessTranscriber`: runs a protocol-1 executable | `apps/hub/src/adapters/transcriber-process.ts` | Yes. It is about 150 lines, has no dependencies, and is idle without a plugin. |
-| `MemoryTranscriber`: scripted answers, a manual clock | `apps/hub/src/application/fakes.ts` (tests) | No (test code). |
+| `MemoryTranscriber`: scripted answers, a manual clock | `packages/protocol/test/memory-transcriber.ts` (tests; the hub PR may call it from its fakes) | No (test code). |
 | whisper.cpp engine, `morndo-transcribe` | `plugins/transcribe-whisper-cpp/` | **No.** It is a separate install. |
 | Later: faster-whisper, sherpa-onnx with Parakeet | other `plugins/transcribe-*` | No |
 
@@ -439,7 +441,7 @@ Each step is one PR, green on its own. No step installs anything on a live machi
 | Step | PR | Done when |
 |---|---|---|
 | 1 | **Domain.** `transcription.ts` (TX1–TX9, states, `sniffAudio`, caps); the S1 change behind a Capability argument; the queue decision extracted from `jobs.ts` into a shared pure function; `docs/domain.md` gets the context, invariants and context-map lines. | Domain tests and negative controls are green. All existing job tests pass unchanged. The architecture tests pass. |
-| 2 | **Protocol and fixture.** `packages/protocol/src/transcription.ts` (protocol 1, API bodies), `fake-transcribe.mjs`, and the contract suite against `MemoryTranscriber`. | The schema tests and contract suite pass on the fake. |
+| 2 | **Protocol and fixture.** `packages/protocol/src/transcription.ts` (protocol 1, API bodies), `packages/protocol/test/fixtures/fake-transcribe.mjs`, and the contract suite against `MemoryTranscriber` (`packages/protocol/test/`). | The schema tests and contract suite pass on the fake. |
 | 3 | **Hub.** `Transcriber` port, `ProcessTranscriber`, `TranscriptionService` (queue, timeout, cancel, `lost`), store migration, routes, `/api/me`, the audio gate on `/api/uploads`, and the `Permissions-Policy` switch. | The contract suite passes on the process host. The "default install unchanged" row passes. Restart gives `lost`. The send-cap row passes. |
 | 4 | **Plugin package.** `plugins/transcribe-whisper-cpp` (`morndo-transcribe`, `plugin.json` pins, install script, `LICENSES/`), the `plugin:transcribe` script, and `transcription-plugin.yml`. | The CI job is green with the real `base` model, including the no-network step. The root lockfile check still passes. A manual install from a clean checkout reaches `ready: true`. |
 | 5 | **Web.** Microphone, chips, text into the composer, "Send audio only", the player and text in messages, "Transcribe" on an agent's audio, desktop parity. | Chromium tests and `e2e/transcription.e2e.ts` pass. Manual QA steps 1–4 are done. |
