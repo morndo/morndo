@@ -345,7 +345,12 @@ export async function writeModelBody(
               });
             }
           }
-          if (!stopped) out.end(() => resolve());
+          if (!stopped) {
+            out.end((error?: Error | null) => {
+              if (error) fail(downloadError(error as NodeJS.ErrnoException));
+              else resolve();
+            });
+          }
         } catch (error) {
           fail(error instanceof Error ? error : new Error(String(error)));
         }
@@ -361,19 +366,24 @@ export async function writeModelBody(
   return { sha256: hash.digest("hex"), bytes };
 }
 
-async function download(url: string, dest: string, pin: ModelPin): Promise<void> {
-  const response = await fetch(url, { redirect: "follow" });
-  const host = new URL(response.url).hostname;
-  if (!modelHost(host)) throw new Error(`model download left the pinned host for ${host}`);
-  if (!response.ok || response.body === null) throw new Error(`model download answered ${response.status}`);
-  const partial = `${dest}.partial`;
-  const got = await writeModelBody(partial, Readable.fromWeb(response.body));
+export async function commitModel(partial: string, dest: string, pin: { sha256: string; bytes: number }): Promise<void> {
+  const got = await sha256Of(partial);
   if (got.sha256 !== pin.sha256 || got.bytes !== pin.bytes) {
     rmSync(partial, { force: true });
     throw new Error(`model sha256 or size does not match the pin (${got.bytes} bytes)`);
   }
   rmSync(dest, { force: true });
   renameSync(partial, dest);
+}
+
+async function download(url: string, dest: string, pin: ModelPin): Promise<void> {
+  const response = await fetch(url, { redirect: "follow" });
+  const host = new URL(response.url).hostname;
+  if (!modelHost(host)) throw new Error(`model download left the pinned host for ${host}`);
+  if (!response.ok || response.body === null) throw new Error(`model download answered ${response.status}`);
+  const partial = `${dest}.partial`;
+  await writeModelBody(partial, Readable.fromWeb(response.body));
+  await commitModel(partial, dest, pin);
 }
 
 async function ensureModel(pin: ModelPin, dest: string): Promise<void> {

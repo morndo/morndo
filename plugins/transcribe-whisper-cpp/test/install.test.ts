@@ -6,7 +6,7 @@ import { basename, join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { commandOnPath } from "../src/morndo-transcribe.mts";
-import { BUILD_FLAGS, absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, placeCachedFile, pruneBuildDirs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
+import { BUILD_FLAGS, absentTools, buildDir, commitModel, memAvailableFrom, memoryBudget, parseInstallArgs, placeCachedFile, pruneBuildDirs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
@@ -165,6 +165,30 @@ describe("install choices", () => {
       expect(readdirSync(root)).toEqual(["transcribe"]);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("a close error rejects, and a short file never replaces the cached model", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-commit-"));
+    const partial = join(dir, "model.bin.partial");
+    const dest = join(dir, "model.bin");
+    writeFileSync(partial, "started");
+    writeFileSync(dest, "cached");
+    const open = () => new Writable({
+      write(_chunk, _encoding, callback) { callback(); },
+      final(callback) { callback(Object.assign(new Error("ENOSPC"), { code: "ENOSPC" })); },
+    });
+    try {
+      await expect(writeModelBody(partial, (async function* () { yield Buffer.from("weights"); })(), open))
+        .rejects.toThrow("disk full while downloading the model");
+      expect(readFileSync(dest, "utf8")).toBe("cached");
+      writeFileSync(partial, "short");
+      await expect(commitModel(partial, dest, { sha256: "ab".repeat(32), bytes: 100 }))
+        .rejects.toThrow("does not match the pin (5 bytes)");
+      expect(readFileSync(dest, "utf8")).toBe("cached");
+      expect(readdirSync(dir)).toEqual(["model.bin"]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
