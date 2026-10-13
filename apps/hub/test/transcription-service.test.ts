@@ -198,6 +198,25 @@ describe("transcription service", () => {
     svc.close();
   });
 
+  it("close() launches nothing more and leaves the interrupted run to the restart's lost", async () => {
+    const gate = new Gate();
+    const store = memory();
+    const { svc } = service(store, gate);
+    await svc.start();
+    await svc.request(body("tx-a", "hang"));
+    expect(await until(() => svc.get("tx-a")?.state === "running", 2000)).toBe(true);
+    await svc.request(body("tx-b", "b"));
+    svc.close();
+    await new Promise(r => setTimeout(r, 50));               // let the abort's rejection run its microtasks
+    expect(gate.calls).toEqual(["/audio/hang.wav"]);         // the queued row was never launched after close
+    expect(store.transcriptions().find(row => row.id === "tx-b")?.state).toBe("queued");
+    // The principal never cancelled: the run keeps no recorded end, so the next start marks it lost (TX4).
+    expect(store.transcriptions().find(row => row.id === "tx-a")?.state).toBe("running");
+    const after = service(store, new Gate(), { now: () => 1_700_000_060_000 });
+    expect(after.svc.get("tx-a")).toMatchObject({ state: "lost", outcome: "lost" });
+    after.svc.close();
+  });
+
   it("fails a queued row when the plugin is no longer ready, and logs the change", async () => {
     const gate = new Gate();
     const { svc, lines } = service(memory(), gate);
