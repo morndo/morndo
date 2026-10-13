@@ -4,7 +4,7 @@
 // the metadata a photo carries (location, camera, text): JPEG APP1/APP13/comment segments and PNG text, time and
 // EXIF chunks are dropped. A recording loses its tags only where that can be done without corrupting the audio
 // (docs/design/transcription, section 8). Files older than a week are removed.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,6 +12,23 @@ import { basename, join } from "node:path";
 import { IMAGE_EXTENSION, NO_CAPABILITY, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, sniffAudio, type AudioContainer, type EndpointId, type ImageMime, type Result, type TranscriptionCapability, type Upload, type UploadRefusal } from "@morndo/domain";
 
 const KEEP_FILES_MS = 7 * 24 * 3_600_000;
+
+// Said once, at hub start. Without ffmpeg the mp4, ogg and webm files are stored unchanged: the hand-written
+// strippers for those containers stay out, because a wrong size or offset corrupts the audio.
+let ffmpegNoted = false;
+export function noteMissingFfmpeg(log: (line: string) => void, present: () => boolean = ffmpegOnPath): void {
+  if (ffmpegNoted || present()) return;
+  ffmpegNoted = true;
+  log("recordings keep their container metadata");
+}
+function ffmpegOnPath(): boolean {
+  try {
+    execFileSync("ffmpeg", ["-hide_banner", "-version"], { stdio: "ignore", timeout: 2000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // What an audio file loses on the way in. A photo's segments can be dropped because each one names its own length.
 // A recording cannot: an mp4 chunk offset, an Ogg page and a Matroska element size all count the bytes around them,

@@ -8,7 +8,7 @@ import { deflateSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { audioDurationMs, endpointId } from "@morndo/domain";
 import { webmBytes } from "../../../packages/domain/test/audio-bytes.ts";
-import { stripMetadata, uploadInbox } from "../src/adapters/uploads.ts";
+import { noteMissingFfmpeg, stripMetadata, uploadInbox } from "../src/adapters/uploads.ts";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "morndo-inbox-")); });
@@ -26,7 +26,7 @@ const png = (...extra: Buffer[]) => Buffer.concat([
 const pngChunks = (b: Uint8Array) => { const out: string[] = []; let i = 8; while (i + 12 <= b.length) { const n = Buffer.from(b).readUInt32BE(i); out.push(Buffer.from(b.subarray(i + 4, i + 8)).toString("latin1")); i += 12 + n; } return out; };
 const seg = (marker: number, payload: string) => { const p = Buffer.from(payload, "latin1"); const h = Buffer.from([0xff, marker, 0, 0]); h.writeUInt16BE(p.length + 2, 2); return Buffer.concat([h, p]); };
 
-describe("metadata a photo carries", async () => {
+describe("metadata a photo carries", () => {
   it("PNG: text, time and EXIF chunks go; the image chunks stay in order", async () => {
     const b = png(chunk("tEXt", Buffer.from("Author\0me")), chunk("eXIf", Buffer.from("gps")), chunk("tIME", Buffer.alloc(7)));
     expect(pngChunks(await stripMetadata(b, "image/png"))).toEqual(["IHDR", "IDAT", "IEND"]);
@@ -42,7 +42,16 @@ describe("metadata a photo carries", async () => {
   });
 });
 
-describe("metadata a recording carries", async () => {
+describe("metadata a recording carries", () => {
+  it("logs once at start that container metadata stays when ffmpeg is absent", () => {
+    const lines: string[] = [];
+    noteMissingFfmpeg(line => lines.push(line), () => true);
+    expect(lines).toEqual([]);
+    noteMissingFfmpeg(line => lines.push(line), () => false);
+    noteMissingFfmpeg(line => lines.push(line), () => false);
+    expect(lines).toEqual(["recordings keep their container metadata"]);
+  });
+
   const u32be = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };
   const u32le = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); return b; };
   const u64le = (n: number) => Buffer.concat([u32le(n % 2 ** 32), u32le(Math.floor(n / 2 ** 32))]);
@@ -231,7 +240,7 @@ function decodes(bytes: Uint8Array, ext: string): boolean {
   }
 }
 
-describe.skipIf(!ffmpegOk)("a stripped recording still decodes", async () => {
+describe.skipIf(!ffmpegOk)("a stripped recording still decodes", () => {
   const samples = [
     ["m4a", "mp4", ["-c:a", "aac", "-movflags", "+faststart"]],
     ["ogg", "ogg", ["-c:a", "libvorbis"]],
@@ -250,7 +259,7 @@ describe.skipIf(!ffmpegOk)("a stripped recording still decodes", async () => {
   }
 });
 
-describe("the inbox", async () => {
+describe("the inbox", () => {
   it("saves an image under its own name, readable by this user only, and remembers who uploaded it", async () => {
     const inbox = uploadInbox({ dir, now: () => Date.UTC(2026, 9, 1, 12, 30) });
     const r = await inbox.save(png(), endpointId("ep1"));
