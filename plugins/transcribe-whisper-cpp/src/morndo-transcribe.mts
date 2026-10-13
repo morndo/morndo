@@ -314,7 +314,7 @@ export function runChild(cmd: string, args: string[], cwd: string): Promise<Chil
     const child = spawn(cmd, args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
     children.add(child);
     child.on("error", reject);
-    child.on("close", (code, signal) => {
+    child.on("close", code => {
       children.delete(child);
       // A stop signal reaches the child and this process at the same time, and this process's own
       // handler for it can still be queued behind the child's close, because signal events run
