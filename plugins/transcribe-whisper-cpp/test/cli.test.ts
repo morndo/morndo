@@ -396,6 +396,86 @@ EOF
     await expectStopped("SIGINT");
   });
 
+  live("a group signal still stops the run when the converter traps it into an ffmpeg-style exit 255", async () => {
+    stage(true);
+    writeFileSync(join(BIN, "ffmpeg"), "#!/bin/sh\ntrap 'exit 255' TERM\nsleep 30\n");
+    chmodSync(join(BIN, "ffmpeg"), 0o755);
+    const watch = mkdtempSync(join(tmpdir(), "morndo-trap-"));
+    const note = join(ROOT, "trap.wav");
+    writeFileSync(note, pcmWav(1));
+    const { child } = spawnDetachedRun(note, watch, `${BIN}:${pathEnv}`);
+    try {
+      expect(await until(() => hasScratchDir(watch), 5000)).toBe(true);
+      if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
+      const code = await Promise.race([
+        new Promise<number | null>(resolve => { child.on("close", resolve); }),
+        new Promise<number>(resolve => { setTimeout(() => resolve(-1), 3000); }),
+      ]);
+      expect(code).toBe(143);
+      expect(readdirSync(watch)).toEqual([]);
+    } finally {
+      if (child.pid !== undefined) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      rmSync(watch, { recursive: true, force: true });
+    }
+  });
+
+  live("a whisper-cli killed by a signal nobody else got is an engine failure, not a stop", async () => {
+    stage(true);
+    writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nkill -TERM $$\n");
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const watch = mkdtempSync(join(tmpdir(), "morndo-lone-"));
+    const note = join(ROOT, "lone.wav");
+    writeFileSync(note, pcmWav(1));
+    const { child, done } = spawnDetachedRun(note, watch, pathEnv);
+    try {
+      const ended = await done;
+      expect(ended.code).toBe(1);
+      expect(ended.stderr).toContain("whisper-cli failed");
+      expect(readdirSync(watch)).toEqual([]);
+    } finally {
+      if (child.pid !== undefined) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      rmSync(watch, { recursive: true, force: true });
+    }
+  });
+
+  live("a clip directory that cannot be removed is named on stderr, and the run's own exit code stands", async () => {
+    stage(true);
+    const go = join(ROOT, "go-leak");
+    rmSync(go, { force: true });
+    writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh
+while [ ! -f ${JSON.stringify(go)} ]; do sleep 0.02; done
+exit 4
+`);
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const watch = mkdtempSync(join(tmpdir(), "morndo-leak-"));
+    const note = join(ROOT, "leak.wav");
+    writeFileSync(note, pcmWav(1));
+    const { child, done } = spawnDetachedRun(note, watch, pathEnv);
+    try {
+      expect(await until(() => hasClip(watch), 5000)).toBe(true);
+      chmodSync(watch, 0o555);
+      writeFileSync(go, "");
+      const ended = await done;
+      expect(ended.code).toBe(1);
+      expect(ended.stderr).toContain("whisper-cli failed");
+      const leaked = readdirSync(watch).map(String);
+      expect(leaked.length).toBe(1);
+      expect(ended.stderr).toContain(join(watch, leaked[0] ?? ""));
+      expect(ended.stderr).toContain("EACCES");
+    } finally {
+      chmodSync(watch, 0o755);
+      if (child.pid !== undefined) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      rmSync(watch, { recursive: true, force: true });
+      rmSync(go, { force: true });
+    }
+  });
+
   live("an abort leaves the host's temp dir empty", async () => {
     stage(true);
     writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nsleep 30\n");
@@ -457,6 +537,35 @@ function hasClip(dir: string): boolean {
   } catch {
     return false;
   }
+}
+
+function hasScratchDir(dir: string): boolean {
+  try {
+    return readdirSync(dir).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// A run of the executable in a process group of its own, as the hub starts it, with stderr kept: the
+// stop paths speak through the exit code, and the leak path through stderr.
+function spawnDetachedRun(note: string, watch: string, pathEnv: string): {
+  child: ChildProcess;
+  done: Promise<{ code: number | null; stderr: string }>;
+} {
+  const child: ChildProcess = spawn(process.execPath, [
+    join(BIN, "morndo-transcribe"), "run",
+    "--input", note, "--language", "auto", "--threads", "1", "--max-seconds", "600", "--json",
+  ], {
+    detached: true,
+    env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: watch },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string) => { stderr += chunk; });
+  child.stdout?.resume();
+  return { child, done: new Promise(resolve => { child.on("close", code => resolve({ code, stderr })); }) };
 }
 
 function until(ready: () => boolean, ms: number): Promise<boolean> {
