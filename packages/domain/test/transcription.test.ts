@@ -8,7 +8,7 @@ import {
   afterRestart, audioDurationMs, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
   composerText, editText, type EngineText, type Transcription, type TranscriptionBody,
 } from "../src/index.ts";
-import { mp3Bytes, mp4Bytes, opusBytes, vorbisBytes, wavBytes, webmBytes, webmClusterLooksLikeDuration } from "./audio-bytes.ts";
+import { mp3Bytes, mp4Bytes, mp4MoovAfterMdat, opusBytes, vorbisBytes, wavBytes, webmBytes, webmClusterLooksLikeDuration } from "./audio-bytes.ts";
 
 it("a language choice is the code's body, or auto, written once", () => {
   const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
@@ -437,6 +437,11 @@ describe("audioDurationMs", () => {
     expect(audioDurationMs(whole(inHead.head))).toBe(2500);                          // mvhd: duration over timescale
     const moovLast = mp4Bytes(1000, 2500, true);                                     // a recorder's moov at the end
     expect(audioDurationMs({ head: moovLast.head, tail: moovLast.moov, tailAt: moovLast.head.length, size: moovLast.head.length + moovLast.moov.length })).toBe(2500);
+    const laid = mp4MoovAfterMdat(1000, 2500, 80);                                  // tail starts inside mdat, not on a box
+    const headLen = 24;                                                             // ftyp plus the mdat header, so its size is known
+    const tailAt = 16 + 8 + 80 - 20;                                                // twenty bytes before moov
+    expect(tailAt).toBeGreaterThan(headLen);
+    expect(audioDurationMs({ head: laid.subarray(0, headLen), tail: laid.subarray(tailAt), tailAt, size: laid.length })).toBe(2500);
     const cbr = mp3Bytes(100, "44100");
     expect(audioDurationMs({ head: cbr, size: 110 + 16_000 })).toBe(1000);           // constant 128 kbit/s from the tag's end
     const foot = mp3Bytes(20, "44100", undefined, true);                             // ID3v2.4 footer is 10 bytes, not part of the size

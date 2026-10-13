@@ -73,36 +73,73 @@ function wavDuration(head: Uint8Array): number | null {
     : null;
 }
 
-// moov may sit at the end of the file, so the head is tried first and then the tail. `b` is whichever slice holds
-// the boxes; they say their own sizes.
-function mp4Duration(b: Uint8Array): number | null {
-  let i = 0;
-  while (i + 8 <= b.length) {
-    const size = u32be(b, i);
-    if (size < 8) return null;                               // a broken box ends the walk, never a guess
-    if (text(b, i + 4, 4) === "moov") {
-      let j = i + 8;
-      while (j + 8 <= Math.min(i + size, b.length)) {
-        const inner = u32be(b, j);
-        if (inner < 8) return null;
-        if (text(b, j + 4, 4) === "mvhd") {
-          const version = b[j + 8];                           // 0: 32-bit fields; 1: 64-bit dates, then the same
-          const scaleAt = j + 8 + (version === 1 ? 20 : 12);   // v1 carries 64-bit dates first
-          const durationAt = scaleAt + 4;
-          if (!fits(b, scaleAt, 4) || !fits(b, durationAt, version === 1 ? 8 : 4)) return null;
-          const scale = u32be(b, scaleAt);
-          const duration = version === 1
-            ? u32be(b, durationAt) * 2 ** 32 + u32be(b, durationAt + 4)
-            : u32be(b, durationAt);
-          return scale > 0 && duration > 0 && duration < 2 ** 32 - 1
-            ? Math.round((duration / scale) * 1000)
-            : null;
-        }
-        j += inner;
-      }
-      return null;                                            // a moov without a readable mvhd
+// Bytes at a file offset, from the head or from the tail. A hole between them is not guessed at.
+function readAt(bytes: AudioBytes, offset: number, n: number): Uint8Array | null {
+  if (offset < 0 || n < 0 || offset + n > bytes.size) return null;
+  if (offset + n <= bytes.head.length) return bytes.head.subarray(offset, offset + n);
+  const tail = bytes.tail;
+  if (!tail) return null;
+  const tailAt = bytes.tailAt ?? bytes.size - tail.length;
+  if (offset < tailAt || offset + n > tailAt + tail.length) return null;
+  const i = offset - tailAt;
+  return tail.subarray(i, i + n);
+}
+
+// ISO/IEC 14496-12: size 1 means the next 8 bytes are the real size; size 0 means the box runs to the end of the file.
+function boxSizeAt(bytes: AudioBytes, offset: number): { size: number; header: number } | null {
+  const header = readAt(bytes, offset, 8);
+  if (!header) return null;
+  const size = u32be(header, 0);
+  if (size === 1) {
+    const ext = readAt(bytes, offset + 8, 8);
+    if (!ext) return null;
+    const full = u32be(ext, 0) * 2 ** 32 + u32be(ext, 4);
+    return full >= 16 ? { size: full, header: 16 } : null;
+  }
+  if (size === 0) {
+    const full = bytes.size - offset;
+    return full >= 8 ? { size: full, header: 8 } : null;
+  }
+  return size >= 8 ? { size, header: 8 } : null;
+}
+
+function mvhdMs(moov: Uint8Array): number | null {
+  let j = u32be(moov, 0) === 1 ? 16 : 8;
+  while (j + 8 <= moov.length) {
+    const inner = boxSizeAt({ head: moov, size: moov.length }, j);
+    if (!inner || j + inner.size > moov.length) return null;
+    if (text(moov, j + 4, 4) === "mvhd") {
+      const version = moov[j + inner.header];                  // 0: 32-bit fields; 1: 64-bit dates, then the same
+      const scaleAt = j + inner.header + (version === 1 ? 20 : 12);
+      const durationAt = scaleAt + 4;
+      if (!fits(moov, scaleAt, 4) || !fits(moov, durationAt, version === 1 ? 8 : 4)) return null;
+      const scale = u32be(moov, scaleAt);
+      const duration = version === 1
+        ? u32be(moov, durationAt) * 2 ** 32 + u32be(moov, durationAt + 4)
+        : u32be(moov, durationAt);
+      return scale > 0 && duration > 0 && duration < 2 ** 32 - 1
+        ? Math.round((duration / scale) * 1000)
+        : null;
     }
-    i += size;
+    j += inner.size;
+  }
+  return null;
+}
+
+// Walk top-level boxes from offset 0. Each box names its own size, so a moov that sits after a large mdat is
+// reached by skipping that size, and a header is read only where the head or the tail actually holds it. The
+// tail slice is not itself a box: starting the walk at its first byte parses the middle of mdat.
+function mp4Duration(bytes: AudioBytes): number | null {
+  let pos = 0;
+  while (pos + 8 <= bytes.size) {
+    const header = readAt(bytes, pos, 8);
+    const box = boxSizeAt(bytes, pos);
+    if (!header || !box || pos + box.size > bytes.size) return null;
+    if (text(header, 4, 4) === "moov") {
+      const moov = readAt(bytes, pos, box.size);
+      return moov ? mvhdMs(moov) : null;
+    }
+    pos += box.size;
   }
   return null;
 }
@@ -246,7 +283,7 @@ export function audioDurationMs(bytes: AudioBytes): number | null {
   const container = sniffAudio(bytes.head);
   if (!container) return null;
   const ms = container === "wav" ? wavDuration(bytes.head)
-    : container === "mp4" ? mp4Duration(bytes.head) ?? (bytes.tail ? mp4Duration(bytes.tail) : null)
+    : container === "mp4" ? mp4Duration(bytes)
       : container === "mp3" ? mp3Duration(bytes.head, bytes.size)
         : container === "ogg" ? oggDuration(bytes.head, bytes.tail)
           : webmDuration(bytes.head);

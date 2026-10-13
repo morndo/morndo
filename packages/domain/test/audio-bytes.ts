@@ -36,6 +36,12 @@ export function mp4Bytes(timescale: number, duration: number, moovLast = false):
   return { head: moovLast ? ftyp : concat(ftyp, moov), moov };
 }
 
+// ftyp, a media-data box, then moov. The tail of a real file often starts inside that media data, not on a box.
+export function mp4MoovAfterMdat(timescale: number, duration: number, mdatBytes: number): Uint8Array {
+  const { head: ftyp, moov } = mp4Bytes(timescale, duration, true);
+  return concat(ftyp, box("mdat", [...new Uint8Array(mdatBytes)]), moov);
+}
+
 // An ID3v2 tag of `tag` padding bytes, then an MPEG-1 Layer III frame header: 128 kbit/s at the given rate.
 // `footer` adds the 10-byte ID3v2.4 footer the flag names; the sync-safe size does not include it.
 export function mp3Bytes(tag: number, rate: "44100" | "48000", xing?: { frames: number }, footer = false): Uint8Array {
