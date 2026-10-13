@@ -8,7 +8,7 @@ const tmux = (...a: string[]) => execFileSync("tmux", ["-L", SOCKET, ...a], { en
 const term = terminalAdapter({ socket: SOCKET });
 let pane = "";
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-async function until(f: () => Promise<boolean>, ms = 4000) { const t = Date.now(); while (Date.now() - t < ms) { if (await f()) return true; await wait(100); } return false; }
+async function until(f: () => Promise<boolean>, ms = 4000) { const t = performance.now(); while (performance.now() - t < ms) { if (await f()) return true; await wait(100); } return false; }
 
 beforeAll(() => {
   tmux("new-session", "-d", "-s", "qa", "-x", "60", "-y", "12", "bash --norc --noprofile");

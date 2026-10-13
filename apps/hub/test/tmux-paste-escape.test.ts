@@ -15,7 +15,7 @@ const FIXTURE = join(import.meta.dirname, "tmux-fake-claude.fixture.ts");
 const END = "\x1b[201~";
 const tmux = (...a: string[]) => execFileSync("tmux", ["-L", SOCKET, ...a], { encoding: "utf8" });
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-async function until(f: () => boolean, ms = 4000) { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await wait(100); } return false; }
+async function until(f: () => boolean, ms = 4000) { const t = performance.now(); while (performance.now() - t < ms) { if (f()) return true; await wait(100); } return false; }
 let dir: string;
 let box: string;
 const raw = () => (existsSync(join(dir, "raw.bin")) ? readFileSync(join(dir, "raw.bin"), "utf8") : "");

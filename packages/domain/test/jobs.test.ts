@@ -226,9 +226,9 @@ describe("notice", () => {
   });
   it("caps a long line before scanning it, so a 60 KB line stays cheap", () => {
     const marker = "ENDMARKER";
-    const started = Date.now();
+    const started = performance.now();
     const text = redactJobOutput(`{"password":"hunter2"}` + "a".repeat(60_000) + marker);
-    expect(Date.now() - started).toBeLessThan(100);
+    expect(performance.now() - started).toBeLessThan(100);
     expect(text).not.toContain("hunter2");
     expect(text).not.toContain(marker);
     expect(text.length).toBeLessThan(8_000);

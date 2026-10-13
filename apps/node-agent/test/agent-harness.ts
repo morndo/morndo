@@ -1,6 +1,7 @@
 // A whole agent on a temporary HOME: joined to a scripted fake fleet (through `join`, as an owner would), its relay on
 // a random port, its tmux an isolated server, with short intervals so the tests run fast.
 import { join as joinPath } from "node:path";
+import type { Flight } from "@morndo/service-kit";
 import { startAgent, type RunningAgent } from "../src/agent.ts";
 import type { RetryOptions } from "../src/conn/retry.ts";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
@@ -20,13 +21,15 @@ export async function joinedConfig(home: string, fleet: FakeFleet, socket: strin
   return loadConfig(home);
 }
 
-export async function runAgent(config: AgentConfig, o: { pollMs?: number; healthMs?: number; instanceId?: string; hooks?: TestHooks; diskBudgetBytes?: number; retry?: RetryOptions } = {}) {
+export async function runAgent(config: AgentConfig, o: { pollMs?: number; healthMs?: number; instanceId?: string; hooks?: TestHooks; diskBudgetBytes?: number; retry?: RetryOptions; flight?: Flight; stopWaitMs?: number } = {}) {
   const logged = captureLog();
   const agent: RunningAgent = await startAgent({
     config, log: logged.log, retry: o.retry ?? { baseMs: 20, capMs: 100 }, pollMs: o.pollMs ?? 100, healthMs: o.healthMs ?? 200, statusMs: 100,
     ...(o.instanceId ? { instanceId: o.instanceId } : {}),
     ...(o.hooks ? { hooks: o.hooks } : {}),
     ...(o.diskBudgetBytes !== undefined ? { diskBudgetBytes: o.diskBudgetBytes } : {}),
+    ...(o.flight ? { flight: o.flight } : {}),
+    ...(o.stopWaitMs !== undefined ? { stopWaitMs: o.stopWaitMs } : {}),
   });
   const post = (path: string, body: unknown) =>
     fetch(`http://127.0.0.1:${agent.relayPort}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });

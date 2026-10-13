@@ -38,7 +38,7 @@ describe("the harness", () => {
     const t = tmuxServer();
     t.run("new-session", "-d", "-s", "first", "sleep", "60");
     const file = join(process.env.TMUX_TMPDIR || "/tmp", `tmux-${process.getuid?.() ?? 0}`, t.socket);
-    t.kill();                                                          // as the tmux-restart drill does
+    await t.kill();                                                    // as the tmux-restart drill does
     expect(t.has("first")).toBe(false);
     t.run("new-session", "-d", "-s", "second", "sleep", "60");         // a new server on the same socket
     expect(t.has("second")).toBe(true);

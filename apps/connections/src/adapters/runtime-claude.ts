@@ -21,6 +21,7 @@
 // https://code.claude.com/docs/en/env-vars
 import { spawn, type SpawnOptions } from "node:child_process";
 import { statSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { Isolation } from "@morndo/domain";
 import { BUILTIN_FIRST_PARTY_HOST } from "@morndo/protocol";
@@ -298,8 +299,31 @@ export function childEnv(parent: NodeJS.ProcessEnv, extra: Readonly<Record<strin
   return env;
 }
 
-export function helperCommand(execPath: string, main: string, lease: string): string {
-  return `${execPath} --experimental-strip-types ${main} helper --lease ${lease}`;
+// The keys helper is the stable launcher, not a Version's own path (design: releases, section 5).
+// An install writes this absolute path. A relative path is never used, including when HOME is unset.
+const INSTALLED_KEYS = "/usr/local/bin/morndo-keys";
+
+export function keysLauncher(home: string, configured?: string): string {
+  if (configured !== undefined && configured.length > 0 && isAbsolute(configured)) return configured;
+  if (isAbsolute(home)) return join(home, ".local", "bin", "morndo-keys");
+  return INSTALLED_KEYS;
+}
+
+// A run from a checkout has no installer-written launcher. The helper must still be this program,
+// on an absolute path, or the runtime receives an empty key.
+export function keysProgram(
+  home: string,
+  configured: string | undefined,
+  present: (path: string) => boolean,
+  self: { command: string; args: readonly string[] },
+): { command: string; args: readonly string[] } {
+  const layout = keysLauncher(home, configured);
+  if (present(layout)) return { command: layout, args: [] };
+  return { command: self.command, args: self.args };
+}
+
+export function helperCommand(launcher: string, lease: string): string {
+  return `${launcher} helper --lease ${lease}`;
 }
 
 const SANDBOX = { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } as const;
