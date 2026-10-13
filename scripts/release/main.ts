@@ -152,7 +152,11 @@ function main(argv: string[]): void {
       return;
     }
     case "feed-site":
-      materialiseFeed(flag(values, "repository"), flag(values, "dir"));
+      materialiseFeed(
+        flag(values, "repository"),
+        flag(values, "dir"),
+        typeof values.signers === "string" && values.signers !== "" ? values.signers : "trust/feed_allowed_signers",
+      );
       return;
     case "feed-publish":
       publishChannelFeeds({

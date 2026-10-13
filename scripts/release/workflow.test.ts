@@ -185,6 +185,7 @@ describe("release pipeline files", () => {
     const pages = job(release, "pages");
     expect(pages).toContain(`actions/upload-pages-artifact@${UPLOAD_PAGES}`);
     expect(pages).toContain("feed-site");
+    expect(pages).toContain("trust/feed_allowed_signers");
     expect(pages).toContain("environment:");
     expect(pages).toContain("name: github-pages");
     expect(pages).toContain(`actions/deploy-pages@${DEPLOY_PAGES}`);
@@ -199,6 +200,7 @@ describe("release pipeline files", () => {
     expect(job(release, "pages")).toContain("group: morndo-pages");
     expect(job(feed, "pages")).toContain("group: morndo-pages");
     expect(job(feed, "pages")).toContain("feed-site");
+    expect(job(feed, "pages")).toContain("trust/feed_allowed_signers");
     expect(feed).not.toContain("morndo-release-feed");
     expect(feed).toContain('cron: "17 6 * * 1"');
     expect(feed).toContain("workflow_dispatch");

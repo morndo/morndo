@@ -39,16 +39,29 @@ function must(run: Gh, what: string): string {
   return run.stdout.trim();
 }
 
-export function materialiseFeed(repository: string, dir: string): void {
+export function writeVerifiedSite(dir: string, signers: string, files: readonly { name: string; body: string }[]): void {
+  const scratch = join(dir, ".check");
+  mkdirSync(scratch, { recursive: true });
+  for (const channel of ["latest", "stable"] as const) {
+    const body = files.find(file => file.name === `${channel}.json`)?.body;
+    const signature = files.find(file => file.name === `${channel}.json.sig`)?.body;
+    if (body === undefined || signature === undefined) throw new Error(`feed ${channel} is missing`);
+    verifyFeed(signers, body, signature, scratch);
+  }
+  rmSync(scratch, { recursive: true, force: true });
+  for (const file of files) writeFileSync(join(dir, file.name), file.body);
+}
+
+export function materialiseFeed(repository: string, dir: string, signers = "trust/feed_allowed_signers"): void {
   freshSite(
     () => readSiteHead(repository),
     head => {
-      mkdirSync(dir, { recursive: true });
-      for (const file of FEED_FILES) {
-        const body = readAt(repository, head.sha, file);
-        if (body === null) throw new Error(`feed ${file} is missing at ${head.sha}`);
-        writeFileSync(join(dir, file), body);
-      }
+      const files = FEED_FILES.map(name => {
+        const body = readAt(repository, head.sha, name);
+        if (body === null) throw new Error(`feed ${name} is missing at ${head.sha}`);
+        return { name, body };
+      });
+      writeVerifiedSite(dir, signers, files);
       return head;
     },
   );

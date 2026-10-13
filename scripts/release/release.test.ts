@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,7 +14,7 @@ import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/proto
 import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
-import { feedTree, refUpdateResult, syncFeed } from "./feed-sync.ts";
+import { feedTree, refUpdateResult, syncFeed, writeVerifiedSite } from "./feed-sync.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
@@ -241,6 +241,29 @@ describe("feed", () => {
     ]);
     expect(readFileSync(join(import.meta.dirname, "feed-sync.ts"), "utf8")).not.toContain("git/blobs");
     expect(readFileSync(join(import.meta.dirname, "feed-sync.ts"), "utf8")).not.toContain('join(dir, "payload")');
+  });
+
+  it("does not publish a site from a feed commit whose signature was tampered", () => {
+    const dir = temp();
+    const key = join(dir, "feed");
+    expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", "feed-test", "-q"]).status).toBe(0);
+    const pub = spawnSync("ssh-keygen", ["-y", "-f", key], { encoding: "utf8" });
+    const signers = join(dir, "allowed");
+    writeFileSync(signers, `${allowedSignerLine({ identity: FEED_NAMESPACE, namespace: FEED_NAMESPACE, publicKey: pub.stdout.trim() })}\n`);
+    const latest = "{\"seq\":4}\n";
+    const stable = "{\"seq\":4}\n";
+    const files = [
+      { name: "latest.json", body: latest },
+      { name: "latest.json.sig", body: signBytes({ bytes: Buffer.from(latest), keyPath: key, namespace: FEED_NAMESPACE, dir }).toString("utf8") },
+      { name: "stable.json", body: stable },
+      { name: "stable.json.sig", body: signBytes({ bytes: Buffer.from(stable), keyPath: key, namespace: FEED_NAMESPACE, dir }).toString("utf8") },
+    ];
+    const site = join(dir, "site");
+    const tampered = files.map(file => file.name === "latest.json" ? { ...file, body: "{\"seq\":9}\n" } : file);
+    expect(() => writeVerifiedSite(site, signers, tampered)).toThrow(/signature/i);
+    expect(existsSync(join(site, "latest.json"))).toBe(false);
+    writeVerifiedSite(site, signers, files);
+    expect(readFileSync(join(site, "latest.json"), "utf8")).toBe(latest);
   });
 
   it("retries a ref update only when GitHub says it was not a fast forward", () => {
