@@ -90,8 +90,10 @@ describe("the lane watch in the fleet: activity by the hook's own time, retries,
     const a = req.args as { id: string; target: unknown };
     return { ok: true as const, result: { delivery: { id: a.id, node, target: a.target, state: "queued", queuedAt: 1, notAfter: 2 } } };
   };
-  const events = (socketPath: string) => client(socketPath).get("/v1/lane-events?since=0")
-    .then(r => (r?.body as { events: LaneEvent[] }).events.map(e => `${e.event} ${e.node}/${e.lane ?? ""}`));
+  const events = async (socketPath: string) => {
+    const lane = (await client(socketPath).get("/v1/lane-events?since=0"))?.body as { events: LaneEvent[] };
+    return lane.events.map(e => `${e.event} ${e.node}/${e.lane ?? ""}`);
+  };
   const delivered = (reqs: Req[]) => reqs.filter(q => q.op === "lane.deliver").map(q => q.args as { id: string; target: unknown });
 
   it("a hook the fleet takes in the same batch as the Stop before it is activity", async () => {
