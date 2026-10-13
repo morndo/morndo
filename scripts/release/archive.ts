@@ -18,7 +18,7 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
   const dirs = new Set<string>();
   for (const file of files) {
     assertTreePath(file.path);
-    if ("link" in file && (file.link.startsWith("/") || file.link.split("/").includes(""))) {
+    if ("link" in file && linkLeaves(file.path, file.link)) {
       throw new Error(`refusing link target ${file.link}`);
     }
     if (seen.has(file.path)) throw new Error(`duplicate path ${file.path}`);
@@ -62,6 +62,21 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
   // gzipSync writes header mtime 0 (gzip -n). ZlibOptions has no mtime field (@types/node 24);
   // passing one is ignored on Node 24.5.0, checked 2026-10-13.
   return gzipSync(Buffer.concat(chunks), { level: 9 });
+}
+
+export function linkLeaves(path: string, target: string): boolean {
+  if (target.startsWith("/") || target.split("/").includes("")) return true;
+  const stack = path.split("/").slice(0, -1);
+  for (const part of target.split("/")) {
+    if (part === "." || part === "") continue;
+    if (part === "..") {
+      if (stack.length === 0) return true;
+      stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+  return false;
 }
 
 export function assertTreePath(path: string): void {

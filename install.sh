@@ -87,14 +87,25 @@ else
 fi
 [ "$sum" = "$hash" ] || { echo "archive digest does not match the manifest" >&2; exit 65; }
 
-tar -tzf "$work/archive.tar.gz" > "$work/list"
-while IFS= read -r entry; do
-  [ -n "$entry" ] || continue
+# GNU tar 1.35 does not refuse a symlink target that climbs out
+# (https://www.gnu.org/software/tar/manual/html_section/Security.html, read 2026-10-13).
+# bsdtar secures member names, not every link target. Read the target from tar -tv and refuse it here.
+tar -tvzf "$work/archive.tar.gz" > "$work/list"
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  target=
+  case $line in
+    *" -> "*)
+      target=${line#* -> }
+      left=${line%% -> *}
+      entry=${left##* }
+      ;;
+    *) entry=${line##* } ;;
+  esac
   path=${entry#./}
   case $path in
     /*) echo "refusing archive path $entry" >&2; exit 65 ;;
   esac
-  # A `..` segment is refused before any `./` pattern, including `./../x` and `./a/../../x`.
   saved=$IFS
   IFS=/
   for part in $path; do
@@ -103,6 +114,31 @@ while IFS= read -r entry; do
       exit 65
     fi
   done
+  if [ -n "$target" ]; then
+    rel=${target#./}
+    case $rel in
+      /*) echo "refusing archive path $entry -> $target" >&2; exit 65 ;;
+    esac
+    depth=0
+    IFS=/
+    for part in $path; do
+      [ -n "$part" ] || continue
+      depth=$((depth + 1))
+    done
+    # The last segment is the link itself, not a directory.
+    depth=$((depth - 1))
+    for part in $rel; do
+      if [ "$part" = ".." ]; then
+        if [ "$depth" -le 0 ]; then
+          echo "refusing archive path $entry -> $target" >&2
+          exit 65
+        fi
+        depth=$((depth - 1))
+      elif [ -n "$part" ] && [ "$part" != "." ]; then
+        depth=$((depth + 1))
+      fi
+    done
+  fi
   IFS=$saved
 done < "$work/list"
 

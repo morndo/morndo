@@ -427,6 +427,21 @@ describe("install.sh", () => {
     expect(spawnSync("test", ["-f", bad.marker]).status).not.toBe(0);
   });
 
+  it("refuses a packed link whose target leaves the tree", () => {
+    expect(() => packTree([{ path: "app/x", mode: "0555", link: "../../../../outside" }], 1_700_000_000)).toThrow(/link/);
+    expect(() => packTree([{ path: "node/bin/npm", mode: "0555", link: "../lib/npm-cli.js" }], 1_700_000_000)).not.toThrow();
+  });
+
+  it("refuses a symlink whose target climbs out of the tree", () => {
+    const bad = fixture({ archive: craftArchive("app/x", "../../../../outside") });
+    const run = spawnSync("sh", [bad.scriptPath, "--role", "node", "--signers", bad.signers], {
+      encoding: "utf8",
+      env: { ...process.env, MORNDO_RELEASE_BASE: `file://${bad.base}` },
+    });
+    expect(run.status, run.stderr).not.toBe(0);
+    expect(run.stderr).toMatch(/refusing archive path/);
+  });
+
   it("refuses an archive entry that climbs with .. or is absolute", () => {
     for (const name of ["./../x", "./a/../../x", "..", "./.."]) {
       const bad = fixture({ archive: craftArchive(name) });
@@ -441,9 +456,10 @@ describe("install.sh", () => {
   });
 });
 
-function craftArchive(entryName: string): Buffer {
+function craftArchive(entryName: string, link = ""): Buffer {
   const buf = Buffer.alloc(512);
   buf.write(entryName, 0);
+  if (link) buf.write(link, 157);
   const oct = (at: number, width: number, value: number) => {
     buf.write(value.toString(8).padStart(width - 1, "0"), at, width - 1, "ascii");
   };
@@ -453,7 +469,7 @@ function craftArchive(entryName: string): Buffer {
   oct(124, 12, 0);
   oct(136, 12, 0);
   buf.fill(0x20, 148, 156);
-  buf.write("0", 156, 1, "ascii");
+  buf.write(link ? "2" : "0", 156, 1, "ascii");
   buf.write("ustar\0", 257, 6, "binary");
   buf.write("00", 263, 2, "ascii");
   let sum = 0;
