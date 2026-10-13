@@ -27,7 +27,7 @@ function rig(o: { config?: LaneWatchConfig; alive?: boolean; online?: () => bool
   let n = 0;
   const finished = (at: number, over: Partial<LaneEvent> = {}): LaneEvent =>
     ({ v: 1, t: "lane", seq: ++n, event: "finished", node: "pc", window: "api", lane: "api", at, status: null, firstLine: "", bg: 0, crons: 0, ...over });
-  const hook = (at: number): HookEvent => ({ streamId: "s", seq: ++n, at, path: "/cc", node: "pc", window: "api", body: {} });
+  const hook = (at: number, path: HookEvent["path"] = "/cc"): HookEvent => ({ streamId: "s", seq: ++n, at, path, node: "pc", window: "api", body: {} });
   return { watch, raised, nudged, alive, finished, hook, at: (t: number) => { now = t; } };
 }
 
@@ -64,8 +64,15 @@ describe("the lane watch", () => {
     expect(r.nudged[0]?.text).toContain("waiting on CI");
     expect(r.nudged[0]?.text).toContain("STATUS: DONE");
     // A new turn with a hook after it: activity, so no stale event (negative control: without the hook, one more).
+    // Status line refreshes are not activity: Claude Code may re-run it on a timer while the lane sits idle.
     r.watch.turn(r.finished(T0 + 20 * MIN));
     r.watch.saw(r.hook(T0 + 21 * MIN));
+    const idle = rig();
+    idle.watch.turn(idle.finished(T0));
+    for (let m = 1; m <= 16; m++) idle.watch.saw(idle.hook(T0 + m * MIN, "/sl"));
+    idle.at(T0 + 16 * MIN);
+    idle.watch.sweep();
+    expect(idle.raised).toHaveLength(1);
     r.at(T0 + 60 * MIN);
     r.watch.sweep();
     expect(r.raised).toHaveLength(1);
