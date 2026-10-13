@@ -53,6 +53,7 @@ export class TranscriptionService {
   #why = new Map<string, "timed_out" | "cancelled">();
   #timers = new Set<ReturnType<typeof setTimeout>>();
   #probeChain: Promise<void> = Promise.resolve();
+  #closed = false;
 
   constructor(p: {
     store: TranscriptionStore;
@@ -97,7 +98,10 @@ export class TranscriptionService {
     this.tick();
   }
 
+  // The hub is going down. In-flight runs are aborted with no recorded end, so the next start marks them lost (TX4),
+  // and nothing further is launched: no queued row gets a slot after this.
   close(): void {
+    this.#closed = true;
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     for (const ac of this.#inflight.values()) ac.abort();
@@ -160,7 +164,7 @@ export class TranscriptionService {
   }
 
   tick(): void {
-    if (!capabilityReady(this.capability())) return;
+    if (this.#closed || !capabilityReady(this.capability())) return;
     const scheduled = scheduleTranscriptions(this.#rows, this.#limit, this.#guard());
     for (const row of scheduled) {
       const prev = this.#rows.find(item => sameRow(item, row));
@@ -232,6 +236,14 @@ export class TranscriptionService {
         ? { outcome: "done", at: this.#now(), engine: result.value, engineName: this.#engine.name, model: this.#engine.model }
         : { outcome: "failed", at: this.#now(), problem: result.error });
     }, () => {
+      // The close() abort has no principal behind it: the run keeps no recorded end, so the next start marks it lost
+      // (TX4). A queued row's slot is not handed on either; the next start queues the row again in its order.
+      if (this.#closed) {
+        clearTimeout(timer);
+        this.#timers.delete(timer);
+        this.#inflight.delete(key);
+        return;
+      }
       const why = this.#why.get(key) ?? "cancelled";
       this.#finish(key, timer, why === "timed_out"
         ? { outcome: "timed_out", at: this.#now() }
