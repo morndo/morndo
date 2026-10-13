@@ -240,6 +240,22 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("desk"));
   });
 
+  // The repeat's own request was not delivered (round 3.3): a retry of it, within the window a request is remembered,
+  // is told the same — already answered — never ok, as if its own answer had gone through.
+  it("a retry of a repeat that learnt another endpoint's answer is told it was answered elsewhere again", async () => {
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("the connection was lost while typing"); },            // in doubt: typed at the node
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                     // its node typed it after all
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "ship" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
+    const retry = await s.answer(auth("phone"), "ny-7", { kind: "option", key: "ship" }, "r2");  // the same request, retried
+    expect(retry).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(retry.item?.decision?.via).toBe("elsewhere");
+  });
+
   // A tap the hub itself typed whose row nothing can settle (round 2.1): the port threw after the paste, the row keeps
   // "started" with no store, and this hub has no node to ask — no repeat can ever learn more, and no answer path is
   // left to record it. The tap in the pane is the ask's only record: it settles the ask, as it did before the pane-tap

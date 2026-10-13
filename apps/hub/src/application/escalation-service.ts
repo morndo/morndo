@@ -839,9 +839,11 @@ export class EscalationService {
     if (settled === null) return null;
     if (!settled.ok && settled.problem === "duplicate") {
       const requester = this.#requesterOf(row);
-      const r = this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
-      if (requester !== null && requester.endpointId !== a.endpoint.id) return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
-      return r;
+      if (requester === null || requester.endpointId === a.endpoint.id) return this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
+      // Recorded for its own endpoint. This caller's request delivered nothing, so it is not remembered as delivered:
+      // a retry of it is told the same, never ok (round 3.3).
+      this.#record(id, choice, requester);
+      return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
     }
     log.warn(`answer to ${id} in doubt: its node can't say it never typed it; it stays uncertain`);
     return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
@@ -903,9 +905,14 @@ export class EscalationService {
   // defaults to the caller; an answer in doubt that another endpoint's repeat settled is recorded for its row's own
   // requester — the endpoint whose answer it was — not whoever's repeat learnt it (review of PR #55).
   #delivered(a: Authenticated, id: string, choice: Choice, key: string, at?: number, by?: { endpointId: EndpointId; sessionId: SessionId | null }): AnswerResult {
-    this.#clearNotice(id);
     this.#seen.set(key, this.#now());
-    const r = this.#x.record(id, choice, by ?? { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
+    this.#record(id, choice, by ?? { endpointId: a.endpoint.id, sessionId: a.session.id });
+    return { ok: true, item: this.#view(id, a.endpoint.id), ...(at === undefined ? {} : { duplicate: true as const, at }) };
+  }
+  // The Decision itself, for the endpoint whose answer it was, without saying anything to whoever learnt it.
+  #record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }) {
+    this.#clearNotice(id);
+    const r = this.#x.record(id, choice, by, this.#now());
     if (r.ok) {
       const decision = this.#x.get(id)?.decision;
       if (decision) this.#store.saveDecision(id, decision);
@@ -915,6 +922,5 @@ export class EscalationService {
       log.warn(`answer to ${id} delivered but not recorded: ${r.error}`);
     }
     this.#notify();
-    return { ok: true, item: this.#view(id, a.endpoint.id), ...(at === undefined ? {} : { duplicate: true as const, at }) };
   }
 }
