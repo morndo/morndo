@@ -285,7 +285,7 @@ describe("install.sh", () => {
     const signers = join(dir, "allowed");
     writeFileSync(signers, `${allowedSignerLine({ identity: RELEASE_NAMESPACE, namespace: RELEASE_NAMESPACE, publicKey: pub.stdout.trim() })}\n`);
     const marker = join(dir, "marker");
-    const payload = new TextEncoder().encode(`#!/bin/sh\nprintf '%s\\n' "$@" > "${marker}"\n`);
+    const payload = new TextEncoder().encode(`#!/bin/sh\nprintf '%s\\n' "$*" > "${marker}"\n`);
     const archive = packTree([{ path: "bin/morndo", bytes: payload, mode: "0555" }], 1_700_000_000);
     const host = platform();
     const name = artifactName("0.1.0", host);
