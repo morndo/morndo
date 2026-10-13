@@ -109,6 +109,15 @@ describe("install choices", () => {
     for (const path of paths) expect(workflow.split(`- "${path}"`).length - 1).toBe(2);
   });
 
+  it("the workflow allows unshare before the contract suite", () => {
+    const workflow = readFileSync(join(import.meta.dirname, "../../../.github/workflows/transcription-plugin.yml"), "utf8");
+    const allow = workflow.indexOf("name: Allow unshare to open a network namespace");
+    const suite = workflow.indexOf("name: Contract suite and the no-network run");
+    expect(allow).toBeGreaterThanOrEqual(0);
+    expect(allow).toBeLessThan(suite);
+    expect(workflow.slice(allow, suite)).toContain("userns,");
+  });
+
   it("places an unchanged model by hard link so a reinstall does not copy it", () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-link-"));
     const cached = join(dir, "cached.bin");

@@ -177,7 +177,6 @@ export function wavDurationFile(path: string): number | "engine" | null {
         }
         break;
       }
-      if (body + chunk < body) return null;
       offset = body + chunk + (chunk % 2);
     }
     if (rate < 1 || channels < 1 || bits < 8 || bits % 8 !== 0 || dataBytes < 0) return null;
