@@ -6,8 +6,8 @@
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import Star from "@lucide/svelte/icons/star";
   import X from "@lucide/svelte/icons/x";
-  import { againLabel } from "../catchup/answer.ts";
   import { renderBriefInline, renderBriefMarkdown, renderMarkdown } from "../markdown.ts";
+  import AnswerFooter from "./AnswerFooter.svelte";
   import { AnswerSession } from "./answer-session.svelte.ts";
   import type { AnswerBody, AnswerProblem, AskOutcome } from "./answer-session.ts";
   import { ago, deliveryLine, dueLine, REFUSALS, type DecisionItem } from "./decisions.ts";
@@ -24,7 +24,6 @@
   const session = $derived(given ?? own);
   let dialogEl = $state<HTMLDialogElement | null>(null);
   let headlineEl = $state<HTMLHeadingElement | null>(null);
-  let wordsEl = $state<HTMLTextAreaElement | null>(null);
 
   const view = $derived(session.shown);
   const card = $derived(cardOf(view));
@@ -46,13 +45,10 @@
     return `Sent. You chose ${choice}. ${whom} has it.`;
   });
 
-  const takeFocus = (node: HTMLElement) => node.focus();
-
   onMount(() => {
     dialogEl?.showModal();
     headlineEl?.focus();
   });
-  $effect(() => { if (session.mode === "words") wordsEl?.focus(); });
 
   function showNew() { session.showNew(); tick().then(() => headlineEl?.focus()); }
   function choose(label: string, body: AnswerBody) { session.pick(label, body); }
@@ -68,16 +64,10 @@
     if (session.sending) { e.preventDefault(); return; }
     if (session.mode !== "idle") { e.preventDefault(); back(); }
   }
-  function onWordsKey(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (session.again) sendAgain(); else if (session.words.trim()) void send({ text: session.words }); }
-    if (e.key === "Escape") { e.preventDefault(); back(); }
-  }
-
   async function send(body: AnswerBody, requestId?: string) {
     await session.send(onAnswer, body, requestId);
     if (session.sent) headlineEl?.focus();
   }
-  function sendAgain() { if (session.again) void send(session.again.body, session.again.requestId); }
   function ask() { void session.ask(onAskBrief); }
 </script>
 
@@ -208,45 +198,10 @@
     {:else if !open}
       <p class="stand" role="status">This decision is no longer open.</p>
       <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
+    {:else if session.mode === "confirm" || session.mode === "words" || session.again}
+      <AnswerFooter {session} {open} {verifiedFresh} {asker} focusSend onSend={send} onAfterBack={() => tick().then(() => headlineEl?.focus())} />
     {:else if session.stale}
-      {#if session.again}
-        <div class="actions">
-          <button type="button" class="btn primary" disabled={session.sending} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-        </div>
-      {:else}
-        <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
-      {/if}
-    {:else if session.mode === "confirm" && session.picked}
-      <div class="confirm" role="group" aria-label="Confirm your answer">
-        <p class="your">Your answer: <b>{session.picked.label}</b></p>
-        <p class="how">{whom} gets it as your decision and acts on it.</p>
-        <div class="actions">
-          {#if session.again}
-            <button type="button" class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-          {:else}
-            <button type="button" class="btn primary" disabled={session.sending || !open} use:takeFocus onclick={() => session.picked && send(session.picked.body)}>{session.sending ? "Sending…" : "Send answer"}</button>
-          {/if}
-          <button type="button" class="btn ghost" disabled={session.sending} onclick={back}>Back</button>
-          {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{/if}
-        </div>
-      </div>
-    {:else if session.mode === "words"}
-      <div class="confirm" role="group" aria-label="Answer in words">
-        <textarea bind:this={wordsEl} value={session.words} rows="2" readonly={!!session.again} placeholder="Your answer for {asker}…" onkeydown={onWordsKey} oninput={(e) => (session.words = e.currentTarget.value)} aria-label="Your answer for {asker}"></textarea>
-        <div class="actions">
-          {#if session.again}
-            <button type="button" class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-          {:else}
-            <button type="button" class="btn primary" disabled={session.sending || !open || !session.words.trim()} onclick={() => send({ text: session.words })}>{session.sending ? "Sending…" : `Send to ${asker}`}</button>
-          {/if}
-          <button type="button" class="btn ghost" disabled={session.sending} onclick={back}>Back</button>
-          {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{:else}<span class="hint">Enter sends · Shift+Enter for a new line</span>{/if}
-        </div>
-      </div>
-    {:else if session.again}
-      <div class="actions">
-        <button type="button" class="btn primary" disabled={session.sending || !open} use:takeFocus onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-      </div>
+      <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
     {:else if open && item.answerBy === "screen"}
       <div class="actions">
         {#if item.asker.workerId}<button type="button" class="btn primary" onclick={() => item.asker.workerId && onOpenScreen(item.asker.workerId)}>Answer in {terminal}'s terminal</button>{/if}
@@ -348,16 +303,10 @@
   .btn.ghost { border-color: transparent; background: transparent; }
   .btn:disabled { opacity: 0.45; cursor: default; }
   .link { padding: 0; border: 0; background: none; color: var(--link); font: 700 13px/19px var(--font, sans-serif); cursor: pointer; text-decoration: underline; }
-  .confirm { display: grid; gap: 8px; }
-  .your { margin: 0; }
-  .how, .hint, .shield, .note { font: 400 13px/18px var(--font, sans-serif); color: var(--muted); }
+  .shield, .note { font: 400 13px/18px var(--font, sans-serif); color: var(--muted); }
   .shield { display: inline-flex; align-items: center; gap: 5px; }
   .err { margin: 8px 0 0; color: var(--bad-fg); font: 400 13px/18px var(--font, sans-serif); }
   .stand { margin: 0 0 8px; font: 400 15px/22px var(--font, sans-serif); }
-  textarea {
-    width: 100%; min-height: 60px; resize: vertical; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
-    background: var(--main-bg); color: var(--text); font: 400 15px/22px var(--font, sans-serif);
-  }
   .screen { margin: 0; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: var(--term-bg); color: var(--term-fg); font: 12px/17px var(--mono, monospace); white-space: pre; }
   @media (prefers-reduced-motion: reduce) {
     dialog.brief { transition: none; }

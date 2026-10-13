@@ -106,6 +106,23 @@ async function releaseAnswer() {
   await tab.evaluate(() => (globalThis as { __releaseAnswer?: () => void }).__releaseAnswer?.());
 }
 
+describe("round 3: the card and the brief share one answer footer", () => {
+  it("words mode says Back on the card and in the brief", async () => {
+    await ready();
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Something else…" }).click();
+    await card.getByRole("button", { name: "Back", exact: true }).waitFor();
+    expect(await card.getByRole("button", { name: "Cancel", exact: true }).count()).toBe(0);
+    await card.getByRole("textbox", { name: "Your answer for the manager" }).waitFor();
+    await card.getByRole("button", { name: "Ship the weekly notes" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Back", exact: true }).waitFor();
+    expect(await dialog.getByRole("button", { name: "Cancel", exact: true }).count()).toBe(0);
+    await dialog.getByRole("textbox", { name: "Your answer for the manager" }).waitFor();
+  }, 60_000);
+});
+
 describe("round 3: a decision that leaves the list drops its session", () => {
   it("comes back open, not still sent, when the same id returns", async () => {
     const errors = await ready();

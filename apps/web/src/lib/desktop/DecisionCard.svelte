@@ -18,12 +18,11 @@
   import Lightbulb from "@lucide/svelte/icons/lightbulb";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import Repeat from "@lucide/svelte/icons/repeat-2";
-  import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import Signpost from "@lucide/svelte/icons/signpost";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import Star from "@lucide/svelte/icons/star";
   import { cardOf } from "@morndo/domain";
-  import { againLabel } from "../catchup/answer.ts";
+  import AnswerFooter from "./AnswerFooter.svelte";
   import { AnswerSession } from "./answer-session.svelte.ts";
   import type { AnswerBody, AnswerProblem } from "./answer-session.ts";
   import { ago, deliveryLine, dueLabel, REFUSALS, urgency, type DecisionItem } from "./decisions.ts";
@@ -39,7 +38,6 @@
 
   const own = new AnswerSession(item);
   const session = $derived(given ?? own);
-  let wordsEl = $state<HTMLTextAreaElement | null>(null);
   $effect(() => { if (!given) own.bind(item, false); });
 
   const u = $derived(urgency(item, now));
@@ -67,7 +65,6 @@
     card.hasBrief ? null : "Filed without a brief",
   ].filter((part): part is string => part !== null).join(" · "));
   const readLabel = $derived(card.hasBrief ? "Read the brief ›" : "Details ›");
-  $effect(() => { if (session.mode === "words") wordsEl?.focus(); });
 
   function choose(label: string, body: AnswerBody) { session.pick(label, body); }
   function writeWords(prefill = "") {
@@ -76,16 +73,7 @@
     session.mode = "words";
     session.error = null;
   }
-  function back() { session.back(); }
-  function escBack(e: KeyboardEvent) { if (e.key === "Escape") { e.preventDefault(); back(); } }
   function send(body: AnswerBody, requestId?: string) { void session.send(onAnswer, body, requestId); }
-  function sendAgain() { if (session.again) void session.send(onAnswer, session.again.body, session.again.requestId); }
-  function onWordsKey(e: KeyboardEvent) {
-    // Like the message box (and Slack): Enter sends, Shift+Enter starts a new line; not while an IME is composing. While
-    // an answer is in doubt, Enter is Check again: never a new answer under a new request id.
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (session.again) sendAgain(); else if (session.words.trim()) void send({ text: session.words }); }
-    if (e.key === "Escape") { e.preventDefault(); back(); }
-  }
 </script>
 
 <article bind:this={root} class="dc {variant} u-{u}" data-decision={item.id} aria-label="Decision: {card.topic}">
@@ -171,40 +159,9 @@
     <div class="actions">
       {#if item.asker.workerId}<button class="btn primary" onclick={() => item.asker.workerId && onOpenScreen(item.asker.workerId)}><SquareTerminal size={16} />Answer in {asker}'s terminal</button>{/if}
     </div>
-  {:else if session.mode === "confirm" && session.picked}
-    <div class="confirm" role="group" aria-label="Confirm your answer">
-      <p class="your">Your answer: <b>{session.picked.label}</b></p>
-      <p class="how">{whom[0]?.toUpperCase()}{whom.slice(1)} gets it as your decision and acts on it.</p>
-      <div class="actions">
-        <!-- svelte-ignore a11y_autofocus -->
-        {#if session.again}
-          <button class="btn primary" disabled={session.sending || !open} onkeydown={escBack} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-        {:else}
-          <!-- svelte-ignore a11y_autofocus -->
-          <button class="btn primary" disabled={session.sending || !open || session.stale} autofocus={!briefOpen} onkeydown={escBack} onclick={() => session.picked && send(session.picked.body)}>{session.sending ? "Sending…" : "Send answer"}</button>
-        {/if}
-        <button class="btn ghost" disabled={session.sending} onkeydown={escBack} onclick={back}>Back</button>
-        {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{/if}
-      </div>
-    </div>
-  {:else if session.mode === "words"}
-    <div class="confirm" role="group" aria-label="Answer in words">
-      <textarea bind:this={wordsEl} value={session.words} rows="2" readonly={!!session.again} placeholder="Your answer for {whom}…" onkeydown={onWordsKey} oninput={(e) => (session.words = e.currentTarget.value)} aria-label="Your answer for {whom}"></textarea>
-      <div class="actions">
-        {#if session.again}
-          <button class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-        {:else}
-          <button class="btn primary" disabled={session.sending || !open || session.stale || !session.words.trim()} onclick={() => send({ text: session.words })}>{session.sending ? "Sending…" : `Send to ${whom}`}</button>
-        {/if}
-        <button class="btn ghost" disabled={session.sending} onclick={back}>Cancel</button>
-        {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{:else}<span class="hint">Enter sends · Shift+Enter for a new line</span>{/if}
-      </div>
-    </div>
-  {:else if session.again}
+  {:else if session.mode === "confirm" || session.mode === "words" || session.again}
     <!-- An answer in doubt: only Check again, never another answer while it may have reached the asker (E8). -->
-    <div class="actions">
-      <button class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-    </div>
+    <AnswerFooter {session} {open} {verifiedFresh} asker={whom} focusSend={!briefOpen} escapeBack onSend={send} />
   {:else}
     <div class="actions">
       {#if variant === "panel" && card.spend}
@@ -280,18 +237,7 @@
   .btn.primary { background: var(--send); border-color: var(--send); color: var(--send-fg); }
   .btn.primary:hover:not(:disabled) { background: var(--send-hover); border-color: transparent; }
   .btn:disabled { opacity: 0.45; cursor: default; }
-  .btn.ghost { border-color: transparent; background: transparent; }
-  .btn.ghost:hover:not(:disabled) { background: var(--hover); }
   .link { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--link); font: 700 13px/19px var(--font); cursor: pointer; text-decoration: underline; }
-  .confirm { display: grid; gap: 8px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--send) 45%, transparent); background: color-mix(in srgb, var(--send) 7%, var(--main-bg)); }
-  .your { margin: 0; font: 400 15px/22px var(--font); }
-  .how { margin: -6px 0 0; font: 400 13px/18px var(--font); color: var(--muted); }
-  textarea {
-    width: 100%; min-height: 60px; resize: vertical; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-strong);
-    background: var(--main-bg); color: var(--text); font: 400 15px/22px var(--font); outline: 0;
-  }
-  textarea:focus { border-color: var(--link); box-shadow: 0 0 0 1px var(--link); }
-  .shield, .hint { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font: 400 12px/1 var(--font); color: var(--muted); }
   .state { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; }
   .state p { margin: 0; font: 400 14px/20px var(--font); }
   .state .sub { font-size: 13px; color: var(--muted); }
@@ -326,5 +272,5 @@
   .rec { margin: 0; display: flex; align-items: center; gap: 6px; font: 400 13px/18px var(--font); }
   .chat { justify-self: start; }
   .restated { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); font: 400 13px/18px var(--font); }
-  .actions, .confirm, .state, .err, .note, .chat, .readonly, .screen, .restated { position: relative; z-index: 1; }
+  .actions, .state, .err, .note, .chat, .readonly, .screen, .restated { position: relative; z-index: 1; }
 </style>
