@@ -57,7 +57,9 @@ describe("process host", () => {
     expect(getPriority(pid)).toBe(10);
     const raw = environ();
     const keys = raw.map(row => row.split("=")[0]);
-    expect(keys.toSorted()).toEqual(["HOME", "LANG", "PATH", "TMPDIR"].filter(key => key === "TMPDIR" || process.env[key]).toSorted());
+    const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
+    const expected = ["HOME", "LANG", "PATH", "TMPDIR"].filter(key => key === "TMPDIR" || process.env[key]);
+    expect(keys.sort(order)).toEqual(expected.sort(order));
     expect(raw.join("\0")).not.toContain("MORNDO_");
     const tmp = raw.find(row => row.startsWith("TMPDIR="))?.slice("TMPDIR=".length);
     expect(readlinkSync(`/proc/${pid}/cwd`)).toBe(tmp);
