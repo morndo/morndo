@@ -148,7 +148,7 @@ describe("desktop brief review", () => {
     const row = tab.locator('[data-decision="d-1"]');
     expect(await row.getByText("Answered on another device").count()).toBe(0);
     await row.getByText("You chose").waitFor();
-    const again = structuredClone(sent) as { version: string; decision: { choice: { label: string }; via?: string } };
+    const again = structuredClone(sent) as unknown as { version: string; decision: { choice: { label: string }; via?: string } };
     again.version = "v2";
     again.decision.via = "elsewhere";
     again.decision.choice.label = "Buy a hosted add-on";
