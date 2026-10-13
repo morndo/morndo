@@ -294,6 +294,9 @@ jobs:
 
   feed:
     needs: [release-please, ship]
+    concurrency:
+      group: morndo-feed
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: feed
@@ -386,6 +389,9 @@ jobs:
 
   pages:
     needs: feed
+    concurrency:
+      group: morndo-feed
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

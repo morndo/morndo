@@ -18,12 +18,14 @@ permissions:
   contents: read
 
 concurrency:
-  group: morndo-release
+  group: morndo-feed
   cancel-in-progress: false
 
 jobs:
   resign:
     runs-on: ubuntu-24.04
+    outputs:
+      present: ${{ steps.resign.outputs.present }}
     timeout-minutes: 20
     environment: feed
     permissions:
@@ -37,7 +39,8 @@ jobs:
           node-version-file: package.json
           cache: npm
       - run: npm ci
-      - name: Verify the live feed, then re-sign
+      - id: resign
+        name: Verify the live feed, then re-sign
         env:
           GH_TOKEN: ${{ github.token }}
           FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
@@ -45,15 +48,34 @@ jobs:
           set -euo pipefail
           now=$(node -e "process.stdout.write(String(Date.now()))")
           mkdir -p site
-          test -s trust/feed_allowed_signers
+          if [ ! -s trust/feed_allowed_signers ]; then
+            echo "skipping re-sign: trust/feed_allowed_signers is not in the tree yet" >&2
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           umask 077
           key="$RUNNER_TEMP/feed.key"
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$FEED_SSH_KEY" > "$key"
           # https://docs.github.com/en/rest/repos/contents#get-repository-content (read 2026-10-13)
+          if err=$(gh api -H "Accept: application/vnd.github.raw+json" \
+              "/repos/${GITHUB_REPOSITORY}/contents/latest.json?ref=feed" 2>&1 > site/latest.json); then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            rm -f site/latest.json
+            if printf '%s\n' "$err" | grep -q '404'; then
+              echo "skipping re-sign: branch feed has no feed yet" >&2
+              echo "present=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            printf '%s\n' "$err" >&2
+            exit 1
+          fi
           for channel in latest stable; do
-            gh api -H "Accept: application/vnd.github.raw+json" \
-              "/repos/${GITHUB_REPOSITORY}/contents/${channel}.json?ref=feed" > "site/${channel}.json"
+            if [ "$channel" != latest ]; then
+              gh api -H "Accept: application/vnd.github.raw+json" \
+                "/repos/${GITHUB_REPOSITORY}/contents/${channel}.json?ref=feed" > "site/${channel}.json"
+            fi
             gh api -H "Accept: application/vnd.github.raw+json" \
               "/repos/${GITHUB_REPOSITORY}/contents/${channel}.json.sig?ref=feed" > "site/${channel}.json.sig"
             ssh-keygen -Y verify -f trust/feed_allowed_signers -I feed@morndo.github.io -n feed@morndo.github.io -s "site/${channel}.json.sig" < "site/${channel}.json"
@@ -73,11 +95,13 @@ jobs:
           commit=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/commits" --input - --jq .sha <<< "$body")
           gh api --method PATCH "/repos/${GITHUB_REPOSITORY}/git/refs/heads/feed" -f sha="$commit" > /dev/null
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: steps.resign.outputs.present == 'true'
         with:
           path: site
 
   pages:
     needs: resign
+    if: needs.resign.result == 'success' && needs.resign.outputs.present == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

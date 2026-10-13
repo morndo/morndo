@@ -147,6 +147,12 @@ describe("release pipeline files", () => {
     expect(pages).toContain("pages: write");
     expect(pages).toContain("id-token: write");
 
+    expect(feed).toContain("group: morndo-feed");
+    expect(feed).toContain("cancel-in-progress: false");
+    expect(feed).not.toContain("morndo-release");
+    expect(job(feed, "resign")).toContain("skipping re-sign:");
+    expect(job(release, "feed")).toContain("group: morndo-feed");
+    expect(job(release, "pages")).toContain("group: morndo-feed");
     expect(feed).toContain('cron: "17 6 * * 1"');
     expect(feed).toContain("workflow_dispatch");
     const resign = job(feed, "resign");
