@@ -298,19 +298,47 @@ describe("a Decision the record can no longer attribute", () => {
   });
 
   // A row written after the tap is not the tap's source either (round 2.2): the row goes down before its own paste,
-  // so a tap older than the row was typed by a hand, and answers the ask. Here the later row is in doubt with a store
-  // to ask — one that may still be settled by a repeat — and the hand tap still wins.
-  it("a hand tap typed before the hub's own row was written still settles the ask", async () => {
+  // so a tap the hub read before it wrote the row was typed by a hand, and answers the ask. Which came first is the
+  // hub's own order of what it read and wrote, never the transcript's time against the hub's (round 3.2). Here the
+  // hand tap was read while an earlier row of the same choice still hid it; that row turns out never started, the
+  // next answer's row goes down after the tap was read, in doubt with a store to ask, and the hand tap still wins.
+  it("a hand tap the hub read before it wrote its own row still settles the ask", async () => {
+    const k = answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "hold" });
+    store.db.prepare("INSERT INTO sends (key, state, at, worker_id, request, node_store) VALUES (?, 'started', ?, '%0', ?, 'st-0')")
+      .run(k, T0 - 1000, "desk:r0");                                                             // an earlier answer in doubt
+    manager.push({ id: "m-tap", at: T0, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] hold (Hold for a day)" });
     const s = new EscalationService({
       watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
       send: async () => { throw new SendInDoubt("st-1", "the node may have typed it"); },        // in doubt, with a store
+      settle: async key => { store.dropSend(key); return null; },                                // the earlier one never started there
     });
-    s.poll();
+    s.poll();                                                                                    // read now, hidden by the earlier row
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");
     expect(await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
-    manager.push({ id: "m-tap", at: T0 - 1, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] hold (Hold for a day)" });
     s.poll();
     expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
     expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+  });
+
+  // The hub's own paste is told by that order, not by clocks (round 3.2): the node that typed it stamps the line on
+  // its own clock, here 1.5 s behind the hub's. Read after the hub wrote its row, it is that row's paste: no answer from
+  // elsewhere, and the repeat that learns it was typed records it for the endpoint that sent it.
+  it("the hub's own paste, stamped by a node whose clock runs behind, is not an answer from elsewhere", async () => {
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async (_pane, text) => {
+        manager.push({ id: "m-tap", at: now - 1500, author: { kind: "principal", name: "You" }, kind: "text", text });   // the node's clock
+        throw new SendInDoubt("st-1", "the connection dropped after the paste");
+      },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now - 1500 }),                 // typed there after all
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    s.poll();
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");                     // its own paste, not a tap from elsewhere
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: true, duplicate: true });
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("desk"));
+    expect(s.seenBy(endpointId("desk")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
 
   // The same exact key on the answer path's own repeat (round 2.8): a request's row belongs to the version it was
