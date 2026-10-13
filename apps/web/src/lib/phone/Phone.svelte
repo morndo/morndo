@@ -19,7 +19,7 @@
   import { STEP_UP_MS, type Policy } from "../SecurityChoices.svelte";
   import { postAnswer } from "../catchup/answer.ts";
   import { askForBrief as sharedAsk } from "../ask-brief.ts";
-  import { baseKey, type Body } from "../catchup/run.ts";
+  import { latestEntry, type Body } from "../catchup/run.ts";
   import { AnswerSession } from "../desktop/answer-session.svelte.ts";
   import type { AskOutcome } from "../desktop/answer-session.ts";
   import { OFFLINE_DECISION, PASSKEY_UNFINISHED, STILL_OFFLINE, type DecisionItem } from "../desktop/decisions.ts";
@@ -41,7 +41,7 @@
   import { Away } from "./chat/away.svelte.ts";
   import { chatEntry, entryChatState, keptChat, restoredChat, restoredScreen } from "./chat/history.ts";
   import { chatRows } from "./chat/rows.ts";
-  import type { DigestLine } from "@morndo/domain";
+  import { decisionKey, type DigestLine } from "@morndo/domain";
   import "./phone.css";
 
   let { verifiedAt: initialVerifiedAt, policy, engines = false, onSignedOut }: {
@@ -145,10 +145,7 @@
   const briefCardKey = $derived.by(() => {
     const run = session.run;
     if (!briefId || !run) return null;
-    const base = `d:${briefId}`;
-    let key: string | null = null;
-    for (const k of run.order) if (baseKey(k) === base) key = k;
-    return key;
+    return latestEntry(run, decisionKey(briefId)) ?? null;
   });
   const briefRefusal = $derived.by(() => {
     const r = session.refusal;

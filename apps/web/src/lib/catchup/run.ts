@@ -48,7 +48,7 @@ export function current(run: Run): Card | null {
 // A run's entry for a card is the card's own key, or, when the card came round again in the same run, that key with
 // "~2", "~3"… (review of PR #7, finding 2).
 export const baseKey = (k: string) => k.replace(/~\d+$/, "");
-const latestEntry = (run: Run, key: string) => run.order.findLast(k => baseKey(k) === key);
+export const latestEntry = (run: Run, key: string) => run.order.findLast(k => baseKey(k) === key);
 
 // A card passed in this run comes round again when it qualifies with something new: an update whose agent spoke since
 // (a later last message); a decision asked again (a later ask), or open again after the board showed it closed.
