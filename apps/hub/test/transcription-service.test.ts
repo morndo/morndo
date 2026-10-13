@@ -364,6 +364,22 @@ describe("transcription service", () => {
     }
   });
 
+  it("stops taking rows once the queue holds its cap, however many languages they name", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    for (let i = 0; i < 100; i++) {                       // the same recording under many codes: each its own row
+      const made = await svc.request(body(`tx-${i}`, "a", `la-${i}`));
+      if (!made.ok) throw new Error(JSON.stringify(made.error));
+    }
+    expect(gate.calls).toEqual(["/audio/a.wav"]);         // one runs; the rest wait behind it
+    const refused = await svc.request(body("tx-over", "a", "la-99x"));
+    expect(refused).toEqual({ ok: false, error: "too_many" });
+    const again = await svc.request(body("tx-0", "a", "la-0"));   // a row already in flight still comes back
+    expect(again.ok && again.value.state).toBe("running");
+    svc.close();
+  });
+
   it("a rejection that is not an abort is a failure, whichever reason an earlier attempt left", async () => {
     const gate = new Gate();
     const { svc } = service(memory(), gate, { timeoutFor: () => 40 });

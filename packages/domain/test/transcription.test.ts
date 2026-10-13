@@ -83,6 +83,17 @@ describe("requesting a transcription", () => {
     expect(requestTranscription([], ask({ language: "xx" }), AT, READY, "multi").ok).toBe(true);  // a multilingual engine takes any code
   });
 
+  it("refuses a new attempt once the queue holds its cap of live rows, whatever they name", () => {
+    const full = Array.from({ length: 100 }, (_, i) => live({ id: `tx-${i}`, recording: { kind: "upload", id: `up-${i}` } }));
+    expect(requestTranscription(full, ask({ id: "tx-new", recording: { kind: "upload", id: "up-new" } }), AT, READY, "multi"))
+      .toEqual({ ok: false, error: "too_many" });
+    // The row already in flight comes back whatever the queue holds (TX2), and a finished row holds no slot (TX3).
+    expect(value(requestTranscription(full, ask({ id: "tx-77", recording: { kind: "upload", id: "up-77" } }), AT, READY, "multi")).id).toBe("tx-77");
+    const oneEnded = full.map((row, i) => i === 0 ? { ...row, state: "done" as const } : row);
+    expect(requestTranscription(oneEnded, ask({ id: "tx-new", recording: { kind: "upload", id: "up-new" } }), AT, READY, "multi").ok).toBe(true);
+    expect(requestTranscription(full, ask({ id: "tx-new", recording: { kind: "upload", id: "up-new" } }), AT, READY, "multi", 101).ok).toBe(true);
+  });
+
   it("refuses an id that is missing or not a string, instead of reading it as its own spelling", () => {
     expect(requestTranscription([], ask({ id: undefined as unknown as string }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_id" });
     expect(requestTranscription([], ask({ id: 42 as unknown as string }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_id" });
