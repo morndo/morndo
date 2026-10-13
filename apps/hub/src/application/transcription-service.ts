@@ -61,6 +61,7 @@ export type TranscriptionStore = {
 
 const rowKey = (tx: Transcription) => `${tx.recording.kind}:${tx.recording.id}:${tx.language}`;
 const sameRow = (a: Transcription, b: Transcription) => a.id === b.id && rowKey(a) === rowKey(b);
+const sameOwned = (a: Transcription, b: Transcription) => sameRow(a, b) && endpointOf(a) === endpointOf(b);
 const live = (state: Transcription["state"]) => state === "queued" || state === "starting" || state === "running";
 
 // The endpoint that asked for the row (S2). It rides on the stored body so a restart still knows. One attempt
@@ -239,10 +240,10 @@ export class TranscriptionService {
     // A new row belongs to the endpoint that asked. The one in-flight attempt on a shared attachment gains this
     // endpoint as a reader (TX2: still one run). A stored row with no owner is left unanswered.
     const row = this.#share(decided.value, input.caller.endpointId);
-    if (this.#rows.find(item => sameRow(item, row)) !== row) this.#save(row);
+    if (this.#rows.find(item => sameOwned(item, row)) !== row) this.#save(row);
     this.tick();
     // The row this body made or matched (TX2's in-flight attempt), not whichever live row answers to the id first.
-    const made = this.#rows.find(item => sameRow(item, row));
+    const made = this.#rows.find(item => sameOwned(item, row));
     return ok(made ?? row);
   }
 
@@ -271,9 +272,9 @@ export class TranscriptionService {
       again = false;
       const scheduled = scheduleTranscriptions(this.#rows, this.#limit, this.#guard());
       for (const row of scheduled) {
-        const prev = this.#rows.find(item => sameRow(item, row));
+        const prev = this.#rows.find(item => sameOwned(item, row));
         if (!prev || prev.state !== row.state || prev.position !== row.position || prev.reason !== row.reason) this.#save(row);
-        if (row.state === "starting" && !this.#launch(this.#rows.find(item => sameRow(item, row)) ?? row)) again = true;
+        if (row.state === "starting" && !this.#launch(this.#rows.find(item => sameOwned(item, row)) ?? row)) again = true;
       }
     }
   }
@@ -395,9 +396,10 @@ export class TranscriptionService {
     this.tick();
   }
 
-  // A stored row this caller cannot read becomes readable by them too. A row that is not stored yet is theirs alone.
+  // Join only the in-flight object the domain handed back. A newly built row is this caller's own attempt,
+  // even when another endpoint already finished the same id.
   #share(row: Transcription, endpointId: string): Transcription {
-    const stored = this.#rows.find(item => sameRow(item, row));
+    const stored = this.#rows.find(item => item === row);
     if (!stored) return owned(row, endpointId);
     if (endpointOf(stored) === null) return stored;
     if (canRead(stored, endpointId)) return stored;
@@ -410,7 +412,7 @@ export class TranscriptionService {
   }
 
   #save(row: Transcription): void {
-    const i = this.#rows.findIndex(item => sameRow(item, row));
+    const i = this.#rows.findIndex(item => sameOwned(item, row));
     if (i < 0) this.#rows.push(row);
     else this.#rows[i] = row;
     this.#store.saveTranscription(row);

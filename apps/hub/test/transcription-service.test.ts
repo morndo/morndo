@@ -293,6 +293,30 @@ describe("transcription service", () => {
     svc.close();
   });
 
+  it("a finished row another endpoint owns does not become this caller's attempt", async () => {
+    files.set("clip", { path: "/audio/clip.wav", size: 100, durationMs: null });
+    try {
+      const gate = new Gate();
+      const { svc } = service(memory(), gate);
+      await svc.start();
+      const ask = (endpointId: string) => svc.request({
+        id: "t1", recording: { kind: "attachment", id: "clip" }, language: "en", caller: { endpointId },
+      });
+      expect((await ask("ep-1")).ok).toBe(true);
+      gate.release("/audio/clip.wav");
+      expect(await until(() => svc.get("t1", { endpointId: "ep-1" })?.state === "done", 2000)).toBe(true);
+      const clip = files.get("clip");
+      if (clip) clip.size = 120;
+      const again = await ask("ep-2");
+      expect(again.ok && again.value.sizeBytes).toBe(120);
+      expect(again.ok && again.value.state).not.toBe("done");
+      expect(svc.get("t1", { endpointId: "ep-1" })).toMatchObject({ state: "done", sizeBytes: 100 });
+      svc.close();
+    } finally {
+      files.delete("clip");
+    }
+  });
+
   it("a row with no recorded owner answers nobody", async () => {
     const old: Transcription = {
       id: "old", recording: { kind: "attachment", id: "a" }, language: "de", sizeBytes: 12,
