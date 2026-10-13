@@ -8,7 +8,8 @@ import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/protocol";
 import { packTree, type TreeFile } from "./archive.ts";
@@ -16,7 +17,7 @@ import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
 import { writeVerifiedSite } from "./feed-site.ts";
 import { feedTree, refUpdateResult, syncFeed } from "./feed-sync.ts";
-import { readSchemaJson, repoRoot } from "./schema-read.ts";
+import { readSchemaJson } from "./schema-read.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
@@ -129,7 +130,8 @@ describe("file list and manifest", () => {
     expect(() => readSchemaJson(bad)).toThrow(/schema read failed: sqlite was not built/);
     const probe = join(dir, "probe.js");
     writeFileSync(probe, "process.stdout.write(JSON.stringify({ cwd: process.cwd(), execArgv: process.execArgv }));\n");
-    expect(readSchemaJson(probe)).toEqual({ cwd: repoRoot, execArgv: process.execArgv });
+    const realRoot = dirname(fileURLToPath(new URL("../../package.json", import.meta.url)));
+    expect(readSchemaJson(probe)).toEqual({ cwd: realRoot, execArgv: process.execArgv });
   });
 
   it("states this tree's schemas, including a floor of 0 where nothing breaking has shipped", () => {

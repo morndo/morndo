@@ -4,7 +4,9 @@ import { spawnSync } from "node:child_process";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+// schema-read.ts lives in scripts/release/, so three parents is the repository root
+// (the directory that holds package.json), not scripts/.
+export const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 // spawn has no execArgv option (that option is on fork). The parent's node flags are
 // passed on the child command, which is what the child reports as process.execArgv.
