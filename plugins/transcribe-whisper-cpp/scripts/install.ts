@@ -16,7 +16,7 @@
 //   that the bytes are the pin; the host check refuses any other site.
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, totalmem } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -240,9 +240,28 @@ function modelHost(hostname: string): boolean {
   return hostname === "huggingface.co" || hostname.endsWith(".huggingface.co") || hostname.endsWith(".hf.co");
 }
 
+function recoverInstall(dest: string): void {
+  const parent = dirname(dest);
+  const name = basename(dest);
+  let entries: string[];
+  try {
+    entries = readdirSync(parent);
+  } catch {
+    return;
+  }
+  const prevs = entries.filter(entry => entry.startsWith(`.${name}.prev-`)).sort();
+  const nexts = entries.filter(entry => entry.startsWith(`.${name}.next-`));
+  if (!existsSync(dest) && prevs.length > 0) {
+    const keep = prevs.shift();
+    if (keep !== undefined) renameSync(join(parent, keep), dest);
+  }
+  for (const leftover of [...prevs, ...nexts]) rmSync(join(parent, leftover), { recursive: true, force: true });
+}
+
 export async function replaceInstall(dest: string, fill: (dir: string) => Promise<void>): Promise<void> {
   const parent = dirname(dest);
   mkdirSync(parent, { recursive: true });
+  recoverInstall(dest);
   const staging = join(parent, `.${basename(dest)}.next-${randomBytes(4).toString("hex")}`);
   mkdirSync(staging, { recursive: true });
   try {

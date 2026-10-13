@@ -118,6 +118,28 @@ describe("install choices", () => {
     }
   });
 
+  it("recovers a previous install left by a crash and drops staging leftovers", async () => {
+    const root = mkdtempSync(join(tmpdir(), "morndo-crash-"));
+    const dest = join(root, "transcribe");
+    const prev = join(root, ".transcribe.prev-ab12");
+    const next = join(root, ".transcribe.next-cd34");
+    mkdirSync(prev);
+    writeFileSync(join(prev, "marker"), "old");
+    mkdirSync(next);
+    writeFileSync(join(next, "marker"), "junk");
+    try {
+      await expect(replaceInstall(dest, async () => { throw new Error("killed"); })).rejects.toThrow("killed");
+      expect(readFileSync(join(dest, "marker"), "utf8")).toBe("old");
+      expect(readdirSync(root)).toEqual(["transcribe"]);
+      mkdirSync(join(root, ".transcribe.next-eeee"));
+      await replaceInstall(dest, async (dir) => { writeFileSync(join(dir, "marker"), "new"); });
+      expect(readFileSync(join(dest, "marker"), "utf8")).toBe("new");
+      expect(readdirSync(root)).toEqual(["transcribe"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("a failed install leaves the previous plugin in place", async () => {
     const root = mkdtempSync(join(tmpdir(), "morndo-swap-"));
     const dest = join(root, "transcribe");
