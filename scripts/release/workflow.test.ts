@@ -125,6 +125,7 @@ describe("release pipeline files", () => {
     expect(outside).toContain("trust/release_allowed_signers");
     expect(outside).toContain("ssh-keygen -Y verify");
     expect(outside).toContain("gh attestation verify");
+    expect(readFileSync("scripts/release/published-gh.sh", "utf8")).not.toContain("verify-asset");
     expect(outside).toContain("signer-workflow");
     expect(outside).toContain(".github/workflows/release.yml@refs/heads/main");
     expect(outside).not.toContain("gh release verify");
@@ -146,8 +147,17 @@ describe("release pipeline files", () => {
     expect(dry.status, dry.stderr).toBe(0);
     const calls = readFileSync(log, "utf8");
     expect(calls).toContain("morndo/morndo release download v0.0.0");
-    expect(calls).toContain("morndo/morndo release verify-asset v0.0.0");
+    expect(calls).not.toContain("verify-asset");
     expect(calls).toContain("morndo/morndo release verify v0.0.0");
+    const summary = join(dir, "summary");
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s %s\\n' "$GH_REPO" "$*" >> "${log}"\nif [ "$1" = release ] && [ "$2" = verify ]; then exit 1; fi\nexit 0\n`);
+    chmodSync(join(bin, "gh"), 0o755);
+    const failed = spawnSync("sh", ["scripts/release/published-gh.sh"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, GH_REPO: "morndo/morndo", TAG: "v0.0.0", RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary },
+    });
+    expect(failed.status).not.toBe(0);
+    expect(readFileSync(summary, "utf8")).toMatch(/withdraw/i);
     const missing = spawnSync("sh", ["scripts/release/published-gh.sh"], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, TAG: "v0.0.0", RUNNER_TEMP: dir, GH_REPO: "" },
@@ -172,8 +182,9 @@ describe("release pipeline files", () => {
     expect(sync).toContain("emptyFeed");
     expect(sync).toContain("resignFeed");
     expect(sync).toContain("ssh-keygen");
-    expect(first).toContain(`actions/upload-pages-artifact@${UPLOAD_PAGES}`);
     const pages = job(release, "pages");
+    expect(pages).toContain(`actions/upload-pages-artifact@${UPLOAD_PAGES}`);
+    expect(pages).toContain("feed-site");
     expect(pages).toContain("environment:");
     expect(pages).toContain("name: github-pages");
     expect(pages).toContain(`actions/deploy-pages@${DEPLOY_PAGES}`);
@@ -185,7 +196,9 @@ describe("release pipeline files", () => {
     expect(feed).not.toContain("morndo-release");
     expect(job(feed, "resign")).toContain("skipping re-sign:");
     expect(job(release, "feed")).toContain("group: morndo-release-feed");
-    expect(job(release, "pages")).toContain("group: morndo-release-feed");
+    expect(job(release, "pages")).toContain("group: morndo-pages");
+    expect(job(feed, "pages")).toContain("group: morndo-pages");
+    expect(job(feed, "pages")).toContain("feed-site");
     expect(feed).not.toContain("morndo-release-feed");
     expect(feed).toContain('cron: "17 6 * * 1"');
     expect(feed).toContain("workflow_dispatch");

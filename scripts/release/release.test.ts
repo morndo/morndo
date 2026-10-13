@@ -15,6 +15,7 @@ import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
 import { syncFeed } from "./feed-sync.ts";
+import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, schemaFrom } from "./manifest.ts";
@@ -232,6 +233,22 @@ describe("feed", () => {
     const again = ChannelFeedSchema.parse(JSON.parse(second));
     expect(again.seq).toBe(2);
     expect(again.releases.map(r => r.version)).toEqual(["0.2.0", "0.1.0"]);
+  });
+
+  it("does not deploy a site older than the feed head", () => {
+    const heads = [
+      { sha: "aaa", seq: 4 },
+      { sha: "bbb", seq: 5 },
+      { sha: "bbb", seq: 5 },
+    ];
+    let i = 0;
+    const built: string[] = [];
+    const site = freshSite(
+      () => heads[i++] ?? heads[heads.length - 1]!,
+      (head) => { built.push(head.sha); return { ...head }; },
+    );
+    expect(built).toEqual(["aaa", "bbb"]);
+    expect(site).toEqual({ sha: "bbb", seq: 5 });
   });
 
   it("retries the feed read when the branch moved, and commits the head it just read", () => {

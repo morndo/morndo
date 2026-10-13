@@ -271,8 +271,10 @@ jobs:
           gh release download "$TAG" --dir "$RUNNER_TEMP/assets"
           ssh-keygen -Y verify -f trust/release_allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s "$RUNNER_TEMP/assets/manifest.json.sig" < "$RUNNER_TEMP/assets/manifest.json"
           ssh-keygen -Y verify -f trust/release_allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s "$RUNNER_TEMP/assets/install.sh.sig" < "$RUNNER_TEMP/assets/install.sh"
-          # Build attestations exist as soon as actions/attest runs. The release attestation
-          # is generated when an immutable release is published, not while it is a draft.
+          # Asset digests against the build attestations, while the release is still a draft.
+          # The release-asset command needs the release attestation, which exists only after
+          # an immutable release is published, so it runs in the published job.
+          # https://cli.github.com/manual/gh_release_verify-asset (read 2026-10-13)
           # https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases
           # (read 2026-10-13)
           for f in "$RUNNER_TEMP/assets"/morndo-*.tar.gz "$RUNNER_TEMP/assets/manifest.json" "$RUNNER_TEMP/assets/install.sh" "$RUNNER_TEMP/assets/SHA256SUMS"; do
@@ -361,17 +363,17 @@ jobs:
             --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" \
             --now "$now" --key-set 1 --key "$key" --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
           rm -f "$key"
-      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
-        with:
-          path: site
 
   pages:
     needs: feed
+    # The two Pages deploys share one group, so they cannot land in either order.
+    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+    # (read 2026-10-13). feed-site rebuilds from the feed head just before the upload.
     concurrency:
-      group: morndo-release-feed
+      group: morndo-pages
       cancel-in-progress: false
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: write
@@ -380,5 +382,20 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - name: Rebuild the site from the feed head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/main.ts feed-site --repository "$GITHUB_REPOSITORY" --dir site
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

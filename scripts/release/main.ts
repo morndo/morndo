@@ -10,7 +10,7 @@ import { packTree, type TreeFile } from "./archive.ts";
 import { compileWorkspaces } from "./compile.ts";
 import { sha256Sums } from "./checksums.ts";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
-import { publishChannelFeeds, resignChannelFeeds } from "./feed-sync.ts";
+import { materialiseFeed, publishChannelFeeds, resignChannelFeeds } from "./feed-sync.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, type ArtifactInput } from "./manifest.ts";
 import { BUNDLED_NODE, newerNode24 } from "./node-pin.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes } from "./sign.ts";
@@ -60,7 +60,7 @@ function treeFiles(root: string): TreeFile[] {
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
-  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-resign-branch | feed-publish | sums | node-check");
+  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-resign-branch | feed-publish | feed-site | sums | node-check");
   const { values, positionals } = parseArgs({
     args: rest,
     options: {
@@ -151,6 +151,9 @@ function main(argv: string[]): void {
       process.stdout.write(`${outcome}\n`);
       return;
     }
+    case "feed-site":
+      materialiseFeed(flag(values, "repository"), flag(values, "dir"));
+      return;
     case "feed-publish":
       publishChannelFeeds({
         repository: flag(values, "repository"), dir: flag(values, "dir"), version: flag(values, "version"),

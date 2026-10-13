@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
+import { freshSite, type SiteHead } from "./pages.ts";
 import { FEED_NAMESPACE, signBytes } from "./sign.ts";
 
 const FEED_FILES = ["latest.json", "latest.json.sig", "stable.json", "stable.json.sig"] as const;
@@ -36,6 +37,33 @@ function gh(args: string[], input?: string): Gh {
 function must(run: Gh, what: string): string {
   if (!run.ok) throw new Error(`${what} failed: ${run.stderr}`);
   return run.stdout.trim();
+}
+
+export function materialiseFeed(repository: string, dir: string): void {
+  freshSite(
+    () => readSiteHead(repository),
+    head => {
+      mkdirSync(dir, { recursive: true });
+      for (const file of FEED_FILES) {
+        const body = readAt(repository, head.sha, file);
+        if (body === null) throw new Error(`feed ${file} is missing at ${head.sha}`);
+        writeFileSync(join(dir, file), body);
+      }
+      return head;
+    },
+  );
+}
+
+function readSiteHead(repository: string): SiteHead {
+  const sha = readFeedHead(repository);
+  if (sha === null) throw new Error("branch feed has no feed yet");
+  const latest = readAt(repository, sha, "latest.json");
+  if (latest === null) throw new Error("branch feed has no feed yet");
+  const parsed: unknown = JSON.parse(latest);
+  if (typeof parsed !== "object" || parsed === null || !("seq" in parsed) || typeof parsed.seq !== "number") {
+    throw new Error("feed has no seq");
+  }
+  return { sha, seq: parsed.seq };
 }
 
 export function readFeedHead(repository: string): string | null {
