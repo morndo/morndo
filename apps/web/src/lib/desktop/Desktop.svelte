@@ -85,7 +85,6 @@
   let sidebarWidth = $state(store.get("morndo.sidebar", 300));
   // The stored width is the one the owner chose. A narrow window only changes what is drawn.
   let rightWidth = $state(clampRight(store.get("morndo.right.width", 440)));
-  const drawnRight = $derived(widthAfterWindowChange(rightWidth, windowWidth, sidebarWidth).drawn);
   function setRightWidth(n: number, persist = false) {
     rightWidth = clampRight(n);
     if (persist) store.set("morndo.right.width", rightWidth);
@@ -127,6 +126,7 @@
   // Like Slack, the right-hand panel sits beside the conversation while the conversation keeps a readable width (560px);
   // in a narrower window it stays shut until asked for, and then lies over the conversation.
   let windowWidth = $state(typeof innerWidth === "number" ? innerWidth : 1920);
+  const drawnRight = $derived(widthAfterWindowChange(rightWidth, windowWidth, sidebarWidth).drawn);
   const narrow = $derived(layoutIsNarrow(windowWidth, sidebarWidth));
   const rightShown = $derived(narrow ? overlayOpen : right.open);
   const decisionsShown = $derived(rightShown);

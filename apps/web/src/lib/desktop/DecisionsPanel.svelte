@@ -26,7 +26,7 @@
     const hold = openId;
     const list = items;
     untrack(() => {
-      const ids = new Set(list.map(d => d.id));
+      const ids = new Set<string>(list.map(d => d.id));
       for (const d of list) {
         const cur = sessions[d.id];
         if (!cur) sessions[d.id] = new AnswerSession(d);
