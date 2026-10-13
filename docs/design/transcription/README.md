@@ -95,7 +95,7 @@ RTF is wall time over audio length. The same German text as ogg/opus gave the sa
 | # | Invariant |
 |---|---|
 | TX1 | A Transcription runs on the hub's machine, from a file already there. No adapter in this design sends audio or text off that machine. |
-| TX2 | A Recording has at most one Transcription in flight. A repeat request for the same Recording and Language choice returns it. |
+| TX2 | A Recording has at most one Transcription in flight per Recording and Language. A repeat request for the same Recording and Language choice returns it. |
 | TX3 | A Transcription becomes terminal once (`done`, `failed`, `timed_out`, `cancelled`, `lost`). It is never re-run on its own. The principal may ask again, which makes a new Transcription. |
 | TX4 | A Transcription whose run is gone with no recorded end (a hub restart) becomes `lost`. The row stays. |
 | TX5 | At most `limit` Transcriptions run at once (default 1). Others wait in the order accepted, each with a visible position. The guard delays a start and never stops a run (as J5). |
@@ -107,8 +107,8 @@ RTF is wall time over audio length. The same German text as ogg/opus gave the sa
 **S1 change, in Steering:** an audio Upload (`.ogg .oga .opus .webm .m4a .mp3 .wav`) is allowed only while the Capability is present. A Safari recording is named `.m4a`.
 - Its bytes must match its container:
   - `OggS` for Ogg;
-  - the EBML magic `1A 45 DF A3` for WebM;
-  - `ftyp` at offset 4 for MP4/M4A;
+  - the EBML magic `1A 45 DF A3` for WebM — the magic is all the sniff reads of one, so a WebM of video passes it and the engine's own decoding is the second gate;
+  - `ftyp` at offset 4 for MP4/M4A, and the major brand one of `M4A `, `isom`, `iso2`, `iso5`, `iso6`, `mp41`, `mp42` — the brands a recorder writes (Chromium's MediaRecorder muxer writes `isom`). An image brand (`heic`, `heix`, `avif`, `mif1`, `msf1`) or any other brand is not audio. A video file passes the gate and the engine reads its audio track, which is acceptable;
   - `ID3` or an MPEG frame sync for MP3;
   - `RIFF…WAVE` for WAV.
 - It is at most 10 MiB.
