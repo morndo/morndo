@@ -21,7 +21,11 @@ export class AnswerSession {
   asked = $state(false);
   askError = $state<string | null>(null);
 
-  constructor(item: DecisionItem) { this.apply(openSession(item)); }
+  // The last item `bind` took, outside the state: `live`'s proxy wraps a plain item's nested objects anew on every
+  // write, so they would never compare same, and the bind would keep rewriting the state its caller's effect reads.
+  #bound: DecisionItem | null = null;
+
+  constructor(item: DecisionItem) { this.apply(openSession(item)); this.#bound = item; }
 
   snapshot(): AnswerState {
     return {
@@ -43,8 +47,10 @@ export class AnswerSession {
   // Compare the version, not object identity: a state proxy is never === the item the list just passed.
   bind(live: DecisionItem, hold: boolean) {
     const follow = !hold && !this.holdingAnswer;
-    const same = this.live.version === live.version && this.live.status === live.status && this.live.briefVersion === live.briefVersion && this.live.answerable === live.answerable && this.live.decision === live.decision && this.live.notice === live.notice && this.shown.version === (follow ? live.version : this.shown.version);
+    const bound = this.#bound;
+    const same = bound !== null && bound.version === live.version && bound.status === live.status && bound.briefVersion === live.briefVersion && bound.answerable === live.answerable && bound.decision === live.decision && bound.notice === live.notice && this.shown.version === (follow ? live.version : this.shown.version);
     if (!same) {
+      this.#bound = live;
       this.live = live;
       if (follow) this.shown = live;
     }
