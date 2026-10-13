@@ -135,15 +135,8 @@
   $effect(() => {
     if (top?.kind === "decision" && session.refusal?.key === top.key && MAY_HAVE_GONE.has(session.refusal.code) && item?.status === "answered" && item.decision?.via === "here") session.confirmAnswered(top.key);
   });
-  // The passkey retry: the answer the refusal carries. A brief restated since then (its version moved on) is not sent.
   async function verifyAgain() {
-    const r = session.refusal;
-    const again = r?.retry;
-    if (top?.kind !== "decision" || !r || !again || r.code !== "step_up" || r.key !== top.key) return;
-    const live = feed.decisions.find(d => d.id === again.id)?.version ?? "";
-    if (live !== again.seen) return;
-    if (!(await verify())) return;
-    await session.retry(r.key, again.id, again.body, again.label, again.seen);
+    note = await session.retryStepUp(feed, verify);
   }
   // Queued in the outbox, or false with a note (the text stays in the box).
   async function reply(text: string, seen: string): Promise<boolean> {

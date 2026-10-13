@@ -85,6 +85,9 @@ export const OFFLINE_DECISION = "You're offline. A decision goes only while Morn
 export const STILL_OFFLINE = "Still offline. It goes when you try again online.";
 // The passkey check didn't finish. Catch-up's word is "Not answered" (§6.3: an answer goes as catch-up's do).
 export const PASSKEY_UNFINISHED = "Not answered: the passkey check didn't finish.";
+// A passkey confirm that cannot be sent, in the words the catch-up card and the phone sheet share.
+export const STEP_UP_CHANGED = "Not sent: the brief changed since that answer, so it was not sent.";
+export const STEP_UP_MISMATCH = "Not sent: this isn't the answer that passkey check was for.";
 
 // Where a sent answer stands, in one line: the phone's sheet and the desktop modal say it the same way.
 // "Answered on another device" only when this device did not send it. A send from here can still arrive

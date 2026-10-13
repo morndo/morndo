@@ -467,7 +467,45 @@ describe("the phone around the brief sheet", () => {
     await dialog.getByText("Alpha restated this brief.").waitFor({ timeout: 3_000 });
     const before = (await calls(tab)).length;
     await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
-    await tab.waitForTimeout(500);
+    await dialog.getByText("Not sent: the brief changed since that answer, so it was not sent.").waitFor({ timeout: 3_000 });
+    expect(await calls(tab)).toHaveLength(before);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("does not resend a passkey confirm after the sheet shows the restated brief", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true, passkeyOk);
+    await push(tab, [release]);
+    await queue(tab, [STEP_UP]);
+    await tab.locator("button.banner.you").click();
+    await tab.locator('[data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    await push(tab, [releaseRestated]);
+    await dialog.getByRole("button", { name: "Show the new version" }).click();
+    const before = (await calls(tab)).length;
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
+    await dialog.getByText("Not sent: the brief changed since that answer, so it was not sent.").waitFor({ timeout: 3_000 });
+    expect(await calls(tab)).toHaveLength(before);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("says why a card's passkey confirm does nothing after the brief changed", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true, passkeyOk);
+    await push(tab, [release]);
+    await queue(tab, [STEP_UP]);
+    await tab.locator("button.banner.you").click();
+    await tab.getByRole("button", { name: "Ship today" }).click();
+    await tab.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    await push(tab, [releaseRestated]);
+    const before = (await calls(tab)).length;
+    await tab.getByRole("button", { name: "Confirm with passkey and send" }).click();
+    await tab.getByRole("article").getByText("Not sent: the brief changed since that answer, so it was not sent.").waitFor({ timeout: 3_000 });
     expect(await calls(tab)).toHaveLength(before);
     expect(errors).toEqual([]);
     await context.close();

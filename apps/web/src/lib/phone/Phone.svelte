@@ -237,17 +237,8 @@
     if (!verifiedFresh && !(await verify())) { briefNote = PASSKEY_UNFINISHED; return; }
     await session.retry(r.key, r.retry.id, r.retry.body, r.retry.label, r.retry.seen, r.retry.requestId);
   }
-  // The passkey retry, from the sheet: the answer the refusal itself carries, with a new request id.
-  // A brief restated since that answer (the same stale check as starting one) is not sent again.
   async function verifySheetAgain() {
-    const r = briefRefusal;
-    const held = briefId ? sessions[briefId] : null;
-    if (!r?.retry || r.code !== "step_up" || !held || held.stale) return;
-    briefNote = null;
-    if (feed.status !== "live" || navigator.onLine === false) { briefNote = STILL_OFFLINE; return; }
-    if (!(await verify())) { briefNote = PASSKEY_UNFINISHED; return; }
-    const a = r.retry;
-    await session.retry(r.key, a.id, a.body, a.label, a.seen);
+    briefNote = await session.retryStepUp(feed, verify);
   }
   function go(t: Tab) {
     if (deciding) stopDeciding();
