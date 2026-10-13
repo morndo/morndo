@@ -2,11 +2,12 @@
 // flags and files. import.meta.main: https://nodejs.org/docs/latest-v24.x/api/esm.html#importmetamain
 // (added in v24.2.0, read 2026-10-13).
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, sep } from "node:path";
 import { parseArgs } from "node:util";
 import type { Channel, Platform } from "@morndo/domain";
 import { packTree, type TreeFile } from "./archive.ts";
+import { compileWorkspaces } from "./compile.ts";
 import { sha256Sums } from "./checksums.ts";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, type ArtifactInput } from "./manifest.ts";
@@ -39,8 +40,11 @@ function treeFiles(root: string): TreeFile[] {
     for (const name of readdirSync(dir).sort()) {
       const abs = join(dir, name);
       const rel = prefix ? `${prefix}/${name}` : name;
-      const st = statSync(abs);
-      if (st.isDirectory()) walk(abs, rel);
+      const st = lstatSync(abs);
+      if (st.isSymbolicLink()) {
+        const target = relative(dirname(abs), realpathSync(abs)).split(sep).join("/");
+        out.push({ path: rel, mode: "0555", link: target });
+      } else if (st.isDirectory()) walk(abs, rel);
       else if (st.isFile()) {
         const mode = rel.startsWith("bin/") || rel.startsWith("node/bin/") ? "0555" : "0444";
         out.push({ path: rel, bytes: readFileSync(abs), mode });
@@ -53,11 +57,11 @@ function treeFiles(root: string): TreeFile[] {
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
-  if (!command) throw new Error("usage: stage | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | sums | node-check");
+  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | sums | node-check");
   const { values, positionals } = parseArgs({
     args: rest,
     options: {
-      repo: { type: "string" }, node: { type: "string" }, dest: { type: "string" }, version: { type: "string" },
+      repo: { type: "string" }, node: { type: "string" }, dest: { type: "string" }, version: { type: "string" }, compiled: { type: "string" },
       root: { type: "string" }, out: { type: "string" }, mtime: { type: "string" },
       commit: { type: "string" }, "published-at": { type: "string" }, repository: { type: "string" },
       artifact: { type: "string", multiple: true }, files: { type: "string", multiple: true },
@@ -70,8 +74,14 @@ function main(argv: string[]): void {
     allowPositionals: true,
   });
   switch (command) {
+    case "compile":
+      compileWorkspaces(flag(values, "repo"), flag(values, "out"));
+      return;
     case "stage":
-      stageRelease({ repo: flag(values, "repo"), nodeDir: flag(values, "node"), dest: flag(values, "dest"), version: flag(values, "version") });
+      stageRelease({
+        repo: flag(values, "repo"), nodeDir: flag(values, "node"), dest: flag(values, "dest"), version: flag(values, "version"),
+        ...(typeof values.compiled === "string" ? { compiled: values.compiled } : {}),
+      });
       return;
     case "pack": {
       const mtime = Number(flag(values, "mtime"));

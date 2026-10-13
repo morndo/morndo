@@ -5,7 +5,9 @@
 // both extract it. Owner and group are 0. No name, no atime.
 import { gzipSync } from "node:zlib";
 
-export type TreeFile = { path: string; bytes: Uint8Array; mode: "0444" | "0555" };
+export type TreeFile =
+  | { path: string; mode: "0444" | "0555"; bytes: Uint8Array }
+  | { path: string; mode: "0555"; link: string };
 
 const BLOCK = 512;
 
@@ -15,6 +17,9 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
   const dirs = new Set<string>();
   for (const file of files) {
     assertTreePath(file.path);
+    if ("link" in file && (file.link.startsWith("/") || file.link.split("/").includes(""))) {
+      throw new Error(`refusing link target ${file.link}`);
+    }
     if (seen.has(file.path)) throw new Error(`duplicate path ${file.path}`);
     seen.add(file.path);
     const parts = file.path.split("/");
@@ -28,7 +33,7 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
   entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const chunks: Buffer[] = [];
   let pax = 0;
-  const emit = (path: string, mode: number, type: string, body: Uint8Array | null) => {
+  const emit = (path: string, mode: number, type: string, body: Uint8Array | null, link = "") => {
     const size = body?.length ?? 0;
     const split = splitUstar(path);
     if (!split) {
@@ -38,14 +43,15 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
       chunks.push(pad(Buffer.from(record)));
       const base = path.replace(/\/$/, "").split("/").pop() ?? "file";
       const name = type === "5" ? `${base.slice(-99)}/` : base.slice(-100);
-      chunks.push(header({ name, prefix: "", size, mtime: mtimeSec, mode, type }));
+      chunks.push(header({ name, prefix: "", size, mtime: mtimeSec, mode, type, link }));
     } else {
-      chunks.push(header({ name: split.name, prefix: split.prefix, size, mtime: mtimeSec, mode, type }));
+      chunks.push(header({ name: split.name, prefix: split.prefix, size, mtime: mtimeSec, mode, type, link }));
     }
     if (body && body.length > 0) chunks.push(pad(Buffer.from(body)));
   };
   for (const entry of entries) {
     if (entry.dir) emit(entry.path, 0o755, "5", null);
+    else if ("link" in entry.file) emit(entry.path, 0o755, "2", null, entry.file.link);
     else emit(entry.path, parseInt(entry.file.mode, 8), "0", Buffer.from(entry.file.bytes));
   }
   chunks.push(Buffer.alloc(BLOCK * 2));
@@ -83,7 +89,7 @@ function paxRecord(key: string, value: string): string {
   }
 }
 
-function header(p: { name: string; prefix: string; size: number; mtime: number; mode: number; type: string }): Buffer {
+function header(p: { name: string; prefix: string; size: number; mtime: number; mode: number; type: string; link?: string }): Buffer {
   const buf = Buffer.alloc(BLOCK, 0);
   writeField(buf, 0, 100, p.name);
   writeOctal(buf, 100, 8, p.mode);
@@ -93,6 +99,7 @@ function header(p: { name: string; prefix: string; size: number; mtime: number; 
   writeOctal(buf, 136, 12, p.mtime);
   buf.fill(0x20, 148, 156);
   buf.write(p.type, 156, 1, "ascii");
+  if (p.link) writeField(buf, 157, 100, p.link);
   buf.write("ustar\0", 257, 6, "binary");
   buf.write("00", 263, 2, "ascii");
   writeField(buf, 345, 155, p.prefix);

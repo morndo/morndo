@@ -114,9 +114,12 @@ jobs:
           fi
           npx vitest run --project=units
           npm run build
+          # Node will not strip types under node_modules (nodejs.org/docs/latest-v24.x/api/typescript.html,
+          # "Type stripping in dependencies", v24.21.0, read 2026-10-13). Compile while typescript is installed.
+          node scripts/release/main.ts compile --repo "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/compiled"
           npm prune --omit=dev
           mtime=$(git log -1 --format=%ct "$RELEASE_SHA")
-          node scripts/release/main.ts stage --repo "$GITHUB_WORKSPACE" --node "$RUNNER_TEMP/node" --dest "$RUNNER_TEMP/stage" --version "$VERSION"
+          node scripts/release/main.ts stage --repo "$GITHUB_WORKSPACE" --node "$RUNNER_TEMP/node" --dest "$RUNNER_TEMP/stage" --version "$VERSION" --compiled "$RUNNER_TEMP/compiled"
           ( cd "$RUNNER_TEMP/stage/app" && "$RUNNER_TEMP/node/bin/node" -e "require('better-sqlite3')(':memory:').close()" )
           for name in morndo morndo-fleet morndo-node morndo-job morndo-board morndo-keys; do
             "$RUNNER_TEMP/stage/bin/$name" --version

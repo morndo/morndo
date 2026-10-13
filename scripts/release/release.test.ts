@@ -5,7 +5,7 @@
 // its number and its expiry only.
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -242,6 +242,34 @@ describe("stage, launchers, node pin, notice", () => {
     const packedA = packTree(readStaged(destA), 1_700_000_000);
     const packedB = packTree(readStaged(destB), 1_700_000_000);
     expect(Buffer.from(packedA).equals(packedB)).toBe(true);
+  });
+
+  it("keeps an in-tree symlink and ships a workspace package as JavaScript", () => {
+    const repo = temp();
+    const nodeDir = temp();
+    mkdirSync(join(repo, "packages/domain/src"), { recursive: true });
+    mkdirSync(join(repo, "node_modules/@morndo"), { recursive: true });
+    mkdirSync(join(nodeDir, "bin"), { recursive: true });
+    mkdirSync(join(nodeDir, "lib"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0","workspaces":["packages/*"]}\n');
+    writeFileSync(join(repo, "package-lock.json"), '{"name":"morndo","lockfileVersion":3,"packages":{}}\n');
+    writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+    writeFileSync(join(repo, "packages/domain/package.json"), '{"name":"@morndo/domain","exports":{".":"./src/index.ts"}}\n');
+    writeFileSync(join(repo, "packages/domain/src/index.ts"), "export const n = 1;\n");
+    symlinkSync("../../packages/domain", join(repo, "node_modules/@morndo/domain"));
+    writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n");
+    writeFileSync(join(nodeDir, "lib/npm-cli.js"), "#!/bin/sh\necho npm\n");
+    symlinkSync("../lib/npm-cli.js", join(nodeDir, "bin/npm"));
+    const compiled = temp();
+    mkdirSync(join(compiled, "domain/src"), { recursive: true });
+    writeFileSync(join(compiled, "domain/package.json"), '{"name":"@morndo/domain","exports":{".":"./src/index.js"}}\n');
+    writeFileSync(join(compiled, "domain/src/index.js"), "export const n = 1;\n");
+    const dest = join(temp(), "out");
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", compiled });
+    expect(readlinkSync(join(dest, "node/bin/npm"))).toBe("../lib/npm-cli.js");
+    expect(lstatSync(join(dest, "app/node_modules/@morndo/domain")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/src/index.js"), "utf8")).toBe("export const n = 1;\n");
+    expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/package.json"), "utf8")).toContain("./src/index.js");
   });
 
   it("names the pinned Node 24 tarballs and notices a newer 24", () => {
