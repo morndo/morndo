@@ -130,6 +130,38 @@ describe("desktop brief review", () => {
     await tab.getByRole("dialog").getByRole("button", { name: "Check again" }).waitFor();
   }, 60_000);
 
+  it("a send from this modal stays this device's answer when via is elsewhere or missing", async () => {
+    await ready();
+    const card = tab.locator('[data-decision="d-1"]');
+    await card.getByRole("button", { name: "Approve option B: extend the in-house triage script" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: /B · Extend the triage script/ }).click();
+    await dialog.getByRole("button", { name: "Send answer" }).click();
+    await dialog.locator("p.stand").getByText("Sent. The manager gets it as your decision and acts on it.").waitFor();
+    const sent = structuredClone(ITEMS[0]) as unknown as { status: string; decision: { choice: { kind: string; key: string; label: string }; at: number; via?: string; endpointId: null; sessionId: null } };
+    sent.status = "answered";
+    sent.decision = { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW, via: "elsewhere", endpointId: null, sessionId: null };
+    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [sent, ITEMS[1], ITEMS[2]]);
+    const stand = dialog.locator("p.stand");
+    await stand.getByText("Sent. You chose Extend the triage script.").waitFor();
+    expect(await stand.getByText("Answered on another device").count()).toBe(0);
+    const row = tab.locator('[data-decision="d-1"]');
+    expect(await row.getByText("Answered on another device").count()).toBe(0);
+    await row.getByText("You chose").waitFor();
+    const again = structuredClone(sent) as unknown as { version: string; decision: { choice: { label: string }; via?: string } };
+    again.version = "v2";
+    again.decision.via = "elsewhere";
+    again.decision.choice.label = "Buy a hosted add-on";
+    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [again, ITEMS[1], ITEMS[2]]);
+    await stand.getByText("Answered on another device: “Buy a hosted add-on”.").waitFor();
+    await row.getByText("Answered on another device").waitFor();
+    const missing = structuredClone(sent);
+    delete missing.decision.via;
+    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [missing, ITEMS[1], ITEMS[2]]);
+    await stand.getByText("Sent. You chose Extend the triage script.").waitFor();
+    expect(await stand.getByText("Answered on another device").count()).toBe(0);
+  }, 60_000);
+
   it("a decision answered elsewhere leaves the modal without Send answer", async () => {
     await ready();
     const card = tab.locator('[data-decision="d-1"]');

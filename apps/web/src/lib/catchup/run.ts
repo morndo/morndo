@@ -48,7 +48,7 @@ export function current(run: Run): Card | null {
 // A run's entry for a card is the card's own key, or, when the card came round again in the same run, that key with
 // "~2", "~3"… (review of PR #7, finding 2).
 export const baseKey = (k: string) => k.replace(/~\d+$/, "");
-const latestEntry = (run: Run, key: string) => run.order.findLast(k => baseKey(k) === key);
+export const latestEntry = (run: Run, key: string) => run.order.findLast(k => baseKey(k) === key);
 
 // A card passed in this run comes round again when it qualifies with something new: an update whose agent spoke since
 // (a later last message); a decision asked again (a later ask), or open again after the board showed it closed.
@@ -141,6 +141,10 @@ export function dueAnswer(run: Run, now: number): { run: Run; send: NonNullable<
   if (now - a.commitAt > LATE_ANSWER_MS) return { run: { ...run, answering: null }, send: null, late: a };
   const sending = { ...a, sending: true };
   return { run: { ...run, answering: sending }, send: sending };
+}
+// Still waiting to send, or the send is in flight. Both effects that return to Today use this one check.
+export function inWindow(a: { sending: boolean; commitAt: number } | null | undefined, now: number): boolean {
+  return !!a && (a.sending || a.commitAt > now);
 }
 // Leaving catch-up (Back, another tab, the page hidden): an answer in its window goes now, as he left it.
 export function answerNow(run: Run, now: number): Run {

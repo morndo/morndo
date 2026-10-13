@@ -24,7 +24,8 @@ export type Action =
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
-const httpLink = (s: string | null) => (s && /^https?:\/\//i.test(s) ? s : null);
+// A link is only ever http(s): the sheet draws it for a brief-backed ask (its card hides More).
+export const httpLink = (s: string | null) => (s && /^https?:\/\//i.test(s) ? s : null);
 
 // "due 16:00", "due tomorrow"; once its time has passed (as Horizon's overdue: at or before now), "overdue since 08:00"
 // or "overdue since Sat", in words and not only in colour.

@@ -88,6 +88,20 @@ describe("a decision item's brief on the wire (§4.5)", () => {
     expect(d.brief?.blocking).toBe(false);
     expect(d.brief?.topic).toBe("Support inbox triage");
   });
+  it("an unknown, null, or absent via reads as absent, and the item stays", () => {
+    const decision = {
+      choice: { kind: "option", key: "b", label: "Extend the triage script" },
+      at: 1, via: "here", endpointId: null, sessionId: null,
+    };
+    const answered = { ...item, status: "answered", decision };
+    const api = read({ ...answered, decision: { ...decision, via: "api" } });
+    expect(api.id).toBe("d-1");
+    expect(api.decision?.via).toBeUndefined();
+    const none = read({ ...answered, decision: { ...decision, via: null } });
+    expect(none.decision?.via).toBeUndefined();
+    const { via: _via, ...absent } = decision;
+    expect(read({ ...answered, decision: absent }).decision?.via).toBeUndefined();
+  });
   it("the brief's own schema reads the hub's JSON as the domain type", () => {
     const r = z.safeParse(DecisionBriefSchema, brief);
     expect(r.success).toBe(true);

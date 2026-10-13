@@ -146,7 +146,8 @@ export const DecisionItemSchema = z.object({
       z.object({ kind: z.literal("words") }),
     ]),
     at: z.number(),
-    via: orElse(z.enum(["here", "elsewhere"]), "elsewhere"),
+    // A via this app doesn't know, or null, reads as absent. That is not "elsewhere", and it does not drop the item.
+    via: orElse(z.optional(z.enum(["here", "elsewhere"])), undefined),
     endpointId: z.nullable(z.pipe(text(), z.transform(s => s as EndpointId))),
     sessionId: z.nullable(z.pipe(text(), z.transform(s => s as SessionId))),
     // ADR-0010: a Decision for the manager waits in its inbox ("queued") until it reached the manager ("delivered").

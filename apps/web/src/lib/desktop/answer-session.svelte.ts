@@ -1,6 +1,7 @@
 // The answer the card and the brief both read. Kept per decision on the panel, so closing the brief does not drop an
 // answer that may have been typed.
 import { MAY_HAVE_GONE, endsDoubt } from "../catchup/answer.ts";
+import { rememberSend } from "../sent-here.ts";
 import {
   back, noteClosed, openSession, pick, settledElsewhere, showNew,
   type AnswerBody, type AnswerProblem, type AnswerState, type AskOutcome,
@@ -15,6 +16,9 @@ export class AnswerSession {
   error = $state<string | null>(null);
   again = $state<AnswerState["again"]>(null);
   sent = $state(false);
+  // A successful send that found the decision already settled somewhere else. The brief says it is no longer
+  // open. An answered brief this session did not just close still uses the standing line.
+  settledOut = $state(false);
   // Raw, not a deep proxy: the list's item compares by identity, and a field the old sameness list forgot
   // (inbox, asked again, blocking) is not left behind. Svelte 5.57 $state.raw (svelte.dev/docs/svelte/$state).
   shown = $state.raw<DecisionItem>(null as unknown as DecisionItem);
@@ -48,6 +52,7 @@ export class AnswerSession {
   // `sent` belongs to the version it was sent for. A re-ask (same id, new version) is a new question: a closed brief
   // follows it, and an open brief drops `sent` only once that version is shown.
   bind(live: DecisionItem, hold: boolean) {
+    if (live.status === "open") this.settledOut = false;
     if (this.sent && live.version !== this.shown.version && !hold && !this.#keepSent) this.sent = false;
     const follow = !hold && !this.holdingAnswer;
     if (this.live !== live) this.live = live;
@@ -67,7 +72,7 @@ export class AnswerSession {
   }
 
   pick(label: string, body: AnswerBody) { this.apply(pick(this.snapshot(), label, body)); }
-  showNew() { this.#keepSent = false; this.apply(showNew(this.snapshot(), this.live)); }
+  showNew() { this.#keepSent = false; this.settledOut = false; this.apply(showNew(this.snapshot(), this.live)); }
   back() { this.apply(back(this.snapshot())); }
   get stale() { return this.live.version !== this.shown.version; }
   get seen() { return this.shown.version; }
@@ -93,13 +98,16 @@ export class AnswerSession {
     const sentFor = this.seen;
     if (settledElsewhere(this.live)) {
       this.#keepSent = false;
+      this.settledOut = true;
       this.#settleClosed();
       return;
     }
+    this.settledOut = false;
     // A restate that landed during the request does not undo this: sent stays on the version that was posted.
     this.again = null;
     this.sent = true;
     this.#keepSent = this.live.version !== sentFor;
+    rememberSend(this.live.id, requestId, sentFor);
     this.mode = "idle";
     this.picked = null;
     this.words = "";
