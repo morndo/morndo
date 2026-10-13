@@ -89,6 +89,19 @@ describe("page commands", () => {
     expect(mem.store.policy.roles.find(item => item.role === "implement")?.override).toBe("follow");
   });
 
+  it("turns global auto on through the priority command and records the switch", async () => {
+    const mem = memory();
+    mem.catalog.rows = [preset()];
+    mem.vault.put("ref-a", "0123456789ab");
+    const connections = new ConnectionsService(mem.deps);
+    expect((await connections.addKey({ name: "key-a", vendor: "vendor-a", runtime: "runtime-a", ref: "ref-a", billing: "metered", budget: { kind: "capped", amount: 10 }, expiry: null }, who)).ok).toBe(true);
+    const bound = bindCommands(mem.deps);
+    const switched = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: true }, "hub");
+    expect(switched.ok).toBe(true);
+    expect(mem.store.policy.priority.auto).toBe(true);
+    expect(mem.store.policy.events.some(event => event.type === "AutoSwitched" && event.on)).toBe(true);
+  });
+
   it("checks the saved order and picks together, and names risk picks that no longer fit", async () => {
     const mem = memory();
     mem.catalog.rows = [preset()];

@@ -10,8 +10,8 @@ type Out = Result<void, Failure>;
 type Routing = Pick<RoutingService, "commitPriority" | "commitRole" | "reapply">;
 type Register = Pick<ConnectionsService, "revoke" | "turnOff" | "setBudget" | "setRepo">;
 
-export function applyPriority(routing: Routing, body: { mode: Mode; order: readonly string[] }, command: string): Out {
-  return routing.commitPriority(body.mode, [...body.order], command);
+export function applyPriority(routing: Routing, body: { mode: Mode; order: readonly string[]; auto?: boolean | undefined }, command: string): Out {
+  return routing.commitPriority(body.mode, [...body.order], command, body.auto);
 }
 
 export function applyRole(routing: Routing, body: { role: string; override: Override; order: readonly string[]; picks: readonly string[]; riskPicks?: readonly string[]; action: "save" | "reapply" | "keep-hand" }, command: string): Out {

@@ -14,6 +14,8 @@
     "defaultPicks": { "*": "sonnet-5.5@high" },
     "idPatterns": { "sonnet-5.5": "claude-sonnet-5-5(-[0-9]{8})?" },
     "isolation": "rules",
+    "families": [],
+    "class": [{"pattern":"*opus*","class":"flagship"},{"pattern":"*fable*","class":"flagship"},{"pattern":"*sonnet*","class":"everyday"},{"pattern":"*haiku*","class":"fast"}],
     "terms": {
       "revision": "2025-06-17",
       "summary": "May not train models on Customer Content from Services.",
@@ -34,6 +36,8 @@
     "balance": null,
     "defaultPicks": { "*": "gpt-6-astra@high" },
     "isolation": "rules",
+    "families": [],
+    "class": [],
     "terms": {
       "revision": "2023-03-01",
       "summary": "API data is not used to train or improve OpenAI models since 2023-03-01; abuse logs up to 30 days.",
@@ -57,6 +61,8 @@
     "balance": { "endpoint": "https://api.deepseek.com/user/balance", "field": "balance_infos[].total_balance" },
     "defaultPicks": { "plan": "deepseek-v4-pro@max", "*": "deepseek-v4-pro@high" },
     "isolation": "os",
+    "families": [],
+    "class": [],
     "terms": {
       "revision": "2026-04-29",
       "summary": "Stored in the PRC; may be used for training; opt-out with no API switch.",
@@ -77,6 +83,8 @@
     "balance": null,
     "defaultPicks": { "*": "kimi-k3" },
     "isolation": "os",
+    "families": [],
+    "class": [],
     "terms": {
       "revision": "2026-10-10",
       "summary": "May train unless otherwise expressly agreed in writing.",
@@ -100,6 +108,8 @@
     "balance": null,
     "defaultPicks": { "implement": "glm-5.3@max", "*": "glm-5.3@high" },
     "isolation": "os",
+    "families": [],
+    "class": [{"pattern":"glm-5.3-flash","class":"fast"},{"pattern":"glm-5.3","class":"flagship"}],
     "terms": {
       "revision": "2025-09-29",
       "summary": "API input is processed in real time and not saved on Z.ai's servers.",
@@ -121,6 +131,8 @@
     "defaultPicks": { "*": "openrouter/auto" },
     "idPatterns": { "openrouter/auto": "*" },
     "isolation": "os",
+    "families": [{"pattern":"openrouter/auto","family":"unknown"},{"pattern":"anthropic/*","family":"anthropic"},{"pattern":"openai/*","family":"openai"}],
+    "class": [{"pattern":"openrouter/auto","class":"unknown"},{"pattern":"*opus*","class":"flagship"},{"pattern":"*fable*","class":"flagship"},{"pattern":"*sonnet*","class":"everyday"},{"pattern":"*haiku*","class":"fast"}],
     "terms": {
       "revision": "2026-10-10",
       "summary": "Keeps no prompts unless you opt in; zero data retention per request or account-wide.",
@@ -142,6 +154,8 @@
     "defaultPicks": { "*": "ask" },
     "idPatterns": { "ask": "*" },
     "isolation": "os",
+    "families": [],
+    "class": [],
     "terms": {
       "revision": "unknown",
       "summary": "Unknown until the principal names the endpoint.",
@@ -163,6 +177,8 @@
     "defaultPicks": { "*": "ask" },
     "idPatterns": { "ask": "*" },
     "isolation": "os",
+    "families": [],
+    "class": [],
     "terms": {
       "revision": "unknown",
       "summary": "Unknown until the principal names the endpoint.",
@@ -184,6 +200,8 @@
     "defaultPicks": { "*": "sonnet-5.5@high" },
     "idPatterns": { "sonnet-5.5": "claude-sonnet-5-5(-[0-9]{8})?" },
     "isolation": "rules",
+    "families": [],
+    "class": [{"pattern":"*opus*","class":"flagship"},{"pattern":"*fable*","class":"flagship"},{"pattern":"*sonnet*","class":"everyday"},{"pattern":"*haiku*","class":"fast"}],
     "terms": {
       "revision": "2026-10-10",
       "summary": "The vendor's terms for the subscription plan.",
@@ -204,6 +222,8 @@
     "balance": null,
     "defaultPicks": { "*": "gpt-6-astra@high" },
     "isolation": "none",
+    "families": [],
+    "class": [],
     "terms": {
       "revision": "2026-10-10",
       "summary": "The vendor's terms for the subscription plan. Isolation stays none until the runtime's read-deny is verified.",
@@ -224,6 +244,8 @@
     "balance": null,
     "defaultPicks": { "*": "auto" },
     "isolation": "none",
+    "families": [{"pattern":"claude-*","family":"anthropic"},{"pattern":"gpt-*","family":"openai"},{"pattern":"auto","family":"unknown"}],
+    "class": [{"pattern":"*opus*","class":"flagship"},{"pattern":"*fable*","class":"flagship"},{"pattern":"*sonnet*","class":"everyday"},{"pattern":"*haiku*","class":"fast"},{"pattern":"auto","class":"unknown"}],
     "terms": {
       "revision": "2026-10-10",
       "summary": "Privacy Mode: code is not used for training. Off: codebase and prompts may be stored and used to train.",
@@ -244,6 +266,8 @@
     "balance": null,
     "defaultPicks": { "*": "chatgpt" },
     "isolation": null,
+    "families": [],
+    "class": [],
     "terms": {
       "revision": "unknown",
       "summary": "Unknown until a source on this provider's own site is recorded.",
@@ -264,6 +288,8 @@
     "balance": null,
     "defaultPicks": { "*": "auto" },
     "isolation": null,
+    "families": [{"pattern":"claude-*","family":"anthropic"},{"pattern":"gpt-*","family":"openai"},{"pattern":"auto","family":"unknown"}],
+    "class": [{"pattern":"*opus*","class":"flagship"},{"pattern":"*fable*","class":"flagship"},{"pattern":"*sonnet*","class":"everyday"},{"pattern":"*haiku*","class":"fast"},{"pattern":"auto","class":"unknown"}],
     "terms": {
       "revision": "2026-10-10",
       "summary": "Privacy Mode: code is not used for training. Off: codebase and prompts may be stored and used to train.",
@@ -284,6 +310,8 @@
     "balance": null,
     "defaultPicks": { "*": "agy" },
     "isolation": null,
+    "families": [],
+    "class": [],
     "terms": {
       "revision": "2026-10-10",
       "summary": "Records interactions and may use them to improve products unless that setting is changed.",

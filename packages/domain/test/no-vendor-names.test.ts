@@ -22,6 +22,7 @@ function sources(): string[] {
   const files = [
     join(ROOT, "packages/domain/src/connections.ts"),
     join(ROOT, "packages/domain/src/routing.ts"),
+    join(ROOT, "packages/domain/src/auto-routing.ts"),
     join(ROOT, "packages/domain/src/secrets.ts"),
   ];
   const app = join(ROOT, "apps/connections/src/application");

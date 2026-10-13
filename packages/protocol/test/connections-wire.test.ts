@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  CONNECTION_WORDS, ConnectionRow, ConnectionsPage, ConnectionView, LeaseView, NarrowCommand, PolicyView, PriorityCommand,
-  RevokeCommand, RoleCommand, VendorCatalog, VendorPreset, commandNeedsStepUp,
+  AutoPickView, CONNECTION_WORDS, ConnectionRow, ConnectionsPage, ConnectionView, LeaseView, NarrowCommand, PolicyView, PriorityCommand,
+  RevokeCommand, RoleCommand, RouteAnswer, VendorCatalog, VendorPreset, commandNeedsStepUp,
 } from "../src/index.ts";
 
 const BANNED = /secret|value|plaintext|apiKey|token/i;
@@ -17,7 +17,7 @@ const CONNECTION_KEYS = [
   "billing", "budget", "configDir", "custody", "expiry", "fingerprint", "isolation", "kind", "name", "ref", "repo", "runtime", "status", "termsRevision", "vendor",
 ];
 const LEASE_KEYS = ["authority", "connection", "entry", "id", "isolation", "probe", "reservation", "role", "runtime", "start", "workspace"];
-const POLICY_KEYS = ["mode", "order", "roles"];
+const POLICY_KEYS = ["auto", "mode", "order", "roles"];
 
 describe("connection wire", () => {
   it("schema keys match the allowlist, and a banned name fails even if listed", () => {
@@ -54,9 +54,29 @@ describe("connection wire", () => {
     expect(Object.keys(CONNECTION_WORDS.sections)).toEqual(["connections", "priority", "roles"]);
     expect(CONNECTION_WORDS.modes["keys-only"]).toBe("API keys only");
   });
+
+  it("names the Auto switch, and a policy carries the switch on the priority and on each role", () => {
+    expect(CONNECTION_WORDS.auto.label).toBe("Auto: Morndo picks per task, among each Role's chain, and says why");
+    expect(CONNECTION_WORDS.auto.fallbackOrder).toBe("Fallback order");
+    expect(CONNECTION_WORDS.auto.on).toBe("On");
+    expect(CONNECTION_WORDS.auto.off).toBe("Off");
+    expect(CONNECTION_WORDS.auto.hand).toBe("Hand: Auto doesn't route this Role. Its chain runs as you set it.");
+    expect(CONNECTION_WORDS.auto.drifted).toBe("Changed outside Morndo: Auto waits until you re-apply or keep it as hand.");
+    const policy = {
+      auto: true, mode: "keys-only" as const, order: ["key-a"],
+      roles: [{
+        role: "implement", override: "follow" as const, mode: null, order: ["key-a"],
+        picks: ["key-a:m"], riskPicks: null, drifted: false, auto: true,
+      }],
+    };
+    expect(PolicyView.safeParse(policy).success).toBe(true);
+    const { auto, ...without } = policy;
+    expect(auto).toBe(true);
+    expect(PolicyView.safeParse(without).success).toBe(false);
+  });
 });
 
-const PAGE_KEYS = ["alerts", "catalog", "connections", "mode", "order", "roles", "version"];
+const PAGE_KEYS = ["alerts", "auto", "catalog", "connections", "mode", "order", "roles", "version"];
 const ROW_KEYS = ["availability", "budgetLevel", "budgetPercent", "expiry", "kind", "name", "runtime", "spendSource", "usageFiveHour", "usageSevenDay", "vendor"];
 const COMMANDS = [PriorityCommand, RoleCommand, RevokeCommand, NarrowCommand, ConnectionsPage, ConnectionRow];
 
@@ -94,6 +114,26 @@ describe("the settings page allowlist", () => {
     expect(commandNeedsStepUp("role")).toBe(true);
     expect(commandNeedsStepUp("revoke")).toBe(true);
     expect(commandNeedsStepUp("narrow")).toBe(false);
+    expect(PriorityCommand.safeParse({ ...priority, auto: true }).success).toBe(true);
+    expect(ConnectionsPage.safeParse({
+      ...page,
+      auto: { on: true, taskCeiling: 3, saveLine: 0.5, dailyCaps: { "key-a": 10 }, reserves: { implement: 5 } },
+    }).success).toBe(true);
+  });
+
+  it("a pick view and a route answer refuse a title and a long code", () => {
+    const pick = {
+      route: "rt-118", tier: "routine" as const, pick: "key-a:m@high",
+      chain: ["key-a:m@high", "sub-a:m@high"], stage: "rules" as const, rulesPick: "key-a:m@high",
+      reasons: [{ code: "cheapest", stage: "rules" as const }], excluded: [], ranked: ["key-a:m@high"],
+    };
+    expect(AutoPickView.safeParse(pick).success).toBe(true);
+    expect(AutoPickView.safeParse({ ...pick, title: "docs: explain the retry flag" }).success).toBe(false);
+    expect(AutoPickView.safeParse({ ...pick, reasons: [{ code: "x".repeat(65), stage: "rules" }] }).success).toBe(false);
+    expect(AutoPickView.safeParse({ ...pick, reasons: [{ code: "docs: explain the retry flag", stage: "rules" }] }).success).toBe(false);
+    expect(RouteAnswer.safeParse({ route: "rt-118", auto: true, chain: ["key-a:m@high"] }).success).toBe(true);
+    expect(RouteAnswer.safeParse({ route: "rt-118", auto: false, reason: "hand", chain: ["key-a:m@high"] }).success).toBe(true);
+    expect(RouteAnswer.safeParse({ route: "rt-118", auto: true, chain: ["key-a:m@high"], title: "MARKER" }).success).toBe(false);
   });
 });
 
@@ -153,6 +193,30 @@ describe("vendor catalog", () => {
       if (preset.terms.revision === "unknown") expect(preset.terms.sources, preset.id).toEqual([]);
       else expect(preset.terms.sources[0], preset.id).toMatch(/^https:\/\//);
       expect(preset.isolation === null, preset.id).toBe(preset.custody === "engine-layer");
+      if (!preset.families || !preset.class) throw new Error(preset.id);
+      expect(preset.families.some(row => row.pattern === "*"), preset.id).toBe(false);
     }
+    const cursorFamilies = [
+      { pattern: "claude-*", family: "anthropic" },
+      { pattern: "gpt-*", family: "openai" },
+      { pattern: "auto", family: "unknown" },
+    ];
+    const modelClass = [
+      { pattern: "*opus*", class: "flagship" },
+      { pattern: "*fable*", class: "flagship" },
+      { pattern: "*sonnet*", class: "everyday" },
+      { pattern: "*haiku*", class: "fast" },
+    ];
+    expect(cursor?.families).toEqual(cursorFamilies);
+    expect(cloud?.families).toEqual(cursorFamilies);
+    expect(cursor?.class).toEqual([...modelClass, { pattern: "auto", class: "unknown" }]);
+    expect(cloud?.class).toEqual(cursor?.class);
+    expect(catalog.find(p => p.id === "openrouter")?.families).toEqual([
+      { pattern: "openrouter/auto", family: "unknown" },
+      { pattern: "anthropic/*", family: "anthropic" },
+      { pattern: "openai/*", family: "openai" },
+    ]);
+    expect(catalog.find(p => p.id === "anthropic")?.class).toEqual(modelClass);
+    expect(catalog.find(p => p.id === "claude")?.class).toEqual(modelClass);
   });
 });
