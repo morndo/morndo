@@ -818,21 +818,28 @@ describe("child supervisor", () => {
     expect(store.get("job-junk")?.state).not.toBe("starting");
   });
 
+  // Keeps writing, and stops itself at 256 KiB, under the 1 MiB per-job cap this test sets. The pool budget is 32.
+  const POOL_WRITER = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); let n = 0; setInterval(() => { if (n >= 262144) return; require('node:fs').writeSync(1, b); n += b.length; }, 20);";
+
   it("leaves a job running when the pool is full and the job is under its own cap", async () => {
     const { store, start, sup, dir, notices } = rig(undefined, undefined, 1_000_000, undefined, undefined, 32);
     const marker = join(dir, "pid");
     await start({
       id: "job-pool",
-      command: [process.execPath, "-e", "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); require('node:fs').writeSync(1, Buffer.alloc(64, 97)); setInterval(() => {}, 1000);", marker],
+      command: [process.execPath, "-e", POOL_WRITER, marker],
     });
     expect(await until(() => existsSync(marker))).toBe(true);
     const pid = Number(readFileSync(marker, "utf8"));
     const logPath = join(dir, "job-pool.log");
+    let held = 0;
     expect(await until(async () => {
-      if (!existsSync(logPath) || statSync(logPath).size < 64) return false;
       await sup.sweep();
       const job = store.get("job-pool");
-      return job?.state === "running" && job.outcome === null;
+      if (!existsSync(logPath) || job?.state !== "running" || job.outcome !== null) return false;
+      const size = statSync(logPath).size;
+      if (size < 32 || size >= 1_000_000) return false;
+      if (held === 0) { held = size; return false; }
+      return size > held;
     }, 8000)).toBe(true);
     expect(store.get("job-pool")).toMatchObject({ state: "running", outcome: null });
     expect(existsSync(join(dir, "job-pool.cap"))).toBe(false);
@@ -973,8 +980,7 @@ describe("the log cap rule on the helper backend", () => {
 
   it("keeps the code of a command that ends within the grace", async () => {
     const { sup, store, start } = rig(undefined, undefined, 8);
-    // Exactly the cap: one write. A larger write can be seen twice, and the second look is growth, which stops the command.
-    const script = `require("node:fs").writeSync(1, Buffer.alloc(8, 97)); setTimeout(() => process.exit(1), 150);`;
+    const script = `${FILLED} setTimeout(() => process.exit(1), 150);`;
     expect((await start({ id: "job-cap-grace", command: [process.execPath, "-e", script] })).state).toBe("running");
     expect(await ended(sup, store, "job-cap-grace")).toBe(true);
     expect(store.get("job-cap-grace")).toMatchObject({ outcome: "exited", exitCode: 1 });
@@ -1010,7 +1016,7 @@ describe("the log cap rule on the helper backend", () => {
 
   it("keeps the code across a restart: a .cap on disk does not override what the helper wrote", async () => {
     const { sup, store, dir, home, paths, start, slot } = rig(undefined, undefined, 8);
-    const script = `require("node:fs").writeSync(1, Buffer.alloc(8, 97)); setTimeout(() => process.exit(2), 400);`;
+    const script = `${FILLED} setTimeout(() => process.exit(2), 400);`;
     expect((await start({ id: "job-cap-restart", command: [process.execPath, "-e", script] })).state).toBe("running");
     expect(await until(async () => { await sup.sweep(); return existsSync(join(dir, "job-cap-restart.cap")); }, 8000)).toBe(true);
     sup.close();

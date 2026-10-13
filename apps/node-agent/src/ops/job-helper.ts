@@ -129,17 +129,15 @@ async function main(): Promise<void> {
       process.exit(0);
       return;
     }
+    // The note is read before the size, and only for the first sighting. The supervisor writes it after the
+    // log is already at the cap, so this stat includes those bytes. One stat per look after that.
+    let noted = false;
     let size = 0;
     if (spec.logBytes > 0) {
+      if (sight === null) noted = existsSync(capRequest(spec.exitPath));
       try { size = statSync(spec.logPath).size; } catch { /* a missing log is not over the cap */ }
     }
     // The grace is timed on the monotonic clock, so a wall-clock step neither stretches nor ends it.
-    // A .cap note can appear between the stat and this check. Re-stat so the sighting size is the log
-    // the note was about, not a stale size from before the write that crossed the cap.
-    const noted = existsSync(capRequest(spec.exitPath));
-    if (noted && spec.logBytes > 0) {
-      try { size = statSync(spec.logPath).size; } catch { /* keep the size already read */ }
-    }
     const step = capStep(sight, size, spec.logBytes, performance.now(), noted);
     if (step.kind === "under") return;
     if (step.kind === "grace" && !childExited) { sight = step.sight; return; }
