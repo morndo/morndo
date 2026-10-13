@@ -84,6 +84,11 @@ describe("transcription guard reads", () => {
     expect(win.memAvailableMiB).toBe(512);
     expect(guardNow({ memAvailableMiB: 1024 }, () => freebsd)).toBe("off");
     expect(guardNow({ memAvailableMiB: 1024 }, () => win)).toBe("memory");
+    // Total memory does not fall as the machine gets busier, so a 16 GiB box stays under a 2048 MiB line.
+    const busy = readMachine({ memAvailableMiB: 2048 }, {
+      platform: "freebsd", vmStat, totalmem: () => 16 * 1024 * 1024 * 1024,
+    });
+    expect(guardNow({ memAvailableMiB: 2048 }, () => busy)).toBe("off");
   });
 
   it("reads only the configured line on linux, so a load-only guard never touches meminfo", () => {

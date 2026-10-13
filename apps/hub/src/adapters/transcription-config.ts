@@ -51,7 +51,8 @@ export function loadTranscriptionSettings(dataDir: string, warn: (line: string) 
 // macOS has no MemAvailable. vm_stat(1) prints the page size and the page counts (Pages free, Pages inactive,
 // Pages speculative; https://keith.github.io/xcode-man-pages/vm_stat.1.html, the macOS man page, read 2026-10-13).
 // Those three are the pages the machine can give back. Their sum times the page size is what the guard compares.
-// Only macOS reads vm_stat. Every other platform that is not Linux keeps total memory, the figure it had before.
+// Only macOS reads vm_stat. Every other platform that is not Linux uses total memory. That figure does not fall
+// as the machine gets busier, so a memory line holds starts only when the machine's total is under the line.
 // Only the configured lines are read, so a load-only guard never fails on an unreadable meminfo, and a read that
 // throws is the configured line being unanswerable: guardNow answers "unknown" for it.
 export function readMachine(
