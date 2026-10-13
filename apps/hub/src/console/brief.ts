@@ -3,7 +3,7 @@
 // `startup|resume|clear|compact`), its output is put back into the orchestrator's context each time
 // (https://code.claude.com/docs/en/hooks, SessionStart, read 2026-10-13). In order:
 // - the lanes: each one's last turn (status, how long ago), its deadline or what it waits on, stale ones with their stall
-//   count, and lanes with no turn seen in the last day;
+//   count; then, by name only, lanes closed since their last turn and lanes with no turn seen in the last day;
 // - deliveries not yet taken (queued, typed or held), with why they wait;
 // - the last day's alerts.
 // Pure: the fleet's answers in, lines out.
@@ -37,14 +37,23 @@ function laneLine(w: LaneWatchEntry, now: number): string {
 
 export function briefLines(b: BriefInput, now: number): string[] {
   const lines = [`Fleet brief, ${new Date(now).toISOString()} (morndo lanes brief)`];
-  // Stale first, then the ones with a deadline, then the rest; newest first within each.
+  // Stale first, then the ones with a deadline, then the rest; newest first within each. A watched lane whose window is
+  // gone (no lane of that name on its node) is only named: the watch keeps a reported turn for a day, but there is
+  // nothing left to re-plan.
   const rank = (w: LaneWatchEntry) => (w.stale ? 0 : w.deadline !== null ? 1 : 2);
-  const watched = [...b.watch].sort((x, y) => rank(x) - rank(y) || y.at - x.at);
-  const seen = new Set(watched.map(w => `${w.node}\u0000${w.window}`));
-  const unseen = b.lanes.filter(l => !seen.has(`${l.node}\u0000${l.name}`));
+  const keyOf = (node: string, name: string) => `${node}\u0000${name}`;
+  const present = new Set(b.lanes.map(l => keyOf(l.node, l.name)));
+  const watched = b.watch.filter(w => present.has(keyOf(w.node, w.window))).sort((x, y) => rank(x) - rank(y) || y.at - x.at);
+  const closed = b.watch.filter(w => !present.has(keyOf(w.node, w.window))).sort((x, y) => y.at - x.at);
+  const seen = new Set(b.watch.map(w => keyOf(w.node, w.window)));
+  const unseen = b.lanes.filter(l => !seen.has(keyOf(l.node, l.name)));
   lines.push(`Lanes (${b.lanes.length}; ${watched.filter(w => w.stale).length} stale):`);
   const shown = watched.slice(0, LANES_MAX).map(w => laneLine(w, now));
   lines.push(...shown, ...more(watched.length - shown.length, "lanes"));
+  if (closed.length) {
+    const names = closed.map(w => `${w.window}@${w.node}`);
+    lines.push(`  closed since their last turn: ${names.slice(0, 12).join(", ")}${names.length > 12 ? `, … ${names.length - 12} more` : ""}`);
+  }
   if (unseen.length) {
     const names = unseen.map(l => `${l.name}@${l.node}${l.workerId === null ? " (offline)" : ""}${l.conflict ? " (name conflict)" : ""}`);
     lines.push(`  no turn seen in the last day: ${names.slice(0, 12).join(", ")}${names.length > 12 ? `, … ${names.length - 12} more` : ""}`);

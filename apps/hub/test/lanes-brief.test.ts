@@ -42,6 +42,23 @@ describe("the brief", () => {
     ]);
   });
 
+  it("names lanes closed since their last turn once, out of the stale count, never to re-plan", () => {
+    const lines = briefLines({
+      lanes: [lane("api")],
+      watch: [
+        entry("api", { stale: true, stalls: 1, deadline: NOW - MIN, reason: "no_status", at: NOW - 20 * MIN }),
+        entry("gone", { stale: true, stalls: 4, deadline: NOW - MIN, reason: "no_status", at: NOW - 180 * MIN }),
+        entry("old", { status: "done", at: NOW - 60 * MIN }),
+      ],
+      deliveries: [], alerts: [],
+    }, NOW);
+    expect(lines.slice(1, 4)).toEqual([
+      "Lanes (1; 1 stale):",
+      "  api@pc · no status · 20 min ago · STALE",
+      "  closed since their last turn: old@pc, gone@pc",
+    ]);
+  });
+
   it("names the lane of a delivery sent to a worker ID (the lane watch's nudge), else shows the worker ID", () => {
     const lines = briefLines({
       lanes: [lane("api")], watch: [],
