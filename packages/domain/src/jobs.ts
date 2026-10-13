@@ -3,13 +3,13 @@
 // reads nothing: no supervisor, no file, no socket, no clock. Callers pass `at` and `now`.
 import { err, ok, type Result } from "./shared.ts";
 import { COMMENT_MAX, LANE_NAME, parseTaskKey, type TaskKey } from "./board.ts";
+import { queueDecision, type QueueGuard, type QueueReason } from "./queue.ts";
 
 export const JOB_OUTCOMES = ["exited", "timed_out", "cancelled", "lost", "refused"] as const;
 export type JobOutcome = (typeof JOB_OUTCOMES)[number];
 export const JOB_STATES = ["queued", "starting", "running", ...JOB_OUTCOMES] as const;
 export type JobState = (typeof JOB_STATES)[number];
-export const QUEUE_REASONS = ["class", "load", "memory", "guard_unknown"] as const;
-export type QueueReason = (typeof QUEUE_REASONS)[number];
+export { QUEUE_REASONS, type QueueReason } from "./queue.ts";
 export const NOTICE_STATES = ["none", "pending", "queued", "typed", "held", "delivered", "uncertain", "given_up", "commented"] as const;
 export type NoticeState = (typeof NOTICE_STATES)[number];
 
@@ -109,7 +109,8 @@ export type FinishEvent =
 
 export type FinishProblem = "not_running" | "already_terminal" | "bad_exit";
 
-export type Guard = "off" | "load" | "memory" | "unknown";
+// The node policy's optional load and memory line, as the shared queue decision takes it (queue.ts).
+export type Guard = QueueGuard;
 export type Schedule = { jobs: Job[]; refused: readonly string[] };
 
 export type TokenCache = { lane: string; hash: string; checkedAt: number };
@@ -263,9 +264,9 @@ const ownLimit = (limits: Readonly<Record<string, number>>, jobClass: string): n
   return typeof limit === "number" && Number.isFinite(limit) ? limit : null;
 };
 
-// J5: each class runs at most its limit, in the order accepted. A free slot is `starting`, with no start time, until
-// work has begun. A full class queues with `class`. A guard queues with its own reason and
-// does not stop a job that is already running. `off` means the guard is not configured. A class that is not an own
+// J5: each class runs at most its limit, in the order accepted. The order, the limit and the guard reasons are the
+// shared queue decision (queue.ts), which Transcription calls too; a free slot is `starting`, with no start time,
+// until work has begun. `off` means the guard is not configured. A class that is not an own
 // property of the policy is terminal `refused`, with a notice. It is not left queued.
 export function schedule(jobs: readonly Job[], limits: Readonly<Record<string, number>>, guard: Guard): Schedule {
   const queuedOf = new Map<string, Job[]>();
@@ -292,18 +293,13 @@ export function schedule(jobs: readonly Job[], limits: Readonly<Record<string, n
       }
       continue;
     }
-    let slots = Math.max(0, limit - (runningOf.get(jobClass) ?? 0));
-    const blocking = guard === "load" || guard === "memory" || guard === "unknown";
-    const reason: QueueReason = slots === 0 ? "class" : guard === "unknown" ? "guard_unknown" : guard === "off" ? "class" : guard;
-    queued.sort((a, b) => a.acceptedAt - b.acceptedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
-    let position = 1;
+    const slots = queueDecision(queued.map(job => ({ key: job.id, acceptedAt: job.acceptedAt })), runningOf.get(jobClass) ?? 0, limit, guard);
     for (const job of queued) {
-      if (slots > 0 && !blocking) {
-        slots -= 1;
-        updates.set(job.id, { ...job, state: "starting", position: null, reason: null, startedAt: null, endedAt: null });
-      } else {
-        updates.set(job.id, { ...job, position: position++, reason });
-      }
+      const slot = slots.get(job.id);
+      if (!slot) continue;
+      updates.set(job.id, slot.start
+        ? { ...job, state: "starting", position: null, reason: null, startedAt: null, endedAt: null }
+        : { ...job, position: slot.position, reason: slot.reason });
     }
   }
   return { jobs: jobs.map(job => updates.get(job.id) ?? job), refused };

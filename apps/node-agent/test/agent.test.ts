@@ -47,7 +47,7 @@ describe("over the connection", () => {
     let stopping: Promise<void> | null = null;
     stops.push(() => { stopping ??= agent.stop(); return stopping; });
     await fleet.waitFor(m => m.t === "ev.inventory");
-    const started = Date.now();
+    const started = performance.now();
     stopping = agent.stop();
     fleet.send({
       t: "req", id: "late", op: "pane.send", timeoutMs: 5000, key: "hub:late",
@@ -55,7 +55,7 @@ describe("over the connection", () => {
     });
     expect(await fleet.waitFor(m => m.t === "res" && m.id === "late", 2000)).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
     await stopping;
-    expect(Date.now() - started).toBeLessThan(8000);
+    expect(performance.now() - started).toBeLessThan(8000);
     stuck();
   });
 

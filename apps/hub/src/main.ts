@@ -24,6 +24,7 @@ import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
 import { EscalationService, managerOf } from "./application/escalation-service.ts";
+import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { ManagerQueue } from "./application/manager-queue.ts";
 import { fleetDeliveries } from "./adapters/fleet-deliveries.ts";
@@ -164,6 +165,7 @@ switch (cmd) {
     const steering = new SteeringService(store, typist, Date.now, () => access.policy(), inbox, id => observation.waitingOn(id),
       id => observation.nameOf(id), ports.uploads, ports.sendStatus, queue ? { queue, isManager: id => id === managerPane() } : null,
       () => managerPane() ?? null, config.managerWindow);
+    const filed: { briefs: BriefService | null } = { briefs: null };
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -176,7 +178,10 @@ switch (cmd) {
       // An answer in doubt is settled as a send is, with its node (op.status; final review C1).
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
       queue,
+      briefs: () => filed.briefs?.sightings() ?? [],
     });
+    const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
+    filed.briefs = briefs;
     if (queue) {
       // Off: what is still queued is cancelled here, before any answer (the hub types directly once it serves). On:
       // nothing has to come first; the sticky check and the first round run while the hub serves (review #8).
@@ -221,7 +226,7 @@ switch (cmd) {
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
       push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
-      updates: { holdPath: holdFile(process.env.HOME || homedir()) },
+      briefs, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
     });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
     // Old pairing tokens and long-ended sessions, on start and daily; never the audit or the decisions (A8).

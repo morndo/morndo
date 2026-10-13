@@ -2,7 +2,7 @@
 // child supervisor. These rows never leave a morndo-job unit on the live user manager.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
@@ -29,8 +29,8 @@ const showValue = (unit: string, prop: string): string =>
 
 // Stop and reset one unit this drill created. Never a glob: other lanes run real morndo-job units on this user manager.
 function releaseUnit(unit: string): void {
-  const end = Date.now() + 8_000;
-  while (Date.now() < end) {
+  const end = performance.now() + 8_000;
+  while (performance.now() < end) {
     if (showValue(unit, "LoadState") === "not-found") return;
     try { execFileSync("systemctl", ["--user", "reset-failed", unit], { timeout: 10_000, stdio: "ignore" }); } catch { /* not failed */ }
     try { execFileSync("systemctl", ["--user", "stop", unit], { timeout: 20_000, stdio: "ignore" }); } catch { /* already gone */ }
@@ -59,9 +59,9 @@ function openDrill(): { slice: string; close: () => void } {
   const child: ChildProcess = spawn("systemd-run", [
     "--user", "--scope", "--collect", "--unit", name, "--slice", `${name}.slice`, "--", "sleep", "infinity",
   ], { stdio: "ignore" });
-  const end = Date.now() + 5_000;
+  const end = performance.now() + 5_000;
   let active = false;
-  while (Date.now() < end) {
+  while (performance.now() < end) {
     const state = execFileSync("systemctl", ["--user", "show", "-p", "ActiveState", "--value", `${name}.scope`], { encoding: "utf8" }).trim();
     if (state === "active") { active = true; break; }
     execFileSync("sleep", ["0.05"]);
@@ -664,6 +664,9 @@ exit 0
 
 const FILL = "require('node:fs').writeSync(1, 'KEEP'); const b = Buffer.alloc(64, 97); while (true) require('node:fs').writeSync(1, b);";
 
+// Keeps writing, and stops itself at 256 KiB, under the 1 MiB per-job cap the pool test sets. The pool budget is 32.
+const POOL_WRITER = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); let n = 0; setInterval(() => { if (n >= 262144) return; require('node:fs').writeSync(1, b); n += b.length; }, 20);";
+
 describe.skipIf(!bus.ok)("systemd log cap", () => {
   it("stops a job once its log reaches the per-job cap and keeps the bytes already written", async () => {
     const { store, start, sup, dir } = await systemdRig({ logBytes: 8 });
@@ -677,12 +680,19 @@ describe.skipIf(!bus.ok)("systemd log cap", () => {
   it("marks a job truncated when the pool is full and leaves it running under its own cap", async () => {
     const { store, notices, start, sup, home, dir } = await systemdRig({ logBytes: 1_000_000, budget: 32 });
     const marker = join(home, "pid");
-    const id = await start([process.execPath, "-e", "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); while (true) require('node:fs').writeSync(1, b);", marker]);
+    const id = await start([process.execPath, "-e", POOL_WRITER, marker]);
     expect(await until(() => existsSync(marker))).toBe(true);
     const pid = Number(readFileSync(marker, "utf8"));
+    const logPath = join(dir, `${id}.log`);
+    let held = 0;
     expect(await until(async () => {
       await sup.sweep();
-      return existsSync(join(dir, `${id}.log`)) && readFileSync(join(dir, `${id}.log`)).length >= 32;
+      const job = store.get(id);
+      if (!existsSync(logPath) || job?.state !== "running" || job.outcome !== null) return false;
+      const size = statSync(logPath).size;
+      if (size < 32 || size >= 1_000_000) return false;
+      if (held === 0) { held = size; return false; }
+      return size > held;
     }, 8000)).toBe(true);
     expect(store.get(id)).toMatchObject({ state: "running", outcome: null });
     expect(existsSync(join(dir, `${id}.cap`))).toBe(false);
@@ -817,9 +827,9 @@ describe("systemd event loop", () => {
     const env = slowSystemctl(h.home);
     let ran = false;
     setTimeout(() => { ran = true; }, 20);
-    const started = Date.now();
+    const started = performance.now();
     const pending = showUnit(`missing${randomBytes(4).toString("hex")}`, env);
-    expect(Date.now() - started).toBeLessThan(100);
+    expect(performance.now() - started).toBeLessThan(100);
     await wait(50);
     expect(ran).toBe(true);
     expect(await pending).toMatchObject({ kind: "found" });
@@ -834,9 +844,9 @@ describe("systemd event loop", () => {
     const b = await start([process.execPath, "-e", STAY, markerB]);
     expect(await until(() => existsSync(markerA) && existsSync(markerB))).toBe(true);
     const blind = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: slowSystemctl(home) } });
-    const began = Date.now();
+    const began = performance.now();
     await blind.sweep();
-    const elapsed = Date.now() - began;
+    const elapsed = performance.now() - began;
     const stamps = readFileSync(join(home, "slow.log"), "utf8").trim().split("\n").map(Number);
     expect(stamps.length).toBeGreaterThanOrEqual(2);
     expect(Math.max(...stamps) - Math.min(...stamps)).toBeLessThan(200_000_000);
@@ -931,14 +941,14 @@ describe.skipIf(!bus.ok)("systemd duration", () => {
   it("uses the unit's own start and exit, not the time the agent was down", async () => {
     const { store, start, sup, opts, drill, slot } = await systemdRig();
     const id = await start([process.execPath, "-e", "setTimeout(() => process.exit(0), 1500)"]);
-    const began = Date.now();
+    const began = performance.now();
     sup.close();
     expect(await until(() => showValue(unitOf(id), "ExecMainCode") === "1", 8000)).toBe(true);
     await wait(3000);
     slot.sup = await openJobSupervisor(store, opts, { slice: drill.slice, probe: () => ({ ok: true }) });
     await slot.sup.sweep();
     const job = store.get(id);
-    const elapsed = Date.now() - began;
+    const elapsed = performance.now() - began;
     expect(job?.outcome).toBe("exited");
     expect(job?.exitCode).toBe(0);
     expect(job?.durationMs ?? 0).toBeGreaterThanOrEqual(1000);

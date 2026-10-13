@@ -10,6 +10,7 @@ import { decodeAccounts, type AccountUsage } from "./desktop/usage.ts";
 import { FeedConnection, PROBE_AFTER_MS, type SocketLike } from "./connection.ts";
 import { AttendingTracker } from "./attending.ts";
 import { ABSENT_MANAGER, MANAGER, absentManager } from "./manager.ts";
+import { onSent } from "./sent-here.ts";
 // A list element the protocol dropped (it didn't fit) is worth a line in the console, never a crash.
 onDropped(where => console.warn(`morndo: dropped a ${where} the hub sent that this app can't read`));
 
@@ -214,7 +215,10 @@ export class LiveFeed {
     addEventListener("focus", this.#onFocus);
     addEventListener("blur", this.#onFocus);
     this.#conn.start();
+    this.#unsent ??= onSent(() => { this.decisions = this.decisions.slice(); });
   }
+
+  #unsent: (() => void) | null = null;
 
   stop() {
     document.removeEventListener("visibilitychange", this.#onVisible);
@@ -227,6 +231,8 @@ export class LiveFeed {
     removeEventListener("blur", this.#onFocus);
     this.#attending.stop();
     this.#conn.stop();
+    this.#unsent?.();
+    this.#unsent = null;
   }
 
   watch(worker: string | null) {

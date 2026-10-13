@@ -65,9 +65,9 @@ describe("listing and captures", () => {
     await ports.tmux.listWorkers();
     box.panes["%2"] = { name: "delta", cwd: "/w/delta", screen: BOX };                // a new window, not announced
     fleet.intercept("inventory.get", async (call, next) => { if (call.node === "box") await new Promise(r => setTimeout(r, 1000)); return next(); });
-    const t0 = Date.now();
+    const t0 = performance.now();
     const first = await ports.tmux.listWorkers();
-    expect(Date.now() - t0).toBeLessThan(800);
+    expect(performance.now() - t0).toBeLessThan(800);
     expect(first.map(w => w.id).sort()).toEqual([BOX1, PC1, PC2]);                    // the slow node's answer isn't in yet
     await until(() => fleet.calls.filter(c => c.op === "inventory.get" && c.node === "box").length === 1);
     await new Promise(r => setTimeout(r, 1100));
@@ -81,9 +81,9 @@ describe("listing and captures", () => {
     box.panes["%2"] = { name: "delta", cwd: "/w/delta", screen: BOX };
     fleet.intercept("inventory.get", async (call, next) => (call.node === "box" ? new Promise(() => {}) : next()));
     for (let i = 0; i < 3; i++) {
-      const t0 = Date.now();
+      const t0 = performance.now();
       expect((await ports.tmux.listWorkers()).map(w => w.id).sort()).toEqual([BOX1, PC1, PC2]);
-      expect(Date.now() - t0).toBeLessThan(800);
+      expect(performance.now() - t0).toBeLessThan(800);
     }
     expect(fleet.calls.filter(c => c.op === "inventory.get" && c.node === "box")).toHaveLength(1);   // the one in flight
   });

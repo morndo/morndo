@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { chromium, type Browser, type Page } from "playwright";
+import { steady } from "./harness.ts";
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from "vitest";
 
@@ -109,7 +110,7 @@ beforeAll(async () => {
     optimizeDeps: { noDiscovery: true, include: [] },             // see composer-target.test.ts
   });
   await server.listen();
-  browser = await chromium.launch();
+  browser = steady(await chromium.launch());               // reloads a page a network change cut (harness.ts)
 }, 60_000);
 
 afterAll(async () => {

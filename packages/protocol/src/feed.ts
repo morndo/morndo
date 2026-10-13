@@ -5,9 +5,10 @@
 // value a newer hub adds falls back to a safe one, and a list drops only the element that doesn't fit, never the frame.
 // What the app sends the hub stays strict, with limits.
 import type {
-  AnswerRefusal, CatchUpConversation, Escalation, EscalationId, EndpointId, FeedBody, FeedEvent, Message, RosterEntry, SessionId, WorkerId,
+  AnswerRefusal, CatchUpConversation, DecisionBrief, Escalation, EscalationId, EndpointId, FeedBody, FeedEvent, Message, RosterEntry, SessionId, WorkerId,
 } from "@morndo/domain";
 import { BoardFrameSchema } from "./board.ts";
+import { DecisionBriefSchema } from "./brief.ts";
 import { JobsFrameSchema } from "./jobs.ts";
 import { UsageFrameSchema } from "./usage.ts";
 import { isWorkerOrLegacyId } from "./worker-id.ts";
@@ -136,7 +137,7 @@ export const DecisionItemSchema = z.object({
   project: z.nullable(text()),
   askedAt: z.number(),
   messageId: z.nullable(text()),
-  tracking: z.enum(["ledger", "age", "source"]),
+  tracking: z.enum(["ledger", "age", "source", "hub"]),
   status: z.enum(["open", "answered", "settled", "expired"]),
   source: orElse(z.enum(["open", "settled", "missing", "unreadable"]), "unreadable"),
   decision: z.nullable(z.object({
@@ -145,7 +146,8 @@ export const DecisionItemSchema = z.object({
       z.object({ kind: z.literal("words") }),
     ]),
     at: z.number(),
-    via: orElse(z.enum(["here", "elsewhere"]), "elsewhere"),
+    // A via this app doesn't know, or null, reads as absent. That is not "elsewhere", and it does not drop the item.
+    via: orElse(z.optional(z.enum(["here", "elsewhere"])), undefined),
     endpointId: z.nullable(z.pipe(text(), z.transform(s => s as EndpointId))),
     sessionId: z.nullable(z.pipe(text(), z.transform(s => s as SessionId))),
     // E13: a Decision for the manager waits in the fleet's delivery queue ("queued") until it reached the manager
@@ -164,6 +166,12 @@ export const DecisionItemSchema = z.object({
   // While a queued Decision waits: why, as the queue says (a WaitingReason, or "typed" or "held"; words in the app's
   // queue-words.ts). Absent otherwise, and from a hub from before the queue.
   waiting: z.exactOptional(text()),
+  // ADR-0023: the brief this ask was filed from and its version. A hub that doesn't send them (an older hub, or a plain
+  // ask), or a brief this app can't read: none and zero — never a half brief, the card falls back to the plain fields.
+  brief: orElse(z.nullable(DecisionBriefSchema), null),
+  briefVersion: orElse(z.number(), 0),
+  // Who drafted a forwarded brief. A hub that doesn't say, or a plain ask: null.
+  draftedBy: orElse(z.nullable(text()), null),
 });
 // Where one of this device's messages to the manager stands in the fleet's delivery queue (fleet-clients §9.1), by its
 // request id: "queued" (typed and held included: not in the conversation yet), with why it waits; "delivered";
@@ -283,7 +291,10 @@ export const ClientFeedFrames = {
 
 export type ServerFeedFrame = { [K in keyof typeof ServerFeedFrames]: z.output<(typeof ServerFeedFrames)[K]> }[keyof typeof ServerFeedFrames];
 export type ClientFeedFrame = { [K in keyof typeof ClientFeedFrames]: z.output<(typeof ClientFeedFrames)[K]> }[keyof typeof ClientFeedFrames];
-export type DecisionItem = Escalation & { answerable: AnswerRefusal | null; version: string; notice?: string | null; waiting?: string };
+export type DecisionItem = Escalation & {
+  answerable: AnswerRefusal | null; version: string; notice?: string | null; waiting?: string;
+  brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null;
+};
 export type LedgerState = z.output<typeof LedgerStateSchema>;
 export type SessionInfoWire = z.output<typeof SessionInfoSchema>;
 export type CatchUpConversationWire = z.output<typeof CatchUpConversationSchema>;

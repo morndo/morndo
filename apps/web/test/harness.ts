@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { chromium, type Browser } from "playwright";
+import { steady } from "./steady.ts";
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
 const WEB = join(import.meta.dirname, "..");
@@ -16,6 +17,8 @@ export const DESKTOP_PAGE = `<!doctype html><html><head><meta charset="utf-8"></
   import Desktop from "/src/lib/desktop/Desktop.svelte";
   mount(Desktop, { target: document.body, props: { device: "dev-1", office: "Test office", verifiedAt: Date.now(), policy: { stay: "7d", stepUp: "1h" }, desktop: false, onSignedOut: () => {} } });
 </script></body></html>`;
+
+export { steady };
 
 export type Web = { url: string; browser: Browser; close: () => Promise<void> };
 
@@ -33,13 +36,18 @@ export async function startWeb(html = DESKTOP_PAGE): Promise<Web> {
   const server: ViteDevServer = await createServer({
     configFile: false, root: WEB, cacheDir, logLevel: "error", clearScreen: false,
     plugins: [svelte({ configFile: false }), page],
-    // The one SvelteKit module a component here imports (Phone.svelte's goto): a stand-in that records where it went.
-    resolve: { alias: { "$app/navigation": join(WEB, "test/app-navigation.stub.ts"), $lib: join(WEB, "src/lib") } },
+    // The SvelteKit modules a component here imports (Phone.svelte's goto, pushState, page): stand-ins that record
+    // where the app asked to go and keep shallow-routing state the way Kit 2.70.3 does.
+    resolve: { alias: {
+      "$app/navigation": join(WEB, "test/app-navigation.stub.ts"),
+      "$app/state": join(WEB, "test/app-state.stub.svelte.ts"),
+      $lib: join(WEB, "src/lib"),
+    } },
     server: { host: "127.0.0.1", port: 0, hmr: false, watch: null },
     optimizeDeps: { noDiscovery: true, include: [] },
   });
   await server.listen();
-  const browser = await chromium.launch();
+  const browser = steady(await chromium.launch());
   return {
     url: server.resolvedUrls?.local[0] ?? "",
     browser,
@@ -57,7 +65,31 @@ export type FeedWin = {
   __feedRefuses?: boolean;                    // true: every new feed socket fails before it opens (as a refused upgrade does)
   __signedOut?: boolean;                      // true: GET /api/me answers 401
   __feedClose: (code: number) => void;        // the current feed socket closes with this code
+  __answerCalls?: { url: string; body: unknown }[];   // every answer POST that reached the gate, body parsed
+  __answerReplies?: { status: number; body?: unknown }[];   // the gate's replies, in order; 200 when it runs out
 };
+
+// Runs in the page before the app (addInitScript, ahead of fakeFeed): the hub's answer endpoint. Every POST to
+// /api/escalations/<id>/answer is recorded with its parsed body (the request id included) and answered from the
+// queue the test fills; anything else falls through to the real fetch — fakeFeed's own wrap included, which is why
+// the gate goes in first.
+export function answerGate() {
+  const w = globalThis as unknown as FeedWin;
+  w.__answerCalls = [];
+  w.__answerReplies = [];
+  const g = globalThis as { fetch: typeof fetch };
+  const real = g.fetch.bind(globalThis);
+  g.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.pathname : input.url;
+    if (/^\/api\/escalations\/[^/]+\/answer$/.test(new URL(url, "http://gate.test").pathname)) {
+      const raw = typeof init?.body === "string" ? init.body : null;
+      w.__answerCalls?.push({ url, body: raw === null ? null : JSON.parse(raw) });
+      const next = w.__answerReplies?.shift() ?? { status: 200 };
+      return new Response(JSON.stringify(next.body ?? {}), { status: next.status });
+    }
+    return real(input, init);
+  };
+}
 
 // `history`: each worker's messages (latest last); `older`: what lies before them in its transcript, for older pages;
 // `olderMissing`: the hub can't read older pages (an unreadable transcript); `reading`: the hub's read marks and mutes

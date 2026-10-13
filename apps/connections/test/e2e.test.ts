@@ -382,6 +382,13 @@ describe("keys run", () => {
     expect(ran.code).toBe(1);
   }, 20_000);
 
+  it("turns a child exit of 78 into 1: 78 is the launcher's own store refusal (§8.4), not a child's to give", async () => {
+    const dir = homeDir();
+    await ready(dir);
+    const ran = await cli(["run", "--connection", "credit", "--workspace", join(dir, "work"), "--", "--job", job(dir, { exit: 78 })], envOf(dir));
+    expect(ran.code).toBe(1);
+  }, 20_000);
+
   it("fetches a model list under a probe lease and marks a mismatch", async () => {
     const dir = homeDir();
     await ready(dir);

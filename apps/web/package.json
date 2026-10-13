@@ -15,6 +15,7 @@
     "@fontsource/lato": "^5.3.0",
     "@lucide/svelte": "^1.49.0",
     "@morndo/brand": "0.0.0",
+    "@morndo/domain": "0.0.0",
     "@morndo/protocol": "0.0.0",
     "@novnc/novnc": "^1.7.0",
     "@simplewebauthn/browser": "^14.0.0",

@@ -12,7 +12,7 @@ import {
   err, ok,
   type FinishEvent, type FinishProblem, type Guard, type Job, type NotifyTarget, type Result, type StartProblem,
 } from "@morndo/domain";
-import { deniedBy, denyRoots, processAlive, resolvedRoots } from "@morndo/node-ops";
+import { deniedBy, denyRoots, processAlive, resolvedRoots, type ProcessStart } from "@morndo/node-ops";
 import { errno } from "@morndo/service-kit";
 import { psStarts, readRecorded, sameProcess, START_RECORD_GRACE_MS, writeProcessFile, type Recorded } from "./job-identity.ts";
 import { capStep, endedBeforeStop, monotonicUsec, UNIT_CAP_LOOK_MS, type CapSight } from "./job-cap.ts";
@@ -410,13 +410,13 @@ export class JobSupervisor {
       if (job.state !== "running" && job.state !== "starting") continue;
       for (const kind of ["pid", "child"] as const) {
         const found = this.#recorded(job.id, kind);
-        if (found?.recorded.kind === "lstart") pids.push(found.pid);
+        if (found?.recorded.kind === "start") pids.push(found.pid);
       }
     }
     return pids;
   }
 
-  async #sweepOne(id: string, pending: Set<string>, starts: ReadonlyMap<number, number | null>, watches: Promise<void>[] = []): Promise<void> {
+  async #sweepOne(id: string, pending: Set<string>, starts: ReadonlyMap<number, ProcessStart | null>, watches: Promise<void>[] = []): Promise<void> {
     if (this.#slice) { await this.#sweepUnit(id, pending, watches); return; }
     if (!this.#open(id)) return;
     if (existsSync(join(this.#store.dir, `${id}.exit`))) { this.#takeExit(id); return; }
@@ -675,10 +675,14 @@ export class JobSupervisor {
     let sight = this.#capSights.get(id) ?? null;
     let seen = seenUsec;
     for (;;) {
-      const step = capStep(sight, this.#logSize(id), this.#store.logBytes, performance.now(), true);
-      if (step.kind !== "grace") break;
-      sight = step.sight;
-      this.#capSights.set(id, sight);
+      // A failed stat is not a size of 0. Skip this look: no sighting, and no stop.
+      const size = this.#logSize(id);
+      if (size !== null) {
+        const step = capStep(sight, size, this.#store.logBytes, performance.now(), true);
+        if (step.kind !== "grace") break;
+        sight = step.sight;
+        this.#capSights.set(id, sight);
+      }
       await wait(UNIT_CAP_LOOK_MS);
       if (this.#closed || !this.#open(id)) return;
       if (view.mainPid > 0 && processAlive(view.mainPid)) continue;
@@ -695,8 +699,8 @@ export class JobSupervisor {
     await this.#exclusive(id, () => (this.#closed ? undefined : this.#stopForCap(id, seen)));
   }
 
-  #logSize(id: string): number {
-    try { return statSync(join(this.#store.dir, `${id}.log`)).size; } catch { return 0; }
+  #logSize(id: string): number | null {
+    try { return statSync(join(this.#store.dir, `${id}.log`)).size; } catch { return null; }
   }
 
   async #cancelUnit(id: string): Promise<Result<NoticeHandoff, SuperviseProblem>> {
@@ -954,7 +958,7 @@ export class JobSupervisor {
     try { writeFileSync(path, "", { flag: "wx", mode: 0o600 }); } catch { /* already requested */ }
   }
 
-  async #stopChild(id: string, starts?: ReadonlyMap<number, number | null>): Promise<void> {
+  async #stopChild(id: string, starts?: ReadonlyMap<number, ProcessStart | null>): Promise<void> {
     const child = this.#recorded(id, "child");
     if (!child || !(await sameProcess(child.pid, child.recorded, starts))) return;
     // SIGKILL leaves a zombie, and kill(pid, 0) still succeeds until it is reaped

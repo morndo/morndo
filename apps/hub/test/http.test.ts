@@ -178,7 +178,7 @@ describe("health", () => {
 describe("idle", () => {
   it("holds new work, then returns while something is still in flight", async () => {
     const end = http.flight.begin({ kind: "http", id: "stuck" });
-    const started = Date.now();
+    const started = performance.now();
     const waiting = http.idle(200);
     const res = await req("/api/workers/%251/send", {
       method: "POST", headers: { "content-type": "application/json", origin: config.origin },
@@ -187,6 +187,6 @@ describe("idle", () => {
     expect(res.status).toBe(503);
     end();
     await waiting;
-    expect(Date.now() - started).toBeLessThan(2000);
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 });

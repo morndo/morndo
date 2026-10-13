@@ -3,6 +3,8 @@
 // the domain never imports this package, and it imports no node:* (it runs in the browser too).
 export * from "./decode.ts";
 export * from "./feed.ts";
+export * from "./brief.ts";
+export * from "./brief-template.ts";
 export * from "./terminal.ts";
 export * from "./http.ts";
 export * from "./push.ts";
@@ -14,5 +16,8 @@ export * from "./board.ts";
 export * from "./usage.ts";
 export * from "./connections.ts";
 export * from "./jobs.ts";
+export * from "./releases.ts";
 export * from "./service-health.ts";
 export * from "./uploads.ts";
+export * from "./transcription.ts";
+export * from "./secrets.ts";
