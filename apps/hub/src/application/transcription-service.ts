@@ -122,9 +122,13 @@ export class TranscriptionService {
     for (const ac of this.#inflight.values()) ac.abort();
   }
 
+  // The row a caller names by id: the earliest live one (several may share an id in flight; TX2's attempts are told
+  // apart by Recording and Language, not id), else the newest ended.
   get(id: string): Transcription | null {
-    const matches = this.#rows.filter(row => row.id === id);
-    return matches.find(row => live(row.state)) ?? matches.sort((a, b) => b.acceptedAt - a.acceptedAt)[0] ?? null;
+    const matches = this.#rows
+      .filter(row => row.id === id)
+      .sort((a, b) => a.acceptedAt - b.acceptedAt || (rowKey(a) < rowKey(b) ? -1 : rowKey(a) > rowKey(b) ? 1 : 0));
+    return matches.find(row => live(row.state)) ?? matches.at(-1) ?? null;
   }
 
   capability(): TranscriptionCapability {
@@ -161,7 +165,9 @@ export class TranscriptionService {
     if (!decided.ok) return decided;
     if (!this.#rows.some(row => sameRow(row, decided.value))) this.#save(decided.value);
     this.tick();
-    return ok(this.get(decided.value.id) ?? decided.value);
+    // The row this body made or matched (TX2's in-flight attempt), not whichever live row answers to the id first.
+    const made = this.#rows.find(row => sameRow(row, decided.value));
+    return ok(made ?? decided.value);
   }
 
   cancel(id: string): Result<Transcription, "unknown"> {
