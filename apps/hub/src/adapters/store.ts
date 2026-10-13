@@ -160,9 +160,11 @@ export class Store {
     return this.db.prepare("INSERT OR IGNORE INTO sends (key, state, at, worker_id, request, request_session) VALUES (?, 'started', ?, ?, ?, ?)")
       .run(key, at, o.workerId, o.request, o.session ?? null).changes === 1;
   }
-  // The answer a request sent, if any (its row, under its answer key).
+  // The answer a request sent, if any (its row, under its answer key). A request can hold rows for two versions of an
+  // ask (asked again in between, its first never started): the latest it wrote, then by key, so the same rows always
+  // give the same row (round 3.6 of the PR #55 review). Both times are this hub's own clock.
   sendOfRequest(request: string): SendRow | null {
-    const r = this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE request = ?`).get(request) as SendRowSql | undefined;
+    const r = this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE request = ? ORDER BY at DESC, key DESC LIMIT 1`).get(request) as SendRowSql | undefined;
     return r ? sendRow(r) : null;
   }
   // Every answer to one ask kept here (24 hours), whatever its choice: the rows whose answer key starts with `prefix`
