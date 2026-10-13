@@ -90,13 +90,16 @@ export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: numb
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}) });
   const jobs = new JobsService({ store, board, ...(o.now ? { now: o.now } : {}) });
-  const transcription = o.transcriber
-    ? new TranscriptionService({
-      store, transcriber: o.transcriber, probeTtlMs: 0, log: () => {},
-      file: recording => fileOnDisk(recording.kind === "upload" ? inbox.get(recording.id)?.path : null),
-    })
-    : null;
-  if (transcription) await transcription.start();
+  // Wired as production main.ts wires it: the service is always constructed, with the plugin's answer when there is
+  // none (the routes must answer for that shape, not only for a null port).
+  const txHost = o.transcriber ?? null;
+  const transcription = new TranscriptionService({
+    store, transcriber: txHost,
+    unavailable: txHost ? null : { ready: false, reason: "missing", detail: "missing" },
+    probeTtlMs: 0, log: () => {},
+    file: recording => fileOnDisk(recording.kind === "upload" ? inbox.get(recording.id)?.path : null),
+  });
+  await transcription.start();
   const http = startHttp({
     config, identity: loadOrCreateIdentity(dir), access, observation: o.observation ?? new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox), escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now),
@@ -126,6 +129,6 @@ export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: numb
       ws.on("unexpected-response", (_q, res) => reject(new Error(`upgrade refused: ${res.statusCode}`)));
       ws.on("error", () => {});
     }),
-    close: async () => { transcription?.close(); notifications.stop(); await http.close(); store.close(); rmSync(dir, { recursive: true, force: true }); },
+    close: async () => { transcription.close(); notifications.stop(); await http.close(); store.close(); rmSync(dir, { recursive: true, force: true }); },
   };
 }
