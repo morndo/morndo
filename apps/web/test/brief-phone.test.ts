@@ -182,7 +182,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   const feed = { decisions: [spend, free, plain], workers: [], status: "live", primed: true, caughtUpAt: null };
   const catchup = { later: {}, cards: [], count: 0 };
   mount(Today, { target: document.getElementById("today"), props: {
-    feed, session: catchup, quick, verifiedFresh: true, verify: async () => true,
+    feed, session: catchup, quick, verifiedFresh: false, verify: async () => (globalThis.__passkeyOk !== false),
     onCatchUp: ${noop}, onDecide(id) { window.__decide = id; }, onReadBrief(id) { window.__read = id; },
   } });
   window.__ready = true;
@@ -372,6 +372,18 @@ describe("the sheet and cards report what happened to an answer", () => {
     await dialog.waitFor();
     const pad = await dialog.locator(".factors li.rec").first().evaluate(el => getComputedStyle(el).paddingLeft);
     expect(pad).toBe("8px");
+    await context.close();
+  }, 60_000);
+
+  it("says the catch-up word when Today's passkey check does not finish", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    await tab.evaluate(() => { document.querySelector("dialog")?.close(); (globalThis as { __passkeyOk?: boolean }).__passkeyOk = false; });
+    const row = tab.locator("#today").locator('li[data-row="d:d-2"]');
+    await row.getByRole("button", { name: "Ship today" }).click();
+    await row.getByText("Not answered: the passkey check didn't finish.").waitFor({ timeout: 3_000 });
     await context.close();
   }, 60_000);
 

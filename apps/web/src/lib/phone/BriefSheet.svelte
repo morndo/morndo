@@ -46,11 +46,7 @@
   const asker = $derived(item.asker.kind === "manager" ? "the manager" : item.asker.name);
   const whom = $derived(asker[0] ? asker[0].toUpperCase() + asker.slice(1) : asker);
   // Where an answer that went through stands; the same words the catch-up card and the desktop modal use.
-  const standing = $derived.by(() => {
-    const d = item.decision;
-    if (d?.via === "elsewhere") return `Answered on another device: ${d.choice.kind === "option" ? `“${d.choice.label}”` : "in words"}.`;
-    return standingLine(item, whom);
-  });
+  const standing = $derived(standingLine(item, whom));
 
   $effect(() => { if (answering) writing = false; });
 

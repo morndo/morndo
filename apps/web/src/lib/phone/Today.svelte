@@ -12,7 +12,7 @@
   import { cardOf } from "@morndo/domain";
   import type { LiveFeed } from "../feed.svelte.ts";
   import type { CatchUpSession } from "../catchup/session.svelte.ts";
-  import { REFUSALS, type DecisionItem } from "../desktop/decisions.ts";
+  import { OFFLINE_DECISION, PASSKEY_UNFINISHED, REFUSALS, type DecisionItem } from "../desktop/decisions.ts";
   import { againLabel } from "../catchup/answer.ts";
   import { heroTime, horizon, keptForLater, timeLabel, untilLabel, type Row } from "./horizon.ts";
   import { actions, brief } from "./brief.ts";
@@ -61,12 +61,12 @@
     note = { ...note, [d.id]: "" };
     if (paused(d)) return false;                                     // the hub would refuse it: nothing starts
     if (feed.status !== "live" || navigator.onLine === false) {      // refused, not queued: as catch-up and the sheet (§6.3)
-      note = { ...note, [d.id]: "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here." };
+      note = { ...note, [d.id]: OFFLINE_DECISION };
       return false;
     }
     // After a refusal for the passkey check, the check comes first whatever this page thinks is fresh (code review #3).
     const stale = quick.state.failed[d.id]?.code === "step_up";
-    if ((!verifiedFresh || stale) && !(await verify())) { note = { ...note, [d.id]: "Not sent: the passkey check didn't finish." }; return false; }
+    if ((!verifiedFresh || stale) && !(await verify())) { note = { ...note, [d.id]: PASSKEY_UNFINISHED }; return false; }
     quick.answer(d.id, body, label, d.version);
     return true;
   }
@@ -74,7 +74,7 @@
   async function confirmAndSend(d: DecisionItem) {
     const a = quick.state.failed[d.id]?.again;
     if (!a) return;
-    if (!(await verify())) { note = { ...note, [d.id]: "Not sent: the passkey check didn't finish." }; return; }
+    if (!(await verify())) { note = { ...note, [d.id]: PASSKEY_UNFINISHED }; return; }
     note = { ...note, [d.id]: "" };
     quick.answer(a.id, a.body, a.label, a.seen, a.requestId);              // the same request id: typed at most once
   }

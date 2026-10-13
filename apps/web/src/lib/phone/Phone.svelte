@@ -22,7 +22,7 @@
   import { baseKey, type Body } from "../catchup/run.ts";
   import { AnswerSession } from "../desktop/answer-session.svelte.ts";
   import type { AskOutcome } from "../desktop/answer-session.ts";
-  import type { DecisionItem } from "../desktop/decisions.ts";
+  import { OFFLINE_DECISION, PASSKEY_UNFINISHED, STILL_OFFLINE, type DecisionItem } from "../desktop/decisions.ts";
   import { briefFromPageState, decisionFromSearch } from "./brief-route.ts";
   import BriefSheet from "./BriefSheet.svelte";
   import { startDeviceOutbox } from "../outbox/device.ts";
@@ -197,10 +197,10 @@
     if (!id || !held || held.stale) return false;
     briefNote = null;
     if (feed.status !== "live" || navigator.onLine === false) {
-      briefNote = "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here.";
+      briefNote = OFFLINE_DECISION;
       return false;
     }
-    if (!verifiedFresh && !(await verify())) { briefNote = "Not answered: the passkey check didn't finish."; return false; }
+    if (!verifiedFresh && !(await verify())) { briefNote = PASSKEY_UNFINISHED; return false; }
     if (!session.opened || session.top?.kind !== "decision" || session.top.id !== id) session.open({ decision: id });
     const card = session.top;                            // the run's card on top: its key carries any re-ask suffix (finding 4)
     if (card?.kind !== "decision" || card.id !== id) {
@@ -229,8 +229,8 @@
     const r = briefRefusal;
     if (!r?.retry) return;
     briefNote = null;
-    if (feed.status !== "live" || navigator.onLine === false) { briefNote = "Still offline. It goes when you try again online."; return; }
-    if (!verifiedFresh && !(await verify())) { briefNote = "Not sent: the passkey check didn't finish."; return; }
+    if (feed.status !== "live" || navigator.onLine === false) { briefNote = STILL_OFFLINE; return; }
+    if (!verifiedFresh && !(await verify())) { briefNote = PASSKEY_UNFINISHED; return; }
     await session.retry(r.key, r.retry.id, r.retry.body, r.retry.label, r.retry.seen, r.retry.requestId);
   }
   // The passkey retry, from the sheet: the same answer with a new request id. Only the pick for the decision
@@ -243,8 +243,8 @@
       return;
     }
     briefNote = null;
-    if (feed.status !== "live" || navigator.onLine === false) { briefNote = "Still offline. It goes when you try again online."; return; }
-    if (!(await verify())) { briefNote = "Not sent: the passkey check didn't finish."; return; }
+    if (feed.status !== "live" || navigator.onLine === false) { briefNote = STILL_OFFLINE; return; }
+    if (!(await verify())) { briefNote = PASSKEY_UNFINISHED; return; }
     await session.retry(p.key, p.id, p.body, p.label, p.seen);
   }
   function go(t: Tab) {

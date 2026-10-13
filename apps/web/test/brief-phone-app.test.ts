@@ -363,7 +363,7 @@ describe("the phone around the brief sheet", () => {
     expect(await calls(tab)).toHaveLength(before);
     await context.setOffline(false);
     await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
-    await dialog.getByText("Not sent: the passkey check didn't finish.").waitFor({ timeout: 3_000 });
+    await dialog.getByText("Not answered: the passkey check didn't finish.").waitFor({ timeout: 3_000 });
     expect(await calls(tab)).toHaveLength(before);
     expect(errors).toEqual([]);
     await context.close();

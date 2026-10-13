@@ -14,7 +14,7 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import { cardOf } from "@morndo/domain";
   import { renderMarkdown } from "../markdown.ts";
-  import { REFUSALS, ago, deliveryLine, type DecisionItem } from "../desktop/decisions.ts";
+  import { REFUSALS, ago, deliveryLine, standingLine, type DecisionItem } from "../desktop/decisions.ts";
   import { byLabel } from "./horizon.ts";
   import { actions, brief, due } from "./brief.ts";
   import type { Body } from "../catchup/run.ts";
@@ -59,7 +59,7 @@
   // What closed it, in words, when it isn't open any more.
   // Not on the board: gone, if the board is current; otherwise nothing can be said yet (review of PR #7, finding 8).
   const closed = $derived(!item ? (primed ? "This decision isn't on the hub's list anymore." : null)
-    : item.status === "answered" ? (item.decision?.via === "elsewhere" ? `Answered on another device: ${item.decision.choice.kind === "option" ? `“${item.decision.choice.label}”` : "in words"}.` : answeredHere(item))
+    : item.status === "answered" ? (item.decision?.via === "elsewhere" ? standingLine(item, "") : answeredHere(item))
     : item.status === "settled" ? `Settled${item.resolution ? `: ${item.resolution}` : "."}`
     : item.status === "expired" ? "Expired: nobody answered within a day." : null);
   // The words stay until the answer has started (offline, a cancelled passkey check, or a refusal keep them; Undo

@@ -80,10 +80,20 @@ export function deliveryLine(d: DecisionItem): DeliveryLine | null {
   return { state: "queued", why: reason ? INBOX_WAITS[reason] ?? null : null };
 }
 
+// A decision refused before it starts, in the words catch-up, Today and the phone sheet share (§6.3).
+export const OFFLINE_DECISION = "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here.";
+export const STILL_OFFLINE = "Still offline. It goes when you try again online.";
+// The passkey check didn't finish. Catch-up's word is "Not answered" (§6.3: an answer goes as catch-up's do).
+export const PASSKEY_UNFINISHED = "Not answered: the passkey check didn't finish.";
+
 // Where a sent answer stands, in one line: the phone's sheet and the desktop modal say it the same way.
 export function standingLine(item: DecisionItem, whom: string): string {
   const d = item.decision;
   if (!d) return "Sent. The manager gets it as your decision and acts on it.";
+  if (d.via === "elsewhere") {
+    const said = d.choice.kind === "option" ? `“${d.choice.label}”` : "in words";
+    return `Answered on another device: ${said}.`;
+  }
   const choice = d.choice.kind === "option" ? d.choice.label : "in words";
   const dl = deliveryLine(item);
   if (dl?.state === "queued") return `Queued${dl.why ? `, ${dl.why}` : ""}.`;

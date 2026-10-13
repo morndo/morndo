@@ -10,6 +10,7 @@
   import type { CatchUpConversationWire } from "@morndo/protocol";
   import type { LiveFeed } from "../feed.svelte.ts";
   import { MAY_HAVE_GONE, type CatchUpSession } from "../catchup/session.svelte.ts";
+  import { OFFLINE_DECISION, PASSKEY_UNFINISHED, STILL_OFFLINE } from "../desktop/decisions.ts";
   import { counts, segments, type Body, type Mark } from "../catchup/run.ts";
   import { hold, swipe, type Swiped } from "../catchup/swipe.ts";
   import type { NewCommand } from "../outbox/outbox.ts";
@@ -115,9 +116,9 @@
     if (top?.kind !== "decision") return false;
     const card = top;
     note = null;
-    if (!online || navigator.onLine === false) { note = "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here."; return false; }
+    if (!online || navigator.onLine === false) { note = OFFLINE_DECISION; return false; }
     // AC7: the passkey first, inside the tap (Safari asks for Face ID only from a user gesture), then the 5 seconds.
-    if (!verifiedFresh && !(await verify())) { note = "Not answered: the passkey check didn't finish."; return false; }
+    if (!verifiedFresh && !(await verify())) { note = PASSKEY_UNFINISHED; return false; }
     // The version of the ask on screen now goes with it (review of PR #7, finding 5).
     const seen = feed.decisions.find(d => d.id === card.id)?.version ?? "";
     lastPick = { key: card.key, id: card.id, body, label, seen };
@@ -128,8 +129,8 @@
   async function tryAgain() {
     const r = session.refusal;
     if (!r?.retry) return;
-    if (!online || navigator.onLine === false) { note = "Still offline. It goes when you try again online."; return; }
-    if (!verifiedFresh && !(await verify())) { note = "Not answered: the passkey check didn't finish."; return; }
+    if (!online || navigator.onLine === false) { note = STILL_OFFLINE; return; }
+    if (!verifiedFresh && !(await verify())) { note = PASSKEY_UNFINISHED; return; }
     await session.retry(r.key, r.retry.id, r.retry.body, r.retry.label, r.retry.seen, r.retry.requestId);
   }
   // An unknown outcome that did reach the hub: the board shows it answered here, and it counts as his answer.
