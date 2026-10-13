@@ -14,7 +14,9 @@ import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/proto
 import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
-import { feedTree, refUpdateResult, syncFeed, writeVerifiedSite } from "./feed-sync.ts";
+import { writeVerifiedSite } from "./feed-site.ts";
+import { feedTree, refUpdateResult, syncFeed } from "./feed-sync.ts";
+import { readSchemaJson, repoRoot } from "./schema-read.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
@@ -113,6 +115,21 @@ describe("file list and manifest", () => {
     const diff = spawnSync("git", ["diff", "origin/main", "--", "apps/hub/src/adapters/migrations.ts", "apps/fleet/src/adapters/migrations.ts", "apps/node-agent/src/db/migrations.ts", "apps/connections/src/adapters/store-migrations.ts"], { encoding: "utf8" });
     expect(diff.status).toBe(0);
     expect(diff.stdout).toBe("");
+  });
+
+  it("starts the schema child in the repo and reports the child's own error", () => {
+    for (const name of ["schema-read.ts", "feed-site.ts"]) {
+      const source = readFileSync(join(import.meta.dirname, name), "utf8");
+      expect(source, name).not.toMatch(/apps\//);
+      expect(source, name).not.toMatch(/@morndo/);
+    }
+    const dir = temp();
+    const bad = join(dir, "bad.js");
+    writeFileSync(bad, "console.error('sqlite was not built'); process.exit(1);\n");
+    expect(() => readSchemaJson(bad)).toThrow(/schema read failed: sqlite was not built/);
+    const probe = join(dir, "probe.js");
+    writeFileSync(probe, "process.stdout.write(JSON.stringify({ cwd: process.cwd(), execArgv: process.execArgv }));\n");
+    expect(readSchemaJson(probe)).toEqual({ cwd: repoRoot, execArgv: process.execArgv });
   });
 
   it("states this tree's schemas, including a floor of 0 where nothing breaking has shipped", () => {

@@ -2,15 +2,12 @@
 // Update a reference leaves force false, so a moved branch is rejected
 // (https://docs.github.com/en/rest/git/refs#update-a-reference, read 2026-10-13).
 // The caller then reads that new head and tries again.
-import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
-import { freshSite, type SiteHead } from "./pages.ts";
+import { FEED_FILES, gh, must, readAt, readFeedHead, verifyFeed } from "./feed-site.ts";
 import { FEED_NAMESPACE, signBytes } from "./sign.ts";
-
-const FEED_FILES = ["latest.json", "latest.json.sig", "stable.json", "stable.json.sig"] as const;
 
 export function syncFeed(p: {
   readHead: () => string | null;
@@ -25,82 +22,6 @@ export function syncFeed(p: {
     if (p.commit(head) === "ok") return;
   }
   throw new Error("the feed branch moved on every attempt");
-}
-
-type Gh = { ok: boolean; stdout: string; stderr: string };
-
-function gh(args: string[], input?: string): Gh {
-  const run = spawnSync("gh", args, { encoding: "utf8", input });
-  return { ok: run.status === 0, stdout: run.stdout ?? "", stderr: `${run.stderr ?? ""}\n${run.stdout ?? ""}` };
-}
-
-function must(run: Gh, what: string): string {
-  if (!run.ok) throw new Error(`${what} failed: ${run.stderr}`);
-  return run.stdout.trim();
-}
-
-export function writeVerifiedSite(dir: string, signers: string, files: readonly { name: string; body: string }[]): void {
-  const scratch = join(dir, ".check");
-  mkdirSync(scratch, { recursive: true });
-  for (const channel of ["latest", "stable"] as const) {
-    const body = files.find(file => file.name === `${channel}.json`)?.body;
-    const signature = files.find(file => file.name === `${channel}.json.sig`)?.body;
-    if (body === undefined || signature === undefined) throw new Error(`feed ${channel} is missing`);
-    verifyFeed(signers, body, signature, scratch);
-  }
-  rmSync(scratch, { recursive: true, force: true });
-  for (const file of files) writeFileSync(join(dir, file.name), file.body);
-}
-
-export function materialiseFeed(repository: string, dir: string, signers = "trust/feed_allowed_signers"): void {
-  freshSite(
-    () => readSiteHead(repository),
-    head => {
-      const files = FEED_FILES.map(name => {
-        const body = readAt(repository, head.sha, name);
-        if (body === null) throw new Error(`feed ${name} is missing at ${head.sha}`);
-        return { name, body };
-      });
-      writeVerifiedSite(dir, signers, files);
-      return head;
-    },
-  );
-}
-
-function readSiteHead(repository: string): SiteHead {
-  const sha = readFeedHead(repository);
-  if (sha === null) throw new Error("branch feed has no feed yet");
-  const latest = readAt(repository, sha, "latest.json");
-  if (latest === null) throw new Error("branch feed has no feed yet");
-  const parsed: unknown = JSON.parse(latest);
-  if (typeof parsed !== "object" || parsed === null || !("seq" in parsed) || typeof parsed.seq !== "number") {
-    throw new Error("feed has no seq");
-  }
-  return { sha, seq: parsed.seq };
-}
-
-export function readFeedHead(repository: string): string | null {
-  const run = gh(["api", `/repos/${repository}/git/ref/heads/feed`, "--jq", ".object.sha"]);
-  if (run.ok) return run.stdout.trim();
-  if (/\b404\b/.test(run.stderr)) return null;
-  throw new Error(`feed head failed: ${run.stderr}`);
-}
-
-function readAt(repository: string, sha: string, file: string): string | null {
-  const run = gh(["api", "-H", "Accept: application/vnd.github.raw+json", `/repos/${repository}/contents/${file}?ref=${sha}`]);
-  if (run.ok) return run.stdout;
-  if (/\b404\b/.test(run.stderr)) return null;
-  throw new Error(`feed ${file} at ${sha} failed: ${run.stderr}`);
-}
-
-function verifyFeed(signers: string, bytes: string, signature: string, dir: string): void {
-  const sig = join(dir, "payload.sig");
-  writeFileSync(sig, signature);
-  const run = spawnSync("ssh-keygen", ["-Y", "verify", "-f", signers, "-I", FEED_NAMESPACE, "-n", FEED_NAMESPACE, "-s", sig], {
-    input: bytes, encoding: "utf8",
-  });
-  rmSync(sig, { force: true });
-  if (run.status !== 0) throw new Error(`feed signature failed: ${run.stderr}`);
 }
 
 // The trees API writes the blob when the entry carries content, so the feed push

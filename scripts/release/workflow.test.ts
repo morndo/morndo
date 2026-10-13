@@ -181,10 +181,11 @@ describe("release pipeline files", () => {
     expect(sync).toContain("publishRelease");
     expect(sync).toContain("emptyFeed");
     expect(sync).toContain("resignFeed");
-    expect(sync).toContain("ssh-keygen");
+    expect(readFileSync("scripts/release/feed-site.ts", "utf8")).toContain("ssh-keygen");
     const pages = job(release, "pages");
     expect(pages).toContain(`actions/upload-pages-artifact@${UPLOAD_PAGES}`);
-    expect(pages).toContain("feed-site");
+    expect(pages).toContain("scripts/release/feed-site.ts");
+    expect(pages).not.toContain("npm ci");
     expect(pages).toContain("trust/feed_allowed_signers");
     expect(pages).toContain("environment:");
     expect(pages).toContain("name: github-pages");
@@ -199,7 +200,8 @@ describe("release pipeline files", () => {
     expect(job(release, "feed")).toContain("group: morndo-release-feed");
     expect(job(release, "pages")).toContain("group: morndo-pages");
     expect(job(feed, "pages")).toContain("group: morndo-pages");
-    expect(job(feed, "pages")).toContain("feed-site");
+    expect(job(feed, "pages")).toContain("scripts/release/feed-site.ts");
+    expect(job(feed, "pages")).not.toContain("npm ci");
     expect(job(feed, "pages")).toContain("trust/feed_allowed_signers");
     expect(feed).not.toContain("morndo-release-feed");
     expect(feed).toContain('cron: "17 6 * * 1"');

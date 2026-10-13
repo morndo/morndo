@@ -2,30 +2,15 @@
 // the apps' MIGRATIONS arrays, read in a child process so this module does not load them itself.
 // The child needs npm ci on the same Node (scripts/release/README.md). The floor is the highest
 // breaking migration, or 0 when every migration so far is additive.
-import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import type { DatabaseName, Platform, ProtocolRange, SchemaInfo } from "@morndo/domain";
 import { CLIENT_API, FLEET_PROTO, ManifestSchema } from "@morndo/protocol";
 import { canonicalJson, isoUtc } from "./json.ts";
+import { readSchemaJson } from "./schema-read.ts";
 
-type SchemaMigration = { version: number; compat: "additive" | "breaking" };
-
-export function schemaFrom(migrations: readonly SchemaMigration[]): SchemaInfo {
-  if (migrations.length === 0) throw new Error("no migrations");
-  let version = 0;
-  let floor = 0;
-  for (const migration of migrations) {
-    if (migration.version > version) version = migration.version;
-    if (migration.compat === "breaking" && migration.version > floor) floor = migration.version;
-  }
-  return { version, floor };
-}
+export { schemaFrom } from "./schema.ts";
 
 export function declaredSchemas(): Record<DatabaseName, SchemaInfo> {
-  const child = fileURLToPath(new URL("./schema-child.ts", import.meta.url));
-  const run = spawnSync(process.execPath, [child], { encoding: "utf8" });
-  if (run.status !== 0) throw new Error(run.stderr || run.stdout || "schema read failed");
-  const parsed: unknown = JSON.parse(run.stdout);
+  const parsed = readSchemaJson();
   if (!isDeclared(parsed)) throw new Error("schema read was not the four databases");
   return parsed;
 }

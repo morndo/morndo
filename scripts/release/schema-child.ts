@@ -4,7 +4,7 @@ import { MIGRATIONS as connectionMigrations } from "../../apps/connections/src/a
 import { MIGRATIONS as fleetMigrations } from "../../apps/fleet/src/adapters/migrations.ts";
 import { MIGRATIONS as hubMigrations } from "../../apps/hub/src/adapters/migrations.ts";
 import { MIGRATIONS as nodeMigrations } from "../../apps/node-agent/src/db/migrations.ts";
-import { schemaFrom } from "./manifest.ts";
+import { schemaFrom } from "./schema.ts";
 
 const schemas = {
   hub: schemaFrom(hubMigrations),
