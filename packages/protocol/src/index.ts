@@ -4,6 +4,7 @@
 export * from "./decode.ts";
 export * from "./feed.ts";
 export * from "./brief.ts";
+export * from "./brief-template.ts";
 export * from "./terminal.ts";
 export * from "./http.ts";
 export * from "./push.ts";

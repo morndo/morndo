@@ -101,7 +101,7 @@ A Decision is a Command under Access (AC7). It is recorded only after the asker 
 
 ### Decision briefs: the case for one decision
 
-Added 2026-10-11 by [ADR-0023](adr/0023-decision-briefs.md); code in `packages/domain/src/brief.ts`. A Decision brief is one value in this context, linted once (DB10) and shown as one compact card, brief or plain. The guide an asker follows is `docs/agents/decision-requests.md`.
+Added 2026-10-11 by [ADR-0023](adr/0023-decision-briefs.md); code in `packages/domain/src/brief.ts`. A Decision brief is one value in this context, linted once (DB10) and shown as one compact card, brief or plain. An agent files one with `morndo-decide` or `POST /api/agent/decisions`; the hub stores it and sights it as an Ask (`tracking: "hub"`, or the list item its `ref` names). The guide an asker follows is `docs/agents/decision-requests.md`.
 
 | # | Invariant | Guards |
 |---|---|---|

@@ -1,6 +1,6 @@
 # ADR-0023: Decision briefs: one format for every decision, a compact card, the full brief in a modal
 
-- **Status:** Proposed, 2026-10-11. Design: [`docs/design/decision-briefs/README.md`](../design/decision-briefs/README.md). Design only; no product code. Building starts after the owner answers the design's section 12.
+- **Status:** Accepted, 2026-10-12. The owner approved the design (section 12's defaults) and said build. Design: [`docs/design/decision-briefs/README.md`](../design/decision-briefs/README.md).
 - **The request (the owner, 2026-10-11, paraphrased):** the decisions panel is too thin and its cards are not clear enough; he keeps asking what they mean. Compact, sharp cards; a click opens a modal with the full brief, where he decides; the brief written in his format; part of the public harness, so every agent writes it the same way.
 - **Number:** 0019 to 0022 belong to other branches.
 - **Builds on:** ADR-0006 (the desktop and its decisions panel), ADR-0009 (the phone's decision cards, the 5-second Undo), ADR-0010 (the manager's inbox), ADR-0011 (the phone as a chat app, the visual viewport), ADR-0015 (agent tokens, the agents' door, a CLI first), ADR-0007 (the brand's colour rules).
