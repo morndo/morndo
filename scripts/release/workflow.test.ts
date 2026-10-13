@@ -120,8 +120,12 @@ describe("release pipeline files", () => {
     expect(outside).toContain("gh attestation verify");
     expect(outside).toContain("signer-workflow");
     expect(outside).toContain(".github/workflows/release.yml@refs/heads/main");
-    expect(outside).toContain("gh release verify");
-    expect(outside).toContain("gh release verify-asset");
+    expect(outside).not.toContain("gh release verify");
+    const published = job(release, "published");
+    expect(published).toContain("needs: [release-please, ship]");
+    expect(published).toContain("gh release verify-asset");
+    expect(published).toContain("gh release verify");
+    expect(job(release, "feed")).toContain("needs: [release-please, published]");
   });
 
   it("publishes the feed from the release and re-signs it weekly", () => {

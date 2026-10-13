@@ -269,11 +269,13 @@ jobs:
           gh release download "$TAG" --dir "$RUNNER_TEMP/assets"
           ssh-keygen -Y verify -f trust/release_allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s "$RUNNER_TEMP/assets/manifest.json.sig" < "$RUNNER_TEMP/assets/manifest.json"
           ssh-keygen -Y verify -f trust/release_allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s "$RUNNER_TEMP/assets/install.sh.sig" < "$RUNNER_TEMP/assets/install.sh"
+          # Build attestations exist as soon as actions/attest runs. The release attestation
+          # is generated when an immutable release is published, not while it is a draft.
+          # https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases
+          # (read 2026-10-13)
           for f in "$RUNNER_TEMP/assets"/morndo-*.tar.gz "$RUNNER_TEMP/assets/manifest.json" "$RUNNER_TEMP/assets/install.sh" "$RUNNER_TEMP/assets/SHA256SUMS"; do
             gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/heads/main"
-            gh release verify-asset "$TAG" "$f"
           done
-          gh release verify "$TAG"
 
   ship:
     needs: [release-please, outside]
@@ -288,8 +290,29 @@ jobs:
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: gh release edit "$TAG" --draft=false
 
-  feed:
+  published:
     needs: [release-please, ship]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - name: Verify the published release attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/assets"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/assets"
+          for f in "$RUNNER_TEMP/assets"/morndo-*.tar.gz "$RUNNER_TEMP/assets/manifest.json" "$RUNNER_TEMP/assets/install.sh" "$RUNNER_TEMP/assets/SHA256SUMS"; do
+            gh release verify-asset "$TAG" "$f"
+          done
+          gh release verify "$TAG"
+
+  feed:
+    needs: [release-please, published]
     concurrency:
       group: morndo-feed
       cancel-in-progress: false
