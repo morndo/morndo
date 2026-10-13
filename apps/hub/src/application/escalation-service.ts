@@ -605,8 +605,8 @@ export class EscalationService {
   // "started", no store, not being typed (the hub stopped while typing it, or the port threw after the paste and no
   // node can be asked) — would leave that tap as the ask's only record: it settles the ask, as it did before the
   // filter (rounds 2.1 and 2.2, PR #55 review). The rows come as this poll's one read (round 2.7), keyed by answer
-  // key, made on the first tap that needs it (round 3.7). Being typed is that answer's own key, never the whole ask: a tap of another choice is no paste of this one,
-  // and still refuses it (E8, round 3.1).
+  // key, made on the first tap that needs it (round 3.7). Being typed is that answer's own key, never the whole ask: a
+  // tap of another choice is no paste of this one, and still refuses it (E8, round 3.1).
   #ownTapOf(ask: Ask, tap: PaneTap | null, answers: () => ReadonlyMap<string, SendRow>): Sighting["answered"] {
     if (tap === null) return null;
     const k = answerKey(ask.id, ask, { kind: "option", key: tap.key });
