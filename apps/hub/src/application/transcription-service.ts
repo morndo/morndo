@@ -35,6 +35,8 @@ const live = (state: Transcription["state"]) => state === "queued" || state === 
 export class TranscriptionService {
   #store: TranscriptionStore;
   #transcriber: Transcriber | null;
+  #active: Transcriber | null;
+  #locate: (() => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null) | null;
   #unavailable: TranscriberProbe | null;
   #now: () => number;
   #limit: number;
@@ -60,6 +62,7 @@ export class TranscriptionService {
     store: TranscriptionStore;
     transcriber: Transcriber | null;
     unavailable?: TranscriberProbe | null;
+    locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
     file: (recording: Recording) => RecordingFile | null;
     now?: () => number;
     limit?: number;
@@ -75,6 +78,8 @@ export class TranscriptionService {
   }) {
     this.#store = p.store;
     this.#transcriber = p.transcriber;
+    this.#active = p.transcriber;
+    this.#locate = p.locate ?? null;
     this.#unavailable = p.unavailable ?? null;
     this.#now = p.now ?? Date.now;
     this.#limit = p.limit ?? TRANSCRIPTION_LIMIT_DEFAULT;
@@ -193,7 +198,18 @@ export class TranscriptionService {
     const cached = this.#cache;
     if (cached && this.#now() - cached.at < this.#probeTtlMs) return this.capability();
     let probe: TranscriberProbe;
-    if (this.#unavailable) probe = this.#unavailable;
+    if (this.#locate) {
+      // Each probe asks again what is on the machine (design §6: the capability follows the probe): a plugin
+      // installed while the hub runs turns the feature on, one removed or turned unsafe turns it off.
+      const located = this.#locate();
+      this.#active = located?.transcriber ?? null;
+      if (!located || !located.transcriber) probe = located?.unavailable ?? { ready: false, reason: "missing", detail: "missing" };
+      else {
+        try { probe = await located.transcriber.probe(); }
+        catch { probe = { ready: false, reason: "not_ready", detail: "probe_failed" }; }
+      }
+    }
+    else if (this.#unavailable) probe = this.#unavailable;
     else if (!this.#transcriber) probe = { ready: false, reason: "missing", detail: "missing" };
     else {
       try { probe = await this.#transcriber.probe(); }
@@ -245,7 +261,7 @@ export class TranscriptionService {
       ac.abort();
     }, this.#timeoutFor(maxSeconds * 1000));
     this.#timers.add(timer);
-    const transcriber = this.#transcriber;
+    const transcriber = this.#active ?? this.#transcriber;
     if (!transcriber) return true;
     void transcriber.transcribe({
       path: file.path, language: row.language, threads: this.#threads, maxSeconds, signal: ac.signal,

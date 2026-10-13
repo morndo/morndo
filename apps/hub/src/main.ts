@@ -200,13 +200,18 @@ switch (cmd) {
     const usage = new UsageService({ store });
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
-    const located = locateTranscriber(process.env, config.dataDir);
     const txSettings = loadTranscriptionSettings(config.dataDir, line => log.warn(line));
-    const absent = "reason" in located;
+    // Each probe looks again: a plugin installed while the hub runs turns the feature on, and one removed or turned
+    // unsafe turns it off (design §6). The one known path, never PATH.
     const transcription = new TranscriptionService({
       store,
-      transcriber: absent ? null : processTranscriber(located.path),
-      unavailable: absent ? { ready: false, reason: located.reason, detail: located.detail } : null,
+      transcriber: null,
+      locate: () => {
+        const located = locateTranscriber(process.env, config.dataDir);
+        return "path" in located
+          ? { transcriber: processTranscriber(located.path), unavailable: null }
+          : { transcriber: null, unavailable: { ready: false, reason: located.reason, detail: located.detail } };
+      },
       file: recording => fileOnDisk(recording.kind === "upload" ? inbox.get(recording.id)?.path : files.get(recording.id)?.file),
       limit: txSettings.limit, timeoutSec: txSettings.timeoutSec, maxSeconds: txSettings.maxSeconds, threads: txSettings.threads,
       guard: () => guardNow(txSettings.guard, () => readMachine(txSettings.guard)),
