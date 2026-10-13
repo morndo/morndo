@@ -2,7 +2,7 @@
 // PR, against ProcessTranscriber with the fixture plugin. A fake that ignores the abort signal stays pending, so
 // the abort case fails. A process adapter reports the pids it started; a timeout must leave that group dead.
 import { describe, expect, it } from "vitest";
-import type { EngineText, Result, TranscriptionProblem } from "@morndo/domain";
+import type { EngineText } from "@morndo/domain";
 import type { TranscribeInput, Transcriber, TranscriberProbe } from "../src/index.ts";
 import { SENTENCE } from "./answers.mjs";
 import { alive, until } from "./proc.ts";
