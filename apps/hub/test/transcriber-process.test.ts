@@ -46,14 +46,18 @@ describe("process host", () => {
     expect(await until(() => host.group().length > 0, 2000)).toBe(true);
     const pid = host.group()[0];
     if (pid === undefined) throw new Error("the run started without a pid");
+    const environ = () => {
+      try { return readFileSync(`/proc/${pid}/environ`).toString("utf8").split("\0").filter(row => row !== ""); }
+      catch { return []; }
+    };
+    expect(await until(() => environ().some(row => row.startsWith("TMPDIR=")), 2000)).toBe(true);
     expect(alive(pid)).toBe(true);
     // Node 24 os.constants.priority.PRIORITY_BELOW_NORMAL is nice 10 on Linux (docs fetched 2026-10-13).
     expect(constants.priority.PRIORITY_BELOW_NORMAL).toBe(10);
     expect(getPriority(pid)).toBe(10);
-    const raw = readFileSync(`/proc/${pid}/environ`).toString("utf8").split("\0").filter(row => row !== "");
+    const raw = environ();
     const keys = raw.map(row => row.split("=")[0]);
-    expect(keys.every(key => key === "PATH" || key === "HOME" || key === "LANG" || key === "TMPDIR")).toBe(true);
-    expect(keys).toContain("TMPDIR");
+    expect(keys.toSorted()).toEqual(["HOME", "LANG", "PATH", "TMPDIR"].filter(key => key === "TMPDIR" || process.env[key]).toSorted());
     expect(raw.join("\0")).not.toContain("MORNDO_");
     const tmp = raw.find(row => row.startsWith("TMPDIR="))?.slice("TMPDIR=".length);
     expect(readlinkSync(`/proc/${pid}/cwd`)).toBe(tmp);
