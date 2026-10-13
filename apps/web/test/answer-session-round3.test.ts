@@ -17,7 +17,10 @@ function item(version: string, over: Partial<DecisionItem> = {}): DecisionItem {
   };
 }
 
-beforeEach(() => { vi.stubGlobal("$state", <T>(v: T) => v); });
+beforeEach(() => {
+  const state = <T>(v: T) => v;
+  vi.stubGlobal("$state", Object.assign(state, { raw: <T>(v: T) => v }));
+});
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("stale and seen", () => {
@@ -33,5 +36,16 @@ describe("stale and seen", () => {
     expect(s.stale).toBe(true);
     expect(s.seen).toBe("v1");
     expect(words).toBe(0);
+  });
+
+  it("a new item with the same version still replaces live when another field changed", async () => {
+    const { AnswerSession } = await import("../src/lib/desktop/answer-session.svelte.ts");
+    const first = item("v1");
+    const s = new AnswerSession(first);
+    const next = item("v1", { inbox: { status: "queued", reason: "offline" }, askedAgain: true });
+    s.bind(next, false);
+    expect(s.live).toBe(next);
+    expect(s.shown).toBe(next);
+    expect(s.live.askedAgain).toBe(true);
   });
 });

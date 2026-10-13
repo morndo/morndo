@@ -15,17 +15,15 @@ export class AnswerSession {
   error = $state<string | null>(null);
   again = $state<AnswerState["again"]>(null);
   sent = $state(false);
-  shown = $state<DecisionItem>(null as unknown as DecisionItem);
-  live = $state<DecisionItem>(null as unknown as DecisionItem);
+  // Raw, not a deep proxy: the list's item compares by identity, and a field the old sameness list forgot
+  // (inbox, asked again, blocking) is not left behind. Svelte 5.57 $state.raw (svelte.dev/docs/svelte/$state).
+  shown = $state.raw<DecisionItem>(null as unknown as DecisionItem);
+  live = $state.raw<DecisionItem>(null as unknown as DecisionItem);
   asking = $state(false);
   asked = $state(false);
   askError = $state<string | null>(null);
 
-  // The last item `bind` took, outside the state: `live`'s proxy wraps a plain item's nested objects anew on every
-  // write, so they would never compare same, and the bind would keep rewriting the state its caller's effect reads.
-  #bound: DecisionItem | null = null;
-
-  constructor(item: DecisionItem) { this.apply(openSession(item)); this.#bound = item; }
+  constructor(item: DecisionItem) { this.apply(openSession(item)); }
 
   snapshot(): AnswerState {
     return {
@@ -44,19 +42,13 @@ export class AnswerSession {
   get holdingAnswer() { return this.mode !== "idle" || this.again !== null || this.sending || this.sent; }
 
   // `hold` while the brief is open: the body stays on the version he has seen. Otherwise a quiet card follows the list.
-  // Compare the version, not object identity: a state proxy is never === the item the list just passed.
   // `sent` belongs to the version it was sent for. A re-ask (same id, new version) is a new question: a closed brief
   // follows it, and an open brief drops `sent` only once that version is shown.
   bind(live: DecisionItem, hold: boolean) {
     if (this.sent && live.version !== this.shown.version && !hold) this.sent = false;
     const follow = !hold && !this.holdingAnswer;
-    const bound = this.#bound;
-    const same = bound !== null && bound.version === live.version && bound.status === live.status && bound.briefVersion === live.briefVersion && bound.answerable === live.answerable && bound.decision === live.decision && bound.notice === live.notice && this.shown.version === (follow ? live.version : this.shown.version);
-    if (!same) {
-      this.#bound = live;
-      this.live = live;
-      if (follow) this.shown = live;
-    }
+    if (this.live !== live) this.live = live;
+    if (follow && this.shown !== live) this.shown = live;
     if (live.status !== "open" && (this.mode !== "idle" || this.picked !== null || this.again !== null || this.error !== null)) {
       this.#settleClosed();
     }
