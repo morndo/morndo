@@ -37,16 +37,16 @@ export function mp4Bytes(timescale: number, duration: number, moovLast = false):
 }
 
 // An ID3v2 tag of `tag` padding bytes, then an MPEG-1 Layer III frame header: 128 kbit/s at the given rate.
-export function mp3Bytes(tag: number, rate: "44100" | "48000", xing?: { frames: number }): Uint8Array {
+// `footer` adds the 10-byte ID3v2.4 footer the flag names; the sync-safe size does not include it.
+export function mp3Bytes(tag: number, rate: "44100" | "48000", xing?: { frames: number }, footer = false): Uint8Array {
   const header = new Uint8Array([0xff, 0xfb, rate === "44100" ? 0x90 : 0x94, 0x00]);
-  const id3 = new Uint8Array([
-    0x49, 0x44, 0x33, 3, 0, 0,                                             // ID3v2.3, no flags
-    (tag >> 21) & 0x7f, (tag >> 14) & 0x7f, (tag >> 7) & 0x7f, tag & 0x7f,  // sync-safe size
-    ...new Array<number>(tag).fill(0),
-  ]);
-  if (!xing) return concat(id3, header);
+  const flags = footer ? 0x10 : 0;
+  const size = new Uint8Array([(tag >> 21) & 0x7f, (tag >> 14) & 0x7f, (tag >> 7) & 0x7f, tag & 0x7f]);
+  const id3 = new Uint8Array([0x49, 0x44, 0x33, 4, 0, flags, ...size, ...new Array<number>(tag).fill(0)]);
+  const foot = footer ? new Uint8Array([0x33, 0x44, 0x49, 4, 0, flags, ...size]) : new Uint8Array();
+  if (!xing) return concat(id3, foot, header);
   const body = new Uint8Array([...new TextEncoder().encode("Xing"), ...u32be(1), ...u32be(xing.frames), ...new Array<number>(96).fill(0)]);
-  return concat(id3, header, body);
+  return concat(id3, foot, header, body);
 }
 
 // An Ogg page: only version, type, the granule position and a one-segment payload matter to the parser.

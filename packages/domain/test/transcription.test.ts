@@ -439,6 +439,8 @@ describe("audioDurationMs", () => {
     expect(audioDurationMs({ head: moovLast.head, tail: moovLast.moov, tailAt: moovLast.head.length, size: moovLast.head.length + moovLast.moov.length })).toBe(2500);
     const cbr = mp3Bytes(100, "44100");
     expect(audioDurationMs({ head: cbr, size: 110 + 16_000 })).toBe(1000);           // constant 128 kbit/s from the tag's end
+    const foot = mp3Bytes(20, "44100", undefined, true);                             // ID3v2.4 footer is 10 bytes, not part of the size
+    expect(audioDurationMs({ head: foot, size: foot.length - 4 + 16_000 })).toBe(1000);
     const vbr = mp3Bytes(0, "48000", { frames: 1000 });
     expect(audioDurationMs(whole(vbr))).toBe(24_000);                                // a Xing header's frame count
     expect(audioDurationMs(withTail(opusBytes(5000).head, opusBytes(5000).tail))).toBe(5000);   // Opus granule at 48 kHz

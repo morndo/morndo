@@ -118,7 +118,7 @@ function mp3Duration(head: Uint8Array, size: number): number | null {
     if (!fits(head, 0, 10)) return null;
     const flags = head[5]!;
     i = 10 + (((head[6]! & 0x7f) << 21) | ((head[7]! & 0x7f) << 14) | ((head[8]! & 0x7f) << 7) | (head[9]! & 0x7f))
-      + (flags & 0x10 ? 5 : 0);
+      + (flags & 0x10 ? 10 : 0);                            // ID3v2.4 footer is 10 bytes, and the size excludes it
   }
   if (!fits(head, i, 4) || head[i] !== 0xff || (head[i + 1]! & 0xe0) !== 0xe0) return null;
   const version = (head[i + 1]! >> 3) & 0x3;                  // 3: MPEG-1; 2: MPEG-2; 0: MPEG-2.5
