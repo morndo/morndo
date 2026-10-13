@@ -54,6 +54,7 @@ export class TranscriptionService {
   #timers = new Set<ReturnType<typeof setTimeout>>();
   #probeChain: Promise<void> = Promise.resolve();
   #closed = false;
+  #sweep: ReturnType<typeof setInterval> | null = null;
 
   constructor(p: {
     store: TranscriptionStore;
@@ -70,6 +71,7 @@ export class TranscriptionService {
     log?: (line: string) => void;
     probeTtlMs?: number;
     timeoutFor?: (durationMs: number) => number;
+    tickMs?: number;
   }) {
     this.#store = p.store;
     this.#transcriber = p.transcriber;
@@ -91,6 +93,13 @@ export class TranscriptionService {
       const prev = loaded.find(item => sameRow(item, row));
       if (!prev || prev.state !== row.state) this.#store.saveTranscription(row);
     }
+    // A row the guard holds (load, memory, guard_unknown) has nothing else waiting on it: a minute's sweep re-checks
+    // the queue, as the jobs' own minute does (jobs-service). Unref'd, so an idle service never holds the process.
+    const sweepMs = p.tickMs ?? 60_000;
+    if (sweepMs > 0) {
+      this.#sweep = setInterval(() => this.tick(), sweepMs);
+      this.#sweep.unref?.();
+    }
   }
 
   async start(): Promise<void> {
@@ -102,6 +111,7 @@ export class TranscriptionService {
   // and nothing further is launched: no queued row gets a slot after this.
   close(): void {
     this.#closed = true;
+    if (this.#sweep) clearInterval(this.#sweep);
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     for (const ac of this.#inflight.values()) ac.abort();
