@@ -19,6 +19,7 @@ import {
 } from "../application/ports.ts";
 import { FleetOpFailed, FleetUnavailable, type FleetClient, type FleetEvent, type FleetLane, type NodeStatus, type OpAnswer } from "./fleet-client.ts";
 import { log } from "./log.ts";
+import { stagedUploadName } from "./uploads.ts";
 import { perKeyLimit } from "./per-key-limit.ts";
 
 export type FleetTimeouts = { listMs: number; captureMs: number; sendMs: number; keysMs: number; frameMs: number; statusMs: number; transcriptMs: number; fileMs: number };
@@ -412,14 +413,14 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
 
   // An image the principal attached, put on the node of the worker it goes to (spec §3.1, Uploads), in chunks of at most
   // 256 KiB, each keyed `upload:<id>:<chunk>`. A chunk asked again after a lost answer gets the node's stored outcome.
-  type ChunkResult = { ok: true; path: string | null } | { ok: false; problem: "no_pane" | "too_large" | "node_offline"; restart?: true };
+  type ChunkResult = { ok: true; path: string | null } | { ok: false; problem: "no_pane" | "too_large" | "node_offline" | "not_allowed"; restart?: true };
   async function putChunk(node: string, args: OpArgs["file.put"], key: string): Promise<ChunkResult> {
     for (let attempt = 0; attempt < 3; attempt++) {
       let r: OpAnswer<"file.put">;
       try { r = await client.op({ node }, "file.put", args, { key, timeoutMs: t.fileMs }); }
       catch { continue; }                                       // the fleet didn't answer: the same key again
       if (r.ok) return { ok: true, path: typeof r.result.path === "string" ? r.result.path : null };
-      if (r.error.code === "node_offline" || r.error.code === "too_large") return { ok: false, problem: r.error.code };
+      if (r.error.code === "node_offline" || r.error.code === "too_large" || r.error.code === "not_allowed") return { ok: false, problem: r.error.code };
       if (r.error.executed === "maybe") continue;
       log.warn(`an image for ${node} was refused: ${r.error.code}`);
       return { ok: false, problem: "no_pane", ...(r.error.code === "bad_args" ? { restart: true as const } : {}) };
@@ -446,7 +447,7 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
           const offset = i * LIMITS.chunkBytes;
           const final = i === chunks - 1;
           const part = bytes.subarray(offset, offset + LIMITS.chunkBytes).toString("base64");
-          const r = await putChunk(node, { upload: transfer, offset, bytes: part, final, name: basename(upload.path) }, hubKey(`upload:${transfer}:${i}`));
+          const r = await putChunk(node, { upload: transfer, offset, bytes: part, final, name: stagedUploadName(upload.path) }, hubKey(`upload:${transfer}:${i}`));
           if (!r.ok) { last = r; restart = r.restart === true; break; }
           if (final) return r.path === null ? { ok: false, problem: "no_pane" } : { ok: true, path: r.path };
         }

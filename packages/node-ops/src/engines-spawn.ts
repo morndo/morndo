@@ -21,16 +21,26 @@ export class EnginesError extends Error {
 
 export type EnginesRun = { code: number; stdout: string; stderr: string };
 
-export function runEngines(program: string, args: readonly string[], env: NodeJS.ProcessEnv): Promise<EnginesRun> {
+// `signal` stops the run: it is killed (SIGKILL), and the promise settles only once it has exited. execFile's own signal
+// option calls back at once, before the process is gone (lib/child_process.js, errorhandler, v24.21.0); its callback on
+// close comes after the exit ("Called with the output when process terminates", child_process docs, v24.21.0).
+export function runEngines(program: string, args: readonly string[], env: NodeJS.ProcessEnv, signal?: AbortSignal): Promise<EnginesRun> {
   return new Promise((resolve, reject) => {
-    execFile(program, [...args], { env, timeout: ENGINES_TIMEOUT_MS, maxBuffer: ENGINES_MAX_OUTPUT, encoding: "utf8" }, (error, stdout, stderr) => {
+    if (signal?.aborted) return reject(stopped(program));
+    const stop = () => { child.kill("SIGKILL"); };
+    const child = execFile(program, [...args], { env, timeout: ENGINES_TIMEOUT_MS, maxBuffer: ENGINES_MAX_OUTPUT, encoding: "utf8" }, (error, stdout, stderr) => {
+      signal?.removeEventListener("abort", stop);
       if (!error) return resolve({ code: 0, stdout, stderr });
+      if (signal?.aborted) return reject(stopped(program));
       const failed = error as NodeJS.ErrnoException & { code?: unknown; killed?: boolean };
       if (typeof failed.code === "number" && !failed.killed) return resolve({ code: failed.code, stdout, stderr });
       reject(spawnFailure(program, failed, null));
     });
+    signal?.addEventListener("abort", stop, { once: true });
   });
 }
+
+const stopped = (program: string) => new EnginesError("unavailable", `${program} was stopped: another engines call failed first`);
 
 export function runEnginesSync(program: string, args: readonly string[], env: NodeJS.ProcessEnv): EnginesRun {
   const result = spawnSync(program, [...args], {

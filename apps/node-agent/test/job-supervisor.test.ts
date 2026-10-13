@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { noticeIdOf, type Job } from "@morndo/domain";
-import { processIdentity } from "@morndo/node-ops";
+import { processIdentity, resetProcessStartCache } from "@morndo/node-ops";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore, type NoticeHandoff } from "../src/ops/job-store.ts";
 import { psStarts, START_RECORD_GRACE_MS, writeProcessFile } from "../src/ops/job-identity.ts";
@@ -692,8 +692,8 @@ describe("child supervisor", () => {
       return "10 Thu Jan  1 00:00:01 1970\n11 Thu Jan  1 00:00:02 1970\n";
     });
     expect(calls).toEqual([[10, 11]]);
-    expect(starts.get(10)).toBe(Date.parse("Thu Jan  1 00:00:01 1970"));
-    expect(starts.get(11)).toBe(Date.parse("Thu Jan  1 00:00:02 1970"));
+    expect(starts.get(10)?.earliest).toBe(Date.parse("Thu Jan  1 00:00:01 1970"));
+    expect(starts.get(11)?.earliest).toBe(Date.parse("Thu Jan  1 00:00:02 1970"));
   });
 
   it("records a start identity only inside the spawn window, before it returns", async () => {
@@ -712,6 +712,36 @@ describe("child supervisor", () => {
       expect(existsSync(late)).toBe(false);
     } finally {
       try { process.kill(child.pid!, "SIGKILL"); } catch { /* already gone */ }
+    }
+  });
+
+  // /proc/stat prints the boot time in whole seconds, here 990 ms short of the boot clock's own. A process that started
+  // 50 ms before the spawn stamp is inside the window all the same. The tick rate and ps are given, not the host's.
+  it("records a start inside the spawn window when btime is most of a second short", () => {
+    const { dir } = rig();
+    const bootS = 1_791_300_000;
+    const bootMs = bootS * 1000 + 990;
+    const ticks = 100_000;
+    const startedMs = bootMs + ticks * 10;
+    const nowMs = startedMs + 200;
+    const proc: Record<string, string> = {
+      "/proc/4242/stat": `4242 (job) S ${Array.from({ length: 18 }, () => "0").join(" ")} ${ticks}`,
+      "/proc/stat": `cpu 1\nbtime ${bootS}\n`,
+      "/proc/uptime": `${((nowMs - bootMs) / 1000).toFixed(2)} 1.00\n`,
+      "/proc/sys/kernel/random/boot_id": "0f6c1b52-7a3e-4c55-9d1e-2b8f4a6c9e10\n",
+    };
+    const io = { read: (path: string) => proc[path] ?? null, now: () => nowMs, hz: 100, ps: () => null };
+    resetProcessStartCache();
+    try {
+      writeProcessFile(join(dir, "born.at"), 4242, startedMs + 50, io);
+      expect(existsSync(join(dir, "born.at"))).toBe(true);
+      expect(JSON.parse(readFileSync(join(dir, "born.at"), "utf8"))).toEqual({ ticks, bootId: "0f6c1b52-7a3e-4c55-9d1e-2b8f4a6c9e10" });
+      writeProcessFile(join(dir, "late.at"), 4242, startedMs + 60_000, io);
+      writeProcessFile(join(dir, "early.at"), 4242, startedMs - 60_000, io);
+      expect(existsSync(join(dir, "late.at"))).toBe(false);
+      expect(existsSync(join(dir, "early.at"))).toBe(false);
+    } finally {
+      resetProcessStartCache();
     }
   });
 
@@ -928,5 +958,61 @@ exit 0
     if (!decided.ok) return;
     expect(decided.value.job.outcome).toBe("exited");
     expect(store.get(id)?.outcome).toBe("exited");
+  });
+});
+
+// Design §5, "When a log reaches its cap": the helper owns the decision. Sweeps run the whole time, as they do in the
+// agent, so a .cap note from the supervisor is part of every case.
+describe("the log cap rule on the helper backend", () => {
+  const FILLED = `require("node:fs").writeSync(1, Buffer.alloc(64, 97));`;
+  const ended = async (sup: JobSupervisor, store: JobStore, id: string) =>
+    until(async () => { await sup.sweep(); return store.get(id)?.outcome != null; }, 10_000);
+
+  it("keeps the code of a command that ends within the grace", async () => {
+    const { sup, store, start } = rig(undefined, undefined, 8);
+    const script = `${FILLED} setTimeout(() => process.exit(1), 150);`;
+    expect((await start({ id: "job-cap-grace", command: [process.execPath, "-e", script] })).state).toBe("running");
+    expect(await ended(sup, store, "job-cap-grace")).toBe(true);
+    expect(store.get("job-cap-grace")).toMatchObject({ outcome: "exited", exitCode: 1 });
+  });
+
+  it("records no code for a command still running when the cap stops it, even when its SIGTERM handler exits 0", async () => {
+    const { sup, store, start } = rig(undefined, undefined, 8);
+    const script = `process.on("SIGTERM", () => process.exit(0)); ${FILLED} setInterval(() => {}, 1000);`;
+    expect((await start({ id: "job-cap-trap", command: [process.execPath, "-e", script] })).state).toBe("running");
+    expect(await ended(sup, store, "job-cap-trap")).toBe(true);
+    expect(store.get("job-cap-trap")).toMatchObject({ outcome: "exited", exitCode: null });
+  });
+
+  it("records no code for a writer that keeps going past the cap and exits 0 on SIGTERM", async () => {
+    const { sup, store, start } = rig(undefined, undefined, 8);
+    const script = `process.on("SIGTERM", () => process.exit(0)); const b = Buffer.alloc(64, 97); setInterval(() => require("node:fs").writeSync(1, b), 5);`;
+    expect((await start({ id: "job-cap-writer", command: [process.execPath, "-e", script] })).state).toBe("running");
+    expect(await ended(sup, store, "job-cap-writer")).toBe(true);
+    expect(store.get("job-cap-writer")).toMatchObject({ outcome: "exited", exitCode: null });
+  });
+
+  it("keeps the code when the command ended but a process it left behind holds the group, and stops that process", async () => {
+    const { sup, store, start, home } = rig(undefined, undefined, 8);
+    const marker = join(home, "left.pid");
+    const script = `const left = require("node:child_process").spawn("sleep", ["30"], { stdio: "ignore" });
+      require("node:fs").writeFileSync(process.argv[1], String(left.pid)); ${FILLED} process.exit(3);`;
+    expect((await start({ id: "job-cap-left", command: [process.execPath, "-e", script, marker] })).state).toBe("running");
+    expect(await ended(sup, store, "job-cap-left")).toBe(true);
+    expect(store.get("job-cap-left")).toMatchObject({ outcome: "exited", exitCode: 3 });
+    const left = Number(readFileSync(marker, "utf8"));
+    expect(await until(() => !alive(left), 5000)).toBe(true);
+  });
+
+  it("keeps the code across a restart: a .cap on disk does not override what the helper wrote", async () => {
+    const { sup, store, dir, home, paths, start, slot } = rig(undefined, undefined, 8);
+    const script = `${FILLED} setTimeout(() => process.exit(2), 400);`;
+    expect((await start({ id: "job-cap-restart", command: [process.execPath, "-e", script] })).state).toBe("running");
+    expect(await until(async () => { await sup.sweep(); return existsSync(join(dir, "job-cap-restart.cap")); }, 8000)).toBe(true);
+    sup.close();
+    expect(await until(() => existsSync(join(dir, "job-cap-restart.exit")), 8000)).toBe(true);
+    const next = replace(slot, store, home, paths);
+    await next.sweep();
+    expect(store.get("job-cap-restart")).toMatchObject({ outcome: "exited", exitCode: 2 });
   });
 });

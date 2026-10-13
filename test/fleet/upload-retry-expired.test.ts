@@ -25,7 +25,8 @@ describe("a retried upload", () => {
     const client = new FleetClient(fleet.config.socketPath);
     const dir = mkdtempSync(join(tmpdir(), "upload-retry-"));
     const ports = fleetPorts(client, { files: null, stagingDir: join(dir, "staging") });
-    const image = randomBytes(3 * LIMITS.chunkBytes - 1000);
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const image = Buffer.concat([png, randomBytes(3 * LIMITS.chunkBytes - 1000 - png.length)]);
     const file = join(dir, "photo.png");
     writeFileSync(file, image);
     const upload = { id: "up0000000000000000000001", endpointId: "e1" as never, path: file, mime: "image/png" as const, size: image.length, at: Date.now() };

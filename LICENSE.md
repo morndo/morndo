@@ -1,13 +1,3 @@
-Copyright (c) 2026-present jacksnxly
-
-Portions of this software, namely every file that resides under a directory named `ee` anywhere in this repository (for example [`ee/`](ee/) at the root, or an `ee/` directory inside an app or package), are licensed under the licence defined in [`ee/LICENSE.md`](ee/LICENSE.md).
-
-All third-party components incorporated into Morndo are licensed under the original licence provided by the owner of the applicable component.
-
-Content outside the directories named above is available under the "AGPLv3" licence as defined below.
-
----
-
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

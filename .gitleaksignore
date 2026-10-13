@@ -8,3 +8,5 @@ fd17b9fab6ac257a780be1461d567797eee90a6f:apps/node-agent/test/config.test.ts:gen
 d752906f6d555537b5f9044cb4a96d9e2270524e:docs/design/fleet-core/plan/03-agent.md:generic-api-key:187
 # The redaction test's synthetic input: the Ed25519 key header plus "xyz=", asserting the log redactor blanks a fleetKey. Not a key.
 29674697f741692cb6b9dbc4adc972da19cad5fd:apps/hub/test/log-agreement.test.ts:generic-api-key:13
+# A secrets wire test's view fixture: keyedFingerprint "0123456789ab", a made-up 12-hex value (later replaced by an all-zero one).
+2ebda4874c58fab304c5bfdcbd93629fff234ded:packages/protocol/test/secrets-wire-review.test.ts:generic-api-key:12

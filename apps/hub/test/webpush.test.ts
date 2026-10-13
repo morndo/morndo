@@ -187,11 +187,11 @@ describe("the sender (RFC 8030)", () => {
       const send = pushSender(loadOrCreateVapid(dir, "mailto:owner@example.com"), Date.now, 400);
       const sub = { endpoint: `http://127.0.0.1:${port}/push/abc`, p256dh: ua.getPublicKey().toString("base64url"), auth: Buffer.alloc(16, 3).toString("base64url") };
       const o = { ttlSeconds: 60, topic: "decision", urgency: "high" } as const;
-      const started = Date.now();
+      const started = performance.now();
       expect(await send(sub, Buffer.from("{}"), o)).toEqual({ status: 0 });                           // no answer at all
       mode = "stalls";
       expect(await send(sub, Buffer.from("{}"), o)).toEqual({ status: 403 });                         // the status came, the reason never did
-      expect(Date.now() - started).toBeLessThan(5000);
+      expect(performance.now() - started).toBeLessThan(5000);
     } finally { server.closeAllConnections(); server.close(); }
   });
   it("posts the encrypted payload with TTL, Topic, Urgency, aes128gcm and VAPID, and says what the service answered", async () => {

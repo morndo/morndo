@@ -2,7 +2,7 @@
 
 **By morning, it's done.**
 
-Morndo is the control plane for one person who runs many coding agents. You give the direction. The agents do the work. Morndo holds the loop back to you: every decision reaches you once, is answered once, and is remembered. Proof of "done" comes from a check the agent didn't run itself.
+Morndo is an open-source, self-hosted control plane for one person who runs many AI coding agents. You give the direction. The agents do the work. Morndo holds the loop back to you: every decision reaches you once, is answered once, and is remembered. Proof of "done" comes from a check the agent didn't run itself.
 
 The agents stay what they are: Claude Code, Codex and others, run unmodified in tmux. Morndo doesn't replace them. It serves you.
 
@@ -91,6 +91,8 @@ One machine can hold everything (hub, fleet service, node agent), or a control p
 ## Licence
 
 Morndo is open core. The repository is licensed under the [AGPLv3](LICENSE.md), except for everything under a directory named `ee`, which is the Enterprise Edition and is covered by a separate [enterprise licence](ee/LICENSE.md). The `ee` directory is empty today; enterprise features for larger organisations land there, and need a commercial licence to run in production. Everything else stays free to run, change and self-host.
+
+In detail: every file under a directory named `ee` anywhere in this repository (for example [`ee/`](ee/) at the root, or an `ee/` directory inside an app or package) is licensed under [`ee/LICENSE.md`](ee/LICENSE.md). Content outside those directories is available under the AGPLv3 in [LICENSE.md](LICENSE.md). Third-party components incorporated into Morndo are licensed under the original licence provided by the owner of each component. Copyright (c) 2026-present jacksnxly.
 
 How to contribute is [CONTRIBUTING.md](CONTRIBUTING.md). Report a vulnerability in private, as [SECURITY.md](SECURITY.md) describes. Agents follow [AGENTS.md](AGENTS.md).
 
