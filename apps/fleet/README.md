@@ -44,6 +44,7 @@ Every path derives from `HOME`.
 | `publicUrl` | `ws://127.0.0.1:8791/agent` | What join strings tell agents to dial: `wss://…`, or `ws://` to a loopback host only. Anything else is refused at start. |
 | `subscribers` | `[]` | `[{ "name", "url", "paths": ["/hook/stop", …] }]`: who gets which hook events. |
 | `stickyLanes` | `["manager"]` | Lane names a delivery follows across a restart: while no window has the name, a delivery to it goes to the node that last had it and waits there (`no_pane`). Any other name binds a delivery to the session it had when queued. |
+| `laneWatch` | `{ "waitingMin": 30, "noStatusMin": 15, "nudge": true }` | The lane watch (Lane events, below): the deadline of a turn that waits without a `for` or ends with background work (`waitingMin`), and of one that ends with no status (`noStatusMin`), in whole minutes from 1 to 1440; `nudge` sends a lane past its deadline one delivery saying so. |
 | `laneEvents` | `{ "deliverTo": "manager", "header": "[lane-event] Lane events (handle them as your instructions say):", "ignore": [], "batchMs": 3000 }` | Lane events delivered to a lane: batched for `batchMs`, one delivery per batch (split at 8000 characters), the `header` line, then one JSON line per event. `deliverTo: null` turns delivery off; the events are still published and kept. `ignore`: globs of lane names that raise none. |
 
 ## Agent endpoint
@@ -88,6 +89,7 @@ Liveness: the fleet pings every 15 s and terminates a connection that missed a p
 | `GET /v1/deliveries?lane=&state=` | `{ deliveries }`: the newest 1000 of the last 7 days, oldest first, each with `stale` (true while its node is offline) |
 | `POST /v1/deliveries/<id>/cancel` | `{ ok: true, delivery }` for one still `queued`; 200 `{ ok: false, error }` (`already_typed`) past that; 404 `{ error: "no_such_delivery" }` for an id it doesn't know |
 | `GET /v1/lane-events?since=<seq>` | `{ events }`: lane events after `seq`, at most 1000, oldest first, from the last 7 days |
+| `GET /v1/lane-watch` | `{ lanes }`: each lane's last turn as the lane watch holds it, oldest first: `{ node, window, at, status, deadline, reason?, waitingOn?, stale, stalls }` |
 | `WS /v1/events` | `status`, `inventory`, `health`, `conflict`, `alert`, `delivery` (a delivery's new state) and `lane` (a lane event); the current status, inventory and health first. A client more than 8 MiB of events behind is closed with 1013; on reconnecting it gets the current state first. |
 
 A body that isn't JSON is 415 and one over 1 MiB 413, and an unknown API version is 404 `{ error: "unsupported_api" }`; an op body is answered in the op's own shape even then. From a shell: `curl --unix-socket ~/.local/state/morndo-fleet/fleet.sock http://fleet/v1/nodes`.
@@ -110,15 +112,16 @@ A delivery is a message for one lane running Claude Code. It is queued on the la
 
 ## Lane events
 
-Built per node and window, from two sources:
-- the hooks: `finished` from `/hook/stop`, `stop_failure` from `/hook/failure`. Either Claude Code's own body or the owner's older script body is read: `docs/fleet-api.md` §11.3.
+Built per node and window, from three sources:
+- the hooks: `finished` from `/hook/stop`, `stop_failure` from `/hook/failure`. Either Claude Code's own body or the owner's older script body is read: `docs/fleet-api.md` §11.3. A `finished` event's `status` is read from the answer's status line (`waiting` too, with `waitingOn` and `until`).
 - the session states the node reports: `needs_input` and `answered`, which the node sends through its hook stream as `/lane`.
+- the lane watch: `stale`, for a lane whose last turn passed its deadline with no hook from it since (WAITING: its `until`; background work or a wake-up: `laneWatch.waitingMin`; no status: `laneWatch.noStatusMin`; DONE, BLOCKED and NEEDS DECISION have none). One per turn, with `reason`, `waitingOn`, `since` and `stalls` (stale events since the lane last settled). With `laneWatch.nudge`, the lane also gets one delivery (`fleet:nudge:<node>:<turn end, ms>`) while `stalls` is at most 2. A lane whose node isn't online isn't called stale until the node is back. The watch is in memory, rebuilt from the last day's lane events at start; the restart counts as activity, so deadlines run again from it.
 
 Each is stored in the same synced intake commit as the hooks, kept 7 days, served at `GET /v1/lane-events?since=` and published on `/v1/events`.
 
 `laneEvents` delivers them to a lane, the manager:
 - batched for `batchMs`, one delivery per batch (split at 8000 characters);
-- the `header` line, then one JSON line per event in the shape `lane-events-push` used: `{ ts, lane, sessionId, event, status, firstLine, bg, crons }`;
+- the `header` line, then one JSON line per event in the shape `lane-events-push` used: `{ ts, lane, sessionId, event, status, firstLine, bg, crons }`, plus `waitingOn` and `until` for a wait, and `{ ts, lane, sessionId, event, reason, waitingOn, since, stalls }` for `stale`;
 - the delivery id is `fleet:lane-events:<node>:<first event's time, ms>`, with `-1`, `-2` … for a batch split over 8000 characters, and `.2`, `.3` … for a batch queued again after its delivery was given up.
 
 What is not delivered:
@@ -161,6 +164,7 @@ The audit also holds `op.<name>` for every side-effecting op (actor `client`; `{
 | `lane_conflict` | A lane name got a second claimant. |
 | `delivery_waiting` | A delivery is still `queued`, `typed` or `held` 2, 15 and 60 minutes after it was queued, once each; `detail` `{ id, lane, state, reason, minutes }`. |
 | `subscriber_lagging` | A subscriber's oldest undelivered event is older than 60 s; `detail` `{ subscriber, oldestAgeMs, streams }`. |
+| `engine_fallback` | A `lane.start` ran an engine its role reached only after passing over others; `detail` `{ lane, role?, entry, skipped: { entry, reason }[] }`. The start's audit row (`op.lane.start`) keeps the `role` or `engine`, the `reason` and the entry that ran (`ran`). |
 
 ## Security model
 

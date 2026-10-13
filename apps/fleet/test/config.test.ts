@@ -27,6 +27,7 @@ describe("fleet config", () => {
       subscribers: [],
       stickyLanes: ["manager"],
       laneEvents: { deliverTo: "manager", header: "[lane-event] Lane events (handle them as your instructions say):", ignore: [], batchMs: 3000 },
+      laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: true },
     });
   });
 
@@ -77,6 +78,11 @@ describe("fleet config", () => {
     expect(loadConfig(off).laneEvents).toMatchObject({ deliverTo: null, batchMs: 100 });
   });
 
+  it("takes laneWatch's settings one by one over their defaults (reliable lanes §3.2)", () => {
+    expect(loadConfig(withFile({ laneWatch: { noStatusMin: 5 } })).laneWatch).toEqual({ waitingMin: 30, noStatusMin: 5, nudge: true });
+    expect(loadConfig(withFile({ laneWatch: { waitingMin: 1440, nudge: false } })).laneWatch).toEqual({ waitingMin: 1440, noStatusMin: 15, nudge: false });
+  });
+
   it("refuses a file that doesn't fit, naming the setting", () => {
     const cases: [unknown, RegExp][] = [
       ["{not json", /not valid JSON/],
@@ -101,6 +107,11 @@ describe("fleet config", () => {
       [{ stickyLanes: [""] }, /stickyLanes must be a list of lane names/],
       [{ stickyLanes: ["man\nager"] }, /stickyLanes must be a list of lane names/],
       [{ laneEvents: [] }, /laneEvents must be an object/],
+      [{ laneWatch: [] }, /laneWatch must be an object/],
+      [{ laneWatch: { nudges: true } }, /laneWatch has unknown settings: nudges/],
+      [{ laneWatch: { noStatusMin: 0 } }, /laneWatch.noStatusMin must be a whole number of minutes from 1 to 1440/],
+      [{ laneWatch: { waitingMin: 1.5 } }, /laneWatch.waitingMin must be a whole number of minutes/],
+      [{ laneWatch: { nudge: "yes" } }, /laneWatch.nudge must be true or false/],
       [{ laneEvents: { deliver: "manager" } }, /laneEvents has unknown settings: deliver/],
       [{ laneEvents: { deliverTo: "" } }, /laneEvents.deliverTo must be a lane name, or null/],
       [{ laneEvents: { header: "two\nlines" } }, /laneEvents.header must be one line/],

@@ -10,10 +10,13 @@
 // name's window is gone (the manager restarting), a delivery still goes to the node that last reported it.
 // `laneEvents` (spec §7): lane events delivered to the lane `deliverTo` (null: not delivered, still published), batched
 // for `batchMs`, as one message whose first line is `header`; lanes whose name matches a glob of `ignore` emit none.
+// `laneWatch` (reliable lanes §3.2): the lease of a WAITING turn that names no `for`, and of one that ended with background
+// work (`waitingMin`); the deadline of a turn with no status line (`noStatusMin`); whether a stale lane is nudged.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fleetUrlOk, type HookEvent } from "@morndo/protocol";
+import { DEFAULT_LANE_WATCH, type LaneWatchConfig } from "./application/lane-watch.ts";
 
 export type HookPath = HookEvent["path"];
 export type Subscriber = { name: string; url: string; paths: HookPath[] };
@@ -26,6 +29,7 @@ export type FleetConfig = {
   subscribers: Subscriber[];                  // the hook bus's static subscribers
   stickyLanes: string[];                      // lane names deliveries follow across restarts (spec §4.6)
   laneEvents: LaneEventsConfig;               // lane events to the manager (spec §7)
+  laneWatch: LaneWatchConfig;                 // deadlines for a lane's last turn (reliable lanes §3.2)
 };
 export type LaneEventsConfig = { deliverTo: string | null; header: string; ignore: string[]; batchMs: number };
 
@@ -43,7 +47,8 @@ const SUBSCRIBER_NAME = /^[a-z0-9-]{1,32}$/;
 const JOIN_URL = /^wss?:\/\/[!-~]{1,2040}$/;
 // The loopback names and addresses the agent endpoint may listen on.
 const LOOPBACK_HOST = /^(?:127(?:\.\d{1,3}){3}|localhost|::1)$/;
-const KEYS = new Set(["listen", "socketPath", "dbPath", "keyPath", "publicUrl", "subscribers", "stickyLanes", "laneEvents"]);
+const KEYS = new Set(["listen", "socketPath", "dbPath", "keyPath", "publicUrl", "subscribers", "stickyLanes", "laneEvents", "laneWatch"]);
+const LANE_WATCH_KEYS = new Set(["waitingMin", "noStatusMin", "nudge"]);
 const LANE_EVENT_KEYS = new Set(["deliverTo", "header", "ignore", "batchMs"]);
 // The header is the message's first line: printable, no line break; the batch window from 0.1 to 60 s.
 const HEADER = /^[^\p{Cc}]{1,1000}$/u;
@@ -65,6 +70,7 @@ export function defaults(home: string): FleetConfig {
     subscribers: [],
     stickyLanes: ["manager"],
     laneEvents: { deliverTo: "manager", header: "[lane-event] Lane events (handle them as your instructions say):", ignore: [], batchMs: 3000 },
+    laneWatch: { ...DEFAULT_LANE_WATCH },
   };
 }
 
@@ -141,6 +147,24 @@ function laneEvents(v: unknown, base: LaneEventsConfig): LaneEventsConfig {
   };
 }
 
+// Each setting of laneWatch over its default: minutes from 1 to 1440 (a day), nudge true or false.
+function laneWatch(v: unknown, base: LaneWatchConfig): LaneWatchConfig {
+  if (!isObject(v)) throw new ConfigError("laneWatch must be an object with waitingMin, noStatusMin and nudge");
+  const extra = Object.keys(v).filter(k => !LANE_WATCH_KEYS.has(k));
+  if (extra.length) throw new ConfigError(`laneWatch has unknown settings: ${extra.join(", ")}`);
+  for (const k of ["waitingMin", "noStatusMin"] as const) {
+    if (v[k] !== undefined && (!Number.isInteger(v[k]) || (v[k] as number) < 1 || (v[k] as number) > 1440)) {
+      throw new ConfigError(`laneWatch.${k} must be a whole number of minutes from 1 to 1440`);
+    }
+  }
+  if (v.nudge !== undefined && typeof v.nudge !== "boolean") throw new ConfigError("laneWatch.nudge must be true or false");
+  return {
+    waitingMin: v.waitingMin === undefined ? base.waitingMin : (v.waitingMin as number),
+    noStatusMin: v.noStatusMin === undefined ? base.noStatusMin : (v.noStatusMin as number),
+    nudge: v.nudge === undefined ? base.nudge : (v.nudge as boolean),
+  };
+}
+
 // The file's settings over the defaults. Throws ConfigError for a file that isn't JSON or doesn't fit.
 export function loadConfig(o: { env?: NodeJS.ProcessEnv; home?: string } = {}): FleetConfig {
   const env = o.env ?? process.env;
@@ -173,5 +197,6 @@ export function loadConfig(o: { env?: NodeJS.ProcessEnv; home?: string } = {}): 
     subscribers: raw.subscribers === undefined ? base.subscribers : subscribers(raw.subscribers),
     stickyLanes: raw.stickyLanes === undefined ? base.stickyLanes : laneNames(raw.stickyLanes, "stickyLanes"),
     laneEvents: raw.laneEvents === undefined ? base.laneEvents : laneEvents(raw.laneEvents, base.laneEvents),
+    laneWatch: raw.laneWatch === undefined ? base.laneWatch : laneWatch(raw.laneWatch, base.laneWatch),
   };
 }

@@ -242,6 +242,7 @@ export type Fleet = {
 };
 export async function startFleet(o: {
   subscribers?: FleetConfig["subscribers"]; stickyLanes?: string[]; laneEvents?: Partial<FleetConfig["laneEvents"]>;
+  laneWatch?: Partial<FleetConfig["laneWatch"]>;
 } = {}): Promise<Fleet> {
   const home = tempDir("morndo-fleet-");
   // The client socket's path must fit sockaddr_un.sun_path: 103 bytes on macOS, 107 on Linux
@@ -259,6 +260,8 @@ export async function startFleet(o: {
     // Off unless a test turns it on: a lane-event batch typed into a lane named "manager" would land in drills that count
     // what that lane received (the fleet core's retry drills have one).
     laneEvents: { deliverTo: null, header: "[lane-event] Lane events (handle them as your instructions say):", ignore: [], batchMs: 3000, ...o.laneEvents },
+    // Nudges off unless a test turns them on, for the same reason.
+    laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: false, ...o.laneWatch },
   };
   mkdirSync(join(home, ".config/morndo-fleet"), { recursive: true });
   writeFileSync(join(home, ".config/morndo-fleet/config.json"), JSON.stringify(config, null, 2));

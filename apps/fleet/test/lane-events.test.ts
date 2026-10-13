@@ -35,6 +35,14 @@ describe("lane events from hooks", () => {
     expect(firstLineOf(`${"x".repeat(250)}\nsecond`)).toHaveLength(200);
   });
 
+  it("a WAITING line: what it waits on, and until when: its own `for`, else laneWatch.waitingMin (reliable lanes §3.1)", () => {
+    const waiting = (text: string) => laneEventOf(hook("/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: text }), RULES);
+    expect(waiting("STATUS: WAITING on CI for 20 min")).toEqual({ ...base, event: "finished", status: "waiting", firstLine: "STATUS: WAITING on CI for 20 min", bg: 0, crons: 0, waitingOn: "CI", until: AT + 20 * 60_000 });
+    expect(waiting("STATUS: WAITING")).toMatchObject({ status: "waiting", until: AT + 30 * 60_000 });
+    expect(waiting("STATUS: WAITING")?.waitingOn).toBeUndefined();
+    expect(statusOf("STATUS: WAITING on review")).toBe("waiting");
+  });
+
   it("stop_failure from either form: error_type, else error, else unknown, at most 60 characters", () => {
     expect(laneEventOf(hook("/hook/failure", { session_id: SID, hook_event_name: "StopFailure", error_type: "rate_limit" }), RULES)).toEqual({ ...base, event: "stop_failure", error: "rate_limit" });
     expect(laneEventOf(hook("/hook/failure", { window: "studio", session_id: SID, error: "overloaded" }), RULES)).toMatchObject({ error: "overloaded" });
@@ -76,6 +84,10 @@ describe("the manager's message", () => {
     expect(lineOf(ev(2, { event: "needs_input", question: "Which?", status: undefined as never }))).toBe(`{"ts":"2026-10-08T17:17:06.086Z","lane":"studio","sessionId":"${SID}","event":"needs_input","question":"Which?"}`);
     const { sessionId: _, ...noSession } = ev(3, { event: "stop_failure", error: "rate_limit" });
     expect(lineOf(noSession)).toBe('{"ts":"2026-10-08T17:17:06.086Z","lane":"studio","event":"stop_failure","error":"rate_limit"}');
+    expect(lineOf(ev(3, { status: "waiting", firstLine: "STATUS: WAITING on CI", waitingOn: "CI", until: AT + 60_000 }))).toBe(
+      `{"ts":"2026-10-08T17:17:06.086Z","lane":"studio","sessionId":"${SID}","event":"finished","status":"waiting","firstLine":"STATUS: WAITING on CI","bg":0,"crons":0,"waitingOn":"CI","until":"2026-10-08T17:18:06.086Z"}`);
+    expect(lineOf(ev(4, { event: "stale", status: undefined as never, firstLine: undefined as never, bg: undefined as never, crons: undefined as never, reason: "no_status", since: AT - 60_000, stalls: 2 }))).toBe(
+      `{"ts":"2026-10-08T17:17:06.086Z","lane":"studio","sessionId":"${SID}","event":"stale","reason":"no_status","since":"2026-10-08T17:16:06.086Z","stalls":2}`);
   });
 
   it("splits a batch over 8000 characters into parts of at most 8000, each with the header, in order (Review Focus 4)", () => {

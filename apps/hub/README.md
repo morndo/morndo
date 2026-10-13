@@ -64,10 +64,11 @@ Every lane of every node, for anyone with the fleet's socket. It is a subcommand
 | `morndo lanes peek <lane \| worker id> [--lines N] [--json]` | its screen's last lines (default 40) |
 | `morndo lanes send <lane \| worker id> <text \| -> [--json]` | a delivery to the lane (`-` reads the text from stdin as is; `--id` chooses its id). It prints the state and returns, or with `--wait <s>` waits that long for `delivered`. `--direct` types at once (`pane.send`), for a lane without Claude Code; `--id` then names its key. |
 | `morndo lanes keys <lane \| worker id> <key…>` | keys by name (`Enter`, `Escape`, `C-c`, `Up`, the digits, …) |
-| `morndo lanes start <name> --cwd <dir> [--node <n>] [--account <a>] [--resume <session>] [--prompt <text>] [--json]` | a new lane, run by the node's launcher; the prompt is typed once Claude Code can take it. `--json` prints the result, with `waiting: "trust"` when Claude Code asks to trust the folder. |
+| `morndo lanes start <name> --cwd <dir> [--node <n>] [--role <role> \| --engine <provider:model[@effort]> --reason <why>] [--account <a>] [--resume <session>] [--prompt <text>] [--json]` | a new lane, run by the node's launcher, or on an engine: `--role` asks the node's engine layer what runs that role now, `--engine` names one (with a reason where the node has a default role). It prints what ran and what the resolver passed over first. The prompt is typed once Claude Code can take it. `--json` prints the result, with `waiting: "trust"` when Claude Code asks to trust the folder. |
 | `morndo lanes stop <lane \| worker id> [--kill]` | `/exit`, typed as a delivery is; `--kill` closes the window, also after an exit that timed out. The node's protected lanes (the manager) are refused. |
 | `morndo lanes status <delivery id> [--json]` | a delivery's state; an id without a client's name is read as `lanes:<id>`, as `--id` writes it |
 | `morndo lanes events [--json]` | lane events as they happen |
+| `morndo lanes brief [--json]` | what an orchestrator must know after a restart or a compaction, in at most 60 lines: each lane's last status and deadline, the stale ones with their stall count, deliveries not yet taken, the day's alerts. As a `SessionStart` hook (matcher `startup\|resume\|clear\|compact`), it is put back into the orchestrator's context each time (ADR-0027). |
 
 | Exit | Meaning |
 |---|---|

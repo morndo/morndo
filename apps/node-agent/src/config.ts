@@ -8,14 +8,22 @@
 //   command into the user's shell once its prompt shows; "direct" runs it as the pane's own program.
 // - `protected` lists the lane names lane.stop refuses.
 // An op can't add a word to the command (spec §11): only `{account}` and `--resume <session>`, both of fixed formats.
+// Reliable lanes (design §3.1, §3.3):
+// - `statusContract`: whether the relay asks a lane, once per turn, for the status line its answer lacks; never the lanes in
+//   `exempt` (the orchestrator).
+// - `engines`: the engine layer's CLI on this node (`cli`), a launch command per provider (`launch`, with `{model}`,
+//   `{effort}`, `{account}` and `{lane}` filled from the pick and the op), and the Role a new lane runs on when its start
+//   names neither a role nor an engine (`defaultRole`). Without `engines`, lane.start refuses a role or an engine.
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { JOB_CLASS } from "@morndo/domain";
-import { NODE_NAME, OP_NAMES, fleetUrlOk, type OpName } from "@morndo/protocol";
+import { NODE_NAME, OP_NAMES, ROLE_NAME, fleetUrlOk, type OpName } from "@morndo/protocol";
 import { MAX_TIMER_MS } from "./ops/job-limits.ts";
 import { agentPaths } from "./paths.ts";
 
 export type Launch = { command: string[]; via: "shell" | "direct" };
+export type StatusContract = { mode: "ask" | "off"; exempt: string[] };
+export type EnginesPolicy = { cli?: string; launch: Record<string, Launch>; defaultRole?: string };
 export type JobClassPolicy = { limit: number; timeoutSec?: number };
 export type JobGuardPolicy = { load1?: number; memAvailableMiB?: number };
 export type JobsPolicy = { enabled: boolean; classes: Record<string, JobClassPolicy>; guard?: JobGuardPolicy };
@@ -28,6 +36,8 @@ export type Policy = {
   tmuxSocket: string | null;
   launch: Launch;
   protected: string[];
+  statusContract: StatusContract;
+  engines?: EnginesPolicy;
   jobs: JobsPolicy;
   jobsWarning?: string;
 };
@@ -49,12 +59,13 @@ export const RELAY_PORT = 8787;
 export const DEFAULT_JOBS: JobsPolicy = { enabled: true, classes: { default: { limit: 2 } } };
 export const DEFAULT_POLICY: Policy = {
   ops: [...ALL_OPS], session: "main", repoRoots: [], lockedPanes: {}, tmuxSocket: null,
-  launch: { command: ["claude"], via: "shell" }, protected: ["manager"], jobs: DEFAULT_JOBS,
+  launch: { command: ["claude"], via: "shell" }, protected: ["manager"], statusContract: { mode: "ask", exempt: ["manager"] }, jobs: DEFAULT_JOBS,
 };
 // The defaults as a copy that a parse may change, never DEFAULT_POLICY itself.
 const defaults = (): Policy => ({
   ...DEFAULT_POLICY, ops: [...DEFAULT_POLICY.ops], repoRoots: [], lockedPanes: {},
   launch: { command: [...DEFAULT_POLICY.launch.command], via: DEFAULT_POLICY.launch.via }, protected: [...DEFAULT_POLICY.protected],
+  statusContract: { mode: DEFAULT_POLICY.statusContract.mode, exempt: [...DEFAULT_POLICY.statusContract.exempt] },
   jobs: copyJobs(DEFAULT_JOBS),
 });
 
@@ -83,19 +94,67 @@ function readJson(path: string): Obj {
 const absolutePaths = (v: unknown): v is string[] => Array.isArray(v) && v.every(p => typeof p === "string" && isAbsolute(p));
 
 // `launch`: a field it doesn't set keeps its default. The program comes first and is never an option.
-function parseLaunch(v: unknown, where: string): Launch {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: launch must be an object { command, via }`);
+function parseLaunch(v: unknown, where: string, name = "launch"): Launch {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: ${name} must be an object { command, via }`);
   const o = v as Obj;
   const unknown = Object.keys(o).filter(k => k !== "command" && k !== "via");
-  if (unknown.length) throw new ConfigError(`${where}: launch has an unknown field ${unknown.join(", ")} (known: command, via)`);
+  if (unknown.length) throw new ConfigError(`${where}: ${name} has an unknown field ${unknown.join(", ")} (known: command, via)`);
   const command = o.command ?? DEFAULT_POLICY.launch.command;
   if (!Array.isArray(command) || command.length < 1 || command.length > 32 || !command.every(w => typeof w === "string" && WORD.test(w))
     || String(command[0]).startsWith("-")) {
-    throw new ConfigError(`${where}: launch.command must be 1 to 32 words without control characters, the program first (not an option)`);
+    throw new ConfigError(`${where}: ${name}.command must be 1 to 32 words without control characters, the program first (not an option)`);
   }
   const via = o.via ?? DEFAULT_POLICY.launch.via;
-  if (via !== "shell" && via !== "direct") throw new ConfigError(`${where}: launch.via must be "shell" or "direct"`);
+  if (via !== "shell" && via !== "direct") throw new ConfigError(`${where}: ${name}.via must be "shell" or "direct"`);
   return { command: command.map(String), via };
+}
+
+function parseStatusContract(v: unknown, where: string): StatusContract {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: statusContract must be an object { mode, exempt }`);
+  const o = v as Obj;
+  const unknown = Object.keys(o).filter(k => k !== "mode" && k !== "exempt");
+  if (unknown.length) throw new ConfigError(`${where}: statusContract has an unknown field ${unknown.join(", ")} (known: mode, exempt)`);
+  const mode = o.mode ?? DEFAULT_POLICY.statusContract.mode;
+  if (mode !== "ask" && mode !== "off") throw new ConfigError(`${where}: statusContract.mode must be "ask" or "off"`);
+  const exempt = o.exempt ?? DEFAULT_POLICY.statusContract.exempt;
+  if (!Array.isArray(exempt) || !exempt.every(n => typeof n === "string" && LANE_NAME.test(n))) {
+    throw new ConfigError(`${where}: statusContract.exempt must be a list of lane names`);
+  }
+  return { mode, exempt: [...new Set(exempt as string[])] };
+}
+
+const PROVIDER = /^[a-z][a-z0-9-]{0,31}$/;
+const PLACEHOLDERS = ["{account}", "{model}", "{effort}", "{lane}"];
+
+function parseEngines(v: unknown, where: string): EnginesPolicy {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: engines must be an object { cli, launch, defaultRole }`);
+  const o = v as Obj;
+  const unknown = Object.keys(o).filter(k => k !== "cli" && k !== "launch" && k !== "defaultRole");
+  if (unknown.length) throw new ConfigError(`${where}: engines has an unknown field ${unknown.join(", ")} (known: cli, launch, defaultRole)`);
+  const engines: EnginesPolicy = { launch: {} };
+  if (o.cli !== undefined) {
+    if (typeof o.cli !== "string" || !isAbsolute(o.cli)) throw new ConfigError(`${where}: engines.cli must be the absolute path of the engine layer's CLI`);
+    engines.cli = o.cli;
+  }
+  if (o.launch === null || typeof o.launch !== "object" || Array.isArray(o.launch)) {
+    throw new ConfigError(`${where}: engines.launch must map each provider to its launch command { command, via }`);
+  }
+  for (const [provider, raw] of Object.entries(o.launch as Obj)) {
+    if (!PROVIDER.test(provider)) throw new ConfigError(`${where}: engines.launch: ${provider} is not a provider name`);
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw) || (raw as Obj).command === undefined) {
+      throw new ConfigError(`${where}: engines.launch.${provider} must name its command`);
+    }
+    const launch = parseLaunch(raw, where, `engines.launch.${provider}`);
+    // The program is the owner's, never a value an op fills.
+    if (PLACEHOLDERS.some(p => (launch.command[0] ?? "").includes(p))) throw new ConfigError(`${where}: engines.launch.${provider}: the program can't be a placeholder`);
+    engines.launch[provider] = launch;
+  }
+  if (o.defaultRole !== undefined) {
+    if (typeof o.defaultRole !== "string" || !ROLE_NAME.test(o.defaultRole)) throw new ConfigError(`${where}: engines.defaultRole must be a role name`);
+    if (engines.cli === undefined) throw new ConfigError(`${where}: engines.defaultRole needs engines.cli, the resolver that fills it`);
+    engines.defaultRole = o.defaultRole;
+  }
+  return engines;
 }
 
 function copyJobs(jobs: JobsPolicy): JobsPolicy {
@@ -202,7 +261,7 @@ export function jobTimeouts(jobs: JobsPolicy): Record<string, number> {
 }
 
 export function parsePolicy(value: Obj, where: string): Policy {
-  const known = ["ops", "session", "repoRoots", "fileRoots", "lockedPanes", "tmuxSocket", "launch", "protected", "jobs"];
+  const known = ["ops", "session", "repoRoots", "fileRoots", "lockedPanes", "tmuxSocket", "launch", "protected", "statusContract", "engines", "jobs"];
   const unknown = Object.keys(value).filter(k => !known.includes(k));
   if (unknown.length) throw new ConfigError(`${where}: unknown field ${unknown.join(", ")} (known: ${known.join(", ")})`);
   const policy: Policy = defaults();
@@ -242,6 +301,8 @@ export function parsePolicy(value: Obj, where: string): Policy {
     }
     policy.protected = [...new Set(value.protected as string[])];
   }
+  if (value.statusContract !== undefined) policy.statusContract = parseStatusContract(value.statusContract, where);
+  if (value.engines !== undefined) policy.engines = parseEngines(value.engines, where);
   if (value.jobs !== undefined) {
     try { policy.jobs = parseJobs(value.jobs, where); }
     catch (e) {

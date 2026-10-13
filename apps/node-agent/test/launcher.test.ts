@@ -245,3 +245,30 @@ describe("lane.stop (spec §5)", () => {
     expect(t.tmux("capture-pane", "-p", "-t", pane)).not.toContain("/exit");
   });
 });
+
+describe("lane.start on an engine (reliable lanes §3.3)", () => {
+  // The engine layer's CLI as a stand-in: on, and every role resolves to acme:large-2 after passing over beta.
+  const enginesCli = () => {
+    const path = join(bin, "engines");
+    writeFileSync(path, `#!/bin/sh\n[ "$1" = option ] && { echo true; exit 0; }\necho '{"picked":{"entry":"acme:large-2"},"skipped":[{"entry":"beta:x@high","reason":"beta: not installed"}]}'\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const acme: Launch = { command: ["claude-as", "--model", "{model}", "--effort", "{effort}", "--window", "{lane}"], via: "direct" };
+
+  it("a start that names nothing runs the default role's pick with the provider's launch, and says what ran", async () => {
+    const h = harness({ command: ["claude-quick"], via: "direct" }, {}, { engines: { cli: enginesCli(), launch: { acme }, defaultRole: "implement" } });
+    const r = await h.call("lane.start", { cwd: work, name: "eng" }, { key: "lanes:e1", timeoutMs: 30_000 });
+    expect(r).toMatchObject({ ok: true, result: { engine: { entry: "acme:large-2", role: "implement", skipped: [{ entry: "beta:x@high", reason: "beta: not installed" }] } } });
+    await until(() => argv("claude-as") !== null);
+    expect(argv("claude-as")).toEqual(["claude-as", "--model", "large-2", "--window", "eng"]);
+    expect(argv("claude-quick")).toBeNull();                                             // negative control: the node's own launch
+  });
+
+  it("a role whose provider has no launch command here is refused, and nothing starts", async () => {
+    const h = harness({ command: ["claude-quick"], via: "direct" }, {}, { engines: { cli: enginesCli(), launch: {} } });
+    const r = await h.call("lane.start", { cwd: work, name: "eng", role: "implement" }, { key: "lanes:e2", timeoutMs: 30_000 });
+    expect(r).toMatchObject({ ok: false, error: { code: "denied", executed: "no" } });
+    expect(windows()).not.toContain("eng");
+  });
+});
