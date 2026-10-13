@@ -183,4 +183,21 @@ describe("a Decision the record can no longer attribute", () => {
     s.poll();                                                                                // the tap line stays in the history
     expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
+
+  // An answer in doubt that its node typed after all, learnt while another endpoint answers the same ask otherwise
+  // (review of PR #55): the Decision is the endpoint that typed it — the row in doubt names it — not the endpoint whose
+  // answer happened to settle the question.
+  it("an answer in doubt, typed by one device and learnt from another's answer, is recorded as the device that typed it", async () => {
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("the connection was lost while typing"); },            // in doubt: typed at the node
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 7 }),                     // its node typed it after all
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "hold" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(s.seenBy(endpointId("desk")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");    // it typed the answer
+    expect(s.seenBy(endpointId("phone")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("desk"));
+  });
 });
