@@ -14,7 +14,7 @@ import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/proto
 import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
-import { syncFeed } from "./feed-sync.ts";
+import { refUpdateResult, syncFeed } from "./feed-sync.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
@@ -233,6 +233,13 @@ describe("feed", () => {
     const again = ChannelFeedSchema.parse(JSON.parse(second));
     expect(again.seq).toBe(2);
     expect(again.releases.map(r => r.version)).toEqual(["0.2.0", "0.1.0"]);
+  });
+
+  it("retries a ref update only when GitHub says it was not a fast forward", () => {
+    expect(refUpdateResult(false, "422 Update is not a fast forward")).toBe("moved");
+    expect(refUpdateResult(false, "409 reference moved")).toBe("moved");
+    expect(() => refUpdateResult(false, "422 Object does not exist")).toThrow(/Object does not exist/);
+    expect(refUpdateResult(true, "")).toBe("ok");
   });
 
   it("does not deploy a site older than the feed head", () => {

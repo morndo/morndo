@@ -113,9 +113,16 @@ function writeRef(repository: string, parent: string | null, dir: string, messag
   const update = parent === null
     ? gh(["api", "--method", "POST", `/repos/${repository}/git/refs`, "-f", "ref=refs/heads/feed", "-f", `sha=${commit}`])
     : gh(["api", "--method", "PATCH", `/repos/${repository}/git/refs/heads/feed`, "-f", `sha=${commit}`]);
-  if (update.ok) return "ok";
-  if (/\b422\b|\b409\b/.test(update.stderr)) return "moved";
-  throw new Error(`feed ref update failed: ${update.stderr}`);
+  return refUpdateResult(update.ok, update.stderr);
+}
+
+// force defaults to false, so a non-fast-forward update is rejected.
+// https://docs.github.com/en/rest/git/refs#update-a-reference (read 2026-10-13)
+// Retry only when the body says the update was not a fast forward or the reference moved.
+export function refUpdateResult(ok: boolean, stderr: string): "ok" | "moved" {
+  if (ok) return "ok";
+  if (/not a fast forward/i.test(stderr) || /reference moved/i.test(stderr)) return "moved";
+  throw new Error(`feed ref update failed: ${stderr}`);
 }
 
 export function publishChannelFeeds(p: {
