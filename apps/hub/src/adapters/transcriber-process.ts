@@ -62,10 +62,19 @@ function killGroup(pid: number): ReturnType<typeof setTimeout> | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   try { process.kill(-pid, "SIGTERM"); } catch { /* already gone */ }
   const hard = setTimeout(() => {
+    // Only when the group still exists: signal 0 is ESRCH once it is gone, and the pid may have been reused.
+    if (!groupAlive(pid)) return;
     try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
   }, KILL_AFTER_MS);
   hard.unref?.();
   return hard;
+}
+
+// Whether any process still holds the process group: signal 0 to the pgid is ESRCH once the group is gone
+// (kill(2), fetched 2026-10-13).
+function groupAlive(pid: number): boolean {
+  try { process.kill(-pid, 0); return true; }
+  catch { return false; }
 }
 
 type Run = { code: number | null; stdout: string; stderr: string; capped: boolean; aborted: boolean };
@@ -114,8 +123,17 @@ function runProgram(program: string, args: string[], signal: AbortHandle, onLead
     let aborted = false;
     let settled = false;
     let hard: ReturnType<typeof setTimeout> | null = null;
-    // The answer can be ready before the process has exited: an abort rejects at once, and the SIGKILL
-    // timer stays until close so a child that ignores SIGTERM is still taken. Clearing it here would cancel that.
+    let escalated = false;
+    // One escalation per run (a stdout cap and then an abort is still one group): a second would arm a second
+    // timer nothing clears, and it would signal a pgid the kernel may have reused.
+    const escalate = () => {
+      if (escalated || pid === undefined) return;
+      escalated = true;
+      hard = killGroup(pid);
+    };
+    // The answer can be ready before the process has exited: an abort rejects at once, and the SIGKILL timer
+    // outlives the leader's stdio while any process still holds the group, so a member that ignores SIGTERM and
+    // holds no pipe is still taken. It is cleared only once the group is gone.
     const settle = (run: Run) => {
       if (settled) return;
       settled = true;
@@ -123,14 +141,16 @@ function runProgram(program: string, args: string[], signal: AbortHandle, onLead
       resolve(run);
     };
     const reap = () => {
-      if (hard) clearTimeout(hard);
-      hard = null;
+      if (hard && (pid === undefined || !groupAlive(pid))) {
+        clearTimeout(hard);
+        hard = null;
+      }
       onLeader(null);
       rmSync(tmp, { recursive: true, force: true });
     };
     const onAbort = () => {
       aborted = true;
-      if (pid !== undefined) hard = killGroup(pid);
+      escalate();
       settle({ code: null, stdout: "", stderr: "", capped: false, aborted: true });
     };
     signal.addEventListener("abort", onAbort);
@@ -142,7 +162,7 @@ function runProgram(program: string, args: string[], signal: AbortHandle, onLead
       if (capped || aborted) return;
       if (stdout.length + chunk.length > STDOUT_CAP) {
         capped = true;
-        if (pid !== undefined) hard = killGroup(pid);
+        escalate();
         return;
       }
       stdout = Buffer.concat([stdout, chunk]);
