@@ -322,7 +322,7 @@ export function startHttp(p: {
     if (!briefs) return json(res, 404, { error: "briefs_off" });
     const q = new URL(req.url ?? "/", "http://hub").searchParams;
     if (path === "/api/agent/decisions/template" && method === "GET") {
-      res.writeHead(200, { ...secureHeaders, "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store" });
+      res.writeHead(200, { ...secureHeaders(), "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store" });
       res.end(BRIEF_TEMPLATE);
       return;
     }
