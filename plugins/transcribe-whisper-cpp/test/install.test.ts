@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { Writable } from "node:stream";
@@ -140,6 +140,26 @@ describe("install choices", () => {
       expect(readFileSync(again, "utf8")).toBe("weights");
     } finally {
       rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("restores the newest crashed install, not the one first by name", async () => {
+    const root = mkdtempSync(join(tmpdir(), "morndo-newest-"));
+    const dest = join(root, "transcribe");
+    const older = join(root, ".transcribe.prev-aaaa");
+    const newer = join(root, ".transcribe.prev-ffff");
+    mkdirSync(older);
+    writeFileSync(join(older, "marker"), "old");
+    mkdirSync(newer);
+    writeFileSync(join(newer, "marker"), "new");
+    utimesSync(older, new Date("2020-01-01T00:00:00Z"), new Date("2020-01-01T00:00:00Z"));
+    utimesSync(newer, new Date("2024-06-01T00:00:00Z"), new Date("2024-06-01T00:00:00Z"));
+    try {
+      await expect(replaceInstall(dest, async () => { throw new Error("killed"); })).rejects.toThrow("killed");
+      expect(readFileSync(join(dest, "marker"), "utf8")).toBe("new");
+      expect(readdirSync(root)).toEqual(["transcribe"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 

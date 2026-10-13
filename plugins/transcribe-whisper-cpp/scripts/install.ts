@@ -272,11 +272,15 @@ function recoverInstall(dest: string): void {
   } catch {
     return;
   }
-  const prevs = entries.filter(entry => entry.startsWith(`.${name}.prev-`)).sort();
+  let prevs = entries.filter(entry => entry.startsWith(`.${name}.prev-`));
   const nexts = entries.filter(entry => entry.startsWith(`.${name}.next-`));
   if (!existsSync(dest) && prevs.length > 0) {
-    const keep = prevs.shift();
-    if (keep !== undefined) renameSync(join(parent, keep), dest);
+    const ranked = prevs
+      .map(entry => ({ entry, mtime: statSync(join(parent, entry)).mtimeMs }))
+      .sort((left, right) => right.mtime - left.mtime);
+    const keep = ranked[0];
+    if (keep !== undefined) renameSync(join(parent, keep.entry), dest);
+    prevs = ranked.slice(1).map(item => item.entry);
   }
   for (const leftover of [...prevs, ...nexts]) rmSync(join(parent, leftover), { recursive: true, force: true });
 }
