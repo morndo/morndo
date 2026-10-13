@@ -10,7 +10,7 @@ export function listFiles(files: readonly TreeFile[]): { json: string; sha256: s
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     .map(file => {
       assertTreePath(file.path);
-      const bytes = "link" in file ? Buffer.from(file.link) : file.bytes;
+      const bytes = "link" in file ? Buffer.from(file.link) : "directory" in file ? Buffer.alloc(0) : file.bytes;
       return { path: file.path, mode: file.mode, sha256: createHash("sha256").update(bytes).digest("hex") };
     });
   const parsed = FileListSchema.safeParse(entries);

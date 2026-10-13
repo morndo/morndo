@@ -44,7 +44,10 @@ function treeFiles(root: string): TreeFile[] {
       if (st.isSymbolicLink()) {
         const target = relative(dirname(abs), realpathSync(abs)).split(sep).join("/");
         out.push({ path: rel, mode: "0555", link: target });
-      } else if (st.isDirectory()) walk(abs, rel);
+      } else if (st.isDirectory()) {
+        if (readdirSync(abs).length === 0) out.push({ path: rel, mode: "0555", directory: true });
+        else walk(abs, rel);
+      }
       else if (st.isFile()) {
         const mode = rel.startsWith("bin/") || rel.startsWith("node/bin/") ? "0555" : "0444";
         out.push({ path: rel, bytes: readFileSync(abs), mode });

@@ -7,7 +7,8 @@ import { gzipSync } from "node:zlib";
 
 export type TreeFile =
   | { path: string; mode: "0444" | "0555"; bytes: Uint8Array }
-  | { path: string; mode: "0555"; link: string };
+  | { path: string; mode: "0555"; link: string }
+  | { path: string; mode: "0555"; directory: true };
 
 const BLOCK = 512;
 
@@ -22,13 +23,14 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
     }
     if (seen.has(file.path)) throw new Error(`duplicate path ${file.path}`);
     seen.add(file.path);
+    if ("directory" in file) dirs.add(`${file.path}/`);
     const parts = file.path.split("/");
     for (let i = 1; i < parts.length; i++) dirs.add(`${parts.slice(0, i).join("/")}/`);
   }
   type Entry = { path: string; dir: true } | { path: string; dir: false; file: TreeFile };
   const entries: Entry[] = [
     ...[...dirs].map(path => ({ path, dir: true as const })),
-    ...files.map(file => ({ path: file.path, dir: false as const, file })),
+    ...files.filter(file => !("directory" in file)).map(file => ({ path: file.path, dir: false as const, file })),
   ];
   entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const chunks: Buffer[] = [];

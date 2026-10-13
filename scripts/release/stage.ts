@@ -40,14 +40,14 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     const lock = readJson(readFileSync(lockPath, "utf8"));
     if (isLock(lock)) files.push({ path: "LICENSES/NOTICE", bytes: Buffer.from(thirdPartyNotice(lock)), mode: "0444" });
   } catch { /* a fixture may omit the lock */ }
-  mkdirSync(join(p.dest, "units"), { recursive: true });
-  mkdirSync(join(p.dest, "trust"), { recursive: true });
+  files.push({ path: "units", mode: "0555", directory: true }, { path: "trust", mode: "0555", directory: true });
   const listed = listFiles(files);
   files.push({ path: "files.json", bytes: Buffer.from(listed.json), mode: "0444" });
   for (const file of files) {
     const dest = join(p.dest, ...file.path.split("/"));
     mkdirSync(join(dest, ".."), { recursive: true });
-    if ("link" in file) symlinkSync(file.link, dest);
+    if ("directory" in file) mkdirSync(dest, { recursive: true });
+    else if ("link" in file) symlinkSync(file.link, dest);
     else writeFileSync(dest, file.bytes, { mode: file.mode === "0555" ? 0o555 : 0o444 });
   }
 }

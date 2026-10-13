@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/protocol";
-import { packTree } from "./archive.ts";
+import { packTree, type TreeFile } from "./archive.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
@@ -237,11 +237,16 @@ describe("stage, launchers, node pin, notice", () => {
     expect(files(destA)).toEqual(files(destB));
     expect(files(destA).some(p => p.includes("docs/") || p.endsWith(".test.ts"))).toBe(false);
     expect(files(destA)).toContain("bin/morndo");
+    expect(files(destA)).toContain("units");
+    expect(files(destA)).toContain("trust");
     expect(files(destA)).toContain("LICENSES/LICENSE.md");
     expect(readFileSync(join(destA, "bin/morndo"), "utf8")).toBe(launcherSource(LAUNCHERS.morndo));
     const packedA = packTree(readStaged(destA), 1_700_000_000);
     const packedB = packTree(readStaged(destB), 1_700_000_000);
     expect(Buffer.from(packedA).equals(packedB)).toBe(true);
+    const listed = spawnSync("tar", ["-tzf", "-"], { input: packedA, encoding: "utf8" });
+    expect(listed.stdout).toContain("units/");
+    expect(listed.stdout).toContain("trust/");
   });
 
   it("keeps an in-tree symlink and ships a workspace package as JavaScript", () => {
@@ -367,17 +372,19 @@ describe("install.sh", () => {
 });
 
 // The staged tree, as the packer wants it: every file files.json names, plus files.json itself.
-function readStaged(dest: string): { path: string; bytes: Uint8Array; mode: "0444" | "0555" }[] {
+function readStaged(dest: string): TreeFile[] {
   const listed = FileListSchema.parse(JSON.parse(readFileSync(join(dest, "files.json"), "utf8")));
   const modeOf = (mode: string): "0444" | "0555" => {
     if (mode === "0444" || mode === "0555") return mode;
     throw new Error(`unexpected mode ${mode}`);
   };
-  const out = listed.map(entry => ({
-    path: entry.path,
-    mode: modeOf(entry.mode),
-    bytes: new Uint8Array(readFileSync(join(dest, entry.path))),
-  }));
+  const out: TreeFile[] = listed.map(entry => {
+    const abs = join(dest, entry.path);
+    const st = lstatSync(abs);
+    if (st.isDirectory()) return { path: entry.path, mode: "0555" as const, directory: true as const };
+    if (st.isSymbolicLink()) return { path: entry.path, mode: "0555" as const, link: readlinkSync(abs) };
+    return { path: entry.path, mode: modeOf(entry.mode), bytes: new Uint8Array(readFileSync(abs)) };
+  });
   out.push({ path: "files.json", bytes: new Uint8Array(readFileSync(join(dest, "files.json"))), mode: "0444" });
   return out;
 }
