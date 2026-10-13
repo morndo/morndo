@@ -98,8 +98,8 @@ describe("sending", () => {
   it("an attached image goes after the text as the note workers read; another device's upload is refused (S2, S3)", async () => {
     const inbox = uploadInbox({ dir: join(dir, "inbox"), now: () => now });
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82]);
-    const mine = inbox.save(png, endpointId("ep1"));
-    const theirs = inbox.save(png, endpointId("ep2"));
+    const mine = await inbox.save(png, endpointId("ep1"));
+    const theirs = await inbox.save(png, endpointId("ep2"));
     if (!mine.ok || !theirs.ok) throw new Error("setup");
     const s = new SteeringService(store, typist(), () => now, undefined, inbox);
     await drawBox();

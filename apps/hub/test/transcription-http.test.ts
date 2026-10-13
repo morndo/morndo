@@ -1,5 +1,9 @@
 // The hub's transcription routes (design §6, §13). With no plugin the install is unchanged. With the fixture,
 // a short upload comes back as text. A temporary data dir and a random port, never a running hub.
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { UPLOAD_NAME_HEADER, type Transcriber } from "@morndo/protocol";
@@ -233,6 +237,60 @@ describe("transcription http", () => {
     } finally {
       process.stderr.write = write;
       process.off("unhandledRejection", onReject);
+    }
+  });
+
+  it("answers another request while a recording is remuxed", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "morndo-remux-"));
+    const sample = join(folder, "note.m4a");
+    const made = spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample], { encoding: "utf8" });
+    expect(made.status).toBe(0);
+    const bytes = readFileSync(sample);
+    const flag = join(folder, "started");
+    const done = join(folder, "finished");
+    writeFileSync(join(folder, "ffmpeg"), [
+      "#!/bin/sh",
+      "touch \"$MORNDO_REMUX_FLAG\"",
+      "sleep 1",
+      "prev=\"\"",
+      "in=\"\"",
+      "out=\"\"",
+      "for a in \"$@\"; do",
+      "  if [ \"$prev\" = \"-i\" ]; then in=$a; fi",
+      "  prev=$a",
+      "  out=$a",
+      "done",
+      "cp \"$in\" \"$out\"",
+      "touch \"$MORNDO_REMUX_DONE\"",
+      "",
+    ].join("\n"), { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${folder}:${path ?? ""}`;
+    process.env.MORNDO_REMUX_FLAG = flag;
+    process.env.MORNDO_REMUX_DONE = done;
+    const ready: Transcriber = {
+      probe: async () => ({ ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture", languages: "multi", maxSeconds: 600 }),
+      transcribe: () => Promise.reject(new Error("not used")),
+    };
+    try {
+      const hub = await startInProcessHub({ transcriber: ready });
+      hubs.push(hub);
+      const cookie = await cookieOf(hub);
+      const posted = upload(hub, cookie, "note.m4a", bytes);
+      const wait = Date.now();
+      while (!existsSync(flag) && Date.now() - wait < 3000) await new Promise(resolve => setTimeout(resolve, 15));
+      expect(existsSync(flag)).toBe(true);
+      expect(existsSync(done)).toBe(false);
+      const health = await fetch(`${hub.base}/api/health`);
+      expect(health.status).toBe(200);
+      expect(existsSync(done)).toBe(false);
+      expect((await posted).status).toBe(200);
+    } finally {
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+      delete process.env.MORNDO_REMUX_FLAG;
+      delete process.env.MORNDO_REMUX_DONE;
+      rmSync(folder, { recursive: true, force: true });
     }
   });
 });

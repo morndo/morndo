@@ -4,7 +4,7 @@
 // the metadata a photo carries (location, camera, text): JPEG APP1/APP13/comment segments and PNG text, time and
 // EXIF chunks are dropped. A recording loses its tags only where that can be done without corrupting the audio
 // (docs/design/transcription, section 8). Files older than a week are removed.
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,7 +17,7 @@ const KEEP_FILES_MS = 7 * 24 * 3_600_000;
 // A recording cannot: an mp4 chunk offset, an Ogg page and a Matroska element size all count the bytes around them,
 // so those three are remuxed (ffmpeg -map_metadata -1 -c copy) or stored unchanged. A wav's RIFF size and an mp3's
 // tags are the fields this file rewrites itself. The choice is written in docs/design/transcription (section 8).
-export function stripMetadata(b: Uint8Array, mime: ImageMime | AudioContainer): Uint8Array {
+export async function stripMetadata(b: Uint8Array, mime: ImageMime | AudioContainer, timeoutMs = 30_000): Promise<Uint8Array> {
   if (mime === "image/jpeg") {
     const out: Uint8Array[] = [b.subarray(0, 2)];
     let i = 2;
@@ -47,7 +47,7 @@ export function stripMetadata(b: Uint8Array, mime: ImageMime | AudioContainer): 
   // Audio (a gif or webp passes through as before), and only when the bytes are what the name claimed (the sniff
   // already ran before the save): a strip never walks bytes of another shape than the container it was told.
   if (sniffAudio(b) !== mime) return b;
-  if (mime === "mp4" || mime === "ogg" || mime === "webm") return stripByRemux(b, mime);
+  if (mime === "mp4" || mime === "ogg" || mime === "webm") return stripByRemux(b, mime, timeoutMs);
   if (mime === "mp3") return stripMp3(b);
   if (mime === "wav") return stripWav(b);
   return b;
@@ -58,20 +58,21 @@ const latin = (b: Uint8Array, i: number, n: number) => String.fromCharCode(...b.
 const frameSync = (b: Uint8Array) => b.length >= 2 && b[0] === 0xff && (b[1]! & 0xe0) === 0xe0;
 
 // mp4, ogg, webm: ffmpeg rewrites every size and offset when it copies the streams without metadata.
+// The spawn is asynchronous, with a timeout that kills it, so a slow remux never stalls the hub.
 // A missing ffmpeg, or a remux that fails, keeps the bytes: a hand edit of those containers would corrupt them.
 const REMUX_FORMAT = { mp4: "mp4", ogg: "ogg", webm: "webm" } as const;
-function stripByRemux(b: Uint8Array, container: keyof typeof REMUX_FORMAT): Uint8Array {
+async function stripByRemux(b: Uint8Array, container: keyof typeof REMUX_FORMAT, timeoutMs: number): Promise<Uint8Array> {
   const ext = container === "mp4" ? "m4a" : container;
   const folder = mkdtempSync(join(tmpdir(), "morndo-strip-"));
   try {
     const input = join(folder, `in.${ext}`);
     const output = join(folder, `out.${ext}`);
     writeFileSync(input, b, { mode: 0o600 });
-    const run = spawnSync("ffmpeg", [
+    const code = await runFfmpeg([
       "-nostdin", "-v", "error", "-y", "-i", input,
       "-map_metadata", "-1", "-c", "copy", "-f", REMUX_FORMAT[container], output,
-    ], { timeout: 30_000 });
-    if (run.status !== 0) return b;
+    ], timeoutMs);
+    if (code !== 0) return b;
     const out = readFileSync(output);
     return out.length > 0 && sniffAudio(out) === container ? out : b;
   } catch {
@@ -79,6 +80,22 @@ function stripByRemux(b: Uint8Array, container: keyof typeof REMUX_FORMAT): Uint
   } finally {
     rmSync(folder, { recursive: true, force: true });
   }
+}
+
+function runFfmpeg(args: string[], timeoutMs: number): Promise<number | null> {
+  return new Promise(resolve => {
+    const child = spawn("ffmpeg", args, { stdio: "ignore" });
+    let settled = false;
+    const finish = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(code);
+    };
+    const timer = setTimeout(() => { child.kill("SIGKILL"); }, timeoutMs);
+    child.on("error", () => finish(null));
+    child.on("close", code => finish(code));
+  });
 }
 
 // mp3: drop a whole ID3v2 tag (header, body, and the 10-byte footer when its flag is set) and an ID3v1 tail.
@@ -138,7 +155,7 @@ const AUDIO_MIME: Record<AudioContainer, Upload["mime"]> = {
 };
 
 export type Inbox = {
-  save(bytes: Uint8Array, endpointId: EndpointId, name?: string, capability?: TranscriptionCapability): Result<Upload, UploadRefusal>;
+  save(bytes: Uint8Array, endpointId: EndpointId, name?: string, capability?: TranscriptionCapability): Promise<Result<Upload, UploadRefusal>>;
   get(id: string): Upload | undefined;
   sweep(): void;
 };
@@ -161,7 +178,7 @@ export function uploadInbox(opts: { dir: string; now?: () => number; registry?: 
   const known = opts.registry ?? memoryRegistry();
   const stamp = (t: number) => new Date(t).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
   return {
-    save(bytes, endpointId, name = "", capability = NO_CAPABILITY) {
+    async save(bytes, endpointId, name = "", capability = NO_CAPABILITY) {
       const at = now();
       const id = randomBytes(12).toString("hex");
       const id6 = id.slice(0, 6);
@@ -174,17 +191,17 @@ export function uploadInbox(opts: { dir: string; now?: () => number; registry?: 
         pathName = `pasted-${stamp(at)}-${id6}-${accepted.value.name}`;
         if (accepted.value.kind === "audio") {
           mime = AUDIO_MIME[accepted.value.container];
-          clean = stripMetadata(bytes, accepted.value.container);   // tags go when that can be done without corrupting the audio
+          clean = await stripMetadata(bytes, accepted.value.container);   // tags go when that can be done without corrupting the audio
         } else {
           mime = accepted.value.mime;
-          clean = accepted.value.kind === "image" ? stripMetadata(bytes, accepted.value.mime) : bytes;
+          clean = accepted.value.kind === "image" ? await stripMetadata(bytes, accepted.value.mime) : bytes;
         }
       } else {
         const accepted = acceptUpload(bytes);
         if (!accepted.ok) return accepted;
         pathName = `pasted-${stamp(at)}-${id6}.${IMAGE_EXTENSION[accepted.value]}`;
         mime = accepted.value;
-        clean = stripMetadata(bytes, accepted.value);
+        clean = await stripMetadata(bytes, accepted.value);
       }
       const path = join(opts.dir, pathName);
       writeFileSync(path, clean, { mode: 0o600 });

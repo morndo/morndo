@@ -511,7 +511,7 @@ export function startHttp(p: {
       if (!inbox) throw new HttpError(404, "no such route");
       limited(buckets.uploads.take(a.endpoint.id));
       await p.transcription?.refresh();
-      const r = inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req), p.transcription?.capability());
+      const r = await inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req), p.transcription?.capability());
       if (!r.ok) return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
       return json(res, 200, { id: r.value.id, name: r.value.path.split("/").pop(), size: r.value.size, mime: r.value.mime });
     }
