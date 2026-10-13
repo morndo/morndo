@@ -59,7 +59,7 @@ class HttpError extends Error {
 }
 
 // Rate limits (ADR-0008, A6): token buckets, refused with 429 and Retry-After in whole seconds, rounded up.
-export type Limits = Record<"passkeyPerCaller" | "passkeyGlobal" | "commands" | "uploads" | "feedFrames" | "linkRequests" | "linkPolls" | "engineReads" | "agentCalls" | "agentRefusals", BucketConfig>;
+export type Limits = Record<"passkeyPerCaller" | "passkeyGlobal" | "commands" | "uploads" | "feedFrames" | "linkRequests" | "linkPolls" | "engineReads" | "agentCalls" | "agentRefusals" | "transcriptions", BucketConfig>;
 export const LIMITS: Limits = {
   passkeyPerCaller: { capacity: 10, refillPerSecond: 1 / 6 },      // pairing and login: 10 at once, then 10 a minute per caller
   passkeyGlobal: { capacity: 60, refillPerSecond: 1 },             // and a looser ceiling for everyone together
@@ -77,6 +77,10 @@ export const LIMITS: Limits = {
   // lanes), and refused ones per caller address, so a guessed token is slow to try.
   agentCalls: { capacity: 120, refillPerSecond: 2 },
   agentRefusals: { capacity: 20, refillPerSecond: 1 / 6 },
+  // ADR-0021: an ask costs a probe and a queue slot behind runs that hold half the cores: 30 at once, then 30 a
+  // minute per Endpoint, as commands are. Spent whatever the plugin answers, so a looping client spends its own
+  // bucket and not the machine's queue alone (the queue cap is the second door).
+  transcriptions: { capacity: 30, refillPerSecond: 0.5 },
 };
 const limited = (t: Taken) => {
   if (!t.ok) throw new HttpError(429, "rate_limited", { "Retry-After": String(t.retryAfterSeconds) });
@@ -215,6 +219,7 @@ export function startHttp(p: {
     linkRequests: new RateLimiter(limits.linkRequests, clock), linkPolls: new RateLimiter(limits.linkPolls, clock),
     engineReads: new RateLimiter(limits.engineReads, clock),
     agentCalls: new RateLimiter(limits.agentCalls, clock), agentRefusals: new RateLimiter(limits.agentRefusals, clock),
+    transcriptions: new RateLimiter(limits.transcriptions, clock),
   };
   // Who is asking, for the per-caller buckets: the proxy's identity header (the person on the private network), else the
   // remote address. Never a header a caller could pick freely when the proxy doesn't set one: only the proxy's own.
@@ -516,6 +521,7 @@ export function startHttp(p: {
       await p.transcription.refresh();
       const id = tx[1];
       if (!id && method === "POST") {
+        limited(buckets.transcriptions.take(a.endpoint.id));
         if (!p.transcription.allowsMicrophone()) return json(res, 404, { error: "transcription_off" });
         const body = await readBody(req, TranscriptionCreateBody);
         // The endpoint is part of the ask: an upload another device made is not this caller's recording (S2).

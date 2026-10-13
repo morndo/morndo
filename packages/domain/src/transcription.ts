@@ -332,7 +332,7 @@ export type EndReport = {
   text: string;
 };
 
-export type TranscriptionRequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size";
+export type TranscriptionRequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size" | "too_many";
 
 // The caller's id for an attempt or a Recording. The same shape as a job id: one run of letters, digits and a few
 // marks, so a path cannot be one.
@@ -361,12 +361,18 @@ const open = (state: TranscriptionState) => state === "queued" || state === "sta
 // in with it — then TX2: one attempt per Recording and Language, so a repeat returns the attempt already in flight
 // unchanged. A terminal attempt holds nothing (TX3): asking again makes a new one, and only the caller's ids tell
 // them apart.
+// The queue's cap on live rows (TX5): one class on one machine, and a client looping languages or ids must not
+// fill the store with rows the engine would reach only after hours. A repeat of a row already in flight never
+// counts and never pays it (TX2); a terminal row holds no slot (TX3).
+export const TRANSCRIPTION_QUEUE_CAP = 100;
+
 export function requestTranscription(
   existing: readonly Transcription[],
   body: TranscriptionBody,
   at: number,
   capability: TranscriptionCapability,
   languages: "multi" | readonly string[],
+  queueCap: number = TRANSCRIPTION_QUEUE_CAP,
 ): Result<Transcription, TranscriptionRequestProblem> {
   if (!capabilityReady(capability)) return err("no_capability");
   // The pattern is for strings only: `test` would read a missing id as "undefined" and a number as its digits, and
@@ -389,6 +395,7 @@ export function requestTranscription(
   // accept is (jobs.ts) — and a conflict for a different one. An id may be shared by attempts in flight.
   const held = existing.find(row => row.id === body.id && terminal(row.state));
   if (held) return sameBody(held, body) ? ok(held) : err("id_conflict");
+  if (existing.filter(row => open(row.state)).length >= queueCap) return err("too_many");
   return ok({
     id: body.id, recording, language: body.language, sizeBytes: body.sizeBytes, acceptedAt: at,
     state: "queued", position: null, reason: null, outcome: null, problem: null, text: null, report: null,
