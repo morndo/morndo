@@ -566,8 +566,24 @@ describe("R22 and R25: a pick is a pure function of its inputs and writes nothin
       expect(decide(structuredClone(frozen))).toEqual(first);
       const live = structuredClone(frozen);
       live.settings = { ...live.settings, taskCeiling: live.settings.taskCeiling + 10 };
+      expect(decide(live)).toEqual(decide(structuredClone(live)));
       expect(decide(frozen)).toEqual(first);
     }
+    const kept = cand({ entry: "sub-a:m@high", window: null, level: "hard", rank: 0 });
+    const above = cand({ entry: "key-a:m@high", kindOf: "api-key", expectedUsd: 4, reservation: 10, level: "routine", rank: 1 });
+    const stored = {
+      role: "implement-backend", reviewRule: false, implementerFamilies: [] as string[], reviewFamilies: [] as string[],
+      candidates: [kept, above],
+      profile: profile({ size: { value: "S", source: "flag" }, kind: { value: "docs", source: "flag" } }),
+      settings: settings(), derived: ["sub-a:m@high", "key-a:m@high"],
+    };
+    const frozen = structuredClone(stored);
+    const first = decide(frozen);
+    expect(first.pick).toBe("sub-a:m@high");
+    const live = structuredClone(frozen);
+    live.settings = { ...live.settings, taskCeiling: 10 };
+    expect(decide(live).pick).toBe("key-a:m@high");
+    expect(decide(frozen).pick).toBe(first.pick);
   });
 
   it("control: a counter that moves between calls would not replay", () => {
