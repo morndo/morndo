@@ -533,14 +533,14 @@ export function startHttp(p: {
       // no ready plugin is the feature being off, not a missing row.
       const off = () => !p.transcription?.capability().present;
       if (id && !tx[2] && method === "GET") {
-        const row = p.transcription.get(id);
+        const row = p.transcription.get(id, { endpointId: a.endpoint.id });
         return row ? json(res, 200, transcriptionView(row)) : off()
           ? json(res, 404, { error: "transcription_off" })
           : json(res, 404, { error: "unknown" });
       }
       if (id && tx[2] === "/cancel" && method === "POST") {
         await readBody(req, TranscriptionCancelBody);
-        const cancelled = p.transcription.cancel(id);
+        const cancelled = p.transcription.cancel(id, { endpointId: a.endpoint.id });
         return cancelled.ok ? json(res, 200, transcriptionView(cancelled.value)) : off()
           ? json(res, 404, { error: "transcription_off" })
           : json(res, 404, { error: "unknown" });

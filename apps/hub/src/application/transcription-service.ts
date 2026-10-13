@@ -63,6 +63,19 @@ const rowKey = (tx: Transcription) => `${tx.recording.kind}:${tx.recording.id}:$
 const sameRow = (a: Transcription, b: Transcription) => a.id === b.id && rowKey(a) === rowKey(b);
 const live = (state: Transcription["state"]) => state === "queued" || state === "starting" || state === "running";
 
+// The endpoint that asked for the row (S2, the same rule as the ask). It rides on the stored body so a restart
+// still knows. A row loaded without one answers nobody: ownership is not guessed.
+type OwnedTranscription = Transcription & { endpointId: string };
+
+function endpointOf(row: Transcription): string | null {
+  if (!("endpointId" in row)) return null;
+  const value = row.endpointId;
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+function owned(row: Transcription, endpointId: string): OwnedTranscription {
+  return { ...row, endpointId };
+}
+
 export class TranscriptionService {
   #store: TranscriptionStore;
   #transcriber: Transcriber | null;
@@ -154,8 +167,16 @@ export class TranscriptionService {
   }
 
   // The row a caller names by id: the earliest live one (several may share an id in flight; TX2's attempts are told
-  // apart by Recording and Language, not id), else the newest ended.
-  get(id: string): Transcription | null {
+  // apart by Recording and Language, not id), else the newest ended. With a caller, another endpoint's row is the
+  // same as no row (S2): the ask already refuses a recording this endpoint did not upload.
+  get(id: string, caller?: RecordingCaller): Transcription | null {
+    const row = this.#row(id);
+    if (!row) return null;
+    if (caller && endpointOf(row) !== caller.endpointId) return null;
+    return row;
+  }
+
+  #row(id: string): Transcription | null {
     const matches = this.#rows
       .filter(row => row.id === id)
       .sort((a, b) => a.acceptedAt - b.acceptedAt || (rowKey(a) < rowKey(b) ? -1 : rowKey(a) > rowKey(b) ? 1 : 0));
@@ -203,15 +224,17 @@ export class TranscriptionService {
       id: input.id, recording: input.recording, language: input.language, sizeBytes: file.size,
     }, this.#now(), this.capability(), this.#languages());
     if (!decided.ok) return decided;
-    if (!this.#rows.some(row => sameRow(row, decided.value))) this.#save(decided.value);
+    // A new row belongs to the endpoint that asked. A repeat is the row already stored, owner unchanged (TX2).
+    const row = endpointOf(decided.value) === null ? owned(decided.value, input.caller.endpointId) : decided.value;
+    if (!this.#rows.some(item => sameRow(item, row))) this.#save(row);
     this.tick();
     // The row this body made or matched (TX2's in-flight attempt), not whichever live row answers to the id first.
-    const made = this.#rows.find(row => sameRow(row, decided.value));
-    return ok(made ?? decided.value);
+    const made = this.#rows.find(item => sameRow(item, row));
+    return ok(made ?? row);
   }
 
-  cancel(id: string): Result<Transcription, "unknown"> {
-    const row = this.get(id);
+  cancel(id: string, caller?: RecordingCaller): Result<Transcription, "unknown"> {
+    const row = this.get(id, caller);
     if (!row) return err("unknown");
     if (!live(row.state)) return ok(row);
     const key = rowKey(row);

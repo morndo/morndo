@@ -74,6 +74,48 @@ describe("transcription http", () => {
     expect(view.text?.text).toBe(SENTENCE);
   });
 
+  it("answers a transcription and its cancel only to the endpoint that owns the row", async () => {
+    let release: (value: { ok: true; value: { language: string; durationMs: number; segments: { startMs: number; endMs: number; text: string }[] } }) => void = () => {};
+    const transcriber: Transcriber = {
+      probe: async () => ({ ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture", languages: "multi", maxSeconds: 600 }),
+      transcribe: input => new Promise((resolve, reject) => {
+        const stop = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        if (input.signal.aborted) { stop(); return; }
+        input.signal.addEventListener("abort", stop);
+        release = resolve;
+      }),
+    };
+    const hub = await startInProcessHub({ transcriber });
+    hubs.push(hub);
+    const mine = await cookieOf(hub);
+    const other = await cookieOf(hub);
+    const ogg = await upload(hub, mine, "note.ogg", Buffer.from("OggSrest"));
+    expect(ogg.status).toBe(200);
+    const saved = await ogg.json() as { id: string };
+    const created = await hub.post("/api/transcriptions", {
+      id: "voice1", recording: { kind: "upload", id: saved.id }, language: "auto",
+    }, { cookie: mine });
+    expect(created.status).toBe(200);
+    const headers = (cookie: string) => ({ cookie, origin: ORIGIN });
+    const missingGet = await fetch(`${hub.base}/api/transcriptions/no-such-row`, { headers: headers(mine) });
+    const foreignGet = await fetch(`${hub.base}/api/transcriptions/voice1`, { headers: headers(other) });
+    expect(foreignGet.status).toBe(missingGet.status);
+    expect(await foreignGet.json()).toEqual(await missingGet.json());
+    const ownGet = await fetch(`${hub.base}/api/transcriptions/voice1`, { headers: headers(mine) });
+    expect(ownGet.status).toBe(200);
+    expect((await ownGet.json() as { state: string }).state).not.toBe("cancelled");
+    const missingCancel = await hub.post("/api/transcriptions/no-such-row/cancel", {}, { cookie: mine });
+    const foreignCancel = await hub.post("/api/transcriptions/voice1/cancel", {}, { cookie: other });
+    expect(foreignCancel.status).toBe(missingCancel.status);
+    expect(await foreignCancel.json()).toEqual(await missingCancel.json());
+    const still = await fetch(`${hub.base}/api/transcriptions/voice1`, { headers: headers(mine) });
+    expect((await still.json() as { state: string }).state).not.toBe("cancelled");
+    const ownCancel = await hub.post("/api/transcriptions/voice1/cancel", {}, { cookie: mine });
+    expect(ownCancel.status).toBe(200);
+    expect((await ownCancel.json() as { state: string }).state).toBe("cancelled");
+    release({ ok: true, value: { language: "en", durationMs: 1, segments: [{ startMs: 0, endMs: 1, text: "kept" }] } });
+  });
+
   it("refuses a recording that is not audio, or another device's upload", async () => {
     const hub = await startInProcessHub({ transcriber: processTranscriber(FIXTURE) });
     hubs.push(hub);
