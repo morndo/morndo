@@ -2,7 +2,7 @@
 // answer that may have been typed.
 import { MAY_HAVE_GONE, endsDoubt } from "../catchup/answer.ts";
 import {
-  back, noteClosed, openSession, pick, showNew, seenOf, stale,
+  back, noteClosed, openSession, pick, showNew,
   type AnswerBody, type AnswerProblem, type AnswerState, type AskOutcome,
 } from "./answer-session.ts";
 import type { DecisionItem } from "./decisions.ts";
@@ -74,8 +74,8 @@ export class AnswerSession {
   pick(label: string, body: AnswerBody) { this.apply(pick(this.snapshot(), label, body)); }
   showNew() { this.apply(showNew(this.snapshot(), this.live)); }
   back() { this.apply(back(this.snapshot())); }
-  get stale() { return stale(this.snapshot()); }
-  get seen() { return seenOf(this.snapshot()); }
+  get stale() { return this.live.version !== this.shown.version; }
+  get seen() { return this.shown.version; }
 
   async send(onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>, body: AnswerBody, requestId: string = crypto.randomUUID()) {
     // A new answer waits until the version on screen is current. An answer already in doubt is checked again on the
