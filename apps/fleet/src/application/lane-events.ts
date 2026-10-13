@@ -155,7 +155,8 @@ export class LaneEvents {
     return le;
   }
 
-  // The turn ends and stale events since `after`, oldest first (the watch's rebuild).
+  // What the watch rebuilds from since `after`, oldest first: turn ends, stale events, and the state changes and failed
+  // turns after them.
   turnsSince(after: number): LaneEvent[] { return this.#store.turnsSince(after); }
 
   since(seq: number): LaneEvent[] { return this.#store.since(seq, SINCE_MAX); }

@@ -729,7 +729,7 @@ GET /v1/lane-events?since={{number:le4}}
 
 ### 7.1 The lane watch
 
-The fleet keeps each lane's last turn end and watches for anything after it: a hook from that lane (a tool call or prompt on `/cc`, a new turn, a session state change) is activity. The status line's `/sl` is not: Claude Code re-runs it on a timer when `refreshInterval` is set, idle or not. Each kind of turn end has a deadline:
+The fleet keeps each lane's last turn end and watches for anything after it: a hook from that lane (a tool call or prompt on `/cc`, a new turn, a session state change, a failed turn) is activity. It goes by the hook's own time on its node, so a hook that reaches the fleet in the same batch as the Stop before it, or after an outage, still counts. Two kinds of hook are not activity. The status line's `/sl`: Claude Code re-runs it on a timer when `refreshInterval` is set, idle or not. And Claude Code's `idle_prompt` notification, which it sends about a minute after a turn ends if nothing has happened since. Each kind of turn end has a deadline:
 
 | Last turn | Deadline |
 |---|---|
@@ -739,10 +739,10 @@ The fleet keeps each lane's last turn end and watches for anything after it: a h
 | `DONE`, `BLOCKED`, `NEEDS DECISION` | none: it is the manager's to act on |
 
 - **A Stop the relay asked for its status line** (§11.1) makes no lane event, but counts as a turn without a status until the lane's next Stop: a lane that never acts on the ask still goes stale.
-- **Past the deadline with no activity,** the fleet makes one `stale` lane event for that turn. It goes where the other lane events go.
-- **The nudge.** With `laneWatch.nudge` (on by default), a lane that runs Claude Code (a session in the node's inventory) gets one delivery, id `fleet:nudge:<node>:<the turn's end, in ms>`: when its turn ended, on what it waited, and the status line to start its answer with. From the third stale event since the lane last settled, it isn't nudged again: that lane is for the manager to re-plan.
+- **Past the deadline with no activity,** the fleet makes one `stale` lane event for that turn. It goes where the other lane events go. One that fleet.db can't store now is tried again at the next sweep.
+- **The nudge.** With `laneWatch.nudge` (on by default), a lane that runs Claude Code (a session in the node's inventory) gets one delivery, sent to that session's pane by its worker ID, so a window of the same name on another node doesn't get in the way. Its id is `fleet:nudge:<worker ID>:<the turn's end, in ms>`. It says when the turn ended, what the lane was waiting on, and the status line to start its answer with. A nudge the fleet refuses is logged. From the third stale event since the lane last settled, it isn't nudged again: that lane is for the manager to re-plan.
 - **Not watched:** the manager's own lane, lanes matching `laneEvents.ignore`, and a lane whose window is gone. A lane whose node isn't online waits until the node is back: the node's status already says why it is quiet.
-- **Restarts.** The watch lives in the fleet's memory and is rebuilt from the last day's lane events at start. A restart counts as activity, so each deadline runs again from it, and no lane is called stale for time the fleet didn't see.
+- **Restarts.** The watch lives in the fleet's memory and is rebuilt from the last day's lane events at start, including the session state changes and failed turns after each turn end. A restart counts as activity, so each deadline runs again from it, and no lane is called stale for time the fleet didn't see. A hook a node sends on from the outage counts by its own time.
 
 `GET /v1/lane-watch` answers what the watch holds, oldest first: `{ lanes: { node, window, at, status, deadline, reason?, waitingOn?, stale, stalls }[] }`. `deadline` is null for a settled turn; `reason` is there with a deadline.
 

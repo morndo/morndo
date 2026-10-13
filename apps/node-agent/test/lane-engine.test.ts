@@ -124,6 +124,16 @@ echo '{"picked":null,"skipped":[{"entry":"acme:large-2","reason":"out of quota"}
     expect(await engineLayer().resolve(none, "implement")).toEqual({ picked: null, skipped: [{ entry: "acme:large-2", reason: "out of quota" }] });
   });
 
+  it("reads the kill switch as the hub does: on only for true, off for other JSON, and output that isn't JSON refuses the start", async () => {
+    for (const [out, on] of [["true", true], ["false", false], ["null", false]] as const) {
+      expect([out, await engineLayer().enabled(fakeCli(`echo '${out}'`))]).toEqual([out, on]);
+    }
+    const garbled = fakeCli("echo False");
+    await expect(engineLayer().enabled(garbled)).rejects.toMatchObject({ kind: "unavailable" });
+    expect(await laneLaunch(policy({ ...ENGINES, cli: garbled }), { ...start, role: "implement" }, engineLayer()))
+      .toMatchObject({ refused: { code: "internal", executed: "no" } });
+  });
+
   it("an unknown role is the engine layer's refusal (exit 2), anything else unreadable is a failure", async () => {
     const refusing = fakeCli(`[ "$1" = option ] && { echo true; exit 0; }
 echo "engines: unknown role 'nope'" >&2; exit 2`);

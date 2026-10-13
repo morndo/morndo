@@ -17,7 +17,7 @@
 // (Node docs, child_process.execFile, read 2026-10-07).
 import { createHash } from "node:crypto";
 import { availabilityOf, chainArg, parseEngine, type Engine, type EngineProvider, type RoleEngines } from "@morndo/domain";
-import { EnginesError, enginesText, runEngines } from "@morndo/node-ops";
+import { EnginesError, enginesEnabledOf, enginesText, runEngines } from "@morndo/node-ops";
 import { allEnded, mapLimit } from "@morndo/service-kit";
 import type { EnginesNow, EnginesView } from "@morndo/protocol";
 
@@ -76,7 +76,7 @@ export function enginesCli(program: string, env: NodeJS.ProcessEnv = process.env
       const now = await mapLimit(roles, RESOLVE_AT_ONCE, async (r, signal) => nowFrom(json(await call(["resolve", r.role, "--json"], [0, 3], signal), "resolve")));
       return {
         version: createHash("sha256").update(rolesOut).digest("hex"), providers,
-        enabled: json(enabledOut, "option") === true,
+        enabled: enginesEnabledOf(enabledOut),
         roles: roles.map((r, i) => ({ ...r, now: now[i] as EnginesNow })),
       };
     },

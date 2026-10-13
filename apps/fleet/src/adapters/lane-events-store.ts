@@ -40,9 +40,11 @@ export class LaneEventsStore {
     return r?.event ?? null;
   }
 
-  // `finished` and `stale` events after the time `after`, oldest first (the lane watch's rebuild).
+  // What the lane watch rebuilds from, after the time `after`, oldest first: the turn ends and stale events, and the
+  // session state changes and failed turn ends that may follow a turn end (activity, as they were live).
   turnsSince(after: number): LaneEvent[] {
-    return (this.#db.prepare(`SELECT ${COLUMNS} FROM lane_events WHERE at > ? AND event IN ('finished', 'stale') ORDER BY seq`).all(after) as Row[]).map(eventOf);
+    return (this.#db.prepare(`SELECT ${COLUMNS} FROM lane_events WHERE at > ? AND event IN ('finished', 'stale', 'needs_input', 'answered', 'stop_failure') ORDER BY seq`)
+      .all(after) as Row[]).map(eventOf);
   }
 
   // Events waiting for the manager, oldest first, at most `limit`.

@@ -49,10 +49,12 @@ export function briefLines(b: BriefInput, now: number): string[] {
     const names = unseen.map(l => `${l.name}@${l.node}${l.workerId === null ? " (offline)" : ""}${l.conflict ? " (name conflict)" : ""}`);
     lines.push(`  no turn seen in the last day: ${names.slice(0, 12).join(", ")}${names.length > 12 ? `, … ${names.length - 12} more` : ""}`);
   }
+  // A delivery to a worker ID (the lane watch's nudge) names its lane, while one lane holds that pane.
+  const byWorker = new Map(b.lanes.flatMap(l => (l.workerId === null ? [] : [[l.workerId, `${l.name}@${l.node}`] as const])));
   const open = b.deliveries.filter(d => d.state === "queued" || d.state === "typed" || d.state === "held");
   lines.push(`Deliveries not yet taken (${open.length}):`);
   for (const d of open.slice(0, DELIVERIES_MAX)) {
-    const to = "lane" in d.target ? d.target.lane : d.target.workerId;
+    const to = "lane" in d.target ? d.target.lane : byWorker.get(d.target.workerId) ?? d.target.workerId;
     lines.push(`  ${d.id} → ${to} · ${d.state}${d.waiting ? ` (${d.waiting.reason})` : ""} · ${ago(now - d.queuedAt)}`);
   }
   lines.push(...more(open.length - DELIVERIES_MAX, "deliveries"));

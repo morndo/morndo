@@ -42,6 +42,19 @@ describe("the brief", () => {
     ]);
   });
 
+  it("names the lane of a delivery sent to a worker ID (the lane watch's nudge), else shows the worker ID", () => {
+    const lines = briefLines({
+      lanes: [lane("api")], watch: [],
+      deliveries: [
+        { id: "fleet:nudge:pc.aaaaaaaa.3:1", node: "pc", target: { workerId: "pc.aaaaaaaa.3" }, state: "queued", queuedAt: NOW - MIN, notAfter: NOW + MIN } satisfies Delivery,
+        { id: "fleet:nudge:pc.aaaaaaaa.9:1", node: "pc", target: { workerId: "pc.aaaaaaaa.9" }, state: "typed", queuedAt: NOW - MIN, notAfter: NOW + MIN } satisfies Delivery,
+      ],
+      alerts: [],
+    }, NOW);
+    expect(lines).toContain("  fleet:nudge:pc.aaaaaaaa.3:1 → api@pc · queued · 60 s");
+    expect(lines).toContain("  fleet:nudge:pc.aaaaaaaa.9:1 → pc.aaaaaaaa.9 · typed · 60 s");
+  });
+
   it("never runs past 60 lines, saying how many more there are", () => {
     const many = Array.from({ length: 80 }, (_, i) => `lane-${i}`);
     const lines = briefLines({
