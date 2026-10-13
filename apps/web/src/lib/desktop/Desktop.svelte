@@ -32,6 +32,7 @@
   import { clampRight, layoutIsNarrow, widthAfterWindowChange } from "./panel-width.ts";
   import type { AskOutcome } from "./answer-session.ts";
   import { api, ApiError, explain } from "../api.ts";
+  import { askForBrief as sharedAsk } from "../ask-brief.ts";
   import { decodeJobs, type ShownJob } from "./jobs.ts";
   import { stepUp, withStepUp } from "../stepup.ts";
   import LinkedNotice from "../LinkedNotice.svelte";
@@ -152,20 +153,11 @@
   }
   function openScreen(workerId: string) { open(workerId); overlayOpen = false; screenRequest = { worker: workerId, n: (screenRequest?.n ?? 0) + 1 }; }
   async function askForBrief(d: DecisionItem): Promise<AskOutcome> {
-    const worker = d.asker.workerId;
-    if (!worker) return { ok: false, error: "This decision has no one to ask." };
-    if (!verifiedFresh && navigator.onLine !== false) {
-      try { verifiedAt = await stepUp(); }
-      catch (e) { return { ok: false, error: explain(e) }; }
-    }
-    const w = feed.workers.find(x => x.id === worker);
-    // The command is written for the question that pane is on now, or the hub refuses it as stale (S6).
-    try {
-      await onQueue({ target: worker, targetName: w?.name ?? d.asker.name, text: `Please restate ${d.id} as a decision brief: morndo-decide template`, uploads: [], images: [], files: [], seen: w?.waitingOn ?? "none" });
-    } catch (e) {
-      return { ok: false, error: explain(e) };
-    }
-    return { ok: true };
+    return sharedAsk(d, feed.workers, c => onQueue({ target: c.worker, targetName: c.workerName, text: c.text, uploads: [], images: [], files: [], seen: c.seen }), async () => {
+      if (verifiedFresh || navigator.onLine === false) return null;
+      try { verifiedAt = await stepUp(); } catch (e) { return explain(e); }
+      return null;
+    });
   }
   function openChat(d: DecisionItem) {
     if (!d.asker.workerId || !d.messageId) return;

@@ -132,7 +132,7 @@ export function parseQuick(v: unknown): QuickState {
 
 // The board says how a noticed answer ended: one that may have gone and shows answered from here counts as said from
 // here (as catch-up's confirmAnswered); anything no longer open clears its notice. Unchanged while it is still open.
-export function settleFromBoard(s: QuickState, items: readonly { id: string; status: string; decision: { at: number; via: string } | null }[]): QuickState {
+export function settleFromBoard(s: QuickState, items: readonly { id: string; status: string; decision: { at: number; via?: string } | null }[]): QuickState {
   let next = s;
   for (const [id, f] of Object.entries(s.failed)) {
     const d = items.find(i => i.id === id);

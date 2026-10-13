@@ -157,7 +157,7 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/uploads" }
         run: node e2e/uploads.e2e.ts
-      # ADR-0023: the desktop decision brief, on a synthetic office.
+      # ADR-0023: decision briefs, the desktop modal and the phone sheet, on a synthetic office.
       - name: e2e briefs
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/briefs" }

@@ -1,8 +1,10 @@
-// Desktop decision briefs (ADR-0023 §6, PR 3). A synthetic office, the real morndo-decide, headless Chromium.
-// The phone sheet (390×844, undo, 48px footer) is PR 4. Run: npm run build && node e2e/briefs.e2e.ts
+// Decision briefs (ADR-0023 §6). A synthetic office, the real morndo-decide, headless Chromium.
+// Desktop checks, then the phone sheet at 390×844 (per-factor table, 48px footer, Back, Undo; Back lands where he
+// was, and the headline keeps focus without the browser's heavy focus frame).
+// Run: npm run build && node e2e/briefs.e2e.ts
 // Screenshots land in E2E_OUT, and also in QA_DIR when that is set (a private QA record, never this tree).
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Page } from "playwright";
 import { contrastProblems } from "./contrast.ts";
@@ -147,6 +149,98 @@ try {
     assert(await card.getByRole("button", { name: "Extend the triage script" }).count() === 0, "spend can be approved from the card");
     await shot(page, "briefs-card-light.png");
   });
+
+  const phone = await pairedPage(browser, office, {
+    width: 390, height: 844, phone: true, ready: "nav.tabbar",
+    init: () => localStorage.setItem("morndo.tab", "today"),
+  });
+  c.watch(phone.page);
+  await c.check("at 390 the sheet is per factor, the footer is 48px, and Back closes it", async () => {
+    const row = phone.page.locator(`li[data-row="d:${id}"]`);
+    await row.getByText("Includes spend").waitFor({ timeout: 15_000 });
+    await row.getByRole("button", { name: "Read the brief" }).waitFor();
+    assert(await row.getByRole("button", { name: "Extend the triage script" }).count() === 0, "spend can be approved from Today's card");
+    await row.getByRole("button", { name: "Read the brief" }).click();
+    const dialog = phone.page.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await dialog.waitFor();
+    assert(await dialog.locator("table.compare").evaluate(el => getComputedStyle(el).display) === "none", "the comparison is still a table");
+    await dialog.getByRole("heading", { name: "Year-one cost" }).waitFor();
+    await dialog.locator(".factors").getByText("Recommended").first().waitFor();
+    const heights = await dialog.locator("footer button").evaluateAll(els => els.map(e => e.getBoundingClientRect().height));
+    assert(heights.length >= 2 && heights.every(h => h >= 48), `footer heights ${JSON.stringify(heights)}`);
+    const wide = await dialog.locator(".brief-body").evaluate(el => el.scrollWidth - el.clientWidth);
+    assert(wide <= 1, `the sheet scrolls sideways by ${wide}px`);
+    await phone.cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 47, bottom: 34, left: 0, right: 0 } });
+    await phone.page.waitForTimeout(200);
+    const headerPad = await dialog.locator("header").evaluate(el => parseFloat(getComputedStyle(el).paddingTop));
+    const footerPad = await dialog.locator("footer").evaluate(el => parseFloat(getComputedStyle(el).paddingBottom));
+    assert(headerPad >= 47 && footerPad >= 34, `insets not cleared: header ${headerPad}px, footer ${footerPad}px`);
+    await phone.page.evaluate(() => {
+      const vv = window.visualViewport as VisualViewport;
+      Object.defineProperty(vv, "height", { configurable: true, get: () => window.innerHeight - 280 });
+      Object.defineProperty(vv, "offsetTop", { configurable: true, get: () => 24 });
+      vv.dispatchEvent(new Event("resize"));
+    });
+    await phone.page.waitForTimeout(200);
+    const box = await dialog.boundingBox();
+    const inner = await phone.page.evaluate(() => innerHeight);
+    assert(box !== null && box.y >= 23 && box.y + box.height <= inner - 256 + 2, `sheet left the visual viewport: ${JSON.stringify(box)} inner ${inner}`);
+    await phone.page.evaluate(() => {
+      const vv = window.visualViewport as VisualViewport;
+      delete (vv as unknown as Record<string, unknown>).height;
+      delete (vv as unknown as Record<string, unknown>).offsetTop;
+      vv.dispatchEvent(new Event("resize"));
+    });
+    await phone.cdp.send("Emulation.setSafeAreaInsetsOverride", { insets: { top: 0, bottom: 0, left: 0, right: 0 } });
+    await shot(phone.page, "briefs-phone-sheet-light.png");
+    const problems = await contrastProblems(phone.page, "light", "dialog.sheet");
+    assert(problems.length === 0, `phone contrast: ${problems.slice(0, 4).join("; ")}`);
+    await dialog.locator("footer").getByRole("button", { name: "Extend the triage script" }).click();
+    await dialog.getByRole("status").getByText("Answered: Extend the triage script").waitFor();
+    await dialog.getByRole("button", { name: "Undo" }).click();
+    await phone.page.waitForTimeout(6_000);
+    const screen = office.tmux("capture-pane", "-p", "-J", "-t", office.office.panes.manager ?? "", "-S", "-80");
+    assert(!screen.includes(`[tap ${id}]`), `an undone answer was typed:\n${screen.slice(-400)}`);
+    await dialog.getByRole("button", { name: "Back", exact: true }).click();
+    await dialog.waitFor({ state: "hidden" });
+    await row.waitFor();                    // Back from a sheet opened on Today returns him to Today, not to catch-up
+    await phone.page.goto(new URL(`/?decision=${encodeURIComponent(id)}`, phone.page.url()).href);
+    const linked = phone.page.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await linked.waitFor({ timeout: 15_000 });
+    // The headline takes focus when the sheet opens (a screen reader announces it) but never shows more than the
+    // app's own ring: not the browser's default focus frame.
+    await phone.page.waitForFunction(() => document.activeElement?.id === "brief-sheet-headline");
+    const frame = await phone.page.evaluate(() => {
+      const el = document.getElementById("brief-sheet-headline") as HTMLElement;
+      const cs = getComputedStyle(el);
+      return { style: cs.outlineStyle, width: cs.outlineWidth };
+    });
+    assert(frame.style === "none" || (frame.style === "solid" && parseFloat(frame.width) <= 3), `headline focus frame: ${JSON.stringify(frame)}`);
+    await linked.getByRole("button", { name: "Back", exact: true }).click();
+    await linked.waitFor({ state: "hidden" });
+  });
+
+  const phoneDark = await pairedPage(browser, office, { width: 390, height: 844, phone: true, colorScheme: "dark", ready: "nav.tabbar" });
+  c.watch(phoneDark.page);
+  await c.check("the phone sheet meets contrast in the dark theme", async () => {
+    await phoneDark.page.goto(new URL(`/?decision=${encodeURIComponent(id)}`, phoneDark.page.url()).href);
+    const dialog = phoneDark.page.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await dialog.waitFor({ timeout: 15_000 });
+    await shot(phoneDark.page, "briefs-phone-sheet-dark.png");
+    const problems = await contrastProblems(phoneDark.page, "dark", "dialog.sheet");
+    assert(problems.length === 0, `dark phone contrast: ${problems.slice(0, 4).join("; ")}`);
+  });
+  await phoneDark.context.close();
+  await phone.context.close();
+  c.watch(page);
+  if (QA) writeFileSync(join(QA, "open.md"), [
+    "# PR 4 phone sheet",
+    "",
+    "Screenshots: briefs-phone-sheet-light.png, briefs-phone-sheet-dark.png.",
+    "",
+    "Open: the owner's check on a real iPhone. Chromium emulates the visual viewport and the safe areas. A physical iPhone is not on this box (ADR-0023).",
+    "",
+  ].join("\n"));
 
   await c.check("Enter opens the brief, Escape returns focus to the headline", async () => {
     const card = panel.locator(`[data-decision="${id}"]`);

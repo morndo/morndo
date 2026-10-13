@@ -1,6 +1,7 @@
 // How decisions are shown (ADR-0006 addendum "Decisions"): urgency, due labels, groups, and what each refusal means
 // in plain words. The rules themselves live in the domain and the hub; this only presents their results.
 import type { DecisionItem, LedgerState } from "@morndo/protocol";
+import { viaOf } from "../sent-here.ts";
 
 export type { DecisionItem, LedgerState };
 export type Board = { items: DecisionItem[]; ledger: LedgerState };
@@ -78,6 +79,34 @@ export function deliveryLine(d: DecisionItem): DeliveryLine | null {
   if (del.state === "delivered") return { state: "delivered", at: del.at };
   const reason = d.inbox?.reason ?? null;
   return { state: "queued", why: reason ? INBOX_WAITS[reason] ?? null : null };
+}
+
+// A decision refused before it starts, in the words catch-up, Today and the phone sheet share (§6.3).
+export const OFFLINE_DECISION = "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here.";
+export const STILL_OFFLINE = "Still offline. It goes when you try again online.";
+// The passkey check didn't finish. Catch-up's word is "Not answered" (§6.3: an answer goes as catch-up's do).
+export const PASSKEY_UNFINISHED = "Not answered: the passkey check didn't finish.";
+// A passkey confirm that cannot be sent, in the words the catch-up card and the phone sheet share.
+export const STEP_UP_CHANGED = "Not sent: the brief changed since that answer, so it was not sent.";
+export const STEP_UP_MISMATCH = "Not sent: this isn't the answer that passkey check was for.";
+
+// Where a sent answer stands, in one line: the phone's sheet and the desktop modal say it the same way.
+// "Answered on another device" only when the record says elsewhere and this device did not send this version.
+// A record that doesn't say, and no send from here, stays neutral: it claims neither.
+export function standingLine(item: DecisionItem, whom: string): string {
+  const d = item.decision;
+  if (!d) return "Sent. The manager gets it as your decision and acts on it.";
+  const where = viaOf(item);
+  if (where === "elsewhere") {
+    const said = d.choice.kind === "option" ? `“${d.choice.label}”` : "in words";
+    return `Answered on another device: ${said}.`;
+  }
+  const choice = d.choice.kind === "option" ? d.choice.label : "in words";
+  if (where !== "here") return `Answered: ${choice}.`;
+  const dl = deliveryLine(item);
+  if (dl?.state === "queued") return `Queued${dl.why ? `, ${dl.why}` : ""}.`;
+  if (dl?.state === "delivered") return `Delivered. You chose ${choice}.`;
+  return `Sent. You chose ${choice}. ${whom} has it.`;
 }
 
 export const REFUSALS: Record<string, string> = {

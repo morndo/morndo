@@ -4,8 +4,9 @@
   // Status (every lane in one line), plus the board (ADR-0015) and Home (ADR-0016). Decisions keep their cards (catch-up, decisions only), opened from Today, the chat
   // list, a chat that waits, or a push. Updates no longer come as cards: they wait in each chat, and a digest sums them
   // up only when he comes back after a real absence. One live feed and one outbox serve it all.
-  import { onDestroy, onMount } from "svelte";
-  import { goto } from "$app/navigation";
+  import { onDestroy, onMount, untrack } from "svelte";
+  import { goto, pushState, replaceState } from "$app/navigation";
+  import { page } from "$app/state";
   import { LiveFeed } from "../feed.svelte.ts";
   import LinkedNotice from "../LinkedNotice.svelte";
   import FleetNotice from "../FleetNotice.svelte";
@@ -17,6 +18,13 @@
   import { stepUp, withStepUp } from "../stepup.ts";
   import { STEP_UP_MS, type Policy } from "../SecurityChoices.svelte";
   import { postAnswer } from "../catchup/answer.ts";
+  import { askForBrief as sharedAsk } from "../ask-brief.ts";
+  import { inWindow, latestEntry, type Body } from "../catchup/run.ts";
+  import { AnswerSession } from "../desktop/answer-session.svelte.ts";
+  import type { AskOutcome } from "../desktop/answer-session.ts";
+  import { OFFLINE_DECISION, PASSKEY_UNFINISHED, STILL_OFFLINE, type DecisionItem } from "../desktop/decisions.ts";
+  import { briefFromPageState, decisionFromSearch } from "./brief-route.ts";
+  import BriefSheet from "./BriefSheet.svelte";
   import { startDeviceOutbox } from "../outbox/device.ts";
   import type { Outbox } from "../outbox/outbox.ts";
   import type { OutboxRecord } from "../outbox/state.ts";
@@ -31,9 +39,9 @@
   import Digest from "./chat/Digest.svelte";
   import SettingsSheet from "./chat/SettingsSheet.svelte";
   import { Away } from "./chat/away.svelte.ts";
-  import { chatEntry, keptChat, restoredChat, restoredScreen } from "./chat/history.ts";
+  import { chatEntry, entryChatState, keptChat, restoredChat, restoredScreen } from "./chat/history.ts";
   import { chatRows } from "./chat/rows.ts";
-  import type { DigestLine } from "@morndo/domain";
+  import { decisionKey, type DigestLine } from "@morndo/domain";
   import "./phone.css";
 
   let { verifiedAt: initialVerifiedAt, policy, engines = false, onSignedOut }: {
@@ -89,11 +97,15 @@
   // The cards open once the feed has said what waits (the roster, the board, the read marks), so a run holds the real
   // cards and never ends empty on a page that is still connecting.
   let want = $state<{ decision?: string; decisions?: boolean } | null>(null);
+  // `/?decision=<id>` opens catch-up with that brief's sheet. The query is dropped; the sheet is a history entry.
+  let linkedBrief = $state<string | null>(null);
   if (typeof location !== "undefined") {
+    const linked = decisionFromSearch(location.search);
     const v = new URLSearchParams(location.search).get("view");
-    if (v === "decisions") { deciding = true; want = { decisions: true }; }
+    if (linked) { deciding = true; want = { decision: linked }; linkedBrief = linked; }
+    else if (v === "decisions") { deciding = true; want = { decisions: true }; }
     else if (v === "activity") tab = "chats";
-    if (v) history.replaceState(history.state, "", location.pathname);
+    if (linked || v) history.replaceState(history.state, "", location.pathname);
   }
   $effect(() => {
     if (!deciding || !feed.primed || !want) return;
@@ -102,23 +114,163 @@
   });
   function decide(o: { decision?: string } = {}) { want = o; deciding = true; scrollTo(0, 0); }
   function stopDeciding() { session.leave(); deciding = false; }
+  const briefId = $derived(briefFromPageState(page.state));
+  let sessions = $state<Record<string, AnswerSession>>({});
+  let briefNote = $state<string | null>(null);
+  // Every sheet session follows the feed each time the decisions change, held only while its own sheet is open: a
+  // restatement that lands while the sheet is closed follows at once, so reopening shows the new brief as it is
+  // (finding 5) — the same bind AnswerSession's own screen already runs for the desktop (review, 15).
+  $effect(() => {
+    const open = briefId;
+    const list = feed.decisions;
+    untrack(() => {
+      for (const [id, cur] of Object.entries(sessions)) {
+        const d = list.find(x => x.id === id);
+        if (d) cur.bind(d, open === id);
+      }
+      if (!open) { briefNote = null; return; }
+      const d = list.find(x => x.id === open);
+      if (!d) return;
+      if (!sessions[open]) sessions[open] = new AnswerSession(d);
+    });
+  });
+  const briefItem = $derived(briefId ? feed.decisions.find(d => d.id === briefId) ?? null : null);
+  const briefSession = $derived(briefId ? sessions[briefId] ?? null : null);
+  const briefAnswering = $derived(session.run?.answering && briefId && session.run.answering.id === briefId
+    ? { label: session.run.answering.label, sending: session.run.answering.sending, commitAt: session.run.answering.commitAt }
+    : null);
+  // What the run holds for the decision on screen: its refusal (the sheet sits over the card that would show it) and
+  // whether it was answered here already. The due line uses this page's slow clock; the countdown uses the session's.
+  // The current entry, re-ask suffix included. An earlier entry of the same id is not this ask.
+  const briefCardKey = $derived.by(() => {
+    const run = session.run;
+    if (!briefId || !run) return null;
+    return latestEntry(run, decisionKey(briefId)) ?? null;
+  });
+  const briefRefusal = $derived.by(() => {
+    const r = session.refusal;
+    const key = briefCardKey;
+    if (!r || !key || r.key !== key) return null;
+    return r;
+  });
+  const briefRunAnswered = $derived.by(() => {
+    const key = briefCardKey;
+    const run = session.run;
+    return key !== null && run !== null && run.done[key] === "answered";
+  });
+  // The sheet is open while page.state.brief is set. Back (and the browser's back) pop that entry.
+  // A sheet opened from Today returns there when its entry is popped (finding 10): catch-up was never the place he
+  // was, so it shouldn't become it. From anywhere else the sheet sits over catch-up, which keeps its own Back.
+  let briefOver = $state<"today" | null>(null);
+  // The card key of an answer started on a Today sheet, while that answer is still in its window.
+  // Today comes back only after that answer has committed. A refusal or Undo leaves him on the card.
+  let returnAfter = $state<string | null>(null);
+  $effect(() => {
+    if (briefId !== null) return;
+    untrack(() => {
+      if (briefOver === null) return;
+      briefOver = null;
+      // §6.3: an answer keeps catch-up's 5-second Undo, and Back only closes the sheet. leave()
+      // would send it now. The card underneath keeps the window, as it does for a sheet opened
+      // from catch-up. With nothing in the window, Today comes back.
+      const a = session.run?.answering;
+      if (inWindow(a, session.now) && a) { returnAfter = a.key; return; }
+      stopDeciding();
+    });
+  });
+  $effect(() => {
+    const key = returnAfter;
+    if (!key || briefId !== null) return;
+    const a = session.run?.answering;
+    if (inWindow(a, session.now)) return;
+    const committed = session.run?.done[key] === "answered";
+    returnAfter = null;
+    if (committed) stopDeciding();
+  });
+  function openBrief(id: string) {
+    briefOver = !deciding && tab === "today" ? "today" : null;
+    if (!deciding) { want = { decision: id }; deciding = true; }
+    else if (!(session.top?.kind === "decision" && session.top.id === id)) session.open({ decision: id });
+    if (briefFromPageState(page.state) !== id) pushState("", { brief: id });
+    scrollTo(0, 0);
+  }
+  $effect(() => {
+    const id = linkedBrief;
+    if (!id || !feed.primed || !feed.decisions.some(d => d.id === id)) return;
+    linkedBrief = null;
+    if (briefFromPageState(page.state) !== id) pushState("", { brief: id });
+  });
+  async function answerFromSheet(body: Body, label: string): Promise<boolean> {
+    const id = briefId;
+    const held = id ? sessions[id] : null;
+    if (!id || !held || held.stale) return false;
+    briefNote = null;
+    if (feed.status !== "live" || navigator.onLine === false) {
+      briefNote = OFFLINE_DECISION;
+      return false;
+    }
+    if (!verifiedFresh && !(await verify())) { briefNote = PASSKEY_UNFINISHED; return false; }
+    if (!session.opened || session.top?.kind !== "decision" || session.top.id !== id) session.open({ decision: id });
+    const card = session.top;                            // the run's card on top: its key carries any re-ask suffix (finding 4)
+    if (card?.kind !== "decision" || card.id !== id) {
+      briefNote = "Not sent: this decision isn't in your catch-up right now.";   // …and why, not silence (finding 7)
+      return false;
+    }
+    session.answer(card.key, id, body, label, held.seen);
+    const a = session.run?.answering;
+    if (!a || a.id !== id || a.key !== card.key) {
+      briefNote = a && a.id !== id ? "Not sent: another answer is still in its window. It goes first." : "Not sent: this decision isn't in your catch-up right now.";
+      return false;
+    }
+    return true;
+  }
+  async function askForBrief(d: DecisionItem): Promise<AskOutcome> {
+    return sharedAsk(d, feed.workers, c => queue({ ...c, uploads: [] }), async () => {
+      if (verifiedFresh || navigator.onLine === false) return null;
+      return (await verify()) ? null : "Not sent: the passkey check didn't finish.";
+    });
+  }
+  // "Try again" after an unknown outcome, from the sheet: the same answer with the same request id (typed at most once).
+  async function trySheetAgain() {
+    const r = briefRefusal;
+    if (!r?.retry) return;
+    briefNote = null;
+    if (feed.status !== "live" || navigator.onLine === false) { briefNote = STILL_OFFLINE; return; }
+    if (!verifiedFresh && !(await verify())) { briefNote = PASSKEY_UNFINISHED; return; }
+    await session.retry(r.key, r.retry.id, r.retry.body, r.retry.label, r.retry.seen, r.retry.requestId);
+  }
+  async function verifySheetAgain() {
+    briefNote = await session.retryStepUp(feed, verify);
+  }
   function go(t: Tab) {
     if (deciding) stopDeciding();
     tab = t;
     scrollTo(0, 0);
   }
-  // A conversation is a page of its own: the phone's back gesture closes it (history), as the button does.
+  // A conversation is a page of its own: the phone's back gesture closes it (history), as the button does. The entry
+  // goes through the router's shallow routing, like the sheet's, so its state sits where popstate looks for it
+  // whichever entry is current — the sheet's included (finding 3).
   let chatScreen = $state(false);
   function openChat(worker: string, screen = false) {
     if (deciding) stopDeciding();
     chat = worker;
     chatScreen = screen;
     const entry = { chat: worker, screen };
-    if (chatEntry(history.state?.chat, worker) === "stay") { history.replaceState(entry, "", location.pathname); return; }
-    history.pushState(entry, "", location.pathname);
+    if (chatEntry(restoredChat(entryChatState(history.state)), worker) === "stay") { replaceState("", entry); return; }
+    pushState("", entry);
   }
-  function closeChat() { if (history.state?.chat) history.back(); else { chat = null; chatScreen = false; } }
-  const onPop = () => { chat = restoredChat(history.state); chatScreen = chat !== null && restoredScreen(history.state); };
+  // page.state is {} after a reload until the next navigation (SvelteKit 2.70.3 sets it so on hydrate;
+  // https://kit.svelte.dev/docs/shallow-routing#caveats, read 2026-10-13). The entry itself is still in
+  // history, which is what onMount restores the chat from, so Back pops that entry.
+  function closeChat() {
+    if (restoredChat(entryChatState(history.state))) history.back();
+    else { chat = null; chatScreen = false; }
+  }
+  const onPop = () => {
+    const entry = entryChatState(history.state);
+    chat = restoredChat(entry);
+    chatScreen = chat !== null && restoredScreen(entry);
+  };
   $effect(() => {
     const next = keptChat(chat, feed.workers, feed.primed);
     if (next === chat) return;
@@ -185,8 +337,9 @@
 
   const onHidden = () => { if (document.visibilityState === "hidden") { session.leave(); quick.flush(); } };
   onMount(() => {
-    const open = restoredChat(history.state);
-    if (open) { chat = open; chatScreen = restoredScreen(history.state); }
+    const entry = entryChatState(history.state);
+    const open = restoredChat(entry);
+    if (open) { chat = open; chatScreen = restoredScreen(entry); }
     feed.start();
     session.start();
     quick.start();
@@ -208,17 +361,17 @@
   });
 </script>
 
-<div class="phone" class:full={deciding || chat !== null || away.open}>
+<div class="phone" class:full={deciding || chat !== null || away.open || briefId !== null}>
   {#if deciding}
     <CatchUp {feed} {session} {quick} {outgoing} {verifiedFresh} {verify} onBack={stopDeciding} onDay={() => { session.finish(); stopDeciding(); }}
       onQueue={queue} onRetry={id => void outbox?.retry(id)} onDiscard={id => void outbox?.discard(id)}
       onEchoes={(worker, e) => void outbox?.echoes(worker, e)}
-      onScreen={id => { stopDeciding(); openChat(id, true); }} />
+      onScreen={id => { stopDeciding(); openChat(id, true); }} onOpenBrief={openBrief} />
   {:else if tab === "chats"}
     <ChatList {rows} status={feed.status} {now} decisions={feed.primed ? session.count : 0} digestWaiting={!!away.pending && !away.open}
       onOpen={openChat} onDecide={() => decide()} onDigest={() => (away.open = true)} onSettings={() => (settings = true)} />
   {:else if tab === "today"}
-    <Today {feed} {session} {quick} {verifiedFresh} {verify} onCatchUp={() => decide()} onDecide={id => decide({ decision: id })} />
+    <Today {feed} {session} {quick} {verifiedFresh} {verify} onCatchUp={() => decide()} onDecide={id => decide({ decision: id })} onReadBrief={openBrief} />
   {:else if tab === "status"}
     <Status {rows} status={feed.status} primed={feed.primed} onOpen={openChat} />
   {:else if tab === "board"}
@@ -246,6 +399,10 @@
       onMarkRead={markDigestRead} onLater={() => (away.open = false)} />
   {/if}
   {#if settings}<SettingsSheet setting={away.setting} {engines} onChoose={v => away.choose(v)} onClose={() => (settings = false)} />{/if}
+  {#if briefItem && briefSession}
+    <BriefSheet item={briefItem} {now} clock={session.now} session={briefSession} answering={briefAnswering} refusal={briefRefusal} runAnswered={briefRunAnswered} note={briefNote}
+      onPick={answerFromSheet} onUndo={() => session.undo()} onVerifyAgain={() => void verifySheetAgain()} onTryAgain={() => void trySheetAgain()} onAskBrief={askForBrief} />
+  {/if}
   <LinkedNotice linked={feed.linked} onReview={() => void goto("/devices")} onSeen={at => feed.seeLinked(at)} />
   <FleetNotice available={feed.fleetAvailable} />
 </div>

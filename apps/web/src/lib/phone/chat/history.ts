@@ -4,6 +4,14 @@ export function chatEntry(stateChat: string | null | undefined, worker: string):
   return stateChat === worker ? "stay" : "push";
 }
 
+// One entry's chat state, wherever the router kept it: Kit 2.70.3 nests shallow-routing state under
+// "sveltekit:states" on the entries it owns, and an entry pushed outside the router keeps it at the top (finding 3).
+export function entryChatState(state: unknown): ChatHistoryState {
+  if (!state || typeof state !== "object") return null;
+  const nested = (state as { "sveltekit:states"?: unknown })["sveltekit:states"];
+  return (nested ?? state) as ChatHistoryState;
+}
+
 // One history entry, as Phone writes it: the open chat and whether its screen is showing.
 type ChatHistoryState = { chat?: unknown; screen?: unknown } | null;
 
