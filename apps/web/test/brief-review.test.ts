@@ -145,6 +145,16 @@ describe("desktop brief review", () => {
     const stand = dialog.locator("p.stand");
     await stand.getByText("Sent. You chose Extend the triage script.").waitFor();
     expect(await stand.getByText("Answered on another device").count()).toBe(0);
+    const row = tab.locator('[data-decision="d-1"]');
+    expect(await row.getByText("Answered on another device").count()).toBe(0);
+    await row.getByText("You chose").waitFor();
+    const again = structuredClone(sent) as { version: string; decision: { choice: { label: string }; via?: string } };
+    again.version = "v2";
+    again.decision.via = "elsewhere";
+    again.decision.choice.label = "Buy a hosted add-on";
+    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [again, ITEMS[1], ITEMS[2]]);
+    await stand.getByText("Answered on another device: “Buy a hosted add-on”.").waitFor();
+    await row.getByText("Answered on another device").waitFor();
     const missing = structuredClone(sent);
     delete missing.decision.via;
     await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [missing, ITEMS[1], ITEMS[2]]);

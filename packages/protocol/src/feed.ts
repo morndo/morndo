@@ -146,7 +146,7 @@ export const DecisionItemSchema = z.object({
       z.object({ kind: z.literal("words") }),
     ]),
     at: z.number(),
-    via: orElse(z.enum(["here", "elsewhere"]), "elsewhere"),
+    via: z.exactOptional(z.enum(["here", "elsewhere"])),
     endpointId: z.nullable(z.pipe(text(), z.transform(s => s as EndpointId))),
     sessionId: z.nullable(z.pipe(text(), z.transform(s => s as SessionId))),
     // ADR-0010: a Decision for the manager waits in its inbox ("queued") until it reached the manager ("delivered").

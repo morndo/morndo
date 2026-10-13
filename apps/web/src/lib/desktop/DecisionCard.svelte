@@ -27,6 +27,7 @@
   import { AnswerSession } from "./answer-session.svelte.ts";
   import type { AnswerBody, AnswerProblem } from "./answer-session.ts";
   import { ago, deliveryLine, dueLabel, REFUSALS, urgency, type DecisionItem } from "./decisions.ts";
+  import { viaOf } from "../sent-here.ts";
   import { clock } from "./grouping.ts";
 
   let { item, variant, now, verifiedFresh, briefOpen = false, session: given, onAnswer, onOpenScreen, onOpenChat, onOpen }: {
@@ -134,7 +135,7 @@
       <CircleCheckBig size={18} />
       <div>
         <p>
-          {#if d.via === "elsewhere"}Answered on another device: <b>{d.choice.kind === "option" ? d.choice.label : "in words"}</b>
+          {#if viaOf(item) === "elsewhere"}Answered on another device: <b>{d.choice.kind === "option" ? d.choice.label : "in words"}</b>
           {:else if d.choice.kind === "option"}You chose <b>{d.choice.label}</b>
           {:else}You answered in words{/if}
           <span class="t">· {clock(d.at)}</span>

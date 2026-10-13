@@ -36,7 +36,7 @@
   const terminal = $derived(item.asker.kind === "manager" ? "the manager" : `#${item.asker.name}`);
   const headline = $derived(card.headline ?? view.title);
   const recommendKey = $derived(brief?.recommend ?? (view.answerBy === "tap" ? view.options[0]?.key ?? null : null));
-  const standing = $derived(standingLine(item, whom, session.sent));
+  const standing = $derived(standingLine(item, whom));
 
   const takeFocus = (node: HTMLElement) => node.focus();
 
@@ -194,7 +194,7 @@
   </div>
 
   <footer>
-    {#if session.sent}
+    {#if (item.status === "answered" && item.decision) || session.sent}
       <p class="stand" role="status">{standing}</p>
       <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
     {:else if !open}

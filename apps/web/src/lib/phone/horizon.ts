@@ -11,6 +11,7 @@
 // own heading at the end, never waiting, never the headline.
 import { clause, type RosterEntry } from "@morndo/domain";
 import { deliveryLine, type DecisionItem } from "../desktop/decisions.ts";
+import { viaOf } from "../sent-here.ts";
 
 export type Row = {
   key: string;
@@ -64,7 +65,7 @@ export function horizon(p: {
       // within SAID_SKEW_MS), never an earlier answer to an ask that was asked again since (E11).
       const mine = p.said?.[d.id];
       const here = mine && dec && mine.at >= dec.at - SAID_SKEW_MS ? mine : undefined;
-      const said = !dec ? "Answered." : dec.via === "elsewhere" ? "Answered on another device."
+      const said = !dec ? "Answered." : viaOf(d) === "elsewhere" ? "Answered on another device."
         : dec.choice.kind === "option" ? `You said “${dec.choice.label}” at ${hm(dec.at)}.`
         : here?.label === "your own words" ? `You answered in your own words at ${hm(dec.at)}.`
         : here ? `You said “${here.label}” at ${hm(dec.at)}.` : `You answered in words at ${hm(dec.at)}.`;

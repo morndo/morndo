@@ -1,6 +1,7 @@
 // Where an answer stands, in the one sentence the phone sheet, the catch-up card and the desktop modal share.
 import { describe, expect, it } from "vitest";
 import { standingLine, type DecisionItem } from "../src/lib/desktop/decisions.ts";
+import { clearSends, rememberSend } from "../src/lib/sent-here.ts";
 
 const item = (over: Partial<DecisionItem>): DecisionItem => ({
   id: "d-5" as DecisionItem["id"],
@@ -16,6 +17,7 @@ const item = (over: Partial<DecisionItem>): DecisionItem => ({
 
 describe("standingLine", () => {
   it("names an answer given on another device, choice and all", () => {
+    clearSends();
     const said = standingLine(item({
       decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere", endpointId: null, sessionId: null },
     }), "Alpha");
@@ -26,10 +28,15 @@ describe("standingLine", () => {
     expect(words).toBe("Answered on another device: in words.");
   });
 
-  it("keeps this device's own send when the report says elsewhere, or omits via", () => {
+  it("keeps this device's own send for that version, and a later version from elsewhere stays elsewhere", () => {
+    clearSends();
+    rememberSend("d-own", "req-1", "v1");
     const decision = { choice: { kind: "option" as const, key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere" as const, endpointId: null, sessionId: null };
-    expect(standingLine(item({ decision }), "Alpha", true)).toBe("Sent. You chose Extend the triage script. Alpha has it.");
+    const own = item({ id: "d-own" as DecisionItem["id"], decision });
+    expect(standingLine(own, "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
     const { via: _via, ...missing } = decision;
-    expect(standingLine(item({ decision: missing as typeof decision }), "Alpha", true)).toBe("Sent. You chose Extend the triage script. Alpha has it.");
+    expect(standingLine(item({ id: "d-own" as DecisionItem["id"], decision: missing as typeof decision }), "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
+    expect(standingLine(item({ id: "d-own" as DecisionItem["id"], version: "v2", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
+    expect(standingLine(item({ id: "d-other" as DecisionItem["id"], decision: missing as typeof decision }), "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
   });
 });

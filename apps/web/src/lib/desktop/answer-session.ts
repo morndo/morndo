@@ -43,7 +43,7 @@ export function pick(s: AnswerState, label: string, body: AnswerBody): AnswerSta
 
 // Show the new version: the pick belonged to the version that was on screen, so it goes.
 export function showNew(s: AnswerState, live: DecisionItem): AnswerState {
-  return { ...s, live, shown: live, mode: "idle", picked: null, words: "", error: null };
+  return { ...s, live, shown: live, mode: "idle", picked: null, words: "", error: null, sent: false };
 }
 
 export function back(s: AnswerState): AnswerState {

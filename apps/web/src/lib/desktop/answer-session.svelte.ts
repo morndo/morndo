@@ -1,6 +1,7 @@
 // The answer the card and the brief both read. Kept per decision on the panel, so closing the brief does not drop an
 // answer that may have been typed.
 import { MAY_HAVE_GONE, endsDoubt } from "../catchup/answer.ts";
+import { rememberSend } from "../sent-here.ts";
 import {
   back, noteClosed, openSession, pick, showNew, seenOf, stale,
   type AnswerBody, type AnswerProblem, type AnswerState, type AskOutcome,
@@ -46,6 +47,7 @@ export class AnswerSession {
   // `hold` while the brief is open: the body stays on the version he has seen. Otherwise a quiet card follows the list.
   // Compare the version, not object identity: a state proxy is never === the item the list just passed.
   bind(live: DecisionItem, hold: boolean) {
+    if (this.#bound && this.#bound.version !== live.version) this.sent = false;
     const follow = !hold && !this.holdingAnswer;
     const bound = this.#bound;
     const same = bound !== null && bound.version === live.version && bound.status === live.status && bound.briefVersion === live.briefVersion && bound.answerable === live.answerable && bound.decision === live.decision && bound.notice === live.notice && this.shown.version === (follow ? live.version : this.shown.version);
@@ -80,6 +82,7 @@ export class AnswerSession {
     }
     this.again = null;
     this.sent = true;
+    rememberSend(this.live.id, requestId, this.seen);
     this.mode = "idle";
     this.picked = null;
     this.words = "";

@@ -1,6 +1,7 @@
 // How decisions are shown (ADR-0006 addendum "Decisions"): urgency, due labels, groups, and what each refusal means
 // in plain words. The rules themselves live in the domain and the hub; this only presents their results.
 import type { DecisionItem, LedgerState } from "@morndo/protocol";
+import { viaOf } from "../sent-here.ts";
 
 export type { DecisionItem, LedgerState };
 export type Board = { items: DecisionItem[]; ledger: LedgerState };
@@ -90,12 +91,11 @@ export const STEP_UP_CHANGED = "Not sent: the brief changed since that answer, s
 export const STEP_UP_MISMATCH = "Not sent: this isn't the answer that passkey check was for.";
 
 // Where a sent answer stands, in one line: the phone's sheet and the desktop modal say it the same way.
-// "Answered on another device" only when this device did not send it. A send from here can still arrive
-// with via "elsewhere" (the ledger reports it first; a missing via is decoded as elsewhere).
-export function standingLine(item: DecisionItem, whom: string, sentHere = false): string {
+// "Answered on another device" only when the record says elsewhere and this device did not send this version.
+export function standingLine(item: DecisionItem, whom: string): string {
   const d = item.decision;
   if (!d) return "Sent. The manager gets it as your decision and acts on it.";
-  if (d.via === "elsewhere" && !sentHere) {
+  if (viaOf(item) === "elsewhere") {
     const said = d.choice.kind === "option" ? `“${d.choice.label}”` : "in words";
     return `Answered on another device: ${said}.`;
   }
