@@ -194,6 +194,56 @@ exit 0
     }
   });
 
+  it("turns a remux away when the waiting line is full, and when a wait runs out", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "morndo-remux-queue-"));
+    const sample = join(folder, "note.m4a");
+    const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
+    expect(made.status, made.stderr || made.error?.message).toBe(0);
+    const bytes = readFileSync(sample);
+    const log = join(folder, "starts");
+    writeFileSync(join(folder, "ffmpeg"), `#!/bin/sh
+while ! mkdir "${folder}/lock" 2>/dev/null; do sleep 0.01; done
+n=$(cat "${folder}/n" 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > "${folder}/n"
+echo "$n" >> "${log}"
+rmdir "${folder}/lock"
+while [ ! -f "${folder}/release" ]; do sleep 0.02; done
+exit 0
+`, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${folder}:${path ?? ""}`;
+    const started = () => {
+      try { return readFileSync(log, "utf8").trim().split("\n").filter(Boolean).length; }
+      catch { return 0; }
+    };
+    const held: Promise<unknown>[] = [];
+    try {
+      held.push(stripMetadata(bytes, "mp4", 10_000), stripMetadata(bytes, "mp4", 10_000));
+      expect(await until(() => started() >= 2, 2000)).toBe(true);
+      let timed: string = "pending";
+      const waiting = stripMetadata(bytes, "mp4", 200).then(
+        () => { timed = "stored"; },
+        (error: Error) => { timed = error.message; },
+      );
+      expect(await until(() => timed !== "pending", 1000)).toBe(true);
+      expect(timed).toBe("too_many");
+      await waiting;
+      expect(started()).toBe(2);
+      for (let n = 0; n < 8; n++) held.push(stripMetadata(bytes, "mp4", 10_000));
+      await expect(stripMetadata(bytes, "mp4", 10_000)).rejects.toThrow("too_many");
+      const inbox = uploadInbox({ dir });
+      expect(await inbox.save(bytes, endpointId("ep1"), "clip.m4a", { present: true, maxSeconds: 600 })).toEqual({ ok: false, error: "too_many" });
+      expect(started()).toBe(2);
+    } finally {
+      writeFileSync(join(folder, "release"), "");
+      await Promise.allSettled(held);
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("a remux writes and reads its temp files asynchronously", async () => {
     const folder = mkdtempSync(join(tmpdir(), "morndo-remux-async-"));
     const sample = join(folder, "note.m4a");

@@ -512,7 +512,10 @@ export function startHttp(p: {
       limited(buckets.uploads.take(a.endpoint.id));
       await p.transcription?.refresh();
       const r = await inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req), p.transcription?.capability());
-      if (!r.ok) return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
+      if (!r.ok) {
+        if (r.error === "too_many") return json(res, 503, { error: r.error }, { "Retry-After": "60" });
+        return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
+      }
       return json(res, 200, { id: r.value.id, name: r.value.path.split("/").pop(), size: r.value.size, mime: r.value.mime });
     }
     const tx = /^\/api\/transcriptions(?:\/([A-Za-z0-9][A-Za-z0-9:_-]{0,199})(\/cancel)?)?$/.exec(path);

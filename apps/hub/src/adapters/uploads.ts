@@ -80,25 +80,53 @@ const frameSync = (b: Uint8Array) => b.length >= 2 && b[0] === 0xff && (b[1]! & 
 // mp4, ogg, webm: ffmpeg rewrites every size and offset when it copies the streams without metadata.
 // The spawn is asynchronous, with a timeout that kills it, so a slow remux never stalls the hub.
 // A missing ffmpeg, or a remux that fails, keeps the bytes: a hand edit of those containers would corrupt them.
-// Two remuxes run at once. The rest wait, so a burst of uploads cannot fill the process table.
+// Two remuxes run at once. Eight more may wait, each only as long as the remux timeout. Past that, or when the
+// wait runs out, the upload is too_many: each waiter holds the whole recording in memory.
 const REMUX_FORMAT = { mp4: "mp4", ogg: "ogg", webm: "webm" } as const;
 const REMUX_LIMIT = 2;
+const REMUX_QUEUE = 8;
+class RemuxBusy extends Error {
+  constructor() {
+    super("too_many");
+    this.name = "RemuxBusy";
+  }
+}
 let remuxActive = 0;
-const remuxWaiters: Array<() => void> = [];
-function acquireRemux(): Promise<void> {
+const remuxWaiters: Array<{ grant: () => void }> = [];
+function acquireRemux(waitMs: number): Promise<void> {
   if (remuxActive < REMUX_LIMIT) {
     remuxActive += 1;
     return Promise.resolve();
   }
-  return new Promise(resolve => { remuxWaiters.push(resolve); });
+  if (remuxWaiters.length >= REMUX_QUEUE) return Promise.reject(new RemuxBusy());
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const slot = {
+      grant: () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve();
+      },
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      const i = remuxWaiters.indexOf(slot);
+      if (i >= 0) remuxWaiters.splice(i, 1);
+      reject(new RemuxBusy());
+    }, waitMs);
+    timer.unref?.();
+    remuxWaiters.push(slot);
+  });
 }
 function releaseRemux(): void {
   const next = remuxWaiters.shift();
-  if (next) next();
+  if (next) next.grant();
   else remuxActive -= 1;
 }
 async function stripByRemux(b: Uint8Array, container: keyof typeof REMUX_FORMAT, timeoutMs: number): Promise<Uint8Array> {
-  await acquireRemux();
+  await acquireRemux(timeoutMs);
   try {
     return await remuxOne(b, container, timeoutMs);
   } finally {
@@ -237,7 +265,12 @@ export function uploadInbox(opts: { dir: string; now?: () => number; registry?: 
         pathName = `pasted-${stamp(at)}-${id6}-${accepted.value.name}`;
         if (accepted.value.kind === "audio") {
           mime = AUDIO_MIME[accepted.value.container];
-          clean = await stripMetadata(bytes, accepted.value.container);   // tags go when that can be done without corrupting the audio
+          try {
+            clean = await stripMetadata(bytes, accepted.value.container);   // tags go when that can be done without corrupting the audio
+          } catch (error) {
+            if (error instanceof RemuxBusy) return { ok: false, error: "too_many" };
+            throw error;
+          }
         } else {
           mime = accepted.value.mime;
           clean = accepted.value.kind === "image" ? await stripMetadata(bytes, accepted.value.mime) : bytes;

@@ -40,7 +40,7 @@ export function sniffImage(b: Uint8Array): ImageMime | null {
   return null;
 }
 
-export type UploadRefusal = "not_an_image" | "too_big" | "not_allowed" | "not_utf8" | "bad_name";
+export type UploadRefusal = "not_an_image" | "too_big" | "not_allowed" | "not_utf8" | "bad_name" | "too_many";
 
 // A name with no extension: an image by its bytes only (a paste that didn't carry a name). Anything else is refused.
 export function acceptUpload(bytes: Uint8Array): Result<ImageMime, UploadRefusal> {
