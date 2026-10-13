@@ -140,7 +140,7 @@
     ? { label: session.run.answering.label, sending: session.run.answering.sending, commitAt: session.run.answering.commitAt }
     : null);
   // What the run holds for the decision on screen: its refusal (the sheet sits over the card that would show it) and
-  // whether it was answered here already. The due line uses this page's slow clock; the sheet counts its own window.
+  // whether it was answered here already. The due line uses this page's slow clock; the countdown uses the session's.
   // The current entry, re-ask suffix included. An earlier entry of the same id is not this ask.
   const briefCardKey = $derived.by(() => {
     const run = session.run;
@@ -410,7 +410,7 @@
   {/if}
   {#if settings}<SettingsSheet setting={away.setting} {engines} onChoose={v => away.choose(v)} onClose={() => (settings = false)} />{/if}
   {#if briefItem && briefSession}
-    <BriefSheet item={briefItem} {now} session={briefSession} answering={briefAnswering} refusal={briefRefusal} runAnswered={briefRunAnswered} note={briefNote}
+    <BriefSheet item={briefItem} {now} clock={session.now} session={briefSession} answering={briefAnswering} refusal={briefRefusal} runAnswered={briefRunAnswered} note={briefNote}
       onPick={answerFromSheet} onUndo={() => session.undo()} onVerifyAgain={() => void verifySheetAgain()} onTryAgain={() => void trySheetAgain()} onAskBrief={askForBrief} />
   {/if}
   <LinkedNotice linked={feed.linked} onReview={() => void goto("/devices")} onSeen={at => feed.seeLinked(at)} />

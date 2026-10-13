@@ -16,8 +16,8 @@
   import { httpLink } from "./brief.ts";
   import { followKeyboard } from "./chat/keyboard.ts";
 
-  let { item, now, session, answering, refusal, runAnswered, note, onPick, onUndo, onVerifyAgain, onTryAgain, onAskBrief }: {
-    item: DecisionItem; now: number; session: AnswerSession;
+  let { item, now, clock, session, answering, refusal, runAnswered, note, onPick, onUndo, onVerifyAgain, onTryAgain, onAskBrief }: {
+    item: DecisionItem; now: number; clock: number; session: AnswerSession;
     answering: { label: string; sending: boolean; commitAt: number } | null;
     refusal: { code: string; text: string } | null;
     runAnswered: boolean;
@@ -41,16 +41,9 @@
   const open = $derived(item.status === "open");
   const primary = $derived(brief ? brief.options.find(o => o.key === brief.recommend) ?? brief.options[0] ?? null : view.options[0] ?? null);
   const headline = $derived(card.headline ?? view.title);
-  // The due line follows the parent's slow clock. The undo countdown has its own clock, and only while an answer
-  // is still in its window — a sending answer and a closed window do not keep the sheet redrawing.
-  let tick = $state(0);
-  $effect(() => {
-    if (!answering || answering.sending) return;
-    tick = Date.now();
-    const t = setInterval(() => (tick = Date.now()), 250);
-    return () => clearInterval(t);
-  });
-  const left = $derived(answering ? Math.max(0, Math.ceil((answering.commitAt - tick) / 1000)) : 0);
+  // The due line follows the page's slow clock. The undo countdown follows the session clock, the same one
+  // that closes the window, so the first paint is not a tick behind.
+  const left = $derived(answering ? Math.max(0, Math.ceil((answering.commitAt - clock) / 1000)) : 0);
   const briefLink = $derived(httpLink(view.link));
   const asker = $derived(item.asker.kind === "manager" ? "the manager" : item.asker.name);
   const whom = $derived(asker[0] ? asker[0].toUpperCase() + asker.slice(1) : asker);

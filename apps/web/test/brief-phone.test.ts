@@ -288,6 +288,29 @@ describe("the sheet and cards report what happened to an answer", () => {
     await context.close();
   }, 60_000);
 
+  it("shows the session clock on the first answer after the sheet mounts", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    await tab.locator("dialog.sheet").waitFor();
+    const first = await tab.evaluate(async () => {
+      const orig = window.setInterval.bind(window);
+      let started = 0;
+      window.setInterval = ((fn: TimerHandler, ms?: number, ...rest: unknown[]) => {
+        started += 1;
+        return orig(fn, ms, ...rest);
+      }) as typeof window.setInterval;
+      (globalThis as unknown as { __setAnswering: (a: { label: string; sending: boolean; commitAt: number }) => void })
+        .__setAnswering({ label: "Extend the triage script", sending: false, commitAt: Date.now() + 5_000 });
+      await Promise.resolve();
+      return { said: document.querySelector("dialog.sheet footer .note")?.textContent ?? "", started };
+    });
+    expect(first.said).toBe("Goes in 5 s.");
+    expect(first.started).toBe(0);
+    await context.close();
+  }, 60_000);
+
   it("counts the answer window down from a live clock, not the sheet's mount time", async () => {
     const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
     tab = await context.newPage();
