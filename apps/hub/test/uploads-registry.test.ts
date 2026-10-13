@@ -20,25 +20,25 @@ const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a
 const T0 = Date.UTC(2026, 9, 2, 9);
 
 describe("the upload registry across a restart", () => {
-  it("an upload from before the restart is found after it, with its endpoint, path and type", () => {
+  it("an upload from before the restart is found after it, with its endpoint, path and type", async () => {
     const before = uploadInbox({ dir: join(dir, "inbox"), now: () => T0, registry: store });
-    const r = before.save(png, endpointId("ep1"));
+    const r = await before.save(png, endpointId("ep1"));
     if (!r.ok) throw new Error(r.error);
     const after = uploadInbox({ dir: join(dir, "inbox"), now: () => T0 + 60_000, registry: store });
     expect(after.get(r.value.id)).toEqual(r.value);
   });
-  it("past its day, the sweep forgets it", () => {
+  it("past its day, the sweep forgets it", async () => {
     let now = T0;
     const inbox = uploadInbox({ dir: join(dir, "inbox"), now: () => now, registry: store });
-    const r = inbox.save(png, endpointId("ep1"));
+    const r = await inbox.save(png, endpointId("ep1"));
     if (!r.ok) throw new Error(r.error);
     now = T0 + UPLOAD_TTL_MS + 1;
     inbox.sweep();
     expect(uploadInbox({ dir: join(dir, "inbox"), now: () => now, registry: store }).get(r.value.id)).toBeUndefined();
   });
-  it("without a registry it still works in memory (unit tests)", () => {
+  it("without a registry it still works in memory (unit tests)", async () => {
     const inbox = uploadInbox({ dir: join(dir, "inbox") });
-    const r = inbox.save(png, endpointId("ep1"));
+    const r = await inbox.save(png, endpointId("ep1"));
     expect(r.ok && inbox.get(r.value.id)?.mime).toBe("image/png");
   });
 });

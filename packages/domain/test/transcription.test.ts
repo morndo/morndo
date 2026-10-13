@@ -4,8 +4,11 @@
 // the text it produced. No engine name, no file, no clock of its own.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { afterRestart, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
-  composerText, editText, type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
+import {
+  afterRestart, audioDurationMs, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
+  composerText, editText, type EngineText, type Transcription, type TranscriptionBody,
+} from "../src/index.ts";
+import { mp3Bytes, mp4Bytes, mp4MoovAfterMdat, opusBytes, vorbisBytes, wavBytes, webmBytes, webmClusterLooksLikeDuration } from "./audio-bytes.ts";
 
 it("a language choice is the code's body, or auto, written once", () => {
   const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
@@ -24,7 +27,7 @@ const ask = (over: Partial<TranscriptionBody> = {}): TranscriptionBody => ({
 });
 const heard = (text = "guten Morgen", durationMs = 30_000): EngineText =>
   ({ language: "de", durationMs, segments: [{ startMs: 0, endMs: durationMs, text }] });
-const live = (over: Partial<Transcription> = {}): Transcription => ({ ...value(requestTranscription([], ask(), AT, READY)), ...over });
+const live = (over: Partial<Transcription> = {}): Transcription => ({ ...value(requestTranscription([], ask(), AT, READY, "multi")), ...over });
 
 describe("sniffAudio", () => {
   it("knows each audio container by its own bytes", () => {
@@ -56,28 +59,48 @@ describe("sniffAudio", () => {
 
 describe("requesting a transcription", () => {
   it("runs nothing and offers nothing while no ready Transcriber is there, whatever the body (TX9)", () => {
-    expect(requestTranscription([], ask(), AT, NO_CAPABILITY)).toEqual({ ok: false, error: "no_capability" });
-    expect(requestTranscription([], ask({ id: "" }), AT, { present: false, reason: "not_ready" })).toEqual({ ok: false, error: "no_capability" });
-    expect(requestTranscription([], ask(), AT, { present: true, maxSeconds: Number.NaN })).toEqual({ ok: false, error: "no_capability" });
+    expect(requestTranscription([], ask(), AT, NO_CAPABILITY, "multi")).toEqual({ ok: false, error: "no_capability" });
+    expect(requestTranscription([], ask({ id: "" }), AT, { present: false, reason: "not_ready" }, "multi")).toEqual({ ok: false, error: "no_capability" });
+    expect(requestTranscription([], ask(), AT, { present: true, maxSeconds: Number.NaN }, "multi")).toEqual({ ok: false, error: "no_capability" });
   });
   it("refuses a bad id, recording, language or size before it queues anything", () => {
-    expect(requestTranscription([], ask({ id: "../up" }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
-    expect(requestTranscription([], ask({ recording: { kind: "upload", id: "" } }), AT, READY)).toEqual({ ok: false, error: "bad_recording" });
+    expect(requestTranscription([], ask({ id: "../up" }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_id" });
+    expect(requestTranscription([], ask({ recording: { kind: "upload", id: "" } }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_recording" });
     const agentKind = { kind: "agent", id: "up-1" } as unknown as TranscriptionBody["recording"];   // not one of the two kinds
-    expect(requestTranscription([], ask({ recording: agentKind }), AT, READY)).toEqual({ ok: false, error: "bad_recording" });
-    expect(requestTranscription([], ask({ language: "DE" }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
-    expect(requestTranscription([], ask({ language: "auto-detected" }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
-    expect(requestTranscription([], ask({ sizeBytes: -1 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
-    expect(requestTranscription([], ask({ sizeBytes: 4096.5 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
+    expect(requestTranscription([], ask({ recording: agentKind }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_recording" });
+    expect(requestTranscription([], ask({ language: "DE" }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ language: "auto-detected" }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ sizeBytes: -1 }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_size" });
+    expect(requestTranscription([], ask({ sizeBytes: 4096.5 }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_size" });
+  });
+
+  it("refuses a language the engine does not list, whatever the code's shape", () => {
+    expect(requestTranscription([], ask({ language: "xx" }), AT, READY, ["de", "en"])).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ language: "en-US" }), AT, READY, ["de", "en"])).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ language: "de" }), AT, READY, ["de", "en"]).ok).toBe(true);
+    expect(requestTranscription([], ask({ language: "pt-BR" }), AT, READY, ["de", "pt-BR"]).ok).toBe(true);
+    expect(requestTranscription([], ask({ language: "auto" }), AT, READY, []).ok).toBe(true);      // auto asks; it chooses no code
+    expect(requestTranscription([], ask({ language: "xx" }), AT, READY, "multi").ok).toBe(true);  // a multilingual engine takes any code
+  });
+
+  it("refuses a new attempt once the queue holds its cap of live rows, whatever they name", () => {
+    const full = Array.from({ length: 100 }, (_, i) => live({ id: `tx-${i}`, recording: { kind: "upload", id: `up-${i}` } }));
+    expect(requestTranscription(full, ask({ id: "tx-new", recording: { kind: "upload", id: "up-new" } }), AT, READY, "multi"))
+      .toEqual({ ok: false, error: "too_many" });
+    // The row already in flight comes back whatever the queue holds (TX2), and a finished row holds no slot (TX3).
+    expect(value(requestTranscription(full, ask({ id: "tx-77", recording: { kind: "upload", id: "up-77" } }), AT, READY, "multi")).id).toBe("tx-77");
+    const oneEnded = full.map((row, i) => i === 0 ? { ...row, state: "done" as const } : row);
+    expect(requestTranscription(oneEnded, ask({ id: "tx-new", recording: { kind: "upload", id: "up-new" } }), AT, READY, "multi").ok).toBe(true);
+    expect(requestTranscription(full, ask({ id: "tx-new", recording: { kind: "upload", id: "up-new" } }), AT, READY, "multi", 101).ok).toBe(true);
   });
 
   it("refuses an id that is missing or not a string, instead of reading it as its own spelling", () => {
-    expect(requestTranscription([], ask({ id: undefined as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
-    expect(requestTranscription([], ask({ id: 42 as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
-    expect(requestTranscription([], ask({ recording: { kind: "upload", id: 7 as unknown as string } }), AT, READY))
+    expect(requestTranscription([], ask({ id: undefined as unknown as string }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_id" });
+    expect(requestTranscription([], ask({ id: 42 as unknown as string }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_id" });
+    expect(requestTranscription([], ask({ recording: { kind: "upload", id: 7 as unknown as string } }), AT, READY, "multi"))
       .toEqual({ ok: false, error: "bad_recording" });
     // An array stringifies to "de", and RegExp.test would accept that. The language has to be a string first.
-    expect(requestTranscription([], ask({ language: ["de"] as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ language: ["de"] as unknown as string }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_language" });
   });
   it("queues one attempt, waiting for a slot, with no outcome and no text", () => {
     expect(live()).toMatchObject({
@@ -88,32 +111,32 @@ describe("requesting a transcription", () => {
   });
   it("returns the attempt already in flight for the same recording and language (TX2)", () => {
     const first = live();
-    expect(value(requestTranscription([first], ask({ id: "tx-2" }), AT + 5, READY))).toBe(first);
+    expect(value(requestTranscription([first], ask({ id: "tx-2" }), AT + 5, READY, "multi"))).toBe(first);
     const german = live({ id: "tx-3", language: "de" });
-    const again = value(requestTranscription([german], ask({ id: "tx-4", language: "de", recording: { kind: "upload", id: "up-2" } }), AT + 5, READY));
+    const again = value(requestTranscription([german], ask({ id: "tx-4", language: "de", recording: { kind: "upload", id: "up-2" } }), AT + 5, READY, "multi"));
     expect(again).not.toBe(german);   // another recording is another attempt, not a conflict
     expect(again.acceptedAt).toBe(AT + 5);
-    const otherLanguage = value(requestTranscription([first], ask({ id: "tx-5", language: "de" }), AT + 6, READY));
+    const otherLanguage = value(requestTranscription([first], ask({ id: "tx-5", language: "de" }), AT + 6, READY, "multi"));
     expect(otherLanguage.id).toBe("tx-5");
   });
   it("an agent's attachment and the principal's upload of the same id are two recordings", () => {
     const first = live({ recording: { kind: "attachment", id: "file-1" } });
-    const second = requestTranscription([first], ask({ recording: { kind: "upload", id: "file-1" } }), AT + 5, READY);
+    const second = requestTranscription([first], ask({ recording: { kind: "upload", id: "file-1" } }), AT + 5, READY, "multi");
     expect(second.ok && second.value.id).toBe("tx-1");   // a new attempt: not the one in flight
     expect(second.ok && second.value.recording.kind).toBe("upload");
   });
   it("a finished attempt does not hold the recording: asking again makes a new one (TX3)", () => {
     const done = { ...live(), state: "failed" as const, outcome: "failed" as const, problem: "engine" as const };
-    const again = value(requestTranscription([done], ask({ id: "tx-9" }), AT + 9, READY));
+    const again = value(requestTranscription([done], ask({ id: "tx-9" }), AT + 9, READY, "multi"));
     expect(again).toMatchObject({ id: "tx-9", state: "queued", acceptedAt: AT + 9 });
     expect(done.state).toBe("failed");
   });
 
   it("an id that names a finished attempt takes its own body again, and only its body (TX3)", () => {
     const done = { ...live(), state: "failed" as const, outcome: "failed" as const, problem: "engine" as const };
-    expect(requestTranscription([done], ask(), AT + 5, READY)).toEqual({ ok: true, value: done });
+    expect(requestTranscription([done], ask(), AT + 5, READY, "multi")).toEqual({ ok: true, value: done });
     const finished = { ...live({ id: "tx-7" }), state: "done" as const, outcome: "done" as const };
-    expect(requestTranscription([finished], ask({ id: "tx-7", recording: { kind: "upload", id: "up-9" } }), AT + 5, READY))
+    expect(requestTranscription([finished], ask({ id: "tx-7", recording: { kind: "upload", id: "up-9" } }), AT + 5, READY, "multi"))
       .toEqual({ ok: false, error: "id_conflict" });
   });
 });
@@ -284,8 +307,8 @@ describe("the caps on a recording, a run and its text (TX6)", () => {
   const run = (): Transcription => ({ ...live(), state: "running", startedAt: AT + 10 });
 
   it("a recording over 10 MiB is refused at the request; one exactly at the line is taken", () => {
-    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES + 1 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
-    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES }), AT, READY).ok).toBe(true);
+    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES + 1 }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_size" });
+    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES }), AT, READY, "multi").ok).toBe(true);
   });
 
   it("words that took longer than the cap are failed: too_long, not done", () => {
@@ -399,5 +422,50 @@ describe("the words a done transcription offers the composer (TX8)", () => {
     const heardAttachment = done({ recording: { kind: "attachment", id: "file-9" } });
     expect(heardAttachment.state).toBe("done");
     expect(composerText(heardAttachment)).toBeNull();
+  });
+});
+
+describe("audioDurationMs", () => {
+  // The head is what a reader takes from the front of the file; `tail`/`tailAt` are the last bytes with the
+  // offset they start at, where a container keeps its length (an m4a's moov, an Ogg's last page).
+  const whole = (head: Uint8Array) => ({ head, size: head.length });
+  const withTail = (head: Uint8Array, tail: Uint8Array) => ({ head, tail, tailAt: head.length, size: head.length + tail.length });
+
+  it("reads each container's own duration", () => {
+    expect(audioDurationMs(whole(wavBytes(1000)))).toBe(1000);                       // PCM: data over byte rate
+    const inHead = mp4Bytes(1000, 2500);
+    expect(audioDurationMs(whole(inHead.head))).toBe(2500);                          // mvhd: duration over timescale
+    const moovLast = mp4Bytes(1000, 2500, true);                                     // a recorder's moov at the end
+    expect(audioDurationMs({ head: moovLast.head, tail: moovLast.moov, tailAt: moovLast.head.length, size: moovLast.head.length + moovLast.moov.length })).toBe(2500);
+    const laid = mp4MoovAfterMdat(1000, 2500, 80);                                  // tail starts inside mdat, not on a box
+    const headLen = 24;                                                             // ftyp plus the mdat header, so its size is known
+    const tailAt = 16 + 8 + 80 - 20;                                                // twenty bytes before moov
+    expect(tailAt).toBeGreaterThan(headLen);
+    expect(audioDurationMs({ head: laid.subarray(0, headLen), tail: laid.subarray(tailAt), tailAt, size: laid.length })).toBe(2500);
+    const across = mp4MoovAfterMdat(1000, 2500, 226);                               // moov starts at 250 and runs past 256
+    expect(across.length).toBeGreaterThan(256);
+    expect(audioDurationMs({ head: across.subarray(0, 256), tail: across.subarray(256), tailAt: 256, size: across.length })).toBe(2500);
+    expect(audioDurationMs({ head: across.subarray(0, 100), tail: across.subarray(280), tailAt: 280, size: across.length })).toBeNull();
+    const cbr = mp3Bytes(100, "44100");
+    expect(audioDurationMs({ head: cbr, size: 110 + 16_000 })).toBe(1000);           // constant 128 kbit/s from the tag's end
+    const foot = mp3Bytes(20, "44100", undefined, true);                             // ID3v2.4 footer is 10 bytes, not part of the size
+    expect(audioDurationMs({ head: foot, size: foot.length - 4 + 16_000 })).toBe(1000);
+    const vbr = mp3Bytes(0, "48000", { frames: 1000 });
+    expect(audioDurationMs(whole(vbr))).toBe(24_000);                                // a Xing header's frame count
+    expect(audioDurationMs(withTail(opusBytes(5000).head, opusBytes(5000).tail))).toBe(5000);   // Opus granule at 48 kHz
+    expect(audioDurationMs(withTail(vorbisBytes(1000, 8000).head, vorbisBytes(1000, 8000).tail))).toBe(1000);   // Vorbis granule at its own rate
+    expect(audioDurationMs(whole(webmBytes(7500)))).toBe(7500);                      // Duration × TimecodeScale
+    expect(audioDurationMs(whole(webmClusterLooksLikeDuration()))).toBeNull();       // a Cluster's bytes are not Info
+  });
+
+  it("answers null whenever the bytes do not say, so a caller falls back rather than guess", () => {
+    expect(audioDurationMs(whole(new Uint8Array(0)))).toBeNull();
+    expect(audioDurationMs(whole(new Uint8Array([...new Array<number>(44).fill(0)])))).toBeNull();   // no container's magic
+    const noData = new Uint8Array([...wavBytes(1000).slice(0, 36), ...new TextEncoder().encode("LIST")]);  // fmt, then no data chunk
+    expect(audioDurationMs(whole(noData))).toBeNull();
+    const tailOnly = mp4Bytes(1000, 2500, true);
+    expect(audioDurationMs(whole(tailOnly.head))).toBeNull();                        // the moov is in no part we were given
+    const noFrames = mp3Bytes(0, "48000", { frames: 0 });                            // Xing present, no frames counted
+    expect(audioDurationMs(whole(noFrames))).toBeNull();
   });
 });

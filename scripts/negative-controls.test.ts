@@ -82,8 +82,19 @@ describe("a control marked for one platform (platform)", () => {
   it("--check still checks a skipped control's text, on every platform", () => {
     const procFd = CONTROLS.find(c => c.id === "t2-openconfined-proc-fd");
     if (!procFd) throw new Error("no t2-openconfined-proc-fd");
-    expect(check([procFd])).toBe(0);
-    expect(check([{ ...procFd, find: `${procFd.find} /* not in the file */` }])).toBe(1);
+    // check() prints. A deliberate miss says STALE; left on stdout it looks like the CI step failed.
+    const lines: string[] = [];
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string | Uint8Array) => { lines.push(String(chunk)); return true; }) as typeof process.stdout.write;
+    try {
+      expect(check([procFd])).toBe(0);
+      expect(check([{ ...procFd, find: `${procFd.find} /* not in the file */` }])).toBe(1);
+    } finally {
+      process.stdout.write = write;
+    }
+    const out = lines.join("");
+    expect(out).toContain("ok    t2-openconfined-proc-fd: found 1 time");
+    expect(out).toContain("STALE t2-openconfined-proc-fd: found 0 times");
   });
   it("the Linux-only /proc/self/fd control is marked linux (it still runs on CI's weekly ubuntu run)", () => {
     expect(CONTROLS.find(c => c.id === "t2-openconfined-proc-fd")?.platform).toBe("linux");
