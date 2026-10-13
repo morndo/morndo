@@ -1,6 +1,7 @@
 // The upload inbox on a temporary directory: what is saved, where, how, and what a photo or a recording loses on
 // the way.
-import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -91,12 +92,11 @@ describe("metadata a recording carries", () => {
     Buffer.concat([Buffer.from([0x12, 0x54, 0xc3, 0x67, 0x87]), Buffer.from("at home", "latin1")]),
   ]);
 
-  it("m4a: the udta and meta boxes go — a recorder's location and title — and the audio's own boxes stay", () => {
-    const out = stripMetadata(m4aMemo(), "mp4");
-    const latin = Buffer.from(out).toString("latin1");
-    expect(latin).not.toMatch(/xyz|©nam|udta|memo at home/);
-    expect(latin).toMatch(/ftyp|moov|mvhd|mdat|the audio itself/);
-    expect(audioDurationMs({ head: out, size: out.length })).not.toBeNull();   // still a container the hub reads
+  it("mp4, ogg and webm that are not a real container stay byte for byte", () => {
+    // ffmpeg cannot remux these hand-built boxes, and a hand edit of their sizes would corrupt a real file.
+    for (const [bytes, mime] of [[m4aMemo(), "mp4"], [opusMemo(), "ogg"], [webmMemo(), "webm"]] as const) {
+      expect(Buffer.compare(Buffer.from(stripMetadata(bytes, mime)), bytes)).toBe(0);
+    }
   });
   it("mp3: the ID3v2 tag and the ID3v1 tail go; the frames stay", () => {
     const out = stripMetadata(mp3Memo(), "mp3");
@@ -105,55 +105,77 @@ describe("metadata a recording carries", () => {
     expect(out[0]).toBe(0xff);
     expect(out.length).toBe(504);
   });
-  it("wav: LIST INFO chunks go, the walk stays word-aligned and the data chunk keeps its duration", () => {
+  it("wav: LIST INFO chunks go, the RIFF size matches the shorter file, and the data chunk keeps its duration", () => {
     const out = stripMetadata(wavMemo(), "wav");
     const latin = Buffer.from(out).toString("latin1");
     expect(latin).not.toMatch(/LIST|ICMT|at home/);
     expect(latin).toMatch(/fmt |data/);
+    expect(Buffer.from(out).readUInt32LE(4)).toBe(out.length - 8);
     expect(audioDurationMs({ head: out, size: out.length })).toBe(1000);
   });
-  it("ogg: a comment header page is blanked in place, framing and checksum intact, the audio pages untouched", () => {
-    // Ogg's CRC (RFC 3533 §5): the poly of CRC-32/MPEG-2 but with the register starting at 0, not 0xFFFFFFFF —
-    // so the check value for the nine digits is 0x89a1897f, not the catalog's 0x0376e6e7.
-    const table: number[] = [];
-    for (let n = 0; n < 256; n++) { let c = n << 24; for (let k = 0; k < 8; k++) c = c & 0x80000000 ? (c << 1) ^ 0x04c11db7 : c << 1; table[n] = c >>> 0; }
-    const crc32mpeg = (b: Uint8Array, at: number, end: number) => { let c = 0; for (let i = at; i < end; i++) c = (((c << 8) >>> 0) ^ table[((c >>> 24) ^ b[i]!) & 0xff]!) >>> 0; return c; };
-    expect(crc32mpeg(Buffer.from("123456789"), 0, 9)).toBe(0x89a1897f);
-    const out = stripMetadata(opusMemo(), "ogg");
-    const latin = Buffer.from(out).toString("latin1");
-    expect(latin).not.toMatch(/libtests|where=home/);         // the vendor string and the comments go
-    expect(latin).toMatch(/OpusHead/);
-    expect(latin).toMatch(/OpusTags/);                        // the magic that names the header stays, as OpusHead's does
-    expect(audioDurationMs({ head: out, size: out.length })).toBe(5000);      // the last page's granule survives
-    for (let i = 0; i + 28 <= out.length;) {                                   // every page still checksums
-      if (Buffer.from(out.subarray(i, i + 4)).toString("latin1") !== "OggS") throw new Error("page walk lost the framing");
-      const nseg = out[i + 26]!;
-      let len = 27 + nseg;
-      for (let s = 0; s < nseg; s++) len += out[i + 27 + s]!;
-      const page = Buffer.from(out.subarray(i, i + len));
-      const stored = page.readUInt32LE(22);
-      page.writeUInt32LE(0, 22);
-      expect(crc32mpeg(page, 0, len)).toBe(stored);
-      i += len;
-    }
+  it("mp3: a tag that does not leave a frame sync stays unchanged", () => {
+    const junk = Buffer.concat([Buffer.from("ID3"), Buffer.from([4, 0, 0, 0, 0, 0, 4]), Buffer.from("junk")]);
+    expect(Buffer.compare(Buffer.from(stripMetadata(junk, "mp3")), junk)).toBe(0);
   });
-  it("webm: Tags elements go; the Info the duration reader needs stays", () => {
-    const out = stripMetadata(webmMemo(), "webm");
-    expect(Buffer.from(out).toString("latin1")).not.toMatch(/at home/);
-    expect(audioDurationMs({ head: out, size: out.length })).toBe(7500);
-  });
-
-  it("the inbox stores an audio upload without its recorder metadata", () => {
+  it("the inbox stores a wav without its LIST chunk and with a RIFF size that matches", () => {
     const inbox = uploadInbox({ dir });
     const cap = { present: true as const, maxSeconds: 600 };
-    const r = inbox.save(m4aMemo(), endpointId("ep1"), "memo.m4a", cap);
+    const r = inbox.save(wavMemo(), endpointId("ep1"), "memo.wav", cap);
     if (!r.ok) throw new Error(r.error);
     const stored = readFileSync(r.value.path);
-    expect(stored.includes(Buffer.from("©xyz", "latin1"))).toBe(false);
-    expect(stored.includes(Buffer.from("the audio itself", "latin1"))).toBe(true);
-    expect(r.value.mime).toBe("audio/mp4");
+    expect(stored.includes(Buffer.from("at home", "latin1"))).toBe(false);
+    expect(stored.includes(Buffer.from("data", "latin1"))).toBe(true);
+    expect(stored.readUInt32LE(4)).toBe(stored.length - 8);
+    expect(r.value.mime).toBe("audio/wav");
     expect(r.value.size).toBe(stored.length);
   });
+});
+
+const ffmpegOk = spawnSync("ffmpeg", ["-version"], { encoding: "utf8" }).status === 0;
+
+function generatedAudio(ext: string, codec: string[]): Buffer {
+  const folder = mkdtempSync(join(tmpdir(), "morndo-gen-"));
+  try {
+    const file = join(folder, `tone.${ext}`);
+    const run = spawnSync("ffmpeg", [
+      "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.3",
+      ...codec, "-metadata", "title=memo at home", file,
+    ], { encoding: "utf8" });
+    if (run.status !== 0) throw new Error(run.stderr || "ffmpeg could not write a sample");
+    return readFileSync(file);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+function decodes(bytes: Uint8Array, ext: string): boolean {
+  const folder = mkdtempSync(join(tmpdir(), "morndo-dec-"));
+  try {
+    const file = join(folder, `tone.${ext}`);
+    writeFileSync(file, bytes);
+    return spawnSync("ffmpeg", ["-v", "error", "-i", file, "-f", "null", "-"], { encoding: "utf8" }).status === 0;
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
+describe.skipIf(!ffmpegOk)("a stripped recording still decodes", () => {
+  const samples = [
+    ["m4a", "mp4", ["-c:a", "aac", "-movflags", "+faststart"]],
+    ["ogg", "ogg", ["-c:a", "libvorbis"]],
+    ["webm", "webm", ["-c:a", "libopus"]],
+    ["wav", "wav", ["-c:a", "pcm_s16le"]],
+    ["mp3", "mp3", ["-c:a", "libmp3lame", "-write_id3v1", "1"]],
+  ] as const;
+  for (const [ext, mime, codec] of samples) {
+    it(`${ext}: the title is gone and ffmpeg decodes the stored bytes`, () => {
+      const raw = generatedAudio(ext, [...codec]);
+      expect(raw.includes("memo at home")).toBe(true);
+      const out = Buffer.from(stripMetadata(raw, mime));
+      expect(out.includes("memo at home")).toBe(false);
+      expect(decodes(out, ext)).toBe(true);
+    });
+  }
 });
 
 describe("the inbox", () => {
