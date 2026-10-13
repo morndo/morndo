@@ -84,6 +84,7 @@ const item = (id: string, over: Partial<DecisionItem>): DecisionItem => ({
   inbox: null,
   brief: spendBrief(),
   briefVersion: 1,
+  draftedBy: null,
   ...over,
 });
 

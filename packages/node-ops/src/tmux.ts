@@ -65,27 +65,104 @@ export function menuIdentity(screen: string): string | null {
 // The text typed after "❯", from a capture with colors (capture-pane -e). After a turn Claude Code shows a suggested
 // next prompt as dim ghost text (SGR 2; "Prompt suggestions", promptSuggestionEnabled, default on), which plain text
 // can't tell from a draft. Only text that isn't dim counts. Plain captures (no escapes) still work.
+//
+// 38/48/58 take colour arguments (indexed 5;n or direct 2;r;g;b). Those numbers are not the dim/reverse flags, even
+// when a component is 2, 7, 22 or 27. xterm ctlseqs (ISO-8613-6; semicolon form from konsole) and kitty's underline
+// colour, which uses the same shape as 38 and 48. Colon-form parameters (ECMA-48, `4:3` for a curly underline) and
+// OSC 8 hyperlinks are the same kind of styling: tmux 3.4 `capture-pane -e` emits both, and neither is typed text.
+function applySgr(params: string, style: { dim: boolean; rev: boolean }) {
+  const codes = (params === "" ? "0" : params).split(";");
+  let i = 0;
+  while (i < codes.length) {
+    const code = codes[i] ?? "";
+    if (code === "38" || code === "48" || code === "58") {
+      const mode = codes[i + 1];
+      // Indexed and direct colour have a fixed shape. Any other selector (empty, or 3 and above) introduces
+      // a run of components; those numbers are not dim or reverse.
+      if (mode === "5") { i += 3; continue; }
+      if (mode === "2") { i += 5; continue; }
+      return;
+    }
+    if (code === "0" || code === "") { style.dim = false; style.rev = false; }
+    else if (code === "7") style.rev = true;
+    else if (code === "27") style.rev = false;
+    else if (code === "2") style.dim = true;
+    else if (code === "22") style.dim = false;
+    i++;
+  }
+}
+
+// CSI ends at its final byte (0x40-0x7e). A final `m` is SGR; anything else is skipped. OSC ends at BEL or ST.
+function takeCsi(text: string, i: number, style: { dim: boolean; rev: boolean }): number {
+  const start = i;
+  while (i < text.length) {
+    const d = text.charCodeAt(i);
+    if (d >= 0x40 && d <= 0x7e) {
+      if (d === 0x6d) applySgr(text.slice(start, i), style);
+      return i + 1;
+    }
+    i++;
+  }
+  return text.length;
+}
+function takeOsc(text: string, i: number): number {
+  while (i < text.length) {
+    const d = text.charCodeAt(i);
+    if (d === 0x07 || d === 0x9c) return i + 1;
+    if (d === 0x1b && text.charCodeAt(i + 1) === 0x5c) return i + 2;
+    i++;
+  }
+  return text.length;
+}
+
 export function draftOnScreen(screen: string): string | null {
   const line = screen.split("\n").slice(-12).reverse().find(l => /^[\s│]*❯/.test(l.replace(SGR, "")));
   if (!line) return null;
   const after = line.slice(line.indexOf("❯") + 1);
-  let dim = false, typed = "";
-  for (const m of after.matchAll(/\x1b\[([0-9;]*)m|([^\x1b]+)/g)) {
-    if (m[1] !== undefined) {
-      for (const code of (m[1] || "0").split(";")) {
-        if (code === "0" || code === "") dim = false;
-        else if (code === "2") dim = true;
-        else if (code === "22") dim = false;
-      }
-    } else if (!dim) {
-      typed += m[2];
-    }
+  // Claude Code draws the cursor as reverse video on one cell. On a dim placeholder or suggestion that cell is the
+  // first character and is not itself dim, so it would look typed. A one-character reverse run takes the dim state
+  // of the text after it (nothing after it counts as typed: a one-character draft, or the cursor at the end). A
+  // longer reverse run is the text itself — a selection or a pasted chip — and is kept.
+  const style = { dim: false, rev: false };
+  const runs: { text: string; dim: boolean; rev: boolean }[] = [];
+  let buf = "";
+  const flush = () => { if (buf) runs.push({ text: buf, dim: style.dim, rev: style.rev }); buf = ""; };
+  for (let i = 0; i < after.length;) {
+    const c = after.charCodeAt(i);
+    if (c !== 0x1b && c !== 0x9b && c !== 0x9d) { buf += after[i]; i++; continue; }
+    flush();
+    if (c === 0x9b) { i = takeCsi(after, i + 1, style); continue; }
+    if (c === 0x9d) { i = takeOsc(after, i + 1); continue; }
+    const next = after.charCodeAt(i + 1);
+    if (next === 0x5b) i = takeCsi(after, i + 2, style);
+    else if (next === 0x5d) i = takeOsc(after, i + 2);
+    else i += next >= 0x40 && next <= 0x5f ? 2 : 1;
+  }
+  flush();
+  let typed = "";
+  for (let i = 0; i < runs.length; i++) {
+    const run = runs[i];
+    if (!run || run.dim) continue;
+    if (run.rev && Array.from(run.text).length === 1 && runs[i + 1]?.dim) continue;
+    typed += run.text;
   }
   const draft = typed.replace(/\s*│\s*$/, "").trim();
   // 'Try "…"' is the empty box's placeholder. Claude Code draws it dim, so with colors the dim check has already left it
   // out, and a typed 'Try "…"' is a real draft. Only a plain capture needs the wording rule.
   const colored = screen.includes("\x1b[");
   return draft && (colored || !/^Try "/.test(draft)) ? draft : null;
+}
+
+// The draft keeps the reverse-video cursor cell, so a box that differs by one character is not this paste. The first
+// 20 code points are the whole short paste, or the start of a longer one. Leading space is ignored on both sides:
+// draftOnScreen trims the box.
+function draftStillWaiting(sent: string, draft: string): boolean {
+  // A long paste is folded into one chip. The chip is the paste, still in the box.
+  if (/^\[Pasted text #\d+ \+\d+ lines\]$/.test(draft)) return true;
+  const sentPoints = Array.from(sent.trim());
+  const head = sentPoints.slice(0, 20);
+  const shown = Array.from(draft).slice(0, 20);
+  return shown.length === head.length && shown.every((c, i) => c === head[i]);
 }
 
 export function tmuxAdapter(opts: { socket: string | null; session: string | null; historyLines?: number }): Tmux {
@@ -143,7 +220,7 @@ export function tmuxAdapter(opts: { socket: string | null; session: string | nul
       await new Promise(r => setTimeout(r, 400));
       const after = await styled(id);
       const draft = after ? draftOnScreen(after) : null;
-      return draft && clean.startsWith(draft.slice(0, 20)) ? "not_submitted" : null;
+      return draft && draftStillWaiting(clean, draft) ? "not_submitted" : null;
     },
     async capture(id) {
       if (!/^%\d+$/.test(id)) return null;

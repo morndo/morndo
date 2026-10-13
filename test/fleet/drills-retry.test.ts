@@ -222,7 +222,7 @@ describe("retry drills through the hub, the fleet and an agent", () => {
     const before = await storeOf(o);
     let fresh: Lane | null = null;
     await o.agent.putBackDatabase(copy, { ...hooks, dropAfterStarted: rid }, async () => {
-      o.tmux.kill();                                                                  // the machine went down: tmux with it
+      await o.tmux.kill();                                                            // the machine went down: tmux with it
       fresh = await fakeLane(o.tmux, { window: "box", prose: "box after the power loss" });
     });
     const retried = await o.fleet.client.op({ node: "n1" }, "pane.send", send, { key });
@@ -261,7 +261,7 @@ describe("retry drills through the hub, the fleet and an agent", () => {
     await o.agent.stop("SIGKILL");                                                  // the machine dies
     let fresh: Lane | null = null;
     const comeBack = async () => {                                                  // tmux went down with it; the lanes start again
-      o.tmux.kill();
+      await o.tmux.kill();
       fresh = await fakeLane(o.tmux, { window: "manager", prose: "manager after the power loss" });
       await fakeLane(o.tmux, { window: "box", prose: "box after the power loss" });
     };

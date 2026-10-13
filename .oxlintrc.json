@@ -30,6 +30,7 @@
         "packages/node-ops/src/tmux.ts",
         "packages/domain/src/board.ts",
         "packages/domain/src/brief.ts",
+        "packages/protocol/src/releases.ts",
         "packages/node-ops/test/tmux*.ts",
         "apps/hub/src/adapters/manager-protocol.ts",
         "apps/hub/test/steering.test.ts",

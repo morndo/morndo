@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { lintBrief } from "@morndo/domain";
-import { BRIEF_TEMPLATE, parseBriefMarkdown } from "../../hub/src/adapters/brief-template.ts";
+import { BRIEF_TEMPLATE, parseBriefMarkdown } from "@morndo/protocol";
 import { run } from "../src/decide.ts";
 import { DECIDE_MANAGER_PROMPT, DECIDE_WORKER_PROMPT } from "../src/prompt.ts";
 

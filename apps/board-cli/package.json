@@ -11,6 +11,8 @@
     "morndo-decide": "./src/decide-main.ts"
   },
   "dependencies": {
-    "@morndo/domain": "0.0.0"
+    "@morndo/domain": "0.0.0",
+    "@morndo/protocol": "0.0.0",
+    "@morndo/service-kit": "0.0.0"
   }
 }

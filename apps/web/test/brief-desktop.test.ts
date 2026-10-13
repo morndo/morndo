@@ -1,5 +1,5 @@
 // Desktop decision briefs (ADR-0023 §6): the compact card, the brief modal, and the markdown subset.
-// The real DecisionsPanel, compiled by Vite, in headless Chromium. Synthetic data only.
+// The real DecisionsPanel and one card on its own, compiled by Vite, in headless Chromium. Synthetic data only.
 import type { Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DecisionBrief } from "@morndo/domain";
@@ -76,10 +76,15 @@ const item = (id: string, over: Partial<DecisionItem>): DecisionItem => ({
   inbox: null,
   brief: brief(),
   briefVersion: 1,
+  draftedBy: null,
   ...over,
 });
 
 const spend = item("d-1", {});
+const answered = item("d-2", {
+  status: "answered",
+  decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW - 5 * 60_000, via: "here", endpointId: null, sessionId: null },
+});
 const plain = item("ny-400", {
   brief: null,
   briefVersion: 0,
@@ -129,13 +134,17 @@ const SAMPLE = [
 const TAGS = ["p", "br", "strong", "em", "del", "code", "pre", "ul", "ol", "li", "blockquote", "a", "table", "thead", "tbody", "tr", "th", "td"];
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
-<div class="desk-tokens" style="height:720px;display:flex"><div id="panel" style="width:440px;display:flex;flex-direction:column"></div></div>
+<div class="desk-tokens" style="height:720px;display:flex">
+  <div id="panel" style="width:440px;display:flex;flex-direction:column"></div>
+  <div id="alone" style="width:440px"></div>
+</div>
 <script type="module">
   import "@morndo/brand/tokens.css";
   import "/src/lib/desktop/desk-tokens.css";
   import { mount } from "svelte";
   import { renderBriefMarkdown, BRIEF_MARKDOWN_TAGS } from "/src/lib/markdown.ts";
   import DecisionsPanel from "/src/lib/desktop/DecisionsPanel.svelte";
+  import DecisionCard from "/src/lib/desktop/DecisionCard.svelte";
   window.__html = renderBriefMarkdown(${JSON.stringify(SAMPLE)});
   window.__tags = BRIEF_MARKDOWN_TAGS;
   mount(DecisionsPanel, { target: document.getElementById("panel"), props: {
@@ -146,6 +155,14 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
     onAnswer: async () => null,
     onOpenScreen() {},
     onOpenChat() {},
+  } });
+  mount(DecisionCard, { target: document.getElementById("alone"), props: {
+    item: ${JSON.stringify(answered)},
+    variant: "panel",
+    now: ${NOW},
+    verifiedFresh: true,
+    onAnswer: async () => null,
+    onOpenScreen() {},
   } });
   window.__ready = true;
 </script></body></html>`;
@@ -207,5 +224,21 @@ describe("desktop decision briefs", () => {
     const plainDialog = tab.getByRole("dialog", { name: "Pick the weekday for the newsletter" });
     await plainDialog.getByRole("button", { name: "Ask for a brief" }).waitFor();
     await tab.keyboard.press("Escape");
+  }, 60_000);
+
+  it("renders a card that holds its own session, over an answered item, without looping Svelte's updates", async () => {
+    // The gallery mounts cards with no session, so the card binds the item in its own effect. With plain data whose
+    // decision is an object, that bind must settle: an effect that keeps rewriting state it reads is the loop Svelte
+    // cuts off with "Maximum update depth exceeded" (its dev message names where each source was "updated at").
+    const page = await (await web.browser.newContext()).newPage();
+    const problems: string[] = [];
+    page.on("console", m => { if (m.type() === "error") problems.push(m.text()); });
+    page.on("pageerror", e => problems.push(e.message));
+    await page.goto(web.url);
+    await page.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    await page.locator('[data-decision="d-2"]').getByText("You chose").waitFor();
+    await page.waitForFunction(() => new Promise(r => requestAnimationFrame(() => r(true))));
+    expect(problems).toEqual([]);
+    await page.close();
   }, 60_000);
 });

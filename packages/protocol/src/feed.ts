@@ -168,6 +168,8 @@ export const DecisionItemSchema = z.object({
   // ask), or a brief this app can't read: none and zero — never a half brief, the card falls back to the plain fields.
   brief: orElse(z.nullable(DecisionBriefSchema), null),
   briefVersion: orElse(z.number(), 0),
+  // Who drafted a forwarded brief. A hub that doesn't say, or a plain ask: null.
+  draftedBy: orElse(z.nullable(text()), null),
 });
 export const LedgerStateSchema = z.object({ configured: z.boolean(), ok: z.boolean(), at: z.nullable(z.number()) });
 
@@ -262,7 +264,7 @@ export const ClientFeedFrames = {
 export type ServerFeedFrame = { [K in keyof typeof ServerFeedFrames]: z.output<(typeof ServerFeedFrames)[K]> }[keyof typeof ServerFeedFrames];
 export type ClientFeedFrame = { [K in keyof typeof ClientFeedFrames]: z.output<(typeof ClientFeedFrames)[K]> }[keyof typeof ClientFeedFrames];
 export type InboxWait = { status: string; reason: string | null };
-export type DecisionItem = Escalation & { answerable: AnswerRefusal | null; version: string; inbox: InboxWait | null; notice?: string | null; brief: DecisionBrief | null; briefVersion: number };
+export type DecisionItem = Escalation & { answerable: AnswerRefusal | null; version: string; inbox: InboxWait | null; notice?: string | null; brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null };
 export type LedgerState = z.output<typeof LedgerStateSchema>;
 export type SessionInfoWire = z.output<typeof SessionInfoSchema>;
 export type CatchUpConversationWire = z.output<typeof CatchUpConversationSchema>;

@@ -3,7 +3,7 @@
 // takes the arguments, the environment, a fetch, a file reader and a way to learn this lane's name.
 // Exit codes, as morndo-board: 0 done, 1 the hub (or the lint) refused, 2 usage, 3 the hub can't be reached.
 import { lintBrief, briefMarkdown, type BriefProblem, type DecisionBrief } from "@morndo/domain";
-import { BRIEF_TEMPLATE, parseBriefMarkdown } from "../../hub/src/adapters/brief-template.ts";
+import { BRIEF_TEMPLATE, parseBriefMarkdown } from "@morndo/protocol";
 import { parseArgs } from "./cli.ts";
 import { decidePromptFor } from "./prompt.ts";
 
@@ -14,6 +14,7 @@ export type Io = {
   out: (line: string) => void;
   err: (line: string) => void;
   now?: () => number;
+  timeZone?: string;
 };
 export type Env = { MORNDO_HUB?: string | undefined; MORNDO_AGENT_TOKEN?: string | undefined; MORNDO_LANE?: string | undefined };
 
@@ -40,7 +41,8 @@ function explain(error: string): string {
   switch (error) {
     case "not_allowed": return "only the manager may do that";
     case "unknown": return "no such request";
-    case "bad_ref": return "ref must be a list id like ny-400";
+    case "due_past": return "the due date has passed; restate it before forwarding";
+    case "no_ledger": return "this hub has no list, so a ref cannot be answered";
     case "ref_taken": return "that ref is already a request";
     case "too_many_open": return "20 open requests already; settle or withdraw one first";
     case "not_open": return "that request is not open";
@@ -57,6 +59,7 @@ function explain(error: string): string {
 }
 
 const problemLine = (p: BriefProblem) => `${p.level} ${p.code} (${p.where}): ${p.text}`;
+const asText = (v: unknown) => typeof v === "string" || typeof v === "number" ? String(v) : "";
 
 class Usage extends Error {}
 class Refused extends Error { constructor(message: string) { super(message); this.name = "Refused"; } }
@@ -97,7 +100,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       const path = rest[0];
       if (!path) throw new Usage("usage: morndo-decide lint <file.md|->");
       const raw = await io.read(path);
-      const parsed = flags.json === true ? { draft: JSON.parse(raw) as unknown, problems: [] as BriefProblem[] } : parseBriefMarkdown(raw);
+      const parsed = flags.json === true ? { draft: JSON.parse(raw) as unknown, problems: [] as BriefProblem[] } : parseBriefMarkdown(raw, io.timeZone ?? "UTC");
       const lint = lintBrief(parsed.draft, (io.now ?? Date.now)());
       const errors = [...parsed.problems.filter(p => p.level === "error"), ...lint.problems.filter(p => p.level === "error")];
       const warnings = errors.length ? [] : lint.problems.filter(p => p.level === "warning");
@@ -165,7 +168,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const { status, data } = await call("POST", "/api/agent/decisions", body);
         if (status === 422 || !status.toString().startsWith("2")) refused(data);
         warn(data);
-        io.out(String(data.id));
+        io.out(asText(data.id));
         return 0;
       }
       case "restate": {
@@ -174,7 +177,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const { status, data } = await call("PUT", `/api/agent/decisions/${id}`, body);
         if (status === 422 || !status.toString().startsWith("2")) refused(data);
         warn(data);
-        io.out(`${data.id}  v${data.version}`);
+        io.out(`${asText(data.id)}  v${asText(data.version)}`);
         return 0;
       }
       case "show": {

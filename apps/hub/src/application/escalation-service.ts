@@ -135,6 +135,7 @@ export class EscalationService {
   // Briefs filed through the hub (ADR-0023). Read at the start of each poll; the service does not store them.
   #briefs: (() => BriefSighting[]) | null;
   #briefOf = new Map<string, BriefSighting>();
+  #paneTaps = new Map<string, { key: string; label: string; at: number }>();
 
   constructor(p: {
     watch: Watch; ledger: (() => LedgerRead) | null; store: Store; managerName: string;
@@ -476,6 +477,7 @@ export class EscalationService {
         if (t && !echoes.has(m.id)) taps.set(t.id, { key: t.key, label: t.label, at: m.at });   // not a withdrawn answer's echo (B1)
       }
     }
+    this.#paneTaps = taps;
     const items = new Map<string, LedgerItem>((ledger?.ok ? ledger.items : []).map(i => [i.id, i]));
     if (ledger?.ok) this.#filed = items;
     const ids = new Set<string>(buttons.keys());
@@ -558,7 +560,7 @@ export class EscalationService {
       out.push({
         ask: shown,
         source: b.closed ? { kind: "settled", resolution: b.closed.resolution, at: b.closed.at } : { kind: "open" },
-        answered: null,
+        answered: this.#paneTaps.get(b.id) ?? null,
       });
     }
     return out;

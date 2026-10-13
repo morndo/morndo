@@ -4,7 +4,7 @@
 import type Database from "better-sqlite3";
 import { dirname } from "node:path";
 import { LIMITS, NODE_NAME, formatJoinString } from "@morndo/protocol";
-import { NotLocalDisk, assertLocalDisk } from "@morndo/service-kit";
+import { NotLocalDisk, assertLocalDisk, productVersion } from "@morndo/service-kit";
 import { ConfigError, loadConfig, type FleetConfig } from "./config.ts";
 import { DatabaseUnreadable, openFleetDb } from "./adapters/db.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
@@ -61,6 +61,10 @@ function fleetKey(path: string): FleetKey {
 }
 
 const [cmd, sub, ...args] = process.argv.slice(2);
+if (cmd === "--version") {
+  print(productVersion());
+  process.exit(0);
+}
 
 if (cmd === "serve") {
   exitOnCrash(log);
@@ -70,7 +74,7 @@ if (cmd === "serve") {
     if (e instanceof KeyFileUnsafe || e instanceof DatabaseUnreadable || e instanceof NotLocalDisk || e instanceof SocketDirUnsafe || e instanceof SocketInUse) return fail(e.message, EXIT_CONFIG);
     throw e;
   });
-  log.info(`morndo-fleet: agents on ws://${cfg.listen.host}:${fleet.agentPort}/agent`);
+  log.info(`morndo-fleet ${productVersion()}: agents on ws://${cfg.listen.host}:${fleet.agentPort}/agent`);
   const stop = async () => { await fleet.close(); process.exit(0); };
   process.on("SIGINT", () => void stop());
   process.on("SIGTERM", () => void stop());

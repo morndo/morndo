@@ -50,14 +50,14 @@ export function fleetUrlOk(url: string): boolean {
 export type Expect = { server: string; window: string; sessionId?: string };
 export type ErrorCode = "bad_args" | "unknown_op" | "denied" | "no_pane" | "menu_open" | "no_input_box"
   | "draft_present" | "busy" | "name_taken" | "lane_conflict" | "too_large" | "timeout" | "node_offline" | "uncertain" | "internal"
-  | "not_allowed";
+  | "updating" | "not_allowed";
 export type Executed = "no" | "maybe";
 // Whether the side effect may have happened (§5.3): "no" is safe to retry. Only an answer that may have come after the
 // side effect started is "maybe".
 export const ERROR_EXECUTED: Record<ErrorCode, Executed> = {
   bad_args: "no", unknown_op: "no", denied: "no", no_pane: "no", menu_open: "no", no_input_box: "no", draft_present: "no",
   busy: "no", name_taken: "no", lane_conflict: "no", too_large: "no", timeout: "no", node_offline: "no", uncertain: "maybe", internal: "maybe",
-  not_allowed: "no",
+  updating: "no", not_allowed: "no",
 };
 export type OpError = { code: ErrorCode; executed: Executed; message: string };
 
@@ -168,7 +168,8 @@ const base64Chunk = () => z.base64().check(z.maxLength(4 * Math.ceil(LIMITS.chun
 const nonce = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{22,86}$/));
 // An Ed25519 signature (64 bytes) and an Ed25519 public key as SPKI DER (44 bytes), base64 (Node's `sign(null, …)`,
 // `export({ format: "der", type: "spki" })`; https://nodejs.org/docs/latest-v24.x/api/crypto.html, read 2026-10-06).
-const signature = () => z.string().check(z.regex(/^[A-Za-z0-9+/]{86}==$/));
+export const ED25519_SIGNATURE = /^[A-Za-z0-9+/]{86}==$/;
+const signature = () => z.string().check(z.regex(ED25519_SIGNATURE));
 const ed25519Spki = () => z.string().check(z.regex(/^MCowBQYDK2VwAyEA[A-Za-z0-9+/]{43}=$/));
 const joinCode = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{22}$/));   // 128 bits, base64url
 // An idempotency key, namespaced by its client ("hub:…", "kira:…", "lanes:…").

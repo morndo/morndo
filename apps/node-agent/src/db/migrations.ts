@@ -1,7 +1,8 @@
 // Numbered schema migrations for the agent's database, in the hub's pattern (apps/hub/src/adapters/migrations.ts,
 // ADR-0008 A1): the schema version is SQLite's user_version; every pending migration runs in one IMMEDIATE transaction
-// that ends by setting the version, so a failure leaves the database as it was; a database written by a newer agent
-// is refused rather than guessed at.
+// that ends by setting the version and the schema floor, so a failure leaves the database as it was; a database
+// written by a newer agent is refused rather than guessed at, unless the floor (ADR-0019 §11.1) says every migration
+// up to its version was additive — then it opens as it is.
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
@@ -23,6 +24,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     name: "the agent's schema: meta (streamId), done keys, the hook stream, relay file copies (fleet-core spec §5.3–5.5, §6)",
+    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -45,6 +47,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 2,
     name: "store_seq: how many keyed ops this database has started, never lowered (fleet core §5.3; final review I2, the store sequence)",
+    compat: "additive",
     // One row. It goes up by one in the transaction that commits each keyed op's `started` (done-keys.ts), and every
     // answer carries it, so a caller that saw a higher number from this store can tell a database put back from an older
     // copy in place (cp over the file, a VM snapshot), which keeps the file's identity and the stream id.
@@ -56,6 +59,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 3,
     name: "jobs: one row per background job, hashes only, no command (ADR-0017)",
+    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE jobs (
@@ -88,6 +92,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 4,
     name: "job notices: one lane.deliver per notice id (ADR-0017)",
+    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE job_deliveries (
@@ -102,6 +107,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 5,
     name: "job token cache: the lane and the hash only, for 24 hours (ADR-0017 decision 7)",
+    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE token_cache (
@@ -115,6 +121,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 6,
     name: "a job keeps the notice text it showed, so a later notice change still has it",
+    compat: "additive",
     up: db => { db.exec("ALTER TABLE jobs ADD COLUMN notice_text TEXT"); },
   },
 ];

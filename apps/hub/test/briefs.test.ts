@@ -11,7 +11,8 @@ import { parseBriefMarkdown } from "../src/adapters/brief-template.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
 import { EscalationService, type Watch } from "../src/application/escalation-service.ts";
 import { ORIGIN, startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
-import type { WebSocket } from "ws";
+import { frameText } from "./http-crash-fixture.ts";
+import type { RawData, WebSocket } from "ws";
 
 const NOW = new Date(2026, 9, 1, 12).getTime();
 const doc = readFileSync(new URL("../../../docs/agents/decision-requests.md", import.meta.url), "utf8");
@@ -57,8 +58,8 @@ const agent = (token: string, lane?: string) => ({
 function frames(ws: WebSocket) {
   const seen: Record<string, unknown>[] = [];
   const waiters: { t: string; resolve: (m: Record<string, unknown>) => void }[] = [];
-  ws.on("message", d => {
-    const m = JSON.parse(String(d)) as Record<string, unknown>;
+  ws.on("message", (d: RawData) => {
+    const m = JSON.parse(frameText(d)) as Record<string, unknown>;
     seen.push(m);
     const i = waiters.findIndex(w => w.t === m.t);
     if (i !== -1) { waiters[i]?.resolve(m); waiters.splice(i, 1); }

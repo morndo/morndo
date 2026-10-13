@@ -43,7 +43,7 @@ function item(version: string, label: string, status: DecisionItem["status"] = "
     options: [{ key: "b", label, detail: null }],
     answerBy: "tap", recommendation: null, ifNoAnswer: null, deadline: null, blocking: false, project: null,
     askedAt: 0, messageId: null, tracking: "hub", status, source: "open", decision: null, resolution: null,
-    settledAt: null, askedAgain: false, answerable: null, version, inbox: null, brief: null, briefVersion: version === "v1" ? 1 : 2,
+    settledAt: null, askedAgain: false, answerable: null, version, inbox: null, brief: null, briefVersion: version === "v1" ? 1 : 2, draftedBy: null,
   };
 }
 
