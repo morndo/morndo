@@ -549,7 +549,7 @@ export function startHttp(p: {
       if (!r.ok) return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
       return json(res, 200, { id: r.value.id, name: r.value.path.split("/").pop(), size: r.value.size, mime: r.value.mime });
     }
-    if (path === "/api/escalations" && method === "GET") return json(res, 200, escalations.board());
+    if (path === "/api/escalations" && method === "GET") return json(res, 200, escalations.seenBy(a.endpoint.id));
     const answer = /^\/api\/escalations\/([A-Za-z0-9_-]{1,80})\/answer$/.exec(path);
     if (answer && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
@@ -725,7 +725,9 @@ export function startHttp(p: {
         fleet: status => send({ t: "fleet", available: status === "ok" }),
         watching: () => conn.watching,
       });
-      const unsubscribeBoard = escalations.subscribe(board => send({ t: "decisions", ...board }));
+      // Each connection hears where every Decision stands for its own endpoint: "here" only for the device whose
+      // request accepted it (seenBy), never the hub-level record.
+      const unsubscribeBoard = escalations.subscribe(board => send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id, board) }));
       const unsubscribeTasks = p.board?.service.subscribe(b => send({ t: "board", ...b })) ?? (() => false);
       const unsubscribeUsage = p.usage?.subscribe(v => send({ t: "usage", ...v })) ?? (() => false);
       const unsubscribeJobs = p.jobs?.subscribe(v => send({ t: "jobs", ...v })) ?? (() => false);
@@ -764,7 +766,7 @@ export function startHttp(p: {
             if (r.kind === "events") send({ t: "events", events: r.events, caughtUp: true });
             else send({ t: "snapshot", ...observation.snapshot() });
             send({ t: "fleet", available: observation.fleet() === "ok" });   // a resumed feed may have missed a change
-            send({ t: "decisions", ...escalations.board() });
+            send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id) });
             if (p.board) send({ t: "board", ...p.board.service.view() });   // ADR-0015: whole, after every hello
             if (p.usage) send({ t: "usage", ...p.usage.view() });           // ADR-0016: every account, after every hello
             if (p.jobs) send({ t: "jobs", ...p.jobs.view() });               // the fleet mirror, after every hello

@@ -140,8 +140,8 @@ describe("a Decision the record can no longer attribute", () => {
     });
     s.poll();
     expect(s.board().items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");          // the record as kept
-    expect(s.board(endpointId("ep1")).items.find(i => i.id === "ny-7")?.decision?.via).toBeUndefined();
-    expect(s.board(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBeUndefined();
+    expect(s.seenBy(endpointId("ep1")).items.find(i => i.id === "ny-7")?.decision?.via).toBeUndefined();
+    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBeUndefined();
   });
 
   it("the answer the device itself accepted reads here, in the answer's own reply and on its board", async () => {
@@ -153,7 +153,7 @@ describe("a Decision the record can no longer attribute", () => {
     const r = await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, randomUUID());
     expect(r.ok).toBe(true);
     expect(r.item?.decision?.via).toBe("here");                                              // the endpoint that answered
-    expect(s.board(endpointId("ep1")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
-    expect(s.board(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
+    expect(s.seenBy(endpointId("ep1")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
 });

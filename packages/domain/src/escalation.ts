@@ -69,12 +69,25 @@ export type Delivery = { state: "queued" | "delivered"; at: number | null };
 export type Decision = {
   choice: DecidedChoice;
   at: number;
-  // Absent when the record didn't say, including a via this app doesn't know. That is not "elsewhere".
+  // The hub's own provenance, as recorded: "here" when the hub accepted the answer (endpointId names the client whose
+  // request it was), "elsewhere" when it was only seen at the asker's end. What one client is told is derived from the
+  // record, per client (viaFor); this stored value never reaches the wire as it is.
   via?: "here" | "elsewhere" | undefined;
   endpointId: EndpointId | null;
   sessionId: SessionId | null;
   delivery?: Delivery | undefined;
 };
+
+// Where a Decision stands for the endpoint reading it — the via the feed and the board send, one value per client:
+// "here" when that endpoint's request accepted it (the record names it), "elsewhere" when another endpoint did, or the
+// answer was only seen at the asker's end (typed there by hand: no client of ours). Absent when the record names no
+// endpoint and wasn't seen elsewhere: the hub took it, but can no longer say for which client. Absent is not
+// "elsewhere", and it never drops the item.
+export function viaFor(d: Decision | null, viewer: EndpointId | null): "here" | "elsewhere" | undefined {
+  if (!d) return undefined;
+  if (d.endpointId !== null) return d.endpointId === viewer ? "here" : "elsewhere";
+  return d.via === "elsewhere" ? "elsewhere" : undefined;
+}
 
 export type EscalationStatus = "open" | "answered" | "settled" | "expired";
 

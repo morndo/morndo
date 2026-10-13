@@ -5,8 +5,8 @@
 // adapters, read through Observation; nothing is decided from them, O4).
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_POLICY, Escalations, answered, askFromBrief, askVersion, escalationId, mayCommand, refusal, sameDecision,
-  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type DecisionBrief, type Escalation, type Message, type Sighting,
+  DEFAULT_POLICY, Escalations, answered, askFromBrief, askVersion, escalationId, mayCommand, refusal, sameDecision, viaFor,
+  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type DecisionBrief, type EndpointId, type Escalation, type Message, type Sighting,
 } from "@morndo/domain";
 import type { BriefSighting } from "./brief-service.ts";
 import { menuEscalationId } from "@morndo/protocol";
@@ -194,6 +194,9 @@ export class EscalationService {
 
   subscribe(fn: (b: Board) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
 
+  // The board as kept, with each Decision's own provenance via: what the hub records and stores, for callers that
+  // count and log rather than show one client (notifications, the brief service). What a client is shown goes through
+  // seenBy.
   board(): Board {
     const now = this.#now();
     const l = this.#lastLedger;
@@ -202,9 +205,17 @@ export class EscalationService {
       ledger: { configured: this.#ledger !== null, ok: l?.ok ?? false, at: l?.at ?? null },
     };
   }
-  #view(id: string): EscalationView | null {
+  // The board as one endpoint sees it: each Decision's via says where it stands for that endpoint, "here" only for the
+  // endpoint whose request accepted it (viaFor). What the feed and GET /api/escalations send. The stored record and
+  // its provenance are untouched; only the copy for this viewer says it.
+  seenBy(viewer: EndpointId, b: Board = this.board()): Board {
+    return { ...b, items: b.items.map(i => (i.decision ? { ...i, decision: { ...i.decision, via: viaFor(i.decision, viewer) } } : i)) };
+  }
+  #view(id: string, viewer?: EndpointId): EscalationView | null {
     const e = this.#x.get(id);
-    return e ? { ...e, answerable: refusal(e, this.#now()), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null, ...this.#briefView(e.id) } : null;
+    if (!e) return null;
+    const view = { ...e, answerable: refusal(e, this.#now()), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null, ...this.#briefView(e.id) };
+    return viewer !== undefined && view.decision ? { ...view, decision: { ...view.decision, via: viaFor(view.decision, viewer) } } : view;
   }
   #briefView(id: string): { brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null } {
     const b = this.#briefOf.get(id);
@@ -627,14 +638,14 @@ export class EscalationService {
   // still uncertain, nothing typed. Without that, an agent database lost between the two would know no key, and the
   // answer would be typed twice.
   async answer(a: Authenticated, id: string, choice: Choice, requestId: string, seen?: string): Promise<AnswerResult> {
-    if (!mayCommand(a.session, this.#now(), this.#policy())) return { ok: false, problem: "step_up", item: this.#view(id) };
-    if (choice.kind === "words" && choice.text.length > MAX_WORDS) return { ok: false, problem: "too_long", item: this.#view(id) };
-    if (choice.kind === "words" && !cleanText(choice.text)) return { ok: false, problem: "empty", item: this.#view(id) };
+    if (!mayCommand(a.session, this.#now(), this.#policy())) return { ok: false, problem: "step_up", item: this.#view(id, a.endpoint.id) };
+    if (choice.kind === "words" && choice.text.length > MAX_WORDS) return { ok: false, problem: "too_long", item: this.#view(id, a.endpoint.id) };
+    if (choice.kind === "words" && !cleanText(choice.text)) return { ok: false, problem: "empty", item: this.#view(id, a.endpoint.id) };
     const now = this.#now();
     for (const [k, t] of this.#seen) if (now - t > REQUEST_TTL_MS) this.#seen.delete(k);
     const key = `${a.session.id}:${requestId}`;
-    if (this.#seen.has(key)) return { ok: true, item: this.#view(id) };
-    if (this.#inFlight.has(id)) return { ok: false, problem: "in_progress", item: this.#view(id) };
+    if (this.#seen.has(key)) return { ok: true, item: this.#view(id, a.endpoint.id) };
+    if (this.#inFlight.has(id)) return { ok: false, problem: "in_progress", item: this.#view(id, a.endpoint.id) };
     this.#inFlight.add(id);
     try {
       // A repeat of this request's answer in doubt first: whatever became of the ask since, it must learn what became of
@@ -647,9 +658,9 @@ export class EscalationService {
       }
       this.poll();                                       // the list may have closed it a moment ago
       const c = this.#x.check(id, choice, this.#now());
-      if (!c.ok) return { ok: false, problem: c.error, item: this.#view(id) };
+      if (!c.ok) return { ok: false, problem: c.error, item: this.#view(id, a.endpoint.id) };
       const e = c.value;
-      if (seen !== undefined && seen !== this.#version(e)) return { ok: false, problem: "changed", item: this.#view(id) };
+      if (seen !== undefined && seen !== this.#version(e)) return { ok: false, problem: "changed", item: this.#view(id, a.endpoint.id) };
       const option = choice.kind === "option" ? e.options.find(o => o.key === choice.key) : undefined;
       const line = option ? tapLine(e.id, option) : wordsLine(e.id, choice.kind === "words" ? choice.text : "");
       const words = choice.kind === "words" ? { length: choice.text.trim().length, digest: digest(choice.text) } : {};
@@ -678,19 +689,19 @@ export class EscalationService {
             const pending = this.#queued.get(queued.key);
             if (pending) this.#giveUp(queued.key, pending);
             log.warn(`answer to ${e.id} not delivered: the same message is already ${st.status} in the manager's inbox`);
-            return { ok: false, problem: "not_delivered", item: this.#view(id) };
+            return { ok: false, problem: "not_delivered", item: this.#view(id, a.endpoint.id) };
           }
           // delivered, lost or accepted: nothing new was typed. Queuing again would make the next poll mark that
           // fresh Decision delivered (review #29.5).
           if (st && (st.status === "delivered" || st.status === "lost" || st.status === "accepted")) {
             log.warn(`answer to ${e.id} not delivered: the same message is already ${st.status} in the manager's inbox`);
-            return { ok: false, problem: "not_delivered", item: this.#view(id) };
+            return { ok: false, problem: "not_delivered", item: this.#view(id, a.endpoint.id) };
           }
         }
         const q = this.#x.queue(id, choice, { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
         if (!q.ok) {
           if (!queued.duplicate) { try { this.#inbox?.cancel(queued.key); } catch (err) { log.error(`answer to ${e.id}: the withdrawal can't be written`, err); } }
-          return { ok: false, problem: q.error, item: this.#view(id) };
+          return { ok: false, problem: q.error, item: this.#view(id, a.endpoint.id) };
         }
         this.#clearNotice(id);
         const dir = this.#inbox?.dir ?? null;
@@ -704,11 +715,11 @@ export class EscalationService {
         this.#seen.set(key, now);
         log.info(`answer to ${e.id} queued for the manager${queued.duplicate ? " (already in its inbox)" : ""}`);
         this.#notify();
-        return { ok: true, item: this.#view(id) };
+        return { ok: true, item: this.#view(id, a.endpoint.id) };
       }
       if (!e.asker.workerId) {
         const conflict = e.asker.kind === "manager" && this.#watch.workers().some(w => w.name === this.#managerName && w.conflict);
-        return { ok: false, problem: conflict ? "lane_conflict" : "no_pane", item: this.#view(id) };
+        return { ok: false, problem: conflict ? "lane_conflict" : "no_pane", item: this.#view(id, a.endpoint.id) };
       }
       // ... or of the same answer from another request. The inbox path ran these already (review #29.2).
       const inDoubt = this.#store.send(k);
@@ -720,7 +731,7 @@ export class EscalationService {
       const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);
       if (other) return other;
       // Written before the first await, as a send's is: a hub that stops while this is typed leaves it "started".
-      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request })) return { ok: false, problem: "uncertain", item: this.#view(id) };
+      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request })) return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
       let outcome: SendOutcome;
       // A node that may have typed it (SendInDoubt): "uncertain", the hub's 409, never a 500 the app reads as a refusal
       // (final review I1), and kept for its repeat with the store it went to. Any other throw keeps its row too (below).
@@ -730,16 +741,16 @@ export class EscalationService {
         // its row stays, with no store, so a repeat is uncertain and it is never typed twice (ADR-0008, phase C).
         if (!(err instanceof SendInDoubt)) {
           log.warn(`answer to ${e.id} in doubt: typing it threw, maybe after the paste; a repeat stays uncertain`, err);
-          return { ok: false, problem: "uncertain", item: this.#view(id) };
+          return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
         }
         keepInDoubt(this.#store, k, err);
         log.warn(`answer to ${e.id} in doubt: its node may have typed it; a repeat asks the node`, err);
-        return { ok: false, problem: "uncertain", item: this.#view(id) };
+        return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
       }
       settleOutcome(this.#store, k, outcome);                           // a retry may type it; "not_submitted" keeps its row
       if (outcome.problem) {
         log.warn(`answer to ${e.id} not delivered: ${outcome.problem}`);
-        return { ok: false, problem: outcome.problem, item: this.#view(id) };
+        return { ok: false, problem: outcome.problem, item: this.#view(id, a.endpoint.id) };
       }
       return this.#delivered(a, id, choice, key);
     } finally {
@@ -754,14 +765,14 @@ export class EscalationService {
     if (row.state === "done") {
       this.#seen.set(key, this.#now());
       // Queued in the inbox, not typed: still queued. The enqueue time is not when it was delivered (round 2.7).
-      if (row.outcome === "queued") return { ok: true, item: this.#view(id), queued: true };
-      return { ok: true, item: this.#view(id), duplicate: true, at: row.typedAt ?? row.at };
+      if (row.outcome === "queued") return { ok: true, item: this.#view(id, a.endpoint.id), queued: true };
+      return { ok: true, item: this.#view(id, a.endpoint.id), duplicate: true, at: row.typedAt ?? row.at };
     }
     const settled = row.workerId === null ? { ok: false as const, problem: "uncertain" as const } : await this.#settle(row.key, row.workerId);
     if (settled === null) return null;
     if (!settled.ok && settled.problem === "duplicate") return this.#delivered(a, id, choice, key, settled.at);
     log.warn(`answer to ${id} in doubt: its node can't say it never typed it; it stays uncertain`);
-    return { ok: false, problem: "uncertain", item: this.#view(id) };
+    return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
   }
 
   // Another answer to the same ask (another choice, another request) that its node may have typed (E8 while an answer is
@@ -778,10 +789,10 @@ export class EscalationService {
       if (settled === null) continue;
       if (!settled.ok && settled.problem === "duplicate") {
         this.#typedEarlier(a, id, other.key.slice(prefix.length));
-        return { ok: false, problem: "already_answered", item: this.#view(id) };
+        return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
       }
       log.warn(`answer to ${id} refused: another answer to it is in doubt (its node can't say it never typed it)`);
-      return { ok: false, problem: "answer_in_doubt", item: this.#view(id) };
+      return { ok: false, problem: "answer_in_doubt", item: this.#view(id, a.endpoint.id) };
     }
     return null;
   }
@@ -816,6 +827,6 @@ export class EscalationService {
       log.warn(`answer to ${id} delivered but not recorded: ${r.error}`);
     }
     this.#notify();
-    return { ok: true, item: this.#view(id), ...(at === undefined ? {} : { duplicate: true as const, at }) };
+    return { ok: true, item: this.#view(id, a.endpoint.id), ...(at === undefined ? {} : { duplicate: true as const, at }) };
   }
 }
