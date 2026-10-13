@@ -22,7 +22,7 @@ import { basename, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import {
   CLIENT_API, ERROR_EXECUTED, LIMITS, formatWorkerId, parseWorkerId,
-  type Alert, type Delivery, type ErrorCode, type LaneEvent, type OpError, type Pane, type SessionStatus,
+  type Alert, type Delivery, type ErrorCode, type LaneEvent, type LaneWatchEntry, type OpError, type Pane, type SessionStatus,
 } from "@morndo/protocol";
 import type { SendProblem, SessionInfo, Terminal } from "@morndo/node-ops";
 import type { Sessions, Tmux, TranscriptSource } from "../../src/application/ports.ts";
@@ -376,6 +376,7 @@ export type FakeFleet = {
   delayCancels(ms: number): void;
   readonly deliveryReads: { id: string; at: number }[];
   laneEvent(e: LaneEvent): void;                            // kept for GET /v1/lane-events, and sent as a `lane` event
+  setLaneWatch(entries: LaneWatchEntry[]): void;            // served by GET /v1/lane-watch from now on
   subscriberCount(): number;                                // events WebSockets open now
   close(): Promise<void>;
 };
@@ -471,6 +472,7 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
   const deliveryCalls: { id: string; lane: string | null; workerId: string | null; text: string }[] = [];
   const cancels: string[] = [];
   const laneEvents: LaneEvent[] = [];
+  let laneWatch: LaneWatchEntry[] = [];
   let quiet = false;
   let lose = 0;
   let loseBy: "drop" | "hang" = "drop";
@@ -570,6 +572,7 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
     }
     if (req.method === "GET" && url.pathname === "/v1/lanes") return json(200, await lanes());
     if (req.method === "GET" && url.pathname === "/v1/alerts") return json(200, alerts);
+    if (req.method === "GET" && url.pathname === "/v1/lane-watch") return json(200, { lanes: laneWatch });
     if (req.method === "POST" && url.pathname === "/v1/op") {
       const chunks: Buffer[] = [];
       for await (const c of req) chunks.push(c as Buffer);
@@ -664,6 +667,7 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
     delayCancels(ms) { cancelDelayMs = ms; },
     deliveryReads,
     laneEvent(e) { laneEvents.push(e); broadcast({ t: "lane", node: e.node, body: e }); },
+    setLaneWatch(entries) { laneWatch = entries; },
     subscriberCount: () => subscribers.size,
     async close() {
       for (const ws of subscribers) ws.terminate();

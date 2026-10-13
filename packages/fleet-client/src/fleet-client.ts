@@ -20,7 +20,7 @@ import { homedir } from "node:os";
 import { WebSocket } from "ws";
 import {
   CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, readOpError, redactText, toLogFormat, type Alert, type AlertKind, type Delivery,
-  type DeliveryState, type Health, type JobsList, type LaneEvent, type OpArgs, type OpError, type OpName, type OpResult,
+  type DeliveryState, type Health, type JobsList, type LaneEvent, type LaneWatchEntry, type OpArgs, type OpError, type OpName, type OpResult,
 } from "@morndo/protocol";
 
 export type NodeStatus = "online" | "stale" | "offline";
@@ -108,8 +108,9 @@ const STATUSES = new Set<string>(["online", "stale", "offline"]);
 const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "alert", "delivery", "lane", "job"]);
 // "unrouted_hook": hook events for a script path no subscriber takes (ADR-0012 decision 8; detail { path, events }).
 // "delivery_waiting" and "subscriber_lagging": fleet clients §4.5, §6. "job_failed" and "job_unnoticed": ADR-0017.
+// "engine_fallback": ADR-0027.
 const ALERT_KINDS = new Set<string>(["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter",
-  "backlog_full", "unrouted_hook", "delivery_waiting", "subscriber_lagging", "job_failed", "job_unnoticed"] satisfies AlertKind[]);
+  "backlog_full", "unrouted_hook", "delivery_waiting", "subscriber_lagging", "job_failed", "job_unnoticed", "engine_fallback"] satisfies AlertKind[]);
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // A store sequence as the fleet passes it on, or null: absent, null, or not a count (never guessed at).
@@ -253,6 +254,14 @@ export class FleetClient {
     const events = isRecord(v) && Array.isArray(v.events) ? v.events.map(e => parseBody(LaneEventSchema, e)) : null;
     if (!events || events.some(e => e === null)) throw new FleetMismatch("GET /v1/lane-events: not a list of lane events");
     return events as LaneEvent[];
+  }
+  // Each lane's last turn as the fleet's lane watch holds it (GET /v1/lane-watch, reliable lanes §3.2), oldest first.
+  async laneWatch(): Promise<LaneWatchEntry[]> {
+    const v = await this.#json("GET", "/v1/lane-watch");
+    const ok = (e: unknown) => isRecord(e) && typeof e.node === "string" && typeof e.window === "string" && typeof e.at === "number"
+      && (e.deadline === null || typeof e.deadline === "number") && typeof e.stale === "boolean" && typeof e.stalls === "number";
+    if (!isRecord(v) || !Array.isArray(v.lanes) || !v.lanes.every(ok)) throw new FleetMismatch("GET /v1/lane-watch: not a lane watch");
+    return v.lanes as LaneWatchEntry[];
   }
   // A file on a node, streamed (GET /v1/files): the fleet reads it in chunks of at most 256 KiB under the node's rules.
   async *fileStream(node: string, refOrPath: string): AsyncIterable<Uint8Array> {

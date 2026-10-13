@@ -35,6 +35,7 @@ import { IntakeWindow } from "./application/intake-window.ts";
 import { LaneEvents } from "./application/lane-events.ts";
 import { LaneEventsPush } from "./application/lane-events-push.ts";
 import { LaneRegistry } from "./application/lane-registry.ts";
+import { LaneWatch, REBUILD_WINDOW_MS } from "./application/lane-watch.ts";
 import { Router } from "./application/router.ts";
 
 export const AUDIT_PRUNE_EVERY_MS = 86_400_000;
@@ -44,12 +45,13 @@ export type FleetOptions = {
   resultSlackMs?: number; instancePongMs?: number; eventsBufferBytes?: number; intakeWindowMs?: number;
   hookBacklog?: number; delivery?: { post?: Post; backoff?: Backoff; tickMs?: number; random?: () => number };
   holdPath?: string;
+  laneWatchSweepMs?: number;
 };
 
 export type Fleet = {
   config: FleetConfig; db: Database.Database; key: FleetKey; nodes: NodesStore; audit: Audit; events: EventHub;
   connections: Connections; lanes: LaneRegistry; router: Router; outbox: OutboxStore; delivery: DeliveryWorker; intake: IntakeWindow;
-  deliveries: Deliveries; laneEvents: LaneEvents; laneEventsPush: LaneEventsPush; jobs: JobMirror; agentPort: number;
+  deliveries: Deliveries; laneEvents: LaneEvents; laneEventsPush: LaneEventsPush; laneWatch: LaneWatch; jobs: JobMirror; agentPort: number;
   close(): Promise<void>;
 };
 
@@ -88,7 +90,17 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   });
   const laneEventsStore = new LaneEventsStore(db);
   const laneEventsPush = new LaneEventsPush({ store: laneEventsStore, deliveries, config: config.laneEvents, log });
-  const laneEvents = new LaneEvents({ store: laneEventsStore, events, config: config.laneEvents, log, now, onWaiting: () => laneEventsPush.kick() });
+  const laneEvents = new LaneEvents({
+    store: laneEventsStore, events, config: config.laneEvents, log, now, onWaiting: () => laneEventsPush.kick(), waitMs: config.laneWatch.waitingMin * 60_000,
+  });
+  // Every lane's last turn and its deadline (reliable lanes §3.2): stale lanes become lane events and, nudged, deliveries.
+  const laneWatch = new LaneWatch({
+    config: config.laneWatch, log, now, raise: d => laneEvents.raise(d), nudge: r => deliveries.post(r, "fleet"),
+    alive: (node, window) => lanes.list().some(l => l.name === window && l.node === node && l.workerId !== null),
+    online: node => connections.status(node) === "online",
+    ...(o.laneWatchSweepMs === undefined ? {} : { sweepMs: o.laneWatchSweepMs }),
+  });
+  laneEvents.watchWith(laneWatch);
   events.subscribe(e => { if (e.t === "delivery") laneEventsPush.delivery(e.body as Delivery); });
   const router = new Router({ connections, lanes, audit, log });
   const flight = new Flight();
@@ -149,7 +161,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   try {
     await agents.ready;
     api = await startClientApi(config.socketPath, {
-      router, connections, lanes, nodes, audit, events, deliveries, laneEvents, jobs, log, ...(o.eventsBufferBytes === undefined ? {} : { eventsBufferBytes: o.eventsBufferBytes }),
+      router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, log, ...(o.eventsBufferBytes === undefined ? {} : { eventsBufferBytes: o.eventsBufferBytes }),
       updates: { held: () => watch.held, flight },
     });
   } catch (e) {
@@ -164,19 +176,23 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   deliveries.start();
   laneEvents.start();
   laneEventsPush.start();
+  try { laneWatch.rebuild(laneEvents.turnsSince(now() - REBUILD_WINDOW_MS)); }
+  catch (e) { log.error("lane watch: reading the last day's turns failed (fleet.db busy?); watching new turns only", e); }
+  laneWatch.start();
   const retention = setInterval(() => { pruneAudit(); pruneJobs(); }, AUDIT_PRUNE_EVERY_MS);
   const noticeRetry = setInterval(() => {
     try { jobs.retry(); } catch (e) { log.error("job notice retry failed; trying again next tick", e); }
   }, NOTICE_RETRY_MS);
   const clientApi = api;
   return {
-    config, db, key, nodes, audit, events, connections, lanes, router, outbox, delivery, intake, deliveries, laneEvents, laneEventsPush, jobs,
+    config, db, key, nodes, audit, events, connections, lanes, router, outbox, delivery, intake, deliveries, laneEvents, laneEventsPush, laneWatch, jobs,
     agentPort: agents.port(),
     close: async () => {
       watch.stop();
       clearInterval(retention);
       clearInterval(noticeRetry);
       deliveries.stop();
+      laneWatch.stop();
       laneEvents.stop();
       connections.stop();                              // settles every request in flight, a lane-event batch's too
       const pushing = laneEventsPush.stop();           // its batch marks what its node stored, before fleet.db closes
