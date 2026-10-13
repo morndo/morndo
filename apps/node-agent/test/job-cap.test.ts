@@ -57,6 +57,16 @@ describe("lookCap", () => {
     expect(lookCap(null, spec, 1000, fs)).toBeNull();
     expect(lookCap(null, spec, 1030, fs)).toEqual({ kind: "grace", sight: { size: 64, at: 1030 } });
   });
+
+  it("reads the cap note before the log size", () => {
+    const order: string[] = [];
+    const fs = {
+      existsSync: () => { order.push("note"); return true; },
+      statSync: () => { order.push("size"); return { size: 64 }; },
+    };
+    lookCap(null, spec, 1000, fs);
+    expect(order).toEqual(["note", "size"]);
+  });
 });
 
 describe("endedBeforeStop", () => {
