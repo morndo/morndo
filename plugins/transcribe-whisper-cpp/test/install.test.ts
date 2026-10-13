@@ -2,11 +2,11 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { commandOnPath } from "../src/morndo-transcribe.mts";
-import { BUILD_FLAGS, absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, placeCachedFile, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
+import { BUILD_FLAGS, absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, placeCachedFile, pruneBuildDirs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
@@ -77,6 +77,23 @@ describe("install choices", () => {
     expect(key).toContain("plugins/transcribe-whisper-cpp/plugin.json");
     expect(key).toContain("plugins/transcribe-whisper-cpp/build-flags.txt");
     expect(key).not.toContain("install.ts");
+  });
+
+  it("drops build directories other than the current flag hash", () => {
+    const src = mkdtempSync(join(tmpdir(), "morndo-builds-"));
+    const current = buildDir(src, BUILD_FLAGS);
+    mkdirSync(join(current, "bin"), { recursive: true });
+    writeFileSync(join(current, "bin", "whisper-cli"), "new");
+    mkdirSync(join(src, "build", "old-hash", "bin"), { recursive: true });
+    writeFileSync(join(src, "build", "old-hash", "bin", "whisper-cli"), "old");
+    writeFileSync(join(src, "build", "CMakeCache.txt"), "stale");
+    try {
+      pruneBuildDirs(src, current);
+      expect(readdirSync(join(src, "build"))).toEqual([basename(current)]);
+      expect(readFileSync(join(current, "bin", "whisper-cli"), "utf8")).toBe("new");
+    } finally {
+      rmSync(src, { recursive: true, force: true });
+    }
   });
 
   it("the plugin workflow runs when a file its tests depend on changes", () => {

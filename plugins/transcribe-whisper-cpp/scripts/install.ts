@@ -55,6 +55,21 @@ export function buildDir(src: string, flags: readonly string[]): string {
   return join(src, "build", key);
 }
 
+export function pruneBuildDirs(src: string, keep: string): void {
+  const root = join(src, "build");
+  let names: string[];
+  try {
+    names = readdirSync(root);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const full = join(root, name);
+    if (full === keep) continue;
+    rmSync(full, { recursive: true, force: true });
+  }
+}
+
 const UBUNTU: Record<string, string> = { git: "git", cmake: "cmake", make: "make", "g++": "g++", ffmpeg: "ffmpeg" };
 const BREW: Record<string, string> = { git: "git", cmake: "cmake", ffmpeg: "ffmpeg" };
 const TOOLS = ["git", "cmake", "make", "g++", "ffmpeg"] as const;
@@ -391,6 +406,7 @@ async function ensureSource(pins: Pins, src: string): Promise<void> {
 
 async function ensureBinary(src: string): Promise<string> {
   const dir = buildDir(src, BUILD_FLAGS);
+  pruneBuildDirs(src, dir);
   const bin = join(dir, "bin", "whisper-cli");
   try {
     if (statSync(bin).isFile()) return bin;
