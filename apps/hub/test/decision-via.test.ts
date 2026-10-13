@@ -383,6 +383,27 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.board().items.find(i => i.id === "ny-7")?.decision).toMatchObject({ choice: { key: "hold" }, via: "elsewhere" });
   });
 
+  // The known limit (docs/domain.md, E8): a hand tap of the hub's own choice that the hub first reads after it wrote
+  // its row can't be told from that row's paste. While the row stands it is taken as the paste. Once the row's node
+  // says it never typed it, the row goes, and the tap is then the hand's: it answers the ask before anything more is
+  // typed, so a repeat from another device is refused and the manager gets the choice once from the hub at most.
+  it("a hand tap read after the hub's own row is its paste while the row stands, and the hand's once it goes", async () => {
+    const typed: string[] = [];
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async (_pane, text) => { typed.push(text); throw new SendInDoubt("st-1", "the connection dropped before the paste"); },
+      settle: async key => { store.dropSend(key); return null; },                                // its node never started it
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "hold" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    manager.push({ id: "m-tap", at: now, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] hold (Hold for a day)" });
+    s.poll();                                                                                    // first read after the row: its paste
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "hold" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(typed).toHaveLength(1);                                                               // the desk's attempt only
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision).toMatchObject({ choice: { key: "hold" }, via: "elsewhere" });
+  });
+
   // The hub's own paste is told by that order, not by clocks (round 3.2): the node that typed it stamps the line on
   // its own clock, here 1.5 s behind the hub's. Read after the hub wrote its row, it is that row's paste: no answer from
   // elsewhere, and the repeat that learns it was typed records it for the endpoint that sent it.
