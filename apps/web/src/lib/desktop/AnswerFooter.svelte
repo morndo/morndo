@@ -33,7 +33,7 @@
       <p class="how">{whom} gets it as your decision and acts on it.</p>
       <div class="actions">
         {#if session.again}
-          <button type="button" class="btn primary" disabled={session.sending || !open} onkeydown={onEsc} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
+          <button type="button" class="btn primary" disabled={session.sending || !open} use:maybeFocus={focusSend} onkeydown={onEsc} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
         {:else}
           <button type="button" class="btn primary" disabled={session.sending || !open || session.stale} use:maybeFocus={focusSend} onkeydown={onEsc} onclick={() => session.picked && onSend(session.picked.body)}>{session.sending ? "Sending…" : "Send answer"}</button>
         {/if}
@@ -46,7 +46,7 @@
       <textarea bind:this={wordsEl} value={session.words} rows="2" readonly={!!session.again} placeholder="Your answer for {asker}…" onkeydown={onWordsKey} oninput={(e) => (session.words = e.currentTarget.value)} aria-label="Your answer for {asker}"></textarea>
       <div class="actions">
         {#if session.again}
-          <button type="button" class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
+          <button type="button" class="btn primary" disabled={session.sending || !open} use:maybeFocus={focusSend} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
         {:else}
           <button type="button" class="btn primary" disabled={session.sending || !open || session.stale || !session.words.trim()} onclick={() => onSend({ text: session.words })}>{session.sending ? "Sending…" : `Send to ${asker}`}</button>
         {/if}

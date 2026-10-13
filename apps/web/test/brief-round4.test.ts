@@ -178,6 +178,22 @@ describe("round 4: a success settled elsewhere is not Sent", () => {
   }, 60_000);
 });
 
+describe("round 4: Check again takes focus when Send becomes it", () => {
+  it("leaves focus on Check again in the brief", async () => {
+    await ready();
+    await doubt();
+    await show([tap("d-focus", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-focus"]');
+    await card.getByRole("button", { name: "Ship the weekly notes" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Extend the triage script" }).click();
+    await dialog.getByRole("button", { name: "Send answer" }).click();
+    const again = dialog.getByRole("button", { name: "Check again" });
+    await again.waitFor();
+    expect(await again.evaluate(el => el === document.activeElement)).toBe(true);
+  }, 60_000);
+});
+
 describe("round 4: a restate during send keeps the sent confirmation", () => {
   it("shows Sent for the version that was posted, not the new answer buttons", async () => {
     await ready();
