@@ -209,7 +209,7 @@ switch (cmd) {
       unavailable: absent ? { ready: false, reason: located.reason, detail: located.detail } : null,
       file: recording => fileOnDisk(recording.kind === "upload" ? inbox.get(recording.id)?.path : files.get(recording.id)?.file),
       limit: txSettings.limit, timeoutSec: txSettings.timeoutSec, maxSeconds: txSettings.maxSeconds, threads: txSettings.threads,
-      guard: () => guardNow(txSettings.guard, readMachine),
+      guard: () => guardNow(txSettings.guard, () => readMachine(txSettings.guard)),
       log: line => log.info(line),
     });
     void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
