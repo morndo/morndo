@@ -105,7 +105,7 @@ describe("a tmux server restart", () => {
     await agent.run(hooks);
     await agent.waitOnline();
     const old = await paneOf(fleet.client, "n1", "alpha");
-    tmux.kill();                                                              // the server dies, as on a crash or a reboot
+    await tmux.kill();                                                        // the server dies, as on a crash or a reboot
     const fresh = await fakeLane(tmux, { window: "alpha", prose: "the new alpha" });
     const now = await until("alpha's new worker id", async () => {
       const p = await paneOf(fleet.client, "n1", "alpha").catch(() => null);

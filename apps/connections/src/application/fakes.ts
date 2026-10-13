@@ -1,8 +1,10 @@
 // In-memory ports. Tests move the clock and the runtime by hand. No ambient I/O.
-import { emptyDirectory, emptyPolicy, type Directory, type Isolation, type Policy } from "@morndo/domain";
+import { emptyDirectory, emptyPolicy, emptySecretDirectory, type Directory, type Isolation, type Policy } from "@morndo/domain";
 import type { VendorPreset } from "@morndo/protocol";
 import { chainHolders } from "./providers.ts";
 import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type ModelLister, type ModelRow, type ProcId, type Processes, type ProviderEntry, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
+import type { IndexChange, IndexWriter, Ids, PreparedIndex, SecretsDirectory, SecretsState, WorkspaceRoots } from "./ports.ts";
+import { savedVaultRefs } from "./vault-refs.ts";
 
 export class ManualClock implements Clock {
   at: number;
@@ -179,4 +181,61 @@ export function memory(at = 1_700_000_000_000): Memory {
   const engines = new MemoryEngines();
   const deps: Deps = { clock, vault, runtime, models, spend, catalog, store, repos, alerts, processes, engines };
   return { clock, vault, runtime, models, spend, catalog, store, repos, alerts, processes, engines, deps };
+}
+
+// ---- Secrets on the node
+
+export class CountingIds implements Ids {
+  n = 0;
+  next(prefix: string): string { this.n += 1; return `${prefix}${String(this.n).padStart(4, "0")}`; }
+}
+
+const copyState = (s: SecretsState): SecretsState => JSON.parse(JSON.stringify(s)) as SecretsState;
+
+// One state; a write runs on a copy and lands only if the change returns without throwing, as the store's transaction.
+export class MemorySecrets implements SecretsDirectory {
+  state: SecretsState = { directory: emptySecretDirectory(), vaults: [], workspaces: [] };
+  writes = 0;
+  // Fails the next save after the change ran, as a constraint or a full disk would: nothing is saved.
+  failNextSave = false;
+  load(): SecretsState { return copyState(this.state); }
+  write<T>(change: (state: SecretsState) => { next: SecretsState | null; result: T }): T {
+    const { next, result } = change(copyState(this.state));
+    if (next && this.failNextSave) { this.failNextSave = false; throw new Error("the save failed"); }
+    // The vault rows by the port's save rule, as SQLite saves them (round 2, point 6; round 3, point 8).
+    if (next) { this.state = copyState({ ...next, vaults: savedVaultRefs(this.state, next) }); this.writes += 1; }
+    return result;
+  }
+}
+
+// Records each write; `short` says which vault refs hold a value under 8 bytes.
+export class MemoryIndex implements IndexWriter {
+  readonly changes: IndexChange[] = [];
+  readonly prepared: string[] = [];
+  readonly #short: (ref: string) => Promise<boolean>;
+  constructor(short: (ref: string) => Promise<boolean> = () => Promise.resolve(false)) { this.#short = short; }
+  async prepare(ref: string): Promise<PreparedIndex> {
+    this.prepared.push(ref);
+    return { short: await this.#short(ref) };
+  }
+  write(change: IndexChange): void { this.changes.push(change); }
+  // What the written changes leave live: each version added (a short one is never indexed), until it is retired.
+  live(): readonly { reference: string; version: number }[] {
+    const live = new Map<string, { reference: string; version: number }>();
+    for (const c of this.changes) {
+      if (c.add && !c.add.prepared.short) live.set(JSON.stringify([c.add.reference, c.add.version]), { reference: c.add.reference, version: c.add.version });
+      for (const r of c.retire) live.delete(JSON.stringify([r.reference, r.version]));
+    }
+    return [...live.values()];
+  }
+}
+
+// A path's repository: the longest registered prefix's common dir.
+export class MemoryRoots implements WorkspaceRoots {
+  readonly repos = new Map<string, string>();
+  commonDir(path: string): string | null {
+    let best: string | null = null;
+    for (const root of this.repos.keys()) if ((path === root || path.startsWith(`${root}/`)) && (best === null || root.length > best.length)) best = root;
+    return best === null ? null : this.repos.get(best) ?? null;
+  }
 }

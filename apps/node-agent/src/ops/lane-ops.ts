@@ -11,13 +11,17 @@
 // - The window to stop is targeted by its ID (@N) from the inventory, never by its name.
 import { realpathSync, statSync } from "node:fs";
 import { formatWorkerId, type OpArgs } from "@morndo/protocol";
-import { deniedBy, denyConfigFromEnv, denyRoots, exactSession, resolvedRoots, tmuxLiteral } from "@morndo/node-ops";
+import { deniedBy, denyConfigFromEnv, denyRoots, exactSession, hostTmuxServer, resolvedRoots, tmuxLiteral } from "@morndo/node-ops";
 import type { Policy } from "../config.ts";
 import { effect, fail, ok, type OpTable } from "./executor.ts";
 import type { Inventory } from "./inventory.ts";
 import { tmuxRun } from "./tmux-panes.ts";
 
-export type LaneDeps = { node: string; policy: Policy; inventory: Inventory; home: string; stateDir: string; stamp: (socket: string | null) => Promise<string | null> };
+export type LaneDeps = {
+  node: string; policy: Policy; inventory: Inventory; home: string; stateDir: string;
+  stamp: (socket: string | null) => Promise<string | null>;
+  host?: (opts: { socket: string | null }) => Promise<unknown>;
+};
 
 export function laneCommand(a: OpArgs["lane.start"]): string[] {
   const resume = a.resume === undefined ? [] : ["--resume", a.resume];
@@ -36,6 +40,7 @@ function realDir(p: string): string | null {
 export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> {
   const socket = d.policy.tmuxSocket;
   const session = d.policy.session;
+  const host = d.host ?? hostTmuxServer;
   // The cwd is judged resolved (realDir), so the deny roots are too, at each start: under a HOME that is a symbolic
   // link, "~/.ssh" as given never prefixes the real path of a directory in it (final review M10).
   const deny = () => resolvedRoots(denyRoots(d.home, d.stateDir, denyConfigFromEnv(process.env)));
@@ -51,9 +56,15 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
       if (deniedBy(cwd, deny())) return fail("denied", "lanes may not start in that directory");
       const snap = await d.inventory.refresh();
       if (snap.rows.some(r => r.window === a.name)) return fail("name_taken", "a window of that name already exists on this node");
+      const exists = await sessionExists();
+      // Host before the deadline check. A failure here started nothing, so the key is released.
+      if (!exists) {
+        try { await host({ socket }); }
+        catch { return { ok: false, error: { code: "internal", executed: "no", message: "the tmux server could not be started outside this service" } }; }
+      }
       const late = ctx.ready();
       if (late) return { ok: false, error: late };
-      const where = (await sessionExists()) ? ["new-window", "-d", "-t", `${exactSession(session)}:`] : ["new-session", "-d", "-s", tmuxLiteral(session)];
+      const where = exists ? ["new-window", "-d", "-t", `${exactSession(session)}:`] : ["new-session", "-d", "-s", tmuxLiteral(session)];
       const out = await tmuxRun(socket, [...where, "-n", tmuxLiteral(a.name), "-c", tmuxLiteral(cwd), "-P", "-F", "#{pane_id}", ...laneCommand(a)]);
       const pane = /^%(\d{1,9})$/.exec(out.trim());
       if (!pane) return fail("internal", "tmux did not report the new pane");

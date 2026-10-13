@@ -1,7 +1,16 @@
 #!/bin/sh
 # Reject a push that adds a secret, a home path, a private key, or a token.
 # Added lines are checked, so a marker already in a file does not fail a later
-# edit. A private-key header in a test or fixture file is a fixture.
+# edit. A private-key header in a test or fixture file is a fixture. Every
+# commit the push adds is checked on its own: a plain
+# commit (a root commit against the empty tree) through its own patch, a
+# merge through its combined diff, which holds only the conflict resolution.
+# A line added and removed in two commits of the push is caught in the commit
+# that added it. gitleaks and the commit-mail checks cover the same commits,
+# so commits already on the remote you push to (its remote-tracking refs;
+# fetch first) are not checked again, and there is no exception list. A push
+# to a URL, or a remote with no tracking refs, checks everything the remote
+# tip does not already hold.
 # Install with scripts/install-git-hooks.sh. Does not change git config.
 #
 # gitleaks 8.30.1 `protect` scans `git diff` (or `--staged`), not the commits
@@ -9,9 +18,14 @@
 # Git passes "<local ref> <local sha> <remote ref> <remote sha>" on stdin.
 # This script is never scanned: its patterns would match their own source.
 set -eu
+# Range words are expanded unquoted below; nothing here globs filenames.
+set -f
 
 root=$(git rev-parse --show-toplevel)
 cd "$root"
+
+# $1 names the remote being pushed to, or holds the URL of the push.
+remote=${1:-}
 
 if ! command -v gitleaks >/dev/null 2>&1; then
   echo "pre-push: gitleaks is not on PATH (https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1)" >&2
@@ -24,12 +38,35 @@ patterns=$(mktemp)
 paths=$(mktemp)
 patch=$(mktemp)
 hits=$(mktemp)
-trap 'rm -f "$ranges" "$patterns" "$paths" "$patch" "$hits"' EXIT
+plain=$(mktemp)
+merges=$(mktemp)
+trap 'rm -f "$ranges" "$patterns" "$paths" "$patch" "$hits" "$plain" "$merges"' EXIT
 
 gitleaks protect --no-banner --redact
 
 scan_dir() {
   gitleaks dir . --config .gitleaks.toml --redact --no-banner
+}
+
+# The rev-list arguments that select the commits this push adds. Published
+# means the remote being pushed to: its remote-tracking refs when $remote
+# names a configured remote that has any, else the remote tip the server
+# names when this clone holds that commit, else the whole history. A second
+# remote's tracking ref, or any other local ref, spares nothing.
+unpublished() {
+  tip=$1
+  known=$2
+  if [ -n "$remote" ] && git remote get-url "$remote" >/dev/null 2>&1 &&
+      [ -n "$(git for-each-ref --count=1 "refs/remotes/$remote/")" ]; then
+    printf '%s --not --remotes=%s/*' "$tip" "$remote"
+    return 0
+  fi
+  if [ "$known" != "$zero" ] &&
+      git rev-parse -q --verify "$known^{commit}" >/dev/null 2>&1; then
+    printf '%s --not %s' "$tip" "$known"
+    return 0
+  fi
+  printf '%s' "$tip"
 }
 
 scan_push() {
@@ -44,13 +81,10 @@ scan_push() {
     if [ "$local_sha" = "$zero" ]; then
       continue
     fi
-    printf '%s %s\n' "$local_sha" "${remote_sha:-$zero}" >> "$ranges"
-    case "${remote_sha:-$zero}" in
-      "$zero")
-        scan_dir ;;
-      *)
-        gitleaks detect --no-banner --redact --log-opts="${remote_sha}..${local_sha}" ;;
-    esac
+    sel=$(unpublished "$local_sha" "$remote_sha")
+    printf '%s\n' "$sel" >> "$ranges"
+    # The same selection every check uses.
+    gitleaks detect --no-banner --redact --log-opts="$sel"
     scanned=1
   done
   if [ "$scanned" -eq 0 ]; then
@@ -156,32 +190,6 @@ scan_file() {
   [ "$status" -eq 1 ] || search_failed
 }
 
-scan_sha() {
-  sha=$1
-  shift
-  status=0
-  raw=$(git grep -I -o -E -e "$home_re" -e "$key_re" -e "$token_re" "$sha" -- "$@" ":(exclude)$listfile") || status=$?
-  [ "$status" -le 1 ] || search_failed
-  if [ "$status" -eq 0 ]; then
-    printf '%s\n' "$raw" > "$hits"
-    while IFS= read -r line || [ -n "$line" ]; do
-      [ -n "$line" ] || continue
-      rest=${line#"$sha":}
-      file=${rest%%:*}
-      hit=${rest#*:}
-      skip_file "$file" && continue
-      allowed "$file" "$hit" && continue
-      obvious_fixture "$file" "$hit" && continue
-      reject "home path, private key, or token in $file"
-    done < "$hits"
-  fi
-  [ -s "$patterns" ] || return 0
-  status=0
-  git grep -I -q -E -f "$patterns" "$sha" -- "$@" ":(exclude)$listfile" || status=$?
-  [ "$status" -ne 0 ] || reject "local leak pattern in $sha"
-  [ "$status" -eq 1 ] || search_failed
-}
-
 # New-file length from a hunk header. Omitted count means one line.
 hunk_new_lines() {
   rest=${1#*+}
@@ -196,14 +204,41 @@ hunk_new_lines() {
   esac
 }
 
-# Added lines of a unified diff. Headers are read only outside a hunk, and a
-# hunk is the number of new-file lines the header names. A marker already in
-# the file is not an added line.
+# Added lines of a unified or a combined diff. Headers are read only outside
+# a hunk, and a hunk is the number of new-file lines the header names. A
+# marker already in the file is not an added line. In a combined hunk, which
+# a merge carries, a line with a '-' column for any parent is not part of the
+# result, and only a '+' in every column is new against them all. A combined
+# header that names no parent is not a hunk anyone can read: the push fails
+# closed instead. The second argument names the commit the patch belongs to.
 scan_patch() {
+  about=${2:-the uncommitted diff}
   file=
   left=0
+  cc=0
+  parents=0
   while IFS= read -r line || [ -n "$line" ]; do
     if [ "$left" -gt 0 ]; then
+      if [ "$cc" -eq 1 ]; then
+        case "$line" in
+          '\'*) continue ;;
+        esac
+        pre=$(printf '%.*s' "$parents" "$line")
+        case "$pre" in
+          *-*) continue ;;
+          *' '*)
+            left=$((left - 1))
+            ;;
+          *)
+            left=$((left - 1))
+            case "$file" in
+              ''|/dev/null) ;;
+              *) skip_file "$file" || scan_text "$file" "${line#"$pre"}" ;;
+            esac
+            ;;
+        esac
+        continue
+      fi
       case "$line" in
         '\'*) continue ;;
         '-'*) continue ;;
@@ -224,6 +259,15 @@ scan_patch() {
     case "$line" in
       'diff --git '*)
         file=
+        cc=0
+        ;;
+      'diff --cc '*)
+        cc=1
+        file=${line#diff --cc }
+        case "$file" in
+          *' b/'*) file=${file##* b/} ;;
+          'a/'*) file=${file#a/} ;;
+        esac
         ;;
       '+++ '*)
         file=${line#+++ }
@@ -232,7 +276,34 @@ scan_patch() {
         esac
         file=${file#b/}
         ;;
+      '@@@'*)
+        cc=1
+        parents=0
+        left=1
+        rest=${line#"${line%%[!@]*}"}
+        rest=${rest%%@*}
+        for word in $rest; do
+          case "$word" in
+            -*) parents=$((parents + 1)) ;;
+            +*)
+              count=${word#+}
+              case "$count" in
+                *,*) count=${count#*,} ;;
+                *) count=1 ;;
+              esac
+              case "$count" in
+                *[!0-9]*|'') count=0 ;;
+              esac
+              left=$count
+              ;;
+          esac
+        done
+        if [ "$parents" -eq 0 ]; then
+          reject "unreadable merge diff in $about"
+        fi
+        ;;
       '@@'*)
+        cc=0
         left=$(hunk_new_lines "$line")
         ;;
     esac
@@ -252,19 +323,27 @@ while IFS= read -r file; do
 done < "$paths"
 
 mails=$(dirname "$(readlink -f "$0")")/commit-traces
-while read -r local_sha remote_sha; do
-  [ -n "${local_sha:-}" ] || continue
-  if [ "$remote_sha" = "$zero" ] && [ -z "$(git for-each-ref --format='%(objectname)' refs/remotes)" ]; then
-    sh "$mails" mails "$local_sha"
-    scan_sha "$local_sha" . ":(exclude)$self" ":(exclude)$listfile"
-    continue
-  fi
-  if [ "$remote_sha" = "$zero" ]; then
-    sh "$mails" mails "$local_sha" --not --remotes
-    git log -p -U0 --pretty=format: --diff-filter=ACMR "$local_sha" --not --remotes -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
-  else
-    sh "$mails" mails "${remote_sha}..${local_sha}"
-    git diff -U0 --diff-filter=ACMR "$remote_sha" "$local_sha" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch"
-  fi
-  scan_patch "$patch"
+
+# Every commit the push adds is checked on its own: commits already on the
+# remote you push to (its remote-tracking refs; fetch first) are not checked
+# again, and a push to a URL, or a remote with no tracking refs, checks
+# everything the remote tip does not already hold. A plain commit is scanned
+# through its own patch, a root commit against the empty tree; a merge is
+# scanned through its combined diff, which holds only the conflict
+# resolution, beside the patches of the commits it carries.
+while read -r sel; do
+  [ -n "${sel:-}" ] || continue
+  sh "$mails" mails $sel
+  git rev-list --no-merges $sel > "$plain" || search_failed
+  while IFS= read -r c || [ -n "$c" ]; do
+    [ -n "$c" ] || continue
+    git diff-tree -p -U0 --root --no-ext-diff --no-color -M --diff-filter=ACMRT "$c" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch" || search_failed
+    scan_patch "$patch" "$c"
+  done < "$plain"
+  git rev-list --merges $sel > "$merges" || search_failed
+  while IFS= read -r c || [ -n "$c" ]; do
+    [ -n "$c" ] || continue
+    git diff-tree --cc -U0 --no-ext-diff --no-color "$c" -- . ":(exclude)$self" ":(exclude)$listfile" > "$patch" || search_failed
+    scan_patch "$patch" "$c"
+  done < "$merges"
 done < "$ranges"

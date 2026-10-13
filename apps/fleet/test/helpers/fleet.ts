@@ -41,7 +41,7 @@ export function testConfig(dir: string, over: Partial<FleetConfig> = {}): FleetC
 
 export async function startTestFleet(o: FleetOptions & { dir?: string; config?: Partial<FleetConfig> } = {}): Promise<TestFleet> {
   const dir = o.dir ?? tempDir();
-  const fleet = await startFleet(testConfig(dir, o.config), { log: quiet, handshakeLimits: WIDE, ...o });
+  const fleet = await startFleet(testConfig(dir, o.config), { log: quiet, handshakeLimits: WIDE, holdPath: join(dir, "hold.json"), ...o });
   running.add(fleet);
   const close = () => fleet.close();
   const agentUrl = `ws://127.0.0.1:${fleet.agentPort}/agent`;

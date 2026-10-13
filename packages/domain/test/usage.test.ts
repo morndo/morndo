@@ -8,6 +8,7 @@ const HOUR = 3_600_000;
 const report = (o: Partial<UsageReport> = {}): UsageReport => ({
   account: "max-1", sessionId: "s1", lane: "builder", model: "Opus", at: NOW, contextUsed: 8,
   fiveHour: { usedPercentage: 23.5, resetsAt: NOW + 2 * HOUR }, sevenDay: { usedPercentage: 41.2, resetsAt: NOW + 3 * 24 * HOUR }, spend: null,
+  limits: null, onDemand: null,
   ...o,
 });
 
@@ -54,6 +55,58 @@ describe("sessions (U3) and what is shown now", () => {
     expect(shown.fiveHour).toBeNull();
     expect(shown.sevenDay?.usedPercentage).toBe(41.2);
     expect(shown.sessions).toEqual([]);                               // 2 hours silent: not reporting
+  });
+});
+
+describe("an account's own windows", () => {
+  const cursor = (): UsageReport => ({
+    ...report({ account: "cursor", fiveHour: null, sevenDay: null, spend: null, model: "Cursor Ultra" }),
+    limits: [
+      { label: "Cursor models", usedPercentage: 88, resetsAt: NOW + 27 * 24 * HOUR, resetsOn: "2026-11-07" },
+      { label: "Other models", usedPercentage: 45, resetsAt: NOW + 27 * 24 * HOUR, resetsOn: "2026-11-07" },
+    ],
+    onDemand: "off",
+  } as UsageReport);
+
+  it("a report names each window with its label, percent and reset, and says when it has no 5-hour or weekly window", () => {
+    const a = applyReport(null, cursor(), NOW);
+    expect(a.limits?.map(w => [w.label, w.usedPercentage, w.resetsOn])).toEqual([
+      ["Cursor models", 88, "2026-11-07"],
+      ["Other models", 45, "2026-11-07"],
+    ]);
+    expect(a.onDemand).toBe("off");
+    expect(a.fiveHour).toBeNull();
+    expect(a.sevenDay).toBeNull();
+    const classic = applyReport(null, report(), NOW);
+    expect(classic.limits).toBeNull();
+    expect(classic.onDemand).toBeNull();
+    expect(classic.fiveHour?.usedPercentage).toBe(23.5);
+  });
+
+  it("a later status line keeps named windows until they reset", () => {
+    const first = applyReport(null, cursor(), NOW);
+    const kept = applyReport(first, report({ account: "cursor", at: NOW + 1000, fiveHour: null, sevenDay: null }), NOW + 1000);
+    expect(kept.limits?.[0]?.label).toBe("Cursor models");
+    expect(kept.onDemand).toBe("off");
+    expect(kept.fiveHour).toBeNull();
+    const after = accountNow(first, NOW + 27 * 24 * HOUR + 1);
+    expect(after.limits).toBeNull();
+    expect(after.onDemand).toBeNull();
+    const back = applyReport(after, report({ account: "cursor", at: NOW + 27 * 24 * HOUR + 2, fiveHour: { usedPercentage: 10, resetsAt: NOW + 30 * 24 * HOUR }, sevenDay: null }), NOW + 27 * 24 * HOUR + 2);
+    expect(back.limits).toBeNull();
+    expect(back.fiveHour?.usedPercentage).toBe(10);
+    expect(back.onDemand).toBeNull();
+  });
+
+  it("an empty named list is not named mode, and a row without a label does not wipe the bars", () => {
+    const empty = applyReport(null, report({ limits: [], fiveHour: { usedPercentage: 10, resetsAt: NOW + HOUR } }), NOW);
+    expect(empty.limits).toBeNull();
+    expect(empty.onDemand).toBeNull();
+    expect(empty.fiveHour?.usedPercentage).toBe(10);
+    const first = applyReport(null, cursor(), NOW);
+    const kept = applyReport(first, { ...cursor(), at: NOW + 1, limits: [{ label: " ", usedPercentage: 9, resetsAt: NOW + HOUR, resetsOn: null }] }, NOW + 1);
+    expect(kept.limits?.map(w => w.label)).toEqual(["Cursor models", "Other models"]);
+    expect(kept.onDemand).toBe("off");
   });
 });
 

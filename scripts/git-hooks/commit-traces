@@ -6,7 +6,8 @@
 #   sh commit-traces range <git rev-list args>
 #   sh commit-traces mails <git rev-list args>
 # A dependabot[bot] author, committer, or trailer is allowed. Any other
-# [bot] identity is not. Install the commit-msg hook with scripts/install-git-hooks.sh.
+# [bot] identity is not. Install the commit-msg hook with
+# scripts/install-git-hooks.sh.
 set -eu
 
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
