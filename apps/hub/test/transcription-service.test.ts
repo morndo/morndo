@@ -274,4 +274,31 @@ describe("transcription service", () => {
     expect(lines.at(-1)).toBe("transcription: off (missing)");
     svc.close();
   });
+
+  it("re-locates the plugin on each probe, so installing it turns the feature on without a restart", async () => {
+    const gate = new Gate();
+    const found: { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } = {
+      transcriber: null, unavailable: { ready: false, reason: "missing", detail: "missing" },
+    };
+    const lines: string[] = [];
+    const svc = new TranscriptionService({
+      store: memory(), transcriber: null, locate: () => found,
+      now: () => 1_700_000_000_000, file: (recording: Recording) => files.get(recording.id) ?? null,
+      log: line => lines.push(line), probeTtlMs: 0,
+    });
+    await svc.start();
+    expect(svc.me()).toBe(false);                                     // /api/me keeps reporting the startup answer today
+    found.transcriber = gate.transcriber;
+    found.unavailable = null;
+    await svc.refresh();
+    expect(svc.me()).toMatchObject({ engine: "fixture-ear", model: "tiny-fixture" });
+    expect(lines.at(-1)).toBe("transcription: on (fixture-ear tiny-fixture)");
+    // The other way round: a binary that went group-writable after start is not run any more (design §6).
+    found.transcriber = null;
+    found.unavailable = { ready: false, reason: "not_ready", detail: "unsafe_permissions" };
+    await svc.refresh();
+    expect(svc.me()).toBe(false);
+    expect(lines.at(-1)).toBe("transcription: off (not_ready)");
+    svc.close();
+  });
 });
