@@ -13,6 +13,7 @@
 #   actions/attest v4.2.2                     1e69f48acb82d1966a394da916b4c1698aa569d6
 #   actions/upload-pages-artifact v5.0.0      fc324d3547104276b827a68afc52ff2a11cc49c9
 #   actions/deploy-pages v5.0.1               368f82528645a54fb793d4d04e342629a3f51346
+#   actions/create-github-app-token v3.3.0    64ab729a6294000f5aa4a4bc0b73d1f32bc45510
 name: Release
 
 on:
@@ -45,9 +46,20 @@ jobs:
       # actionlint-disable-next-line
       version: ${{ steps.release.outputs.version }}
     steps:
+      # A pull request opened with GITHUB_TOKEN starts no workflows, so the required checks never run.
+      # https://docs.github.com/en/actions/concepts/security/github_token (read 2026-10-13)
+      # The app token opens the release PR. Secrets: RELEASE_APP_ID, RELEASE_APP_PRIVATE_KEY.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
       - id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
+          token: ${{ steps.app.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 

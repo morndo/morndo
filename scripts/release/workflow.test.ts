@@ -6,6 +6,7 @@ import { BUNDLED_NODE, NODE_RELEASE_KEYS_COMMIT } from "./node-pin.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE } from "./sign.ts";
 
 const RELEASE_PLEASE = "45996ed1f6d02564a971a2fa1b5860e934307cf7";
+const APP_TOKEN = "64ab729a6294000f5aa4a4bc0b73d1f32bc45510";
 const ATTEST = "1e69f48acb82d1966a394da916b4c1698aa569d6";
 const DOWNLOAD_ARTIFACT = "37930b1c2abaa49bbe596cd826c3c89aef350131";
 const UPLOAD_PAGES = "fc324d3547104276b827a68afc52ff2a11cc49c9";
@@ -38,6 +39,13 @@ describe("release pipeline files", () => {
       "changelog-path": "CHANGELOG.md",
     });
     expect(config.packages["."]).not.toHaveProperty("bump-patch-for-minor-pre-major");
+    const prepare = job(release, "release-please");
+    expect(prepare).toContain(`actions/create-github-app-token@${APP_TOKEN}`);
+    expect(prepare).toContain("secrets.RELEASE_APP_ID");
+    expect(prepare).toContain("secrets.RELEASE_APP_PRIVATE_KEY");
+    expect(prepare).toContain("permission-contents: write");
+    expect(prepare).toContain("permission-pull-requests: write");
+    expect(prepare).toContain("steps.app.outputs.token");
     expect(JSON.parse(readFileSync(".release-please-manifest.json", "utf8"))).toEqual({ ".": "0.0.0" });
     expect(readFileSync("CHANGELOG.md", "utf8").startsWith("# Changelog\n")).toBe(true);
     expect(release).toContain(`googleapis/release-please-action@${RELEASE_PLEASE}`);
