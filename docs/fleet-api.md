@@ -729,7 +729,7 @@ GET /v1/lane-events?since={{number:le4}}
 
 ### 7.1 The lane watch
 
-The fleet keeps each lane's last turn end and watches for anything after it: a hook from that lane (progress, a new turn, a session state change) is activity. Each kind of turn end has a deadline:
+The fleet keeps each lane's last turn end and watches for anything after it: a hook from that lane (a tool call or prompt on `/cc`, a new turn, a session state change) is activity. The status line's `/sl` is not: Claude Code re-runs it on a timer when `refreshInterval` is set, idle or not. Each kind of turn end has a deadline:
 
 | Last turn | Deadline |
 |---|---|

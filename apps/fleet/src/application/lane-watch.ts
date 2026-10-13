@@ -70,9 +70,11 @@ export class LaneWatch {
     this.#sweepMs = p.sweepMs ?? SWEEP_MS;
   }
 
-  // Any hook from a lane: activity after its last turn end.
+  // A hook from a lane: activity after its last turn end. Not the status line's: Claude Code re-runs it on a timer when
+  // `refreshInterval` is set, idle or not (https://code.claude.com/docs/en/statusline, read 2026-10-13), so it says
+  // nothing about the lane doing anything.
   saw(e: HookEvent): void {
-    if (e.window === null) return;
+    if (e.window === null || e.path === "/sl") return;
     const t = this.#turns.get(keyOf(e.node, e.window));
     if (t && e.at > t.active) t.active = e.at;
   }

@@ -42,7 +42,7 @@ STATUS: DONE | STATUS: BLOCKED | STATUS: NEEDS DECISION | STATUS: WAITING <on wh
 
 ### 3.2 The fleet watches every lane's last turn (lane watch)
 
-For each lane (node and window), the fleet keeps its last turn end: status, background work, and when. Any later hook from that lane (progress, a new turn, a session state change) is activity.
+For each lane (node and window), the fleet keeps its last turn end: status, background work, and when. Any later hook from that lane (a tool call or prompt, a new turn, a session state change) is activity; the status line is not, since Claude Code can re-run it on a timer while the lane is idle.
 
 | Last turn | Deadline |
 |---|---|
