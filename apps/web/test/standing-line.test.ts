@@ -39,4 +39,15 @@ describe("standingLine", () => {
     expect(standingLine(item({ id: "d-own" as DecisionItem["id"], version: "v2", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
     expect(standingLine(item({ id: "d-other" as DecisionItem["id"], decision: missing as typeof decision }), "Alpha")).toBe("Answered: Extend the triage script.");
   });
+
+  it("an empty seen or an empty version is not this device's send", () => {
+    clearSends();
+    const decision = { choice: { kind: "option" as const, key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere" as const, endpointId: null, sessionId: null };
+    rememberSend("d-blank", "req-1", "");
+    expect(standingLine(item({ id: "d-blank" as DecisionItem["id"], version: "", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
+    rememberSend("d-blank", "req-2", "v1");
+    expect(standingLine(item({ id: "d-blank" as DecisionItem["id"], version: "", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
+    rememberSend("d-blank", "req-3", "");
+    expect(standingLine(item({ id: "d-blank" as DecisionItem["id"], version: "v1", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
+  });
 });
