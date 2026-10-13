@@ -70,7 +70,9 @@ async function stripByRemux(b: Uint8Array, container: keyof typeof REMUX_FORMAT,
     writeFileSync(input, b, { mode: 0o600 });
     const code = await runFfmpeg([
       "-nostdin", "-v", "error", "-y", "-i", input,
-      "-map", "0:a", "-map_chapters", "-1", "-map_metadata", "-1", "-c", "copy", "-f", REMUX_FORMAT[container], output,
+      "-map", "0:a", "-map_chapters", "-1", "-map_metadata", "-1", "-c", "copy",
+      ...(container === "mp4" ? ["-movflags", "+faststart"] as const : []),
+      "-f", REMUX_FORMAT[container], output,
     ], timeoutMs);
     if (code !== 0) return b;
     const out = readFileSync(output);

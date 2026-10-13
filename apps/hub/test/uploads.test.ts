@@ -113,6 +113,27 @@ describe("metadata a recording carries", async () => {
     }
   });
 
+  it("a long m4a still reports its duration after the remux", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "morndo-long-"));
+    try {
+      const file = join(folder, "note.m4a");
+      const made = spawnSync("ffmpeg", [
+        "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=420",
+        "-c:a", "aac", "-b:a", "16k", "-f", "mp4", file,
+      ], { encoding: "utf8" });
+      expect(made.status, made.stderr).toBe(0);
+      const out = Buffer.from(await stripMetadata(readFileSync(file), "mp4"));
+      const headLen = Math.min(out.length, 256 * 1024);
+      const tailLen = Math.min(out.length - headLen, 64 * 1024);
+      const ms = audioDurationMs({
+        head: out.subarray(0, headLen), tail: out.subarray(out.length - tailLen), tailAt: out.length - tailLen, size: out.length,
+      });
+      expect(ms).toBeGreaterThan(400_000);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("an m4a loses its cover and its chapter titles", async () => {
     const folder = mkdtempSync(join(tmpdir(), "morndo-cover-"));
     try {
