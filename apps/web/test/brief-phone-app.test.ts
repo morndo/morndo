@@ -2,7 +2,7 @@
 // was doing — a conversation, catch-up or Today — and the answer it starts belongs to the run's card on top. The hub
 // is faked at the browser's edge and its answer endpoint gated (harness.ts); the navigation stand-ins keep shallow-
 // routing state the way Kit 2.70.3 does, raw entries included. Synthetic data only.
-import type { BrowserContext, Page } from "playwright";
+import type { Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DecisionBrief } from "@morndo/domain";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
@@ -100,7 +100,7 @@ async function phone(track: (tab: Page) => void, path = "", withGate = false) {
 const push = (tab: Page, items: DecisionItem[]) =>
   tab.evaluate(x => (globalThis as unknown as FeedWin).__feedPush({ t: "decisions", items: x, ledger: { configured: false, ok: true, at: null } }), items);
 const queue = (tab: Page, answers: { status: number }[]) =>
-  tab.evaluate(x => { (globalThis as unknown as FeedWin).__answers!.push(...x); }, answers);
+  tab.evaluate(x => { (globalThis as unknown as FeedWin).__answerReplies!.push(...x); }, answers);
 const calls = (tab: Page) => tab.evaluate(() => (globalThis as unknown as FeedWin).__answerCalls ?? []);
 const runDone = (tab: Page) => tab.evaluate(() => (JSON.parse(localStorage.getItem("morndo.catchup.run") ?? "{}") as { run?: { done?: Record<string, string> } }).run?.done ?? {});
 
@@ -218,8 +218,9 @@ describe("the phone around the brief sheet", () => {
     await dialog.getByText("Sent. The manager gets it as your decision and acts on it.").waitFor({ timeout: 15_000 });
     const posts = await calls(tab);
     expect(posts).toHaveLength(2);
-    const [first, second] = posts as { body: { requestId?: string } }[];
-    expect(second.body.requestId).toBe(first.body.requestId);            // typed at most once
+    const ids = (posts as { body: { requestId?: string } }[]).map(p => p.body.requestId);
+    expect(ids[1]).toBeDefined();                                        // typed at most once
+    expect(ids[1]).toBe(ids[0]);
     expect(errors).toEqual([]);
     await context.close();
   });

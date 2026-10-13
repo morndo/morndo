@@ -66,7 +66,7 @@ export type FeedWin = {
   __signedOut?: boolean;                      // true: GET /api/me answers 401
   __feedClose: (code: number) => void;        // the current feed socket closes with this code
   __answerCalls?: { url: string; body: unknown }[];   // every answer POST that reached the gate, body parsed
-  __answers?: { status: number; body?: unknown }[];   // the replies the gate sends, in order; 200 when it runs out
+  __answerReplies?: { status: number; body?: unknown }[];   // the gate's replies, in order; 200 when it runs out
 };
 
 // Runs in the page before the app (addInitScript, ahead of fakeFeed): the hub's answer endpoint. Every POST to
@@ -76,14 +76,15 @@ export type FeedWin = {
 export function answerGate() {
   const w = globalThis as unknown as FeedWin;
   w.__answerCalls = [];
-  w.__answers = [];
+  w.__answerReplies = [];
   const g = globalThis as { fetch: typeof fetch };
   const real = g.fetch.bind(globalThis);
   g.fetch = async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.pathname : input.url;
     if (/^\/api\/escalations\/[^/]+\/answer$/.test(new URL(url, "http://gate.test").pathname)) {
-      w.__answerCalls?.push({ url, body: init?.body === undefined ? null : JSON.parse(String(init.body)) });
-      const next = w.__answers?.shift() ?? { status: 200 };
+      const raw = typeof init?.body === "string" ? init.body : null;
+      w.__answerCalls?.push({ url, body: raw === null ? null : JSON.parse(raw) });
+      const next = w.__answerReplies?.shift() ?? { status: 200 };
       return new Response(JSON.stringify(next.body ?? {}), { status: next.status });
     }
     return real(input, init);
