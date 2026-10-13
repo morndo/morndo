@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { guardNow, readMachine } from "../src/adapters/transcription-config.ts";
+import { guardNow, readMachine, watchMachine } from "../src/adapters/transcription-config.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -42,6 +42,32 @@ describe("transcription guard reads", () => {
     expect(guardNow({ memAvailableMiB: 1024 }, () => readMachine({ memAvailableMiB: 1024 }, {
       platform: "darwin", vmStat: () => { throw new Error("vm_stat failed"); },
     }))).toBe("unknown");
+  });
+
+  it("a failed refresh makes the guard unknown instead of keeping the last figure", async () => {
+    const pages = [
+      "Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+      "Pages free:                               100000.",
+      "Pages inactive:                             10000.",
+      "Pages speculative:                          10000.",
+    ].join("\n");
+    let fail = false;
+    const watched = watchMachine({ memAvailableMiB: 64 }, {
+      platform: "darwin",
+      vmStat: async () => {
+        if (fail) throw new Error("vm_stat failed");
+        return pages;
+      },
+    });
+    try {
+      await watched.refresh();
+      expect(guardNow({ memAvailableMiB: 64 }, watched.read)).toBe("off");
+      fail = true;
+      await expect(watched.refresh()).rejects.toThrow("vm_stat failed");
+      expect(guardNow({ memAvailableMiB: 64 }, watched.read)).toBe("unknown");
+    } finally {
+      watched.close();
+    }
   });
 
   it("keeps total memory on every platform that is not linux or macOS", () => {

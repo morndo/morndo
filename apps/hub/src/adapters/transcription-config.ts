@@ -123,18 +123,23 @@ export function watchMachine(
     return pending;
   };
   async function fill(): Promise<void> {
-    const platform = o.platform ?? process.platform;
-    const rest: { platform: NodeJS.Platform; loadavg?: () => number[]; totalmem?: () => number; loadPath?: string; memPath?: string } = { platform };
-    if (o.loadavg) rest.loadavg = o.loadavg;
-    if (o.totalmem) rest.totalmem = o.totalmem;
-    if (o.loadPath) rest.loadPath = o.loadPath;
-    if (o.memPath) rest.memPath = o.memPath;
-    if (platform === "darwin" && policy?.memAvailableMiB !== undefined) {
-      const text = await (o.vmStat ?? vmStatText)();
-      sample = readMachine(policy, { ...rest, vmStat: () => text });
-      return;
+    try {
+      const platform = o.platform ?? process.platform;
+      const rest: { platform: NodeJS.Platform; loadavg?: () => number[]; totalmem?: () => number; loadPath?: string; memPath?: string } = { platform };
+      if (o.loadavg) rest.loadavg = o.loadavg;
+      if (o.totalmem) rest.totalmem = o.totalmem;
+      if (o.loadPath) rest.loadPath = o.loadPath;
+      if (o.memPath) rest.memPath = o.memPath;
+      if (platform === "darwin" && policy?.memAvailableMiB !== undefined) {
+        const text = await (o.vmStat ?? vmStatText)();
+        sample = readMachine(policy, { ...rest, vmStat: () => text });
+        return;
+      }
+      sample = readMachine(policy, rest);
+    } catch (error) {
+      sample = {};
+      throw error;
     }
-    sample = readMachine(policy, rest);
   }
   const timer = setInterval(() => void refresh().catch(() => {}), MACHINE_CACHE_MS);
   timer.unref?.();
