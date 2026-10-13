@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type Database from "better-sqlite3";
 import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
+import { MIGRATION_LIST } from "./migration-list.ts";
 
 export type { Migration };
 
@@ -20,11 +21,8 @@ export class DatabaseFromFuture extends Error {
   }
 }
 
-export const MIGRATIONS: readonly Migration[] = [
+const UPS: { up: Migration["up"] }[] = [
   {
-    version: 1,
-    name: "the agent's schema: meta (streamId), done keys, the hook stream, relay file copies (fleet-core spec §5.3–5.5, §6)",
-    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -45,9 +43,6 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    version: 2,
-    name: "store_seq: how many keyed ops this database has started, never lowered (fleet core §5.3; final review I2, the store sequence)",
-    compat: "additive",
     // One row. It goes up by one in the transaction that commits each keyed op's `started` (done-keys.ts), and every
     // answer carries it, so a caller that saw a higher number from this store can tell a database put back from an older
     // copy in place (cp over the file, a VM snapshot), which keeps the file's identity and the stream id.
@@ -57,9 +52,6 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    version: 3,
-    name: "jobs: one row per background job, hashes only, no command (ADR-0017)",
-    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE jobs (
@@ -90,9 +82,6 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    version: 4,
-    name: "job notices: one lane.deliver per notice id (ADR-0017)",
-    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE job_deliveries (
@@ -105,9 +94,6 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    version: 5,
-    name: "job token cache: the lane and the hash only, for 24 hours (ADR-0017 decision 7)",
-    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE token_cache (
@@ -119,12 +105,15 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    version: 6,
-    name: "a job keeps the notice text it showed, so a later notice change still has it",
-    compat: "additive",
     up: db => { db.exec("ALTER TABLE jobs ADD COLUMN notice_text TEXT"); },
   },
 ];
+if (UPS.length !== MIGRATION_LIST.length) throw new Error("migration list and up functions differ");
+export const MIGRATIONS: readonly Migration[] = MIGRATION_LIST.map((row, i) => {
+  const step = UPS[i];
+  if (!step) throw new Error(`migration ${row.version} has no up function`);
+  return { version: row.version, name: row.name, compat: row.compat, up: step.up };
+});
 
 export function migrate(db: Database.Database, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {
   return runMigrations(db, migrations, (found, known) => new DatabaseFromFuture(found, known));

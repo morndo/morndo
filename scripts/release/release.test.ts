@@ -4,6 +4,7 @@
 // Manifest are the wire documents, ssh-keygen accepts the signature, and re-signing a Feed moves
 // its number and its expiry only.
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -95,6 +96,11 @@ describe("file list and manifest", () => {
     ]);
     expect(listed.sha256).toBe(sha256(new TextEncoder().encode(listed.json)));
     expect(listed.json.endsWith("\n")).toBe(true);
+  });
+
+  it("reads the schema lists without loading the database driver", () => {
+    const require = createRequire(import.meta.url);
+    expect(Object.keys(require.cache).some(key => key.includes("better-sqlite3"))).toBe(false);
   });
 
   it("states this tree's schemas, including a floor of 0 where nothing breaking has shipped", () => {

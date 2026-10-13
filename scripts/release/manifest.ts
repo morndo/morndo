@@ -3,10 +3,10 @@
 // migration, or 0 when every migration so far is additive.
 import type { DatabaseName, Platform, ProtocolRange, SchemaInfo } from "@morndo/domain";
 import { CLIENT_API, FLEET_PROTO, ManifestSchema } from "@morndo/protocol";
-import { MIGRATIONS as connectionMigrations } from "../../apps/connections/src/adapters/store-migrations.ts";
-import { MIGRATIONS as fleetMigrations } from "../../apps/fleet/src/adapters/migrations.ts";
-import { MIGRATIONS as hubMigrations } from "../../apps/hub/src/adapters/migrations.ts";
-import { MIGRATIONS as nodeMigrations } from "../../apps/node-agent/src/db/migrations.ts";
+import { MIGRATION_LIST as connectionMigrations } from "../../apps/connections/src/adapters/store-migration-list.ts";
+import { MIGRATION_LIST as fleetMigrations } from "../../apps/fleet/src/adapters/migration-list.ts";
+import { MIGRATION_LIST as hubMigrations } from "../../apps/hub/src/adapters/migration-list.ts";
+import { MIGRATION_LIST as nodeMigrations } from "../../apps/node-agent/src/db/migration-list.ts";
 import { canonicalJson, isoUtc } from "./json.ts";
 
 type SchemaMigration = { version: number; compat: "additive" | "breaking" };

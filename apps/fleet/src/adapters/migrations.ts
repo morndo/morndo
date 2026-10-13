@@ -4,6 +4,7 @@
 // service is refused, unless the floor (ADR-0019 §11.1) says every migration up to its version was additive.
 import type Database from "better-sqlite3";
 import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
+import { MIGRATION_LIST } from "./migration-list.ts";
 
 export type { Migration };
 
@@ -18,11 +19,8 @@ export class DatabaseFromFuture extends Error {
   }
 }
 
-export const MIGRATIONS: readonly Migration[] = [
+const UPS: { up: Migration["up"] }[] = [
   {
-    version: 1,
-    name: "the fleet schema: nodes, join codes, stream marks, lanes, the hook outbox, dead letters, audit (ADR-0012)",
-    compat: "additive",
     up: db => db.exec(`
       -- conn_epoch: the number of the node's latest welcome, a fencing token that only grows, across restarts too.
       CREATE TABLE nodes (
@@ -53,18 +51,12 @@ export const MIGRATIONS: readonly Migration[] = [
     `),
   },
   {
-    version: 2,
-    name: "hook events no subscriber takes, counted per path (final review I3; ADR-0012 decision 8)",
-    compat: "additive",
     up: db => db.exec(`
       -- Acknowledged to the node and stored for no one: counted, so they are never lost silently (morndo-fleet status).
       CREATE TABLE hook_unrouted (path TEXT PRIMARY KEY, count INTEGER NOT NULL, latest_at INTEGER NOT NULL);
     `),
   },
   {
-    version: 3,
-    name: "the highest store sequence each agent database has shown, per node and store (fleet core §5.2, §5.3; the fix wave's follow-up)",
-    compat: "additive",
     up: db => db.exec(`
       -- Sent in the welcome as storeSeqSeen: an agent whose database is behind it was put back from an older copy.
       CREATE TABLE IF NOT EXISTS store_seqs (
@@ -72,9 +64,6 @@ export const MIGRATIONS: readonly Migration[] = [
     `),
   },
   {
-    version: 4,
-    name: "the pending deliveries alone, per subscriber in outbox order, for the backlog cap (B6 EF3)",
-    compat: "additive",
     up: db => db.exec(`
       -- A partial index (https://www.sqlite.org/partialindex.html): only rows still to deliver are in it, in outbox
       -- order, so the backlog cap finds a subscriber's oldest pending progress event without sorting its whole backlog.
@@ -82,9 +71,6 @@ export const MIGRATIONS: readonly Migration[] = [
     `),
   },
   {
-    version: 5,
-    name: "a job row the fleet may show (ADR-0017, ADR-0014): state, never the command line",
-    compat: "additive",
     up: db => db.exec(`
       -- No argv, command, cwd, env or token column. The tail is the redacted tail the node already sent.
       CREATE TABLE jobs (
@@ -109,9 +95,6 @@ export const MIGRATIONS: readonly Migration[] = [
     `),
   },
   {
-    version: 6,
-    name: "one routed notice id per job (ADR-0014): the text stays on the node that types it",
-    compat: "additive",
     up: db => db.exec(`
       -- The destination node stores the text. This row is only the id, the job and the node that types it.
       CREATE TABLE job_routes (
@@ -122,9 +105,6 @@ export const MIGRATIONS: readonly Migration[] = [
     `),
   },
   {
-    version: 7,
-    name: "a job is (node, id): two nodes may use the same id, and a notice id names the node that ran it",
-    compat: "breaking",                                                // it drops and rebuilds the jobs tables (§11.2): the fleet's floor
     up: db => db.exec(`
       CREATE TABLE jobs_keyed (
         node TEXT NOT NULL,
@@ -167,51 +147,36 @@ export const MIGRATIONS: readonly Migration[] = [
     `),
   },
   {
-    version: 8,
-    name: "one job_failed alert per (node, id) (ADR-0017): a replay of ev.job does not raise it again",
-    compat: "additive",
     up: db => db.exec("CREATE TABLE job_alerts (node TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (node, id));"),
   },
   {
-    version: 9,
-    name: "a job's real end time, separate from the observation stamp (ADR-0017)",
-    compat: "additive",
     up: db => db.exec("ALTER TABLE jobs ADD COLUMN ended INTEGER;"),
   },
   {
-    version: 10,
-    name: "job_failed starts when this fleet learned to alert, not from jobs that already ended (ADR-0017)",
-    compat: "additive",
     up: db => {
       db.exec("CREATE TABLE job_alert_since (at INTEGER NOT NULL);");
       db.prepare("INSERT INTO job_alert_since (at) VALUES (?)").run(Date.now());
     },
   },
   {
-    version: 11,
-    name: "one job_unnoticed alert per (node, id) (ADR-0017): a given_up notice raises it once",
-    compat: "additive",
     up: db => db.exec("CREATE TABLE job_unnoticed (node TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY (node, id));"),
   },
   {
-    version: 12,
-    name: "an index for the notice retry: which job a route belongs to",
-    compat: "additive",
     up: db => { db.exec("CREATE INDEX job_routes_job ON job_routes(node, job_id)"); },
   },
   {
-    version: 13,
-    name: "the node a job notice was aimed at when the job finished",
-    compat: "additive",
     up: db => { db.exec("ALTER TABLE jobs ADD COLUMN notice_dest TEXT"); },
   },
   {
-    version: 14,
-    name: "the notice the node has already confirmed, so a welcome does not send it again",
-    compat: "additive",
     up: db => { db.exec("ALTER TABLE jobs ADD COLUMN node_notice TEXT"); },
   },
 ];
+if (UPS.length !== MIGRATION_LIST.length) throw new Error("migration list and up functions differ");
+export const MIGRATIONS: readonly Migration[] = MIGRATION_LIST.map((row, i) => {
+  const step = UPS[i];
+  if (!step) throw new Error(`migration ${row.version} has no up function`);
+  return { version: row.version, name: row.name, compat: row.compat, up: step.up };
+});
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
 

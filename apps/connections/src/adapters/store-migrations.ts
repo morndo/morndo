@@ -5,6 +5,7 @@
 import type Database from "better-sqlite3";
 import { emptyDirectory, emptyPolicy } from "@morndo/domain";
 import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
+import { MIGRATION_LIST } from "./store-migration-list.ts";
 
 export type { Migration };
 
@@ -19,11 +20,8 @@ export class DatabaseFromFuture extends Error {
   }
 }
 
-export const MIGRATIONS: readonly Migration[] = [
+const UPS: { up: Migration["up"] }[] = [
   {
-    version: 1,
-    name: "connections directory, events and routing policy",
-    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE cas (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL);
@@ -36,9 +34,6 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    version: 2,
-    name: "secrets on the node: metadata, the fingerprint ledger, grants, uses, events and workspaces",
-    compat: "additive",
     // Design §6, "Metadata"; §3.4 SC2. A held Secret is one row, its own versions (which restart after a Delete) a JSON
     // column. secret_versions is the fingerprint ledger: one row per version ever stored here, with its vault ref, kept
     // after a Delete. secret_uses waits for the broker (PR 3).
@@ -95,6 +90,12 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
 ];
+if (UPS.length !== MIGRATION_LIST.length) throw new Error("migration list and up functions differ");
+export const MIGRATIONS: readonly Migration[] = MIGRATION_LIST.map((row, i) => {
+  const step = UPS[i];
+  if (!step) throw new Error(`migration ${row.version} has no up function`);
+  return { version: row.version, name: row.name, compat: row.compat, up: step.up };
+});
 
 export function migrate(db: Database.Database, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {
   return runMigrations(db, migrations, (found, known) => new DatabaseFromFuture(found, known));

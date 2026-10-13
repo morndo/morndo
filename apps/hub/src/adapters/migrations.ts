@@ -5,6 +5,7 @@
 // to its version was additive — then it opens as it is.
 import type Database from "better-sqlite3";
 import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
+import { MIGRATION_LIST } from "./migration-list.ts";
 
 export type { Migration };
 
@@ -24,11 +25,8 @@ const hasColumn = (db: Database.Database, table: string, column: string) =>
 
 // Each migration can run on a database that already has its change (a hub from before numbered migrations created
 // these tables itself and left user_version at 0), so it checks before it changes anything.
-export const MIGRATIONS: readonly Migration[] = [
+const UPS: { up: Migration["up"] }[] = [
   {
-    version: 1,
-    name: "the schema of increment 1 (Access, audit, decisions)",
-    compat: "additive",
     up: db => db.exec(`
       CREATE TABLE IF NOT EXISTS pairing_tokens (
         id TEXT PRIMARY KEY, secret_hash TEXT UNIQUE NOT NULL, issued_by TEXT NOT NULL,
@@ -47,38 +45,23 @@ export const MIGRATIONS: readonly Migration[] = [
     `),
   },
   {
-    version: 2,
-    name: "sessions.verified_at: a session's last user verification (ADR-0006, AC7)",
-    compat: "additive",
     up: db => { if (!hasColumn(db, "sessions", "verified_at")) db.exec("ALTER TABLE sessions ADD COLUMN verified_at INTEGER"); },
   },
   {
-    version: 3,
-    name: "sends: each request id typed at most once, across restarts (ADR-0008 phase C, S5)",
-    compat: "additive",
     up: db => db.exec(`CREATE TABLE IF NOT EXISTS sends (
       key TEXT PRIMARY KEY, state TEXT NOT NULL CHECK (state IN ('started', 'done')), outcome TEXT, at INTEGER NOT NULL)`),
   },
   {
-    version: 4,
-    name: "uploads: the images the principal pasted, attachable after a restart (ADR-0008 phase C, S2)",
-    compat: "additive",
     up: db => db.exec(`CREATE TABLE IF NOT EXISTS uploads (
       id TEXT PRIMARY KEY, endpoint_id TEXT NOT NULL, path TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, at INTEGER NOT NULL)`),
   },
   {
-    version: 5,
-    name: "read marks and mute per conversation, on the hub (ADR-0008 phase D, O7)",
-    compat: "additive",
     up: db => db.exec(`
       CREATE TABLE IF NOT EXISTS read_marks (conversation TEXT PRIMARY KEY, at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS conversation_prefs (conversation TEXT PRIMARY KEY, muted INTEGER NOT NULL DEFAULT 0);
     `),
   },
   {
-    version: 6,
-    name: "a code on pairing tokens issued from an Endpoint, and Link requests (ADR-0008 phase E, AC10, AC11)",
-    compat: "additive",
     up: db => {
       if (!hasColumn(db, "pairing_tokens", "code")) db.exec("ALTER TABLE pairing_tokens ADD COLUMN code TEXT");
       db.exec(`CREATE TABLE IF NOT EXISTS link_requests (
@@ -88,34 +71,19 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    version: 7,
-    name: "one push subscription per Endpoint (ADR-0008 phase F, N4)",
-    compat: "additive",
     up: db => db.exec(`CREATE TABLE IF NOT EXISTS push_subscriptions (
       endpoint_id TEXT PRIMARY KEY, url TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, at INTEGER NOT NULL)`),
   },
   {
-    version: 8,
-    name: "sends.typed_at: when the node typed it, on its own clock, for matching the echo (fleet core §3.1)",
-    compat: "additive",
     up: db => { if (!hasColumn(db, "sends", "typed_at")) db.exec("ALTER TABLE sends ADD COLUMN typed_at INTEGER"); },
   },
   {
-    version: 9,
-    name: "ask_first_seen: when an ask without a message was first seen, so its answer key survives a hub restart",
-    compat: "additive",
     up: db => db.exec("CREATE TABLE IF NOT EXISTS ask_first_seen (key TEXT PRIMARY KEY, at INTEGER NOT NULL)"),
   },
   {
-    version: 10,
-    name: "sends.node_store: the agent database a send in doubt went to, so a repeat can tell a lost key from a send never started (fleet core §3.1)",
-    compat: "additive",
     up: db => { if (!hasColumn(db, "sends", "node_store")) db.exec("ALTER TABLE sends ADD COLUMN node_store TEXT"); },
   },
   {
-    version: 11,
-    name: "sends.worker_id and sends.request: an escalation answer in doubt keeps the worker it went to and the request that sent it, so its repeat asks that node (fleet core §3.1)",
-    compat: "additive",
     up: db => {
       if (!hasColumn(db, "sends", "worker_id")) db.exec("ALTER TABLE sends ADD COLUMN worker_id TEXT");
       if (!hasColumn(db, "sends", "request")) db.exec("ALTER TABLE sends ADD COLUMN request TEXT");
@@ -123,15 +91,9 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    version: 12,
-    name: "sends.node_store_seq: the store sequence a send or an answer in doubt saw from its store, so a repeat can tell that store's database put back from an older copy (fleet core §3.1, §5.3)",
-    compat: "additive",
     up: db => { if (!hasColumn(db, "sends", "node_store_seq")) db.exec("ALTER TABLE sends ADD COLUMN node_store_seq INTEGER"); },
   },
   {
-    version: 13,
-    name: "the board (ADR-0015): tasks, their events with provenance, and the agent tokens the manager and the lanes change it with",
-    compat: "additive",
     up: db => db.exec(`
       CREATE TABLE IF NOT EXISTS board_tasks (
         key TEXT PRIMARY KEY, n INTEGER UNIQUE NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL,
@@ -147,31 +109,25 @@ export const MIGRATIONS: readonly Migration[] = [
     `),
   },
   {
-    version: 14,
-    name: "usage (ADR-0016): the latest state of each connected account, as the status lines reported it",
-    compat: "additive",
     up: db => db.exec("CREATE TABLE IF NOT EXISTS usage_accounts (account TEXT PRIMARY KEY, body TEXT NOT NULL, reported_at INTEGER NOT NULL)"),
   },
   {
-    version: 15,
-    name: "answers waiting in the manager's inbox, one row per inbox message (ADR-0010; code review B7)",
-    compat: "additive",
     up: db => db.exec(`CREATE TABLE IF NOT EXISTS pending_answers (
       key TEXT PRIMARY KEY, escalation_id TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL)`),
   },
   {
-    version: 16,
-    name: "one board comment per job (ADR-0017): the job id is the idempotency key, so a replayed ev.job does not comment again",
-    compat: "additive",
     up: db => db.exec("CREATE TABLE IF NOT EXISTS job_notices (id TEXT PRIMARY KEY, result TEXT NOT NULL)"),
   },
   {
-    version: 17,
-    name: "a board result waits until the fleet acknowledges it (ADR-0017)",
-    compat: "additive",
     up: db => { if (!hasColumn(db, "job_notices", "acked")) db.exec("ALTER TABLE job_notices ADD COLUMN acked INTEGER NOT NULL DEFAULT 0"); },
   },
 ];
+if (UPS.length !== MIGRATION_LIST.length) throw new Error("migration list and up functions differ");
+export const MIGRATIONS: readonly Migration[] = MIGRATION_LIST.map((row, i) => {
+  const step = UPS[i];
+  if (!step) throw new Error(`migration ${row.version} has no up function`);
+  return { version: row.version, name: row.name, compat: row.compat, up: step.up };
+});
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
 
