@@ -227,6 +227,27 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
+  it("offers a re-asked decision, and does not treat an earlier answer in this run as this ask", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true);
+    await queue(tab, [{ status: 200 }]);
+    await push(tab, [triage, other]);
+    await tab.locator("button.banner.you").click();
+    await tab.getByRole("button", { name: "Ship today" }).click();
+    await tab.waitForTimeout(6_500);
+    expect((await runDone(tab))["d:d-1"]).toBe("answered");
+    await push(tab, [triageAgain, other]);
+    await tab.locator('button.back[aria-label="Back to Today"]').click();
+    await tab.getByRole("button", { name: "Today" }).click();
+    await tab.locator('li[data-row="d:d-1"] [data-open-brief="d-1"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).waitFor({ timeout: 3_000 });
+    expect(await dialog.getByText("Delivered. You chose Ship today.").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("answers the run's current entry for the decision, not its first-pass key", { timeout: 40_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track, "", true);

@@ -19,7 +19,7 @@
   import { STEP_UP_MS, type Policy } from "../SecurityChoices.svelte";
   import { postAnswer } from "../catchup/answer.ts";
   import { askForBrief as sharedAsk } from "../ask-brief.ts";
-  import type { Body } from "../catchup/run.ts";
+  import { baseKey, type Body } from "../catchup/run.ts";
   import { AnswerSession } from "../desktop/answer-session.svelte.ts";
   import type { AskOutcome } from "../desktop/answer-session.ts";
   import type { DecisionItem } from "../desktop/decisions.ts";
@@ -147,14 +147,20 @@
     const c = session.run?.cards[r.key];
     return c?.kind === "decision" && c.id === briefId ? r : null;
   });
-  const briefRunAnswered = $derived.by(() => {
+  // The run's current entry for the decision on screen, re-ask suffix included. An earlier entry of the
+  // same id (answered, or refused) is not this ask.
+  const briefCardKey = $derived.by(() => {
     const run = session.run;
-    if (!briefId || !run) return false;
-    for (const k of run.order) {
-      const c = run.cards[k];
-      if (c?.kind === "decision" && c.id === briefId && run.done[k] === "answered") return true;
-    }
-    return false;
+    if (!briefId || !run) return null;
+    const base = `d:${briefId}`;
+    let key: string | null = null;
+    for (const k of run.order) if (baseKey(k) === base) key = k;
+    return key;
+  });
+  const briefRunAnswered = $derived.by(() => {
+    const key = briefCardKey;
+    const run = session.run;
+    return key !== null && run !== null && run.done[key] === "answered";
   });
   // The sheet is open while page.state.brief is set. Back (and the browser's back) pop that entry.
   // A sheet opened from Today returns there when its entry is popped (finding 10): catch-up was never the place he
