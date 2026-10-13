@@ -23,9 +23,9 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     try { st = lstatSync(abs); } catch { continue; }
     if (st.isSymbolicLink()) throw new Error(`symlink escapes the tree: ${name}`);
     if (st.isFile()) files.push({ path: `app/${name}`, bytes: readFileSync(abs), mode: "0444" });
-    else if (st.isDirectory()) files.push(...walkCopied(abs, `app/${name}`, () => "0444", realpathSync(p.repo), p.compiled));
+    else if (st.isDirectory()) files.push(...walkCopied(abs, `app/${name}`, () => "0444", realpathSync(p.repo), p.compiled, APP_TOP));
   }
-  files.push(...walkCopied(p.nodeDir, "node", rel => rel.startsWith("node/bin/") ? "0555" : "0444", realpathSync(p.nodeDir)));
+  files.push(...walkCopied(p.nodeDir, "node", rel => rel.startsWith("node/bin/") ? "0555" : "0444", realpathSync(p.nodeDir), undefined, null));
   for (const [name, entry] of Object.entries(LAUNCHERS)) {
     files.push({ path: `bin/${name}`, bytes: Buffer.from(launcherSource(entry)), mode: "0555" });
   }
@@ -54,6 +54,7 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
 
 function walkCopied(
   dir: string, prefix: string, mode: (rel: string) => "0444" | "0555", root: string, compiled?: string,
+  tops: readonly string[] | null = null,
 ): TreeFile[] {
   const out: TreeFile[] = [];
   for (const name of readdirSync(dir).sort()) {
@@ -66,11 +67,11 @@ function walkCopied(
       if (!inside(real, root)) throw new Error(`symlink escapes the tree: ${rel}`);
       const built = compiledPackage(real, compiled);
       if (built) out.push(...walkCopied(built, rel, mode, built));
-      else if (shipped(real, root)) out.push({ path: rel, mode: "0555", link: linkTarget(abs, real) });
+      else if (shipped(real, root, tops)) out.push({ path: rel, mode: "0555", link: linkTarget(abs, real) });
       else out.push(copiedUnshipped(abs, rel, real, mode));
       continue;
     }
-    if (st.isDirectory()) out.push(...walkCopied(abs, rel, mode, root, compiled));
+    if (st.isDirectory()) out.push(...walkCopied(abs, rel, mode, root, compiled, tops));
     else if (st.isFile()) {
       if (name.endsWith(".test.ts") || name.endsWith(".test.js")) continue;
       out.push({ path: rel, bytes: readFileSync(abs), mode: mode(rel) });
@@ -98,9 +99,10 @@ function workspaceName(real: string): string | null {
   return value.name.slice("@morndo/".length);
 }
 
-function shipped(real: string, root: string): boolean {
+function shipped(real: string, root: string, tops: readonly string[] | null): boolean {
   const rel = relative(root, real).split(sep).join("/");
-  const parts = rel.split("/");
+  const parts = rel.split("/").filter(Boolean);
+  if (tops && !tops.includes(parts[0] ?? "")) return false;
   if (parts.some(part => SKIP_DIR.has(part))) return false;
   const base = parts.at(-1) ?? "";
   return !base.endsWith(".test.ts") && !base.endsWith(".test.js");

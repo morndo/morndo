@@ -373,13 +373,18 @@ describe("stage, launchers, node pin, notice", () => {
     mkdirSync(join(repo, "apps/hub/test"), { recursive: true });
     writeFileSync(join(repo, "apps/hub/src/index.ts"), "export const live = 1;\n");
     writeFileSync(join(repo, "apps/hub/test/hidden.ts"), "export const hidden = 1;\n");
+    mkdirSync(join(repo, "docs"), { recursive: true });
+    writeFileSync(join(repo, "docs/x.md"), "outside the staged set\n");
     symlinkSync("index.ts", join(repo, "apps/hub/src/alias.ts"));
     symlinkSync("../test/hidden.ts", join(repo, "apps/hub/src/from-test.ts"));
+    symlinkSync("../../../docs/x.md", join(repo, "apps/hub/src/doc.md"));
     const withLinks = join(temp(), "links-out");
     stageRelease({ repo, nodeDir, dest: withLinks, version: "0.1.0", compiled });
     expect(readlinkSync(join(withLinks, "app/apps/hub/src/alias.ts"))).toBe("index.ts");
     expect(lstatSync(join(withLinks, "app/apps/hub/src/from-test.ts")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(withLinks, "app/apps/hub/src/from-test.ts"), "utf8")).toBe("export const hidden = 1;\n");
+    expect(lstatSync(join(withLinks, "app/apps/hub/src/doc.md")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(withLinks, "app/apps/hub/src/doc.md"), "utf8")).toBe("outside the staged set\n");
     symlinkSync("../test", join(repo, "apps/hub/src/skipped-dir"));
     expect(() => stageRelease({ repo, nodeDir, dest: join(temp(), "bad-link"), version: "0.1.0", compiled })).toThrow(/not shipped/);
     expect(lstatSync(join(dest, "app/node_modules/@morndo/domain")).isSymbolicLink()).toBe(false);
