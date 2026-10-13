@@ -614,7 +614,7 @@ describe("install.sh", () => {
       encoding: "utf8",
       env: { ...process.env, MORNDO_RELEASE_BASE: `file://${bad.base}` },
     });
-    expect(run.status, run.stderr).not.toBe(0);
+    expect(run.status, run.stderr).toBe(65);
     expect(run.stderr).toMatch(/refusing archive path/);
   });
 

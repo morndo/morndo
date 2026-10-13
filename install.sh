@@ -106,72 +106,69 @@ fi
 # pwd -P is the physical directory. On macOS /var is a symlink to /private/var,
 # and a logical pwd would not match a resolved link target.
 extract_root=$(cd -P "$work/extract" && pwd -P)
-# find -P does not follow symlinks. Each name is one argument, and set -f is on,
-# so a "*" segment is not expanded. A link target is resolved with cd -P and pwd -P
-# (POSIX), not realpath -m, which macOS and busybox reject.
-find -P "$extract_root" -exec sh -c '
-  set -efu
-  root=$1
-  shift
-  resolve() {
-    dir=$1
-    target=$2
-    case $target in
-      /*) cursor= ;;
-      *) cursor=$(cd -P -- "$dir" && pwd -P) || return 1 ;;
-    esac
-    saved=$IFS
-    IFS=/
-    for part in $target; do
-      if [ -z "$part" ] || [ "$part" = "." ]; then
-        continue
-      fi
-      if [ "$part" = ".." ]; then
-        cursor=${cursor%/*}
-        [ -n "$cursor" ] || cursor=/
-        continue
-      fi
-      if [ -z "$cursor" ] || [ "$cursor" = / ]; then
-        next=/$part
-      else
-        next=$cursor/$part
-      fi
-      if [ -d "$next" ]; then
-        cursor=$(cd -P -- "$next" && pwd -P) || return 1
-      else
-        cursor=$next
-      fi
-    done
-    IFS=$saved
-    printf "%s\n" "$cursor"
-  }
-  for path do
-    case "$path" in
-      "$root"|"$root"/*) ;;
-      *) echo "refusing archive path $path" >&2; exit 65 ;;
-    esac
-    case "$path" in
+# find -P does not follow symlinks, and set -f is on, so a "*" segment is not
+# expanded. A link target is resolved with cd -P and pwd -P (POSIX), not
+# realpath -m, which macOS and busybox reject.
+# The check runs in this shell. find -exec + would turn an inner exit 65 into 1.
+resolve() {
+  dir=$1
+  target=$2
+  case $target in
+    /*) cursor= ;;
+    *) cursor=$(cd -P -- "$dir" && pwd -P) || return 1 ;;
+  esac
+  saved=$IFS
+  IFS=/
+  for part in $target; do
+    if [ -z "$part" ] || [ "$part" = "." ]; then
+      continue
+    fi
+    if [ "$part" = ".." ]; then
+      cursor=${cursor%/*}
+      [ -n "$cursor" ] || cursor=/
+      continue
+    fi
+    if [ -z "$cursor" ] || [ "$cursor" = / ]; then
+      next=/$part
+    else
+      next=$cursor/$part
+    fi
+    if [ -d "$next" ]; then
+      cursor=$(cd -P -- "$next" && pwd -P) || return 1
+    else
+      cursor=$next
+    fi
+  done
+  IFS=$saved
+  printf "%s\n" "$cursor"
+}
+find -P "$extract_root" > "$work/paths"
+while IFS= read -r path; do
+  case "$path" in
+    "$extract_root"|"$extract_root"/*) ;;
+    *) echo "refusing archive path $path" >&2; exit 65 ;;
+  esac
+  case "$path" in
+    *"
+"*) echo "refusing archive path $path" >&2; exit 65 ;;
+  esac
+  if [ -L "$path" ]; then
+    target=$(readlink "$path")
+    case "$target" in
       *"
 "*) echo "refusing archive path $path" >&2; exit 65 ;;
     esac
-    if [ -L "$path" ]; then
-      target=$(readlink "$path")
-      case "$target" in
-        *"
-"*) echo "refusing archive path $path" >&2; exit 65 ;;
-      esac
-      dir=$(dirname "$path")
-      resolved=$(resolve "$dir" "$target") || {
-        echo "refusing archive path $path -> $target" >&2
-        exit 65
-      }
-      case "$resolved" in
-        "$root"|"$root"/*) ;;
-        *) echo "refusing archive path $path -> $target" >&2; exit 65 ;;
-      esac
-    fi
-  done
-' sh "$extract_root" {} +
+    dir=$(dirname "$path")
+    resolved=$(resolve "$dir" "$target") || {
+      echo "refusing archive path $path -> $target" >&2
+      exit 65
+    }
+    case "$resolved" in
+      "$extract_root"|"$extract_root"/*) ;;
+      *) echo "refusing archive path $path -> $target" >&2; exit 65 ;;
+    esac
+  fi
+done < "$work/paths"
 mv "$work/extract" "$work/tree"
 chmod 0555 "$work/tree/bin/morndo"
 "$work/tree/bin/morndo" install --role "$role" --channel "$channel"
