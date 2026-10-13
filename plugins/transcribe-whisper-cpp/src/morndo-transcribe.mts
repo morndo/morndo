@@ -5,7 +5,7 @@
 // network. whisper.cpp's -oj offsets are milliseconds: examples/cli/cli.cpp writes t0 * 10, and t0 is
 // whisper's 10 ms unit (v1.9.5, read 2026-10-13).
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { closeSync, fstatSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
@@ -151,6 +151,54 @@ export function wavDurationMs(bytes: Uint8Array): number | null {
   return Math.round((dataBytes / block / rate) * 1000);
 }
 
+// Duration from the WAV header's data-chunk size. The sample bytes are not read, so a clip past the
+// 2 GiB readFileSync limit still reports too_long instead of throwing.
+export function wavDurationFile(path: string): number | null {
+  let fd: number;
+  try { fd = openSync(path, "r"); } catch { return null; }
+  try {
+    const size = fstatSync(fd).size;
+    const readAt = (at: number, len: number): Buffer | null => {
+      if (at < 0 || len < 1 || at + len > size) return null;
+      const buf = Buffer.alloc(len);
+      return readSync(fd, buf, 0, len, at) === len ? buf : null;
+    };
+    const head = readAt(0, 12);
+    if (head === null || head.toString("latin1", 0, 4) !== "RIFF" || head.toString("latin1", 8, 12) !== "WAVE") return null;
+    let offset = 12;
+    let rate = 0;
+    let channels = 0;
+    let bits = 0;
+    let dataBytes = -1;
+    const limit = Math.min(size, 1024 * 1024);
+    while (offset + 8 <= limit) {
+      const hdr = readAt(offset, 8);
+      if (hdr === null) return null;
+      const id = hdr.toString("latin1", 0, 4);
+      const chunk = hdr.readUInt32LE(4);
+      const body = offset + 8;
+      if (id === "fmt ") {
+        if (chunk < 16) return null;
+        const fmt = readAt(body, 16);
+        if (fmt === null || fmt.readUInt16LE(0) !== 1) return null;
+        channels = fmt.readUInt16LE(2);
+        rate = fmt.readUInt32LE(4);
+        bits = fmt.readUInt16LE(14);
+      } else if (id === "data") {
+        dataBytes = chunk;
+        break;
+      }
+      offset += 8 + chunk + (chunk % 2);
+    }
+    if (rate < 1 || channels < 1 || bits < 8 || bits % 8 !== 0 || dataBytes < 0) return null;
+    const block = channels * (bits / 8);
+    if (block < 1 || dataBytes % block !== 0) return null;
+    return Math.round((dataBytes / block / rate) * 1000);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function ascii(bytes: Uint8Array, at: number, word: string): boolean {
   for (let i = 0; i < word.length; i++) if (bytes[at + i] !== word.charCodeAt(i)) return false;
   return true;
@@ -288,13 +336,13 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
     const wav = join(dir, "in.wav");
     let converted: Child;
     try {
-      converted = await runChild(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", wav], dir);
+      converted = await runChild(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-t", String(cap + 1), "-i", input, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-y", wav], dir);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       return fail(code === "ENOENT" ? EXIT.notReady : EXIT.unreadable, "ffmpeg failed");
     }
     if (converted.code !== 0) return fail(EXIT.unreadable, "not audio");
-    const duration = wavDurationMs(readFileSync(wav));
+    const duration = wavDurationFile(wav);
     if (duration === null) return fail(EXIT.unreadable, "not audio");
     if (duration > cap * 1000) return fail(EXIT.tooLong, "too long");
     const out = join(dir, "out");

@@ -134,6 +134,45 @@ describe("morndo-transcribe", () => {
     expect(notReady.stderr).toContain("model");
   });
 
+  live("stops a long input at the cap and reports too_long from the wav header", async () => {
+    stage(true);
+    const seen = join(ROOT, "ffmpeg-args");
+    const header = Buffer.alloc(44);
+    header.write("RIFF", 0);
+    header.writeUInt32LE(36 + 16_000 * 2 * 601, 4);
+    header.write("WAVE", 8);
+    header.write("fmt ", 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(1, 22);
+    header.writeUInt32LE(16_000, 24);
+    header.writeUInt32LE(16_000 * 2, 28);
+    header.writeUInt16LE(2, 32);
+    header.writeUInt16LE(16, 34);
+    header.write("data", 36);
+    header.writeUInt32LE(16_000 * 2 * 601, 40);
+    const declared = join(ROOT, "declared.wav");
+    writeFileSync(declared, header);
+    writeFileSync(join(BIN, "ffmpeg"), `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(seen)}
+out=""
+for arg in "$@"; do out="$arg"; done
+cp ${JSON.stringify(declared)} "$out"
+`);
+    chmodSync(join(BIN, "ffmpeg"), 0o755);
+    const note = join(ROOT, "long-input.wav");
+    writeFileSync(note, pcmWav(1));
+    const tooLong = await run(
+      ["run", "--input", note, "--language", "en", "--threads", "1", "--max-seconds", "600", "--json"],
+      `${BIN}:${pathEnv}`,
+    );
+    const args = readFileSync(seen, "utf8").split("\n").filter(line => line !== "");
+    expect(args[args.indexOf("-t") + 1]).toBe("601");
+    expect(args.indexOf("-t")).toBeLessThan(args.indexOf("-i"));
+    expect(tooLong.code).toBe(4);
+    expect(tooLong.stdout).toBe("");
+  });
+
   live("passes whisper the primary language of a region tag", async () => {
     stage(true);
     const seen = join(ROOT, "seen-lang");
