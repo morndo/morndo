@@ -317,19 +317,22 @@ export function runChild(cmd: string, args: string[], cwd: string): Promise<Chil
     child.on("close", code => {
       children.delete(child);
       // A stop signal reaches the child and this process at the same time, and this process's own
-      // handler for it can still be queued behind the child's close, because signal events run
-      // through the event loop like any other (nodejs.org/api/process, signal events, read
-      // 2026-10-13). The close is settled one loop turn later, in the check phase, which only runs
-      // once this iteration's poll callbacks are through: a pending stop handler has then had its
-      // chance to record the stop. A death without that record is the engine's own, whatever the
-      // child reported, and never a stop nobody sent.
-      setImmediate(() => {
+      // handler for it is itself only an event loop turn: it can sit behind the child's close in the
+      // same poll batch, or in the next iteration's poll, because signal events run through the loop
+      // like any other (nodejs.org/api/process, signal events, read 2026-10-13). The group's kill
+      // marks this process before the child can die, so by the time the close is dispatched the stop
+      // event is at most one loop turn away. The close is therefore settled two turns late, each in
+      // a check phase behind a poll: any stop this process was sent has then been dispatched and
+      // recorded. A death without that record is the engine's own, whatever the child reported, and
+      // never a stop nobody sent.
+      const settle = (): void => {
         if (stopSignal !== null) {
           reject(new StoppedRun(stopSignal));
           return;
         }
         resolve({ code: code ?? 1 });
-      });
+      };
+      setImmediate(() => setImmediate(settle));
     });
   });
 }
