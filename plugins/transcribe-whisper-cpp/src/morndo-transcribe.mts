@@ -254,14 +254,13 @@ function flags(rest: readonly string[]): FlagBag | null {
   return out;
 }
 
-function absent(root: string, pathEnv: string): { missing: string[]; manifest: Manifest | null } {
+function missingParts(root: string, pathEnv: string, manifest: Manifest | null): string[] {
   const missing: string[] = [];
   if (commandOnPath("ffmpeg", pathEnv) === null) missing.push("ffmpeg");
   if (!executable(join(root, "bin", "whisper-cli"))) missing.push("whisper-cli");
-  const manifest = readManifest(root);
   if (manifest === null) missing.push("plugin");
   else if (!statFile(join(root, "models", manifest.modelFile))) missing.push("model");
-  return { missing, manifest };
+  return missing;
 }
 
 function statFile(path: string): boolean {
@@ -273,7 +272,8 @@ function statFile(path: string): boolean {
 }
 
 export function probeDocument(root: string, pathEnv: string): ProbeBody {
-  const { missing, manifest } = absent(root, pathEnv);
+  const manifest = readManifest(root);
+  const missing = missingParts(root, pathEnv, manifest);
   if (missing.length > 0 || manifest === null) return { protocol: 1, ready: false, missing: missing.length > 0 ? missing : ["plugin"] };
   return {
     protocol: 1,
@@ -297,21 +297,16 @@ function fail(code: number, detail: string): number {
   return code;
 }
 
-type Child = { code: number; stderr: string };
+type Child = { code: number };
 
 function runChild(cmd: string, args: string[], cwd: string): Promise<Child> {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { cwd, stdio: ["ignore", "ignore", "pipe"] });
+    const child = spawn(cmd, args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
     children.add(child);
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk: string) => {
-      if (stderr.length < 4096) stderr += chunk.slice(0, 4096 - stderr.length);
-    });
     child.on("error", reject);
     child.on("close", (code) => {
       children.delete(child);
-      resolve({ code: code ?? 1, stderr });
+      resolve({ code: code ?? 1 });
     });
   });
 }
@@ -324,7 +319,7 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
   if (input === undefined || language === undefined || threads === undefined || maxSeconds === undefined) return fail(EXIT.usage, "usage");
   if (!input.startsWith("/") || !CHOICE.test(language) || !POSITIVE.test(threads) || !POSITIVE.test(maxSeconds)) return fail(EXIT.usage, "usage");
   const cap = Number(maxSeconds);
-  const { missing } = absent(root, pathEnv);
+  const missing = missingParts(root, pathEnv, manifest);
   if (missing.length > 0) return fail(EXIT.notReady, `missing: ${missing.join(",")}`);
   const ffmpeg = commandOnPath("ffmpeg", pathEnv);
   const whisper = join(root, "bin", "whisper-cli");

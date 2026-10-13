@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
+import { commandOnPath } from "../src/morndo-transcribe.mts";
 import { absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
@@ -120,6 +121,24 @@ describe("install choices", () => {
         .rejects.toThrow("disk full while downloading the model");
       expect(readdirSync(dir)).toEqual([]);
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("treats a non-executable file as missing, the same way the plugin does", () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-tools-"));
+    writeFileSync(join(dir, "ffmpeg"), "#!/bin/sh\n");
+    chmodSync(join(dir, "ffmpeg"), 0o644);
+    writeFileSync(join(dir, "git"), "#!/bin/sh\n");
+    chmodSync(join(dir, "git"), 0o755);
+    const saved = process.env.PATH;
+    process.env.PATH = dir;
+    try {
+      expect(commandOnPath("ffmpeg", dir)).toBeNull();
+      expect(commandOnPath("git", dir)).toBe(join(dir, "git"));
+      expect(absentTools()).toEqual(["cmake", "make", "g++", "ffmpeg"]);
+    } finally {
+      process.env.PATH = saved;
       rmSync(dir, { recursive: true, force: true });
     }
   });

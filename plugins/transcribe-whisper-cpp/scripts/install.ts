@@ -20,6 +20,7 @@ import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, e
 import { availableParallelism, homedir, totalmem } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { commandOnPath } from "../src/morndo-transcribe.mts";
 import { Readable, type Writable } from "node:stream";
 
 const PACKAGE = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -172,22 +173,9 @@ export function readPins(path: string): Pins {
   };
 }
 
-function commandExists(name: string): boolean {
-  const pathEnv = process.env.PATH ?? "";
-  for (const dir of pathEnv.split(":")) {
-    if (dir === "") continue;
-    try {
-      const st = statSync(join(dir, name));
-      if (st.isFile() && (st.mode & 0o111) !== 0) return true;
-    } catch {
-      // next
-    }
-  }
-  return false;
-}
-
 export function absentTools(): string[] {
-  return TOOLS.filter(name => !commandExists(name));
+  const pathEnv = process.env.PATH ?? "";
+  return TOOLS.filter(name => commandOnPath(name, pathEnv) === null);
 }
 
 function cacheRoot(): string {

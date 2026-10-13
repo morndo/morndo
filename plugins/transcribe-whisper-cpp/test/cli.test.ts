@@ -202,6 +202,28 @@ EOF
     });
   });
 
+  live("whisper's own stderr is not the transcript", async () => {
+    stage(true);
+    writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-of" ]; then out="$2"; shift 2; continue; fi
+  shift
+done
+echo "engine chatter" >&2
+cat > "$out.json" <<'EOF'
+{"result":{"language":"de"},"transcription":[{"offsets":{"from":0,"to":800},"text":" Hafen frei."}]}
+EOF
+`);
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const note = join(ROOT, "stderr.wav");
+    writeFileSync(note, pcmWav(1));
+    const heard = await run(["run", "--input", note, "--language", "de", "--threads", "1", "--max-seconds", "600", "--json"], pathEnv);
+    expect(heard.code).toBe(0);
+    expect(heard.stderr).toBe("");
+    expect(JSON.parse(heard.stdout).language).toBe("de");
+  });
+
   live("whisper exiting 0 without a transcript is an engine error", async () => {
     stage(true);
     writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nexit 0\n");
