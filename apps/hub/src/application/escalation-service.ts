@@ -488,6 +488,14 @@ export class EscalationService {
         if (t && !echoes.has(m.id)) taps.set(t.id, { key: t.key, label: t.label, at: m.at });   // not a withdrawn answer's echo (B1)
       }
     }
+    // A tap the hub itself typed for one of its own answers — a sends row under this ask's answer keys for that choice,
+    // in flight, in doubt or done — is that answer arriving in the pane, not an answer from elsewhere. Reported as a
+    // sighting it would settle the ask as "elsewhere" naming no endpoint, and the answer's own recording, which names
+    // the endpoint that accepted it, would be refused as a second answer (E8). So it is no sighting: the answer path
+    // records it (review of PR #55).
+    for (const [id, t] of taps) {
+      if (this.#store.answersOfAsk(`answer:${id}:`).some(r => r.key.endsWith(`:${choicePart({ kind: "option", key: t.key })}`))) taps.delete(id);
+    }
     this.#paneTaps = taps;
     const items = new Map<string, LedgerItem>((ledger?.ok ? ledger.items : []).map(i => [i.id, i]));
     if (ledger?.ok) this.#filed = items;
