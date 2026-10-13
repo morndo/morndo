@@ -27,10 +27,12 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
     const parts = file.path.split("/");
     for (let i = 1; i < parts.length; i++) dirs.add(`${parts.slice(0, i).join("/")}/`);
   }
-  type Entry = { path: string; dir: true } | { path: string; dir: false; file: TreeFile };
+  type Packed = Exclude<TreeFile, { directory: true }>;
+  const isPacked = (file: TreeFile): file is Packed => !("directory" in file);
+  type Entry = { path: string; dir: true } | { path: string; dir: false; file: Packed };
   const entries: Entry[] = [
     ...[...dirs].map(path => ({ path, dir: true as const })),
-    ...files.filter(file => !("directory" in file)).map(file => ({ path: file.path, dir: false as const, file })),
+    ...files.filter(isPacked).map(file => ({ path: file.path, dir: false as const, file })),
   ];
   entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   const chunks: Buffer[] = [];
