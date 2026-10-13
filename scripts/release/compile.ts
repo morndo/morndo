@@ -21,23 +21,19 @@ export function compileWorkspaces(repo: string, out: string): void {
       if (!existsSync(join(dir, "tsconfig.json"))) continue;
       const dest = join(out, name);
       mkdirSync(dest, { recursive: true });
-      let run = spawnSync(process.execPath, [
-        tsc, "-p", dir, "--noEmit", "false", "--outDir", dest, "--pretty", "false",
-      ], { cwd: repo, encoding: "utf8" });
-      // A test that imports another app makes the common root the parent. Emit src only then.
-      if (run.status !== 0 && `${run.stdout}${run.stderr}`.includes("TS5011")) {
-        const config = join(out, `${name}.tsconfig.json`);
-        writeFileSync(config, `${JSON.stringify({
-          extends: join(dir, "tsconfig.json"),
-          compilerOptions: {
-            noEmit: false, outDir: dest, rootDir: dir,
-            typeRoots: [join(repo, "node_modules/@types")],
-          },
-          include: [join(dir, "src")],
-        })}\n`);
-        run = spawnSync(process.execPath, [tsc, "-p", config, "--pretty", "false"], { cwd: repo, encoding: "utf8" });
-        rmSync(config, { force: true });
-      }
+      // A config outside the package, with an explicit rootDir, so tsc never emits beside the sources.
+      // Tests stay out: one app's tests import another app. Ambient declarations (*.d.ts) stay in.
+      const config = join(out, `${name}.tsconfig.json`);
+      writeFileSync(config, `${JSON.stringify({
+        extends: join(dir, "tsconfig.json"),
+        compilerOptions: {
+          noEmit: false, outDir: dest, rootDir: dir,
+          typeRoots: [join(repo, "node_modules/@types")],
+        },
+        include: [join(dir, "src"), join(dir, "**/*.d.ts")],
+      })}\n`);
+      const run = spawnSync(process.execPath, [tsc, "-p", config, "--pretty", "false"], { cwd: repo, encoding: "utf8" });
+      rmSync(config, { force: true });
       if (run.status !== 0) throw new Error(run.stderr || run.stdout || `tsc failed for ${name}`);
       const pkgPath = join(dir, "package.json");
       if (existsSync(pkgPath)) writeFileSync(join(dest, "package.json"), rewritePackage(readFileSync(pkgPath, "utf8")));
