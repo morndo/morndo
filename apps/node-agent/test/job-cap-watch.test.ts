@@ -13,13 +13,13 @@ import { tempHome, until, wait } from "./helpers.ts";
 const fault = vi.hoisted(() => ({ left: 0, suffix: "" }));
 vi.mock("node:fs", async importOriginal => {
   const real = await importOriginal<typeof import("node:fs")>();
-  const statSync: typeof real.statSync = (path, opts) => {
+  const statSync = ((path: import("node:fs").PathLike, opts?: import("node:fs").StatSyncOptions) => {
     if (fault.left > 0 && String(path).endsWith(fault.suffix) && new Error().stack?.includes("#logSize")) {
       fault.left -= 1;
       throw Object.assign(new Error("EMFILE"), { code: "EMFILE" });
     }
     return opts === undefined ? real.statSync(path) : real.statSync(path, opts);
-  };
+  }) as typeof real.statSync;
   return { ...real, statSync };
 });
 
