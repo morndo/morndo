@@ -60,6 +60,10 @@
   async function answer(d: DecisionItem, body: { key: string } | { text: string }, label: string) {
     note = { ...note, [d.id]: "" };
     if (paused(d)) return false;                                     // the hub would refuse it: nothing starts
+    if (feed.status !== "live" || navigator.onLine === false) {      // refused, not queued: as catch-up and the sheet (§6.3)
+      note = { ...note, [d.id]: "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here." };
+      return false;
+    }
     // After a refusal for the passkey check, the check comes first whatever this page thinks is fresh (code review #3).
     const stale = quick.state.failed[d.id]?.code === "step_up";
     if ((!verifiedFresh || stale) && !(await verify())) { note = { ...note, [d.id]: "Not sent: the passkey check didn't finish." }; return false; }

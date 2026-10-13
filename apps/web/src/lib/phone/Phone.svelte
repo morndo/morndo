@@ -5,9 +5,8 @@
   // list, a chat that waits, or a push. Updates no longer come as cards: they wait in each chat, and a digest sums them
   // up only when he comes back after a real absence. One live feed and one outbox serve it all.
   import { onDestroy, onMount, untrack } from "svelte";
-  import { goto, pushState } from "$app/navigation";
+  import { goto, pushState, replaceState } from "$app/navigation";
   import { page } from "$app/state";
-  import { decisionKey } from "@morndo/domain";
   import { LiveFeed } from "../feed.svelte.ts";
   import LinkedNotice from "../LinkedNotice.svelte";
   import FleetNotice from "../FleetNotice.svelte";
@@ -40,7 +39,7 @@
   import Digest from "./chat/Digest.svelte";
   import SettingsSheet from "./chat/SettingsSheet.svelte";
   import { Away } from "./chat/away.svelte.ts";
-  import { chatEntry, keptChat, restoredChat, restoredScreen } from "./chat/history.ts";
+  import { chatEntry, entryChatState, keptChat, restoredChat, restoredScreen } from "./chat/history.ts";
   import { chatRows } from "./chat/rows.ts";
   import type { DigestLine } from "@morndo/domain";
   import "./phone.css";
@@ -118,16 +117,21 @@
   const briefId = $derived(briefFromPageState(page.state));
   let sessions = $state<Record<string, AnswerSession>>({});
   let briefNote = $state<string | null>(null);
+  // Every sheet session follows the feed each time the decisions change, held only while its own sheet is open: a
+  // restatement that lands while the sheet is closed follows at once, so reopening shows the new brief as it is
+  // (finding 5) — the same bind AnswerSession's own screen already runs for the desktop (review, 15).
   $effect(() => {
-    const id = briefId;
+    const open = briefId;
     const list = feed.decisions;
     untrack(() => {
-      if (!id) { briefNote = null; return; }
-      const d = list.find(x => x.id === id);
+      for (const [id, cur] of Object.entries(sessions)) {
+        const d = list.find(x => x.id === id);
+        if (d) cur.bind(d, open === id);
+      }
+      if (!open) { briefNote = null; return; }
+      const d = list.find(x => x.id === open);
       if (!d) return;
-      const cur = sessions[id];
-      if (!cur) sessions[id] = new AnswerSession(d);
-      else cur.bind(d, true);
+      if (!sessions[open]) sessions[open] = new AnswerSession(d);
     });
   });
   const briefItem = $derived(briefId ? feed.decisions.find(d => d.id === briefId) ?? null : null);
@@ -153,7 +157,19 @@
     return false;
   });
   // The sheet is open while page.state.brief is set. Back (and the browser's back) pop that entry.
+  // A sheet opened from Today returns there when its entry is popped (finding 10): catch-up was never the place he
+  // was, so it shouldn't become it. From anywhere else the sheet sits over catch-up, which keeps its own Back.
+  let briefOver = $state<"today" | null>(null);
+  $effect(() => {
+    if (briefId !== null) return;
+    untrack(() => {
+      if (briefOver === null) return;
+      briefOver = null;
+      stopDeciding();
+    });
+  });
   function openBrief(id: string) {
+    briefOver = !deciding && tab === "today" ? "today" : null;
     if (!deciding) { want = { decision: id }; deciding = true; }
     else if (!(session.top?.kind === "decision" && session.top.id === id)) session.open({ decision: id });
     if (briefFromPageState(page.state) !== id) pushState("", { brief: id });
@@ -176,11 +192,19 @@
     }
     if (!verifiedFresh && !(await verify())) { briefNote = "Not answered: the passkey check didn't finish."; return false; }
     if (!session.opened || session.top?.kind !== "decision" || session.top.id !== id) session.open({ decision: id });
-    const key = decisionKey(id);
-    if (!session.run?.cards[key]) return false;
-    lastSheetPick = { key, id, body, label, seen: held.seen };
-    session.answer(key, id, body, label, held.seen);
-    return session.run.answering?.id === id;
+    const card = session.top;                            // the run's card on top: its key carries any re-ask suffix (finding 4)
+    if (card?.kind !== "decision" || card.id !== id) {
+      briefNote = "Not sent: this decision isn't in your catch-up right now.";   // …and why, not silence (finding 7)
+      return false;
+    }
+    lastSheetPick = { key: card.key, id, body, label, seen: held.seen };
+    session.answer(card.key, id, body, label, held.seen);
+    const a = session.run?.answering;
+    if (!a || a.id !== id || a.key !== card.key) {
+      briefNote = a && a.id !== id ? "Not sent: another answer is still in its window. It goes first." : "Not sent: this decision isn't in your catch-up right now.";
+      return false;
+    }
+    return true;
   }
   // What the sheet last started, for its passkey retry (the card's own lastPick serves the card the same way).
   let lastSheetPick: { key: string; id: string; body: Body; label: string; seen: string } | null = null;
@@ -210,18 +234,24 @@
     tab = t;
     scrollTo(0, 0);
   }
-  // A conversation is a page of its own: the phone's back gesture closes it (history), as the button does.
+  // A conversation is a page of its own: the phone's back gesture closes it (history), as the button does. The entry
+  // goes through the router's shallow routing, like the sheet's, so its state sits where popstate looks for it
+  // whichever entry is current — the sheet's included (finding 3).
   let chatScreen = $state(false);
   function openChat(worker: string, screen = false) {
     if (deciding) stopDeciding();
     chat = worker;
     chatScreen = screen;
     const entry = { chat: worker, screen };
-    if (chatEntry(history.state?.chat, worker) === "stay") { history.replaceState(entry, "", location.pathname); return; }
-    history.pushState(entry, "", location.pathname);
+    if (chatEntry(restoredChat(entryChatState(history.state)), worker) === "stay") { replaceState("", entry); return; }
+    pushState("", entry);
   }
-  function closeChat() { if (history.state?.chat) history.back(); else { chat = null; chatScreen = false; } }
-  const onPop = () => { chat = restoredChat(history.state); chatScreen = chat !== null && restoredScreen(history.state); };
+  function closeChat() { if (page.state.chat) history.back(); else { chat = null; chatScreen = false; } }
+  const onPop = () => {
+    const entry = entryChatState(history.state);
+    chat = restoredChat(entry);
+    chatScreen = chat !== null && restoredScreen(entry);
+  };
   $effect(() => {
     const next = keptChat(chat, feed.workers, feed.primed);
     if (next === chat) return;
@@ -288,8 +318,9 @@
 
   const onHidden = () => { if (document.visibilityState === "hidden") { session.leave(); quick.flush(); } };
   onMount(() => {
-    const open = restoredChat(history.state);
-    if (open) { chat = open; chatScreen = restoredScreen(history.state); }
+    const entry = entryChatState(history.state);
+    const open = restoredChat(entry);
+    if (open) { chat = open; chatScreen = restoredScreen(entry); }
     feed.start();
     session.start();
     quick.start();
