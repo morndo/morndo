@@ -117,7 +117,7 @@
     <p class="note" role="status">Waiting for the hub to say where this decision stands…</p>
   {:else if closed}
     {#if refusal && !MAY_HAVE_GONE.has(refusal.code)}<p class="err" role="alert">{refusal.text}</p>{/if}
-    <div class="state" role="status"><p>{closed}</p>{#if item && item.decision?.via !== "here"}<p class="note">Nothing was answered from here.</p>{/if}</div>
+    <div class="state" role="status"><p>{closed}</p>{#if item && item.decision?.via === "elsewhere"}<p class="note">Nothing was answered from here.</p>{/if}</div>
     <button class="pbtn primary block" onclick={onNext}>Next card</button>
   {:else if item}
     {#if refusal}
