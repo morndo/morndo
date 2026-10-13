@@ -1,5 +1,6 @@
 // Decision briefs (ADR-0023 §6). A synthetic office, the real morndo-decide, headless Chromium.
-// Desktop checks, then the phone sheet at 390×844 (per-factor table, 48px footer, Back, Undo).
+// Desktop checks, then the phone sheet at 390×844 (per-factor table, 48px footer, Back, Undo; Back lands where he
+// was, and the headline keeps focus without the browser's heavy focus frame).
 // Run: npm run build && node e2e/briefs.e2e.ts
 // Screenshots land in E2E_OUT, and also in QA_DIR when that is set (a private QA record, never this tree).
 import { execFileSync } from "node:child_process";
@@ -202,9 +203,19 @@ try {
     assert(!screen.includes(`[tap ${id}]`), `an undone answer was typed:\n${screen.slice(-400)}`);
     await dialog.getByRole("button", { name: "Back", exact: true }).click();
     await dialog.waitFor({ state: "hidden" });
+    await row.waitFor();                    // Back from a sheet opened on Today returns him to Today, not to catch-up
     await phone.page.goto(new URL(`/?decision=${encodeURIComponent(id)}`, phone.page.url()).href);
     const linked = phone.page.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
     await linked.waitFor({ timeout: 15_000 });
+    // The headline takes focus when the sheet opens (a screen reader announces it) but never shows more than the
+    // app's own ring: not the browser's default focus frame.
+    await phone.page.waitForFunction(() => document.activeElement?.id === "brief-sheet-headline");
+    const frame = await phone.page.evaluate(() => {
+      const el = document.getElementById("brief-sheet-headline") as HTMLElement;
+      const cs = getComputedStyle(el);
+      return { style: cs.outlineStyle, width: cs.outlineWidth };
+    });
+    assert(frame.style === "none" || (frame.style === "solid" && parseFloat(frame.width) <= 3), `headline focus frame: ${JSON.stringify(frame)}`);
     await linked.getByRole("button", { name: "Back", exact: true }).click();
     await linked.waitFor({ state: "hidden" });
   });
