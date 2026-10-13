@@ -16,6 +16,7 @@
   import { ConversationSettings } from "./prefs.svelte.ts";
   import { withoutFileNotes } from "./present.ts";
   import ChannelView from "./ChannelView.svelte";
+  import type { SentFile } from "../attach.ts";
   import type { Outgoing } from "./MessageList.svelte";
   import type { Outbox } from "../outbox/outbox.ts";
   import { startDeviceOutbox } from "../outbox/device.ts";
@@ -88,6 +89,7 @@
   // ended by their echo. `previews` are the images' thumbnails for this page's life (blob URLs aren't kept).
   let outgoing = $state<OutboxRecord[]>([]);
   const previews = new Map<string, string[]>();
+  const sentFiles = new Map<string, SentFile[]>();
   let outbox: Outbox | null = null;
   let deviceOutbox: ReturnType<typeof startDeviceOutbox> | null = null;
   let markReady: (o: Outbox) => void = () => {};
@@ -227,16 +229,18 @@
   function open(id: string) { view = "home"; selected = id; }
   // Resolves once the message is written down on this device; throws if it couldn't be, so the composer keeps the draft
   // (review M6). Waits for the outbox if the page has only just opened.
-  async function onQueue(c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; seen: string; held?: string }) {
+  async function onQueue(c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; files: SentFile[]; seen: string; held?: string }) {
     const o = await outboxReady;
     const r = await o.enqueue({ worker: c.target, workerName: c.targetName, text: c.text, uploads: c.uploads, seen: c.seen }, c.held);
     if (c.images.length) previews.set(r.id, c.images);
+    if (c.files.length) sentFiles.set(r.id, c.files);
     // Reading far back: the latest come back, so the message and its echo show where they belong (review L4).
     if (feed.detached && feed.watching === c.target) feed.latest();
   }
   function forget(id: string) {
     const shown = previews.get(id);
     previews.delete(id);
+    sentFiles.delete(id);
     setTimeout(() => shown?.forEach(u => URL.revokeObjectURL(u)), 60_000);   // the echoed message may still show them a while
   }
   async function onRetry(id: string) { await outbox?.retry(id); }
@@ -295,7 +299,7 @@
       connected: () => feed.status === "live" && navigator.onLine !== false,
       onChange: records => {
         outgoing = records;
-        for (const id of previews.keys()) if (!records.some(r => r.id === id)) forget(id);
+        for (const id of new Set([...previews.keys(), ...sentFiles.keys()])) if (!records.some(r => r.id === id)) forget(id);
       },
     });
     void deviceOutbox.ready.then(o => { outbox = o; markReady(o); });
@@ -356,7 +360,7 @@
               onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />
           {:else if current}
             <ChannelView worker={current} displayName={nameOf(current)} {feed} {verifiedAt} panel={rightShown}
-              outgoing={outgoing.filter(r => r.worker === current?.id).map((r): Outgoing => ({ ...r, images: previews.get(r.id) ?? [] }))}
+              outgoing={outgoing.filter(r => r.worker === current?.id).map((r): Outgoing => ({ ...r, images: previews.get(r.id) ?? [], files: sentFiles.get(r.id) ?? [] }))}
               {onQueue} {onRetry} {onDiscard} {onVerify} {onEdit} {editRequest} {onEdited}
               prefs={prefsOf(current.name)} onDetails={() => current && openDetails(current.id)}
               dividerMark={opened?.worker === current.id ? opened.mark : undefined} onAtBottom={(value, worker) => (atBottom = { worker, value })}

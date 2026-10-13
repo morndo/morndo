@@ -1,0 +1,50 @@
+# Every commit on a pull request, and every push to main, must be free of
+# assistant attribution (trailers, generated-by lines, session links, vendor
+# addresses, and the author and committer names). The author address is
+# @users.noreply.github.com. The committer may also be noreply@github.com.
+# actions/checkout v7.0.1, same pin as ci.yml.
+name: Commit traces
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: commit-traces-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  traces:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check commits
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+        run: |
+          zero=0000000000000000000000000000000000000000
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            test -n "$BASE_SHA"
+            test -n "$HEAD_SHA"
+            exec sh scripts/git-hooks/commit-traces range "$BASE_SHA..$HEAD_SHA"
+          fi
+          if [ "$BEFORE_SHA" = "$zero" ]; then
+            set -- "$AFTER_SHA"
+          else
+            set -- "$BEFORE_SHA..$AFTER_SHA"
+          fi
+          # Every commit in the pushed range is checked.
+          exec sh scripts/git-hooks/commit-traces range "$@"

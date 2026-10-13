@@ -58,7 +58,7 @@ export function conversation(now: number) {
 
 // One outgoing message in each send state (S8), oldest first, so none is held behind a failed one but the last.
 export function sends(now: number): Outgoing[] {
-  const base = { worker: `${MARK}-search`, workerName: "search", uploads: [], seen: "", images: [] as string[] };
+  const base = { worker: `${MARK}-search`, workerName: "search", uploads: [], seen: "", images: [] as string[], files: [] };
   const send = (id: string, at: number, text: string, over: Partial<Outgoing>): Outgoing =>
     ({ ...base, id: `${MARK}-${id}`, text, createdAt: at, budgetFrom: at, state: "queued", error: null, attempts: 0, sentAt: null, typedAt: null, ...over });
   return [

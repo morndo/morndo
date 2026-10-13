@@ -16,6 +16,7 @@
 // UnsetEnvironment= is applied last, so it removes assignments inherited from the user manager and names the
 // manager itself would add (systemd.exec(5), same page, read 2026-10-10).
 import { execFile } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -177,7 +178,22 @@ export async function startJobUnit(job: {
     `--property=StandardOutput=append:${job.logPath}`, `--property=StandardError=append:${job.logPath}`,
   ];
   if (job.timeoutMs !== null && job.timeoutMs > 0) args.push(`--property=RuntimeMaxSec=${job.timeoutMs}ms`);
-  for (const key of job.unset) {
+  const drop = new Set(job.unset);
+  // The user manager passes its own environment to children. A hosted runner can import the
+  // launching process's names into that block after show-environment was read.
+  // environment.d(5) also passes /etc/environment to the service, and that file is not the
+  // manager block the snapshot read (JAVA_HOME_* on a hosted image).
+  // UnsetEnvironment= is applied last.
+  // systemd.exec(5), https://www.freedesktop.org/software/systemd/man/latest/systemd.exec.html, read 2026-10-11.
+  // environment.d(5), https://www.freedesktop.org/software/systemd/man/latest/environment.d.html, read 2026-10-11.
+  for (const key of Object.keys(toolEnv ?? process.env)) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) drop.add(key);
+  }
+  for (const key of await serviceEnvironmentNames()) drop.add(key);
+  // A later UnsetEnvironment name replaces an earlier one when it is a prefix of that name.
+  // systemd 255, observed 2026-10-11: JAVA_HOME after JAVA_HOME_8_X64 leaves only JAVA_HOME,
+  // and the longer name stays in the job. Shorter names go first.
+  for (const key of unsetNameOrder(drop)) {
     if (key in job.env) continue;
     args.push(`--property=UnsetEnvironment=${key}`);
   }
@@ -223,6 +239,40 @@ const ADDED_BY_SYSTEMD = [
   "LISTEN_PID", "LISTEN_FDS", "LISTEN_FDNAMES", "WATCHDOG_PID", "WATCHDOG_USEC",
   "DEBUG_INVOCATION",
 ];
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const SERVICE_ENV_GENERATOR = "/usr/lib/systemd/user-environment-generators/30-systemd-environment-d-generator";
+
+// Keys from an environment.d export: KEY=VALUE lines. Comments and other lines are skipped.
+// Shorter names first, so a prefix is not applied after the longer name it would replace.
+export function unsetNameOrder(names: Iterable<string>): string[] {
+  return [...names].sort((a, b) => a.length - b.length || (a < b ? -1 : a > b ? 1 : 0));
+}
+
+export function namesFromEnvironmentExport(text: string): string[] {
+  const names: string[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    const at = trimmed.indexOf("=");
+    if (at <= 0) continue;
+    const key = trimmed.slice(0, at);
+    if (ENV_NAME.test(key)) names.push(key);
+  }
+  return names;
+}
+
+// Names the environment generator passes to user services. /etc/environment is included even when
+// the generator is absent, because a hosted image lists JDK paths there.
+async function serviceEnvironmentNames(): Promise<string[]> {
+  const texts: string[] = [];
+  try {
+    const { stdout } = await execFileAsync(SERVICE_ENV_GENERATOR, { encoding: "utf8", timeout: 5_000 });
+    texts.push(String(stdout));
+  } catch { /* read the image file directly */ }
+  try { texts.push(readFileSync("/etc/environment", "utf8")); } catch { /* no such file */ }
+  return namesFromEnvironmentExport(texts.join("\n"));
+}
 
 // Names the user manager would hand to the unit, plus the names systemd adds while starting it.
 // A failed read throws: the caller must not start the unit, or the job inherits the whole manager environment.

@@ -61,7 +61,7 @@ describe("the job list", () => {
     const look = await fetch(`${hub.base}/api/jobs`, { headers: { cookie: `__Host-morndo=${cookie}` } });
     expect(look.status).toBe(200);
     const body = await look.json() as { jobs: Record<string, unknown>[]; counts: { node: string; running: number; queued: number; failed: number }[] };
-    expect(body.jobs.map(j => j.id).sort()).toEqual(["job-bad", "job-run"]);
+    expect(body.jobs.map(j => String(j.id)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))).toEqual(["job-bad", "job-run"]);
     const failed = body.jobs.find(j => j.id === "job-bad");
     expect(failed).toMatchObject({ name: "pack", class: "default", state: "exited", lane: "builder", outcome: "exited", exit: 1, durationSec: 2, notice: "pending" });
     expect(body.counts).toEqual([{ node: "pc", running: 1, queued: 0, failed: 1 }]);
@@ -192,7 +192,7 @@ describe("a job list read", () => {
     const late = view({ id: "job-2", at: 15, state: "running", outcome: null, exit: null, durationSec: null, notice: "none", tail: "" });
     jobs.apply(running);
     jobs.merge({ jobs: [running], stale: false }, [exited, late, view({ at: 5, state: "queued", outcome: null, exit: null, durationSec: null, notice: "none", tail: "" })]);
-    expect(jobs.view().jobs.map(j => [j.id, j.state]).sort()).toEqual([["job-1", "exited"], ["job-2", "running"]]);
+    expect(jobs.view().jobs.map(j => [j.id, j.state]).sort((a, b) => (a.join(",") < b.join(",") ? -1 : a.join(",") > b.join(",") ? 1 : 0))).toEqual([["job-1", "exited"], ["job-2", "running"]]);
     jobs.apply(view({ id: "gone", at: 1, state: "running", outcome: null, exit: null, durationSec: null, notice: "none", tail: "" }));
     jobs.merge({ jobs: [exited], stale: true }, []);
     expect(jobs.view().jobs.map(j => j.id)).toEqual(["job-1"]);

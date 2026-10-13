@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { redactText } from "@morndo/protocol";
 import {
-  COMMENT_MAX, ENDED_SKEW_MS, NOTICE_MAX, TOKEN_CACHE_MS, acceptJob, boundNotice, clampEnded, finish, fleetRecord, jobCounts, jobFailed, noticeCanMove, noticeCanReach, noticeIdOf, noticeText, redactJobOutput, schedule, taskEffect, taskNotice, tokenAllows,
+  COMMENT_MAX, ENDED_SKEW_MS, NOTICE_MAX, TOKEN_CACHE_MS, acceptJob, boundNotice, clampEnded, finish, fleetRecord, jobCounts, jobFailed, noticeCanMove, noticeCanReach, noticeIdOf, noticeText, parseTaskKey, redactJobOutput, schedule, taskEffect, taskNotice, tokenAllows,
   type Job, type StartBody,
 } from "../src/index.ts";
 
@@ -17,6 +17,11 @@ const body = (over: Partial<StartBody> = {}): StartBody => ({
 const value = <T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T => {
   if (!r.ok) throw new Error(`refused: ${JSON.stringify(r.error)}`);
   return r.value;
+};
+const taskKey = (s: string) => {
+  const key = parseTaskKey(s);
+  if (!key) throw new Error(`not a task key: ${s}`);
+  return key;
 };
 const queued = (over: Partial<StartBody> = {}, at = AT) => value(acceptJob(null, body(over), at));
 const running = (over: Partial<StartBody> = {}, at = AT): Job => ({ ...queued(over, at), state: "running" });
@@ -162,7 +167,7 @@ describe("notice", () => {
       logPath: "/home/someone/pack.log", home: "/home/someone", lines: ["all good"], error: null,
     }, (s) => s);
     expect(text).toBe("[morndo-job] pack exited\nid: job-1\nclass: default\nexit: 0\nduration: 1.5\nlog: /home/someone/pack.log\n---\nall good");
-    const task = value(acceptJob(null, body({ notify: { kind: "task", key: "T-12" } }), AT));
+    const task = value(acceptJob(null, body({ notify: { kind: "task", key: taskKey("T-12") } }), AT));
     expect(taskEffect(task, "hello")).toEqual({ task: "T-12", text: "hello", status: null });
     expect(taskNotice({ outcome: "exited", notify: task.notify, tail: "shipped" })).toEqual({ task: "T-12", text: "shipped", status: null });
     expect(taskNotice({ outcome: null, notify: task.notify, tail: "shipped" })).toBeNull();
@@ -221,9 +226,9 @@ describe("notice", () => {
   });
   it("caps a long line before scanning it, so a 60 KB line stays cheap", () => {
     const marker = "ENDMARKER";
-    const started = Date.now();
+    const started = performance.now();
     const text = redactJobOutput(`{"password":"hunter2"}` + "a".repeat(60_000) + marker);
-    expect(Date.now() - started).toBeLessThan(100);
+    expect(performance.now() - started).toBeLessThan(100);
     expect(text).not.toContain("hunter2");
     expect(text).not.toContain(marker);
     expect(text.length).toBeLessThan(8_000);
@@ -417,7 +422,7 @@ describe("fleet record", () => {
 });
 
 describe("a task notice", () => {
-  const job = { outcome: "refused" as const, notify: { kind: "task" as const, key: "T-5" as const }, tail: "" };
+  const job = { outcome: "refused" as const, notify: { kind: "task" as const, key: taskKey("T-5") }, tail: "" };
   it("does not comment when the notice has no text", () => {
     expect(taskNotice(job)).toBeNull();
     expect(taskNotice({ ...job, tail: "   " })).toBeNull();

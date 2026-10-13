@@ -6,12 +6,16 @@
   // terminal, read-only. A lane that waits for his call says so above the composer, with the way to its card.
   import { onMount, tick, untrack } from "svelte";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import Paperclip from "@lucide/svelte/icons/paperclip";
   import SendHorizontal from "@lucide/svelte/icons/send-horizontal";
+  import X from "@lucide/svelte/icons/x";
   import Check from "@lucide/svelte/icons/check";
   import CheckCheck from "@lucide/svelte/icons/check-check";
   import Clock from "@lucide/svelte/icons/clock-3";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
-  import type { Message, RosterEntry } from "@morndo/domain";
+  import { UPLOAD_ACCEPT, type Message, type RosterEntry } from "@morndo/domain";
+  import { beginAttachments, fileSize, fileType, removalNote, settleAttachment, type AttachmentRow, type SentFile } from "../../attach.ts";
+  import { uploadFile } from "../../api.ts";
   import type { LiveFeed } from "../../feed.svelte.ts";
   import type { DecisionItem } from "../../desktop/decisions.ts";
   import { renderMarkdown } from "../../markdown.ts";
@@ -25,10 +29,10 @@
   import { bindWatch, pinnedToEnd } from "./watch.ts";
   import { deviceDrafts } from "../../drafts.ts";
 
-  let { feed, worker, outgoing, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCheck, onEchoes, screen = false }: {
-    feed: LiveFeed; worker: RosterEntry; outgoing: OutboxRecord[]; now: number; verifiedFresh: boolean; verify: () => Promise<boolean>;
+  let { feed, worker, outgoing, pendingFiles = {}, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCheck, onEchoes, screen = false }: {
+    feed: LiveFeed; worker: RosterEntry; outgoing: OutboxRecord[]; pendingFiles?: Record<string, SentFile[]>; now: number; verifiedFresh: boolean; verify: () => Promise<boolean>;
     onBack: () => void; onDecide: (id: string) => void;
-    onQueue: (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string }) => Promise<void>;
+    onQueue: (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string; files: SentFile[] }) => Promise<void>;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onAgain: (id: string) => void; onCheck: (id: string) => void;
     onEchoes: (worker: string, echoes: { id: string; at: number; text: string }[]) => void;
     screen?: boolean;
@@ -96,8 +100,22 @@
   let note = $state<string | null>(null);
   let busy = $state(false);
   let input = $state<HTMLTextAreaElement | null>(null);
+  let fileInput = $state<HTMLInputElement | null>(null);
+  let dragging = $state(false);
+  let files = $state<AttachmentRow[]>([]);
+  const readyIds = $derived(files.filter(f => f.status === "ready" && f.id).map(f => f.id as string));
+  const uploading = $derived(files.some(f => f.status === "uploading"));
+  const failed = $derived(files.some(f => f.status === "error"));
+  function addFiles(list: File[]) {
+    const started = beginAttachments(files.length, list);
+    note = started.note;
+    for (const { file, row } of started.taken) {
+      files.push(row);
+      void settleAttachment(files.find(s => s.key === row.key) ?? row, file, uploadFile);
+    }
+  }
   $effect(() => {
-    const started = text.trim().length > 0;
+    const started = text.trim().length > 0 || files.length > 0;
     if (started && seen === null) seen = worker.waitingOn ?? "none";
     else if (!started) seen = null;
   });
@@ -108,17 +126,23 @@
     input.style.height = `${Math.min(input.scrollHeight, 132)}px`;
   });
   async function send() {
+    const blocked = removalNote(files);
+    if (blocked) { note = blocked; return; }
     const body = text.trim();
-    if (!body || busy) return;
+    if ((!body && readyIds.length === 0) || busy || uploading) return;
     busy = true;
     note = null;
+    const uploads = readyIds;
+    const attached = files.filter(f => f.status === "ready").map((f): SentFile => ({ name: f.name, kind: f.kind, size: f.size }));
+    const sentFiles = files;
     try {
       if (!verifiedFresh && navigator.onLine !== false && !(await verify())) { note = "Not sent: the passkey check didn't finish. Your message is still here."; return; }
       const written = seen ?? worker.waitingOn ?? "none";
       drafts.sent(worker.id);
       text = "";
-      try { await onQueue({ worker: worker.id, workerName: worker.name, text: body, uploads: [], seen: written }); }
-      catch { text = body; note = "Couldn't keep the message on this device. It is back in the box."; return; }
+      files = [];
+      try { await onQueue({ worker: worker.id, workerName: worker.name, text: body, uploads, files: attached, seen: written }); }
+      catch { text = body; files = sentFiles; note = "Couldn't keep the message on this device. It is back in the box."; return; }
       atBottom = true;
       void tick().then(() => { if (scroller) scroller.scrollTop = scroller.scrollHeight; });
     } finally { busy = false; input?.focus(); }
@@ -169,9 +193,13 @@
                 {#if m.kind === "question"}<span class="kicker">Asks you</span>{/if}
                 {#if m.text}<div class="md">{@html renderMarkdown(long ? shortened(m.text) : it.mine ? withoutFileNotes(m.text) : m.text)}</div>{/if}
                 {#if long}<button class="tlink more" onclick={() => (expanded = { ...expanded, [m.id]: true })}>Show more</button>{/if}
-                {#each m.attachments ?? [] as a, i (attachmentKey(m.id, i))}
-                  {#if a.id}<a class="file" href="/api/files/{a.id}" target="_blank" rel="noopener">{a.name}</a>{:else}<span class="file gone">{a.name}: not available</span>{/if}
-                {/each}
+                {#if m.attachments?.length}
+                  <div class="files">
+                    {#each m.attachments as a, i (attachmentKey(m.id, i))}
+                      {#if a.id}<a class="file" href="/api/files/{a.id}" target="_blank" rel="noopener"><span>{a.name}</span><small>{fileType(a.name, a.kind)}{a.size != null ? ` · ${fileSize(a.size)}` : ""}</small></a>{:else}<span class="file gone"><span>{a.name}</span><small>not available</small></span>{/if}
+                    {/each}
+                  </div>
+                {/if}
                 <span class="meta"><time>{clock(m.at)}</time>{#if it.mine && m.kind !== "event"}<CheckCheck size={14} aria-label="Delivered" />{/if}</span>
               </div>
             </li>
@@ -181,7 +209,14 @@
           {@const d = deliveryOf(o, now)}
           <li class="b mine first last pending" data-outbox={o.id} data-delivery={d}>
             <div class="bubble" class:failed={d === "failed" || d === "uncertain" || d === "lost" || d === "unseen" || d === "late" || d === "dead"}>
-              <div class="md"><p>{o.text}</p></div>
+              {#if o.text.trim()}<div class="md"><p>{o.text}</p></div>{/if}
+              {#if pendingFiles[o.id]?.length}
+                <div class="files">
+                  {#each pendingFiles[o.id] ?? [] as f (`${f.name}:${f.size}`)}
+                    <span class="file"><span>{f.name}</span><small>{fileType(f.name, f.kind)} · {fileSize(f.size)}</small></span>
+                  {/each}
+                </div>
+              {/if}
               <span class="meta">
                 {#if d === "delivered" || d === "arrived"}<CheckCheck size={14} />{:else if d === "sending"}<Check size={14} />{:else if d === "queued"}<Clock size={14} />{:else}<CircleAlert size={14} />{/if}
                 <span class="state" role="status">{deliveryLabel(o, outgoing, online, now)}</span>
@@ -229,12 +264,27 @@
       <button class="pbtn small primary" onclick={() => asks[0] && onDecide(asks[0].id)}>Decide</button>
     </div>
   {/if}
-  <div class="composer">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="composer" class:dragging
+    ondragover={e => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragging = true; } }}
+    ondragleave={() => (dragging = false)}
+    ondrop={e => { dragging = false; const list = [...(e.dataTransfer?.files ?? [])]; if (!list.length) return; e.preventDefault(); void addFiles(list); }}>
     {#if note}<p class="err">{note}</p>{/if}
+    {#if files.length}
+      <div class="pending" aria-label="Files to send">
+        {#each files as f (f.key)}
+          <span class="chip {f.status}"><span class="fn">{f.name}</span><small>{f.error ?? `${fileType(f.name, f.kind)} · ${fileSize(f.size)}`}</small><button type="button" onclick={() => (files = files.filter(x => x.key !== f.key))} aria-label="Remove {f.name}"><X size={14} /></button></span>
+        {/each}
+      </div>
+    {/if}
     <div class="box">
+      <button class="clip" type="button" onclick={() => fileInput?.click()} aria-label="Attach a file"><Paperclip size={20} /></button>
+      <input bind:this={fileInput} type="file" accept={UPLOAD_ACCEPT} multiple hidden
+        onchange={e => { void addFiles([...((e.currentTarget as HTMLInputElement).files ?? [])]); (e.currentTarget as HTMLInputElement).value = ""; }} />
       <textarea bind:this={input} bind:value={text} rows="1" placeholder="Message {name}" aria-label="Message {name}" enterkeyhint="send"
+        onpaste={e => { const list = [...(e.clipboardData?.files ?? [])]; if (!list.length) return; if (!e.clipboardData?.getData("text/plain")) e.preventDefault(); void addFiles(list); }}
         onkeydown={e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); void send(); } }}></textarea>
-      <button class="send" disabled={!text.trim() || busy} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
+      <button class="send" disabled={((!text.trim() && readyIds.length === 0 && !failed) || busy || uploading)} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
     </div>
     <p class="scope note">{worker.name === "manager" ? "Goes to the manager's inbox; it is typed in once its box is free." : `Goes straight to ${name}; the manager won't see it.`}</p>
   </div>
@@ -293,7 +343,15 @@
   .mine .meta { color: var(--ink-fg); }
   .bubble.failed .meta { color: var(--bad-text); }
   .more { min-height: 36px; padding: 0; color: inherit; }
-  .file { display: inline-flex; align-items: center; min-height: 40px; color: inherit; font-weight: 700; }
+  .files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; max-width: 100%; }
+  .file {
+    display: flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; box-sizing: border-box;
+    height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--fg);
+    font: 700 13px/18px var(--body); text-decoration: none;
+  }
+  .file span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file small { flex: none; font: 400 12px/16px var(--body); color: var(--muted); }
+  .file.gone { color: var(--muted); }
   .why { margin: 4px 4px 0; font: 400 13px/18px var(--body); color: var(--bad-text); text-align: right; }
   .acts { display: flex; gap: 8px; margin-top: 6px; }
   .screen {
@@ -310,6 +368,15 @@
     padding: 8px max(10px, var(--safe-right)) max(8px, var(--safe-bottom)) max(10px, var(--safe-left));
   }
   :global(.kb-open) .composer { padding-bottom: 8px; }
+  .composer.dragging { outline: 2px solid var(--ink); }
+  .pending { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 32px; padding: 4px 6px 4px 10px; border: 1px solid var(--edge); border-radius: 10px; background: var(--bg); }
+  .chip.error { border-color: var(--bad); }
+  .chip.error small { color: var(--bad-text); }
+  .chip .fn { font: 700 13px/18px var(--body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .chip small { flex: none; color: var(--muted); font: 400 12px/16px var(--body); }
+  .chip button { width: 28px; height: 28px; border: 0; border-radius: 14px; background: transparent; color: var(--fg); display: grid; place-items: center; cursor: pointer; }
+  .clip { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 22px; background: transparent; color: var(--fg); cursor: pointer; }
   .box { display: flex; align-items: flex-end; gap: 8px; }
   textarea {
     flex: 1; min-height: 44px; max-height: 132px; resize: none; padding: 10px 14px; border-radius: 22px; border: 1px solid var(--edge);

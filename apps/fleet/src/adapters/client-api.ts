@@ -25,11 +25,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type JobView, type JobsQuery } from "@morndo/protocol";
+import { Flight, productVersion } from "@morndo/service-kit";
 import type { Connections } from "../application/connections.ts";
 import type { EventHub, FleetEvent } from "../application/events.ts";
 import type { JobMirror } from "../application/job-mirror.ts";
 import type { LaneRegistry } from "../application/lane-registry.ts";
-import { opError } from "../application/requests.ts";
+import { SIDE_EFFECT_OPS, opError, type Outcome } from "../application/requests.ts";
 import type { Router } from "../application/router.ts";
 import type { Audit } from "./audit.ts";
 import { streamFile } from "./files-route.ts";
@@ -37,6 +38,7 @@ import type { Logger } from "./log.ts";
 import type { NodesStore } from "./nodes-store.ts";
 import { parseOpBody } from "./op-body.ts";
 import { clearStaleSocket, prepareSocketDir } from "./socket-dir.ts";
+import { SCHEMA_VERSION } from "./migrations.ts";
 
 export const API_VERSIONS = [CLIENT_API - 1, CLIENT_API].filter(v => v >= 1);
 // How long a stopping service lets the requests it is answering finish before it closes every connection left (B6 S1).
@@ -51,6 +53,7 @@ class HttpError extends Error {
 export type ClientApiDeps = {
   router: Router; connections: Connections; lanes: LaneRegistry; nodes: NodesStore; audit: Audit; events: EventHub; jobs: JobMirror; log: Logger;
   eventsBufferBytes?: number;
+  updates?: { schema?: number; held: () => boolean; flight: Flight };
 };
 export type ClientApi = { close(): Promise<void> };
 
@@ -61,8 +64,8 @@ const clientOf = (req: IncomingMessage): string => {
   return typeof h === "string" && CLIENT.test(h) ? h : "unknown";
 };
 
-const json = (res: ServerResponse, status: number, body: unknown) => {
-  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
+const json = (res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) => {
+  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...headers });
   res.end(JSON.stringify(body));
 };
 
@@ -130,9 +133,33 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   await clearStaleSocket(socketPath);
   const eventsBufferBytes = d.eventsBufferBytes ?? LIMITS.eventsBufferBytes;
 
+  const flight = d.updates?.flight ?? new Flight();
+  const held = d.updates?.held ?? (() => false);
+  const schema = d.updates?.schema ?? SCHEMA_VERSION;
+  // A hold still allows a revocation, a narrowing, a lane stop and a job cancel (RL9). Every other side effect is refused before it is sent.
+  const allowedWhileHeld = new Set(["connections.revoke", "connections.narrow", "lane.stop", "job.cancel"]);
+  function heldRefusal(op: Parameters<Router["op"]>[1]): { status: number; outcome: Outcome } | null {
+    if (held() && SIDE_EFFECT_OPS.has(op) && !allowedWhileHeld.has(op)) {
+      return { status: 503, outcome: { ok: false, error: opError("updating", "the fleet is not taking new work while it updates"), store: null, storeSeq: null } };
+    }
+    return null;
+  }
+  async function runOp(target: Parameters<Router["op"]>[0], op: Parameters<Router["op"]>[1], args: Parameters<Router["op"]>[2], o: Parameters<Router["op"]>[3]): Promise<{ status: number; outcome: Outcome }> {
+    const refusal = heldRefusal(op);
+    if (refusal) return refusal;
+    const end = SIDE_EFFECT_OPS.has(op) ? flight.begin({ kind: op, id: o?.key ?? op }) : null;
+    try { return { status: 200, outcome: await d.router.op(target, op, args, o) }; }
+    finally { end?.(); }
+  }
+  const answerOp = (res: ServerResponse, ran: { status: number; outcome: Outcome }) =>
+    json(res, ran.status, ran.outcome, ran.status === 503 ? { "Retry-After": "1" } : {});
+
   async function route(req: IncomingMessage, res: ServerResponse, s: string[]): Promise<void> {
     const method = req.method ?? "GET";
     const [first, second, third] = s;
+    if (method === "GET" && s.length === 1 && first === "health") {
+      return json(res, 200, { version: productVersion(), schema, ready: true, inFlight: flight.list() });
+    }
     if (method === "GET" && s.length === 1 && first === "caps") return json(res, 200, { api: API_VERSIONS });
     if (method === "GET" && s.length === 1 && first === "nodes") return json(res, 200, d.connections.list());
     if (method === "POST" && s.length === 3 && first === "nodes" && third === "revoke") {
@@ -177,27 +204,27 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         const notice = b.args.notice === "commented" || b.args.notice === "given_up" ? b.args.notice : null;
         const node = "node" in b.target ? b.target.node : "";
         if (!notice || !node) return json(res, 200, { ok: false, error: opError("bad_args", "missing"), store: null, storeSeq: null });
+        const refusal = heldRefusal(b.op);
+        if (refusal) return answerOp(res, refusal);
         const stored = d.jobs.report(node, id, notice);
         if (!stored) return json(res, 200, { ok: false, error: opError("denied", "missing"), store: null, storeSeq: null });
-        const outcome = await d.router.op({ node: stored.node }, b.op, { id, notice }, {
+        const ran = await runOp({ node: stored.node }, b.op, { id, notice }, {
           client: clientOf(req), ...(b.key === undefined ? {} : { key: b.key }), ...(b.timeoutMs === undefined ? {} : { timeoutMs: b.timeoutMs }),
         });
-        if (outcome.ok) d.jobs.holdNotice(stored.node, stored.id, notice);
-        return json(res, 200, outcome);
+        if (ran.outcome.ok) d.jobs.holdNotice(stored.node, stored.id, notice);
+        return answerOp(res, ran);
       }
       if (b.op === "job.cancel") {
         const id = typeof b.args.id === "string" ? b.args.id : "";
         const owned = jobOwner(d, id, b.target);
         if (!owned) return json(res, 200, { ok: false, error: opError("denied", "missing"), store: null, storeSeq: null });
-        const outcome = await d.router.op({ node: owned.node }, b.op, b.args, {
+        return answerOp(res, await runOp({ node: owned.node }, b.op, b.args, {
           client: clientOf(req), ...(b.key === undefined ? {} : { key: b.key }), ...(b.timeoutMs === undefined ? {} : { timeoutMs: b.timeoutMs }),
-        });
-        return json(res, 200, outcome);
+        }));
       }
-      const outcome = await d.router.op(b.target, b.op, b.args, {
+      return answerOp(res, await runOp(b.target, b.op, b.args, {
         client: clientOf(req), ...(b.key === undefined ? {} : { key: b.key }), ...(b.timeoutMs === undefined ? {} : { timeoutMs: b.timeoutMs }),
-      });
-      return json(res, 200, outcome);
+      }));
     }
     if (method === "GET" && s.length === 3 && first === "files") return streamFile(res, d.router, second ?? "", third ?? "");
     throw new HttpError(404, "no such route");

@@ -15,6 +15,7 @@
 // `afterStarted` runs right after a keyed op's `started` is committed (the test hook dropAfterStarted cuts the connection
 // there); when it answers true, the op runs on and its reply says `discarded`, for agent.ts never to send.
 import { ERROR_EXECUTED, KEYED_OPS, type ErrorCode, type OpArgs, type OpError, type OpName, type OpResult } from "@morndo/protocol";
+import { Flight } from "@morndo/service-kit";
 import { isOpName } from "../config.ts";
 import type { Logger } from "../log.ts";
 import { CHECK, validKey } from "./args.ts";
@@ -37,6 +38,9 @@ export const read = <O extends OpName>(run: (args: OpArgs[O]) => Promise<Outcome
 export const effect = <O extends OpName>(queue: (args: OpArgs[O]) => string, run: (args: OpArgs[O], ctx: EffectContext) => Promise<Outcome<O>>): EffectOp<O> =>
   ({ kind: "effect", queue, run });
 
+// These reduce what a caller can do. A hold still lets them through.
+const ALLOWED_WHILE_HELD = new Set<OpName>(["connections.revoke", "connections.narrow", "lane.stop", "job.cancel"]);
+
 type AnyOutcome = { ok: true; result: unknown } | Failure;
 type Answered = AnyOutcome & { discarded?: true };
 type AnyOp = { kind: "read"; run(args: unknown): Promise<AnyOutcome> }
@@ -50,6 +54,8 @@ export type ExecutorDeps = {
   log: Logger;
   now?: () => number;
   afterStarted?: (key: string) => boolean;
+  held?: () => boolean;
+  flight?: Flight;
 };
 
 export class OpExecutor {
@@ -96,6 +102,7 @@ export class OpExecutor {
         if (prior.state === "started") return fail("uncertain", "an earlier attempt with this key started, and its outcome is not known");
         if (prior.state === "mismatch") return fail("uncertain", "this key was used with other arguments: its op may have run");
       }
+      if (this.#d.held?.() && !ALLOWED_WHILE_HELD.has(op)) return fail("updating", "this node is not taking new work while it updates");
       if (deadline.expired()) return fail("timeout", "the deadline passed before the op could start");
       if (key !== undefined) {
         let started: boolean;
@@ -103,22 +110,25 @@ export class OpExecutor {
         catch (e) { return this.#keysFailed(op, e); }
         if (!started) return fail("uncertain", "an attempt with this key is already recorded");
       }
-      const discarded = key !== undefined && this.#d.afterStarted?.(key) === true;
-      const ctx: EffectContext = {
-        ready: () => (deadline.expired() ? fail("timeout", "the deadline passed before the side effect").error : null),
-        remainingMs: () => deadline.remainingMs(),
-      };
-      let out: AnyOutcome;
-      try { out = await entry.run(args, ctx); }
-      catch (e) {
-        this.#d.log.error(`op ${op} failed while acting`, e);
-        out = fail("internal", "the node failed while running the op; it may have acted");    // "maybe": the key stays started
-      }
-      if (key !== undefined) {
-        if (out.ok) keys.finish(key, out.result);
-        else if (out.error.executed === "no") keys.release(key);
-      }
-      return discarded ? { ...out, discarded } : out;
+      const end = (this.#d.flight ?? new Flight()).begin({ kind: op, id: key ?? op });
+      try {
+        const discarded = key !== undefined && this.#d.afterStarted?.(key) === true;
+        const ctx: EffectContext = {
+          ready: () => (deadline.expired() ? fail("timeout", "the deadline passed before the side effect").error : null),
+          remainingMs: () => deadline.remainingMs(),
+        };
+        let out: AnyOutcome;
+        try { out = await entry.run(args, ctx); }
+        catch (e) {
+          this.#d.log.error(`op ${op} failed while acting`, e);
+          out = fail("internal", "the node failed while running the op; it may have acted");    // "maybe": the key stays started
+        }
+        if (key !== undefined) {
+          if (out.ok) keys.finish(key, out.result);
+          else if (out.error.executed === "no") keys.release(key);
+        }
+        return discarded ? { ...out, discarded } : out;
+      } finally { end(); }
     });
   }
 

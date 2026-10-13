@@ -113,10 +113,14 @@ export const PolicyView = z.strictObject({
   })),
 });
 
+// A catalog written before the firstParty flag still means this host.
+export const BUILTIN_FIRST_PARTY_HOST = "api.anthropic.com";
+
 const runtime = z.strictObject({
   runtime: text(64),
   dialect: text(64),
   baseUrl: z.nullable(z.url()),
+  firstParty: z.optional(z.literal(true)),
 });
 const models = z.discriminatedUnion("source", [
   z.strictObject({ source: z.literal("endpoint"), url: z.url(), shape: z.enum(["openai-list", "anthropic-list"]) }),
@@ -140,7 +144,9 @@ export const VendorPreset = z.strictObject({
   }))),
   keyShapes: z.array(text(40)),
   spend: z.array(z.enum(["balance", "token-price", "manual", "provider"])),
-  prices: z.array(z.strictObject({ at: text(32), model: text(80), input: z.number(), output: z.number() })),
+  prices: z.array(z.strictObject({
+    at: text(32), model: text(80), input: z.number(), output: z.number(), cacheRead: z.optional(z.number()),
+  })),
   balance: z.nullable(z.strictObject({ endpoint: z.url(), field: text(120) })),
   defaultPicks: z.record(z.string().check(z.maxLength(64)), text(200)),
   idPatterns: z.optional(z.record(z.string().check(z.maxLength(80)), text(200))),

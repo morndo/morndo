@@ -7,13 +7,13 @@ import type { WorkerId } from "./shared.ts";
 
 // A worker's own word on its work: its last answer led with "STATUS: DONE". A check by someone else would be a Verdict
 // (V1, V4), which the hub doesn't read; until it does, there is no "checked" state anywhere (product lane, 2026-10-04).
-export type Claim = "says_done" | null;
+export type SaysDone = "says_done" | null;
 
 // What a card needs to know of one Conversation: the worker's name keys its Read mark and mute (O7).
 export type ConversationLook = { worker: string; name: string; lastMessageAt: number | null; needsYou: boolean };
 
 export type DecisionCard = { kind: "decision"; key: string; id: string; blocking: boolean; due: number | null; askedAt: number };
-export type UpdateCard = { kind: "update"; key: string; worker: string; conversation: string; needsYou: boolean; claim: Claim; lastAt: number };
+export type UpdateCard = { kind: "update"; key: string; worker: string; conversation: string; needsYou: boolean; claim: SaysDone; lastAt: number };
 export type Card = DecisionCard | UpdateCard;
 
 export const decisionKey = (id: string) => `d:${id}`;
@@ -32,7 +32,7 @@ export const hasUpdate = (c: Pick<ConversationLook, "lastMessageAt">, mark: numb
 export function compareDecisionCards(a: DecisionCard, b: DecisionCard): number {
   return Number(b.blocking) - Number(a.blocking) || (a.due ?? Infinity) - (b.due ?? Infinity) || a.askedAt - b.askedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
-const claimRank = (c: Claim) => (c === "says_done" ? 0 : 1);
+const claimRank = (c: SaysDone) => (c === "says_done" ? 0 : 1);
 export function compareUpdateCards(a: UpdateCard, b: UpdateCard): number {
   return Number(b.needsYou) - Number(a.needsYou) || claimRank(a.claim) - claimRank(b.claim) || b.lastAt - a.lastAt
     || (a.conversation < b.conversation ? -1 : a.conversation > b.conversation ? 1 : 0);
@@ -47,7 +47,7 @@ export type CatchUpInput = {
   conversations: readonly ConversationLook[];
   reads: Readonly<Record<string, number>>;
   muted: readonly string[];
-  claims?: Readonly<Record<string, Claim>>;             // by conversation, where the catch-up read model said
+  claims?: Readonly<Record<string, SaysDone>>;          // by conversation, where the catch-up read model said
   // false: decision cards only. The phone's catch-up since ADR-0011: updates wait in each lane's chat and in the digest
   // after he was away (H5), never as a stream of cards.
   updates?: boolean;
@@ -102,7 +102,7 @@ export function statusOf(text: string): { status: "done" | "blocked" | "decision
 // with STATUS: DONE.
 export type NewSince = {
   messages: Message[]; count: number; firstAt: number | null; lastAt: number | null;
-  tools: number; toolNames: string[]; files: number; claim: Claim;
+  tools: number; toolNames: string[]; files: number; claim: SaysDone;
 };
 export function newSince(messages: readonly Message[], mark: number | null, keep = 30): NewSince {
   const fresh = messages.filter(m => m.at > (mark ?? 0));

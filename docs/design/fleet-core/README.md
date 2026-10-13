@@ -189,6 +189,7 @@ Messages are JSON over WebSocket, validated with zod/mini on both sides. Every m
 | `node_offline` | no | the fleet service's own refusal |
 | `uncertain` | maybe | |
 | `internal` | maybe | |
+| `updating` | no | the service is holding new work while it updates |
 
 **Deadlines.** The agent starts a monotonic deadline (`timeoutMs` − 250 ms) when a request arrives. If the side effect hasn't started by then, the answer is `timeout` with `executed: no`. A late pane lock never types.
 

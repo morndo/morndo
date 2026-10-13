@@ -151,8 +151,26 @@ describe("vendor catalog", () => {
   it("every preset has terms, and engine-layer custody is the only one without an isolation floor", () => {
     const catalog = VendorCatalog.parse(raw);
     expect(catalog.map(p => p.id)).toEqual([
-      "anthropic", "openai", "deepseek", "moonshot", "openrouter", "custom-anthropic", "custom-openai",
+      "anthropic", "openai", "deepseek", "moonshot", "zai", "openrouter", "custom-anthropic", "custom-openai",
       "claude", "codex", "cursor", "studio", "cursor-cloud", "agy",
+    ]);
+    // https://docs.z.ai/guides/llm/glm-5.3 and https://docs.z.ai/devpack/latest-model (read 2026-10-10):
+    // Anthropic Messages base is https://api.z.ai/api/anthropic. No models route is in the OpenAPI spec
+    // (https://docs.z.ai/openapi.json, read 2026-10-10), so the ids are static. Coding uses max effort.
+    const anthropic = catalog.find(p => p.id === "anthropic");
+    expect(anthropic?.runtimes).toEqual([{ runtime: "claude", dialect: "anthropic", baseUrl: "https://api.anthropic.com", firstParty: true }]);
+    expect(catalog.filter(p => p.runtimes.some(r => r.firstParty === true)).map(p => p.id)).toEqual(["anthropic"]);
+    const zai = catalog.find(p => p.id === "zai");
+    expect(zai?.runtimes).toEqual([{ runtime: "claude", dialect: "anthropic", baseUrl: "https://api.z.ai/api/anthropic" }]);
+    expect(zai?.models).toEqual({ source: "static", ids: ["glm-5.3", "glm-5.3-flash"] });
+    expect(zai?.defaultPicks).toEqual({ implement: "glm-5.3@max", "*": "glm-5.3@high" });
+    expect(zai?.spend).toEqual(["token-price"]);
+    expect(zai?.balance).toBeNull();
+    // https://docs.z.ai/guides/overview/pricing (read 2026-10-11): Cached Input is $0.26 and $0.03 per 1M.
+    // The page lists no cache-creation price, so that field is absent and those tokens are billed as input.
+    expect(zai?.prices).toEqual([
+      { at: "2026-10-11", model: "glm-5.3", input: 1.4, output: 4.4, cacheRead: 0.26 },
+      { at: "2026-10-11", model: "glm-5.3-flash", input: 0.15, output: 0.5, cacheRead: 0.03 },
     ]);
     // https://platform.kimi.ai/docs/guide/claude-code-kimi (read 2026-10-10): the messages base URL is
     // https://api.moonshot.ai/anthropic. The balance response field is not on that page, so it is not a spend source.

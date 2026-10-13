@@ -2,14 +2,110 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import type { VendorPreset } from "@morndo/protocol";
 import type { RunPlan } from "../src/application/ports.ts";
-import { childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
+import { firstPartyHost } from "../src/application/catalog.ts";
+import { anthropicGatewayEnv, baseUrlProblem, childEnv, ClaudeRuntime, claudeArgv, claudeIsolation, claudeSettings, GATEWAY_ENV_KEYS, isThirdPartyAnthropicBase, pathDenied, sandboxReady } from "../src/adapters/runtime-claude.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "../src/adapters/runtime-limits.ts";
 
 const plan: RunPlan = {
   lease: "l1", connection: "credit", ref: "key-credit", configDir: "/tmp/cfg", model: "sonnet-5.5",
   effort: "high", workspace: "/tmp/work", deny: ["/tmp/vault"], reservation: 2, probe: false,
 };
+
+describe("anthropic-compatible base URL", () => {
+  it("points the child at the third-party base and keeps the key out of the environment", () => {
+    const key = "sk-ant-synthetic-test-key-0001";
+    const env = childEnv(
+      { PATH: "/usr/bin", ANTHROPIC_API_KEY: key, ANTHROPIC_BASE_URL: "https://inherited.example" },
+      anthropicGatewayEnv("http://127.0.0.1:9", "glm-5.3"),
+    );
+    expect(env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:9");
+    expect(env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("glm-5.3");
+    expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("glm-5.3");
+    expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("glm-5.3");
+    expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBe("glm-5.3");
+    const flash = childEnv({}, anthropicGatewayEnv("http://127.0.0.1:9", "glm-5.3", "max", "glm-5.3-flash"));
+    expect(flash.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(flash.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("glm-5.3");
+    expect(flash.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("glm-5.3");
+    expect(flash.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("glm-5.3-flash");
+    expect(flash.CLAUDE_CODE_SUBAGENT_MODEL).toBe("glm-5.3");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(JSON.stringify(env)).not.toContain(key);
+    const first = childEnv({}, anthropicGatewayEnv("https://api.anthropic.com", "sonnet-5.5", "", "", "api.anthropic.com"));
+    expect(first.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(first.ANTHROPIC_MODEL).toBeUndefined();
+  });
+
+  it("keeps placeholder model names out of the gateway environment", () => {
+    for (const name of ["default", "ask"]) {
+      const env = childEnv({}, anthropicGatewayEnv("http://127.0.0.1:9", name));
+      expect(env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:9");
+      expect(env.ANTHROPIC_MODEL).toBeUndefined();
+      expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
+      expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBeUndefined();
+      expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeUndefined();
+      expect(env.CLAUDE_CODE_SUBAGENT_MODEL).toBeUndefined();
+    }
+  });
+});
+
+describe("gateway env keys", () => {
+  it("keeps every gateway variable from one list, and reads the first-party host from the caller", () => {
+    const source = readFileSync(join(import.meta.dirname, "../src/adapters/runtime-claude.ts"), "utf8");
+    expect(source).not.toContain("api.anthropic.com");
+    const host = "api.anthropic.com";
+    expect(isThirdPartyAnthropicBase("https://API.ANTHROPIC.COM", host)).toBe(false);
+    expect(isThirdPartyAnthropicBase("https://api.anthropic.com:443", host)).toBe(false);
+    expect(isThirdPartyAnthropicBase("https://api.anthropic.com:8443", host)).toBe(true);
+    const old = [{ runtimes: [{ runtime: "claude", dialect: "anthropic", baseUrl: "https://api.anthropic.com" }] }] as unknown as VendorPreset[];
+    expect(firstPartyHost(old)).toBe("api.anthropic.com");
+    expect(firstPartyHost([])).toBe("api.anthropic.com");
+    expect(isThirdPartyAnthropicBase("https://API.ANTHROPIC.COM", "")).toBe(false);
+    expect(isThirdPartyAnthropicBase("https://api.anthropic.com:443", "")).toBe(false);
+    expect(isThirdPartyAnthropicBase("http://127.0.0.1:9", "")).toBe(true);
+    expect(anthropicGatewayEnv("https://api.anthropic.com", "sonnet-5.5")).toEqual({});
+    const extra = anthropicGatewayEnv("http://127.0.0.1:9", "glm-5.3", "max", "glm-5.3-flash", host);
+    expect(Object.keys(extra).sort()).toEqual([...GATEWAY_ENV_KEYS].sort());
+    const env = childEnv({ ANTHROPIC_API_KEY: "sk-ant-synthetic-test-key-0001", ANTHROPIC_MODEL: "inherited" }, extra);
+    for (const key of GATEWAY_ENV_KEYS) expect(env[key]).toBe(extra[key]);
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+});
+
+describe("base URL", () => {
+  it("refuses an empty or unparseable base instead of leaving the host unset", () => {
+    expect(baseUrlProblem("")).toBe("base URL missing or invalid");
+    expect(baseUrlProblem("not a url")).toBe("base URL missing or invalid");
+    expect(baseUrlProblem("https://api.z.ai/api/anthropic")).toBeNull();
+    expect(anthropicGatewayEnv("", "glm-5.3")).toEqual({});
+    expect(() => anthropicGatewayEnv("not a url", "glm-5.3")).toThrow(/base URL/);
+  });
+});
+
+describe("third-party run settings", () => {
+  it("denies WebSearch behind a third-party base and leaves it on the first-party host", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-websearch-"));
+    const fixture = join(import.meta.dirname, "fixtures/fake-runtime.mjs");
+    const record = join(dir, "record.json");
+    const jobPath = join(dir, "job.json");
+    const denyOf = async (baseUrl: string): Promise<string[]> => {
+      writeFileSync(jobPath, JSON.stringify({ record, exit: 0 }));
+      const runtime = new ClaudeRuntime(fixture, "helper", {}, baseUrl, "api.anthropic.com");
+      const ran = await runtime.execute({ ...plan, workspace: dir }, ["--job", jobPath]);
+      expect(ran.status).toBe(0);
+      const recorded = JSON.parse(readFileSync(record, "utf8")) as { argv: string[] };
+      const settings = JSON.parse(recorded.argv[recorded.argv.indexOf("--settings") + 1] ?? "{}") as { permissions: { deny: string[] } };
+      return settings.permissions.deny;
+    };
+    try {
+      expect(await denyOf("http://127.0.0.1:9")).toContain("WebSearch");
+      expect(await denyOf("https://api.anthropic.com")).not.toContain("WebSearch");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
 
 describe("runtime flags", () => {
   it("passes the helper, the reservation and a denied path", () => {

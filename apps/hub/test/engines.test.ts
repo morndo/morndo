@@ -76,6 +76,46 @@ describe("reading the engines through the CLI", () => {
     await cli.setChain("plan", ["claude:sonnet-5.5@high"], false);
     expect((await cli.read()).version).not.toBe(a);
   });
+  it("a run that fails stops the others: the read fails at once with that failure, after every run it started has exited", async () => {
+    const stamp = join(dir, "stamp.log");
+    const stamped = () => readFileSync(stamp, "utf8").trim().split("\n").filter(Boolean).map(line => {
+      const [, phase = "", what = "", pid = ""] = line.split(" ");
+      return { phase, what, pid: Number(pid) };
+    });
+    const gone = (pid: number) => { try { process.kill(pid, 0); return false; } catch { return true; } };
+    const HOLD = 12_000;                                          // far past the answer, short of the CLI's 15 s timeout
+    // The kill switch's run crashes at once while the roles' and the providers' runs are held.
+    const held = { ...env, FAKE_ENGINES_FAIL_ON: "option", FAKE_ENGINES_FAIL_AFTER_STARTS: "2", FAKE_ENGINES_PAUSE_ON: "get,providers", FAKE_ENGINES_PAUSE_MS: String(HOLD), FAKE_ENGINES_STAMP: stamp };
+    let t0 = performance.now();
+    await expect(enginesCli(FAKE, held).read()).rejects.toThrow(/option failed/);
+    expect(performance.now() - t0).toBeLessThan(HOLD / 2);
+    let runs = stamped();
+    expect(runs.map(r => `${r.phase} ${r.what}`).sort((x, y) => x.localeCompare(y))).toEqual(["start get", "start providers"]);
+    expect(runs.filter(r => !gone(r.pid))).toEqual([]);        // both stopped and gone before the read answered
+    // The first failure in time is the one reported, not the first in the list: providers crashes while get is held.
+    writeFileSync(stamp, "");
+    const providersFirst = { ...env, FAKE_ENGINES_FAIL_ON: "providers", FAKE_ENGINES_FAIL_AFTER_STARTS: "1", FAKE_ENGINES_PAUSE_ON: "get", FAKE_ENGINES_PAUSE_MS: String(HOLD), FAKE_ENGINES_STAMP: stamp };
+    t0 = performance.now();
+    await expect(enginesCli(FAKE, providersFirst).settings()).rejects.toThrow(/providers failed/);
+    expect(performance.now() - t0).toBeLessThan(HOLD / 2);
+    expect(stamped().filter(r => !gone(r.pid))).toEqual([]);
+    // One role's resolve crashes while three are held: those are stopped and gone before the read fails, and no further
+    // role starts.
+    const s = state();
+    const roles = s.roles as Record<string, { label: string; chain: string[] }>;
+    for (let i = 0; i < 5; i++) roles[`extra-${i}`] = { label: `Extra ${i}`, chain: ["claude:opus-5.5@high"] };
+    writeFileSync(join(dir, "engines.json"), JSON.stringify(s));
+    writeFileSync(stamp, "");
+    writeFileSync(join(dir, "calls.log"), "");
+    const resolving = { ...env, FAKE_ENGINES_FAIL_ON: "resolve:plan", FAKE_ENGINES_FAIL_AFTER_STARTS: "3", FAKE_ENGINES_PAUSE_RESOLVE: String(HOLD), FAKE_ENGINES_STAMP: stamp };
+    t0 = performance.now();
+    await expect(enginesCli(FAKE, resolving).read()).rejects.toThrow(/resolve failed/);
+    expect(performance.now() - t0).toBeLessThan(HOLD / 2);
+    runs = stamped();
+    expect(runs.map(r => `${r.phase} ${r.what}`).sort((x, y) => x.localeCompare(y))).toEqual(["start extra-0", "start implement-backend", "start review"]);
+    expect(runs.filter(r => !gone(r.pid))).toEqual([]);
+    expect(calls().filter(c => c[0] === "resolve").map(c => c[1] ?? "").sort((x, y) => x.localeCompare(y))).toEqual(["extra-0", "implement-backend", "plan", "review"]);
+  });
   it("the review rule is what the resolver applies: on when either the role's flag or review_other_provider is on", () => {
     expect(rolesFrom({ review: { chain: ["a:b"], other_provider: false, other_provider_effective: true, review_other_provider: true } })[0]?.otherProvider).toBe(true);
   });
@@ -538,8 +578,9 @@ describe("without MORNDO_ENGINES", () => {
     const off = await startInProcessHub();
     try {
       const cookie = await off.cookie();
-      const me = await (await fetch(`${off.base}/api/me`, { headers: { cookie: `__Host-morndo=${cookie}` } })).json() as { engines?: boolean };
+      const me = await (await fetch(`${off.base}/api/me`, { headers: { cookie: `__Host-morndo=${cookie}` } })).json() as { engines?: boolean; connections?: boolean };
       expect(me.engines).toBe(false);
+      expect(me.connections).toBe(false);
     } finally { await off.close(); }
     const on = await startInProcessHub({ engines: { bin: FAKE, env } });
     try {

@@ -13,6 +13,14 @@ export * from "./connections.ts";
 export * from "./routing.ts";
 export * from "./auto-routing.ts";
 export * from "./board.ts";
+export * from "./verification.ts";
+export * from "./digest.ts";
 export * from "./usage.ts";
 export * from "./jobs.ts";
 export * from "./chats.ts";
+export * from "./secrets.ts";
+export * from "./knowledge.ts";
+export * from "./knowledge-facts.ts";
+// Level, ModelClass and roleGroup each also exist in another context; Auto's win here, so import the other from its module.
+export type { Level, ModelClass } from "./auto-routing.ts";
+export { roleGroup } from "./auto-routing.ts";
