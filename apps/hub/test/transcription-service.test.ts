@@ -1,0 +1,218 @@
+// TranscriptionService (design §9, §13): one class, FIFO, cancel, a timeout, and lost after a restart.
+// The transcriber here is scripted. The process host has its own suite.
+import { describe, expect, it } from "vitest";
+import {
+  MAX_TEXT_BYTES, requestTranscription, utf8ByteLength,
+  type EngineText, type Recording, type Result, type Transcription, type TranscriptionProblem,
+} from "@morndo/domain";
+import type { TranscribeInput, Transcriber, TranscriberProbe } from "@morndo/protocol";
+import { until } from "../../../packages/protocol/test/proc.ts";
+import { TranscriptionService, type TranscriptionStore } from "../src/application/transcription-service.ts";
+
+const READY: TranscriberProbe = {
+  ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture", languages: "multi", maxSeconds: 600,
+};
+const HEARD: EngineText = { language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "Kurze Notiz." }] };
+
+function abortError(): Error {
+  const error = new Error("The operation was aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+class Gate {
+  calls: string[] = [];
+  ready: TranscriberProbe = READY;
+  answer: Result<EngineText, TranscriptionProblem> = { ok: true, value: HEARD };
+  private held = new Map<string, () => void>();
+
+  readonly transcriber: Transcriber = {
+    probe: async () => this.ready,
+    transcribe: (input: TranscribeInput) => {
+      this.calls.push(input.path);
+      return new Promise((resolve, reject) => {
+        const stop = () => reject(abortError());
+        if (input.signal.aborted) { stop(); return; }
+        input.signal.addEventListener("abort", stop);
+        this.held.set(input.path, () => resolve(this.answer));
+      });
+    },
+  };
+
+  release(path: string): void {
+    const finish = this.held.get(path);
+    this.held.delete(path);
+    finish?.();
+  }
+}
+
+function memory(seed: Transcription[] = []): TranscriptionStore {
+  const rows = seed.map(row => structuredClone(row));
+  return {
+    transcriptions: () => rows.map(row => structuredClone(row)),
+    saveTranscription: row => {
+      const i = rows.findIndex(r => r.id === row.id && r.recording.kind === row.recording.kind
+        && r.recording.id === row.recording.id && r.language === row.language);
+      if (i < 0) rows.push(structuredClone(row));
+      else rows[i] = structuredClone(row);
+    },
+  };
+}
+
+const files = new Map<string, { path: string; size: number }>([
+  ["a", { path: "/audio/a.wav", size: 12 }],
+  ["b", { path: "/audio/b.wav", size: 12 }],
+  ["hang", { path: "/audio/hang.wav", size: 12 }],
+  ["long", { path: "/audio/long.wav", size: 12 }],
+]);
+
+function service(store: TranscriptionStore, gate: Gate, extra: { guard?: () => "off" | "load"; timeoutFor?: () => number; now?: () => number } = {}) {
+  let guard: "off" | "load" = "off";
+  const lines: string[] = [];
+  const svc = new TranscriptionService({
+    store, transcriber: gate.transcriber, now: extra.now ?? (() => 1_700_000_000_000),
+    file: (recording: Recording) => files.get(recording.id) ?? null,
+    guard: () => extra.guard?.() ?? guard,
+    log: line => lines.push(line),
+    probeTtlMs: 0,
+    ...(extra.timeoutFor ? { timeoutFor: extra.timeoutFor } : {}),
+  });
+  return { svc, lines, setGuard: (g: "off" | "load") => { guard = g; } };
+}
+
+const body = (id: string, recording: string, language = "auto") =>
+  ({ id, recording: { kind: "upload" as const, id: recording }, language });
+
+describe("transcription service", () => {
+  it("runs one at a time and starts the next when the first ends", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    const first = await svc.request(body("tx-a", "a"));
+    const second = await svc.request(body("tx-b", "b"));
+    expect(first.ok && first.value.state).toBe("running");
+    expect(second.ok && second.value).toMatchObject({ state: "queued", position: 1, reason: "class" });
+    expect(gate.calls).toEqual(["/audio/a.wav"]);
+    gate.release("/audio/a.wav");
+    expect(await until(() => svc.get("tx-a")?.state === "done" && svc.get("tx-b")?.state === "running", 2000)).toBe(true);
+    expect(svc.get("tx-a")).toMatchObject({ state: "done", text: { text: "Kurze Notiz.", edited: false, engine: "fixture-ear", model: "tiny-fixture" } });
+    expect(gate.calls).toEqual(["/audio/a.wav", "/audio/b.wav"]);
+    svc.close();
+  });
+
+  it("a cancel while queued never starts, and a cancel while running ends cancelled", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    await svc.request(body("tx-a", "hang"));
+    expect(await until(() => svc.get("tx-a")?.state === "running", 2000)).toBe(true);
+    const queued = await svc.request(body("tx-b", "b"));
+    expect(queued.ok && queued.value.state).toBe("queued");
+    const dropped = svc.cancel("tx-b");
+    expect(dropped.ok && dropped.value.state).toBe("cancelled");
+    expect(gate.calls).toEqual(["/audio/hang.wav"]);
+    const stopped = svc.cancel("tx-a");
+    expect(stopped.ok && stopped.value.state).toBe("cancelled");
+    expect(await until(() => svc.get("tx-a")?.state === "cancelled", 2000)).toBe(true);
+    expect(svc.get("tx-a")?.text).toBeNull();
+    expect(gate.calls).toEqual(["/audio/hang.wav"]);
+    svc.close();
+  });
+
+  it("a running row is lost once across a restart, and a queued row waits again", async () => {
+    const made = requestTranscription([], { id: "tx-run", recording: { kind: "upload", id: "a" }, sizeBytes: 12, language: "auto" }, 10, { present: true, maxSeconds: 600 });
+    if (!made.ok) throw new Error(made.error);
+    const running: Transcription = { ...made.value, state: "running", startedAt: 20 };
+    const waiting = requestTranscription([], { id: "tx-wait", recording: { kind: "upload", id: "b" }, sizeBytes: 12, language: "auto" }, 11, { present: true, maxSeconds: 600 });
+    if (!waiting.ok) throw new Error(waiting.error);
+    const store = memory([running, waiting.value]);
+    const gate = new Gate();
+    const first = service(store, gate, { now: () => 50 });
+    expect(first.svc.get("tx-run")).toMatchObject({ state: "lost", outcome: "lost", endedAt: 50, text: null });
+    await first.svc.start();
+    expect(await until(() => first.svc.get("tx-wait")?.state === "running", 2000)).toBe(true);
+    first.svc.close();
+    const again = service(store, new Gate(), { now: () => 80 });
+    expect(again.svc.get("tx-run")).toMatchObject({ state: "lost", endedAt: 50 });
+    again.svc.close();
+  });
+
+  it("a guard over the line keeps the row queued until the line clears", async () => {
+    const gate = new Gate();
+    const { svc, setGuard } = service(memory(), gate);
+    await svc.start();
+    setGuard("load");
+    const row = await svc.request(body("tx-a", "a"));
+    expect(row.ok && row.value).toMatchObject({ state: "queued", reason: "load", position: 1 });
+    expect(gate.calls).toEqual([]);
+    setGuard("off");
+    svc.tick();
+    expect(await until(() => svc.get("tx-a")?.state === "running", 2000)).toBe(true);
+    expect(gate.calls).toEqual(["/audio/a.wav"]);
+    svc.close();
+  });
+
+  it("the same recording and language returns the attempt already in flight", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    const first = await svc.request(body("tx-a", "hang"));
+    const again = await svc.request(body("tx-other", "hang"));
+    expect(first.ok && again.ok && again.value.id).toBe("tx-a");
+    expect(gate.calls).toEqual(["/audio/hang.wav"]);
+    svc.close();
+  });
+
+  it("cuts text past 64 KiB and refuses a recording past the cap", async () => {
+    const gate = new Gate();
+    gate.answer = { ok: true, value: { language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "y".repeat(70_000) }] } };
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    const accepted = await svc.request(body("tx-cut", "a"));
+    expect(accepted.ok && accepted.value.state).toBe("running");
+    gate.release("/audio/a.wav");
+    expect(await until(() => svc.get("tx-cut")?.state === "done", 2000)).toBe(true);
+    const words = svc.get("tx-cut")?.text?.text ?? "";
+    expect(words.endsWith("[truncated]")).toBe(true);
+    expect(utf8ByteLength(words)).toBeLessThanOrEqual(MAX_TEXT_BYTES);
+    svc.close();
+
+    const slow = new Gate();
+    slow.answer = { ok: true, value: { language: "de", durationMs: 601_000, segments: [{ startMs: 0, endMs: 601_000, text: "too much" }] } };
+    const second = service(memory(), slow);
+    await second.svc.start();
+    await second.svc.request(body("tx-long", "long"));
+    slow.release("/audio/long.wav");
+    expect(await until(() => second.svc.get("tx-long")?.state === "failed", 2000)).toBe(true);
+    expect(second.svc.get("tx-long")).toMatchObject({ state: "failed", problem: "too_long", text: null });
+    second.svc.close();
+  });
+
+  it("times out a run that does not finish", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate, { timeoutFor: () => 40 });
+    await svc.start();
+    await svc.request(body("tx-hang", "hang"));
+    expect(await until(() => svc.get("tx-hang")?.state === "timed_out", 2000)).toBe(true);
+    expect(svc.get("tx-hang")?.text).toBeNull();
+    svc.close();
+  });
+
+  it("fails a queued row when the plugin is no longer ready, and logs the change", async () => {
+    const gate = new Gate();
+    const { svc, lines } = service(memory(), gate);
+    await svc.start();
+    expect(lines).toEqual(["transcription: on (fixture-ear tiny-fixture)"]);
+    expect(svc.me()).toEqual({ engine: "fixture-ear", model: "tiny-fixture", languages: "multi", maxSeconds: 600 });
+    await svc.request(body("tx-a", "hang"));
+    expect(await until(() => svc.get("tx-a")?.state === "running", 2000)).toBe(true);
+    await svc.request(body("tx-b", "b"));
+    gate.ready = { ready: false, reason: "missing", detail: "missing" };
+    await svc.refresh();
+    expect(svc.get("tx-b")).toMatchObject({ state: "failed", problem: "not_ready" });
+    expect(svc.get("tx-a")?.state).toBe("running");
+    expect(svc.me()).toBe(false);
+    expect(lines.at(-1)).toBe("transcription: off (missing)");
+    svc.close();
+  });
+});
