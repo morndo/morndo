@@ -42,8 +42,10 @@ export function pick(s: AnswerState, label: string, body: AnswerBody): AnswerSta
 }
 
 // Show the new version: the pick belonged to the version that was on screen, so it goes.
+// A sent answer belonged to that version too. The version now on screen has not been answered.
 export function showNew(s: AnswerState, live: DecisionItem): AnswerState {
-  return { ...s, live, shown: live, mode: "idle", picked: null, words: "", error: null };
+  const sent = live.version === s.shown.version ? s.sent : false;
+  return { ...s, live, shown: live, mode: "idle", picked: null, words: "", error: null, sent };
 }
 
 export function back(s: AnswerState): AnswerState {

@@ -45,7 +45,10 @@ export class AnswerSession {
 
   // `hold` while the brief is open: the body stays on the version he has seen. Otherwise a quiet card follows the list.
   // Compare the version, not object identity: a state proxy is never === the item the list just passed.
+  // `sent` belongs to the version it was sent for. A re-ask (same id, new version) is a new question: a closed brief
+  // follows it, and an open brief drops `sent` only once that version is shown.
   bind(live: DecisionItem, hold: boolean) {
+    if (this.sent && live.version !== this.shown.version && !hold) this.sent = false;
     const follow = !hold && !this.holdingAnswer;
     const bound = this.#bound;
     const same = bound !== null && bound.version === live.version && bound.status === live.status && bound.briefVersion === live.briefVersion && bound.answerable === live.answerable && bound.decision === live.decision && bound.notice === live.notice && this.shown.version === (follow ? live.version : this.shown.version);
