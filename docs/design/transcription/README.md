@@ -331,7 +331,7 @@ Hub config, in the same shape as a Job class:
 - **`threads`:** null means `min(8, floor(cores / 2))`, which leaves half the machine to the agents.
 - **`timeoutSec`:** null means `120 + 6 × duration`. That is about 5× the slowest RTF measured (§1); a small VPS should use the `small` model.
 - **`maxSeconds`:** 600 by default. The probe can lower it, but this setting cannot raise it past the plugin's value.
-- **`guard`:** absent by default, exactly as `jobs.guard`. When set, it delays starts and never stops a run.
+- **`guard`:** absent by default, exactly as `jobs.guard`. When set, it delays starts and never stops a run. Linux reads `MemAvailable`. macOS has no such figure, and free pages count a cached machine as empty, so the guard compares `memAvailableMiB` with total memory there.
 
 **Queue:**
 - The queue decision is the function shared with Jobs: one class, FIFO, position, reason.

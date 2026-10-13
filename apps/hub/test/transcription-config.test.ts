@@ -1,6 +1,6 @@
 // The transcription guard's machine reads (design §9, as jobs' guard): what each platform can answer, and only the
-// configured lines. Linux reads /proc; macOS has no /proc, so the load and free memory come from os, as health.ts
-// already does for the fleet. Synthetic files under a temp dir.
+// configured lines. Linux reads /proc. macOS has no MemAvailable, and free pages under-count a machine that is
+// using its cache, so the guard reads total memory there. Synthetic files under a temp dir.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,14 +21,15 @@ function procFiles(load1: string, memAvailableKb?: number): { loadPath: string; 
 }
 
 describe("transcription guard reads", () => {
-  it("reads load and free memory from os where there is no /proc (macOS), and the guard passes on them", () => {
+  it("reads load and total memory where there is no /proc (macOS), not the free-page count", () => {
     const mac = readMachine({ load1: 6, memAvailableMiB: 1024 }, {
-      platform: "darwin", loadavg: () => [3.25, 2, 1], freemem: () => 512 * 1024 * 1024, loadPath: "/nonexistent", memPath: "/nonexistent",
+      platform: "darwin", loadavg: () => [3.25, 2, 1], totalmem: () => 8 * 1024 * 1024 * 1024,
+      loadPath: "/nonexistent", memPath: "/nonexistent",
     });
-    expect(mac).toEqual({ load1: 3.25, memAvailableMiB: 512 });
-    expect(guardNow({ load1: 6, memAvailableMiB: 256 }, () => mac)).toBe("off");
+    expect(mac).toEqual({ load1: 3.25, memAvailableMiB: 8 * 1024 });
+    expect(guardNow({ load1: 6, memAvailableMiB: 1024 }, () => mac)).toBe("off");
     expect(guardNow({ load1: 3 }, () => mac)).toBe("load");
-    expect(guardNow({ memAvailableMiB: 513 }, () => mac)).toBe("memory");
+    expect(guardNow({ memAvailableMiB: 9 * 1024 }, () => mac)).toBe("memory");
   });
 
   it("reads only the configured line on linux, so a load-only guard never touches meminfo", () => {
