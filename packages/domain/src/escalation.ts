@@ -134,6 +134,10 @@ export function askVersion(a: Pick<Ask, "askedAt" | "messageId" | "title" | "con
   return `v${h.toString(16).padStart(8, "0")}${s.length.toString(16)}`;
 }
 
+// Which asking of an Ask an answer was given for: the message that asked it or, with none, when it was asked. Every
+// answer key carries it (the hub's answerKey), so an answer typed for one asking is never taken for the next (E11).
+export const askIdentity = (a: { messageId: string | null; askedAt: number }) => a.messageId ?? `t${a.askedAt}`;
+
 // Why a Decision can't be taken now, or null if it can (E8, E10, E11). The choice itself is checked in `check`.
 export function refusal(e: Escalation | undefined, now: number): AnswerRefusal | null {
   if (!e) return "unknown";
@@ -376,6 +380,16 @@ export class Escalations {
     e.status = "answered";
     e.askedAgain = false;
     return ok({ type: "EscalationAnswered", escalationId: e.id, choice: decided, endpointId: by.endpointId, sessionId: by.sessionId, at: now });
+  }
+
+  // An answer found typed at the asker for an earlier asking of the ask (`asked`, askIdentity): asked again since, or
+  // no longer held here. Recorded with its provenance (A1), as it was decided, and never this Escalation's Decision: it
+  // doesn't answer the question as it stands (E11, E12). Null when this Escalation still is that asking: the answer is
+  // then the ask's own Decision, taken under E8 by record or recordTyped, never recorded beside it.
+  recordEarlier(id: string, asked: string, decided: DecidedChoice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number): EscalationAnswered | null {
+    const e = this.#items.get(id as EscalationId);
+    if (e && askIdentity(e) === asked) return null;
+    return { type: "EscalationAnswered", escalationId: escalationId(id), choice: decided, endpointId: by.endpointId, sessionId: by.sessionId, at: now };
   }
 }
 

@@ -5,7 +5,7 @@
 // adapters, read through Observation; nothing is decided from them, O4).
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_POLICY, Escalations, answered, askFromBrief, askVersion, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
+  DEFAULT_POLICY, Escalations, answered, askFromBrief, askIdentity, askVersion, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
   type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type DecisionBrief, type EndpointId, type Escalation, type Message, type SessionId, type Sighting,
 } from "@morndo/domain";
 import type { BriefSighting } from "./brief-service.ts";
@@ -81,12 +81,15 @@ export function managerOf(workers: readonly { id: string; name: string; conflict
   return named.some(w => w.conflict) ? null : named[0]?.id ?? null;
 }
 const choicePart = (choice: Choice) => (choice.kind === "option" ? `option:${choice.key}` : `words:${digest(choice.text)}`);
-// One ask of one escalation (the message that asked it, or its time): every answer key to it starts so, whatever the choice.
-export const askPrefix = (id: string, ask: { messageId: string | null; askedAt: number }) => `answer:${id}:${ask.messageId ?? `t${ask.askedAt}`}:`;
+// One ask of one escalation (the message that asked it, or its time: askIdentity): every answer key to it starts so,
+// whatever the choice.
+export const askPrefix = (id: string, ask: { messageId: string | null; askedAt: number }) => `answer:${id}:${askIdentity(ask)}:`;
 export const answerKey = (id: string, ask: { messageId: string | null; askedAt: number }, choice: Choice) =>
   `${askPrefix(id, ask)}${choicePart(choice)}`;
 // Whether an answer key holds this choice for this escalation, in whichever version of its ask it was given.
 const holdsChoice = (key: string, id: string, choice: Choice) => key.startsWith(`answer:${id}:`) && key.endsWith(`:${choicePart(choice)}`);
+// The asking such a key was given for (askIdentity): what it holds between the escalation and the choice.
+const askingOf = (key: string, id: string, choice: Choice) => key.slice(`answer:${id}:`.length, key.length - `:${choicePart(choice)}`.length);
 
 // The question in one line, for asks that aren't on the list: the message's first real line, without markdown marks.
 function headline(body: string): string {
@@ -813,10 +816,10 @@ export class EscalationService {
     if (!settled.ok && settled.problem === "duplicate") {
       if (!others) {
         // Its own request's row, for a version of the ask that is gone or was asked again since: delivered, but an
-        // answer to that earlier version, never to the ask as it stands (E11, E12; round 3.5).
-        const asked = this.#x.get(id);
-        if (!asked || row.key !== answerKey(id, asked, choice)) return this.#deliveredEarlier(a, id, choice, row, key, settled.at, requester);
-        return this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
+        // answer to that earlier version, never to the ask as it stands (E11, E12; round 3.5). Which it is, the
+        // aggregate says (round 4.6); for the ask as it stands, it is the ask's own Decision.
+        return this.#deliveredEarlier(a, id, choice, row, key, settled.at, requester)
+          ?? this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
       }
       // Recorded for its own endpoint. This caller's request delivered nothing, so it is not remembered as delivered:
       // a retry of it is told the same, never ok (round 3.3).
@@ -915,14 +918,16 @@ export class EscalationService {
   // reached the asker, so the caller is told so (a duplicate at the node's time) and it is recorded with its provenance
   // (A1), as an answer to that earlier version, as the inbox records a late one, with the label that version showed:
   // its row's, never the ask's as it stands (E9, round 4.5). A row from before labels were kept says the key. The ask
-  // as it stands is not answered by it (E11, E12): asked again, it stays open.
-  #deliveredEarlier(a: Authenticated, id: string, choice: Choice, row: SendRow, key: string, at: number, by: { endpointId: EndpointId; sessionId: SessionId | null } | null): AnswerResult {
-    this.#seen.set(key, this.#now());
+  // as it stands is not answered by it (E11, E12): asked again, it stays open. The aggregate records it, as every
+  // answered event (round 4.6), and says null when the row's asking is the ask as it stands: no earlier answer.
+  #deliveredEarlier(a: Authenticated, id: string, choice: Choice, row: SendRow, key: string, at: number, by: { endpointId: EndpointId; sessionId: SessionId | null } | null): AnswerResult | null {
     const option = choice.kind === "option" ? choice.key : null;
     const decided: DecidedChoice = option === null ? { kind: "words" } : { kind: "option", key: option, label: row.label ?? option };
-    const who = by ?? { endpointId: a.endpoint.id, sessionId: a.session.id };
+    const event = this.#x.recordEarlier(id, askingOf(row.key, id, choice), decided, by ?? { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
+    if (!event) return null;
+    this.#seen.set(key, this.#now());
     const words = choice.kind === "words" ? { length: choice.text.trim().length, digest: digest(choice.text) } : {};
-    this.#store.record([{ ...answered(escalationId(id), { choice: decided, at: this.#now(), via: "here", ...who }), ...words }]);
+    this.#store.record([{ ...event, ...words }]);
     log.info(`answer to ${id} found typed, for an earlier version of its ask: recorded as that version's answer`);
     return { ok: true, item: this.#view(id, a.endpoint.id), duplicate: true, at };
   }
