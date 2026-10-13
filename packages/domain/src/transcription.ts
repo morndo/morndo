@@ -152,9 +152,10 @@ export type RequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_r
 // marks, so a path cannot be one.
 export const TRANSCRIPTION_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/;
 // A language the engine settled on (`de`, `pt-BR`). Not `auto`, and not case-free: `DE` is not a code.
-export const LANGUAGE_CODE = /^[a-z]{2,3}(-[A-Za-z0-9]{1,8})*$/;
-// The principal's choice: `auto`, or a language code. Not case-free: `DE` is not a code.
-export const LANGUAGE_CHOICE = /^(auto|[a-z]{2,3}(-[A-Za-z0-9]{1,8})*)$/;
+// The choice is that body, or `auto`. One body, so the two patterns cannot drift.
+const LANGUAGE_CODE_BODY = "[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*";
+export const LANGUAGE_CODE = new RegExp(`^${LANGUAGE_CODE_BODY}$`);
+export const LANGUAGE_CHOICE = new RegExp(`^(?:auto|${LANGUAGE_CODE_BODY})$`);
 
 // The one question both contexts ask of it (TX9, S1): present means a ready Transcriber, and a malformed
 // `present` counts as absent.

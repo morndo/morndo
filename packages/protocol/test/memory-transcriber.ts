@@ -2,9 +2,9 @@
 // names the fixture plugin uses, so one suite can run against both. Time does not pass on its own: a delayed run
 // finishes when the clock is moved, and an abort ends it even if the clock is moved afterwards.
 import { err, ok, type EngineText, type Result, type TranscriptionProblem } from "@morndo/domain";
+import type { AbortHandle } from "../src/index.ts";
 import type { TranscribeInput, Transcriber, TranscriberProbe } from "./transcriber-contract.ts";
-
-const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
+import { SENTENCE } from "./answers.mjs";
 
 function abortError(): Error {
   const error = new Error("The operation was aborted");
@@ -25,7 +25,7 @@ export class ManualClock {
     for (const waiter of due) waiter.wake();
   }
 
-  wait(ms: number, signal: AbortSignal): Promise<void> {
+  wait(ms: number, signal: AbortHandle): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
       const finish = (fn: () => void) => {

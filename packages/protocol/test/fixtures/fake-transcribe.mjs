@@ -5,8 +5,8 @@
 // the child, and a signal to the group takes both.
 import { spawn } from "node:child_process";
 import { basename } from "node:path";
+import { SENTENCE } from "./answers.mjs";
 
-const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
 let hanger;
 const CHOICE = /^(auto|[a-z]{2,3}(-[A-Za-z0-9]{1,8})*)$/;
 const POSITIVE = /^[1-9]\d*$/;

@@ -6,11 +6,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseProbe, parseRun } from "../src/index.ts";
+import { SENTENCE } from "./answers.mjs";
+import { alive, until } from "./proc.ts";
 
 const linuxOnly = it.runIf(process.platform === "linux");
 
 const FIXTURE = fileURLToPath(new URL("./fixtures/fake-transcribe.mjs", import.meta.url));
-const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
 const PROBE = {
   protocol: 1, ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture",
   languages: "multi", maxSeconds: 600, missing: [],
@@ -40,24 +41,6 @@ function childrenOf(pid: number): number[] {
   } catch {
     return [];
   }
-}
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-}
-
-async function until(pred: () => boolean, ms: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < ms) {
-    if (pred()) return true;
-    await new Promise(resolve => setTimeout(resolve, 20));
-  }
-  return pred();
 }
 
 describe("fake-transcribe", () => {

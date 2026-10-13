@@ -4,6 +4,8 @@
 import { describe, expect, it } from "vitest";
 import type { EngineText, Result, TranscriptionProblem } from "@morndo/domain";
 import type { TranscribeInput, Transcriber, TranscriberProbe } from "../src/index.ts";
+import { SENTENCE } from "./answers.mjs";
+import { alive, until } from "./proc.ts";
 
 export type { TranscribeInput, Transcriber, TranscriberProbe };
 
@@ -15,8 +17,6 @@ export type ContractSubject = {
   group?: () => readonly number[];
 };
 
-const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
-
 function leaked(error: unknown, sentence: string): boolean {
   if (!(error instanceof Error)) return false;
   return error.message.includes(sentence) || (error.stack ?? "").includes(sentence);
@@ -27,24 +27,6 @@ const HEARD: EngineText = {
 
 const call = (path: string, signal: AbortSignal): TranscribeInput =>
   ({ path, language: "auto", threads: 1, maxSeconds: 600, signal });
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== "ESRCH";
-  }
-}
-
-async function until(pred: () => boolean, ms: number): Promise<boolean> {
-  const start = Date.now();
-  while (Date.now() - start < ms) {
-    if (pred()) return true;
-    await new Promise(resolve => setTimeout(resolve, 20));
-  }
-  return pred();
-}
 
 type Settled<T> = { kind: "value"; value: T } | { kind: "error"; error: unknown } | { kind: "hung" };
 

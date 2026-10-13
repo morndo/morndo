@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MAX_TEXT_BYTES } from "@morndo/domain";
+import { SENTENCE } from "./answers.mjs";
 import {
   MeTranscription, ProbeDocument, RunDocument, TranscriptionCancelBody, TranscriptionCreateBody, TranscriptionView,
   parseBody, parseProbe, parseRun, problemFromExit,
@@ -14,14 +15,14 @@ const PROBE = {
 } as const;
 const RUN = {
   protocol: 1, language: "de", durationMs: 5200,
-  segments: [{ startMs: 0, endMs: 5200, text: "Notiz an den Hafen: der Steg ist frei." }],
+  segments: [{ startMs: 0, endMs: 5200, text: SENTENCE }],
 };
 const CREATE = { id: "tx-1", recording: { kind: "upload" as const, id: "abc123def456" }, language: "auto" };
 const VIEW = {
   id: "tx-1", recording: { kind: "upload" as const, id: "abc123def456" }, language: "auto",
   state: "done" as const, position: null, reason: null, outcome: "done" as const, problem: null,
   text: {
-    language: "de", text: "Notiz an den Hafen: der Steg ist frei.", edit: null, edited: false,
+    language: "de", text: SENTENCE, edit: null, edited: false,
     engine: "fixture-ear", model: "tiny-fixture",
   },
 };

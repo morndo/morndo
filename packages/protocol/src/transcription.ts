@@ -15,7 +15,14 @@ export const PLUGIN_PROTOCOL = 1;
 export const PLUGIN_EXIT = { usage: 2, unreadable: 3, too_long: 4, not_ready: 5 } as const;
 
 // The port the hub calls (design §4). It lives here so the contract suite and the hub share one type. The hub's
-// ports module can re-export it. language is a domain LANGUAGE_CHOICE, checked before the call.
+// ports module can re-export it. language is a domain LANGUAGE_CHOICE, checked before the call. This package's lib
+// is esnext only, so the abort handle is the shape of AbortSignal the host actually uses.
+export type AbortHandle = {
+  readonly aborted: boolean;
+  addEventListener(type: "abort", listener: () => void): void;
+  removeEventListener(type: "abort", listener: () => void): void;
+};
+
 export type TranscriberProbe =
   | { ready: true; engine: string; engineVersion: string; model: string; languages: "multi" | readonly string[]; maxSeconds: number }
   | { ready: false; reason: "missing" | "not_ready" | "protocol"; detail: string };
@@ -25,7 +32,7 @@ export type TranscribeInput = {
   language: string;
   threads: number;
   maxSeconds: number;
-  signal: AbortSignal;
+  signal: AbortHandle;
 };
 
 export type Transcriber = {
@@ -48,10 +55,6 @@ const textBytes = () => z.string().check(z.refine(withinText));
 const id = () => z.string().check(z.regex(TRANSCRIPTION_ID));
 const choice = () => z.string().check(z.regex(LANGUAGE_CHOICE));
 const code = () => z.string().check(z.regex(LANGUAGE_CODE));
-const PROBLEMS = TX_PROBLEMS satisfies readonly TranscriptionProblem[];
-const STATES = TX_STATES satisfies readonly (typeof TX_STATES)[number][];
-const OUTCOMES = TX_TERMINAL satisfies readonly (typeof TX_TERMINAL)[number][];
-const REASONS = QUEUE_REASONS;
 
 // What a not-ready probe may name. "model" and "ffmpeg" are the two the design names; a short token still prints
 // in doctor, and a path does not fit.
@@ -156,11 +159,11 @@ export const TranscriptionView = z.strictObject({
   id: id(),
   recording,
   language: choice(),
-  state: z.enum(STATES),
+  state: z.enum(TX_STATES),
   position: z.nullable(z.int().check(z.gte(1))),
-  reason: z.nullable(z.enum(REASONS)),
-  outcome: z.nullable(z.enum(OUTCOMES)),
-  problem: z.nullable(z.enum(PROBLEMS)),
+  reason: z.nullable(z.enum(QUEUE_REASONS)),
+  outcome: z.nullable(z.enum(TX_TERMINAL)),
+  problem: z.nullable(z.enum(TX_PROBLEMS)),
   text: z.nullable(words),
 });
 export type TranscriptionView = z.output<typeof TranscriptionView>;

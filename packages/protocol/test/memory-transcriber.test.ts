@@ -1,10 +1,9 @@
 // MemoryTranscriber: scripted answers and a manual clock (design §4). The contract suite is the port's proof.
 // The clock test is this fake's own: a delayed answer arrives when time is moved, and an abort still wins.
 import { describe, expect, it } from "vitest";
+import { SENTENCE } from "./answers.mjs";
 import { ManualClock, MemoryTranscriber } from "./memory-transcriber.ts";
 import { transcriberContract } from "./transcriber-contract.ts";
-
-const SENTENCE = "Notiz an den Hafen: der Steg ist frei.";
 
 transcriberContract(() => {
   const transcriber = new MemoryTranscriber();
