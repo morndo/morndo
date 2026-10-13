@@ -3,7 +3,7 @@
 // still fires while the agent is down. SIGTERM means cancel.
 import { spawn } from "node:child_process";
 import { chmodSync, constants, existsSync, openSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { capStep, type CapSight } from "./job-cap.ts";
+import { capStep, type CapSight, type CapStep } from "./job-cap.ts";
 import { writeProcessFile } from "./job-identity.ts";
 import { MAX_TIMER_MS } from "./job-limits.ts";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,27 @@ type ExitBody = {
 
 const capRequest = (exitPath: string): string =>
   exitPath.endsWith(".exit") ? `${exitPath.slice(0, -5)}.cap` : `${exitPath}.cap`;
+
+type CapFs = {
+  existsSync: (path: string) => boolean;
+  statSync: (path: string) => { size: number };
+};
+
+// One look. The note is read before the size, and only for the first sighting. A stat that throws is not a size of
+// 0: the look is skipped, so nothing is sighted and nothing stops.
+export function lookCap(
+  sight: CapSight | null,
+  spec: { logPath: string; exitPath: string; logBytes: number },
+  now: number,
+  fs: CapFs = { existsSync, statSync },
+): CapStep | null {
+  if (!(spec.logBytes > 0)) return capStep(sight, 0, spec.logBytes, now, false);
+  const noted = sight === null && fs.existsSync(capRequest(spec.exitPath));
+  let size: number;
+  try { size = fs.statSync(spec.logPath).size; }
+  catch { return null; }
+  return capStep(sight, size, spec.logBytes, now, noted);
+}
 
 const gone = (pid: number): boolean => {
   try { process.kill(-pid, 0); return false; } catch { return true; }
@@ -129,17 +150,9 @@ async function main(): Promise<void> {
       process.exit(0);
       return;
     }
-    // The note is read before the size, and only for the first sighting. The supervisor writes it after the
-    // log is already at the cap, so this stat includes those bytes. One stat per look after that.
-    let noted = false;
-    let size = 0;
-    if (spec.logBytes > 0) {
-      if (sight === null) noted = existsSync(capRequest(spec.exitPath));
-      try { size = statSync(spec.logPath).size; } catch { /* a missing log is not over the cap */ }
-    }
     // The grace is timed on the monotonic clock, so a wall-clock step neither stretches nor ends it.
-    const step = capStep(sight, size, spec.logBytes, performance.now(), noted);
-    if (step.kind === "under") return;
+    const step = lookCap(sight, spec, performance.now());
+    if (step === null || step.kind === "under") return;
     if (step.kind === "grace" && !childExited) { sight = step.sight; return; }
     // setImmediate runs after this turn's poll phase, where libuv hands over a child exit the kernel already reported,
     // so an exit that came before this decision is seen by stop().
