@@ -1,12 +1,11 @@
 // manifest.json, the release key's document (design §9.6). Schema versions and floors come from
-// the migration lists, the same rule service-kit uses: the floor is the highest breaking
-// migration, or 0 when every migration so far is additive.
+// the apps' MIGRATIONS arrays, read in a child process so this module does not load them itself.
+// The child needs npm ci on the same Node (scripts/release/README.md). The floor is the highest
+// breaking migration, or 0 when every migration so far is additive.
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type { DatabaseName, Platform, ProtocolRange, SchemaInfo } from "@morndo/domain";
 import { CLIENT_API, FLEET_PROTO, ManifestSchema } from "@morndo/protocol";
-import { MIGRATION_LIST as connectionMigrations } from "../../apps/connections/src/adapters/store-migration-list.ts";
-import { MIGRATION_LIST as fleetMigrations } from "../../apps/fleet/src/adapters/migration-list.ts";
-import { MIGRATION_LIST as hubMigrations } from "../../apps/hub/src/adapters/migration-list.ts";
-import { MIGRATION_LIST as nodeMigrations } from "../../apps/node-agent/src/db/migration-list.ts";
 import { canonicalJson, isoUtc } from "./json.ts";
 
 type SchemaMigration = { version: number; compat: "additive" | "breaking" };
@@ -23,12 +22,23 @@ export function schemaFrom(migrations: readonly SchemaMigration[]): SchemaInfo {
 }
 
 export function declaredSchemas(): Record<DatabaseName, SchemaInfo> {
-  return {
-    hub: schemaFrom(hubMigrations),
-    fleet: schemaFrom(fleetMigrations),
-    node: schemaFrom(nodeMigrations),
-    connections: schemaFrom(connectionMigrations),
-  };
+  const child = fileURLToPath(new URL("./schema-child.ts", import.meta.url));
+  const run = spawnSync(process.execPath, [child], { encoding: "utf8" });
+  if (run.status !== 0) throw new Error(run.stderr || run.stdout || "schema read failed");
+  const parsed: unknown = JSON.parse(run.stdout);
+  if (!isDeclared(parsed)) throw new Error("schema read was not the four databases");
+  return parsed;
+}
+
+function isDeclared(value: unknown): value is Record<DatabaseName, SchemaInfo> {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return ["hub", "fleet", "node", "connections"].every(name => {
+    const schema = row[name];
+    return typeof schema === "object" && schema !== null
+      && "version" in schema && typeof schema.version === "number"
+      && "floor" in schema && typeof schema.floor === "number";
+  });
 }
 
 export function protocolRange(): ProtocolRange {

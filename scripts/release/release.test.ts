@@ -4,7 +4,6 @@
 // Manifest are the wire documents, ssh-keygen accepts the signature, and re-signing a Feed moves
 // its number and its expiry only.
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -99,9 +98,20 @@ describe("file list and manifest", () => {
     expect(listed.json.endsWith("\n")).toBe(true);
   });
 
-  it("reads the schema lists without loading the database driver", () => {
-    const require = createRequire(import.meta.url);
-    expect(Object.keys(require.cache).some(key => key.includes("better-sqlite3"))).toBe(false);
+  it("reads the schema version and floor from the apps' migrations", async () => {
+    const { MIGRATIONS: hub } = await import("../../apps/hub/src/adapters/migrations.ts");
+    const { MIGRATIONS: fleet } = await import("../../apps/fleet/src/adapters/migrations.ts");
+    const { MIGRATIONS: node } = await import("../../apps/node-agent/src/db/migrations.ts");
+    const { MIGRATIONS: connections } = await import("../../apps/connections/src/adapters/store-migrations.ts");
+    expect(declaredSchemas()).toEqual({
+      hub: schemaFrom(hub),
+      fleet: schemaFrom(fleet),
+      node: schemaFrom(node),
+      connections: schemaFrom(connections),
+    });
+    const diff = spawnSync("git", ["diff", "origin/main", "--", "apps/hub/src/adapters/migrations.ts", "apps/fleet/src/adapters/migrations.ts", "apps/node-agent/src/db/migrations.ts", "apps/connections/src/adapters/store-migrations.ts"], { encoding: "utf8" });
+    expect(diff.status).toBe(0);
+    expect(diff.stdout).toBe("");
   });
 
   it("states this tree's schemas, including a floor of 0 where nothing breaking has shipped", () => {
