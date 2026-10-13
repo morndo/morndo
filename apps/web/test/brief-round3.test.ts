@@ -94,6 +94,53 @@ describe("round 3: Check again still asks when the brief was restated", () => {
   }, 60_000);
 });
 
+describe("round 3: a restated card does not offer a send that does nothing", () => {
+  it("confirm mode shows the new version and keeps Send disabled", async () => {
+    await ready();
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Extend the triage script" }).click();
+    await card.getByText("Your answer: Extend the triage script").waitFor();
+    await show([tap("d-re", "v2", "Buy a hosted add-on")]);
+    await card.getByText("restated this brief").waitFor();
+    const send = card.getByRole("button", { name: "Send answer" });
+    expect(await send.isDisabled()).toBe(true);
+    await card.getByRole("button", { name: "Show the new version" }).click();
+    const next = card.getByRole("button", { name: "Buy a hosted add-on", exact: true });
+    await next.waitFor();
+    expect(await next.isDisabled()).toBe(false);
+    expect(await card.getByRole("button", { name: "Send answer" }).count()).toBe(0);
+  }, 60_000);
+
+  it("words mode shows the new version and keeps Send disabled", async () => {
+    await ready();
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Something else…" }).click();
+    await card.getByRole("textbox", { name: "Your answer for the manager" }).fill("Ship on Tuesday");
+    await show([tap("d-re", "v2", "Buy a hosted add-on")]);
+    await card.getByText("restated this brief").waitFor();
+    const send = card.getByRole("button", { name: "Send to the manager" });
+    expect(await send.isDisabled()).toBe(true);
+    await card.getByRole("button", { name: "Show the new version" }).click();
+    expect(await card.getByRole("button", { name: "Something else…" }).isDisabled()).toBe(false);
+  }, 60_000);
+
+  it("Back from a restated confirmation still explains why the options are disabled", async () => {
+    await ready();
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Extend the triage script" }).click();
+    await show([tap("d-re", "v2", "Buy a hosted add-on")]);
+    await card.getByRole("button", { name: "Back" }).click();
+    await card.getByText("restated this brief").waitFor();
+    expect(await card.getByRole("button", { name: "Buy a hosted add-on", exact: true }).isDisabled()).toBe(true);
+    expect(await card.getByRole("button", { name: "Something else…" }).count()).toBe(0);
+    await card.getByRole("button", { name: "Show the new version" }).click();
+    expect(await card.getByRole("button", { name: "Buy a hosted add-on", exact: true }).isDisabled()).toBe(false);
+  }, 60_000);
+});
+
 describe("round 3: a sent answer belongs to its version", () => {
   it("follows a re-ask on the card after the answer was sent", async () => {
     await ready();

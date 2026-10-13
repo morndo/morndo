@@ -119,6 +119,9 @@
   {#if showTitle}<h3 class="title">{item.title}</h3>{/if}
   {/if}
   {#if item.status === "open" && item.notice}<p class="sub" role="status">{item.notice}</p>{/if}
+  {#if open && session.stale}
+    <p class="restated" role="status">{whom[0] ? whom[0].toUpperCase() + whom.slice(1) : whom} restated this brief. <button type="button" class="link" onclick={() => session.showNew()}>Show the new version</button></p>
+  {/if}
 
   {#if variant !== "panel" && (showRecommendation || showDefault)}
     <dl class="facts">
@@ -178,7 +181,7 @@
           <button class="btn primary" disabled={session.sending || !open} onkeydown={escBack} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
         {:else}
           <!-- svelte-ignore a11y_autofocus -->
-          <button class="btn primary" disabled={session.sending || !open} autofocus={!briefOpen} onkeydown={escBack} onclick={() => session.picked && send(session.picked.body)}>{session.sending ? "Sending…" : "Send answer"}</button>
+          <button class="btn primary" disabled={session.sending || !open || session.stale} autofocus={!briefOpen} onkeydown={escBack} onclick={() => session.picked && send(session.picked.body)}>{session.sending ? "Sending…" : "Send answer"}</button>
         {/if}
         <button class="btn ghost" disabled={session.sending} onkeydown={escBack} onclick={back}>Back</button>
         {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{/if}
@@ -191,7 +194,7 @@
         {#if session.again}
           <button class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
         {:else}
-          <button class="btn primary" disabled={session.sending || !open || !session.words.trim()} onclick={() => send({ text: session.words })}>{session.sending ? "Sending…" : `Send to ${whom}`}</button>
+          <button class="btn primary" disabled={session.sending || !open || session.stale || !session.words.trim()} onclick={() => send({ text: session.words })}>{session.sending ? "Sending…" : `Send to ${whom}`}</button>
         {/if}
         <button class="btn ghost" disabled={session.sending} onclick={back}>Cancel</button>
         {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{:else}<span class="hint">Enter sends · Shift+Enter for a new line</span>{/if}
@@ -214,7 +217,7 @@
             {#if o.key === recommended}<Star size={14} aria-hidden="true" />{/if}{o.label}
           </button>
         {/each}
-        {#if canAnswer}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
+        {#if canAnswer && !session.stale}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {:else if item.need === "time"}
         <button class="btn primary" disabled={!canAnswer || session.stale} onclick={() => choose("Done", { text: "Done" })}>Done</button>
@@ -322,5 +325,6 @@
   .byline { margin: 0; font: 400 13px/18px var(--font); color: var(--muted); }
   .rec { margin: 0; display: flex; align-items: center; gap: 6px; font: 400 13px/18px var(--font); }
   .chat { justify-self: start; }
-  .actions, .confirm, .state, .err, .note, .chat, .readonly, .screen { position: relative; z-index: 1; }
+  .restated { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); font: 400 13px/18px var(--font); }
+  .actions, .confirm, .state, .err, .note, .chat, .readonly, .screen, .restated { position: relative; z-index: 1; }
 </style>
