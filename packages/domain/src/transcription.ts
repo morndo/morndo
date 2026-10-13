@@ -146,7 +146,7 @@ export type EndReport = {
   text: string;
 };
 
-export type RequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size";
+export type TranscriptionRequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size";
 
 // The caller's id for an attempt or a Recording. The same shape as a job id: one run of letters, digits and a few
 // marks, so a path cannot be one.
@@ -179,7 +179,7 @@ export function requestTranscription(
   body: TranscriptionBody,
   at: number,
   capability: TranscriptionCapability,
-): Result<Transcription, RequestProblem> {
+): Result<Transcription, TranscriptionRequestProblem> {
   if (!capabilityReady(capability)) return err("no_capability");
   // The pattern is for strings only: `test` would read a missing id as "undefined" and a number as its digits, and
   // a row keyed by such an id would answer for every other (TX5's queue is keyed by id).

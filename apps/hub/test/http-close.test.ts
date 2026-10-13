@@ -10,9 +10,9 @@ describe("stopping the hub", () => {
     const port = Number(new URL(hub.base).port);
     const silent = connect(port, "127.0.0.1");
     await new Promise<void>(r => silent.once("connect", () => r()));
-    const started = Date.now();
+    const started = performance.now();
     await hub.close();
-    expect(Date.now() - started).toBeLessThan(3000);
+    expect(performance.now() - started).toBeLessThan(3000);
     silent.destroy();
   }, 20_000);
 });

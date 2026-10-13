@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>Home digest: since you last looked (mockup)</title>
+<!-- Mockup for docs/design/home-digest (issue #33, ADR-0025). Static, synthetic data: every repo, lane, task and
+     number is made up. "Now" is Tue 13 Oct 2026, 09:40; the mark is Mon 18:40. -->
+<link rel="stylesheet" href="mock.css">
+</head>
+<body class="desk-tokens">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-circle-dashed" viewBox="0 0 24 24"><path d="M10.1 2.182a10 10 0 0 1 3.8 0"/><path d="M13.9 21.818a10 10 0 0 1-3.8 0"/><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"/><path d="M2.182 13.9a10 10 0 0 1 0-3.8"/><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"/><path d="M21.818 10.1a10 10 0 0 1 0 3.8"/><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"/><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"/></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-user-check" viewBox="0 0 24 24"><path d="m16 11 2 2 4-4"/><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-badge-check" viewBox="0 0 24 24"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-circle-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol>
+  <symbol id="i-signpost" viewBox="0 0 24 24"><path d="M12 13v8"/><path d="M12 3v3"/><path d="M2.354 10.354a1.207 1.207 0 0 1 0-1.708l2.06-2.06A2 2 0 0 1 5.828 6h12.344a2 2 0 0 1 1.414.586l2.06 2.06a1.207 1.207 0 0 1 0 1.708l-2.06 2.06a2 2 0 0 1-1.414.586H5.828a2 2 0 0 1-1.414-.586z"/></symbol>
+  <symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"/><path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"/></symbol>
+  <symbol id="i-git-merge" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+  <symbol id="i-square-check" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-git-pull-request" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></symbol>
+  <symbol id="i-undo-2" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+  <symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-clock-3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4"/></symbol>
+  <symbol id="i-messages-square" viewBox="0 0 24 24"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></symbol>
+  <symbol id="i-message-circle" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-square-kanban" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 7v7"/><path d="M12 7v4"/><path d="M16 7v9"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 24 24"><path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"/><path d="M20.054 15.987H3.946"/></symbol>
+  <symbol id="i-radio" viewBox="0 0 24 24"><path d="M16.247 7.761a6 6 0 0 1 0 8.478"/><path d="M19.075 4.933a10 10 0 0 1 0 14.134"/><path d="M4.925 19.067a10 10 0 0 1 0-14.134"/><path d="M7.753 16.239a6 6 0 0 1 0-8.478"/><circle cx="12" cy="12" r="2"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-calendar-range" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M16 2v3"/><path d="M3 9h18"/><path d="M8 2v3"/><path d="M17 13h-6"/><path d="M13 17H7"/><path d="M7 13h.01"/><path d="M17 17h.01"/></symbol>
+  <symbol id="i-git-commit-horizontal" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><line x1="3" x2="9" y1="12" y2="12"/><line x1="15" x2="21" y1="12" y2="12"/></symbol>
+  <symbol id="i-flask-conical" viewBox="0 0 24 24"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+  <symbol id="i-list-checks" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+</svg>
+<div class="desk">
+  <div class="top"><div class="search">Search the office</div></div>
+  <div class="bodyrow">
+    <nav class="rail" aria-label="Main">
+      <div class="team">O</div>
+      <div class="tab on"><span class="ico"><svg><use href="#i-house"/></svg></span><span class="lbl">Home</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-messages-square"/></svg></span><span class="lbl">Chats</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-message-circle"/></svg></span><span class="lbl">Manager</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-signpost"/></svg><i class="badge">1</i></span><span class="lbl">Decisions</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-bell"/></svg><i class="badge">2</i></span><span class="lbl">Activity</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-square-kanban"/></svg><i class="badge">1</i></span><span class="lbl">Board</span></div>
+    </nav>
+    <div class="workspace"><div class="panel">
+      <header class="hh"><svg style="width:18px;height:18px"><use href="#i-house"/></svg><h1>Home</h1><span class="upd">Records as of 09:40</span></header>
+      <div class="home-body">
+
+        <div class="dhead">
+          <h2>Since you last looked</h2>
+          <span class="since">since <b>Mon 18:40</b>, 15 h ago · <b>21 new</b> · 1 changed</span>
+          <span class="seg" role="tablist" aria-label="View"><span class="on" role="tab" aria-selected="true">Since you looked</span><span role="tab">Weekly</span></span>
+          <button class="btn primary">Mark all seen · 1 not shown</button>
+        </div>
+
+        <div class="strip" aria-label="Counts by section">
+          <div class="cnt"><span class="tl"><svg><use href="#i-hand"/></svg>Needs you</span><b>2</b><span class="ts">1 due today</span></div>
+          <div class="cnt"><span class="tl"><svg><use href="#i-signpost"/></svg>Decided for you</span><b>3</b><span class="ts">all reversible</span></div>
+          <div class="cnt bad"><span class="tl"><svg><use href="#i-circle-x"/></svg>Failed or rolled back</span><b>2</b><span class="ts">1 rollback</span></div>
+          <div class="cnt warn"><span class="tl"><svg><use href="#i-hourglass"/></svg>Stale or stuck</span><b>2</b><span class="ts">longest 6 h</span></div>
+          <div class="cnt"><span class="tl"><svg><use href="#i-rocket"/></svg>Shipped</span><b>2</b><span class="ts">1 verified live</span></div>
+          <div class="cnt"><span class="tl"><svg><use href="#i-git-merge"/></svg>Merged</span><b>4</b><span class="ts">1 only claimed</span></div>
+          <div class="cnt"><span class="tl"><svg><use href="#i-square-check"/></svg>Done</span><b>3</b><span class="ts">1 only claimed</span></div>
+          <div class="cnt"><span class="tl"><svg><use href="#i-git-pull-request"/></svg>Opened or pushed</span><b>6</b><span class="ts">in motion</span></div>
+        </div>
+        <p class="legend">
+          <span>Who checked it, on this revision:</span>
+          <span class="lv claimed"><svg><use href="#i-circle-dashed"/></svg>Claimed</span>a lane's word
+          <span class="lv checked"><svg><use href="#i-circle-check"/></svg>Checked</span>CI or tests by others
+          <span class="lv reviewed"><svg><use href="#i-user-check"/></svg>Reviewed</span>a fresh reviewer
+          <span class="lv live"><svg><use href="#i-badge-check"/></svg>Verified live</span>where it runs
+          <span class="lv failed"><svg><use href="#i-circle-x"/></svg>Failed</span>a check refuted it
+        </p>
+
+        <!-- 1. Needs you: live state; leaves only when answered, settled or expired. -->
+        <section class="sec" aria-label="Needs you">
+          <div class="sh"><svg><use href="#i-hand"/></svg><h3>Needs you</h3><span class="n">2</span><span class="new">1 new</span><span class="right">oldest first by due time</span></div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv ask"><svg><use href="#i-signpost"/></svg>Decision</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Pick</span><span class="title">the retry policy for failed card charges</span></div>
+              <div class="meta"><span>asked by <span class="lane">#manager</span></span><span>due today 18:00</span><span>3 min to decide</span><span>includes spend</span></div>
+              <div class="why"><b>If nobody answers:</b> option B, retry 3 times over 24 h, applies at 18:00.</div>
+            </div>
+            <div class="acts"><button class="btn small primary">Open brief</button></div>
+          </div>
+          <div class="row">
+            <span class="dot"></span><span><span class="lv ask"><svg><use href="#i-hand"/></svg>Your step</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Log in</span><span class="title">to the payment sandbox in the office browser</span></div>
+              <div class="meta"><span>asked by <span class="lane">#billing-retry</span></span><span>waiting 2 h 10 min</span><span>blocks T-39</span><span>you opened it 08:02</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open lane</button></div>
+          </div>
+        </section>
+
+        <!-- 2. Decided for you: each with its reason and how to undo it; Veto is a message to the manager, not an undo. -->
+        <section class="sec" aria-label="Decided for you">
+          <div class="sh"><svg><use href="#i-signpost"/></svg><h3>Decided for you</h3><span class="n">3</span><span class="new">3 new</span><span class="right">newest first</span></div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv decided"><svg><use href="#i-signpost"/></svg>Decided</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Held</span><span class="title">further storefront releases until the checkout fix passes a live check on staging</span></div>
+              <div class="why"><b>Why:</b> the 09:05 release failed its live check and was rolled back. <b>Undo:</b> lift the hold; the next release goes out as planned.</div>
+              <div class="meta"><span>by <span class="lane">#manager</span></span><span>09:35</span><span>reversible</span><span>linked: T-42</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Veto</button></div>
+          </div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv decided"><svg><use href="#i-signpost"/></svg>Decided</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Moved</span><span class="key">T-44</span><span class="title">to #search-perf: its lane hit its weekly limit</span></div>
+              <div class="meta"><span>by <span class="lane">#manager</span></span><span>07:30</span><span>reversible</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Veto</button></div>
+          </div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv decided"><svg><use href="#i-signpost"/></svg>Decided</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Closed</span><span class="key">acme/storefront#212</span><span class="title">as superseded by #219</span></div>
+              <div class="meta"><span>by <span class="lane">#manager</span></span><span>Mon 22:05</span><span>reversible: reopen</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Veto</button></div>
+          </div>
+        </section>
+
+        <!-- 3. Failed or rolled back. -->
+        <section class="sec bad" aria-label="Failed or rolled back">
+          <div class="sh"><svg><use href="#i-circle-x"/></svg><h3>Failed or rolled back</h3><span class="n">2</span><span class="new">2 new</span><span class="right">newest first</span></div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv failed"><svg><use href="#i-undo-2"/></svg>Rolled back</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Rolled back</span><span class="key">storefront · production</span><span class="title">to 4f2a9c1 after the live check failed</span></div>
+              <div class="chips">
+                <span class="chip fail"><svg><use href="#i-activity"/></svg>live check: /checkout 500 on 3 of 3 probes</span>
+                <span class="chip"><svg><use href="#i-git-pull-request"/></svg>revert #221 merged</span>
+                <span class="chip"><svg><use href="#i-git-commit-horizontal"/></svg>9b1e07d</span>
+              </div>
+              <div class="trail">Shipped 09:05, shown as <b>Checked</b> → live check by #manager failed 09:20 → rolled back 09:31. Counts as a claim that later failed.</div>
+              <div class="meta"><span>claimed by <span class="lane">#checkout-fix</span></span><span>T-42</span><span>09:31</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open task</button></div>
+          </div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv failed"><svg><use href="#i-circle-x"/></svg>Failed</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Timed out</span><span class="key">job nightly-e2e</span><span class="title">after 45 min on node office-pc</span></div>
+              <div class="chips"><span class="chip"><svg><use href="#i-file-text"/></svg>last 40 lines</span><span class="chip">class default</span></div>
+              <div class="meta"><span>started by <span class="lane">#search-perf</span></span><span>03:12</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open lane</button></div>
+          </div>
+        </section>
+
+        <!-- 4. Stale or stuck: computed from records, live state. -->
+        <section class="sec warn" aria-label="Stale or stuck">
+          <div class="sh"><svg><use href="#i-hourglass"/></svg><h3>Stale or stuck</h3><span class="n">2</span><span class="new">2 new</span><span class="right">longest first</span></div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv stale"><svg><use href="#i-hourglass"/></svg>Stuck</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Busy 1 h 20 min</span><span class="title">with no commit, file change, push, board change or job</span></div>
+              <div class="meta"><span class="lane">#search-perf</span><span>since 08:20</span><span>limit 45 min</span><span>on T-44</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open lane</button></div>
+          </div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv stale"><svg><use href="#i-clock-3"/></svg>Waiting</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Blocked 6 h</span><span class="key">T-39</span><span class="title">waiting for staging database credentials</span></div>
+              <div class="meta"><span class="lane">#billing-retry</span><span>blocked since 03:40</span><span>over its 4 h limit since 07:40</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open task</button></div>
+          </div>
+        </section>
+
+        <!-- 5. Shipped. -->
+        <section class="sec" aria-label="Shipped">
+          <div class="sh"><svg><use href="#i-rocket"/></svg><h3>Shipped</h3><span class="n">2</span><span class="new">2 new</span><span class="right">newest first</span></div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv live"><svg><use href="#i-badge-check"/></svg>Verified live</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Shipped</span><span class="key">T-41</span><span class="title">Fix rounding in invoice totals</span></div>
+              <div class="chips">
+                <span class="chip pass"><svg><use href="#i-circle-check"/></svg>CI 3 of 3 checks</span>
+                <span class="chip pass"><svg><use href="#i-flask-conical"/></svg>1,204 passed · 0 failed · 3 skipped</span>
+                <span class="chip pass"><svg><use href="#i-user-check"/></svg>review by #review-3</span>
+                <span class="chip pass"><svg><use href="#i-activity"/></svg>live: /invoices/totals 200, sum matches</span>
+                <span class="chip"><svg><use href="#i-image"/></svg>screenshot</span>
+                <span class="chip"><svg><use href="#i-git-merge"/></svg>acme/billing-api#87 · 3e9d1a7</span>
+              </div>
+              <div class="meta"><span>by <span class="lane">#billing-retry</span></span><span>billing-api · production</span><span>07:55</span><span>done, accepted by #manager</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open task</button></div>
+          </div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv checked"><svg><use href="#i-circle-check"/></svg>Checked</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Shipped</span><span class="key">acme/storefront#219</span><span class="title">Cache category pages for 5 min</span></div>
+              <div class="chips">
+                <span class="chip pass"><svg><use href="#i-circle-check"/></svg>CI 4 of 4 checks</span>
+                <span class="chip pass"><svg><use href="#i-rocket"/></svg>deploy success · staging</span>
+                <span class="chip own">no live check yet</span>
+              </div>
+              <div class="meta"><span>by <span class="lane">#search-perf</span></span><span>storefront · staging · a91c0de</span><span>Mon 21:40</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open lane</button></div>
+          </div>
+        </section>
+
+        <!-- 6. Merged: three lines, then "N more". -->
+        <section class="sec" aria-label="Merged">
+          <div class="sh"><svg><use href="#i-git-merge"/></svg><h3>Merged</h3><span class="n">4</span><span class="new">3 new</span><span class="right">newest first</span></div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv reviewed"><svg><use href="#i-user-check"/></svg>Reviewed</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Merged</span><span class="key">acme/billing-api#88</span><span class="title">Retry webhooks with backoff</span></div>
+              <div class="chips">
+                <span class="chip pass"><svg><use href="#i-circle-check"/></svg>CI 3 of 3</span>
+                <span class="chip warn"><svg><use href="#i-flask-conical"/></svg>640 passed · 0 failed · 12 skipped</span>
+                <span class="chip pass"><svg><use href="#i-user-check"/></svg>review by #review-2</span>
+              </div>
+              <div class="meta"><span>by <span class="lane">#billing-retry</span></span><span>T-43</span><span>06:10</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open task</button></div>
+          </div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv claimed"><svg><use href="#i-circle-dashed"/></svg>Claimed</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Merged</span><span class="key">acme/docs#90</span><span class="title">Update the API pagination guide</span></div>
+              <div class="chips">
+                <span class="chip void">CI passed on c3d4e1f</span>
+                <span class="chip own">attached by the claimant: “docs build passes”</span>
+              </div>
+              <div class="trail">Pushed again after the last check (c3d4e1f → 7aa0b52, a different diff): nothing has checked 7aa0b52.</div>
+              <div class="meta"><span>by <span class="lane">#docs-api</span></span><span>T-38</span><span>Mon 23:50</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open lane</button></div>
+          </div>
+          <div class="row changed">
+            <span class="dot" title="changed since you looked"></span><span><span class="lv checked"><svg><use href="#i-circle-check"/></svg>Checked</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Merged</span><span class="key">acme/storefront#218</span><span class="title">Bump the payment SDK to 9.2</span></div>
+              <div class="chips"><span class="chip pass"><svg><use href="#i-circle-check"/></svg>CI 4 of 4</span><span class="chip pass"><svg><use href="#i-flask-conical"/></svg>812 passed · 0 failed · 0 skipped</span></div>
+              <div class="meta"><span>by <span class="lane">#checkout-fix</span></span><span>T-40</span><span>Mon 19:02</span><span>changed since you looked: CI finished</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open task</button></div>
+          </div>
+          <div class="more">1 more merged · Show</div>
+        </section>
+
+        <!-- 7. Done: tasks accepted on the board, with the level of what backs them. -->
+        <section class="sec" aria-label="Done">
+          <div class="sh"><svg><use href="#i-square-check"/></svg><h3>Done</h3><span class="n">3</span><span class="new">2 new</span><span class="right">newest first · T-41 and T-43 are above</span></div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv claimed"><svg><use href="#i-circle-dashed"/></svg>Claimed</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Done</span><span class="key">T-36</span><span class="title">Find why search is slow on mobile</span></div>
+              <div class="chips"><span class="chip own">claim by #search-perf: “cause found: N+1 query in facets”</span><span class="chip own">no evidence linked</span></div>
+              <div class="meta"><span>accepted by <span class="lane">#manager</span></span><span>Mon 20:15</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open task</button></div>
+          </div>
+          <div class="row new">
+            <span class="dot"></span><span><span class="lv reviewed"><svg><use href="#i-user-check"/></svg>Reviewed</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Done</span><span class="key">T-37</span><span class="title">Write the runbook for webhook retries</span></div>
+              <div class="chips"><span class="chip pass"><svg><use href="#i-user-check"/></svg>review by #review-2</span><span class="chip"><svg><use href="#i-file-text"/></svg>runbook.md</span></div>
+              <div class="meta"><span>by <span class="lane">#billing-retry</span></span><span>accepted by <span class="lane">#manager</span></span><span>Mon 19:30</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open task</button></div>
+          </div>
+          <div class="row">
+            <span class="dot"></span><span><span class="lv checked"><svg><use href="#i-circle-check"/></svg>Checked</span></span>
+            <div class="main">
+              <div class="l1"><span class="verb">Done</span><span class="key">T-35</span><span class="title">Add pagination to the orders API</span></div>
+              <div class="chips"><span class="chip pass"><svg><use href="#i-circle-check"/></svg>CI 3 of 3</span><span class="chip pass"><svg><use href="#i-flask-conical"/></svg>402 passed · 0 failed · 0 skipped</span></div>
+              <div class="meta"><span>by <span class="lane">#billing-retry</span></span><span>accepted by <span class="lane">#manager</span></span><span>Mon 18:55</span><span>you opened it Mon 19:10</span></div>
+            </div>
+            <div class="acts"><button class="btn small">Open task</button></div>
+          </div>
+        </section>
+
+        <!-- 8. Opened or pushed: work in motion, folded by default. -->
+        <section class="sec collapsed" aria-label="Opened or pushed">
+          <div class="sh"><svg><use href="#i-git-pull-request"/></svg><h3>Opened or pushed</h3><span class="n">6</span><span class="new">6 new</span><span class="right">3 opened · 3 pushed · Show</span></div>
+        </section>
+
+        <!-- Usage, unchanged, below the digest (ADR-0016). -->
+        <div class="usage">
+          <h2>Usage across accounts</h2>
+          <div class="kpis">
+            <div class="tile"><span class="tl"><svg><use href="#i-users"/></svg>Accounts</span><b>3</b><span class="ts">connected</span></div>
+            <div class="tile"><span class="tl"><svg><use href="#i-radio"/></svg>Sessions reporting</span><b>7</b><span class="ts">in the last 10 minutes</span></div>
+            <div class="tile"><span class="tl">Tightest 5-hour window</span><b>41%</b><span class="ts">work · resets in 2 h</span></div>
+            <div class="tile warn"><span class="tl">Tightest weekly window</span><b>83%</b><span class="ts">personal · resets Thu</span></div>
+          </div>
+        </div>
+
+      </div>
+    </div></div>
+  </div>
+</div>
+</body>
+</html>

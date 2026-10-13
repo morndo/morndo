@@ -128,8 +128,8 @@ function linkFromLogin(login: string, run: string, name: string, directory: bool
   symlinkSync(target, join(run, name));
 }
 
-export function helperParts(execPath: string, main: string, lease: string): { command: string; args: string[] } {
-  return { command: execPath, args: ["--experimental-strip-types", main, "helper", "--lease", lease] };
+export function helperParts(launcher: string, lease: string): { command: string; args: string[] } {
+  return { command: launcher, args: ["helper", "--lease", lease] };
 }
 
 export class CodexRuntime implements Runtime {

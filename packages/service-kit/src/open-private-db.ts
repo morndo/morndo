@@ -5,6 +5,7 @@
 import Database from "better-sqlite3";
 import { chmodSync, closeSync, openSync, statSync } from "node:fs";
 import { errno } from "./errno.ts";
+import { schemaFloor } from "./migrate.ts";
 
 export class DatabaseUnreadable extends Error {
   constructor(message: string) { super(message); this.name = "DatabaseUnreadable"; }
@@ -42,7 +43,9 @@ function refuseBeforeWriting(path: string, knownVersion: number, refuseNewer: (f
   try {
     opened = new Database(path, { readonly: true, fileMustExist: true });
     const found = opened.pragma("user_version", { simple: true }) as number;
-    if (found > knownVersion) throw refuseNewer(found, knownVersion);
+    // The floor, not the version, refuses (§11.1): a newer database whose breaking migrations this program also knows
+    // opens as it is; one whose floor is above it is refused before anything is written to it.
+    if (schemaFloor(opened, found) > knownVersion) throw refuseNewer(found, knownVersion);
   } catch (error) {
     throw readable(path, error);
   } finally {

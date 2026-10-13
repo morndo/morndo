@@ -8,6 +8,7 @@ import { extname, join, normalize, sep } from "node:path";
 import { hostname } from "node:os";
 import { WebSocketServer, type WebSocket } from "ws";
 import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type FeedEvent, type Transcription } from "@morndo/domain";
+import { Flight, HoldWatch, productVersion } from "@morndo/service-kit";
 import { catchUp } from "../application/catchup.ts";
 import { chats, digest } from "../application/chats.ts";
 import type { PresenceService } from "../application/presence-service.ts";
@@ -36,6 +37,7 @@ import {
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
+import { SCHEMA_VERSION } from "./migrations.ts";
 import { redactFeed, redactResponse } from "./view-redact.ts";
 import { RateLimiter, takeAll, type BucketConfig, type Taken } from "./rate-limit.ts";
 
@@ -171,10 +173,28 @@ function transcriptionView(row: Transcription) {
   };
 }
 
+// 127.0.0.1, ::1, and IPv4-mapped ::ffff:127.0.0.1. A missing address is not this machine.
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false;
+  const host = address.split("%")[0] ?? "";
+  if (host === "127.0.0.1" || host === "::1") return true;
+  return host === "::ffff:127.0.0.1";
+}
+
+// Full version, schema and in-flight only for a session, or for this machine before any proxy identity.
+// A missing identity header is not enough: a tagged device or a public request gets ready only.
+export function healthDetail(opts: { remoteAddress: string | undefined; proxyLogin: string | undefined; authenticated: boolean }): "full" | "ready" {
+  if (opts.authenticated) return "full";
+  const viaProxy = typeof opts.proxyLogin === "string" && opts.proxyLogin.length > 0;
+  if (!viaProxy && isLoopbackAddress(opts.remoteAddress)) return "full";
+  return "ready";
+}
+
 export function startHttp(p: {
   config: Config; identity: HubIdentity; access: AccessService; observation: ObservationService; steering: SteeringService; escalations: EscalationService;
   remote: RemoteService; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
   reading?: ReadingService | null;
+  updates?: { schema?: number; holdPath?: string; now?: () => number };
   presence?: PresenceService | null;                                        // ADR-0011: his last activity per device
   push?: { publicKey: Buffer; notifications: NotificationService } | null;   // web push (phase F); null: off
   engines?: EnginesService | null;                                          // ADR-0013: the Engines page; null: not connected
@@ -203,6 +223,26 @@ export function startHttp(p: {
     return typeof login === "string" && login ? `login:${login}` : `addr:${req.socket.remoteAddress ?? "?"}`;
   };
   const microphone = () => p.transcription?.allowsMicrophone() ? "microphone=(self)" : "microphone=()";
+  const flight = new Flight();
+  const watch = new HoldWatch({
+    path: p.updates?.holdPath ?? join(config.dataDir, "hold.json"),
+    service: "hub",
+    ...(p.updates?.now ? { now: p.updates.now } : {}),
+    onStale: message => log.warn(message),
+  });
+  watch.start();
+  let draining = false;
+  const heldNow = () => watch.held || draining;
+  const schemaVersion = p.updates?.schema ?? SCHEMA_VERSION;
+  // A write, other than a revocation, a narrowing or a sign-in, is refused while hold.json names the hub (RL9).
+  const refusesWhenHeld = (method: string, path: string) => {
+    if (method === "GET" || method === "HEAD" || method === "OPTIONS") return false;
+    if (path.endsWith("/revoke") || path.endsWith("/narrow")) return false;
+    if (path === "/api/login/options" || path === "/api/login/verify" || path === "/api/logout") return false;
+    if (path.startsWith("/api/stepup/") || path.startsWith("/api/identity")) return false;
+    return true;
+  };
+
   const secureHeaders = () => ({
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin",
@@ -219,6 +259,18 @@ export function startHttp(p: {
   // A check the app makes on its own (a poll, not the principal acting) says so, and doesn't keep the Session from
   // going idle (AC5; review M3).
   const auth = (req: IncomingMessage) => access.authenticate(cookieValue(req, COOKIE), req.headers["x-morndo-background"] !== "1");
+  // A session gets the full check. So does a request that never passed a proxy and whose socket is loopback.
+  // A missing identity header is not loopback: a tagged device or a public request gets ready only (design section 6.4).
+  function health(req: IncomingMessage, res: ServerResponse) {
+    const login = req.headers["tailscale-user-login"];
+    const detail = healthDetail({
+      remoteAddress: req.socket.remoteAddress,
+      proxyLogin: typeof login === "string" ? login : undefined,
+      authenticated: auth(req) !== null,
+    });
+    if (detail === "ready") return json(res, 200, { ready: true });
+    return json(res, 200, { version: productVersion(), schema: schemaVersion, ready: true, inFlight: flight.list() });
+  }
 
   // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).
   const json = (res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}, path = "") => {
@@ -599,10 +651,17 @@ export function startHttp(p: {
   async function handle(req: IncomingMessage, res: ServerResponse) {
     try {
       const path = new URL(req.url ?? "/", "http://hub").pathname;
+      if (path === "/api/health" && (req.method === "GET" || req.method === "HEAD")) return health(req, res);
       // The agents' routes carry their own identity (a bearer token), and a lane on another node reaches the hub through
       // the proxy as a tagged device, with no identity header (ADR-0012 decision 4).
       if (!path.startsWith("/api/agent/") && !proxyOk(req)) throw new HttpError(403, "not from the principal's network identity");
-      if (path.startsWith("/api/")) return await api(req, res, path);
+      if (path.startsWith("/api/")) {
+        const method = req.method ?? "GET";
+        if (refusesWhenHeld(method, path) && heldNow()) throw new HttpError(503, "updating", { "Retry-After": "1" });
+        const end = refusesWhenHeld(method, path) ? flight.begin({ kind: "http", id: `${method} ${path}` }) : null;
+        try { return await api(req, res, path); }
+        finally { end?.(); }
+      }
       if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError(405, "method not allowed");
       staticFile(req, res, path);
     } catch (e) {
@@ -623,6 +682,7 @@ export function startHttp(p: {
     socket.on("error", () => socket.destroy());
     let url: URL;
     try { url = new URL(req.url ?? "/", "http://hub"); } catch { return deny(400, "Bad Request"); }   // e.g. "//[": a throw here would end the hub
+    if ((url.pathname === "/api/terminal" || url.pathname === "/api/desktop") && heldNow()) return deny(503, "Service Unavailable");
     if (url.pathname === "/api/terminal" || url.pathname === "/api/desktop") return upgradeRemote(req, socket, head, url, deny);
     if (url.pathname !== "/api/feed") return deny(404, "Not Found");
     if (!proxyOk(req) || !originOk(req)) return deny(403, "Forbidden");
@@ -903,7 +963,10 @@ export function startHttp(p: {
   return {
     server,
     ready,
+    flight,
+    idle: (timeoutMs = 10_000) => { draining = true; return flight.idle(timeoutMs); },
     close: () => new Promise<void>(resolve => {
+      watch.stop();
       clearInterval(sweep); clearInterval(remoteSweep);
       for (const c of conns) c.ws.terminate();
       for (const c of remoteConns) c.ws.terminate();

@@ -42,6 +42,9 @@ jobs:
             exec sh scripts/git-hooks/commit-traces range "$BASE_SHA..$HEAD_SHA"
           fi
           if [ "$BEFORE_SHA" = "$zero" ]; then
-            exec sh scripts/git-hooks/commit-traces range "$AFTER_SHA"
+            set -- "$AFTER_SHA"
+          else
+            set -- "$BEFORE_SHA..$AFTER_SHA"
           fi
-          exec sh scripts/git-hooks/commit-traces range "$BEFORE_SHA..$AFTER_SHA"
+          # Every commit in the pushed range is checked.
+          exec sh scripts/git-hooks/commit-traces range "$@"

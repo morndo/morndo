@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FileRefused } from "../src/adapters/file-mode.ts";
 import { SecretMaterial } from "../src/adapters/secret-material.ts";
 import { AgeVault } from "../src/adapters/vault-age.ts";
+import { keysBeside } from "./fixtures/keys.ts";
 
 const secret = new TextEncoder().encode("synthetic-key-0123456789ab");
 const fingerprint = createHash("sha256").update(secret).digest("hex").slice(0, 12);
@@ -33,7 +34,7 @@ describe("vault-age", () => {
 
   it("round-trips a secret as an age file, and the identity stays in its file", async () => {
     const { vault: dir, identity } = paths();
-    const vault = new AgeVault(dir, identity);
+    const vault = new AgeVault(dir, identity, keysBeside(identity));
     await vault.seal("ref-a", new SecretMaterial(secret));
     expect(await vault.fingerprint("ref-a")).toBe(fingerprint);
     const opened = await vault.open("ref-a");
@@ -56,7 +57,7 @@ describe("vault-age", () => {
     const { vault: dir, identity } = paths();
     mkdirSync(join(root, "config"), { mode: 0o700 });
     writeFileSync(identity, "not-an-identity\n", { mode: 0o644 });
-    const vault = new AgeVault(dir, identity);
+    const vault = new AgeVault(dir, identity, keysBeside(identity));
     await expect(vault.seal("ref-a", new SecretMaterial(secret))).rejects.toBeInstanceOf(FileRefused);
     try { await vault.seal("ref-a", new SecretMaterial(secret)); } catch (error) {
       expect((error as FileRefused).reason).toBe("mode");
@@ -87,7 +88,7 @@ describe("vault-age", () => {
     const [first, second] = await Promise.all([run("ref-a"), run("ref-b")]);
     expect(first).toBe(second);
     expect(readFileSync(identity, "utf8")).toBe(first);
-    const vault = new AgeVault(dir, identity);
+    const vault = new AgeVault(dir, identity, keysBeside(identity));
     expect((await vault.open("ref-a")).bytes()).toEqual(secret);
     expect((await vault.open("ref-b")).bytes()).toEqual(secret);
   });
@@ -100,12 +101,12 @@ describe("vault-age", () => {
     process.env.HOME = root;
     try {
       let bare = "";
-      try { await new AgeVault(dir, join(root, "identity")).seal("ref-a", new SecretMaterial(secret)); } catch (error) {
+      try { await new AgeVault(dir, join(root, "identity"), keysBeside(join(root, "identity"))).seal("ref-a", new SecretMaterial(secret)); } catch (error) {
         bare = error instanceof Error ? error.message : "";
       }
       expect(bare).toContain("home directory");
       let nested = "";
-      try { await new AgeVault(dir, join(root, ".config", "identity")).seal("ref-a", new SecretMaterial(secret)); } catch (error) {
+      try { await new AgeVault(dir, join(root, ".config", "identity"), keysBeside(join(root, ".config", "identity"))).seal("ref-a", new SecretMaterial(secret)); } catch (error) {
         nested = error instanceof Error ? error.message : "";
       }
       expect(nested).toContain(".config");
@@ -115,7 +116,7 @@ describe("vault-age", () => {
 
   it("reports no fingerprint when the ciphertext is not the one that was sealed", async () => {
     const { vault: dir, identity } = paths();
-    const vault = new AgeVault(dir, identity);
+    const vault = new AgeVault(dir, identity, keysBeside(identity));
     const other = new TextEncoder().encode("synthetic-key-ffffffffffffffff");
     await vault.seal("ref-a", new SecretMaterial(secret));
     await vault.seal("ref-b", new SecretMaterial(other));
@@ -127,11 +128,11 @@ describe("vault-age", () => {
 
   it("fingerprints a secret it can no longer decrypt, and reuses the recipient", async () => {
     const { vault: dir, identity } = paths();
-    const vault = new AgeVault(dir, identity);
+    const vault = new AgeVault(dir, identity, keysBeside(identity));
     await vault.seal("ref-a", new SecretMaterial(secret));
     writeFileSync(join(dir, "ref-a.age"), Buffer.from("not-ciphertext"), { mode: 0o600 });
     expect(await vault.fingerprint("ref-a")).toBeNull();
-    expect(await new AgeVault(dir, identity).fingerprint("ref-a")).toBeNull();
+    expect(await new AgeVault(dir, identity, keysBeside(identity)).fingerprint("ref-a")).toBeNull();
     await expect(vault.open("ref-a")).rejects.toThrow();
     chmodSync(identity, 0o000);
     await expect(vault.seal("ref-b", new SecretMaterial(secret))).rejects.toThrow();
@@ -142,7 +143,7 @@ describe("vault-age", () => {
 
   it("seals two secrets at once without a shared worker", async () => {
     const { vault: dir, identity } = paths();
-    const vault = new AgeVault(dir, identity);
+    const vault = new AgeVault(dir, identity, keysBeside(identity));
     const other = new TextEncoder().encode("synthetic-key-ffffffffffffffff");
     await Promise.all([
       vault.seal("ref-a", new SecretMaterial(secret)),
@@ -157,7 +158,7 @@ describe("vault-age", () => {
 
   it("remembers a fingerprint for a secret sealed before the mark existed", async () => {
     const { vault: dir, identity } = paths();
-    const vault = new AgeVault(dir, identity);
+    const vault = new AgeVault(dir, identity, keysBeside(identity));
     await vault.seal("ref-a", new SecretMaterial(secret));
     const mark = join(dir, "ref-a.age.fingerprint");
     rmSync(mark);
@@ -165,12 +166,12 @@ describe("vault-age", () => {
     expect(await vault.fingerprint("ref-a")).toBe(fingerprint);
     expect(statSync(mark).isFile()).toBe(true);
     writeFileSync(identity, "AGE-SECRET-KEY-1not-the-original\n", { mode: 0o600 });
-    expect(await new AgeVault(dir, identity).fingerprint("ref-a")).toBe(fingerprint);
+    expect(await new AgeVault(dir, identity, keysBeside(identity)).fingerprint("ref-a")).toBe(fingerprint);
   });
 
   it("rechecks the identity file on every open and seal", async () => {
     const { vault: dir, identity } = paths();
-    const vault = new AgeVault(dir, identity);
+    const vault = new AgeVault(dir, identity, keysBeside(identity));
     await vault.seal("ref-a", new SecretMaterial(secret));
     chmodSync(identity, 0o644);
     await expect(vault.open("ref-a")).rejects.toBeInstanceOf(FileRefused);
@@ -183,9 +184,9 @@ describe("vault-age", () => {
 
   it("refuses an identity owned by someone else", async () => {
     const { vault: dir, identity } = paths();
-    await new AgeVault(dir, identity).seal("ref-a", new SecretMaterial(secret));
+    await new AgeVault(dir, identity, keysBeside(identity)).seal("ref-a", new SecretMaterial(secret));
     let reason = "";
-    try { await new AgeVault(dir, identity, 0).open("ref-a"); } catch (error) {
+    try { await new AgeVault(dir, identity, keysBeside(identity, 0), 0).open("ref-a"); } catch (error) {
       reason = error instanceof FileRefused ? error.reason : "other";
     }
     expect(reason).toBe("owner");

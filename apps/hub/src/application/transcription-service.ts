@@ -6,7 +6,7 @@ import { availableParallelism } from "node:os";
 import {
   afterRestart, capabilityReady, effectiveMaxSeconds, endTranscription, requestTranscription, scheduleTranscriptions,
   startTranscription, threadsFor, transcriptionTimeoutMs, TRANSCRIPTION_LIMIT_DEFAULT, MAX_RECORDING_SECONDS,
-  type QueueGuard, type Recording, type RequestProblem, type Result, type Transcription, type TranscriptionCapability,
+  type QueueGuard, type Recording, type Result, type Transcription, type TranscriptionCapability, type TranscriptionRequestProblem,
   err, ok,
 } from "@morndo/domain";
 import type { MeTranscription, Transcriber, TranscriberProbe } from "@morndo/protocol";
@@ -132,7 +132,7 @@ export class TranscriptionService {
     return run;
   }
 
-  async request(input: { id: string; recording: Recording; language: string }): Promise<Result<Transcription, RequestProblem | "unreadable">> {
+  async request(input: { id: string; recording: Recording; language: string }): Promise<Result<Transcription, TranscriptionRequestProblem | "unreadable">> {
     await this.refresh();
     const file = this.#file(input.recording);
     if (!file) return err("unreadable");
