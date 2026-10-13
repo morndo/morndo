@@ -245,6 +245,53 @@ describe("transcription service", () => {
     svc.close();
   });
 
+  it("finds each endpoint's own row when two endpoints share an id", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    await svc.request(body("same", "hang", "auto", "ep-1"));
+    expect(await until(() => svc.get("same", { endpointId: "ep-1" })?.state === "running", 2000)).toBe(true);
+    const other = await svc.request(body("same", "b", "auto", "ep-2"));
+    expect(other.ok && other.value.recording.id).toBe("b");
+    expect(svc.get("same", { endpointId: "ep-1" })?.recording.id).toBe("hang");
+    expect(svc.get("same", { endpointId: "ep-2" })?.recording.id).toBe("b");
+    svc.close();
+  });
+
+  it("keeps one attempt for a shared attachment and lets every endpoint that asked read it", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    const ask = (id: string, endpointId: string) => svc.request({
+      id, recording: { kind: "attachment", id: "hang" }, language: "de", caller: { endpointId },
+    });
+    const first = await ask("tx-a", "ep-1");
+    const second = await ask("tx-b", "ep-2");
+    expect(first.ok && second.ok && second.value.id).toBe("tx-a");
+    expect(svc.get("tx-a", { endpointId: "ep-1" })?.id).toBe("tx-a");
+    expect(svc.get("tx-a", { endpointId: "ep-2" })?.id).toBe("tx-a");
+    expect(svc.get("tx-a", { endpointId: "ep-3" })).toBeNull();
+    expect(gate.calls).toEqual(["/audio/hang.wav"]);
+    svc.close();
+  });
+
+  it("still reads a row saved before an endpoint was recorded", async () => {
+    const old: Transcription = {
+      id: "old", recording: { kind: "attachment", id: "a" }, language: "de", sizeBytes: 12,
+      acceptedAt: 1, state: "queued", position: null, reason: null, outcome: null, problem: null,
+      text: null, report: null, startedAt: null, endedAt: null,
+    };
+    const gate = new Gate();
+    const { svc } = service(memory([old]), gate);
+    await svc.start();
+    const again = await svc.request({
+      id: "newer", recording: { kind: "attachment", id: "a" }, language: "de", caller: { endpointId: "ep-1" },
+    });
+    expect(again.ok && again.value.id).toBe("old");
+    expect(svc.get("old", { endpointId: "ep-1" })?.id).toBe("old");
+    svc.close();
+  });
+
   it("cuts text past 64 KiB and refuses a recording past the cap", async () => {
     const gate = new Gate();
     gate.answer = { ok: true, value: { language: "de", durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "y".repeat(70_000) }] } };
