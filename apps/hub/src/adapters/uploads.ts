@@ -6,7 +6,8 @@
 // (docs/design/transcription, section 8). Files older than a week are removed.
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { IMAGE_EXTENSION, NO_CAPABILITY, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, sniffAudio, type AudioContainer, type EndpointId, type ImageMime, type Result, type TranscriptionCapability, type Upload, type UploadRefusal } from "@morndo/domain";
@@ -104,11 +105,11 @@ async function stripByRemux(b: Uint8Array, container: keyof typeof REMUX_FORMAT,
 }
 async function remuxOne(b: Uint8Array, container: keyof typeof REMUX_FORMAT, timeoutMs: number): Promise<Uint8Array> {
   const ext = container === "mp4" ? "m4a" : container;
-  const folder = mkdtempSync(join(tmpdir(), "morndo-strip-"));
+  const folder = await mkdtemp(join(tmpdir(), "morndo-strip-"));
   try {
     const input = join(folder, `in.${ext}`);
     const output = join(folder, `out.${ext}`);
-    writeFileSync(input, b, { mode: 0o600 });
+    await writeFile(input, b, { mode: 0o600 });
     const code = await runFfmpeg([
       "-nostdin", "-v", "error", "-y", "-i", input,
       "-map", "0:a", "-map_chapters", "-1", "-map_metadata", "-1", "-c", "copy",
@@ -116,12 +117,12 @@ async function remuxOne(b: Uint8Array, container: keyof typeof REMUX_FORMAT, tim
       "-f", REMUX_FORMAT[container], output,
     ], timeoutMs);
     if (code !== 0) return b;
-    const out = readFileSync(output);
+    const out = await readFile(output);
     return out.length > 0 && sniffAudio(out) === container ? out : b;
   } catch {
     return b;
   } finally {
-    rmSync(folder, { recursive: true, force: true });
+    await rm(folder, { recursive: true, force: true });
   }
 }
 

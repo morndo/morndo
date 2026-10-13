@@ -5,7 +5,32 @@ import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, existsSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const remuxAsync = vi.hoisted(() => ({ mkdtemp: 0, write: 0, read: 0, rm: 0 }));
+vi.mock("node:fs/promises", async () => {
+  const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+  const strip = (path: unknown) => String(path).includes("morndo-strip");
+  return {
+    ...actual,
+    mkdtemp: async (...args: Parameters<typeof actual.mkdtemp>) => {
+      if (strip(args[0])) remuxAsync.mkdtemp += 1;
+      return actual.mkdtemp(...args);
+    },
+    writeFile: async (...args: Parameters<typeof actual.writeFile>) => {
+      if (strip(args[0])) remuxAsync.write += 1;
+      return actual.writeFile(...args);
+    },
+    readFile: async (...args: Parameters<typeof actual.readFile>) => {
+      if (strip(args[0])) remuxAsync.read += 1;
+      return actual.readFile(...args);
+    },
+    rm: async (...args: Parameters<typeof actual.rm>) => {
+      if (strip(args[0])) remuxAsync.rm += 1;
+      return actual.rm(...args);
+    },
+  };
+});
 import { audioDurationMs, endpointId } from "@morndo/domain";
 import { webmBytes } from "../../../packages/domain/test/audio-bytes.ts";
 import { until } from "../../../packages/protocol/test/proc.ts";
@@ -159,6 +184,24 @@ exit 0
     } finally {
       if (path === undefined) delete process.env.PATH;
       else process.env.PATH = path;
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("a remux writes and reads its temp files asynchronously", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "morndo-remux-async-"));
+    const sample = join(folder, "note.m4a");
+    const made = spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample], { encoding: "utf8" });
+    expect(made.status).toBe(0);
+    const bytes = readFileSync(sample);
+    remuxAsync.mkdtemp = 0;
+    remuxAsync.write = 0;
+    remuxAsync.read = 0;
+    remuxAsync.rm = 0;
+    try {
+      await stripMetadata(bytes, "mp4");
+      expect(remuxAsync).toEqual({ mkdtemp: 1, write: 1, read: 1, rm: 1 });
+    } finally {
       rmSync(folder, { recursive: true, force: true });
     }
   });
