@@ -202,8 +202,8 @@ export class Store {
   }
   pruneUploads(before: number): number { return this.db.prepare("DELETE FROM uploads WHERE at < ?").run(before).changes; }
 
-  // One transcription per recording and language (ADR-0021). The body is the domain row. A row this hub did not write
-  // is skipped rather than guessed at.
+  // One transcription per endpoint, recording and language (ADR-0021). The body is the domain row. A row this hub
+  // did not write is skipped rather than guessed at. The endpoint is part of the key, so two devices keep their own rows.
   transcriptions(): Transcription[] {
     const rows = this.db.prepare("SELECT body FROM transcriptions").all() as { body: string }[];
     const out: Transcription[] = [];
@@ -216,10 +216,11 @@ export class Store {
     return out;
   }
   saveTranscription(row: Transcription) {
-    this.db.prepare(`INSERT INTO transcriptions (id, recording_kind, recording_id, language, accepted_at, body)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id, recording_kind, recording_id, language) DO UPDATE SET accepted_at = excluded.accepted_at, body = excluded.body`)
-      .run(row.id, row.recording.kind, row.recording.id, row.language, row.acceptedAt, JSON.stringify(row));
+    const endpointId = "endpointId" in row && typeof row.endpointId === "string" ? row.endpointId : "";
+    this.db.prepare(`INSERT INTO transcriptions (id, recording_kind, recording_id, language, endpoint_id, accepted_at, body)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id, recording_kind, recording_id, language, endpoint_id) DO UPDATE SET accepted_at = excluded.accepted_at, body = excluded.body`)
+      .run(row.id, row.recording.kind, row.recording.id, row.language, endpointId, row.acceptedAt, JSON.stringify(row));
   }
 
   // Reading (ADR-0008 phase D): one read mark per conversation (the forward-only rule is the domain's, O7), and mute.

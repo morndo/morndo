@@ -58,8 +58,10 @@ function memory(seed: Transcription[] = []): TranscriptionStore {
   return {
     transcriptions: () => rows.map(row => structuredClone(row)),
     saveTranscription: row => {
+      const owner = "endpointId" in row && typeof row.endpointId === "string" ? row.endpointId : "";
       const i = rows.findIndex(r => r.id === row.id && r.recording.kind === row.recording.kind
-        && r.recording.id === row.recording.id && r.language === row.language);
+        && r.recording.id === row.recording.id && r.language === row.language
+        && ("endpointId" in r && typeof r.endpointId === "string" ? r.endpointId : "") === owner);
       if (i < 0) rows.push(structuredClone(row));
       else rows[i] = structuredClone(row);
     },
