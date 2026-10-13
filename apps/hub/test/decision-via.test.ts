@@ -256,6 +256,27 @@ describe("a Decision the record can no longer attribute", () => {
     expect(retry.item?.decision?.via).toBe("elsewhere");
   });
 
+  // The same rule for a row already done (round 3.4): the desk's answer was typed, its row done, and the hub stopped
+  // before its Decision was saved, so the ask reads open. The phone's tap of the same choice finds that row: it was the
+  // desk's answer, recorded for the desk, and the phone is told it was answered elsewhere — not that its own went
+  // through — on the first try and on a retry.
+  it("a done row of another endpoint's answer is that endpoint's Decision, not the caller's duplicate", async () => {
+    store.db.prepare("INSERT INTO sends (key, state, at, outcome, typed_at, worker_id, request, request_session) VALUES (?, 'done', ?, 'typed', ?, '%0', ?, 's-desk')")
+      .run(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "ship" }), T0 - 1000, T0 - 900, "desk:r1");
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("not reached"); },
+    });
+    s.poll();
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");
+    const r = await s.answer(auth("phone"), "ny-7", { kind: "option", key: "ship" }, "r2");
+    expect(r).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(r.item?.decision?.via).toBe("elsewhere");
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("desk"));
+    expect(s.seenBy(endpointId("desk")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "ship" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
+  });
+
   // A tap the hub itself typed whose row nothing can settle (round 2.1): the port threw after the paste, the row keeps
   // "started" with no store, and this hub has no node to ask — no repeat can ever learn more, and no answer path is
   // left to record it. The tap in the pane is the ask's only record: it settles the ask, as it did before the pane-tap

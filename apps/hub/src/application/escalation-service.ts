@@ -825,11 +825,19 @@ export class EscalationService {
   // An answer in doubt, settled with the node it went to (SteeringService's settle, on its row): typed there → delivered,
   // a duplicate at the node's time; null → the node never started it (its row is gone), so the answer is judged anew;
   // anything else → uncertain. A row already done was settled before: delivered. Whose duplicate it is, the row says
-  // (A1): another endpoint's row is not this caller's answer — its result says what its view says, answered from
-  // elsewhere, not a duplicate of its own (round 2.5). A row that names no request is recorded under the caller, whose
-  // answer key it holds, and stays its duplicate.
+  // (A1): another endpoint's row, done or settled now, is not this caller's answer — its result says what its view
+  // says, answered from elsewhere, not a duplicate of its own (rounds 2.5 and 3.4). A row that names no request is
+  // recorded under the caller, whose answer key it holds, and stays its duplicate.
   async #settleAnswer(a: Authenticated, id: string, choice: Choice, row: SendRow, key: string): Promise<AnswerResult | null> {
+    const requester = this.#requesterOf(row);
+    const others = requester !== null && requester.endpointId !== a.endpoint.id;
     if (row.state === "done") {
+      // Another endpoint's row, done, is its answer and never this caller's duplicate: the same rule as a settled one
+      // (round 3.4). Typed, it is recorded for that endpoint; queued, its inbox records it once delivered (E13).
+      if (others) {
+        if (row.outcome !== "queued") this.#record(id, choice, requester);
+        return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
+      }
       this.#seen.set(key, this.#now());
       // Queued in the inbox, not typed: still queued. The enqueue time is not when it was delivered (round 2.7).
       if (row.outcome === "queued") return { ok: true, item: this.#view(id, a.endpoint.id), queued: true };
@@ -838,8 +846,7 @@ export class EscalationService {
     const settled = row.workerId === null ? { ok: false as const, problem: "uncertain" as const } : await this.#settle(row.key, row.workerId);
     if (settled === null) return null;
     if (!settled.ok && settled.problem === "duplicate") {
-      const requester = this.#requesterOf(row);
-      if (requester === null || requester.endpointId === a.endpoint.id) return this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
+      if (!others) return this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
       // Recorded for its own endpoint. This caller's request delivered nothing, so it is not remembered as delivered:
       // a retry of it is told the same, never ok (round 3.3).
       this.#record(id, choice, requester);
