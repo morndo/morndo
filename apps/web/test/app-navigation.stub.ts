@@ -1,7 +1,9 @@
-// A stand-in for SvelteKit's $app/navigation in the component tests (harness.ts): Phone.svelte calls goto and
-// pushState, which only SvelteKit's router provides. goto records where the app asked to go and goes nowhere.
-// pushState keeps the brief id on history, the way Kit 2.70.3's shallow routing does (design §6.3).
-import { page } from "./app-state.stub.ts";
+// A stand-in for SvelteKit's $app/navigation in the browser tests (harness.ts): Phone.svelte calls goto and pushState,
+// which only SvelteKit's router provides. goto records where the app asked to go and goes nowhere. pushState and
+// replaceState number the history entry the way Kit 2.70.3's shallow routing does (client.js): every entry the router
+// owns carries "sveltekit:history", its number, and the state under "sveltekit:states", composed over what history
+// already holds. The initial entry is numbered at start, as Kit's start() does.
+import { page, type PageState } from "./app-state.stub.svelte.ts";
 
 export function beforeNavigate(_fn: (nav: { type: string; cancel: () => void }) => void): void {}
 
@@ -10,12 +12,24 @@ export async function goto(url: string | URL): Promise<void> {
   (g.__goto ??= []).push(String(url));
 }
 
-export function pushState(_url: string, state: { brief?: string }): void {
-  history.pushState({ ...(history.state ?? {}), __page: state }, "", `${location.pathname}${location.search}`);
+const HISTORY_INDEX = "sveltekit:history";
+let index = 0;
+
+function compose(state: PageState): Record<string, unknown> {
+  return { ...(history.state ?? {}), [HISTORY_INDEX]: index, "sveltekit:navigation": 0, "sveltekit:pageurl": location.href, "sveltekit:states": state };
+}
+
+if (typeof history !== "undefined" && typeof history.replaceState === "function") {
+  history.replaceState(compose({}), "", location.href);
+}
+
+export function pushState(url: string, state: PageState): void {
+  index += 1;
+  history.pushState(compose(state), "", url || `${location.pathname}${location.search}`);
   page.state = state;
 }
 
-export function replaceState(_url: string, state: { brief?: string }): void {
-  history.replaceState({ ...(history.state ?? {}), __page: state }, "", `${location.pathname}${location.search}`);
+export function replaceState(url: string, state: PageState): void {
+  history.replaceState(compose(state), "", url || `${location.pathname}${location.search}`);
   page.state = state;
 }
