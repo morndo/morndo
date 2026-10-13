@@ -1,6 +1,6 @@
 # ADR-0021: Voice messages become text on the user's own machine, through a transcription plugin that the default install does not include
 
-- **Status:** Proposed, 2026-10-11. Design: [`docs/design/transcription/README.md`](../design/transcription/README.md). The domain and the protocol (steps 1 and 2) are in the tree; the hub and the plugin package are not.
+- **Status:** Proposed, 2026-10-11. Design: [`docs/design/transcription/README.md`](../design/transcription/README.md). The domain, the protocol and the plugin package are in the tree; the hub is not.
 - **The request:** transcribe audio with a free, open-source transcriber. Integrate it as a plugin or package that the default install does not include, so installing it is entirely optional. Keep it modular, and follow DDD where possible.
 - **Number:** 0019 (releases and updates) and 0020 (auto routing) are taken on branches. 0021 is the next free number on `main` and on every branch (checked 2026-10-11).
 - **Builds on:**
