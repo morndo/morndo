@@ -2,7 +2,7 @@
 // and a synthetic terminal for pane %1. For tests that need the HTTP and WebSocket edges but no crash isolation
 // (crash tests use http-crash-fixture.ts). Synthetic data only.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import type { Transcriber } from "@morndo/protocol";
+import type { Transcriber, TranscriberProbe } from "@morndo/protocol";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -49,7 +49,11 @@ export type InProcessHub = {
 // `now`: the hub's clock for access and rate limits (a test moves it to expire tokens, requests and verifications).
 // `observation`: the service the feed reads from, when a test needs its own (default: one over an empty tmux).
 // `engines`: the engine layer's CLI to run (a test's fake) and its environment; absent, the Engines page is off.
-export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService; engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null } = {}): Promise<InProcessHub> {
+export async function startInProcessHub(o: {
+  limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService;
+  engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
+  locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
+} = {}): Promise<InProcessHub> {
   const dir = mkdtempSync(join(tmpdir(), "morndo-inproc-"));
   const web = join(dir, "web");
   mkdirSync(web);
@@ -95,7 +99,8 @@ export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: numb
   const txHost = o.transcriber ?? null;
   const transcription = new TranscriptionService({
     store, transcriber: txHost,
-    unavailable: txHost ? null : { ready: false, reason: "missing", detail: "missing" },
+    unavailable: txHost || o.locate ? null : { ready: false, reason: "missing", detail: "missing" },
+    ...(o.locate ? { locate: o.locate } : {}),
     probeTtlMs: 0, log: () => {},
     file: (recording, caller) => {
       const upload = inbox.get(recording.id);

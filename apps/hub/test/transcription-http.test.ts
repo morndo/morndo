@@ -203,4 +203,36 @@ describe("transcription http", () => {
     }
     expect(policy).toContain("microphone=(self)");
   });
+
+  it("a probe that throws does not take the hub down from the app shell", async () => {
+    const reasons: unknown[] = [];
+    const onReject = (reason: unknown) => { reasons.push(reason); };
+    process.on("unhandledRejection", onReject);
+    const warned: string[] = [];
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => { warned.push(String(chunk)); return true; }) as typeof process.stderr.write;
+    let calls = 0;
+    const missing = { ready: false as const, reason: "missing" as const, detail: "missing" };
+    try {
+      const hub = await startInProcessHub({
+        locate: () => {
+          calls += 1;
+          if (calls > 1) throw new Error("probe blew up");
+          return {
+            transcriber: { probe: async () => missing, transcribe: () => Promise.reject(new Error("not used")) },
+            unavailable: null,
+          };
+        },
+      });
+      hubs.push(hub);
+      const shell = await fetch(`${hub.base}/`);
+      expect(shell.status).toBe(200);
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(reasons).toEqual([]);
+      expect(warned.join("")).toContain("probe blew up");
+    } finally {
+      process.stderr.write = write;
+      process.off("unhandledRejection", onReject);
+    }
+  });
 });

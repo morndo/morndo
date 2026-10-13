@@ -658,7 +658,8 @@ export function startHttp(p: {
     // rebuild, so the shell never points at assets the build replaced.
     // The document's Permissions-Policy is what gates the microphone. It is served from the last probe, and a
     // refresh runs behind the response so a slow probe never holds the page. The next document sees what it found.
-    void p.transcription?.refresh();
+    // A probe that throws is logged here: a dropped rejection is an unhandledRejection, and that exits the hub.
+    void p.transcription?.refresh()?.catch(e => log.warn("transcription: probe failed", e));
     const file = ["200.html", "index.html"].map(f => join(root, f)).find(f => existsSync(f));
     if (!file) throw new HttpError(503, "web app not built: run `npm run build`");
     const mtimeMs = statSync(file).mtimeMs;
