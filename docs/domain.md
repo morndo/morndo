@@ -550,6 +550,34 @@ One command an agent starts on one node. It keeps running after that turn and re
 
 A queued job has a position and a reason: `class` when the limit is full, `load` or `memory` when the guard is over the line, `guard_unknown` when a configured guard cannot be read. The guard is off unless the policy sets it. It never settles a running job.
 
+## Transcription: voice and audio files become text ([ADR-0021](adr/0021-optional-transcription-plugin.md))
+
+One attempt to turn one Recording into Text, on the hub's own machine, through a Transcriber plugin the default install does not include. Code in `packages/domain/src/transcription.ts`; the queue decision it shares with Jobs is in `packages/domain/src/queue.ts`. The domain decides the states, the caps and the queue. It reads no audio, starts no engine and keeps no clock.
+
+The wire is `packages/protocol/src/transcription.ts`: plugin protocol 1 and the HTTP bodies. `probe --json` and `run --json` are each one JSON document. A wrong protocol, a document that does not fit, or JSON that does not parse is `bad_output`. `POST /api/transcriptions` names the attempt, the Recording and the language choice. The view and the cancel body carry no filesystem path. The transcription field of `/api/me` is `false`, or the engine, model, languages and `maxSeconds` the probe reported. A fixture plugin and the contract suite against an in-memory Transcriber live under `packages/protocol/test/` until the hub speaks the port.
+
+| Term | Means | Is not |
+|---|---|---|
+| Recording | An audio file the principal uploaded or recorded (an audio Upload), or an audio Attachment an agent sent. Known by its upload id or its hub file id. | A Transcript (Observation's word for a session log). |
+| Transcription | One attempt on one Recording, with a state, a queue position and reason, an outcome, and when done its Text. | A Job: no command line, no lane (TX1). |
+| Text | What the engine heard: the language, the segments, the joined words, the engine and model that produced them, and whether the principal edited them. | A Command, until the principal sends it. |
+| Language choice | `auto`, or a language code the engine lists. | A translation target. |
+| Capability | Whether a ready Transcriber is there now. Not a setting: it follows the probe. | A licence or a subscription. |
+
+| # | Invariant |
+|---|---|
+| TX1 | A Transcription runs on the hub's machine, from a file already there. No adapter in this design sends audio or text off that machine. |
+| TX2 | One endpoint has at most one Transcription in flight per Recording and Language. A repeat from that endpoint returns it. Another endpoint's ask for the same clip is its own attempt. |
+| TX3 | A Transcription becomes terminal once (`done`, `failed`, `timed_out`, `cancelled`, `lost`). It is never re-run on its own. The principal may ask again, which makes a new Transcription. |
+| TX4 | A Transcription whose run is gone with no recorded end (a hub restart) becomes `lost`. The row stays. |
+| TX5 | At most `limit` Transcriptions run at once (default 1). Others wait in the order accepted, each with a visible position. The guard delays a start and never stops a run (as J5). |
+| TX6 | A Recording is at most 10 MiB and at most `maxSeconds` long (default 600). A longer one is `failed: too_long` before decoding the whole file where the engine can tell. Text is at most 64 KiB. |
+| TX7 | Text never replaces its Recording. An edit keeps the engine's text and marks the result `edited`. |
+| TX8 | Text grants nothing. It becomes part of a Command only when the principal sends it (AC7). Text from an agent's Recording is that agent's content and is never offered as the principal's Command. |
+| TX9 | With no Capability, nothing in this context runs or is offered. Audio Uploads are refused as on `main`, and the microphone stays blocked. |
+
+A waiting Transcription carries a position and a reason, the queue's own words as for Jobs (`class`, `load`, `memory`, `guard_unknown`). `failed` names a problem: `unreadable`, `too_long`, `not_ready`, `bad_output` or `engine`. The events are `TranscriptionRequested`, `TranscriptionStarted`, `TranscriptionEnded` (the only one that carries Text, and it is never logged), `TextEdited` and `CapabilityChanged`; none carries audio. An audio file is known by its own bytes as an image is: `sniffAudio` names the container (`OggS`; the EBML magic; `ftyp` at offset 4 with a major brand a recorder writes — `M4A `, which a Safari `.m4a` has, or the iso and mp4 brands; an image brand or any other is refused, and a movie file passes the gate for the engine to read its audio track; `ID3` or an MPEG frame sync; `RIFF`…`WAVE`). An audio Upload is on Steering's list only while the Capability is there (S1).
+
 ## Releases: one Version for the whole product ([ADR-0019](adr/0019-releases-and-updates.md))
 
 Added 2026-10-11 by [ADR-0019](adr/0019-releases-and-updates.md); design in [`design/updates/README.md`](design/updates/README.md); code in `packages/domain/src/releases.ts` (wire schemas in `packages/protocol/src/releases.ts`). One Version for the whole product, published once as a Release, offered on a Channel through a signed ChannelFeed, applied to one Installation at a safe point, rolled back when a health check fails. The updater is a separate program (`apps/updater`), never a child of what it stops. The domain decides: it verifies no signature (the Verifier port reports the fact), stops no service, opens no store, reads no clock — every function takes `now`.
@@ -697,6 +725,8 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Verification supplies Authority*: a conditional Mandate ("ship when green") references a Verdict, never a Claim.
 - *Board stands beside Observation*: the board says what a lane was asked to do and where it stands; Observation says what the lane is doing on its screen. Neither decides anything for the other, and the board grants nothing (B8). A lane's "in review" is its word, as "says done" is in Catch-up (C5).
 - *Jobs stand beside the board and the fleet*. A task notice is one comment and does not move the task (B3, B8, J7). The fleet stores the job's state and a redacted tail. It never stores the command (J1, FL14). The node decides when a queued job may start (J5).
+- *Jobs supplies Transcription* with the queue decision. This is a shared rule (`packages/domain/src/queue.ts`), not shared rows: one class, at most its limit, FIFO with a visible position, a guard that delays a start and never stops a run (J5, TX5).
+- *Transcription supplies Steering*: a done Transcription's Text can become a Command's text, and only the principal's send makes it one (AC7, TX8); an audio Upload is on Steering's list only while the Capability is there (TX9, S1).
 - *Releases stands beside the Fleet* (customer and supplier, ADR-0019). It reads the control plane's Version and each node's Version and protocols through the client API, and raises its Alerts there. The Fleet carries one new typed operation, `update.apply { version }`, with a key and no command line (FL14); a node's policy may deny it. "Update now", "Roll back", a Channel change and turning automatic updates on or off from the app are principal Commands (AC7, with step-up). Releases grants nothing (RL13): no Mandate, Decision, Acknowledgement or Verdict. No other app imports the updater; the hub runs the program, as it runs the engines CLI.
 - *Fleet supplies Observation and Steering* (customer and supplier). Observation reads workers, screens and transcripts through it. A Command (S5) and the delivery of a Decision (E8) reach a pane as keyed operations, so neither is typed twice across a dropped connection (FL7). The Hook bus feeds the chat bot, a subscriber, which turns hook events into Escalations through its own adapter.
 - *Engines is downstream of Connections* (customer and supplier). A connection name is the provider name the routing policy orders. Connections never reads the routing policy, and no spend figure decides anything but the lease gate (CN15).
@@ -725,6 +755,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 | Agent CLI status line (its JSON, posted by the lane's status-line script to `/api/agent/usage` with an agent token) | `rate_limits.*` and `context_window.used_percentage` to a Report for the account the call names (U1); everything else in the document is dropped |
 | Agents' board command (`morndo-board`, over `/api/agent/board` with an agent token) | a lane's command line to one change of one Task by one Actor (B1); the hub's refusal to one line the agent can act on |
 | Node job supervisor (`morndo-node`) | a class limit and an optional load or memory reading to the domain's queue decision (J5); a process exit to one Outcome; a completion to one Notice. The domain never sees a pid, a unit name, or `/proc`. |
+| Transcription plugin (protocol 1, `packages/protocol`) | `probe --json` and `run --json` to a Capability and an EngineText. A document that is not protocol 1 is `bad_output`. The domain never sees the plugin's JSON. |
 | Event store | persistence and replay (the scorer reads raw trial logs through it) |
 | Engine layer's CLI (engine-layer `bin/engines`) | its roles, providers and resolver output (JSON) to Roles, Engines and Availability; a save to `set` and `other-provider --effective` calls; its refusal (exit 2) to "refused" with its words; a shape it doesn't know to "unavailable", never a guess; a CLI older than engine-layer 9f3a28c (no `other-provider --effective`) to "unsupported" (R1, R2, R5) |
 | SOP files and skill folders (`knowledge/`, the `sop-check` command) | an SOP's YAML to the plain data the check judges; the skills beside the recurring-job skill to the names of installed patterns; a note's front matter to its id and re-check date; the runtime's time-zone data to a yes or no. The domain never parses YAML |

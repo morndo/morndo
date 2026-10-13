@@ -1,4 +1,5 @@
 export * from "./shared.ts";
+export * from "./queue.ts";
 export * from "./access.ts";
 export * from "./observation.ts";
 export * from "./conversation.ts";
@@ -17,6 +18,7 @@ export * from "./verification.ts";
 export * from "./digest.ts";
 export * from "./usage.ts";
 export * from "./jobs.ts";
+export * from "./transcription.ts";
 export * from "./chats.ts";
 export * from "./releases.ts";
 export * from "./secrets.ts";

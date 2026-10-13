@@ -205,6 +205,21 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 20,
+    name: "transcriptions (ADR-0021): one row per endpoint, recording and language, the body the domain already decided",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS transcriptions (
+        id TEXT NOT NULL, recording_kind TEXT NOT NULL, recording_id TEXT NOT NULL, language TEXT NOT NULL,
+        endpoint_id TEXT NOT NULL,
+        accepted_at INTEGER NOT NULL, body TEXT NOT NULL,
+        PRIMARY KEY (id, recording_kind, recording_id, language, endpoint_id));
+      CREATE INDEX IF NOT EXISTS transcriptions_id ON transcriptions (id);
+    `),
+  },
+  {
+    // PR #50 (transcriptions) merged first, so 20 is that line's table, already running live; this column is 21.
+    // A database at 20 runs only 21.
+    version: 21,
     name: "sends.request_session: the session an escalation answer was sent under, so a row in doubt settled later is recorded with its own sender's provenance (A1; review of PR #55)",
     compat: "additive",
     up: db => { if (!hasColumn(db, "sends", "request_session")) db.exec("ALTER TABLE sends ADD COLUMN request_session TEXT"); },

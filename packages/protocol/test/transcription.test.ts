@@ -1,0 +1,173 @@
+// Plugin protocol 1 and the transcription HTTP bodies (ADR-0021; design §5, §6). A document that is not protocol 1
+// is bad_output. A path is not a field: the wire never carries where the audio sits.
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { MAX_TEXT_BYTES } from "@morndo/domain";
+import { SENTENCE } from "./answers.mjs";
+import {
+  MeTranscription, ProbeDocument, RunDocument, TranscriptionCancelBody, TranscriptionCreateBody, TranscriptionView,
+  parseBody, parseProbe, parseRun, problemFromExit,
+} from "../src/index.ts";
+
+const PROBE = {
+  protocol: 1, ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture",
+  languages: "multi", maxSeconds: 600, missing: [],
+} as const;
+const RUN = {
+  protocol: 1, language: "de", durationMs: 5200,
+  segments: [{ startMs: 0, endMs: 5200, text: SENTENCE }],
+};
+const CREATE = { id: "tx-1", recording: { kind: "upload" as const, id: "abc123def456" }, language: "auto" };
+const VIEW = {
+  id: "tx-1", recording: { kind: "upload" as const, id: "abc123def456" }, language: "auto",
+  state: "done" as const, position: null, reason: null, outcome: "done" as const, problem: null,
+  text: {
+    language: "de", text: SENTENCE, edit: null, edited: false,
+    engine: "fixture-ear", model: "tiny-fixture",
+  },
+};
+
+describe("plugin protocol 1", () => {
+  it("the fixture and the fakes share one sentence, and the wait helpers live in one module", () => {
+    const fixture = readFileSync(new URL("./fixtures/fake-transcribe.mjs", import.meta.url), "utf8");
+    const contract = readFileSync(new URL("./transcriber-contract.ts", import.meta.url), "utf8");
+    const fake = readFileSync(new URL("./fake-transcribe.test.ts", import.meta.url), "utf8");
+    const memory = readFileSync(new URL("./memory-transcriber.ts", import.meta.url), "utf8");
+    expect(fixture).toContain('from "./answers.mjs"');
+    expect(fixture).not.toContain("Notiz an den Hafen");
+    expect(contract).toContain('from "./answers.mjs"');
+    expect(memory).toContain('from "./answers.mjs"');
+    expect(fake).toContain('from "./answers.mjs"');
+    expect(readFileSync(new URL("./memory-transcriber.test.ts", import.meta.url), "utf8")).toContain('from "./answers.mjs"');
+    expect(readFileSync(new URL("./transcription.test.ts", import.meta.url), "utf8")).toContain('from "./answers.mjs"');
+    expect(contract).toContain('from "./proc.ts"');
+    expect(fake).toContain('from "./proc.ts"');
+    expect(contract).not.toContain("function alive");
+    expect(fake).not.toContain("function alive");
+  });
+
+  it("declares the transcriber port on the protocol module", () => {
+    const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
+    expect(src).toContain("export type TranscriberProbe ");
+    expect(src).toContain("export type TranscribeInput ");
+    expect(src).toContain("export type Transcriber ");
+  });
+
+  it("bounds segment text and a view's words by UTF-8 bytes", () => {
+    const cjk = "\u6d77".repeat(21_846);
+    expect(new TextEncoder().encode(cjk).length).toBe(65_538);
+    expect(cjk.length).toBeLessThan(MAX_TEXT_BYTES);
+    const run = { ...RUN, segments: [{ startMs: 0, endMs: 1, text: cjk }] };
+    expect(parseRun(JSON.stringify(run))).toEqual({ ok: false, error: "bad_output" });
+    const words = VIEW.text;
+    if (words === null) throw new Error("the view fixture has words");
+    expect(parseBody(TranscriptionView, { ...VIEW, text: { ...words, text: cjk } })).toBeNull();
+    expect(parseBody(TranscriptionView, { ...VIEW, text: { ...words, edit: cjk, edited: true } })).toBeNull();
+    const fit = "a".repeat(MAX_TEXT_BYTES);
+    expect(parseRun(JSON.stringify({ ...RUN, segments: [{ startMs: 0, endMs: 1, text: fit }] })).ok).toBe(true);
+  });
+
+  it("refuses a segment that ends before it starts or runs past the duration", () => {
+    const inverted = { ...RUN, segments: [{ startMs: 5000, endMs: 10, text: "x" }] };
+    expect(parseRun(JSON.stringify(inverted))).toEqual({ ok: false, error: "bad_output" });
+    const past = { ...RUN, durationMs: 1000, segments: [{ startMs: 0, endMs: 1001, text: "x" }] };
+    expect(parseRun(JSON.stringify(past))).toEqual({ ok: false, error: "bad_output" });
+    const edge = { ...RUN, durationMs: 1000, segments: [{ startMs: 0, endMs: 1000, text: "x" }] };
+    expect(parseRun(JSON.stringify(edge))).toEqual({ ok: true, value: edge });
+  });
+
+  it("reads a ready probe and a run that names its segments", () => {
+    expect(parseProbe(JSON.stringify(PROBE))).toEqual({ ok: true, value: PROBE });
+    expect(parseRun(`${JSON.stringify(RUN)}\n`)).toEqual({ ok: true, value: RUN });
+    expect(parseProbe(JSON.stringify({ protocol: 1, ready: false, missing: ["model", "ffmpeg"] }))).toEqual({
+      ok: true, value: { protocol: 1, ready: false, missing: ["model", "ffmpeg"] },
+    });
+  });
+
+  it("a wrong protocol, an extra field, or broken JSON is bad_output, and the audio path is not kept", () => {
+    expect(parseProbe(JSON.stringify({ ...PROBE, protocol: 2 }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseProbe("{")).toEqual({ ok: false, error: "bad_output" });
+    expect(parseProbe("")).toEqual({ ok: false, error: "bad_output" });
+    const withPath = parseProbe(JSON.stringify({ ...PROBE, path: "/tmp/note.wav" }));
+    expect(withPath).toEqual({ ok: false, error: "bad_output" });
+    expect(JSON.stringify(withPath)).not.toContain("/tmp/note.wav");
+    expect(parseRun(JSON.stringify({ ...RUN, protocol: 2 }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseRun(JSON.stringify({ ...RUN, language: "auto" }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseRun(JSON.stringify({ ...RUN, language: "DE" }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseRun(JSON.stringify({ ...RUN, durationMs: 5200.5 }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseProbe(JSON.stringify({ protocol: 1, ready: false, missing: [] }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseProbe(JSON.stringify({ ...PROBE, missing: ["ffmpeg"] }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseProbe(JSON.stringify({ ...PROBE, ready: false }))).toEqual({ ok: false, error: "bad_output" });
+  });
+
+  it("maps a non-zero exit onto a problem, and zero means the JSON is the answer", () => {
+    expect(problemFromExit(0)).toBeNull();
+    expect(problemFromExit(2)).toBe("engine");
+    expect(problemFromExit(3)).toBe("unreadable");
+    expect(problemFromExit(4)).toBe("too_long");
+    expect(problemFromExit(5)).toBe("not_ready");
+    expect(problemFromExit(1)).toBe("engine");
+    expect(problemFromExit(9)).toBe("engine");
+    expect(ProbeDocument.safeParse(PROBE).success).toBe(true);
+    expect(RunDocument.safeParse({ ...RUN, language: "pt-BR" }).success).toBe(true);
+  });
+
+  it("accepts a languages list the size of the Whisper set, and refuses one past the bound", () => {
+    const codeAt = (i: number) => "abcdefghijklmnopqrstuvwxyz"[Math.floor(i / 26)]! + "abcdefghijklmnopqrstuvwxyz"[i % 26]!;
+    const ninetyNine = Array.from({ length: 99 }, (_, i) => codeAt(i));
+    const listed = { ...PROBE, languages: ninetyNine };
+    expect(parseProbe(JSON.stringify(listed))).toEqual({ ok: true, value: listed });
+    const tooMany = Array.from({ length: 129 }, (_, i) => codeAt(i));
+    expect(parseProbe(JSON.stringify({ ...PROBE, languages: tooMany }))).toEqual({ ok: false, error: "bad_output" });
+  });
+
+  it("accepts a probe that offers more than the recording cap; the hub keeps the lower", () => {
+    const high = { ...PROBE, maxSeconds: 1800 };
+    expect(parseProbe(JSON.stringify(high))).toEqual({ ok: true, value: high });
+    expect(parseProbe(JSON.stringify({ ...PROBE, maxSeconds: 24 * 60 * 60 })).ok).toBe(true);
+    expect(parseProbe(JSON.stringify({ ...PROBE, maxSeconds: 24 * 60 * 60 + 1 }))).toEqual({ ok: false, error: "bad_output" });
+    expect(parseBody(MeTranscription, { engine: "fixture-ear", model: "tiny-fixture", languages: "multi", maxSeconds: 1800 })).toBeNull();
+  });
+
+  it("takes ids, languages and problems from the domain instead of restating them", () => {
+    const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
+    expect(src).toContain("TRANSCRIPTION_ID");
+    expect(src).toContain("LANGUAGE_CHOICE");
+    expect(src).toContain("LANGUAGE_CODE");
+    expect(src).toContain("TX_PROBLEMS");
+    expect(src).toContain("TX_STATES");
+    expect(src).not.toMatch(/A-Za-z0-9:_-/);
+  });
+});
+
+describe("transcription API bodies", () => {
+  it("accepts a create, a done view and a cancel, and refuses a path or a command on any of them", () => {
+    expect(parseBody(TranscriptionCreateBody, CREATE)).toEqual(CREATE);
+    expect(parseBody(TranscriptionCreateBody, { ...CREATE, language: "pt-BR" })).toEqual({ ...CREATE, language: "pt-BR" });
+    expect(parseBody(TranscriptionCreateBody, { ...CREATE, path: "/tmp/note.wav" })).toBeNull();
+    expect(parseBody(TranscriptionCreateBody, { ...CREATE, language: "DE" })).toBeNull();
+    expect(parseBody(TranscriptionCreateBody, { ...CREATE, sizeBytes: 4096 })).toBeNull();
+    expect(parseBody(TranscriptionCreateBody, { ...CREATE, recording: { kind: "note", id: "abc123def456" } })).toBeNull();
+    expect(parseBody(TranscriptionView, VIEW)).toEqual(VIEW);
+    const edited = { ...VIEW, text: { ...VIEW.text, edit: "Der Steg ist frei.", edited: true } };
+    expect(parseBody(TranscriptionView, edited)).toEqual(edited);
+    const waiting = { ...VIEW, state: "queued", position: 2, reason: "class", outcome: null, text: null };
+    expect(parseBody(TranscriptionView, waiting)).toEqual(waiting);
+    expect(parseBody(TranscriptionView, { ...VIEW, path: "/tmp/note.wav" })).toBeNull();
+    expect(parseBody(TranscriptionView, { ...VIEW, state: "paused" })).toBeNull();
+    expect(parseBody(TranscriptionCancelBody, {})).toEqual({});
+    expect(parseBody(TranscriptionCancelBody, { command: "rm -rf /" })).toBeNull();
+  });
+
+  it("reports the capability as false, or as the engine the probe named", () => {
+    expect(parseBody(MeTranscription, false)).toBe(false);
+    const on = { engine: "fixture-ear", model: "tiny-fixture", languages: "multi" as const, maxSeconds: 600 };
+    expect(parseBody(MeTranscription, on)).toEqual(on);
+    expect(parseBody(MeTranscription, { ...on, languages: ["de", "en"] })).toEqual({ ...on, languages: ["de", "en"] });
+    expect(parseBody(MeTranscription, true)).toBeNull();
+    expect(parseBody(MeTranscription, { ...on, path: "/models/x.bin" })).toBeNull();
+    expect(parseBody(MeTranscription, { ...on, languages: ["auto"] })).toBeNull();
+    expect(parseBody(MeTranscription, { ...on, languages: [] })).toBeNull();
+    expect(parseBody(MeTranscription, { engine: "fixture-ear" })).toBeNull();
+  });
+});

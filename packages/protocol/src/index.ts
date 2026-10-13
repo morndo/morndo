@@ -19,4 +19,5 @@ export * from "./jobs.ts";
 export * from "./releases.ts";
 export * from "./service-health.ts";
 export * from "./uploads.ts";
+export * from "./transcription.ts";
 export * from "./secrets.ts";
