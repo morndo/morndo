@@ -175,11 +175,17 @@ export class TranscriptionService {
 
   tick(): void {
     if (this.#closed || !capabilityReady(this.capability())) return;
-    const scheduled = scheduleTranscriptions(this.#rows, this.#limit, this.#guard());
-    for (const row of scheduled) {
-      const prev = this.#rows.find(item => sameRow(item, row));
-      if (!prev || prev.state !== row.state || prev.position !== row.position || prev.reason !== row.reason) this.#save(row);
-      if (row.state === "starting") this.#launch(this.#rows.find(item => sameRow(item, row)) ?? row);
+    // A row whose launch found nothing to run (its file gone) ends failed without ever holding a run, so no #finish
+    // frees its slot: the pass is taken again for whoever waits behind it. Each pass starts at least one row or
+    // shrinks the queue, so the retry ends.
+    for (let again = true; again;) {
+      again = false;
+      const scheduled = scheduleTranscriptions(this.#rows, this.#limit, this.#guard());
+      for (const row of scheduled) {
+        const prev = this.#rows.find(item => sameRow(item, row));
+        if (!prev || prev.state !== row.state || prev.position !== row.position || prev.reason !== row.reason) this.#save(row);
+        if (row.state === "starting" && !this.#launch(this.#rows.find(item => sameRow(item, row)) ?? row)) again = true;
+      }
     }
   }
 
@@ -215,14 +221,16 @@ export class TranscriptionService {
     }
   }
 
-  #launch(row: Transcription): void {
+  // Whether the row holds a run afterwards: true when it started (or already held one), false when it ended without
+  // ever running, so the caller can hand its slot to the next row.
+  #launch(row: Transcription): boolean {
     const key = rowKey(row);
-    if (this.#inflight.has(key) || row.state !== "starting") return;
+    if (this.#inflight.has(key) || row.state !== "starting") return true;
     const file = this.#file(row.recording);
     if (!file) {
       const ended = endTranscription(row, { outcome: "failed", at: this.#now(), problem: "unreadable" });
       if (ended.ok) this.#save(ended.value);
-      return;
+      return false;
     }
     const started = startTranscription(row, this.#now());
     const running = started.ok ? started.value : row;
@@ -238,7 +246,7 @@ export class TranscriptionService {
     }, this.#timeoutFor(maxSeconds * 1000));
     this.#timers.add(timer);
     const transcriber = this.#transcriber;
-    if (!transcriber) return;
+    if (!transcriber) return true;
     void transcriber.transcribe({
       path: file.path, language: row.language, threads: this.#threads, maxSeconds, signal: ac.signal,
     }).then(result => {
@@ -259,6 +267,7 @@ export class TranscriptionService {
         ? { outcome: "timed_out", at: this.#now() }
         : { outcome: "cancelled", at: this.#now() });
     });
+    return true;
   }
 
   #finish(key: string, timer: ReturnType<typeof setTimeout>, event: Parameters<typeof endTranscription>[1]): void {
