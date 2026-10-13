@@ -269,23 +269,51 @@ export async function writeModelBody(
   const out = open(partial);
   const hash = createHash("sha256");
   let bytes = 0;
+  const iterator = chunks[Symbol.asyncIterator]();
+  let stopped = false;
+  const cancelBody = async (): Promise<void> => {
+    if (stopped) return;
+    stopped = true;
+    await iterator.return?.(undefined);
+  };
   try {
     await new Promise<void>((resolve, reject) => {
-      // Attached before the first write. A disk error while waiting for drain must reject this
-      // promise; it must not escape as an uncaught 'error' event.
-      out.on("error", (error: NodeJS.ErrnoException) => reject(downloadError(error)));
-      const pump = async () => {
-        for await (const chunk of chunks) {
-          const buf = Buffer.from(chunk);
-          bytes += buf.length;
-          hash.update(buf);
-          if (!out.write(buf)) await new Promise<void>(resolveDrain => { out.once("drain", resolveDrain); });
-        }
-        out.end(() => resolve());
+      // Attached before the first write. A disk error while waiting for drain rejects this
+      // promise, stops the pump, and cancels the body so the read does not stay pending.
+      let failing = false;
+      const fail = (error: Error) => {
+        if (failing) return;
+        failing = true;
+        void cancelBody().then(() => reject(error), () => reject(error));
       };
-      pump().catch(error => reject(error instanceof Error ? error : new Error(String(error))));
+      out.on("error", (error: NodeJS.ErrnoException) => fail(downloadError(error)));
+      const pump = async () => {
+        try {
+          while (!stopped) {
+            const step = await iterator.next();
+            if (step.done || stopped) break;
+            const buf = Buffer.from(step.value);
+            bytes += buf.length;
+            hash.update(buf);
+            if (!out.write(buf)) {
+              await new Promise<void>((resolveDrain, rejectDrain) => {
+                if (stopped) { resolveDrain(); return; }
+                const onDrain = () => { out.off("error", onWriteError); resolveDrain(); };
+                const onWriteError = () => { out.off("drain", onDrain); rejectDrain(new Error("write stopped")); };
+                out.once("drain", onDrain);
+                out.once("error", onWriteError);
+              });
+            }
+          }
+          if (!stopped) out.end(() => resolve());
+        } catch (error) {
+          fail(error instanceof Error ? error : new Error(String(error)));
+        }
+      };
+      void pump();
     });
   } catch (error) {
+    await cancelBody();
     out.destroy();
     rmSync(partial, { force: true });
     throw error;

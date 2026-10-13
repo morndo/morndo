@@ -115,6 +115,36 @@ describe("install choices", () => {
     }
   });
 
+  it("a write error stops the download and cancels the body", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-cancel-"));
+    const partial = join(dir, "model.bin.partial");
+    writeFileSync(partial, "started");
+    let closed = false;
+    async function* body(): AsyncGenerator<Uint8Array> {
+      try {
+        yield Buffer.from("model-bytes-that-fill-the-buffer");
+        await new Promise(() => {});
+      } finally {
+        closed = true;
+      }
+    }
+    const open = () => new Writable({
+      highWaterMark: 1,
+      write(_chunk, _encoding, _callback) {
+        process.nextTick(() => {
+          this.emit("error", Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }));
+        });
+      },
+    });
+    try {
+      await expect(writeModelBody(partial, body(), open)).rejects.toThrow("disk full while downloading the model");
+      expect(closed).toBe(true);
+      expect(readdirSync(dir)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("a full disk removes the partial model and says the disk is full", async () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-disk-"));
     const partial = join(dir, "model.bin.partial");
