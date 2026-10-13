@@ -208,6 +208,20 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
+  it("names the asker when a brief is restated while the sheet is open", { timeout: 30_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track);
+    await push(tab, [release]);
+    await tab.locator("button.banner.you").click();
+    await tab.locator('[data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await push(tab, [releaseRestated]);
+    await dialog.getByText("Alpha restated this brief.").waitFor({ timeout: 3_000 });
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("shows a restated brief as it is when reopened, not as 'restated'", { timeout: 30_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track);

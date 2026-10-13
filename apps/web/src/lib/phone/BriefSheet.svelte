@@ -91,7 +91,7 @@
       <span class="topic">{card.topic}</span>
     </div>
     {#if session.stale}
-      <p class="restated" role="status">The manager restated this brief. <button type="button" class="link" onclick={showNew}>Show the new version</button></p>
+      <p class="restated" role="status">{whom} restated this brief. <button type="button" class="link" onclick={showNew}>Show the new version</button></p>
     {/if}
     <p class="kicker">Decision request</p>
     <p class="meta">
