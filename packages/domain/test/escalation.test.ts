@@ -84,6 +84,14 @@ describe("E9: a Decision names one of the ask's own options, or carries words", 
     const r = x.record("ny-1", { kind: "option", key: "hold" }, by, T0);
     expect(r.ok && r.value.choice).toEqual({ kind: "option", key: "hold", label: "Hold" });
   });
+  it("takes the label the ask showed when the answer was typed, when given, and still refuses a key the ask no longer has", () => {
+    const x = new Escalations();
+    x.reconcile([seen(ask("ny-1", { options: [{ key: "ship", label: "Ship now", detail: null }] }))], T0, true);   // renamed since
+    expect(x.record("ny-1", { kind: "option", key: "hold" }, by, T0, [{ key: "hold", label: "Hold" }])).toEqual({ ok: false, error: "bad_option" });
+    const r = x.record("ny-1", { kind: "option", key: "ship" }, by, T0, [{ key: "ship", label: "Ship it" }]);
+    expect(r.ok && r.value.choice).toEqual({ kind: "option", key: "ship", label: "Ship it" });
+    expect(x.get("ny-1")?.decision?.choice).toEqual({ kind: "option", key: "ship", label: "Ship it" });
+  });
   it("words need text, and an ask without options can't take an option", () => {
     const x = new Escalations();
     x.reconcile([seen(ask("ny-2", { options: [], answerBy: "words" }))], T0, true);

@@ -513,6 +513,62 @@ describe("a Decision the record can no longer attribute", () => {
       .toEqual([expect.objectContaining({ choice: { kind: "option", key: "ship", label: "Ship it" } })]);
   });
 
+  // A row from before labels were kept (migration 22) has none (round 5.3): the label is then the held ask's own for
+  // that option, as before the column, never the bare key.
+  it("an earlier version's answer on a row from before labels were kept is labelled from the ask as it is held", async () => {
+    store.db.prepare("INSERT INTO sends (key, state, at, worker_id, request, request_session, node_store) VALUES (?, 'started', ?, '%0', ?, 's1', 'st-1')")
+      .run(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "ship" }), T0 - 1000, "desk:r1");
+    manager.push({ id: "m2", at: T0, author: { kind: "agent", name: "manager" }, kind: "text",
+      text: "The demo release is ready again, with the fix.\n\n[buttons ny-7] ship=Ship it | hold=Hold for a day" });
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("not reached"); },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                       // its node typed it
+    });
+    s.poll();                                                                                       // asked again: m2
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: true, duplicate: true });
+    expect(store.audit().filter(e => e.type === "EscalationAnswered").map(e => e.body))
+      .toEqual([expect.objectContaining({ choice: { kind: "option", key: "ship", label: "Ship it" } })]);
+  });
+
+  // The same label rule for the ask as it stands (round 5.2): the list renamed the option under the same message while
+  // the answer was in doubt. Its repeat finds it typed, and the Decision and its record keep the label the hub typed.
+  it("an answer in doubt, found typed after its option was renamed, keeps the label it was typed with", async () => {
+    const typed: string[] = [];
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async (_pane, text) => { typed.push(text); throw new Error("lost while typing"); },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                       // its node typed it
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    manager[0] = { ...manager[0]!, text: "The demo release is ready. CI is green.\n\n[buttons ny-7] ship=Ship now | hold=Hold for a day" };
+    s.poll();                                                                                       // the same message, renamed
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: true, duplicate: true });
+    expect(typed).toEqual(["[tap ny-7] ship (Ship it)"]);
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision?.choice).toEqual({ kind: "option", key: "ship", label: "Ship it" });
+    expect(store.audit().filter(e => e.type === "EscalationAnswered").map(e => e.body))
+      .toEqual([expect.objectContaining({ choice: { kind: "option", key: "ship", label: "Ship it" } })]);
+  });
+
+  // And when another answer to the ask learns it (#typedEarlier): the answer found typed keeps the label it was typed
+  // with, and the other is refused as a second answer.
+  it("an answer in doubt, learnt from another answer after its option was renamed, keeps the label it was typed with", async () => {
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("lost while typing"); },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                       // its node typed it
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    manager[0] = { ...manager[0]!, text: "The demo release is ready. CI is green.\n\n[buttons ny-7] ship=Ship now | hold=Hold for a day" };
+    s.poll();
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "hold" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision).toMatchObject({ choice: { key: "ship", label: "Ship it" }, endpointId: endpointId("desk") });
+    expect(store.audit().filter(e => e.type === "EscalationAnswered").map(e => e.body))
+      .toEqual([expect.objectContaining({ choice: { kind: "option", key: "ship", label: "Ship it" } })]);
+  });
+
   // And when the ask is gone from the board (settled and dropped since, or never sighted after a restart): the retry
   // still settles it with its node, is told it went through, and the answer is recorded for its endpoint.
   it("a retried request in doubt settles its answer when the ask is gone", async () => {

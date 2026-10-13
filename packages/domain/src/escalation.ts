@@ -306,11 +306,13 @@ export class Escalations {
     return ok(e);
   }
 
-  // Takes the principal's Decision once it reached the asker. The option's label comes from the ask, never the request.
-  // `by` is the endpoint whose answer it was: the caller, or the requester a row in doubt names (its session may no
-  // longer be known, A1).
-  record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number): Result<EscalationAnswered, AnswerRefusal> {
-    const c = this.#take(id, choice, by, now);
+  // Takes the principal's Decision once it reached the asker. The option's label comes from the ask, never the request:
+  // `shown`, the options as the ask showed them when the answer was typed, when the caller kept them (E9; the ask may
+  // have been restated since, round 5.2 of the PR #55 review); its own otherwise. Which choices it takes is still the
+  // ask's own (check). `by` is the endpoint whose answer it was: the caller, or the requester a row in doubt names (its
+  // session may no longer be known, A1).
+  record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number, shown?: readonly { key: string; label: string }[]): Result<EscalationAnswered, AnswerRefusal> {
+    const c = this.#take(id, choice, by, now, undefined, shown);
     if (!c.ok) return c;
     const e = c.value;
     return ok(answered(e.id, e.decision!));
@@ -359,11 +361,11 @@ export class Escalations {
     return true;
   }
 
-  #take(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number, delivery?: Delivery): Result<Escalation, AnswerRefusal> {
+  #take(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number, delivery?: Delivery, shown?: readonly { key: string; label: string }[]): Result<Escalation, AnswerRefusal> {
     const c = this.check(id, choice, now);
     if (!c.ok) return c;
     const e = c.value;
-    e.decision = { choice: decidedChoice(choice, e.options), at: now, via: "here", endpointId: by.endpointId, sessionId: by.sessionId, ...(delivery ? { delivery } : {}) };
+    e.decision = { choice: decidedChoice(choice, shown ?? e.options), at: now, via: "here", endpointId: by.endpointId, sessionId: by.sessionId, ...(delivery ? { delivery } : {}) };
     e.status = "answered";
     e.askedAgain = false;
     return ok(e);

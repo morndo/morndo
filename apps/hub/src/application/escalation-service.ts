@@ -788,7 +788,7 @@ export class EscalationService {
         log.warn(`answer to ${e.id} not delivered: ${outcome.problem}`);
         return { ok: false, problem: outcome.problem, item: this.#view(id, a.endpoint.id) };
       }
-      return this.#delivered(a, id, choice, key);
+      return this.#delivered(a, id, choice, key, option?.label ?? null);
     } finally {
       this.#inFlight.delete(id);
     }
@@ -807,7 +807,7 @@ export class EscalationService {
       // Another endpoint's row, done, is its answer and never this caller's duplicate: the same rule as a settled one
       // (round 3.4). Typed, it is recorded for that endpoint; queued, its inbox records it once delivered (E13).
       if (others) {
-        if (row.outcome !== "queued") this.#record(id, choice, requester);
+        if (row.outcome !== "queued") this.#record(id, choice, requester, row.label);
         return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
       }
       this.#seen.set(key, this.#now());
@@ -823,11 +823,11 @@ export class EscalationService {
         // answer to that earlier version, never to the ask as it stands (E11, E12; round 3.5). Which it is, the
         // aggregate says (round 4.6); for the ask as it stands, it is the ask's own Decision.
         return this.#deliveredEarlier(a, id, choice, row, key, settled.at, requester)
-          ?? this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
+          ?? this.#delivered(a, id, choice, key, row.label, settled.at, requester ?? undefined);
       }
       // Recorded for its own endpoint. This caller's request delivered nothing, so it is not remembered as delivered:
       // a retry of it is told the same, never ok (round 3.3).
-      this.#record(id, choice, requester);
+      this.#record(id, choice, requester, row.label);
       return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
     }
     log.warn(`answer to ${id} in doubt: its node can't say it never typed it; it stays uncertain`);
@@ -895,16 +895,18 @@ export class EscalationService {
   }
 
   // An answer found typed at the asker (an answer in doubt that its node had typed): his Decision (E8), once, as it was
-  // decided: its option, labelled from the ask, or words, whose digest its key carries (their length isn't kept). The
-  // row it was found under names whose answer it was, not whoever's repeat settled it (review of PR #55). A row that
-  // names no requester — from before requests were kept — is recorded under whoever's repeat learnt it, as before the
-  // request column: unrecorded, the ask could never close, every answer refused as already answered (round 2.3).
+  // decided: its option, with the label it was typed with (#shown), or words, whose digest its key carries (their
+  // length isn't kept). The row it was found under names whose answer it was, not whoever's repeat settled it (review
+  // of PR #55). A row that names no requester — from before requests were kept — is recorded under whoever's repeat
+  // learnt it, as before the request column: unrecorded, the ask could never close, every answer refused as already
+  // answered (round 2.3).
   #typedEarlier(row: SendRow, id: string, part: string, by: { endpointId: EndpointId; sessionId: SessionId | null }) {
     const requester = this.#requesterOf(row) ?? by;
     const e = this.#x.get(id);
     if (!e || e.status !== "open") return;
     const option = part.startsWith("option:") ? part.slice("option:".length) : null;
-    const r = this.#x.recordTyped(id, decidedChoice(option === null ? { kind: "words" } : { kind: "option", key: option }, e.options), requester, this.#now());
+    const chosen = option === null ? { kind: "words" as const } : { kind: "option" as const, key: option };
+    const r = this.#x.recordTyped(id, decidedChoice(chosen, this.#shown(id, chosen, row.label)), requester, this.#now());
     if (!r.ok) { log.warn(`answer to ${id} found typed but not recorded: ${r.error}`); return; }
     const decision = this.#x.get(id)?.decision;
     if (decision) this.#store.saveDecision(id, decision);
@@ -913,33 +915,34 @@ export class EscalationService {
     this.#notify();
   }
 
-  // The answer arrived: recorded as his Decision (E8), once. `at`: a duplicate's time on the node that typed it. `by`
-  // defaults to the caller; an answer in doubt that another endpoint's repeat settled is recorded for its row's own
-  // requester — the endpoint whose answer it was — not whoever's repeat learnt it (review of PR #55).
-  #delivered(a: Authenticated, id: string, choice: Choice, key: string, at?: number, by?: { endpointId: EndpointId; sessionId: SessionId | null }): AnswerResult {
+  // The answer arrived: recorded as his Decision (E8), once. `label`: its row's, the one it was typed with (#shown).
+  // `at`: a duplicate's time on the node that typed it. `by` defaults to the caller; an answer in doubt that another
+  // endpoint's repeat settled is recorded for its row's own requester — the endpoint whose answer it was — not whoever's
+  // repeat learnt it (review of PR #55).
+  #delivered(a: Authenticated, id: string, choice: Choice, key: string, label: string | null, at?: number, by?: { endpointId: EndpointId; sessionId: SessionId | null }): AnswerResult {
     this.#seen.set(key, this.#now());
-    this.#record(id, choice, by ?? { endpointId: a.endpoint.id, sessionId: a.session.id });
+    this.#record(id, choice, by ?? { endpointId: a.endpoint.id, sessionId: a.session.id }, label);
     return { ok: true, item: this.#view(id, a.endpoint.id), ...(at === undefined ? {} : { duplicate: true as const, at }) };
   }
   // A request's answer found typed for a version of the ask that is gone from the board or was asked again since: it
   // reached the asker, so the caller is told so (a duplicate at the node's time) and it is recorded with its provenance
   // (A1), as an answer to that earlier version, as the inbox records a late one, with the label that version showed:
-  // its row's, never the ask's as it stands (E9, round 4.5). A row from before labels were kept says the key. The ask
-  // as it stands is not answered by it (E11, E12): asked again, it stays open. The aggregate records it, as every
-  // answered event (round 4.6), and says null when the row's asking is the ask as it stands: no earlier answer.
+  // its row's (#shown; E9, round 4.5). The ask as it stands is not answered by it (E11, E12): asked again, it stays
+  // open. The aggregate records it, as every answered event (round 4.6), and says null when the row's asking is the ask
+  // as it stands: no earlier answer.
   #deliveredEarlier(a: Authenticated, id: string, choice: Choice, row: SendRow, key: string, at: number, by: { endpointId: EndpointId; sessionId: SessionId | null } | null): AnswerResult | null {
-    const shown = choice.kind === "option" && row.label !== null ? [{ key: choice.key, label: row.label }] : [];   // as that version showed it
-    const event = this.#x.recordEarlier(id, askingOf(row.key, id, choice), decidedChoice(choice, shown), by ?? { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
+    const event = this.#x.recordEarlier(id, askingOf(row.key, id, choice), decidedChoice(choice, this.#shown(id, choice, row.label)), by ?? { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
     if (!event) return null;
     this.#seen.set(key, this.#now());
     this.#store.record([{ ...event, ...wordsKept(choice) }]);
     log.info(`answer to ${id} found typed, for an earlier version of its ask: recorded as that version's answer`);
     return { ok: true, item: this.#view(id, a.endpoint.id), duplicate: true, at };
   }
-  // The Decision itself, for the endpoint whose answer it was, without saying anything to whoever learnt it.
-  #record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }) {
+  // The Decision itself, for the endpoint whose answer it was, without saying anything to whoever learnt it. `label`:
+  // its row's (#shown).
+  #record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, label: string | null) {
     this.#clearNotice(id);
-    const r = this.#x.record(id, choice, by, this.#now());
+    const r = this.#x.record(id, choice, by, this.#now(), this.#shown(id, choice, label));
     if (r.ok) {
       const decision = this.#x.get(id)?.decision;
       if (decision) this.#store.saveDecision(id, decision);
@@ -948,5 +951,12 @@ export class EscalationService {
       log.warn(`answer to ${id} delivered but not recorded: ${r.error}`);
     }
     this.#notify();
+  }
+  // The options an answer is labelled from (E9), one rule for every record of it (rounds 5.2 and 5.3 of the PR #55
+  // review): the label its row kept, the one the hub typed, whatever the ask was restated as since (round 4.5). A row
+  // from before labels were kept (migration 22) has none: the label is then the held ask's own for that option, as
+  // before the column, and the key only when the ask no longer has it. Never the request's.
+  #shown(id: string, choice: { kind: "option"; key: string } | { kind: "words" }, label: string | null): readonly { key: string; label: string }[] {
+    return choice.kind === "option" && label !== null ? [{ key: choice.key, label }] : this.#x.get(id)?.options ?? [];
   }
 }
