@@ -165,6 +165,11 @@
     untrack(() => {
       if (briefOver === null) return;
       briefOver = null;
+      // §6.3: an answer keeps catch-up's 5-second Undo, and Back only closes the sheet. leave()
+      // would send it now. The card underneath keeps the window, as it does for a sheet opened
+      // from catch-up. With nothing in the window, Today comes back.
+      const a = session.run?.answering;
+      if (a && !a.sending && a.commitAt > session.now) return;
       stopDeciding();
     });
   });

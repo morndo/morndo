@@ -153,6 +153,28 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
+  it("keeps an in-window answer on the card when Back closes a sheet opened from Today", { timeout: 40_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true);
+    await tab.addInitScript(() => localStorage.setItem("morndo.tab", "today"));
+    await tab.goto(tab.url());
+    await push(tab, [release]);
+    await tab.locator('li[data-row="d:d-2"] [data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByText(/Goes in \d+ s\./).waitFor({ timeout: 3_000 });
+    await dialog.locator("button.back").click();
+    await expect.poll(() => dialog.count(), { timeout: 3_000 }).toBe(0);
+    await tab.waitForTimeout(500);
+    expect(await calls(tab)).toEqual([]);                                          // Back closes the sheet; it does not send
+    const card = tab.getByRole("article");
+    await card.getByRole("button", { name: "Undo" }).waitFor({ timeout: 2_000 });  // the card keeps the window
+    await card.getByText(/Goes in \d+ s\./).waitFor({ timeout: 2_000 });
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("returns to Today when the sheet was opened there and its entry is popped", { timeout: 30_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track);
