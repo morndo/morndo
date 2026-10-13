@@ -82,14 +82,17 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   const deliveries = new Deliveries({
     store: new LaneDeliveriesStore(db), sticky: new StickyLanesStore(db), stickyLanes: config.stickyLanes, lanes, connections, audit, events, log, now,
   });
-  // The windows that run a session of the agent CLI now, per node: the lane watch nudges only those.
-  const sessions = new Map<string, Set<string>>();
+  // Per node, the pane of each window that runs a session of the agent CLI now, by worker ID: the lane watch nudges only
+  // those, at that pane. A window with two such panes is nudged at neither (null).
+  const sessions = new Map<string, Map<string, string | null>>();
   events.subscribe(e => {
     if (e.t !== "inventory") return;
     const panes = (e.body as { panes: Pane[] }).panes;
     lanes.inventory(e.node, panes);
     deliveries.inventory(e.node, panes);
-    sessions.set(e.node, new Set(panes.filter(p => p.sessionId !== undefined).map(p => p.window)));
+    const running = new Map<string, string | null>();
+    for (const p of panes) if (p.sessionId !== undefined) running.set(p.window, running.has(p.window) ? null : p.workerId);
+    sessions.set(e.node, running);
   });
   const laneEventsStore = new LaneEventsStore(db);
   const laneEventsPush = new LaneEventsPush({ store: laneEventsStore, deliveries, config: config.laneEvents, log });
@@ -99,9 +102,13 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   // Every lane's last turn and its deadline (reliable lanes §3.2): stale lanes become lane events and, nudged, deliveries.
   const laneWatch = new LaneWatch({
     config: config.laneWatch, log, now, raise: d => laneEvents.raise(d), nudge: r => deliveries.post(r, "fleet"),
-    alive: (node, window) => lanes.list().some(l => l.name === window && l.node === node && l.workerId !== null),
+    // A window is there while its node claims the name, a name in conflict too (another node's window called the same).
+    alive: (node, window) => {
+      const r = lanes.resolve(window);
+      return r.kind === "ok" ? r.node === node : r.kind === "conflict" && r.claims.some(c => c.node === node);
+    },
     online: node => connections.status(node) === "online",
-    nudgeable: (node, window) => sessions.get(node)?.has(window) ?? false,
+    nudgeTarget: (node, window) => sessions.get(node)?.get(window) ?? null,
     ...(o.laneWatchSweepMs === undefined ? {} : { sweepMs: o.laneWatchSweepMs }),
   });
   laneEvents.watchWith(laneWatch);
