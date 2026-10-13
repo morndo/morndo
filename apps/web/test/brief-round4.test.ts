@@ -157,6 +157,27 @@ describe("round 4: a brief gap keeps an answer that must not be sent twice", () 
   }, 60_000);
 });
 
+describe("round 4: a success settled elsewhere is not Sent", () => {
+  it("says the decision is no longer open when another device already answered it", async () => {
+    await ready();
+    await holdAnswer();
+    await show([tap("d-else", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-else"]');
+    await card.getByRole("button", { name: "Ship the weekly notes" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Extend the triage script" }).click();
+    await dialog.getByRole("button", { name: "Send answer" }).click();
+    await tab.waitForFunction(() => ((globalThis as { __answers?: unknown[] }).__answers?.length ?? 0) >= 1);
+    await show([tap("d-else", "v1", "Extend the triage script", {
+      status: "answered",
+      decision: { choice: { kind: "option", key: "a", label: "Hold the notes" }, at: NOW, via: "elsewhere", endpointId: null, sessionId: null },
+    })]);
+    await releaseAnswer();
+    await dialog.getByText("no longer open").waitFor();
+    expect(await dialog.getByText(/^Sent\./).count()).toBe(0);
+  }, 60_000);
+});
+
 describe("round 4: a restate during send keeps the sent confirmation", () => {
   it("shows Sent for the version that was posted, not the new answer buttons", async () => {
     await ready();

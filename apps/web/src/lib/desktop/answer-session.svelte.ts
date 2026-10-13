@@ -88,9 +88,16 @@ export class AnswerSession {
       if (this.live.status !== "open") this.#settleClosed();
       return;
     }
-    // The POST was accepted. The feed may already show the item answered; that is this answer, not a close.
-    // A restate that landed during the request does not undo this: sent stays on the version that was posted.
+    // The POST was accepted. Answered here, including when that status won the race, is this answer.
+    // Settled from somewhere else (another device, expired) is a close: say so, don't claim Sent.
     const sentFor = this.seen;
+    const answeredByThis = this.live.status === "answered" && this.live.decision?.via !== "elsewhere";
+    if (this.live.status !== "open" && !answeredByThis) {
+      this.#keepSent = false;
+      this.#settleClosed();
+      return;
+    }
+    // A restate that landed during the request does not undo this: sent stays on the version that was posted.
     this.again = null;
     this.sent = true;
     this.#keepSent = this.live.version !== sentFor;
