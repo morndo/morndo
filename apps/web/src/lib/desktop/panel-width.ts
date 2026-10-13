@@ -29,11 +29,12 @@ export function widthAfterWindowChange(chosen: number, windowWidth: number, side
   return { chosen: kept, drawn: dockedWidth(kept, windowWidth, sidebarWidth) };
 }
 
-// Arrow keys and drags add `delta` to the chosen width (wider is positive), not to the narrower width
-// a tight window is drawing. While that drawn width is below the choice, only a gesture that lands
-// wider than what is drawn replaces it. A click, or a nudge that would store the drawn width, does not.
+// Wider is positive. Narrowing starts from the edge on screen and always stores that width.
+// Widening is added to the chosen width, and replaces it when the result passes what is drawn.
+// A click stores neither the drawn width nor a new one.
 export function commitWidth(chosen: number, drawn: number, delta: number): number {
+  if (delta < 0) return clampRight(drawn + delta);
   const next = clampRight(chosen + delta);
-  if (drawn < chosen && !(delta > 0 && next > drawn)) return clampRight(chosen);
+  if (drawn < chosen && next <= drawn) return clampRight(chosen);
   return next;
 }

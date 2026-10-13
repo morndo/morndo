@@ -42,13 +42,14 @@ describe("widening the decisions panel stays docked", () => {
     expect(restored.drawn).toBe(546);
     expect(restored.chosen).toBe(600);
   });
-  it("an arrow or a drag on a narrow window commits relative to the chosen width", () => {
-    expect(commitWidth(640, 480, 0)).toBe(640);
-    expect(commitWidth(640, 480, 16)).toBe(640);
-    expect(commitWidth(640, 480, -16)).toBe(640);
-    expect(commitWidth(500, 480, 16)).toBe(516);
-    expect(commitWidth(480, 480, 16)).toBe(496);
+  it("narrowing always sets the chosen width, and widening past the drawn width does too", () => {
+    expect(commitWidth(640, 480, -16)).toBe(464);
+    expect(commitWidth(640, 480, -100)).toBe(380);
     expect(commitWidth(480, 480, -16)).toBe(464);
+    expect(commitWidth(500, 480, 16)).toBe(516);
+    expect(commitWidth(640, 480, 16)).toBe(640);
+    expect(commitWidth(640, 480, 0)).toBe(640);
+    expect(commitWidth(480, 480, 16)).toBe(496);
   });
 });
 
