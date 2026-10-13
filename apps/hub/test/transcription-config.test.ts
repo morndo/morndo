@@ -44,6 +44,22 @@ describe("transcription guard reads", () => {
     }))).toBe("unknown");
   });
 
+  it("keeps total memory on every platform that is not linux or macOS", () => {
+    let calls = 0;
+    const vmStat = () => { calls += 1; throw new Error("no vm_stat"); };
+    const freebsd = readMachine({ memAvailableMiB: 1 }, {
+      platform: "freebsd", vmStat, totalmem: () => 2048 * 1024 * 1024,
+    });
+    const win = readMachine({ memAvailableMiB: 1 }, {
+      platform: "win32", vmStat, totalmem: () => 512 * 1024 * 1024,
+    });
+    expect(calls).toBe(0);
+    expect(freebsd.memAvailableMiB).toBe(2048);
+    expect(win.memAvailableMiB).toBe(512);
+    expect(guardNow({ memAvailableMiB: 1024 }, () => freebsd)).toBe("off");
+    expect(guardNow({ memAvailableMiB: 1024 }, () => win)).toBe("memory");
+  });
+
   it("reads only the configured line on linux, so a load-only guard never touches meminfo", () => {
     const files = procFiles("4.25", undefined);
     const read = readMachine({ load1: 6 }, { platform: "linux", ...files, memPath: "/nonexistent" });

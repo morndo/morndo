@@ -2,7 +2,7 @@
 // plugin is found. Bad JSON is logged and ignored so the hub still starts.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { loadavg } from "node:os";
+import { loadavg, totalmem } from "node:os";
 import { join } from "node:path";
 import { MAX_RECORDING_SECONDS, TRANSCRIPTION_LIMIT_DEFAULT, type QueueGuard } from "@morndo/domain";
 
@@ -51,14 +51,15 @@ export function loadTranscriptionSettings(dataDir: string, warn: (line: string) 
 // macOS has no MemAvailable. vm_stat(1) prints the page size and the page counts (Pages free, Pages inactive,
 // Pages speculative; https://keith.github.io/xcode-man-pages/vm_stat.1.html, the macOS man page, read 2026-10-13).
 // Those three are the pages the machine can give back. Their sum times the page size is what the guard compares.
-// Total memory never changes, so it cannot hold the queue. Only the configured lines are read, so a load-only
-// guard never fails on an unreadable meminfo, and a read that throws is the configured line being unanswerable:
-// guardNow answers "unknown" for it.
+// Only macOS reads vm_stat. Every other platform that is not Linux keeps total memory, the figure it had before.
+// Only the configured lines are read, so a load-only guard never fails on an unreadable meminfo, and a read that
+// throws is the configured line being unanswerable: guardNow answers "unknown" for it.
 export function readMachine(
   policy: TranscriptionGuard | null,
-  o: { platform?: NodeJS.Platform; loadavg?: () => number[]; vmStat?: () => string; loadPath?: string; memPath?: string } = {},
+  o: { platform?: NodeJS.Platform; loadavg?: () => number[]; totalmem?: () => number; vmStat?: () => string; loadPath?: string; memPath?: string } = {},
 ): { load1?: number; memAvailableMiB?: number } {
-  const linux = (o.platform ?? process.platform) === "linux";
+  const platform = o.platform ?? process.platform;
+  const linux = platform === "linux";
   const out: { load1?: number; memAvailableMiB?: number } = {};
   if (policy?.load1 !== undefined) {
     out.load1 = linux
@@ -71,7 +72,9 @@ export function readMachine(
         const line = readFileSync(o.memPath ?? "/proc/meminfo", "utf8").split("\n").find(row => row.startsWith("MemAvailable:"));
         return Number(line?.trim().split(/\s+/)[1]) / 1024;
       })()
-      : macAvailableMiB(o.vmStat ?? (() => execFileSync("vm_stat", { encoding: "utf8", timeout: 2000 })));
+      : platform === "darwin"
+        ? macAvailableMiB(o.vmStat ?? (() => execFileSync("vm_stat", { encoding: "utf8", timeout: 2000 })))
+        : (o.totalmem ?? totalmem)() / (1024 * 1024);
   }
   return out;
 }
