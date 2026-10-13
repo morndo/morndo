@@ -113,6 +113,36 @@ describe("metadata a recording carries", async () => {
     }
   });
 
+  it("an m4a loses its cover and its chapter titles", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "morndo-cover-"));
+    try {
+      const meta = join(folder, "chapters.txt");
+      const file = join(folder, "note.m4a");
+      writeFileSync(meta, ";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=200\ntitle=Opening at home\n");
+      const made = spawnSync("ffmpeg", [
+        "-nostdin", "-v", "error", "-y",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=0.4",
+        "-f", "lavfi", "-i", "color=c=blue:s=16x16:d=0.4",
+        "-i", meta, "-map_metadata", "2", "-map", "0:a", "-map", "1:v",
+        "-c:a", "aac", "-c:v", "mjpeg", "-disposition:v", "attached_pic", "-f", "mp4", file,
+      ], { encoding: "utf8" });
+      expect(made.status, made.stderr).toBe(0);
+      const raw = readFileSync(file);
+      expect(raw.includes("Opening at home")).toBe(true);
+      const out = Buffer.from(await stripMetadata(raw, "mp4"));
+      expect(out.includes("Opening at home")).toBe(false);
+      const probed = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:chapter=id", "-of", "csv=p=0", "-i", file], { encoding: "utf8" });
+      expect(probed.stdout).toContain("video");
+      const kept = join(folder, "kept.m4a");
+      writeFileSync(kept, out);
+      const after = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:chapter=id", "-of", "csv=p=0", "-i", kept], { encoding: "utf8" });
+      expect(after.status).toBe(0);
+      expect(after.stdout.trim()).toBe("audio");
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it("mp4, ogg and webm that are not a real container stay byte for byte", async () => {
     // ffmpeg cannot remux these hand-built boxes, and a hand edit of their sizes would corrupt a real file.
     for (const [bytes, mime] of [[m4aMemo(), "mp4"], [opusMemo(), "ogg"], [webmMemo(), "webm"]] as const) {

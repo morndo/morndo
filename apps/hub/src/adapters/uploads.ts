@@ -15,7 +15,7 @@ const KEEP_FILES_MS = 7 * 24 * 3_600_000;
 
 // What an audio file loses on the way in. A photo's segments can be dropped because each one names its own length.
 // A recording cannot: an mp4 chunk offset, an Ogg page and a Matroska element size all count the bytes around them,
-// so those three are remuxed (ffmpeg -map_metadata -1 -c copy) or stored unchanged. A wav's RIFF size and an mp3's
+// so those three are remuxed (ffmpeg -map 0:a -map_chapters -1 -map_metadata -1 -c copy) or stored unchanged. A wav's RIFF size and an mp3's
 // tags are the fields this file rewrites itself. The choice is written in docs/design/transcription (section 8).
 export async function stripMetadata(b: Uint8Array, mime: ImageMime | AudioContainer, timeoutMs = 30_000): Promise<Uint8Array> {
   if (mime === "image/jpeg") {
@@ -70,7 +70,7 @@ async function stripByRemux(b: Uint8Array, container: keyof typeof REMUX_FORMAT,
     writeFileSync(input, b, { mode: 0o600 });
     const code = await runFfmpeg([
       "-nostdin", "-v", "error", "-y", "-i", input,
-      "-map_metadata", "-1", "-c", "copy", "-f", REMUX_FORMAT[container], output,
+      "-map", "0:a", "-map_chapters", "-1", "-map_metadata", "-1", "-c", "copy", "-f", REMUX_FORMAT[container], output,
     ], timeoutMs);
     if (code !== 0) return b;
     const out = readFileSync(output);
