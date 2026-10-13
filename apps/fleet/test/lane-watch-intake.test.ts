@@ -45,6 +45,20 @@ describe("the lane watch in the fleet", () => {
     expect(pc.reqs.filter(q => q.op === "lane.deliver")).toHaveLength(1);              // only api, which runs the agent CLI
   });
 
+  it("a Stop the relay asked for a status makes no lane event, but goes stale as a turn without one if nothing follows", async () => {
+    let clock = T0;
+    const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: { laneEvents: TO_MANAGER } });
+    const pc = await fleet.online("pc");
+    pc.inventory([{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w", sessionId: SID, status: "idle", pid: 1 }]);
+    await vi.waitFor(() => expect(fleet.lanes.get("api")?.workerId).toBe("pc.3fa2c1d0.1"));
+    pc.hook(1, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "Pushed.", statusAsked: true }, { window: "api" });
+    expect(await pc.acked(1)).toBe(1);
+    const events = () => (fleet.db.prepare("SELECT event FROM lane_events ORDER BY seq").all() as { event: string }[]).map(r => r.event);
+    expect(events()).toEqual([]);
+    clock = T0 + 1 + 15 * MIN;
+    await vi.waitFor(() => expect(events()).toEqual(["stale"]));
+  });
+
   it("a turn that says DONE is never stale, and the manager's own lane is not watched", async () => {
     let clock = T0;
     const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: { laneEvents: TO_MANAGER } });

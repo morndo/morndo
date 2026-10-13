@@ -738,6 +738,7 @@ The fleet keeps each lane's last turn end and watches for anything after it: a h
 | no status, nothing running | the turn's end + `laneWatch.noStatusMin` (15 min) |
 | `DONE`, `BLOCKED`, `NEEDS DECISION` | none: it is the manager's to act on |
 
+- **A Stop the relay asked for its status line** (§11.1) makes no lane event, but counts as a turn without a status until the lane's next Stop: a lane that never acts on the ask still goes stale.
 - **Past the deadline with no activity,** the fleet makes one `stale` lane event for that turn. It goes where the other lane events go.
 - **The nudge.** With `laneWatch.nudge` (on by default), a lane that runs Claude Code (a session in the node's inventory) gets one delivery, id `fleet:nudge:<node>:<the turn's end, in ms>`: when its turn ended, on what it waited, and the status line to start its answer with. From the third stale event since the lane last settled, it isn't nudged again: that lane is for the manager to re-plan.
 - **Not watched:** the manager's own lane, lanes matching `laneEvents.ignore`, and a lane whose window is gone. A lane whose node isn't online waits until the node is back: the node's status already says why it is quiet.
