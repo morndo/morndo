@@ -28,8 +28,13 @@ export function sweepScratch(dirs: Set<string>, remove: (dir: string) => void): 
 
 function dropScratch(dir: string): void {
   if (!scratches.has(dir)) return;
-  rmSync(dir, { recursive: true, force: true });
-  scratches.delete(dir);
+  try {
+    rmSync(dir, { recursive: true, force: true });
+    scratches.delete(dir);
+  } catch {
+    // The dir stays in the set, as a failed sweep leaves its dir: a stop's sweep retries it. A clip
+    // that cannot be removed must not replace the run's own exit code with a crash.
+  }
 }
 
 function clearScratch(): void {
@@ -280,8 +285,17 @@ function runChild(cmd: string, args: string[], cwd: string): Promise<Child> {
     const child = spawn(cmd, args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
     children.add(child);
     child.on("error", reject);
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       children.delete(child);
+      // A child killed by a stop signal was stopped, not failed. The hub's cancel and a Ctrl-C
+      // signal the whole group, and the kernel may reach the small engine child before this
+      // process, so the child's close is dispatched while this process's own handler for the same
+      // signal is still behind it in the loop. Stopping here, exactly as onStop would, keeps the
+      // exit at 128+N instead of an engine failure the sender never caused.
+      if (code === null && (signal === "SIGTERM" || signal === "SIGINT")) {
+        onStop(signal);
+        return;
+      }
       resolve({ code: code ?? 1 });
     });
   });
