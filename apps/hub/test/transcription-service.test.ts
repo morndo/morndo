@@ -291,59 +291,6 @@ describe("transcription service", () => {
     svc.close();
   });
 
-  it("keeps one attempt for a shared attachment and lets every endpoint that asked read it", async () => {
-    const gate = new Gate();
-    const { svc } = service(memory(), gate);
-    await svc.start();
-    const ask = (id: string, endpointId: string) => svc.request({
-      id, recording: { kind: "attachment", id: "hang" }, language: "de", caller: { endpointId },
-    });
-    const first = await ask("tx-a", "ep-1");
-    const second = await ask("tx-b", "ep-2");
-    expect(first.ok && second.ok && second.value.id).toBe("tx-a");
-    expect(svc.get("tx-a", { endpointId: "ep-1" })?.id).toBe("tx-a");
-    expect(svc.get("tx-a", { endpointId: "ep-2" })?.id).toBe("tx-a");
-    expect(svc.get("tx-a", { endpointId: "ep-3" })).toBeNull();
-    expect(gate.calls).toEqual(["/audio/hang.wav"]);
-    svc.close();
-  });
-
-  it("finds a shared run by the id the caller asked with", async () => {
-    const gate = new Gate();
-    const { svc } = service(memory(), gate);
-    await svc.start();
-    const ask = (id: string, endpointId: string) => svc.request({
-      id, recording: { kind: "attachment", id: "hang" }, language: "de", caller: { endpointId },
-    });
-    await ask("a1", "ep-1");
-    expect(await until(() => svc.get("a1", { endpointId: "ep-1" })?.state === "running", 2000)).toBe(true);
-    const joined = await ask("b1", "ep-2");
-    expect(joined.ok && joined.value.id).toBe("a1");
-    expect(svc.get("b1", { endpointId: "ep-2" })?.id).toBe("a1");
-    expect(svc.get("b1", { endpointId: "ep-3" })).toBeNull();
-    expect(svc.cancel("b1", { endpointId: "ep-2" })).toEqual({ ok: false, error: "unknown" });
-    expect(svc.get("a1", { endpointId: "ep-1" })?.state).toBe("running");
-    svc.close();
-  });
-
-  it("only the endpoint that started a shared run may cancel it", async () => {
-    const gate = new Gate();
-    const { svc } = service(memory(), gate);
-    await svc.start();
-    const ask = (id: string, endpointId: string) => svc.request({
-      id, recording: { kind: "attachment", id: "hang" }, language: "de", caller: { endpointId },
-    });
-    await ask("tx-a", "ep-1");
-    expect(await until(() => svc.get("tx-a", { endpointId: "ep-1" })?.state === "running", 2000)).toBe(true);
-    const joined = await ask("tx-b", "ep-2");
-    expect(joined.ok && joined.value.id).toBe("tx-a");
-    expect(svc.cancel("tx-a", { endpointId: "ep-2" })).toEqual({ ok: false, error: "unknown" });
-    expect(svc.get("tx-a", { endpointId: "ep-1" })?.state).toBe("running");
-    expect(svc.cancel("tx-a", { endpointId: "ep-1" }).ok).toBe(true);
-    expect(svc.get("tx-a", { endpointId: "ep-1" })?.state).toBe("cancelled");
-    svc.close();
-  });
-
   it("a finished row another endpoint owns does not become this caller's attempt", async () => {
     files.set("clip", { path: "/audio/clip.wav", size: 100, durationMs: null });
     try {

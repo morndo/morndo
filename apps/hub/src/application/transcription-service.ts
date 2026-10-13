@@ -60,49 +60,21 @@ export type TranscriptionStore = {
 };
 
 const rowKey = (tx: Transcription) => `${tx.recording.kind}:${tx.recording.id}:${tx.language}`;
-const sameRow = (a: Transcription, b: Transcription) => a.id === b.id && rowKey(a) === rowKey(b);
-const sameOwned = (a: Transcription, b: Transcription) => sameRow(a, b) && endpointOf(a) === endpointOf(b);
 const live = (state: Transcription["state"]) => state === "queued" || state === "starting" || state === "running";
 
-// The endpoint that asked for the row (S2). It rides on the stored body so a restart still knows. One attempt
-// per Recording and Language (TX2) stays one row: a second endpoint that asks for that same attachment is added
-// to `readers` and can read the same row. A row saved before an endpoint was recorded has neither field.
-// It answers nobody: ownership is not guessed onto it.
-type AskedId = { endpointId: string; id: string };
-type OwnedTranscription = Transcription & { endpointId: string; readers?: string[]; asked?: AskedId[] };
+// The endpoint that asked (S2). It is part of the row, so a restart still knows whose attempt it is. Each endpoint
+// has its own rows: nothing is shared, and a row with no endpoint is not anyone's.
+type OwnedTranscription = Transcription & { endpointId: string };
 
 function endpointOf(row: Transcription): string | null {
   if (!("endpointId" in row)) return null;
   const value = row.endpointId;
   return typeof value === "string" && value.length > 0 ? value : null;
 }
-function readersOf(row: Transcription): string[] {
-  if ("readers" in row && Array.isArray(row.readers)) {
-    const ids = row.readers.filter((value): value is string => typeof value === "string" && value.length > 0);
-    if (ids.length > 0) return ids;
-  }
-  const owner = endpointOf(row);
-  return owner === null ? [] : [owner];
+function sameOwned(a: Transcription, b: Transcription): boolean {
+  return a.id === b.id && rowKey(a) === rowKey(b) && endpointOf(a) === endpointOf(b);
 }
-function canRead(row: Transcription, endpointId: string): boolean {
-  return readersOf(row).includes(endpointId);
-}
-function askedOf(row: Transcription): AskedId[] {
-  if (!("asked" in row) || !Array.isArray(row.asked)) return [];
-  return row.asked.flatMap(value => {
-    if (!value || typeof value !== "object") return [];
-    const item = value as { endpointId?: unknown; id?: unknown };
-    return typeof item.endpointId === "string" && item.endpointId.length > 0 && typeof item.id === "string" && item.id.length > 0
-      ? [{ endpointId: item.endpointId, id: item.id }]
-      : [];
-  });
-}
-function withAsked(row: OwnedTranscription, endpointId: string, askedId: string): OwnedTranscription {
-  if (askedId === row.id) return row;
-  const asked = askedOf(row);
-  if (asked.some(item => item.endpointId === endpointId && item.id === askedId)) return row;
-  return { ...row, asked: [...asked, { endpointId, id: askedId }] };
-}
+const runKey = (tx: Transcription) => `${endpointOf(tx) ?? ""}|${rowKey(tx)}`;
 function owned(row: Transcription, endpointId: string): OwnedTranscription {
   return { ...row, endpointId };
 }
@@ -170,7 +142,7 @@ export class TranscriptionService {
     const restarted = afterRestart(loaded, this.#now());
     this.#rows = restarted;
     for (const row of restarted) {
-      const prev = loaded.find(item => sameRow(item, row));
+      const prev = loaded.find(item => sameOwned(item, row));
       if (!prev || prev.state !== row.state) this.#store.saveTranscription(row);
     }
     // A row the guard holds (load, memory, guard_unknown) has nothing else waiting on it: a minute's sweep re-checks
@@ -201,10 +173,7 @@ export class TranscriptionService {
   // only then the earliest live one (else the newest ended). Another endpoint's row is the same as no row.
   get(id: string, caller?: RecordingCaller): Transcription | null {
     const matches = this.#rows
-      .filter(row => {
-        const named = row.id === id || (!!caller && askedOf(row).some(item => item.endpointId === caller.endpointId && item.id === id));
-        return named && (!caller || canRead(row, caller.endpointId));
-      })
+      .filter(row => row.id === id && (!caller || endpointOf(row) === caller.endpointId))
       .sort((a, b) => a.acceptedAt - b.acceptedAt || (rowKey(a) < rowKey(b) ? -1 : rowKey(a) > rowKey(b) ? 1 : 0));
     return matches.find(row => live(row.state)) ?? matches.at(-1) ?? null;
   }
@@ -249,20 +218,14 @@ export class TranscriptionService {
     const ask = {
       id: input.id, recording: input.recording, language: input.language, sizeBytes: file.size,
     };
-    let decided = requestTranscription(this.#rows, ask, this.#now(), this.capability(), this.#languages());
-    // An id another endpoint already finished is not this caller's id. The queue cap still counts every open row.
-    if (!decided.ok && decided.error === "id_conflict") {
-      const visible = this.#rows.filter(row => canRead(row, input.caller.endpointId));
-      const hiddenOpen = this.#rows.filter(row => !canRead(row, input.caller.endpointId) && live(row.state)).length;
-      decided = requestTranscription(visible, ask, this.#now(), this.capability(), this.#languages(), Math.max(0, TRANSCRIPTION_QUEUE_CAP - hiddenOpen));
-    }
+    // Dedup only against this endpoint's rows. The queue cap still counts every open row on the machine.
+    const mine = this.#rows.filter(row => endpointOf(row) === input.caller.endpointId);
+    const othersOpen = this.#rows.filter(row => endpointOf(row) !== input.caller.endpointId && live(row.state)).length;
+    const decided = requestTranscription(mine, ask, this.#now(), this.capability(), this.#languages(), Math.max(0, TRANSCRIPTION_QUEUE_CAP - othersOpen));
     if (!decided.ok) return decided;
-    // A new row belongs to the endpoint that asked. The one in-flight attempt on a shared attachment gains this
-    // endpoint as a reader (TX2: still one run). A stored row with no owner is left unanswered.
-    const row = this.#share(decided.value, input.caller.endpointId, input.id);
+    const row = endpointOf(decided.value) === input.caller.endpointId ? decided.value : owned(decided.value, input.caller.endpointId);
     if (this.#rows.find(item => sameOwned(item, row)) !== row) this.#save(row);
     this.tick();
-    // The row this body made or matched (TX2's in-flight attempt), not whichever live row answers to the id first.
     const made = this.#rows.find(item => sameOwned(item, row));
     return ok(made ?? row);
   }
@@ -270,10 +233,8 @@ export class TranscriptionService {
   cancel(id: string, caller?: RecordingCaller): Result<Transcription, "unknown"> {
     const row = this.get(id, caller);
     if (!row) return err("unknown");
-    // A reader joined a run someone else started. They may read it. Cancelling it is the starter's.
-    if (caller && endpointOf(row) !== caller.endpointId) return err("unknown");
     if (!live(row.state)) return ok(row);
-    const key = rowKey(row);
+    const key = runKey(row);
     this.#why.set(key, "cancelled");
     const ended = endTranscription(row, { outcome: "cancelled", at: this.#now() });
     if (!ended.ok) return ok(row);
@@ -345,7 +306,7 @@ export class TranscriptionService {
   // Whether the row holds a run afterwards: true when it started (or already held one), false when it ended without
   // ever running, so the caller can hand its slot to the next row.
   #launch(row: Transcription): boolean {
-    const key = rowKey(row);
+    const key = runKey(row);
     if (this.#inflight.has(key) || row.state !== "starting") return true;
     // No caller here on purpose: the row was accepted for its caller already, and this only asks whether the audio
     // is still on the machine and still audio. A sweep that took the file fails the row as unreadable.
@@ -407,29 +368,13 @@ export class TranscriptionService {
     this.#timers.delete(timer);
     this.#inflight.delete(key);
     this.#why.delete(key);
-    const current = this.#rows.find(row => rowKey(row) === key && live(row.state));
+    const current = this.#rows.find(row => runKey(row) === key && live(row.state));
     if (current) {
       const cap = this.capability();
       const ended = endTranscription(current, event, cap.present ? cap.maxSeconds : this.#maxSeconds);
       if (ended.ok && ended.value !== current) this.#save(ended.value);
     }
     this.tick();
-  }
-
-  // Join only the in-flight object the domain handed back. A newly built row is this caller's own attempt,
-  // even when another endpoint already finished the same id.
-  #share(row: Transcription, endpointId: string, askedId: string): Transcription {
-    const stored = this.#rows.find(item => item === row);
-    if (!stored) return owned(row, endpointId);
-    const owner = endpointOf(stored);
-    if (owner === null) return stored;
-    const joined: OwnedTranscription = canRead(stored, endpointId) ? { ...stored, endpointId: owner } : {
-      ...stored,
-      endpointId: owner,
-      readers: [...readersOf(stored), endpointId],
-    };
-    const noted = withAsked(joined, endpointId, askedId);
-    return noted === joined && canRead(stored, endpointId) ? stored : noted;
   }
 
   #save(row: Transcription): void {

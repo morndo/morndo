@@ -610,11 +610,14 @@ export function afterRestart(rows: readonly Transcription[], at: number): Transc
 // limit is the caller's: the config's number, or this default when it names none.
 export const TRANSCRIPTION_LIMIT_DEFAULT = 1;
 
-// The key that tells two rows apart wherever rows are held together, as the queue asks (queue.ts): a Recording and
-// a Language name the one attempt in flight on them (TX2). An id does not: an agent's attachment and the
-// principal's upload may share one and still be two rows. A language code carries no `:`, so the triple is one
-// key and not three.
-const rowKey = (tx: Transcription): string => `${tx.recording.kind}:${tx.recording.id}:${tx.language}`;
+// The key that tells two rows apart wherever rows are held together, as the queue asks (queue.ts). An endpoint,
+// a Recording and a Language name one attempt (TX2). Another endpoint's row is a different attempt, even on the
+// same clip. An id does not: an agent's attachment and the principal's upload may share one and still be two rows.
+// `|` is not part of an id, so the four parts stay four.
+const rowKey = (tx: Transcription): string => {
+  const owner = "endpointId" in tx && typeof tx.endpointId === "string" ? tx.endpointId : "";
+  return `${owner}|${tx.recording.kind}|${tx.recording.id}|${tx.language}`;
+};
 
 export function scheduleTranscriptions(rows: readonly Transcription[], limit: number, guard: QueueGuard): Transcription[] {
   const queued = rows.filter(tx => tx.state === "queued");
