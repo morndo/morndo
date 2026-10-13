@@ -289,6 +289,9 @@ jobs:
       - name: Publish after the outside check
         env:
           GH_TOKEN: ${{ github.token }}
+          # No checkout in this job. GH_REPO is how gh names the repository.
+          # https://cli.github.com/manual/gh_help_environment (read 2026-10-13)
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: gh release edit "$TAG" --draft=false
 
@@ -300,18 +303,17 @@ jobs:
       contents: read
       attestations: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
       - name: Verify the published release attestation
         env:
           GH_TOKEN: ${{ github.token }}
+          # https://cli.github.com/manual/gh_help_environment (read 2026-10-13)
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/assets"
-          gh release download "$TAG" --dir "$RUNNER_TEMP/assets"
-          for f in "$RUNNER_TEMP/assets"/morndo-*.tar.gz "$RUNNER_TEMP/assets/manifest.json" "$RUNNER_TEMP/assets/install.sh" "$RUNNER_TEMP/assets/SHA256SUMS"; do
-            gh release verify-asset "$TAG" "$f"
-          done
-          gh release verify "$TAG"
+        run: sh scripts/release/published-gh.sh
 
   feed:
     needs: [release-please, published]

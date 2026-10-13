@@ -1,6 +1,9 @@
 // The release pipeline's shape (design §9, ADR-0019). These read the workflow files; they do not
 // call GitHub. A private scratch repository still has to run the real tag once the owner adds keys.
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUNDLED_NODE, NODE_RELEASE_KEYS_COMMIT } from "./node-pin.ts";
 import { RELEASE_NAMESPACE } from "./sign.ts";
@@ -127,8 +130,29 @@ describe("release pipeline files", () => {
     expect(outside).not.toContain("gh release verify");
     const published = job(release, "published");
     expect(published).toContain("needs: [release-please, ship]");
-    expect(published).toContain("gh release verify-asset");
-    expect(published).toContain("gh release verify");
+    expect(published).toContain("GH_REPO: ${{ github.repository }}");
+    expect(published).toContain("published-gh.sh");
+    expect(job(release, "ship")).toContain("GH_REPO: ${{ github.repository }}");
+    const dir = mkdtempSync(join(tmpdir(), "morndo-gh-"));
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    const log = join(dir, "log");
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s %s\\n' "$GH_REPO" "$*" >> "${log}"\nif [ "$1" = release ] && [ "$2" = download ]; then\n  mkdir -p "${dir}/assets"\n  : > "${dir}/assets/morndo-0.0.0-linux-x64.tar.gz"\n  : > "${dir}/assets/manifest.json"\n  : > "${dir}/assets/install.sh"\n  : > "${dir}/assets/SHA256SUMS"\nfi\nexit 0\n`);
+    chmodSync(join(bin, "gh"), 0o755);
+    const dry = spawnSync("sh", ["scripts/release/published-gh.sh"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, GH_REPO: "morndo/morndo", TAG: "v0.0.0", RUNNER_TEMP: dir },
+    });
+    expect(dry.status, dry.stderr).toBe(0);
+    const calls = readFileSync(log, "utf8");
+    expect(calls).toContain("morndo/morndo release download v0.0.0");
+    expect(calls).toContain("morndo/morndo release verify-asset v0.0.0");
+    expect(calls).toContain("morndo/morndo release verify v0.0.0");
+    const missing = spawnSync("sh", ["scripts/release/published-gh.sh"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, TAG: "v0.0.0", RUNNER_TEMP: dir, GH_REPO: "" },
+    });
+    expect(missing.status).not.toBe(0);
     expect(job(release, "feed")).toContain("needs: [release-please, published]");
   });
 
