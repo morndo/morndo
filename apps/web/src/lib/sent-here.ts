@@ -20,7 +20,7 @@ export function clearSends() { sends.clear(); }
 
 // "here" when this device sent this version. An empty seen or version never matches (an older hub sends "").
 // Otherwise the record's own via, and a missing via stays missing.
-export function viaOf(item: { id: string; version: string; decision: { via?: "here" | "elsewhere" } | null }): "here" | "elsewhere" | undefined {
+export function viaOf(item: { id: string; version: string; decision: { via?: "here" | "elsewhere" | undefined } | null }): "here" | "elsewhere" | undefined {
   const mine = sends.get(item.id);
   if (mine && mine.seen !== "" && item.version !== "" && mine.seen === item.version) return "here";
   const via = item.decision?.via;
