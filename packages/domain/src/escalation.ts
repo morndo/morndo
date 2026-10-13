@@ -296,7 +296,9 @@ export class Escalations {
   }
 
   // Takes the principal's Decision once it reached the asker. The option's label comes from the ask, never the request.
-  record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId }, now: number): Result<EscalationAnswered, AnswerRefusal> {
+  // `by` is the endpoint whose answer it was: the caller, or the requester a row in doubt names (its session may no
+  // longer be known, A1).
+  record(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number): Result<EscalationAnswered, AnswerRefusal> {
     const c = this.#take(id, choice, by, now);
     if (!c.ok) return c;
     const e = c.value;
@@ -346,7 +348,7 @@ export class Escalations {
     return true;
   }
 
-  #take(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId }, now: number, delivery?: Delivery): Result<Escalation, AnswerRefusal> {
+  #take(id: string, choice: Choice, by: { endpointId: EndpointId; sessionId: SessionId | null }, now: number, delivery?: Delivery): Result<Escalation, AnswerRefusal> {
     const c = this.check(id, choice, now);
     if (!c.ok) return c;
     const e = c.value;

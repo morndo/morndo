@@ -778,7 +778,7 @@ export class EscalationService {
     }
     const settled = row.workerId === null ? { ok: false as const, problem: "uncertain" as const } : await this.#settle(row.key, row.workerId);
     if (settled === null) return null;
-    if (!settled.ok && settled.problem === "duplicate") return this.#delivered(a, id, choice, key, settled.at);
+    if (!settled.ok && settled.problem === "duplicate") return this.#delivered(a, id, choice, key, settled.at, this.#requesterOf(row) ?? undefined);
     log.warn(`answer to ${id} in doubt: its node can't say it never typed it; it stays uncertain`);
     return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
   }
@@ -832,11 +832,13 @@ export class EscalationService {
     this.#notify();
   }
 
-  // The answer arrived: recorded as his Decision (E8), once. `at`: a duplicate's time on the node that typed it.
-  #delivered(a: Authenticated, id: string, choice: Choice, key: string, at?: number): AnswerResult {
+  // The answer arrived: recorded as his Decision (E8), once. `at`: a duplicate's time on the node that typed it. `by`
+  // defaults to the caller; an answer in doubt that another endpoint's repeat settled is recorded for its row's own
+  // requester — the endpoint whose answer it was — not whoever's repeat learnt it (review of PR #55).
+  #delivered(a: Authenticated, id: string, choice: Choice, key: string, at?: number, by?: { endpointId: EndpointId; sessionId: SessionId | null }): AnswerResult {
     this.#clearNotice(id);
     this.#seen.set(key, this.#now());
-    const r = this.#x.record(id, choice, { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
+    const r = this.#x.record(id, choice, by ?? { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
     if (r.ok) {
       const decision = this.#x.get(id)?.decision;
       if (decision) this.#store.saveDecision(id, decision);
