@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { absentTools, parseInstallArgs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
+import { absentTools, buildDir, parseInstallArgs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
@@ -42,6 +43,15 @@ describe("install choices", () => {
     body.models.base.url = "https://example.invalid/ggml-base.bin";
     writeFileSync(bad, JSON.stringify(body));
     expect(() => readPins(bad)).toThrow(/model base/);
+  });
+
+  it("a change of cmake flags uses a different build directory, and the workflow cache key includes them", () => {
+    const flagKey = (flags: readonly string[]) => createHash("sha256").update(flags.join("\n")).digest("hex").slice(0, 16);
+    const src = "/cache/src/d1be6fde11ac6e0407606b4e42fe72d34add8037";
+    expect(buildDir(src, ["-DBUILD_SHARED_LIBS=OFF"])).toBe(join(src, "build", flagKey(["-DBUILD_SHARED_LIBS=OFF"])));
+    expect(buildDir(src, ["-DBUILD_SHARED_LIBS=ON"])).toBe(join(src, "build", flagKey(["-DBUILD_SHARED_LIBS=ON"])));
+    const workflow = readFileSync(join(import.meta.dirname, "../../../.github/workflows/transcription-plugin.yml"), "utf8");
+    expect(workflow).toContain("hashFiles('plugins/transcribe-whisper-cpp/plugin.json', 'plugins/transcribe-whisper-cpp/scripts/install.ts')");
   });
 
   it("a failed install leaves the previous plugin in place", async () => {

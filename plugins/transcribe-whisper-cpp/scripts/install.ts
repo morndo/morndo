@@ -47,6 +47,20 @@ export type Pins = {
   models: Record<ModelId, ModelPin>;
 };
 
+export const BUILD_FLAGS = [
+  "-DBUILD_SHARED_LIBS=OFF",
+  "-DWHISPER_BUILD_TESTS=OFF",
+  "-DWHISPER_BUILD_SERVER=OFF",
+  "-DWHISPER_SDL2=OFF",
+  "-DWHISPER_CURL=OFF",
+  "-DWHISPER_BUILD_EXAMPLES=ON",
+] as const;
+
+export function buildDir(src: string, flags: readonly string[]): string {
+  const key = createHash("sha256").update(flags.join("\n")).digest("hex").slice(0, 16);
+  return join(src, "build", key);
+}
+
 const UBUNTU: Record<string, string> = { git: "git", cmake: "cmake", make: "make", "g++": "g++", ffmpeg: "ffmpeg" };
 const BREW: Record<string, string> = { git: "git", cmake: "cmake", ffmpeg: "ffmpeg" };
 const TOOLS = ["git", "cmake", "make", "g++", "ffmpeg"] as const;
@@ -311,15 +325,16 @@ async function ensureSource(pins: Pins, src: string): Promise<void> {
 }
 
 async function ensureBinary(src: string): Promise<string> {
-  const bin = join(src, "build", "bin", "whisper-cli");
+  const dir = buildDir(src, BUILD_FLAGS);
+  const bin = join(dir, "bin", "whisper-cli");
   try {
     if (statSync(bin).isFile()) return bin;
   } catch {
     // build it
   }
   process.stderr.write("building whisper-cli\n");
-  await run("cmake", ["-S", src, "-B", join(src, "build"), "-DBUILD_SHARED_LIBS=OFF", "-DWHISPER_BUILD_TESTS=OFF", "-DWHISPER_BUILD_SERVER=OFF", "-DWHISPER_SDL2=OFF", "-DWHISPER_CURL=OFF", "-DWHISPER_BUILD_EXAMPLES=ON"]);
-  await run("nice", ["-n", "10", "cmake", "--build", join(src, "build"), "--target", "whisper-cli", "--parallel", String(availableParallelism())]);
+  await run("cmake", ["-S", src, "-B", dir, ...BUILD_FLAGS]);
+  await run("nice", ["-n", "10", "cmake", "--build", dir, "--target", "whisper-cli", "--parallel", String(availableParallelism())]);
   if (!statSync(bin).isFile()) throw new Error("whisper-cli was not produced");
   return bin;
 }
