@@ -50,4 +50,22 @@ describe("standingLine", () => {
     rememberSend("d-blank", "req-3", "");
     expect(standingLine(item({ id: "d-blank" as DecisionItem["id"], version: "v1", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
   });
+
+  // The hub now says where an answer stands for this client itself (seenBy): the feed's via is the whole truth, and a
+  // send this page remembers must not override it. A reload, which loses the local map, would otherwise say something
+  // else than the page that sent the answer.
+  it("the feed's via wins over this page's own memory of a send", () => {
+    clearSends();
+    const decision = { choice: { kind: "option" as const, key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere" as const, endpointId: null, sessionId: null };
+    rememberSend("d-mine", "req-1", "v1");
+    expect(standingLine(item({ id: "d-mine" as DecisionItem["id"], version: "v1", decision }), "Alpha"))
+      .toBe("Answered on another device: “Extend the triage script”.");
+  });
+
+  it("an answer the feed says was given here reads here, with no local memory at all (after a reload)", () => {
+    clearSends();
+    expect(standingLine(item({
+      decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: 1, via: "here", endpointId: null, sessionId: null },
+    }), "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
+  });
 });
