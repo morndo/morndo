@@ -184,7 +184,7 @@
   </div>
 
   <footer>
-    {#if (item.status === "answered" && item.decision) || session.sent}
+    {#if !session.settledOut && ((item.status === "answered" && item.decision) || session.sent)}
       <p class="stand" role="status">{standing}</p>
       <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
     {:else if !open}
