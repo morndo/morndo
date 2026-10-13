@@ -119,45 +119,11 @@ function readManifest(root: string): Manifest | null {
   return { engine, engineVersion, model, modelFile, languages: "multi", maxSeconds: parsed.maxSeconds };
 }
 
-// A 16-bit PCM WAV. Duration is the data chunk divided by the fmt chunk's rate, channels and width.
-// ffmpeg writes extra chunks (LIST, fact); those are skipped. A file that is not WAVE, or whose fmt
-// is not PCM, has no duration we can trust.
-export function wavDurationMs(bytes: Uint8Array): number | null {
-  if (bytes.length < 12) return null;
-  if (ascii(bytes, 0, "RIFF") === false || ascii(bytes, 8, "WAVE") === false) return null;
-  let rate = 0;
-  let channels = 0;
-  let bits = 0;
-  let dataBytes = -1;
-  let offset = 12;
-  while (offset + 8 <= bytes.length) {
-    const id = String.fromCharCode(bytes[offset]!, bytes[offset + 1]!, bytes[offset + 2]!, bytes[offset + 3]!);
-    const size = readU32(bytes, offset + 4);
-    if (size === null) return null;
-    const body = offset + 8;
-    if (body + size > bytes.length) return null;
-    if (id === "fmt ") {
-      if (size < 16) return null;
-      const format = readU16(bytes, body);
-      channels = readU16(bytes, body + 2) ?? 0;
-      rate = readU32(bytes, body + 4) ?? 0;
-      bits = readU16(bytes, body + 14) ?? 0;
-      if (format !== 1) return null;
-    } else if (id === "data") {
-      dataBytes = size;
-    }
-    offset = body + size + (size % 2);
-  }
-  if (rate < 1 || channels < 1 || bits < 8 || bits % 8 !== 0 || dataBytes < 0) return null;
-  const block = channels * (bits / 8);
-  if (block < 1 || dataBytes % block !== 0) return null;
-  return Math.round((dataBytes / block / rate) * 1000);
-}
-
-// Duration from the WAV header when the data-chunk size fits in the file. The sample bytes are not
-// read. A size past the end of the file, or the 0xFFFFFFFF placeholder ffmpeg writes when it cannot
-// seek back, is not a length: the bytes actually in the file are. If those bytes are not a clip, the
-// caller treats the result as an engine failure rather than too_long.
+// Duration of a 16-bit PCM WAV. The data-chunk size is trusted when it fits in the file. The sample
+// bytes are not read. ffmpeg writes extra chunks (LIST, fact); those are skipped. A size past the end
+// of the file, or the 0xFFFFFFFF placeholder ffmpeg writes when it cannot seek back, is not a length:
+// the bytes actually in the file are. If those bytes are not a clip, the caller treats the result as
+// an engine failure rather than too_long.
 export function wavDurationFile(path: string): number | "engine" | null {
   let fd: number;
   try { fd = openSync(path, "r"); } catch { return null; }
@@ -211,21 +177,6 @@ export function wavDurationFile(path: string): number | "engine" | null {
   } finally {
     closeSync(fd);
   }
-}
-
-function ascii(bytes: Uint8Array, at: number, word: string): boolean {
-  for (let i = 0; i < word.length; i++) if (bytes[at + i] !== word.charCodeAt(i)) return false;
-  return true;
-}
-
-function readU16(bytes: Uint8Array, at: number): number | null {
-  if (at + 2 > bytes.length) return null;
-  return bytes[at]! | (bytes[at + 1]! << 8);
-}
-
-function readU32(bytes: Uint8Array, at: number): number | null {
-  if (at + 4 > bytes.length) return null;
-  return (bytes[at]! | (bytes[at + 1]! << 8) | (bytes[at + 2]! << 16) | (bytes[at + 3]! << 24)) >>> 0;
 }
 
 export function mapWhisper(doc: unknown, wavMs: number): MappedRun | null {

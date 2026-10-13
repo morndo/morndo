@@ -2,18 +2,29 @@ import { closeSync, ftruncateSync, mkdtempSync, openSync, rmSync, writeFileSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { wavDurationFile, wavDurationMs } from "../src/morndo-transcribe.mts";
+import { wavDurationFile } from "../src/morndo-transcribe.mts";
 import { pcmWav } from "./audio.ts";
 
-describe("wavDurationMs", () => {
+function durationOf(bytes: Uint8Array): number | "engine" | null {
+  const dir = mkdtempSync(join(tmpdir(), "morndo-wav-"));
+  try {
+    const path = join(dir, "clip.wav");
+    writeFileSync(path, bytes);
+    return wavDurationFile(path);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+describe("wavDurationFile", () => {
   it("reads one second and one and a half seconds from a PCM wav", () => {
-    expect(wavDurationMs(pcmWav(1))).toBe(1000);
-    expect(wavDurationMs(pcmWav(1.5))).toBe(1500);
+    expect(durationOf(pcmWav(1))).toBe(1000);
+    expect(durationOf(pcmWav(1.5))).toBe(1500);
   });
 
   it("refuses bytes that are not a PCM wave", () => {
-    expect(wavDurationMs(new Uint8Array([0x52, 0x49, 0x46, 0x46]))).toBeNull();
-    expect(wavDurationMs(Uint8Array.from(Buffer.from("this is not audio\n")))).toBeNull();
+    expect(durationOf(new Uint8Array([0x52, 0x49, 0x46, 0x46]))).toBeNull();
+    expect(durationOf(Uint8Array.from(Buffer.from("this is not audio\n")))).toBeNull();
   });
 
   it("reads a declared length from the header without the sample bytes", () => {
