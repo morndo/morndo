@@ -38,6 +38,18 @@ export function dueLabel(deadline: number, now: number): string {
   return `Due ${d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}${at}`;
 }
 
+const dayStart = (t: number) => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+
+// Calendar days in the principal's time zone, the same day-count dueLabel uses. A date-only due is the end of that day.
+export function dueLine(deadline: number, now: number): string {
+  const label = dueLabel(deadline, now);
+  if (deadline <= now) return label;
+  const days = Math.round((dayStart(deadline) - dayStart(now)) / 86_400_000);
+  if (days > 1) return `${label} (in ${days} days)`;
+  if (days === 1) return `${label} (in 1 day)`;
+  return label;
+}
+
 export function ago(t: number, now: number): string {
   const m = Math.round((now - t) / 60_000);
   if (m < 1) return "just now";

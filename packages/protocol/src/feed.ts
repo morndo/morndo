@@ -5,9 +5,10 @@
 // value a newer hub adds falls back to a safe one, and a list drops only the element that doesn't fit, never the frame.
 // What the app sends the hub stays strict, with limits.
 import type {
-  AnswerRefusal, CatchUpConversation, Escalation, EscalationId, EndpointId, FeedBody, FeedEvent, Message, RosterEntry, SessionId, WorkerId,
+  AnswerRefusal, CatchUpConversation, DecisionBrief, Escalation, EscalationId, EndpointId, FeedBody, FeedEvent, Message, RosterEntry, SessionId, WorkerId,
 } from "@morndo/domain";
 import { BoardFrameSchema } from "./board.ts";
+import { DecisionBriefSchema } from "./brief.ts";
 import { JobsFrameSchema } from "./jobs.ts";
 import { UsageFrameSchema } from "./usage.ts";
 import { isWorkerOrLegacyId } from "./worker-id.ts";
@@ -136,7 +137,7 @@ export const DecisionItemSchema = z.object({
   project: z.nullable(text()),
   askedAt: z.number(),
   messageId: z.nullable(text()),
-  tracking: z.enum(["ledger", "age", "source"]),
+  tracking: z.enum(["ledger", "age", "source", "hub"]),
   status: z.enum(["open", "answered", "settled", "expired"]),
   source: orElse(z.enum(["open", "settled", "missing", "unreadable"]), "unreadable"),
   decision: z.nullable(z.object({
@@ -163,6 +164,12 @@ export const DecisionItemSchema = z.object({
   // A sentence on an open card: the answer reached the manager late, or did not reach the manager (ADR-0010 addendum).
   // A hub that doesn't say: none.
   notice: z.exactOptional(z.nullable(text())),
+  // ADR-0023: the brief this ask was filed from and its version. A hub that doesn't send them (an older hub, or a plain
+  // ask), or a brief this app can't read: none and zero — never a half brief, the card falls back to the plain fields.
+  brief: orElse(z.nullable(DecisionBriefSchema), null),
+  briefVersion: orElse(z.number(), 0),
+  // Who drafted a forwarded brief. A hub that doesn't say, or a plain ask: null.
+  draftedBy: orElse(z.nullable(text()), null),
 });
 export const LedgerStateSchema = z.object({ configured: z.boolean(), ok: z.boolean(), at: z.nullable(z.number()) });
 
@@ -257,7 +264,7 @@ export const ClientFeedFrames = {
 export type ServerFeedFrame = { [K in keyof typeof ServerFeedFrames]: z.output<(typeof ServerFeedFrames)[K]> }[keyof typeof ServerFeedFrames];
 export type ClientFeedFrame = { [K in keyof typeof ClientFeedFrames]: z.output<(typeof ClientFeedFrames)[K]> }[keyof typeof ClientFeedFrames];
 export type InboxWait = { status: string; reason: string | null };
-export type DecisionItem = Escalation & { answerable: AnswerRefusal | null; version: string; inbox: InboxWait | null; notice?: string | null };
+export type DecisionItem = Escalation & { answerable: AnswerRefusal | null; version: string; inbox: InboxWait | null; notice?: string | null; brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null };
 export type LedgerState = z.output<typeof LedgerStateSchema>;
 export type SessionInfoWire = z.output<typeof SessionInfoSchema>;
 export type CatchUpConversationWire = z.output<typeof CatchUpConversationSchema>;

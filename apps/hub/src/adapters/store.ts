@@ -6,13 +6,28 @@ import { assertLocalDisk } from "@morndo/service-kit";
 import { migrate } from "./migrations.ts";
 import {
   endpointId, pairingTokenId, sessionId,
-  type AccessEvent, type AccountUsage, type BoardChanged, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
+  type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
   type Session, type Task, type TaskEvent, type Transcription, type Upload,
 } from "@morndo/domain";
 
 // What the audit log holds: Access events, and the principal's Decisions (the words of a Decision never, only their
-// length and a hash), and his changes to the engines (ADR-0013).
-export type AuditEvent = AccessEvent | NotificationEvent | (EscalationAnswered & { length?: number; digest?: string }) | EnginesChanged | BoardChanged;
+// length and a hash), and his changes to the engines (ADR-0013). A brief's audit names the id, version, asker and
+// token, never the text (ADR-0023, as BoardChanged).
+export type BriefAudit = {
+  type: "BriefFiled" | "BriefRestated" | "BriefWithdrawn" | "BriefSettled" | "BriefForwarded" | "BriefDeclined";
+  id: string; version: number; asker: { kind: "manager" | "worker"; name: string }; token: string; at: number;
+};
+export type AuditEvent = AccessEvent | NotificationEvent | (EscalationAnswered & { length?: number; digest?: string }) | EnginesChanged | BoardChanged | BriefAudit;
+
+export type BriefState = "draft" | "open" | "withdrawn" | "settled" | "expired" | "declined";
+// One version of a filed brief. A restate is the next row; the earlier JSON stays.
+export type BriefRecord = {
+  id: string; version: number; ref: string | null;
+  askerKind: "manager" | "worker"; askerName: string; tokenId: string;
+  filedByKind: "manager" | "worker"; filedByName: string;
+  brief: DecisionBrief; state: BriefState; filedAt: number;
+  resolution: string | null; draftedBy: string | null; closedAt: number | null;
+};
 
 // An agent token (ADR-0015, B1): the credential the manager's lane or a worker's changes the board with. Only its hash
 // is kept; `role` says whether it acts as the manager or as the worker lane it names on each call.
@@ -456,6 +471,61 @@ export class Store {
     this.db.prepare("UPDATE job_notices SET acked = 1 WHERE id = ?").run(id);
   }
 
+  // Decision briefs (ADR-0023). The counter only grows, and is taken in the same transaction as the insert, only once
+  // the brief is accepted (a refusal burns no number, as the board's counter, B7). A ref id (ny-…) takes none.
+  peekBriefNumber(): number { return (this.setting<number>("brief_counter") ?? 0) + 1; }
+  takeBriefNumber(n: number) {
+    if (n !== this.peekBriefNumber()) throw new Error(`brief number ${n} is not the next one`);
+    this.saveSetting("brief_counter", n);
+  }
+  insertBrief(r: BriefRecord) {
+    this.db.prepare(`INSERT INTO decision_briefs (
+      id, version, ref, asker_kind, asker_name, token_id, filed_by_kind, filed_by_name, brief, state, filed_at, resolution, drafted_by, closed_at)
+      VALUES (@id, @version, @ref, @askerKind, @askerName, @tokenId, @filedByKind, @filedByName, @brief, @state, @filedAt, @resolution, @draftedBy, @closedAt)`)
+      .run({ ...r, brief: JSON.stringify(r.brief) });
+  }
+  setBriefState(id: string, version: number, state: BriefState, resolution: string | null, closedAt: number | null) {
+    this.db.prepare("UPDATE decision_briefs SET state = ?, resolution = ?, closed_at = ? WHERE id = ? AND version = ?").run(state, resolution, closedAt, id, version);
+  }
+  // Forwarding a draft: the manager becomes the asker, and the card can say who drafted it.
+  forwardBrief(id: string, version: number, askerName: string, tokenId: string, draftedBy: string) {
+    this.db.prepare("UPDATE decision_briefs SET state = 'open', asker_kind = 'manager', asker_name = ?, token_id = ?, drafted_by = ?, closed_at = NULL, resolution = NULL WHERE id = ? AND version = ?")
+      .run(askerName, tokenId, draftedBy, id, version);
+  }
+  // Forwarding a draft that names a list item: the open brief's id becomes that ref, so it joins the list item.
+  // A withdrawn or declined row already at that id does not block; the open brief is the next version.
+  claimForward(oldId: string, version: number, ref: string, askerName: string, tokenId: string, draftedBy: string): { id: string; version: number } {
+    const clash = this.brief(ref);
+    if (clash && clash.id !== oldId) {
+      const old = this.brief(oldId);
+      if (!old) return { id: oldId, version };
+      const next = clash.version + 1;
+      this.insertBrief({
+        ...old, id: ref, version: next, ref, state: "open", askerKind: "manager", askerName, tokenId,
+        draftedBy, resolution: null, closedAt: null,
+      });
+      this.setBriefState(oldId, old.version, "withdrawn", null, old.filedAt);
+      return { id: ref, version: next };
+    }
+    this.db.prepare(`UPDATE decision_briefs SET id = ?, ref = ?, state = 'open', asker_kind = 'manager', asker_name = ?, token_id = ?, drafted_by = ?, closed_at = NULL, resolution = NULL WHERE id = ? AND version = ?`)
+      .run(ref, ref, askerName, tokenId, draftedBy, oldId, version);
+    return { id: ref, version };
+  }
+  brief(id: string): BriefRecord | null {
+    const r = this.db.prepare("SELECT * FROM decision_briefs WHERE id = ? ORDER BY version DESC LIMIT 1").get(id) as Row | undefined;
+    return r ? briefFrom(r) : null;
+  }
+  currentBriefs(): BriefRecord[] {
+    return (this.db.prepare(`SELECT * FROM decision_briefs AS b
+      WHERE version = (SELECT MAX(version) FROM decision_briefs WHERE id = b.id) ORDER BY filed_at`).all() as Row[]).map(briefFrom);
+  }
+  openBriefCount(kind: "manager" | "worker", name: string): number {
+    const r = this.db.prepare(`SELECT COUNT(*) AS n FROM decision_briefs AS b
+      WHERE state = 'open' AND asker_kind = ? AND asker_name = ?
+      AND version = (SELECT MAX(version) FROM decision_briefs WHERE id = b.id)`).get(kind, name) as { n: number };
+    return r.n;
+  }
+
   close() { this.db.close(); }
 }
 
@@ -468,4 +538,12 @@ const taskFrom = (r: Row): Task => ({
 const agentTokenFrom = (r: Row): AgentToken => ({
   id: r.id as string, name: r.name as string, role: r.role as AgentToken["role"], secretHash: r.secret_hash as string,
   createdAt: r.created_at as number, lastUsedAt: (r.last_used_at as number | null) ?? null, revokedAt: (r.revoked_at as number | null) ?? null,
+});
+const briefFrom = (r: Row): BriefRecord => ({
+  id: r.id as string, version: r.version as number, ref: (r.ref as string | null) ?? null,
+  askerKind: r.asker_kind as BriefRecord["askerKind"], askerName: r.asker_name as string, tokenId: r.token_id as string,
+  filedByKind: r.filed_by_kind as BriefRecord["filedByKind"], filedByName: r.filed_by_name as string,
+  brief: JSON.parse(r.brief as string) as DecisionBrief, state: r.state as BriefState, filedAt: r.filed_at as number,
+  resolution: (r.resolution as string | null) ?? null, draftedBy: (r.drafted_by as string | null) ?? null,
+  closedAt: (r.closed_at as number | null) ?? null,
 });

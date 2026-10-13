@@ -169,6 +169,24 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     expect(() => MIGRATIONS[16]?.up(db)).not.toThrow();
   });
 
+  it("migration 18 is manager_deliveries, and 19 stores a decision brief", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 17));
+    expect(migrate(db, MIGRATIONS.slice(0, 18))).toEqual({ from: 17, to: 18 });
+    expect(columns(db, "manager_deliveries")).toEqual([
+      "delivery_id", "kind", "escalation_id", "ask", "choice", "endpoint_id", "session_id", "request_id",
+      "queued_at", "state", "updated_at",
+    ]);
+    expect(tables(db)).not.toContain("decision_briefs");
+    expect(migrate(db)).toEqual({ from: 18, to: 19 });
+    expect(columns(db, "decision_briefs")).toEqual([
+      "id", "version", "ref", "asker_kind", "asker_name", "token_id", "filed_by_kind", "filed_by_name",
+      "brief", "state", "filed_at", "resolution", "drafted_by", "closed_at",
+    ]);
+    expect(() => MIGRATIONS[17]?.up(db)).not.toThrow();
+    expect(() => MIGRATIONS[18]?.up(db)).not.toThrow();
+  });
+
   it("the Store migrates the database it opens", () => {
     const dir = tempDir();
     legacyDb(dir).close();

@@ -28,6 +28,8 @@ import type { AgentAccess } from "../application/agent-access.ts";
 import type { JobsService } from "../application/jobs-service.ts";
 import type { UsageService } from "../application/usage-service.ts";
 import type { TranscriptionService } from "../application/transcription-service.ts";
+import type { BriefService } from "../application/brief-service.ts";
+import { BRIEF_TEMPLATE } from "./brief-template.ts";
 import { bridgeDesktop } from "./rfb.ts";
 import { servingHeaders, type Files } from "./files.ts";
 import type { Inbox } from "./uploads.ts";
@@ -207,6 +209,7 @@ export function startHttp(p: {
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
   transcription?: TranscriptionService | null;                              // ADR-0021; null: the plugin is not wired
+  briefs?: BriefService | null;                                             // ADR-0023: decision briefs; null: off
 }) {
   const { config, identity, access, observation, steering, escalations, remote } = p;
   const files = p.files ?? null;
@@ -297,6 +300,54 @@ export function startHttp(p: {
     problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
     r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}) });
+
+  // ADR-0023: file, restate, list and close a decision brief. Same door as the board (a bearer token, no cookie).
+  const briefStatus = (problem: string) =>
+    problem === "unknown" ? 404 : problem === "not_allowed" ? 403 : problem === "ref_taken" || problem === "too_many_open" ? 409 : 400;
+  async function readBriefBody(req: IncomingMessage): Promise<{ kind: "markdown"; text: string } | { kind: "json"; value: unknown }> {
+    const type = req.headers["content-type"] ?? "";
+    if (type.startsWith("text/markdown")) return { kind: "markdown", text: (await readRaw(req, MAX_BODY)).toString("utf8") };
+    if (type.startsWith("application/json")) return { kind: "json", value: await readJson(req) };
+    throw new HttpError(415, "send markdown or JSON");
+  }
+  function briefAnswer(res: ServerResponse, r: { ok: false; problem: string } | { ok: "filed"; id: string; version: number; warnings: unknown[] } | { ok: "dry"; warnings: unknown[] } | { ok: "refused"; problems: unknown[] } | { ok: true }) {
+    if (r.ok === "filed") return json(res, 201, { id: r.id, version: r.version, warnings: r.warnings });
+    if (r.ok === "dry") return json(res, 200, { dry: true, warnings: r.warnings });
+    if (r.ok === "refused") return json(res, 422, { error: "brief_refused", problems: r.problems, warnings: [] });
+    if (r.ok === true) return json(res, 200, r);
+    return json(res, briefStatus(r.problem), { error: r.problem });
+  }
+  async function agentDecisions(req: IncomingMessage, res: ServerResponse, path: string, method: string, actor: Parameters<BriefService["file"]>[1]) {
+    const briefs = p.briefs;
+    if (!briefs) return json(res, 404, { error: "briefs_off" });
+    const q = new URL(req.url ?? "/", "http://hub").searchParams;
+    if (path === "/api/agent/decisions/template" && method === "GET") {
+      res.writeHead(200, { ...secureHeaders, "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(BRIEF_TEMPLATE);
+      return;
+    }
+    if (path === "/api/agent/decisions" && method === "GET") {
+      const listed = briefs.list(actor, { open: q.get("open") === "1", drafts: q.get("drafts") === "1" });
+      return listed.ok ? json(res, 200, { requests: listed.requests }) : json(res, briefStatus(listed.problem), { error: listed.problem });
+    }
+    if (path === "/api/agent/decisions" && method === "POST") return briefAnswer(res, briefs.file(await readBriefBody(req), actor, q.get("dry") === "1"));
+    const one = /^\/api\/agent\/decisions\/([A-Za-z0-9_-]{1,32})(?:\/(withdraw|settle|forward|decline))?$/.exec(path);
+    if (!one) throw new HttpError(404, "no such route");
+    const id = one[1] ?? "";
+    const action = one[2];
+    if (!action && method === "GET") {
+      const shown = briefs.show(actor, id);
+      return shown.ok ? json(res, 200, { request: shown.request }) : json(res, briefStatus(shown.problem), { error: shown.problem });
+    }
+    if (!action && method === "PUT") return briefAnswer(res, briefs.restate(id, await readBriefBody(req), actor, q.get("dry") === "1"));
+    if (method !== "POST" || !action) throw new HttpError(404, "no such route");
+    if (action === "forward") return briefAnswer(res, briefs.forward(actor, id));
+    const body = await readJson(req);
+    if (action === "decline") return briefAnswer(res, briefs.decline(actor, id, typeof body.why === "string" ? body.why : ""));
+    if (action === "withdraw") return briefAnswer(res, briefs.withdraw(actor, id, typeof body.why === "string" ? body.why : ""));
+    return briefAnswer(res, briefs.settle(actor, id, typeof body.note === "string" ? body.note : null));
+  }
+
   async function agentApi(req: IncomingMessage, res: ServerResponse, path: string) {
     const method = req.method ?? "GET";
     if (!p.board) return json(res, 404, { error: "board_off" });
@@ -316,6 +367,7 @@ export function startHttp(p: {
     limited(buckets.agentCalls.take(who.token.id));
     const { service } = p.board;
     if (path === "/api/agent/whoami" && method === "GET") return json(res, 200, { actor: who.actor, token: { id: who.token.id, name: who.token.name, role: who.token.role } });
+    if (path.startsWith("/api/agent/decisions")) return agentDecisions(req, res, path, method, who.actor);
     // A job grant (ADR-0017 §6). The body names the lane, the class and a directory hash. It has no command.
     if (path === "/api/agent/jobs/grant" && method === "POST") {
       const body = await readJson(req);

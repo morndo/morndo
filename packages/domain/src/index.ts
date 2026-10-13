@@ -4,6 +4,7 @@ export * from "./access.ts";
 export * from "./observation.ts";
 export * from "./conversation.ts";
 export * from "./escalation.ts";
+export * from "./brief.ts";
 export * from "./steering.ts";
 export * from "./reading.ts";
 export * from "./linking.ts";

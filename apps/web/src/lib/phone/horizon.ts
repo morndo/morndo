@@ -6,12 +6,11 @@
 // - the headline is the earliest open item that needs him, or, with something waiting now, how many wait.
 // It never guesses when an agent will finish.
 // From 2026-10-04 (the owner's feedback) a row reads short: its title is the list's own or its text's first clause
-// (brief.ts), and the row carries its item for the rest (sentence, meta, More, buttons). A task he kept for later on
-// this device (its row's Later, quick.ts) is off today: under its own heading at the end, never waiting, never the
-// headline.
-import type { RosterEntry } from "@morndo/domain";
+// (@morndo/domain, the compact card's own rule, ADR-0023 §4.4), and the row carries its item for the rest (sentence,
+// meta, More, buttons). A task he kept for later on this device (its row's Later, quick.ts) is off today: under its
+// own heading at the end, never waiting, never the headline.
+import { clause, type RosterEntry } from "@morndo/domain";
 import { deliveryLine, type DecisionItem } from "../desktop/decisions.ts";
-import { clause } from "./brief.ts";
 
 export type Row = {
   key: string;

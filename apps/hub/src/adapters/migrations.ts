@@ -172,8 +172,8 @@ export const MIGRATIONS: readonly Migration[] = [
     up: db => { if (!hasColumn(db, "job_notices", "acked")) db.exec("ALTER TABLE job_notices ADD COLUMN acked INTEGER NOT NULL DEFAULT 0"); },
   },
   {
-    // PR #34 (fleet-clients) merges first. 18 is that line's manager_deliveries, already running live. A database at
-    // 18 runs only 19. Numbers stay contiguous, so this list and that one agree on 18.
+    // PR #34 (fleet-clients) merges first. 18 is that line's manager_deliveries, already running live.
+    // A database at 18 runs only 19. Numbers stay contiguous, so this list and that one agree on 18.
     version: 18,
     name: "manager_deliveries (migration 18): the manager's answers and messages in the fleet's delivery queue, followed across hub restarts (fleet-clients §9.1)",
     compat: "additive",
@@ -189,7 +189,6 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
-    // PR #45 (decision briefs) merges first. 19 is that line's decision_briefs. This hub does not read the table.
     version: 19,
     name: "decision briefs (ADR-0023): one row per version, so a restate keeps the earlier brief; the counter lives in settings",
     compat: "additive",
