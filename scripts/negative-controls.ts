@@ -753,7 +753,7 @@ export const CONTROLS: Control[] = [
     find: "    if (res.storeSeq !== undefined) this.#seqs.saw(node, res.store, res.storeSeq);\n", replace: "",
     run: ["apps/fleet/test/requests.test.ts"] },
   { id: "fw-b-answer-row-after-typing", task: "B", file: "apps/hub/src/application/escalation-service.ts",
-    find: "      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) return { ok: false, problem: \"uncertain\", item: this.#view(id, a.endpoint.id) };\n",
+    find: "      if (!this.#startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) return { ok: false, problem: \"uncertain\", item: this.#view(id, a.endpoint.id) };\n",
     replace: "",
     run: ["apps/hub/test/escalation-in-doubt.test.ts"] },
   // The fix wave's guards its re-review found without a control, and the residual round's (residual-round-report.md).
