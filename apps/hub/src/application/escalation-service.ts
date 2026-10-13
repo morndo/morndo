@@ -205,17 +205,21 @@ export class EscalationService {
       ledger: { configured: this.#ledger !== null, ok: l?.ok ?? false, at: l?.at ?? null },
     };
   }
-  // The board as one endpoint sees it: each Decision's via says where it stands for that endpoint, "here" only for the
-  // endpoint whose request accepted it (viaFor). What the feed and GET /api/escalations send. The stored record and
-  // its provenance are untouched; only the copy for this viewer says it.
-  seenBy(viewer: EndpointId, b: Board = this.board()): Board {
-    return { ...b, items: b.items.map(i => (i.decision ? { ...i, decision: { ...i.decision, via: viaFor(i.decision, viewer) } } : i)) };
+  // What one endpoint is shown of an item: its Decision's via says where it stands for that endpoint (viaFor), "here"
+  // only for the endpoint whose request accepted it, "elsewhere" for anyone else's, absent when the record can no
+  // longer say whose it was. The stored record and its provenance are untouched; only the copy for this viewer says
+  // it. What the feed and GET /api/escalations send goes through here.
+  #forViewer(item: EscalationView, viewer: EndpointId): EscalationView {
+    return item.decision ? { ...item, decision: { ...item.decision, via: viaFor(item.decision, viewer) } } : item;
   }
-  #view(id: string, viewer?: EndpointId): EscalationView | null {
+  // The board as one endpoint sees it.
+  seenBy(viewer: EndpointId, b: Board = this.board()): Board {
+    return { ...b, items: b.items.map(i => this.#forViewer(i, viewer)) };
+  }
+  #view(id: string, viewer: EndpointId): EscalationView | null {
     const e = this.#x.get(id);
     if (!e) return null;
-    const view = { ...e, answerable: refusal(e, this.#now()), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null, ...this.#briefView(e.id) };
-    return viewer !== undefined && view.decision ? { ...view, decision: { ...view.decision, via: viaFor(view.decision, viewer) } } : view;
+    return this.#forViewer({ ...e, answerable: refusal(e, this.#now()), version: this.#version(e), inbox: this.#inboxView(e), notice: this.#notices.get(e.id) ?? null, ...this.#briefView(e.id) }, viewer);
   }
   #briefView(id: string): { brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null } {
     const b = this.#briefOf.get(id);
