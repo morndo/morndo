@@ -38,7 +38,7 @@ Read in this tree on 2026-10-11.
 - **Sends and restores.** The hub types a request id at most once within 24 hours (S5), and a device retries on its own only within 2 minutes (S7). A node database put back from an older copy is detected by the store sequence and starts a new store (FL7). A restore of the hub's database has no such guard yet (section 11.5). The web app's outbox takes a 409 (other than `uncertain` and `not_submitted`) as a final refusal and a 5xx as saying nothing (`apps/web/src/lib/outbox.ts`), so a temporary refusal must be a 503.
 - **Revocations bypass the services.** `morndo revoke`, `morndo agent-token revoke` (`apps/hub/src/main.ts`) and `morndo-fleet node revoke` (`apps/fleet/src/main.ts`) write their databases directly from the console. A restored database would bring a revoked device, token or node back (section 11.5).
 - **The keys helper names its own Version.** `morndo-keys` writes `process.execPath` and the absolute path of its `main.ts` into the helper command it gives Claude Code and Codex (`apps/connections/src/cli.ts`). Lanes keep calling that path after an update, and nothing running would show that Version as in use.
-- **The connections store has no service.** Its helper runs whenever an agent CLI needs a key, migrates the store on open, and exits 70, not 78, on a database from a newer version (`apps/connections/src/cli.ts`).
+- **The connections store has no service.** Its helper runs whenever an agent CLI needs a key, migrates the store on open, and exits 78, like the services, on a database from a newer version (`apps/connections/src/cli.ts`).
 
 ## 2. Goals and non-goals
 
@@ -581,8 +581,9 @@ ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n re
 
 - Each migration declares `compat: "additive"` or `"breaking"`. The floor of a database at schema N is the highest breaking migration at or below N.
 - The runner keeps the floor in a one-row table (`_morndo_schema`), written in the same transaction as `user_version`. SQLite "makes no use of the user-version itself" [U20], so the meaning is ours.
-- **Opening a newer database.** A service that knows schema K opens a database at schema N > K only if its floor is ≤ K. It then runs no migration and leaves alone what it doesn't know. Otherwise it refuses with exit 78, as now (RL8). The connections helper exits 70 on the same refusal today; PR 2 makes it 78 like the services.
+- **Opening a newer database.** A service that knows schema K opens a database at schema N > K only if its floor is ≤ K. It then runs no migration and leaves alone what it doesn't know. Otherwise it refuses with exit 78, as now (RL8). The connections helper takes 78 on the same refusal (PR 2), so the code means one thing wherever a store is opened; its launcher maps a child's 78 to 1, keeping 78 its own.
 - A database written before floors existed has no floor table, and counts as floor = its version: the old refusal, unchanged.
+- **The one-time line.** Floors protect only builds that know them. Every build from before floors refuses a database above its list whatever the floor row says — the version alone is its rule — so the first floor-aware build opens databases those builds cannot, and a rollback that crosses from a floor-aware build to an older one restores a Backup instead of opening (RL8). The downgrade-contract tests hold the real previous build to this: the runner as it is on the branch's base, loaded from git.
 - **The connections store stays additive.** It has no service to stop: its helper runs whenever an agent CLI needs a key, and migrates the store on open. A breaking migration there would leave lanes on the previous Version without keys after a rollback, so a test refuses one, and its Backup is taken with the online backup API while it may be in use; better-sqlite3 restarts such a backup when another connection writes meanwhile [U20].
 
 ### 11.2 What counts as additive

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { DatabaseBusy, DatabaseUnreadable, NotLocalDisk, RateLimiter, assertLocalDisk, errno, migrate, openPrivateDb, takeAll, type Migration } from "../src/index.ts";
 
-const M = (version: number): Migration => ({ version, name: `m${version}`, up: db => { db.exec(`CREATE TABLE t${version} (x)`); } });
+const M = (version: number): Migration => ({ version, name: `m${version}`, compat: "additive", up: db => { db.exec(`CREATE TABLE t${version} (x)`); } });
 const future = (found: number, known: number) => new Error(`future ${found} ${known}`);
 
 describe("migrate", () => {
@@ -19,7 +19,7 @@ describe("migrate", () => {
   });
   it("leaves the database as it was when a migration fails", () => {
     const db = new Database(":memory:");
-    expect(() => migrate(db, [M(1), { version: 2, name: "bad", up: () => { throw new Error("boom"); } }], future)).toThrow("boom");
+    expect(() => migrate(db, [M(1), { version: 2, name: "bad", compat: "additive", up: () => { throw new Error("boom"); } }], future)).toThrow("boom");
     expect(db.pragma("user_version", { simple: true })).toBe(0);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 't1'").all()).toEqual([]);
   });
