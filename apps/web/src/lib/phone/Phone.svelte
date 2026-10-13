@@ -223,10 +223,16 @@
     if (!verifiedFresh && !(await verify())) { briefNote = "Not sent: the passkey check didn't finish."; return; }
     await session.retry(r.key, r.retry.id, r.retry.body, r.retry.label, r.retry.seen, r.retry.requestId);
   }
-  // The passkey retry, from the sheet: the same answer with a new request id.
+  // The passkey retry, from the sheet: the same answer with a new request id. Only the pick for the decision
+  // and card key this sheet is showing — a confirm left over from another card must not resend that one.
   async function verifySheetAgain() {
     const p = lastSheetPick;
-    if (!p || !(await verify())) return;
+    const r = briefRefusal;
+    if (!p || p.id !== briefId || p.key !== r?.key) {
+      briefNote = "Not sent: this sheet isn't showing the answer that passkey check was for.";
+      return;
+    }
+    if (!(await verify())) return;
     await session.retry(p.key, p.id, p.body, p.label, p.seen);
   }
   function go(t: Tab) {

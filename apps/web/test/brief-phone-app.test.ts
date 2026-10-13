@@ -60,6 +60,11 @@ const triageAgain = item("d-1", {
   title: "Approve option B: extend the triage script today", shortTitle: "Triage",
   summary: "Approve option B: extend the triage script today",
 });
+// A second free brief, so its card has "Read the brief" and a passkey confirm of its own.
+const patch = item("d-3", {
+  title: "Approve option A: ship the patch today", shortTitle: "Patch window", summary: "Approve option A: ship the patch today",
+  brief: brief("Approve option A: ship the patch today"),
+});
 const other = item("ny-700", {
   brief: null, briefVersion: 0, options: [{ key: "tue", label: "Tuesday", detail: null }, { key: "thu", label: "Thursday", detail: null }],
   recommendation: "Tuesday", title: "Pick the weekday for the newsletter", shortTitle: "Newsletter send day", summary: "Pick the weekday for the newsletter",
@@ -83,10 +88,35 @@ const errorsOf = () => {
   return { errors, track: (tab: Page) => tab.on("pageerror", e => errors.push(e.message)) };
 };
 
-async function phone(track: (tab: Page) => void, path = "", withGate = false) {
+// The hub's step-up ceremony, faked at the browser edge: options and verify answer, and the authenticator
+// prompt resolves, so "Confirm with passkey and send" gets past the check and the test can see what it retries.
+function passkeyOk() {
+  const g = globalThis as unknown as { fetch: typeof fetch; navigator: { credentials: { get: (o: unknown) => Promise<unknown> } } };
+  const real = g.fetch.bind(globalThis);
+  g.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes("/api/stepup/options")) {
+      return new Response(JSON.stringify({
+        flowId: "flow-1",
+        options: { challenge: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", timeout: 60000, rpId: "127.0.0.1", userVerification: "preferred" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("/api/stepup/verify")) return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    return real(input, init);
+  };
+  const bytes = (n: number) => new Uint8Array(n);
+  g.navigator.credentials.get = async () => ({
+    id: "cred", rawId: bytes(8), type: "public-key", authenticatorAttachment: "platform",
+    getClientExtensionResults: () => ({}),
+    response: { authenticatorData: bytes(37), clientDataJSON: bytes(8), signature: bytes(8), userHandle: null },
+  });
+}
+
+async function phone(track: (tab: Page) => void, path = "", withGate = false, prelude?: () => void) {
   const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
   const tab = await context.newPage();
   track(tab);
+  if (prelude) await tab.addInitScript(prelude);
   if (withGate) await tab.addInitScript(answerGate);
   await tab.addInitScript(fakeFeed, { workers: [{ id: "pc.3fa2c1d0.0", name: "manager" }, { id: ALPHA, name: "alpha" }] });
   await tab.goto(`${web.url}${path}`);
@@ -99,8 +129,10 @@ async function phone(track: (tab: Page) => void, path = "", withGate = false) {
 }
 const push = (tab: Page, items: DecisionItem[]) =>
   tab.evaluate(x => (globalThis as unknown as FeedWin).__feedPush({ t: "decisions", items: x, ledger: { configured: false, ok: true, at: null } }), items);
-const queue = (tab: Page, answers: { status: number }[]) =>
+const queue = (tab: Page, answers: { status: number; body?: unknown }[]) =>
   tab.evaluate(x => { (globalThis as unknown as FeedWin).__answerReplies!.push(...x); }, answers);
+const STEP_UP = { status: 403, body: { error: "step_up" } };
+const WRONG_PICK = "Not sent: this sheet isn't showing the answer that passkey check was for.";
 const calls = (tab: Page) => tab.evaluate(() => (globalThis as unknown as FeedWin).__answerCalls ?? []);
 const runDone = (tab: Page) => tab.evaluate(() => (JSON.parse(localStorage.getItem("morndo.catchup.run") ?? "{}") as { run?: { done?: Record<string, string> } }).run?.done ?? {});
 
@@ -199,6 +231,53 @@ describe("the phone around the brief sheet", () => {
     await tab.locator('li[data-row="d:d-2"] .err')
       .getByText("You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here.")
       .waitFor({ timeout: 2_500 });
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("retries a passkey confirm only for the decision and card the sheet is showing", { timeout: 60_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true, passkeyOk);
+    await push(tab, [release, patch]);
+    await queue(tab, [STEP_UP, STEP_UP, { status: 200 }]);
+    await tab.locator("button.banner.you").click();
+    await tab.locator('[data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    await dialog.locator("button.back").click();
+    await expect.poll(() => dialog.count(), { timeout: 3_000 }).toBe(0);
+    await tab.getByRole("button", { name: "Later" }).click();                 // d-2 is set aside; the patch is on top
+    await tab.getByRole("button", { name: "Ship today" }).click();
+    await tab.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    await tab.locator('[data-open-brief="d-3"]').click();
+    await dialog.waitFor();
+    const before = (await calls(tab)).length;
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
+    await dialog.getByText(WRONG_PICK).waitFor({ timeout: 3_000 });
+    const posts = await calls(tab) as { url: string }[];
+    expect(posts).toHaveLength(before);                                      // nothing new: not d-3, and not d-2 again
+    expect(posts.filter(p => p.url.includes("/d-2/"))).toHaveLength(1);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("says why a passkey confirm does nothing when the sheet never started that answer", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true);
+    await push(tab, [release]);
+    await queue(tab, [STEP_UP]);
+    await tab.locator("button.banner.you").click();
+    await tab.getByRole("button", { name: "Ship today" }).click();
+    await tab.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    await tab.locator('[data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    const before = (await calls(tab)).length;
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
+    await dialog.getByText(WRONG_PICK).waitFor({ timeout: 3_000 });
+    expect(await calls(tab)).toHaveLength(before);
     expect(errors).toEqual([]);
     await context.close();
   });
