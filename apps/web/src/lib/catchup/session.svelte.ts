@@ -4,6 +4,7 @@
 // never on the hub (C6): reading grants nothing, and "later" only shapes this device's stack and dashboard.
 import { catchUpCards, decisionKey, mutedWithUpdates, type Card } from "@morndo/domain";
 import type { LiveFeed } from "../feed.svelte.ts";
+import { PASSKEY_UNFINISHED, STEP_UP_CHANGED, STEP_UP_MISMATCH, STILL_OFFLINE } from "../desktop/decisions.ts";
 import { MAY_HAVE_GONE, type AnswerOutcome } from "./answer.ts";
 import {
   answered, answerFailed, answerNow, bringToTop, current, dueAnswer, dueMarks, end, ended, markAllRead, markRead, moveOn, newRun, parseRun,
@@ -19,8 +20,8 @@ export const RESUME_MS = 30 * 60_000;
 // The answer's outcome and the may-have-gone codes live with the answer POST (answer.ts); re-exported for catch-up's card.
 export { MAY_HAVE_GONE, type AnswerOutcome };
 
-// Why the card's answer didn't go, and (for an unknown outcome) what "Try again" sends: the same request id, so the hub
-// types it at most once (review of PR #7, finding 6).
+// Why the card's answer didn't go, and the answer to send again: "Try again" reuses the request id (an unknown
+// outcome, typed at most once; review of PR #7, finding 6), and a passkey confirm sends the same body with a new id.
 export type Retry = { id: string; body: Body; label: string; seen: string; requestId: string };
 export type Refusal = { key: string; code: string; text: string; retry?: Retry };
 
@@ -47,6 +48,8 @@ export class CatchUpSession {
   #clock: () => number;
   #timer: ReturnType<typeof setInterval> | null = null;
   #lastStep = 0;
+  // One passkey confirm at a time: a second tap while it runs does not start another prompt or another send.
+  #stepUpBusy = false;
 
   // Every decision that waits now, in order (C1, C3), and the number on Today's tab.
   cards: Card[] = $derived.by(() => catchUpCards({
@@ -158,6 +161,37 @@ export class CatchUpSession {
   }
   // The answer the hub refused for step-up, once more after the passkey check (no new window: he just confirmed it).
   // Once more at once: after the passkey check, or "Try again" after an unknown outcome (the same request id then).
+  // The one passkey confirm: the refusal's own answer, checked against the live ask, the card on top and the
+  // connection. A reason when it cannot be sent (the card and the sheet show that); null once it has gone.
+  async retryStepUp(feed: { status: string; decisions: readonly { id: string; version: string }[] }, verify: () => Promise<boolean>): Promise<string | null> {
+    if (this.#stepUpBusy) return null;
+    this.#stepUpBusy = true;
+    try {
+      // The version, the card and the connection, before the prompt and again after it: any of them can move while it is up.
+      const blocked = (): string | null => {
+        const r = this.refusal;
+        const again = r?.retry;
+        const top = this.top;
+        if (!r || !again || r.code !== "step_up" || top?.kind !== "decision" || r.key !== top.key) return STEP_UP_MISMATCH;
+        const live = feed.decisions.find(d => d.id === again.id)?.version ?? "";
+        if (live !== again.seen) return STEP_UP_CHANGED;
+        if (feed.status !== "live" || navigator.onLine === false) return STILL_OFFLINE;
+        return null;
+      };
+      const before = blocked();
+      if (before) return before;
+      if (!(await verify())) return PASSKEY_UNFINISHED;
+      const after = blocked();
+      if (after) return after;
+      const again = this.refusal?.retry;
+      if (!again || !this.refusal) return STEP_UP_MISMATCH;
+      await this.retry(this.refusal.key, again.id, again.body, again.label, again.seen);
+      return null;
+    } finally {
+      this.#stepUpBusy = false;
+    }
+  }
+
   async retry(key: string, id: string, body: Body, label: string, seen: string, requestId: string = crypto.randomUUID()) {
     this.refusal = null;
     if (!this.run) return;
@@ -211,7 +245,8 @@ export class CatchUpSession {
       else {
         this.run = answerFailed(this.run);
         const retry = { id: a.id, body: a.body, label: a.label, seen: a.seen, requestId: a.requestId };
-        this.refusal = { key: a.key, code: outcome.code, text: outcome.text, ...(MAY_HAVE_GONE.has(outcome.code) ? { retry } : {}) };
+        const again = MAY_HAVE_GONE.has(outcome.code) || outcome.code === "step_up";
+        this.refusal = { key: a.key, code: outcome.code, text: outcome.text, ...(again ? { retry } : {}) };
       }
       this.#lastStep = this.#clock();
       this.#changed();

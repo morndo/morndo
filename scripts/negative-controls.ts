@@ -869,7 +869,7 @@ export const CONTROLS: Control[] = [
   { id: "b1-v7-every-refusal-ends-doubt", task: "B1-V7", file: "apps/web/src/lib/catchup/answer.ts",
     find: "Object.hasOwn(REFUSALS, code) && !STILL_IN_DOUBT.has(code)", replace: "true",
     run: ["apps/web/test/catchup-answer.test.ts"], expect: "keeps the doubt on no answer" },
-  { id: "b1-v7-card-drops-doubt", task: "B1-V7", file: "apps/web/src/lib/desktop/DecisionCard.svelte",
+  { id: "b1-v7-card-drops-doubt", task: "B1-V7", file: "apps/web/src/lib/desktop/answer-session.svelte.ts",
     find: " : doubt && !endsDoubt(problem.code) ? doubt : null;", replace: " : null;",
     run: ["apps/web/test/answer-in-doubt-web.test.ts"], expect: "still Check again on the same request id" },
   { id: "b1-v8-check-again-drops-doubt", task: "B1-V8", file: "apps/web/src/lib/phone/quick.ts",
@@ -1000,6 +1000,19 @@ export const CONTROLS: Control[] = [
   { id: "v45-inbox-mtime-age-kept", task: "8", file: "apps/node-agent/src/ops/upload-inbox.ts",
     find: "return Math.abs(wallSince - monoSince) > CLOCK_STEP_MS ? monoSince : now - mtimeMs;", replace: "return monoSince;",
     run: ["apps/node-agent/test/transcript-file-ops.test.ts"], expect: "expired" },
+  // ---- ADR-0023 (decision briefs): the lint's key rules and the wire's fallback, each with the test that notices it gone.
+  { id: "adr23-headline-names-option", task: "ADR-0023", file: "packages/domain/src/brief.ts",
+    find: "  if (recommend && headline !== null) {", replace: "  if (false) {",
+    run: ["packages/domain/test/brief.test.ts"], expect: "headline_option" },
+  { id: "adr23-money-pattern", task: "ADR-0023", file: "packages/domain/src/brief.ts",
+    find: "return MONEY.test(text);", replace: "return false;",
+    run: ["packages/domain/test/brief.test.ts"], expect: "money_without_assumption" },
+  { id: "adr23-hub-ttl", task: "ADR-0023", file: "packages/domain/src/escalation.ts",
+    find: "export const HUB_TTL_MS = 7 * 24 * 3_600_000;", replace: "export const HUB_TTL_MS = 0;",
+    run: ["packages/domain/test/brief.test.ts"], expect: "overdue is not expired" },
+  { id: "adr23-wire-brief-null", task: "ADR-0023", file: "packages/protocol/src/feed.ts",
+    find: "  brief: orElse(z.nullable(DecisionBriefSchema), null),", replace: "  brief: z.nullable(DecisionBriefSchema),",
+    run: ["packages/protocol/test/brief.test.ts"], expect: "never a half brief" },
   // ---- PR 1 (releases and updates, docs/design/updates/README.md §15, row 1): one guard per invariant in the
   // domain, each with the negative-control history in packages/domain/test/releases-invariants.test.ts that must
   // notice it gone.

@@ -5,9 +5,8 @@
 // - everything else behind "More": the long text, the details, a link, what happens without an answer.
 // Never the raw text as the headline.
 import type { DecisionItem } from "../desktop/decisions.ts";
+import { clause } from "@morndo/domain";
 import { heroTime } from "./horizon.ts";
-
-export const TITLE_MAX = 60;
 
 export type Brief = {
   title: string;
@@ -25,24 +24,8 @@ export type Action =
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
-// A title from a long text: its first clause, up to a full stop or "?" or "!" followed by a space, a colon, a
-// semicolon or an opening bracket ("recipes.index" or "www.example.com" don't end it); at most 60 characters, cut at a
-// word. `rest`: what isn't in the title, or the whole text when the title had to be cut.
-export function clause(text: string): { title: string; rest: string | null } {
-  const t = oneLine(text);
-  const m = /^(.+?)(?:([?!])(?:\s|$)|\.(?:\s|$)|:\s|;\s|\s\()/.exec(t);
-  const head = m ? `${m[1] ?? ""}${m[2] ?? ""}`.trim() : t;
-  const restAt = m ? (m[0].endsWith("(") ? m[0].length - 1 : m[0].length) : t.length;
-  if (head.length <= TITLE_MAX) {
-    const rest = t.slice(restAt).trim();
-    return { title: head, rest: rest || null };
-  }
-  const cut = head.slice(0, TITLE_MAX - 1);
-  const word = cut.lastIndexOf(" ");
-  return { title: `${(word > 20 ? cut.slice(0, word) : cut).replace(/[\s,.;:–-]+$/, "")}…`, rest: t };
-}
-
-const httpLink = (s: string | null) => (s && /^https?:\/\//i.test(s) ? s : null);
+// A link is only ever http(s): the sheet draws it for a brief-backed ask (its card hides More).
+export const httpLink = (s: string | null) => (s && /^https?:\/\//i.test(s) ? s : null);
 
 // "due 16:00", "due tomorrow"; once its time has passed (as Horizon's overdue: at or before now), "overdue since 08:00"
 // or "overdue since Sat", in words and not only in colour.
@@ -53,10 +36,12 @@ export function due(at: number, now: number): string {
 }
 
 export function brief(d: DecisionItem, now: number): Brief {
-  const own = d.shortTitle ? oneLine(d.shortTitle) : null;
+  // A short form of whitespace only is no short form (ADR-0023 §4.4, as the domain's compact card): the title's
+  // first clause takes over, never a blank row.
+  const own = d.shortTitle?.trim() ? oneLine(d.shortTitle) : null;
   const c = own ? null : clause(d.title);
   const title = own ?? c?.title ?? d.title;
-  const sentence = d.summary ? oneLine(d.summary) : null;
+  const sentence = d.summary?.trim() ? oneLine(d.summary) : null;
   // The long text behind More: all of it when the list gave a title, else what the title left out; never a repeat.
   const long = own ? (oneLine(d.title) === own || oneLine(d.title) === sentence ? null : d.title.trim()) : c?.rest ?? null;
   const text = [long, d.details?.trim() || null].filter((x): x is string => !!x).join("\n\n") || null;
