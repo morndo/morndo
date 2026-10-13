@@ -13,7 +13,7 @@ import { ORIGIN, startInProcessHub, type InProcessHub } from "./inprocess-hub.ts
 import { frameText } from "./http-crash-fixture.ts";
 import { Store } from "../src/adapters/store.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
-import { EscalationService, type Watch } from "../src/application/escalation-service.ts";
+import { EscalationService, answerKey, type Watch } from "../src/application/escalation-service.ts";
 import type { Authenticated } from "../src/application/access-service.ts";
 
 const NOW = new Date(2026, 9, 1, 12).getTime();
@@ -217,5 +217,42 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.seenBy(endpointId("desk")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");    // its row, its answer
     expect(s.seenBy(endpointId("phone")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
     expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("desk"));
+  });
+
+  // A tap the hub itself typed whose row nothing can settle (round 2.1): the port threw after the paste, the row keeps
+  // "started" with no store, and this hub has no node to ask — no repeat can ever learn more, and no answer path is
+  // left to record it. The tap in the pane is the ask's only record: it settles the ask, as it did before the pane-tap
+  // filter, instead of the ask staying open with every answer refused for the row's 24 hours.
+  it("the hub's own tap settles the ask when its row can never be settled", async () => {
+    let s: EscalationService;
+    const send = async () => {
+      manager.push({ id: "m-tap", at: now, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] hold (Hold for a day)" });   // pasted; then the port threw
+      throw new Error("the pane connection threw after the paste");
+    };
+    s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now, send,
+    });
+    s.poll();
+    expect(await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    expect(store.send(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "hold" })))
+      .toMatchObject({ state: "started", store: null });                                        // nothing can settle it
+    s.poll();                                                                                    // no answer in flight any more
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
+    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+  });
+
+  // The same for a hub that stopped while typing (round 2.1): the row survives the restart "started", with no store,
+  // nothing in flight, and the pane already holds the pasted tap.
+  it("a tap left in the pane by a hub that stopped mid-type settles the ask", () => {
+    store.db.prepare("INSERT INTO sends (key, state, at, worker_id) VALUES (?, 'started', ?, '%0')")
+      .run(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "ship" }), T0 - 1000);
+    manager.push({ id: "m-tap", at: T0, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] ship (Ship it)" });
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => ({ problem: null, typedAt: 0 }),
+    });
+    s.poll();
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
+    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
   });
 });

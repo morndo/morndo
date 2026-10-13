@@ -496,9 +496,13 @@ export class EscalationService {
     // in flight, in doubt or done — is that answer arriving in the pane, not an answer from elsewhere. Reported as a
     // sighting it would settle the ask as "elsewhere" naming no endpoint, and the answer's own recording, which names
     // the endpoint that accepted it, would be refused as a second answer (E8). So it is no sighting: the answer path
-    // records it (review of PR #55).
+    // records it (review of PR #55). One row nothing can ever record — "started", with no store to ask a node about,
+    // and no answer of this ask in flight here (the hub stopped while typing it, or the port threw after the paste and
+    // no node can be asked) — would leave that tap as the ask's only record: it settles the ask, as it did before the
+    // filter (round 2 of the PR #55 review).
     for (const [id, t] of taps) {
-      if (this.#store.answersOfAsk(`answer:${id}:`).some(r => r.key.endsWith(`:${choicePart({ kind: "option", key: t.key })}`))) taps.delete(id);
+      const own = this.#store.answersOfAsk(`answer:${id}:`).find(r => r.key.endsWith(`:${choicePart({ kind: "option", key: t.key })}`));
+      if (own && (this.#inFlight.has(id) || own.state === "done" || own.store !== null)) taps.delete(id);
     }
     this.#paneTaps = taps;
     const items = new Map<string, LedgerItem>((ledger?.ok ? ledger.items : []).map(i => [i.id, i]));
