@@ -192,6 +192,17 @@ describe("transcription service", () => {
     }
   });
 
+  it("answers the row this request made, not the first live row that shares its id", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    await svc.request(body("v1", "hang"));
+    expect(await until(() => svc.get("v1")?.state === "running", 2000)).toBe(true);
+    const made = await svc.request(body("v1", "b"));        // the same id on another recording is its own attempt
+    expect(made.ok && made.value).toMatchObject({ id: "v1", recording: { kind: "upload", id: "b" }, state: "queued", position: 1 });
+    svc.close();
+  });
+
   it("the same recording and language returns the attempt already in flight", async () => {
     const gate = new Gate();
     const { svc } = service(memory(), gate);
