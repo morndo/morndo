@@ -26,7 +26,8 @@ describe("agent database", () => {
     expect(a.db.pragma("fullfsync", { simple: true })).toBe(1);               // macOS's full flush for what is synced
     expect(a.db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
     const tables = (a.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map(r => r.name);
-    expect(tables).toEqual(["done_keys", "job_deliveries", "jobs", "meta", "relay_files", "store_seq", "stream", "token_cache"]);
+    expect(tables).toEqual(["_morndo_schema", "done_keys", "job_deliveries", "jobs", "meta", "relay_files", "store_seq", "stream", "token_cache"]);
+    expect(a.db.prepare("SELECT floor FROM _morndo_schema WHERE id = 1").get()).toEqual({ floor: 0 });   // no breaking migration yet (§11.1)
     expect(a.db.prepare("SELECT one, seq FROM store_seq").all()).toEqual([{ one: 1, seq: 0 }]);
     expect(a.streamId).toMatch(UUID);
     expect(statSync(path).mode & 0o777).toBe(0o600);
@@ -149,6 +150,7 @@ describe("agent database", () => {
     openAgentDb(path).close();
     const raw = new Database(path);
     raw.pragma("user_version = 99");
+    raw.exec("UPDATE _morndo_schema SET floor = 99");       // a breaking newer agent raised the floor (§11.1)
     raw.close();
     expect(() => openAgentDb(path)).toThrow(DatabaseFromFuture);
     const check = new Database(path);

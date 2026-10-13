@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import { fleetRecord } from "@morndo/domain";
 import { ERROR_EXECUTED, LIMITS, type AgentMessage, type OpError } from "@morndo/protocol";
 import { healthProbe, tmuxAdapter } from "@morndo/node-ops";
+import { Flight, HoldWatch, holdFile, productVersion } from "@morndo/service-kit";
 import { ConfigError, isOpName, jobLimits, jobsConfigProblem, jobTimeouts, type AgentConfig } from "./config.ts";
 import { FleetConnection, type ReqMessage } from "./conn/connection.ts";
 import type { RetryOptions } from "./conn/retry.ts";
@@ -61,6 +62,8 @@ export type AgentOptions = {
   healthMs?: number;
   statusMs?: number;
   diskBudgetBytes?: number;                                // LIMITS.spoolMaxBytes; a test sets a smaller one
+  flight?: Flight;                                        // a test holds one item so stop's wait can be seen
+  stopWaitMs?: number;                                    // how long stop waits for in-flight work; default 10s
 };
 export type RunningAgent = {
   instanceId: string;
@@ -93,8 +96,16 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   const budget = o.diskBudgetBytes ?? LIMITS.spoolMaxBytes;
   const held = (): number => files.bytes() + ops.inbox.bytes();
   const room = (): number => budget - spool.bytes() - held();
+  const flight = o.flight ?? new Flight();
+  const watch = new HoldWatch({
+    path: holdFile(config.home),
+    service: "node",
+    onStale: message => log.warn(message),
+  });
+  watch.start();
+  let draining = false;
   const ops = createOpsRuntime({
-    config, db: adb.db, log, hooks, room: () => room(),
+    config, db: adb.db, log, hooks, room: () => room(), held: () => watch.held || draining, flight,
     ...(hooks.dropAfterStarted !== undefined ? { afterStarted: dropOnce(hooks.dropAfterStarted, () => conn?.drop()) } : {}),
   });
   const spool: Spool = new Spool(adb.db, streamId, { failWrites: hooks.spoolFail === true, maxBytes: budget, held: cachedFor(1000, held) });
@@ -116,6 +127,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   const status = (): AgentStatus => ({
     ...(conn?.status() ?? { state: "stopped", since: Date.now(), connEpoch: null, lastClose: null, retryInMs: null }),
     node: config.node, instanceId, pid: process.pid, spoolDepth: spool.depth(), drops: spool.drops,
+    version: productVersion(), ready: true,
     ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
   });
   const saveStatus = () => {
@@ -143,6 +155,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       windowOf: windowResolver({ windowOfPane: p => ops.inventory.windowOfPane(p), sessions }),
     });
   } catch (e) {
+    watch.stop();
     adb.close();
     throw e;
   }
@@ -171,6 +184,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       ),
     });
   } catch (e) {
+    watch.stop();
     await relay.close();
     adb.close();
     throw e;
@@ -270,6 +284,9 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   return {
     instanceId, get streamId() { return streamId; }, relayPort: relay.port, inventory: ops.inventory, spool, status,
     stop: async () => {
+      draining = true;
+      await flight.idle(o.stopWaitMs ?? 10_000);
+      watch.stop();
       for (const t of timers) clearInterval(t);
       events.stop();
       jobs.close();

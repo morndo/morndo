@@ -16,7 +16,8 @@ describe("fleet.db migrations", () => {
   it("a fresh database gets every table, WAL, synchronous=FULL and foreign keys", () => {
     const db = openFleetDb(join(tempDir(), "data", "fleet.db"));
     expect(db.pragma("user_version", { simple: true })).toBe(LATEST);
-    expect(tables(db)).toEqual(["audit", "dead_letters", "deliveries", "hook_unrouted", "job_alert_since", "job_alerts", "job_routes", "job_unnoticed", "jobs", "join_codes", "lanes", "nodes", "outbox", "store_seqs", "stream_hwm"]);
+    expect(tables(db)).toEqual(["_morndo_schema", "audit", "dead_letters", "deliveries", "hook_unrouted", "job_alert_since", "job_alerts", "job_routes", "job_unnoticed", "jobs", "join_codes", "lanes", "nodes", "outbox", "store_seqs", "stream_hwm"]);
+    expect(db.prepare("SELECT floor FROM _morndo_schema WHERE id = 1").get()).toEqual({ floor: 7 });   // migration 7 is the newest breaking one (§11.1)
     expect(columns(db, "job_unnoticed")).toEqual(["node", "id"]);
     expect(columns(db, "job_alerts")).toEqual(["node", "id"]);
     expect(columns(db, "job_alert_since")).toEqual(["at"]);
@@ -85,7 +86,7 @@ describe("fleet.db migrations", () => {
 
   it("a failing migration rolls back the whole run", () => {
     const db = new Database(join(tempDir(), "fleet.db"));
-    const failing: Migration[] = [...MIGRATIONS, { version: LATEST + 1, name: "fails", up: d => { d.exec("CREATE TABLE half (x)"); throw new Error("boom"); } }];
+    const failing: Migration[] = [...MIGRATIONS, { version: LATEST + 1, name: "fails", compat: "additive", up: d => { d.exec("CREATE TABLE half (x)"); throw new Error("boom"); } }];
     expect(() => migrate(db, failing)).toThrow(/boom/);
     expect(db.pragma("user_version", { simple: true })).toBe(0);
     expect(tables(db)).toEqual([]);

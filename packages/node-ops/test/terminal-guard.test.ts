@@ -22,7 +22,7 @@ beforeAll(() => {
   oldPath = process.env.PATH;
   process.env.PATH = `${dir}:${oldPath}`;
 });
-afterAll(() => { process.env.PATH = oldPath; t.kill(); rmSync(dir, { recursive: true, force: true }); });
+afterAll(async () => { process.env.PATH = oldPath; await t.kill(); rmSync(dir, { recursive: true, force: true }); });
 
 describe("a guarded frame", () => {
   it("is one tmux spawn, and the frame when the session and the server stamp are the lane's", async () => {

@@ -10,7 +10,8 @@
     "@types/better-sqlite3": "^9.6.0"
   },
   "bin": {
-    "morndo-keys": "./src/main.ts"
+    "morndo-keys": "./src/main.ts",
+    "morndo-secrets": "./src/secrets-main.ts"
   },
   "exports": {
     "./compose": "./src/compose.ts",
