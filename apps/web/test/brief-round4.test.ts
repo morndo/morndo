@@ -60,6 +60,18 @@ async function doubt() {
   await tab.evaluate(() => { (globalThis as { __problem?: { code: string; text: string } }).__problem = { code: "uncertain", text: "May have been sent." }; });
 }
 
+async function holdAnswer() {
+  await tab.evaluate(() => {
+    let go: () => void = () => {};
+    (globalThis as { __answerGate?: Promise<void>; __releaseAnswer?: () => void }).__answerGate = new Promise<void>(r => { go = r; });
+    (globalThis as { __releaseAnswer?: () => void }).__releaseAnswer = () => go();
+  });
+}
+
+async function releaseAnswer() {
+  await tab.evaluate(() => (globalThis as { __releaseAnswer?: () => void }).__releaseAnswer?.());
+}
+
 describe("round 4: a brief gap keeps an answer that must not be sent twice", () => {
   it("an answer in doubt keeps its request id when the decision returns", async () => {
     await ready();
@@ -142,5 +154,25 @@ describe("round 4: a brief gap keeps an answer that must not be sent twice", () 
     const back = tab.locator('[data-decision="d-gap"]');
     await back.getByRole("button", { name: "Something else…" }).waitFor();
     expect(await back.getByRole("textbox", { name: "Your answer for the manager" }).count()).toBe(0);
+  }, 60_000);
+});
+
+describe("round 4: a restate during send keeps the sent confirmation", () => {
+  it("shows Sent for the version that was posted, not the new answer buttons", async () => {
+    await ready();
+    await holdAnswer();
+    await show([tap("d-race", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-race"]');
+    await card.getByRole("button", { name: "Extend the triage script" }).click();
+    await card.getByRole("button", { name: "Send answer" }).click();
+    await tab.waitForFunction(() => ((globalThis as { __answers?: unknown[] }).__answers?.length ?? 0) >= 1);
+    await show([tap("d-race", "v2", "Buy a hosted add-on")]);
+    await releaseAnswer();
+    await show([tap("d-race", "v2", "Buy a hosted add-on")]);
+    await card.getByText(/^Sent\./).waitFor();
+    expect(await card.getByRole("button", { name: "Buy a hosted add-on", exact: true }).count()).toBe(0);
+    await card.getByRole("button", { name: "Show the new version" }).click();
+    await card.getByRole("button", { name: "Buy a hosted add-on", exact: true }).waitFor();
+    expect(await card.getByText(/^Sent\./).count()).toBe(0);
   }, 60_000);
 });

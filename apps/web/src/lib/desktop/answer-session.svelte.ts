@@ -22,6 +22,9 @@ export class AnswerSession {
   asking = $state(false);
   asked = $state(false);
   askError = $state<string | null>(null);
+  // A restate that arrived while this send was in flight. `sent` stays on the version that was posted
+  // until the new version is shown; a later push must not clear it and offer another answer.
+  #keepSent = false;
 
   constructor(item: DecisionItem) { this.apply(openSession(item)); }
 
@@ -45,7 +48,7 @@ export class AnswerSession {
   // `sent` belongs to the version it was sent for. A re-ask (same id, new version) is a new question: a closed brief
   // follows it, and an open brief drops `sent` only once that version is shown.
   bind(live: DecisionItem, hold: boolean) {
-    if (this.sent && live.version !== this.shown.version && !hold) this.sent = false;
+    if (this.sent && live.version !== this.shown.version && !hold && !this.#keepSent) this.sent = false;
     const follow = !hold && !this.holdingAnswer;
     if (this.live !== live) this.live = live;
     if (follow && this.shown !== live) this.shown = live;
@@ -64,7 +67,7 @@ export class AnswerSession {
   }
 
   pick(label: string, body: AnswerBody) { this.apply(pick(this.snapshot(), label, body)); }
-  showNew() { this.apply(showNew(this.snapshot(), this.live)); }
+  showNew() { this.#keepSent = false; this.apply(showNew(this.snapshot(), this.live)); }
   back() { this.apply(back(this.snapshot())); }
   get stale() { return this.live.version !== this.shown.version; }
   get seen() { return this.shown.version; }
@@ -86,8 +89,11 @@ export class AnswerSession {
       return;
     }
     // The POST was accepted. The feed may already show the item answered; that is this answer, not a close.
+    // A restate that landed during the request does not undo this: sent stays on the version that was posted.
+    const sentFor = this.seen;
     this.again = null;
     this.sent = true;
+    this.#keepSent = this.live.version !== sentFor;
     this.mode = "idle";
     this.picked = null;
     this.words = "";

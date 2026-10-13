@@ -149,6 +149,8 @@
     </div>
   {:else if item.status === "expired"}
     <div class="state done" role="status"><Hourglass size={18} /><p>Expired: nobody answered within a day.</p></div>
+  {:else if session.sent}
+    <div class="state ok" role="status"><CircleCheckBig size={18} /><p>Sent. The manager gets it as your decision and acts on it.</p></div>
   {:else if item.answerBy === "screen"}
     {#if item.options.length}
       <ul class="readonly">
