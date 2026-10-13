@@ -112,6 +112,27 @@ const plain = item("ny-400", {
   ],
   recommendation: "Tuesday",
 });
+// A brief-backed card the hub would refuse an answer for (its list can't be read).
+const refused = item("d-3", { answerable: "cant_check" });
+// Answered here, delivered: the footer says where the answer stands.
+const answeredHere = item("d-4", {
+  status: "answered",
+  decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW - 1_000, via: "here", endpointId: null, sessionId: null, delivery: { state: "delivered", at: NOW - 500 } },
+});
+// The same answer given on another device.
+const answeredElsewhere = item("d-5", {
+  status: "answered",
+  decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW - 1_000, via: "elsewhere", endpointId: null, sessionId: null },
+});
+// Closed without him: the sheet says it is no longer open.
+const settled = item("d-6", { status: "settled", settledAt: NOW - 1_000, resolution: null });
+// A plain ask with no options and no brief: the footer's only way in is his own words.
+const wordsOnly = item("ny-401", {
+  brief: null, briefVersion: 0, options: [], answerBy: "words", recommendation: null,
+  title: "Name the release", shortTitle: "Release name", summary: "Name the release",
+});
+// A brief that keeps the asker's own message and the list's link.
+const withAsker = item("d-7", { context: "The manager's button said: **ship it**", contextKind: "markdown", link: "https://example.com/ledger-row" });
 
 const noop = "() => {}";
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
@@ -120,28 +141,22 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   <div id="spend"></div>
   <div id="free"></div>
   <div id="plain"></div>
+  <div id="refused"></div>
   <div id="today"></div>
 </div>
 <script type="module">
   import "@morndo/brand/tokens.css";
   import "/src/lib/phone/phone.css";
   import { mount } from "svelte";
-  import { AnswerSession } from "/src/lib/desktop/answer-session.svelte.ts";
-  import BriefSheet from "/src/lib/phone/BriefSheet.svelte";
+  import SheetHarness from "/test/BriefSheetHarness.svelte";
   import DecisionCard from "/src/lib/phone/DecisionCard.svelte";
   import Today from "/src/lib/phone/Today.svelte";
   import { QuickAnswers } from "/src/lib/phone/quick.svelte.ts";
   const spend = ${JSON.stringify(spend)};
   const free = ${JSON.stringify(free)};
   const plain = ${JSON.stringify(plain)};
-  const session = new AnswerSession(spend);
-  window.__picks = [];
-  mount(BriefSheet, { target: document.getElementById("sheet"), props: {
-    item: spend, now: ${NOW}, session, answering: null, note: null, verifiedFresh: true,
-    onPick: async (body, label) => { window.__picks.push({ body, label }); return true; },
-    onUndo() {},
-    onAskBrief: async () => ({ ok: true }),
-  } });
+  const refused = ${JSON.stringify(refused)};
+  mount(SheetHarness, { target: document.getElementById("sheet"), props: { initial: spend, now: ${NOW} } });
   const card = (id, item) => mount(DecisionCard, { target: document.getElementById(id), props: {
     item, primed: true, index: 1, of: 1, now: ${NOW}, answering: null, refusal: null, note: null,
     onPick: async () => false, onUndo: ${noop}, onVerifyAgain: ${noop}, onTryAgain: ${noop}, onScreen: ${noop}, onNext: ${noop},
@@ -150,6 +165,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
   card("spend", spend);
   card("free", free);
   card("plain", plain);
+  card("refused", refused);
   const quick = new QuickAnswers(async () => ({ ok: true }));
   const feed = { decisions: [spend, free, plain], workers: [], status: "live", primed: true, caughtUpAt: null };
   const catchup = { later: {}, cards: [], count: 0 };
@@ -221,6 +237,143 @@ describe("the phone brief sheet", () => {
     await freeRow.getByRole("button", { name: "Ship today" }).waitFor();
     await freeRow.getByRole("button", { name: "Read the brief" }).waitFor();
     await today.locator('li[data-row="d:ny-400"]').getByRole("button", { name: "Decide now" }).waitFor();
+    await context.close();
+  }, 60_000);
+});
+
+// What the sheet and the cards say once an answer was refused, went through, or can't be given: the states review
+// round 1 pinned for PR 4's phone sheet. Each test drives the harness's state from outside.
+describe("the sheet and cards report what happened to an answer", () => {
+  const setItem = (t: Page, v: DecisionItem) => t.evaluate(x => (globalThis as unknown as { __setItem: (i: DecisionItem) => void }).__setItem(x), v);
+  const setRefusal = (t: Page, v: { key: string; code: string; text: string }) =>
+    t.evaluate(x => (globalThis as unknown as { __setRefusal: (r: { key: string; code: string; text: string }) => void }).__setRefusal(x), v);
+  const counts = (t: Page) => t.evaluate(() => (globalThis as unknown as { __counts: () => { verifyAgain: number; tryAgain: number } }).__counts());
+
+  it("counts the answer window down from a live clock, not the sheet's mount time", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    await tab.locator("dialog.sheet").waitFor();
+    await tab.waitForTimeout(1_200);                                   // the sheet has been open past a tick
+    const said = await tab.evaluate(() => new Promise<string>(resolve => {
+      (globalThis as unknown as { __setAnswering: (a: { label: string; sending: boolean; commitAt: number }) => void })
+        .__setAnswering({ label: "Extend the triage script", sending: false, commitAt: Date.now() + 5_000 });
+      requestAnimationFrame(() => resolve(document.querySelector("dialog.sheet footer .note")?.textContent ?? ""));
+    }));
+    expect(said).toBe("Goes in 5 s.");
+    await context.close();
+  }, 60_000);
+
+  it("says a refused answer in the sheet, with the passkey retry and Try again", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await dialog.waitFor();
+    await setRefusal(tab, { key: "d:d-1", code: "step_up", text: "Not sent: confirm with your passkey, then it goes." });
+    expect(await dialog.getByRole("alert").getByText("Not sent: confirm with your passkey, then it goes.").count()).toBe(1);
+    const confirm = dialog.getByRole("button", { name: "Confirm with passkey and send" });
+    expect(await confirm.count()).toBe(1);
+    await confirm.click();
+    expect((await counts(tab)).verifyAgain).toBe(1);
+    await setRefusal(tab, { key: "d:d-1", code: "unknown", text: "Not sure it went: the hub didn't answer. If it arrived, this card says so; Try again sends the same answer, and it is typed at most once." });
+    const again = dialog.getByRole("button", { name: "Try again" });
+    expect(await again.count()).toBe(1);
+    await again.click();
+    expect((await counts(tab)).tryAgain).toBe(1);
+    await context.close();
+  }, 60_000);
+
+  it("says where an answered or closed decision stands", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await dialog.waitFor();
+    await tab.evaluate(() => (globalThis as unknown as { __setRunAnswered: (v: boolean) => void }).__setRunAnswered(true));
+    expect(await dialog.getByText("Sent. The manager gets it as your decision and acts on it.").count()).toBe(1);
+    await tab.evaluate(() => (globalThis as unknown as { __setRunAnswered: (v: boolean) => void }).__setRunAnswered(false));
+    await setItem(tab, answeredHere);
+    expect(await dialog.getByText("Delivered. You chose Extend the triage script.").count()).toBe(1);
+    await setItem(tab, answeredElsewhere);
+    expect(await dialog.getByText("Answered on another device: “Extend the triage script”.").count()).toBe(1);
+    await setItem(tab, settled);
+    expect(await dialog.getByText("This decision is no longer open.").count()).toBe(1);
+    expect(await dialog.getByRole("button", { name: "Back" }).count()).toBe(1);
+    await context.close();
+  }, 60_000);
+
+  it("says why an unanswerable decision can't be answered, and disables its choices", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await dialog.waitFor();
+    await setItem(tab, refused);
+    expect(await dialog.getByText("The manager's list can't be read right now, so answers are paused. Try again in a moment.").count()).toBe(1);
+    expect(await dialog.locator("#brief-choices .act").first().isDisabled()).toBe(true);
+    expect(await dialog.locator("#brief-choices").getByRole("button", { name: "Answer in my own words" }).isDisabled()).toBe(true);
+    await context.close();
+  }, 60_000);
+
+  it("opens the answer box from the words-only footer button", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await dialog.waitFor();
+    await setItem(tab, wordsOnly);
+    const open = dialog.locator("footer").getByRole("button", { name: "Answer in my own words" });
+    await open.waitFor();
+    await open.click();
+    await dialog.locator("#brief-words").waitFor({ timeout: 3_000 });
+    await context.close();
+  }, 60_000);
+
+  it("still shows the asker's message and link on a brief-backed sheet", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await dialog.waitFor();
+    await setItem(tab, withAsker);
+    await dialog.getByRole("heading", { name: "From the asker" }).waitFor({ timeout: 3_000 });
+    expect(await dialog.getByText("ship it").count()).toBe(1);
+    const link = dialog.getByRole("link", { name: /Open the link/ });
+    expect(await link.count()).toBe(1);
+    expect(await link.getAttribute("href")).toBe("https://example.com/ledger-row");
+    await context.close();
+  }, 60_000);
+
+  it("keeps the recommended row's accent bar off the star and the key", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await dialog.waitFor();
+    const pad = await dialog.locator(".factors li.rec").first().evaluate(el => getComputedStyle(el).paddingLeft);
+    expect(pad).toBe("8px");
+    await context.close();
+  }, 60_000);
+
+  it("says why a compact card's answers are paused, and doesn't say the minutes twice", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    await tab.evaluate(() => document.querySelector("dialog")?.close());
+    const spendCard = tab.locator("#spend");
+    expect(await spendCard.getByText("≈4 min").count()).toBe(1);
+    const refusedCard = tab.locator("#refused");
+    expect(await refusedCard.getByText("The manager's list can't be read right now, so answers are paused. Try again in a moment.").count()).toBe(1);
+    expect(await refusedCard.getByRole("button", { name: "Extend the triage script" }).isDisabled()).toBe(true);
     await context.close();
   }, 60_000);
 });
