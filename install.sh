@@ -87,101 +87,56 @@ else
 fi
 [ "$sum" = "$hash" ] || { echo "archive digest does not match the manifest" >&2; exit 65; }
 
-# An escape-style listing encodes a newline as \n. A doubled backslash is a backslash.
-name_has_newline() {
-  rest=$1
-  while [ -n "$rest" ]; do
-    case $rest in
-      \\n*) return 0 ;;
-      \\\\*) rest=${rest#\\\\} ;;
-      \\*) rest=${rest#\\}; rest=${rest#?} ;;
-      *) rest=${rest#?} ;;
-    esac
-  done
-  return 1
-}
-
-# Drop "." and empty segments. ".." stays, so the climb check still sees it.
-normalise_path() {
-  out=
-  old=$IFS
-  IFS=/
-  for part in $1; do
-    if [ -z "$part" ] || [ "$part" = "." ]; then
-      continue
-    fi
-    if [ -z "$out" ]; then out=$part; else out=$out/$part; fi
-  done
-  IFS=$old
-  printf '%s\n' "$out"
-}
-
-# GNU tar 1.35 --list prints one stored name per line. --quoting-style=escape keeps a
-# space in that line and writes a newline as \n (GNU tar manual, "Listing Archive
-# Members" and --quoting-style; https://www.gnu.org/software/tar/manual/tar.html,
-# read 2026-10-13). bsdtar -t / --list does the same for the name
+# Extract into an empty directory with tar's own checks, then judge the tree.
+# Do not pass --absolute-names or -P: those turn the checks off.
+# GNU tar 1.35 skips a member name that contains ".." and exits non-zero, and
+# strips a leading "/". A symlink is still stored with the target from the
+# archive (GNU tar NEWS 1.30 and 1.13.16; tar(1) --absolute-names,
+# https://manpages.debian.org/bookworm/tar/tar.1.en.html, read 2026-10-13).
+# bsdtar without -P removes a leading "/", refuses a pathname that contains
+# "..", and refuses an entry that would retarget a directory through a symlink
 # (https://man.freebsd.org/cgi/man.cgi?query=tar&sektion=1, FreeBSD 14.2, read 2026-10-13).
-# Neither extract option refuses a symlink target that climbs
-# (https://www.gnu.org/software/tar/manual/html_section/Security.html, read 2026-10-13).
-# The name comes from --list. The link target, when the verbose line has one, is the
-# text after " -> ". "." segments are dropped before the depth count.
-if tar --version 2>/dev/null | grep -q 'GNU tar'; then
-  tar --absolute-names --quoting-style=escape -tzf "$work/archive.tar.gz" > "$work/names"
-  tar --absolute-names --quoting-style=escape -tvzf "$work/archive.tar.gz" > "$work/verbose"
-else
-  tar -tzf "$work/archive.tar.gz" > "$work/names"
-  tar -tvzf "$work/archive.tar.gz" > "$work/verbose"
+# The walk below is what refuses a symlink whose target climbs or is absolute.
+set -f
+mkdir "$work/extract"
+if ! tar -xzf "$work/archive.tar.gz" -C "$work/extract"; then
+  echo "refusing archive path" >&2
+  exit 65
 fi
-while IFS= read -r entry; do
-  [ -n "$entry" ] || continue
-  IFS= read -r verbose <&3 || verbose=
-  target=
-  case $verbose in
-    *" -> "*) target=${verbose#* -> } ;;
-  esac
-  if name_has_newline "$entry" || name_has_newline "$target"; then
-    echo "refusing archive path $entry" >&2
-    exit 65
-  fi
-  path=$(normalise_path "${entry#./}")
-  case $entry in
-    /*) echo "refusing archive path $entry" >&2; exit 65 ;;
-  esac
-  saved=$IFS
-  IFS=/
-  for part in $path; do
-    if [ "$part" = ".." ]; then
-      echo "refusing archive path $entry" >&2
-      exit 65
+base=$(cd "$work/extract" && pwd)
+# find -P does not follow symlinks. Each name is one argument, and set -f is on,
+# so a "*" segment is not expanded.
+find -P "$work/extract" -exec sh -c '
+  set -efu
+  base=$1
+  shift
+  for path do
+    case "$path" in
+      "$base"|"$base"/*) ;;
+      *) echo "refusing archive path $path" >&2; exit 65 ;;
+    esac
+    case "$path" in
+      *"
+"*) echo "refusing archive path $path" >&2; exit 65 ;;
+    esac
+    if [ -L "$path" ]; then
+      target=$(readlink "$path")
+      case "$target" in
+        *"
+"*) echo "refusing archive path $path" >&2; exit 65 ;;
+      esac
+      dir=$(dirname "$path")
+      resolved=$(cd "$dir" && realpath -m -- "$target") || {
+        echo "refusing archive path $path -> $target" >&2
+        exit 65
+      }
+      case "$resolved" in
+        "$base"|"$base"/*) ;;
+        *) echo "refusing archive path $path -> $target" >&2; exit 65 ;;
+      esac
     fi
   done
-  if [ -n "$target" ]; then
-    rel=$(normalise_path "${target#./}")
-    case $target in
-      /*) echo "refusing archive path $entry -> $target" >&2; exit 65 ;;
-    esac
-    depth=0
-    for part in $path; do
-      [ -n "$part" ] || continue
-      depth=$((depth + 1))
-    done
-    depth=$((depth - 1))
-    for part in $rel; do
-      if [ "$part" = ".." ]; then
-        if [ "$depth" -le 0 ]; then
-          echo "refusing archive path $entry -> $target" >&2
-          exit 65
-        fi
-        depth=$((depth - 1))
-      elif [ -n "$part" ]; then
-        depth=$((depth + 1))
-      fi
-    done
-  fi
-  IFS=$saved
-done < "$work/names" 3< "$work/verbose"
-
-mkdir -p "$work/tree"
-tar -xzf "$work/archive.tar.gz" -C "$work/tree"
+' sh "$base" {} +
+mv "$work/extract" "$work/tree"
 chmod 0555 "$work/tree/bin/morndo"
 "$work/tree/bin/morndo" install --role "$role" --channel "$channel"

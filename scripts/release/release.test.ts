@@ -482,7 +482,7 @@ describe("install.sh", () => {
     throw new Error(`unsupported test platform ${os} ${arch}`);
   };
 
-  const fixture = (p: { tamper?: boolean; size?: number; archive?: Buffer }) => {
+  const fixture = (p: { tamper?: boolean; size?: number; archive?: Buffer | ((marker: string) => Buffer) }) => {
     const dir = temp();
     const key = join(dir, "release");
     expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", "release-test", "-q"]).status).toBe(0);
@@ -491,7 +491,9 @@ describe("install.sh", () => {
     writeFileSync(signers, `${allowedSignerLine({ identity: RELEASE_NAMESPACE, namespace: RELEASE_NAMESPACE, publicKey: pub.stdout.trim() })}\n`);
     const marker = join(dir, "marker");
     const payload = new TextEncoder().encode(`#!/bin/sh\nprintf '%s\\n' "$*" > "${marker}"\n`);
-    const archive = p.archive ?? packTree([{ path: "bin/morndo", bytes: payload, mode: "0555" }], 1_700_000_000);
+    const archive = typeof p.archive === "function"
+      ? p.archive(marker)
+      : p.archive ?? packTree([{ path: "bin/morndo", bytes: payload, mode: "0555" }], 1_700_000_000);
     const host = platform();
     const name = artifactName("0.1.0", host);
     const files = listFiles([{ path: "bin/morndo", bytes: payload, mode: "0555" }]);
@@ -577,6 +579,44 @@ describe("install.sh", () => {
     expect(run.stderr).toMatch(/refusing archive path/);
   });
 
+  it("refuses arrow names, star segments, dotdot names, and links that leave the tree", () => {
+    const script = (marker: string) => Buffer.from(`#!/bin/sh\nprintf '%s\\n' "$*" > "${marker}"\n`);
+    const cases: readonly (readonly [string, string])[] = [
+      ["a -> b", "../x"],
+      ["a/*/l", "../../../x"],
+      ["../ x", ""],
+      ["app/abs", "/tmp/outside"],
+      ["app/climb", "../../../../outside"],
+    ];
+    for (const [name, link] of cases) {
+      const bad = fixture({
+        archive: marker => craftMembers([
+          { name: "bin/morndo", body: script(marker) },
+          { name, link },
+        ]),
+      });
+      const run = spawnSync("sh", [bad.scriptPath, "--role", "node", "--signers", bad.signers], {
+        encoding: "utf8",
+        env: { ...process.env, MORNDO_RELEASE_BASE: `file://${bad.base}` },
+      });
+      expect(run.status, `${name}: ${run.stderr}`).not.toBe(0);
+      expect(run.stderr, name).toMatch(/refusing archive path/);
+      expect(spawnSync("test", ["-f", bad.marker]).status).not.toBe(0);
+    }
+    const kept = fixture({
+      archive: marker => packTree([
+        { path: "bin/morndo", bytes: script(marker), mode: "0555" },
+        { path: "node/bin/npm", mode: "0555", link: "../lib/npm-cli.js" },
+      ], 1_700_000_000),
+    });
+    const run = spawnSync("sh", [kept.scriptPath, "--role", "node", "--signers", kept.signers], {
+      encoding: "utf8",
+      env: { ...process.env, MORNDO_RELEASE_BASE: `file://${kept.base}` },
+    });
+    expect(run.status, run.stderr).toBe(0);
+    expect(readFileSync(kept.marker, "utf8")).toBe("install --role node --channel stable\n");
+  });
+
   it("refuses an archive entry that climbs with .. or is absolute", () => {
     for (const name of ["./../x", "./a/../../x", "..", "./.."]) {
       const bad = fixture({ archive: craftArchive(name) });
@@ -592,27 +632,37 @@ describe("install.sh", () => {
 });
 
 function craftArchive(entryName: string, link = ""): Buffer {
-  const buf = Buffer.alloc(512);
-  buf.write(entryName, 0);
-  if (link) buf.write(link, 157);
-  const oct = (at: number, width: number, value: number) => {
-    buf.write(value.toString(8).padStart(width - 1, "0"), at, width - 1, "ascii");
-  };
-  oct(100, 8, 0o644);
-  oct(108, 8, 0);
-  oct(116, 8, 0);
-  oct(124, 12, 0);
-  oct(136, 12, 0);
-  buf.fill(0x20, 148, 156);
-  buf.write(link ? "2" : "0", 156, 1, "ascii");
-  buf.write("ustar\0", 257, 6, "binary");
-  buf.write("00", 263, 2, "ascii");
-  let sum = 0;
-  for (const byte of buf) sum += byte;
-  buf.write(sum.toString(8).padStart(6, "0"), 148, 6, "ascii");
-  buf[154] = 0;
-  buf[155] = 0x20;
-  return gzipSync(Buffer.concat([buf, Buffer.alloc(1024)]));
+  return craftMembers([{ name: entryName, link }]);
+}
+
+function craftMembers(members: readonly { name: string; link?: string; body?: Buffer }[]): Buffer {
+  const chunks = members.map(member => {
+    const link = member.link ?? "";
+    const body = link ? Buffer.alloc(0) : member.body ?? Buffer.alloc(0);
+    const buf = Buffer.alloc(512);
+    buf.write(member.name, 0);
+    if (link) buf.write(link, 157);
+    const oct = (at: number, width: number, value: number) => {
+      buf.write(value.toString(8).padStart(width - 1, "0"), at, width - 1, "ascii");
+    };
+    oct(100, 8, 0o644);
+    oct(108, 8, 0);
+    oct(116, 8, 0);
+    oct(124, 12, body.length);
+    oct(136, 12, 0);
+    buf.fill(0x20, 148, 156);
+    buf.write(link ? "2" : "0", 156, 1, "ascii");
+    buf.write("ustar\0", 257, 6, "binary");
+    buf.write("00", 263, 2, "ascii");
+    let sum = 0;
+    for (const byte of buf) sum += byte;
+    buf.write(sum.toString(8).padStart(6, "0"), 148, 6, "ascii");
+    buf[154] = 0;
+    buf[155] = 0x20;
+    const pad = body.length === 0 ? Buffer.alloc(0) : Buffer.concat([body, Buffer.alloc((512 - (body.length % 512)) % 512)]);
+    return Buffer.concat([buf, pad]);
+  });
+  return gzipSync(Buffer.concat([...chunks, Buffer.alloc(1024)]));
 }
 
 // The staged tree, as the packer wants it: every file files.json names, plus files.json itself.
