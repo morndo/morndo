@@ -1,6 +1,6 @@
 // TranscriptionService (design §9, §13): one class, FIFO, cancel, a timeout, and lost after a restart.
 // The transcriber here is scripted. The process host has its own suite.
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   MAX_TEXT_BYTES, requestTranscription, utf8ByteLength,
   type EngineText, type Recording, type Result, type Transcription, type TranscriptionProblem,
@@ -150,6 +150,25 @@ describe("transcription service", () => {
     expect(await until(() => svc.get("tx-a")?.state === "running", 2000)).toBe(true);
     expect(gate.calls).toEqual(["/audio/a.wav"]);
     svc.close();
+  });
+
+  it("re-checks the queue on its own schedule, as the jobs' minute sweep does", async () => {
+    vi.useFakeTimers();
+    try {
+      const gate = new Gate();
+      const { svc, setGuard } = service(memory(), gate);
+      await svc.start();
+      setGuard("load");
+      const row = await svc.request(body("tx-a", "a"));
+      expect(row.ok && row.value.state).toBe("queued");
+      setGuard("off");
+      await vi.advanceTimersByTimeAsync(60_000);        // no request, cancel or finish arrives: the sweep alone starts it
+      expect(svc.get("tx-a")?.state).toBe("running");
+      expect(gate.calls).toEqual(["/audio/a.wav"]);
+      svc.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("the same recording and language returns the attempt already in flight", async () => {
