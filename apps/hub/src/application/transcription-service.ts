@@ -400,7 +400,12 @@ export class TranscriptionService {
     if (!stored) return owned(row, endpointId);
     if (canRead(stored, endpointId)) return stored;
     const readers = readersOf(stored);
-    return { ...stored, readers: readers === "everyone" ? [endpointId] : [...readers, endpointId] };
+    const next: OwnedTranscription = {
+      ...stored,
+      endpointId: endpointOf(stored) ?? endpointId,
+      readers: readers === "everyone" ? [endpointId] : [...readers, endpointId],
+    };
+    return next;
   }
 
   #save(row: Transcription): void {
