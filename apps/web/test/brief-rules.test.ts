@@ -2,7 +2,7 @@
 // inline markdown, and the shared answer session (restate resets a pick; the shown brief stays put).
 import { describe, expect, it } from "vitest";
 import { dueLine } from "../src/lib/desktop/decisions.ts";
-import { dockedWidth, layoutIsNarrow, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
+import { dockedWidth, layoutIsNarrow, widthAfterWindowChange, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
 import { openSession, pick, showNew, noteClosed } from "../src/lib/desktop/answer-session.ts";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
 
@@ -31,6 +31,16 @@ describe("widening the decisions panel stays docked", () => {
   it("a window too narrow for the minimum panel is the overlay, and the width can still be 640", () => {
     expect(layoutIsNarrow(1000, sidebar)).toBe(true);
     expect(dockedWidth(640, 1000, sidebar)).toBe(640);
+  });
+  it("a narrower window draws less and the chosen width is still there when it widens", () => {
+    const chosen = 600;
+    const windowWidth = 1440;
+    const tight = widthAfterWindowChange(chosen, windowWidth, 400);
+    expect(tight.drawn).toBe(406);
+    expect(tight.chosen).toBe(600);
+    const restored = widthAfterWindowChange(tight.chosen, windowWidth, 260);
+    expect(restored.drawn).toBe(546);
+    expect(restored.chosen).toBe(600);
   });
 });
 

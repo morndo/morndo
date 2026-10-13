@@ -21,3 +21,10 @@ export function dockedWidth(requested: number, windowWidth: number, sidebarWidth
   if (layoutIsNarrow(windowWidth, sidebarWidth)) return clamped;
   return Math.min(clamped, maxDockedWidth(windowWidth, sidebarWidth));
 }
+
+// A window or sidebar change never replaces the width the owner chose. The panel draws `drawn`;
+// only a grip or an arrow key stores a new `chosen`.
+export function widthAfterWindowChange(chosen: number, windowWidth: number, sidebarWidth: number): { chosen: number; drawn: number } {
+  const kept = clampRight(chosen);
+  return { chosen: kept, drawn: dockedWidth(kept, windowWidth, sidebarWidth) };
+}
