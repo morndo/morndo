@@ -23,7 +23,7 @@ export function wavBytes(ms: number): Uint8Array {
   ]);
 }
 
-const box = (type: string, body: number[]) => new Uint8Array([...u32be(8 + body.length), ...[...type].map(c => c.charCodeAt(0)), ...body]);
+const box = (type: string, body: number[]) => new Uint8Array([...u32be(8 + body.length), ...Buffer.from(type, "latin1"), ...body]);
 
 // An mvhd of version 0: timescale and duration where the parser reads them (ISO/IEC 14496-12).
 const mvhd = (timescale: number, duration: number) =>
