@@ -81,30 +81,26 @@ function readAt(repository: string, sha: string, file: string): string | null {
 }
 
 function verifyFeed(signers: string, bytes: string, signature: string, dir: string): void {
-  const payload = join(dir, "payload");
   const sig = join(dir, "payload.sig");
-  writeFileSync(payload, bytes);
   writeFileSync(sig, signature);
   const run = spawnSync("ssh-keygen", ["-Y", "verify", "-f", signers, "-I", FEED_NAMESPACE, "-n", FEED_NAMESPACE, "-s", sig], {
     input: bytes, encoding: "utf8",
   });
-  rmSync(payload, { force: true });
   rmSync(sig, { force: true });
   if (run.status !== 0) throw new Error(`feed signature failed: ${run.stderr}`);
 }
 
+// The trees API writes the blob when the entry carries content, so the feed push
+// does not create a blob per file first.
+// https://docs.github.com/en/rest/git/trees#create-a-tree (read 2026-10-13)
+export function feedTree(files: readonly { path: string; content: string }[]): { path: string; mode: "100644"; type: "blob"; content: string }[] {
+  return files.map(file => ({ path: file.path, mode: "100644", type: "blob", content: file.content }));
+}
+
 function writeRef(repository: string, parent: string | null, dir: string, message: string): "ok" | "moved" {
-  const blobs = FEED_FILES.map(file => {
-    const content = readFileSync(join(dir, file)).toString("base64");
-    const sha = must(gh(
-      ["api", "--method", "POST", `/repos/${repository}/git/blobs`, "--jq", ".sha", "--input", "-"],
-      JSON.stringify({ content, encoding: "base64" }),
-    ), file);
-    return { path: file, mode: "100644", type: "blob", sha };
-  });
   const tree = must(gh(
     ["api", "--method", "POST", `/repos/${repository}/git/trees`, "--jq", ".sha", "--input", "-"],
-    JSON.stringify({ tree: blobs }),
+    JSON.stringify({ tree: feedTree(FEED_FILES.map(file => ({ path: file, content: readFileSync(join(dir, file), "utf8") }))) }),
   ), "tree");
   const commit = must(gh(
     ["api", "--method", "POST", `/repos/${repository}/git/commits`, "--jq", ".sha", "--input", "-"],

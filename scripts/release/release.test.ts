@@ -14,7 +14,7 @@ import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/proto
 import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
-import { refUpdateResult, syncFeed } from "./feed-sync.ts";
+import { feedTree, refUpdateResult, syncFeed } from "./feed-sync.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
@@ -233,6 +233,14 @@ describe("feed", () => {
     const again = ChannelFeedSchema.parse(JSON.parse(second));
     expect(again.seq).toBe(2);
     expect(again.releases.map(r => r.version)).toEqual(["0.2.0", "0.1.0"]);
+  });
+
+  it("puts feed file bytes in the tree instead of posting a blob first", () => {
+    expect(feedTree([{ path: "latest.json", content: "{}\n" }])).toEqual([
+      { path: "latest.json", mode: "100644", type: "blob", content: "{}\n" },
+    ]);
+    expect(readFileSync(join(import.meta.dirname, "feed-sync.ts"), "utf8")).not.toContain("git/blobs");
+    expect(readFileSync(join(import.meta.dirname, "feed-sync.ts"), "utf8")).not.toContain('join(dir, "payload")');
   });
 
   it("retries a ref update only when GitHub says it was not a fast forward", () => {
