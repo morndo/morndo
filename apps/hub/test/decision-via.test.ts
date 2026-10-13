@@ -334,27 +334,53 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
   });
 
-  // A row written after the tap is not the tap's source either (round 2.2): the row goes down before its own paste,
-  // so a tap the hub read before it wrote the row was typed by a hand, and answers the ask. Which came first is the
-  // hub's own order of what it read and wrote, never the transcript's time against the hub's (round 3.2). Here the
-  // hand tap was read while an earlier row of the same choice still hid it; that row turns out never started, the
-  // next answer's row goes down after the tap was read, in doubt with a store to ask, and the hand tap still wins.
-  it("a hand tap the hub read before it wrote its own row still settles the ask", async () => {
+  // A hand tap the hub read before it would write its own row answers the ask, and a restart changes nothing (round
+  // 4.1 and 4.3 of the PR #55 review): what decides it is in the store, not in this hub's memory. Here the tap was read
+  // while an earlier row of the same choice hid it. That row turns out never started at its node, so the tap is a
+  // hand's: the ask is judged again before anything is typed, and nothing is typed after the hand. A hub started
+  // afresh on the same store reads the tap the same way.
+  it("a hand tap read before the hub's own row answers the ask, and still does after a restart", async () => {
     const k = answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "hold" });
     store.db.prepare("INSERT INTO sends (key, state, at, worker_id, request, node_store) VALUES (?, 'started', ?, '%0', ?, 'st-0')")
       .run(k, T0 - 1000, "desk:r0");                                                             // an earlier answer in doubt
     manager.push({ id: "m-tap", at: T0, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] hold (Hold for a day)" });
-    const s = new EscalationService({
+    const typed: string[] = [];
+    const service = () => new EscalationService({
       watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
-      send: async () => { throw new SendInDoubt("st-1", "the node may have typed it"); },        // in doubt, with a store
+      send: async (_pane, text) => { typed.push(text); throw new SendInDoubt("st-1", "the node may have typed it"); },
       settle: async key => { store.dropSend(key); return null; },                                // the earlier one never started there
     });
+    const s = service();
     s.poll();                                                                                    // read now, hidden by the earlier row
     expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");
-    expect(await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    const r = await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1");
     s.poll();
     expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
-    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+    const restarted = service();                                                                 // the same store, nothing in memory
+    restarted.poll();
+    expect(restarted.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
+    expect(restarted.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+    expect(r).toMatchObject({ ok: false, problem: "already_answered" });                         // the hand's tap came first
+    expect(typed).toEqual([]);                                                                   // nothing typed after it
+  });
+
+  // The same for a tap of another choice (E8): an earlier row of the hand's choice hid it, the phone answers otherwise,
+  // and settling that row finds it never typed. The hand's tap is then the ask's answer, and the phone's is refused
+  // before anything is typed: the manager never gets two answers.
+  it("a hidden hand tap, freed by settling the row that hid it, refuses an answer of another choice", async () => {
+    store.db.prepare("INSERT INTO sends (key, state, at, worker_id, request, node_store) VALUES (?, 'started', ?, '%0', ?, 'st-0')")
+      .run(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "hold" }), T0 - 1000, "desk:r0");
+    manager.push({ id: "m-tap", at: T0, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] hold (Hold for a day)" });
+    const typed: string[] = [];
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async (_pane, text) => { typed.push(text); return { problem: null, typedAt: 0 }; },
+      settle: async key => { store.dropSend(key); return null; },                                // the earlier one never started there
+    });
+    s.poll();                                                                                    // hidden by the earlier row
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "ship" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(typed).toEqual([]);
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision).toMatchObject({ choice: { key: "hold" }, via: "elsewhere" });
   });
 
   // The hub's own paste is told by that order, not by clocks (round 3.2): the node that typed it stamps the line on

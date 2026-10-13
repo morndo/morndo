@@ -46,8 +46,8 @@ export type EscalationView = Escalation & {
   brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null;
 };
 type ButtonMessage = { message: Message; body: string; options: ButtonOption[] };
-// A tap line read in the manager's pane, with `order`: when this hub first read it, in the hub's own order (#order).
-type PaneTap = { key: string; label: string; at: number; order: number };
+// A tap line read in the manager's pane.
+type PaneTap = { key: string; label: string; at: number };
 export type Board = { items: EscalationView[]; ledger: { configured: boolean; ok: boolean; at: number | null } };
 // `duplicate`: a repeat of an answer in doubt that its node had typed after all; `at` is when, on that node's clock.
 // `queued`: the answer is in the inbox and not typed yet. That is not delivered, and `at` is not the enqueue time.
@@ -64,7 +64,6 @@ const REQUEST_TTL_MS = 10 * 60_000;
 const SETTLED_LEDGER_MS = 3 * 24 * 3_600_000;        // closed list items shown under "Decided" for three days
 const ECHO_KEEP_MS = 24 * 3_600_000;                  // how long a withdrawn answer's echo is ignored (B1)
 const UNREADABLE_GIVE_UP_MS = 15 * 60_000;            // an inbox that can't be read this long counts as gone (H3)
-const ROW_KEEP_MS = 24 * 3_600_000;                   // a sends row's life (Store.pruneSends): its write order is kept as long
 const LATE_ANSWER = "This reached the manager late, as an answer to the earlier version of the question.";
 const MISSED_ANSWER = "The answer did not reach the manager. Answer again.";
 const TYPED = new Set<InboxStatus>(["typing", "sent", "stuck", "accepted"]);
@@ -142,13 +141,6 @@ export class EscalationService {
   #briefs: (() => BriefSighting[]) | null;
   #briefOf = new Map<string, BriefSighting>();
   #paneTaps = new Map<string, PaneTap>();
-  // The hub's own order of what it read and wrote (round 3.2 of the PR #55 review): a tap line takes the next number
-  // when a poll first reads it, an answer row when this hub writes it. Its paste always comes after its row, so a tap
-  // read before the row was written is no paste of that row, whatever the node's clock and the hub's say. A row from
-  // before this hub started has no number: any tap of its choice may be its paste.
-  #order = 0;
-  #tapOrder = new Map<string, number>();               // by message id
-  #rowOrder = new Map<string, { order: number; at: number }>();   // by answer key, with when it was written
 
   constructor(p: {
     watch: Watch; ledger: (() => LedgerRead) | null; store: Store; managerName: string;
@@ -386,7 +378,6 @@ export class EscalationService {
     const ledger = this.#ledger ? this.#ledger() : null;
     this.#lastLedger = ledger;
     this.#briefOf = new Map((this.#briefs?.() ?? []).map(b => [b.id, b]));
-    for (const [k, r] of this.#rowOrder) if (now - r.at > ROW_KEEP_MS) this.#rowOrder.delete(k);   // its row is pruned by now
     // The answer rows this poll judges taps against, grouped by key: read once (round 2.7), not once per tap line in the
     // manager's whole history, and only when a tap is there to judge (round 3.7).
     let read: ReadonlyMap<string, SendRow> | null = null;
@@ -507,17 +498,8 @@ export class EscalationService {
         if (a.buttons) buttons.set(a.buttons.id, { message: m, body: a.body, options: a.buttons.options });   // the latest wins
       } else if (m.author.kind === "principal") {
         const t = parseTap(m.text);
-        if (t && !echoes.has(m.id)) {                    // not a withdrawn answer's echo (B1)
-          let order = this.#tapOrder.get(m.id);
-          if (order === undefined) { order = ++this.#order; this.#tapOrder.set(m.id, order); }
-          taps.set(t.id, { key: t.key, label: t.label, at: m.at, order });
-        }
+        if (t && !echoes.has(m.id)) taps.set(t.id, { key: t.key, label: t.label, at: m.at });   // not a withdrawn answer's echo (B1)
       }
-    }
-    // Only the lines still in the window keep their number. An empty read proves nothing: they are kept.
-    if (messages.length) {
-      const read = new Set(messages.map(m => m.id));
-      for (const id of this.#tapOrder.keys()) if (!read.has(id)) this.#tapOrder.delete(id);
     }
     // The taps as read; whether one is this hub's own answer's paste, each ask's sighting judges for its own version
     // (#ownTapOf). The pane keeps every tap line for as long as the history window holds it, across ask versions.
@@ -599,29 +581,23 @@ export class EscalationService {
   // endpoint, and the answer's own recording, which names the endpoint that accepted it, would be refused as a second
   // answer (E8). So it is no sighting: the answer path records it (review of PR #55). The row that says so is this
   // ask's own answer key — the key carries the ask's version (the message that asked it), so an earlier version's row
-  // is another answer to an ask asked again, and a row this hub wrote after it read the tap is not that tap's source
-  // either (the row goes down before its own paste; #order, never a clock: round 3.2) — and one still waiting to be
-  // recorded: being typed here, done, or in doubt with a store to ask a node about. One row nothing can ever record —
-  // "started", no store, not being typed (the hub stopped while typing it, or the port threw after the paste and no
-  // node can be asked) — would leave that tap as the ask's only record: it settles the ask, as it did before the
-  // filter (rounds 2.1 and 2.2, PR #55 review). The rows come as this poll's one read (round 2.7), keyed by answer
-  // key, made on the first tap that needs it (round 3.7). Being typed is that answer's own key, never the whole ask: a
-  // tap of another choice is no paste of this one, and still refuses it (E8, round 3.1).
+  // is another answer to an ask asked again — and one still waiting to be recorded: being typed here, done, or in
+  // doubt with a store to ask a node about. One row nothing can ever record — "started", no store, not being typed
+  // (the hub stopped while typing it, or the port threw after the paste and no node can be asked) — would leave that
+  // tap as the ask's only record: it settles the ask, as it did before the filter (rounds 2.1 and 2.2, PR #55 review).
+  // No tap the hub read before it wrote the row is that row's paste, and none needs telling apart: the hub writes no
+  // answer row after it read a tap that answers the ask (#settleEarlier), so a row's paste and a hand tap read only
+  // after the row are the two left, and those the hub can't tell apart (docs/domain.md, E8's known limit). Nothing
+  // here is kept in memory, so a restart judges every tap as before it (round 4.1). The rows come as this poll's one
+  // read (round 2.7), keyed by answer key, made on the first tap that needs it (round 3.7). Being typed is that
+  // answer's own key, never the whole ask: a tap of another choice is no paste of this one, and still refuses it (E8,
+  // round 3.1).
   #ownTapOf(ask: Ask, tap: PaneTap | null, answers: () => ReadonlyMap<string, SendRow>): Sighting["answered"] {
     if (tap === null) return null;
     const k = answerKey(ask.id, ask, { kind: "option", key: tap.key });
     const row = answers().get(k) ?? null;
-    const written = this.#rowOrder.get(k)?.order;
-    const afterRow = written === undefined || tap.order > written;
-    if (row !== null && afterRow && (row.state === "done" || row.store !== null || this.#typing.has(k))) return null;
+    if (row !== null && (row.state === "done" || row.store !== null || this.#typing.has(k))) return null;
     return { key: tap.key, label: tap.label, at: tap.at };
-  }
-  // An answer row, written "started" before the answer is typed or queued (Store.startAnswer), and its place in the
-  // hub's own order. False if a row for the key is there already.
-  #startAnswer(k: string, now: number, o: { workerId: string | null; request: string; session: string }): boolean {
-    if (!this.#store.startAnswer(k, now, o)) return false;
-    this.#rowOrder.set(k, { order: ++this.#order, at: now });
-    return true;
   }
 
   // Briefs the hub holds open itself (E14). A `ref` is sighted with its list item, above, not here.
@@ -738,13 +714,8 @@ export class EscalationService {
       if (e.asker.kind === "manager" && this.#inbox) {
         // The same in-doubt checks as the typed path, before anything is queued (E8, review #29.2): an earlier answer
         // this hub may have typed must block a second one, or the manager can be given both.
-        const earlierSend = this.#store.send(k);
-        if (earlierSend) {
-          const settled = await this.#settleAnswer(a, id, choice, earlierSend, key);
-          if (settled) return settled;
-        }
-        const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);
-        if (other) return other;
+        const inDoubt = await this.#settleEarlier(a, id, choice, e, k, key, seen);
+        if (inDoubt) return inDoubt;
         try { queued = this.#inbox.enqueue({ id: `answer:${key}`, kind: option ? "tap" : "answer", text: line, meta: { escalation: e.id } }); }
         catch (err) { log.error(`answer to ${e.id}: the manager's inbox can't be written; typing directly`, err); }
       }
@@ -777,7 +748,7 @@ export class EscalationService {
         this.#store.saveDecision(id, q.value);
         // The same request after the seen window, or a restart, is a duplicate (review #29.4), as a typed answer's
         // done row is. Without the row, check() refuses it as already_answered.
-        if (this.#startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) this.#store.finishQueued(k);
+        if (this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) this.#store.finishQueued(k);
         this.#seen.set(key, now);
         log.info(`answer to ${e.id} queued for the manager${queued.duplicate ? " (already in its inbox)" : ""}`);
         this.#notify();
@@ -787,17 +758,12 @@ export class EscalationService {
         const conflict = e.asker.kind === "manager" && this.#watch.workers().some(w => w.name === this.#managerName && w.conflict);
         return { ok: false, problem: conflict ? "lane_conflict" : "no_pane", item: this.#view(id, a.endpoint.id) };
       }
-      // ... or of the same answer from another request. The inbox path ran these already (review #29.2).
-      const inDoubt = this.#store.send(k);
-      if (inDoubt) {
-        const settled = await this.#settleAnswer(a, id, choice, inDoubt, key);
-        if (settled) return settled;
-      }
-      // Then another answer to this ask, with another choice (E8: one Decision per ask; ADR-0012 7).
-      const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);
-      if (other) return other;
+      // ... or of the same answer from another request, or another answer to this ask (E8). The inbox path ran these
+      // already (review #29.2): what they settled is gone, so here they find nothing.
+      const inDoubt = await this.#settleEarlier(a, id, choice, e, k, key, seen);
+      if (inDoubt) return inDoubt;
       // Written before the first await, as a send's is: a hub that stops while this is typed leaves it "started".
-      if (!this.#startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
+      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
       let outcome: SendOutcome;
       // A node that may have typed it (SendInDoubt): "uncertain", the hub's 409, never a 500 the app reads as a refusal
       // (final review I1), and kept for its repeat with the store it went to. Any other throw keeps its row too (below).
@@ -865,14 +831,38 @@ export class EscalationService {
     return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
   }
 
+  // Every answer to this ask that its node may have typed, settled with that node before this one is typed or queued
+  // (E8): the same choice's row first (a repeat by another request), then another choice's. Each ends in a result for
+  // the caller, or in nothing when its node never started it, and then its row is gone. A tap that row hid as its own
+  // paste was no paste: a hand typed it, and it answers the ask. So once a row went, the ask is judged again from a
+  // fresh read before anything is typed (the conservative outcome, E8): the hub never writes its own row after a tap
+  // that answers the ask, and no order of what it read and wrote is needed (round 4.1 of the PR #55 review). Asked
+  // again or restated meanwhile, the answer is refused as changed (E12), never typed under the earlier version's key.
+  async #settleEarlier(a: Authenticated, id: string, choice: Choice, e: Escalation, k: string, key: string, seen: string | undefined): Promise<AnswerResult | null> {
+    const prefix = askPrefix(e.id, e);
+    const own = this.#store.send(k);
+    const others = this.#store.answersOfAsk(prefix).filter(r => r.key !== k);
+    if (own === null && others.length === 0) return null;
+    if (own) {
+      const settled = await this.#settleAnswer(a, id, choice, own, key);
+      if (settled) return settled;
+    }
+    const other = await this.#otherAnswer(a, id, prefix, others);
+    if (other) return other;
+    this.poll();
+    const c = this.#x.check(id, choice, this.#now());
+    if (!c.ok) return { ok: false, problem: c.error, item: this.#view(id, a.endpoint.id) };
+    if (answerKey(c.value.id, c.value, choice) !== k || (seen !== undefined && seen !== this.#version(c.value))) return { ok: false, problem: "changed", item: this.#view(id, a.endpoint.id) };
+    return null;
+  }
+
   // Another answer to the same ask (another choice, another request) that its node may have typed (E8 while an answer is
   // in doubt; fleet core §3.1). It is settled with that node first, as a repeat of it would be: never started there →
   // its row is gone and this answer is judged as usual (null); typed there, now or before → it was his answer, recorded
   // now, and this one is refused as a second answer; anything else → this one is refused as in doubt. Nothing is typed
   // in either refusal.
-  async #otherAnswer(a: Authenticated, id: string, prefix: string, k: string): Promise<AnswerResult | null> {
-    for (const other of this.#store.answersOfAsk(prefix)) {
-      if (other.key === k) continue;
+  async #otherAnswer(a: Authenticated, id: string, prefix: string, rows: readonly SendRow[]): Promise<AnswerResult | null> {
+    for (const other of rows) {
       const settled = other.state === "done" ? { ok: false as const, problem: "duplicate" as const, at: other.typedAt ?? other.at }
         : other.workerId === null ? { ok: false as const, problem: "uncertain" as const }
         : await this.#settle(other.key, other.workerId);

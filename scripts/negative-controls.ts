@@ -753,7 +753,7 @@ export const CONTROLS: Control[] = [
     find: "    if (res.storeSeq !== undefined) this.#seqs.saw(node, res.store, res.storeSeq);\n", replace: "",
     run: ["apps/fleet/test/requests.test.ts"] },
   { id: "fw-b-answer-row-after-typing", task: "B", file: "apps/hub/src/application/escalation-service.ts",
-    find: "      if (!this.#startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) return { ok: false, problem: \"uncertain\", item: this.#view(id, a.endpoint.id) };\n",
+    find: "      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) return { ok: false, problem: \"uncertain\", item: this.#view(id, a.endpoint.id) };\n",
     replace: "",
     run: ["apps/hub/test/escalation-in-doubt.test.ts"] },
   // The fix wave's guards its re-review found without a control, and the residual round's (residual-round-report.md).
@@ -861,7 +861,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/hub/test/escalation-in-doubt.test.ts", "apps/hub/test/escalation-answer-keys.test.ts"], expect: "a throw while typing keeps its row" },
   // ---- B1 validation (answers and doubt): E8 while an answer is in doubt, and the card that keeps the doubt.
   { id: "b1-v7-other-answer-not-settled", task: "B1-V7", file: "apps/hub/src/application/escalation-service.ts",
-    find: "      const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);\n      if (other) return other;\n", replace: "",
+    find: "    const other = await this.#otherAnswer(a, id, prefix, others);\n    if (other) return other;\n", replace: "",
     run: ["apps/hub/test/escalation-in-doubt.test.ts"], expect: "another answer to the same ask while one is in doubt" },
   { id: "b1-v7-typed-earlier-not-recorded", task: "B1-V7", file: "apps/hub/src/application/escalation-service.ts",
     find: "        this.#typedEarlier(other, id, other.key.slice(prefix.length), { endpointId: a.endpoint.id, sessionId: a.session.id });\n", replace: "",
