@@ -165,6 +165,9 @@
   // A sheet opened from Today returns there when its entry is popped (finding 10): catch-up was never the place he
   // was, so it shouldn't become it. From anywhere else the sheet sits over catch-up, which keeps its own Back.
   let briefOver = $state<"today" | null>(null);
+  // Set when Back closes a Today sheet during the undo window. stopDeciding (and its leave()) waits
+  // until that window is gone, so the answer is not sent early; then Today comes back.
+  let returnAfter = $state(false);
   $effect(() => {
     if (briefId !== null) return;
     untrack(() => {
@@ -174,9 +177,16 @@
       // would send it now. The card underneath keeps the window, as it does for a sheet opened
       // from catch-up. With nothing in the window, Today comes back.
       const a = session.run?.answering;
-      if (a && !a.sending && a.commitAt > session.now) return;
+      if (a && !a.sending && a.commitAt > session.now) { returnAfter = true; return; }
       stopDeciding();
     });
+  });
+  $effect(() => {
+    if (!returnAfter || briefId !== null) return;
+    const a = session.run?.answering;
+    if (a && (!a.sending && a.commitAt > session.now || a.sending)) return;
+    returnAfter = false;
+    stopDeciding();
   });
   function openBrief(id: string) {
     briefOver = !deciding && tab === "today" ? "today" : null;

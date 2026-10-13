@@ -192,6 +192,28 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
+  it("returns to Today once the answer started there commits", { timeout: 40_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true);
+    await tab.addInitScript(() => localStorage.setItem("morndo.tab", "today"));
+    await tab.goto(tab.url());
+    await push(tab, [release]);
+    await tab.locator('li[data-row="d:d-2"] [data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByText(/Goes in \d+ s\./).waitFor({ timeout: 3_000 });
+    await dialog.locator("button.back").click();
+    await expect.poll(() => dialog.count(), { timeout: 3_000 }).toBe(0);
+    await tab.getByRole("article").getByRole("button", { name: "Undo" }).waitFor({ timeout: 2_000 });
+    await tab.locator('li[data-row="d:d-2"]').waitFor({ timeout: 8_000 });
+    const posts = await calls(tab) as { body: { key?: string } }[];
+    expect(posts).toHaveLength(1);
+    expect(posts[0]?.body.key).toBe("a");
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("returns to Today when the sheet was opened there and its entry is popped", { timeout: 30_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track);
