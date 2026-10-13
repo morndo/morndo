@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { availableParallelism, freemem, homedir } from "node:os";
+import { availableParallelism, homedir, totalmem } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable, type Writable } from "node:stream";
@@ -65,8 +65,32 @@ const UBUNTU: Record<string, string> = { git: "git", cmake: "cmake", make: "make
 const BREW: Record<string, string> = { git: "git", cmake: "cmake", ffmpeg: "ffmpeg" };
 const TOOLS = ["git", "cmake", "make", "g++", "ffmpeg"] as const;
 
-export function suggestedModel(cores: number, freeBytes: number): "small" | "turbo" {
-  return cores >= 4 && freeBytes >= 4 * GIB ? "turbo" : "small";
+export function suggestedModel(cores: number, memoryBytes: number): "small" | "turbo" {
+  return cores >= 4 && memoryBytes >= 4 * GIB ? "turbo" : "small";
+}
+
+// os.freemem() is "the amount of free system memory in bytes" (https://nodejs.org/docs/latest-v24.x/api/os.html#osfreemem,
+// read 2026-10-13). Node 24.21.0 bundles libuv 1.52.1, whose Darwin uv_get_free_memory is host_statistics
+// free_count only (https://github.com/libuv/libuv/blob/v1.52.1/src/unix/darwin.c). os.totalmem() is the
+// machine's hw.memsize (https://nodejs.org/docs/latest-v24.x/api/os.html#ostotalmem, same date). Node 24.21
+// does not export an available-memory function. Linux reports MemAvailable in /proc/meminfo; that is the
+// budget there. Everywhere else, including macOS, the budget is total memory.
+export function memAvailableFrom(meminfo: string): number | null {
+  const match = /^MemAvailable:\s+(\d+) kB$/m.exec(meminfo);
+  return match?.[1] !== undefined ? Number(match[1]) * 1024 : null;
+}
+
+export function memoryBudget(platform: string, totalBytes: number, availableBytes: number | null): number {
+  if (platform === "linux" && availableBytes !== null) return availableBytes;
+  return totalBytes;
+}
+
+function readMemAvailable(): number | null {
+  try {
+    return memAvailableFrom(readFileSync("/proc/meminfo", "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 export function toolMessage(missing: readonly string[]): string {
@@ -342,7 +366,7 @@ async function ensureBinary(src: string): Promise<string> {
 function usage(): string {
   return [
     "npm run plugin:transcribe -- --model <base|small|turbo> [--home <dir>]",
-    "With no --model, turbo is used on 4 or more cores with 4 GiB free, and small otherwise.",
+    "With no --model, turbo is used on 4 or more cores with 4 GiB available (MemAvailable on Linux, total memory otherwise), and small otherwise.",
     "--home overrides MORNDO_HOME (default ~/.local/share/morndo).",
   ].join("\n");
 }
@@ -354,7 +378,8 @@ async function install(request: { model: ModelId | null; home: string | null }):
     return 1;
   }
   const pins = readPins(join(PACKAGE, "plugin.json"));
-  const id = request.model ?? suggestedModel(availableParallelism(), freemem());
+  const available = process.platform === "linux" ? readMemAvailable() : null;
+  const id = request.model ?? suggestedModel(availableParallelism(), memoryBudget(process.platform, totalmem(), available));
   const pin = pins.models[id];
   const home = resolve(request.home ?? process.env.MORNDO_HOME ?? join(homedir(), ".local", "share", "morndo"));
   if (home === "/") throw new Error("refusing to install into /");
@@ -410,8 +435,10 @@ async function install(request: { model: ModelId | null; home: string | null }):
 }
 
 class ProbeNotReady extends Error {
-  constructor(readonly probe: string) {
+  readonly probe: string;
+  constructor(probe: string) {
     super("plugin probe was not ready");
+    this.probe = probe;
   }
 }
 

@@ -1,14 +1,32 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { absentTools, buildDir, parseInstallArgs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
+import { absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
 describe("install choices", () => {
+  it("picks turbo from total memory on macOS and from MemAvailable on Linux", () => {
+    expect(memAvailableFrom("MemTotal: 16000000 kB\nMemAvailable:    3145728 kB\n")).toBe(3_145_728 * 1024);
+    expect(memAvailableFrom("MemTotal: 1 kB\n")).toBeNull();
+    expect(memoryBudget("linux", 64 * GIB, 3 * GIB)).toBe(3 * GIB);
+    expect(suggestedModel(4, memoryBudget("linux", 64 * GIB, 3 * GIB))).toBe("small");
+    expect(memoryBudget("darwin", 64 * GIB, 200 * 1024 * 1024)).toBe(64 * GIB);
+    expect(suggestedModel(4, memoryBudget("darwin", 64 * GIB, 200 * 1024 * 1024))).toBe("turbo");
+    const help = spawnSync(process.execPath, [join(import.meta.dirname, "../scripts/install.ts"), "--help"], { encoding: "utf8" });
+    expect(help.status).toBe(0);
+    expect(help.stderr).toBe([
+      "npm run plugin:transcribe -- --model <base|small|turbo> [--home <dir>]",
+      "With no --model, turbo is used on 4 or more cores with 4 GiB available (MemAvailable on Linux, total memory otherwise), and small otherwise.",
+      "--home overrides MORNDO_HOME (default ~/.local/share/morndo).",
+      "",
+    ].join("\n"));
+  });
+
   it("suggests turbo on a roomy machine and small otherwise, and reads --model and --home", () => {
     expect(suggestedModel(4, 4 * GIB)).toBe("turbo");
     expect(suggestedModel(8, 8 * GIB)).toBe("turbo");
