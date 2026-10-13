@@ -20,7 +20,7 @@ import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, m
 import { availableParallelism, freemem, homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Readable } from "node:stream";
+import { Readable, type Writable } from "node:stream";
 
 const PACKAGE = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/";
@@ -201,34 +201,53 @@ function modelHost(hostname: string): boolean {
   return hostname === "huggingface.co" || hostname.endsWith(".huggingface.co") || hostname.endsWith(".hf.co");
 }
 
+function downloadError(error: NodeJS.ErrnoException): Error {
+  if (error.code === "ENOSPC") return new Error("disk full while downloading the model");
+  return new Error(`could not write the model (${error.code ?? error.message})`);
+}
+
+export async function writeModelBody(
+  partial: string,
+  chunks: AsyncIterable<Uint8Array>,
+  open: (path: string) => Writable = (path) => createWriteStream(path),
+): Promise<{ sha256: string; bytes: number }> {
+  const out = open(partial);
+  const hash = createHash("sha256");
+  let bytes = 0;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      // Attached before the first write. A disk error while waiting for drain must reject this
+      // promise; it must not escape as an uncaught 'error' event.
+      out.on("error", (error: NodeJS.ErrnoException) => reject(downloadError(error)));
+      const pump = async () => {
+        for await (const chunk of chunks) {
+          const buf = Buffer.from(chunk);
+          bytes += buf.length;
+          hash.update(buf);
+          if (!out.write(buf)) await new Promise<void>(resolveDrain => { out.once("drain", resolveDrain); });
+        }
+        out.end(() => resolve());
+      };
+      pump().catch(error => reject(error instanceof Error ? error : new Error(String(error))));
+    });
+  } catch (error) {
+    out.destroy();
+    rmSync(partial, { force: true });
+    throw error;
+  }
+  return { sha256: hash.digest("hex"), bytes };
+}
+
 async function download(url: string, dest: string, pin: ModelPin): Promise<void> {
   const response = await fetch(url, { redirect: "follow" });
   const host = new URL(response.url).hostname;
   if (!modelHost(host)) throw new Error(`model download left the pinned host for ${host}`);
   if (!response.ok || response.body === null) throw new Error(`model download answered ${response.status}`);
-  const hash = createHash("sha256");
-  let bytes = 0;
   const partial = `${dest}.partial`;
-  const out = createWriteStream(partial);
-  try {
-    for await (const chunk of Readable.fromWeb(response.body)) {
-      const buf = Buffer.from(chunk as Uint8Array);
-      bytes += buf.length;
-      hash.update(buf);
-      if (!out.write(buf)) await new Promise<void>(resolveDrain => { out.once("drain", resolveDrain); });
-    }
-    await new Promise<void>((resolveEnd, rejectEnd) => {
-      out.end(() => resolveEnd());
-      out.on("error", rejectEnd);
-    });
-  } catch (error) {
+  const got = await writeModelBody(partial, Readable.fromWeb(response.body));
+  if (got.sha256 !== pin.sha256 || got.bytes !== pin.bytes) {
     rmSync(partial, { force: true });
-    throw error;
-  }
-  const sha256 = hash.digest("hex");
-  if (sha256 !== pin.sha256 || bytes !== pin.bytes) {
-    rmSync(partial, { force: true });
-    throw new Error(`model sha256 or size does not match the pin (${bytes} bytes)`);
+    throw new Error(`model sha256 or size does not match the pin (${got.bytes} bytes)`);
   }
   rmSync(dest, { force: true });
   renameSync(partial, dest);

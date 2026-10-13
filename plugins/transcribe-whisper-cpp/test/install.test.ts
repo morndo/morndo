@@ -1,8 +1,9 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { absentTools, parseInstallArgs, readPins, suggestedModel, toolMessage } from "../scripts/install.ts";
+import { absentTools, parseInstallArgs, readPins, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
@@ -41,6 +42,28 @@ describe("install choices", () => {
     body.models.base.url = "https://example.invalid/ggml-base.bin";
     writeFileSync(bad, JSON.stringify(body));
     expect(() => readPins(bad)).toThrow(/model base/);
+  });
+
+  it("a full disk removes the partial model and says the disk is full", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-disk-"));
+    const partial = join(dir, "model.bin.partial");
+    writeFileSync(partial, "started");
+    const open = () => new Writable({
+      highWaterMark: 1,
+      write(_chunk, _encoding, _callback) {
+        // A real write error arrives on a later turn, while the caller is waiting for drain.
+        process.nextTick(() => {
+          this.emit("error", Object.assign(new Error("ENOSPC"), { code: "ENOSPC" }));
+        });
+      },
+    });
+    try {
+      await expect(writeModelBody(partial, (async function* () { yield Buffer.from("model-bytes"); })(), open))
+        .rejects.toThrow("disk full while downloading the model");
+      expect(readdirSync(dir)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("names every tool when PATH has none of them", () => {
