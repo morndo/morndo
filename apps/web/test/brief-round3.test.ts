@@ -106,6 +106,28 @@ async function releaseAnswer() {
   await tab.evaluate(() => (globalThis as { __releaseAnswer?: () => void }).__releaseAnswer?.());
 }
 
+describe("round 3: a decision that leaves the list drops its session", () => {
+  it("comes back open, not still sent, when the same id returns", async () => {
+    const errors = await ready();
+    const item = tap("d-gone", "v1", "Extend the triage script");
+    await show([item]);
+    const card = tab.locator('[data-decision="d-gone"]');
+    await card.getByRole("button", { name: "Ship the weekly notes" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Extend the triage script" }).click();
+    await dialog.getByRole("button", { name: "Send answer" }).click();
+    await dialog.getByText(/^Sent\./).waitFor();
+    await show([]);
+    await dialog.waitFor({ state: "hidden" });
+    await show([item]);
+    await tab.locator('[data-decision="d-gone"]').getByRole("button", { name: "Ship the weekly notes" }).click();
+    const again = tab.getByRole("dialog");
+    await again.getByRole("button", { name: "Extend the triage script" }).waitFor();
+    expect(await again.getByText(/^Sent\./).count()).toBe(0);
+    expect(errors).toEqual([]);
+  }, 60_000);
+});
+
 describe("round 3: a refusal stays when the item closes in the same tick", () => {
   it("shows the refusal when the feed closes the item before the POST returns", async () => {
     await ready();

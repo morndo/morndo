@@ -26,11 +26,15 @@
     const hold = openId;
     const list = items;
     untrack(() => {
+      const ids = new Set(list.map(d => d.id));
       for (const d of list) {
         const cur = sessions[d.id];
         if (!cur) sessions[d.id] = new AnswerSession(d);
         else cur.bind(d, hold === d.id);
       }
+      // A decision that left the list takes its session with it. The one whose brief is still open stays until
+      // that brief closes, so the dialog is not left without the session it is reading.
+      for (const id of Object.keys(sessions)) if (!ids.has(id) && id !== hold) delete sessions[id];
     });
   });
   const openItem = $derived(items.find(d => d.id === openId) ?? null);
