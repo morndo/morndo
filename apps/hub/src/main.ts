@@ -208,11 +208,20 @@ switch (cmd) {
       transcriber: null,
       locate: () => {
         const located = locateTranscriber(process.env, config.dataDir);
-        return "path" in located
+        return located.path !== null
           ? { transcriber: processTranscriber(located.path), unavailable: null }
           : { transcriber: null, unavailable: { ready: false, reason: located.reason, detail: located.detail } };
       },
-      file: recording => fileOnDisk(recording.kind === "upload" ? inbox.get(recording.id)?.path : files.get(recording.id)?.file),
+      // An upload is a recording only for the endpoint that made it (S2's rule); an agent's file is anyone's, as
+      // the design has it. Whatever the id names, the bytes settle whether it is audio (S1).
+      file: (recording, caller) => {
+        if (recording.kind === "upload") {
+          const upload = inbox.get(recording.id);
+          if (!upload || (caller && upload.endpointId !== caller.endpointId)) return null;
+          return fileOnDisk(upload.path);
+        }
+        return fileOnDisk(files.get(recording.id)?.file);
+      },
       limit: txSettings.limit, timeoutSec: txSettings.timeoutSec, maxSeconds: txSettings.maxSeconds, threads: txSettings.threads,
       guard: () => guardNow(txSettings.guard, () => readMachine(txSettings.guard)),
       log: line => log.info(line),

@@ -151,10 +151,10 @@ describe("transcription service", () => {
   });
 
   it("a running row is lost once across a restart, and a queued row waits again", async () => {
-    const made = requestTranscription([], { id: "tx-run", recording: { kind: "upload", id: "a" }, sizeBytes: 12, language: "auto" }, 10, { present: true, maxSeconds: 600 });
+    const made = requestTranscription([], { id: "tx-run", recording: { kind: "upload", id: "a" }, sizeBytes: 12, language: "auto" }, 10, { present: true, maxSeconds: 600 }, "multi");
     if (!made.ok) throw new Error(made.error);
     const running: Transcription = { ...made.value, state: "running", startedAt: 20 };
-    const waiting = requestTranscription([], { id: "tx-wait", recording: { kind: "upload", id: "b" }, sizeBytes: 12, language: "auto" }, 11, { present: true, maxSeconds: 600 });
+    const waiting = requestTranscription([], { id: "tx-wait", recording: { kind: "upload", id: "b" }, sizeBytes: 12, language: "auto" }, 11, { present: true, maxSeconds: 600 }, "multi");
     if (!waiting.ok) throw new Error(waiting.error);
     const store = memory([running, waiting.value]);
     const gate = new Gate();

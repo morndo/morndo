@@ -357,7 +357,8 @@ const sameBody = (row: Transcription, body: TranscriptionBody): boolean =>
 const open = (state: TranscriptionState) => state === "queued" || state === "starting" || state === "running";
 
 // TX9 first: with no ready Transcriber nothing runs and nothing is offered, whatever the body. Then the body is
-// checked, then TX2: one attempt per Recording and Language, so a repeat returns the attempt already in flight
+// checked — a Language choice is `auto` or a code the engine itself lists, so the languages the probe reported come
+// in with it — then TX2: one attempt per Recording and Language, so a repeat returns the attempt already in flight
 // unchanged. A terminal attempt holds nothing (TX3): asking again makes a new one, and only the caller's ids tell
 // them apart.
 export function requestTranscription(
@@ -365,6 +366,7 @@ export function requestTranscription(
   body: TranscriptionBody,
   at: number,
   capability: TranscriptionCapability,
+  languages: "multi" | readonly string[],
 ): Result<Transcription, TranscriptionRequestProblem> {
   if (!capabilityReady(capability)) return err("no_capability");
   // The pattern is for strings only: `test` would read a missing id as "undefined" and a number as its digits, and
@@ -376,6 +378,9 @@ export function requestTranscription(
     return err("bad_recording");
   }
   if (typeof body.language !== "string" || !LANGUAGE_CHOICE.test(body.language)) return err("bad_language");
+  // A code that is well-shaped but not on the engine's list would only fail inside the run: refuse it here, where
+  // the answer is a body problem and not an engine one. `auto` asks the engine to choose, so every engine takes it.
+  if (body.language !== "auto" && languages !== "multi" && !languages.includes(body.language)) return err("bad_language");
   if (!Number.isInteger(body.sizeBytes) || body.sizeBytes < 0 || body.sizeBytes > MAX_RECORDING_BYTES) return err("bad_size");
   const inFlight = existing.find(row => sameRecording(row.recording, recording) && row.language === body.language && open(row.state));
   if (inFlight) return ok(inFlight);

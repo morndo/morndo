@@ -518,7 +518,8 @@ export function startHttp(p: {
       if (!id && method === "POST") {
         if (!p.transcription.allowsMicrophone()) return json(res, 404, { error: "transcription_off" });
         const body = await readBody(req, TranscriptionCreateBody);
-        const created = await p.transcription.request(body);
+        // The endpoint is part of the ask: an upload another device made is not this caller's recording (S2).
+        const created = await p.transcription.request({ ...body, caller: { endpointId: a.endpoint.id } });
         if (!created.ok) return json(res, created.error === "unreadable" ? 404 : 400, { error: created.error });
         return json(res, 200, transcriptionView(created.value));
       }

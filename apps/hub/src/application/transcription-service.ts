@@ -5,7 +5,7 @@ import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import {
   afterRestart, audioDurationMs, capabilityReady, effectiveMaxSeconds, endTranscription, requestTranscription, scheduleTranscriptions,
-  startTranscription, threadsFor, transcriptionTimeoutMs, TRANSCRIPTION_LIMIT_DEFAULT, MAX_RECORDING_SECONDS,
+  sniffAudio, startTranscription, threadsFor, transcriptionTimeoutMs, TRANSCRIPTION_LIMIT_DEFAULT, MAX_RECORDING_SECONDS,
   type QueueGuard, type Recording, type Result, type Transcription, type TranscriptionCapability, type TranscriptionRequestProblem,
   err, ok,
 } from "@morndo/domain";
@@ -13,12 +13,16 @@ import type { MeTranscription, Transcriber, TranscriberProbe } from "@morndo/pro
 
 export type RecordingFile = { path: string; size: number; durationMs: number | null };
 
+// The endpoint asking for the run (S2's rule, as attachments are told apart): an upload another endpoint made is
+// not the caller's recording, so the port answers nothing for it.
+export type RecordingCaller = { endpointId: string };
+
 export function fileOnDisk(path: string | null | undefined): RecordingFile | null {
   if (!path) return null;
   try {
     const st = statSync(path);
     if (!st.isFile()) return null;
-    return { path, size: st.size, durationMs: durationOnDisk(path, st.size) };
+    return audioOnDisk(path, st.size);
   } catch {
     return null;
   }
@@ -26,18 +30,21 @@ export function fileOnDisk(path: string | null | undefined): RecordingFile | nul
 
 // §9's timeout scales with the recording's length, and the container's own header says it: the head and the tail
 // carry what each one keeps (an m4a's moov may sit at the end, an Ogg's last page too). Whatever the bytes do not
-// say stays null — the caller then uses its cap, never a guess.
+// say stays null — the caller then uses its cap, never a guess. The same head settles first whether this is audio
+// at all (S1: by its own bytes, never the name an id or path carries), for a file that is not one of the containers
+// is no recording however it was stored.
 const DURATION_HEAD = 256 * 1024;
 const DURATION_TAIL = 64 * 1024;
-function durationOnDisk(path: string, size: number): number | null {
+function audioOnDisk(path: string, size: number): RecordingFile | null {
   const fd = openSync(path, "r");
   try {
     const head = Buffer.alloc(Math.min(size, DURATION_HEAD));
     readSync(fd, head, 0, head.length, 0);
-    if (size <= head.length) return audioDurationMs({ head, size });
+    if (sniffAudio(head) === null) return null;
+    if (size <= head.length) return { path, size, durationMs: audioDurationMs({ head, size }) };
     const tail = Buffer.alloc(Math.min(size - head.length, DURATION_TAIL));
     readSync(fd, tail, 0, tail.length, size - tail.length);
-    return audioDurationMs({ head, tail, tailAt: size - tail.length, size });
+    return { path, size, durationMs: audioDurationMs({ head, tail, tailAt: size - tail.length, size }) };
   }
   catch {
     return null;
@@ -67,7 +74,7 @@ export class TranscriptionService {
   #maxSeconds: number;
   #threads: number;
   #guard: () => QueueGuard;
-  #file: (recording: Recording) => RecordingFile | null;
+  #file: (recording: Recording, caller?: RecordingCaller) => RecordingFile | null;
   #log: (line: string) => void;
   #probeTtlMs: number;
   #timeoutFor: (durationMs: number) => number;
@@ -87,7 +94,7 @@ export class TranscriptionService {
     transcriber: Transcriber | null;
     unavailable?: TranscriberProbe | null;
     locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
-    file: (recording: Recording) => RecordingFile | null;
+    file: (recording: Recording, caller?: RecordingCaller) => RecordingFile | null;
     now?: () => number;
     limit?: number;
     timeoutSec?: number | null;
@@ -173,19 +180,28 @@ export class TranscriptionService {
     return { engine: probe.engine, model: probe.model, languages, maxSeconds: cap.maxSeconds };
   }
 
+  // What the last probe said the engine takes. "multi" when nothing was probed yet: the capability check in front
+  // of every request refuses before the list could matter.
+  #languages(): "multi" | readonly string[] {
+    const probe = this.#cache?.probe;
+    return probe?.ready ? probe.languages : "multi";
+  }
+
   async refresh(): Promise<TranscriptionCapability> {
     const run = this.#probeChain.then(() => this.#probe());
     this.#probeChain = run.then(() => {}, () => {});
     return run;
   }
 
-  async request(input: { id: string; recording: Recording; language: string }): Promise<Result<Transcription, TranscriptionRequestProblem | "unreadable">> {
+  async request(input: { id: string; recording: Recording; language: string; caller: RecordingCaller }): Promise<Result<Transcription, TranscriptionRequestProblem | "unreadable">> {
     await this.refresh();
-    const file = this.#file(input.recording);
+    // The caller is part of the ask: the port answers nothing for a recording this endpoint may not read (an upload
+    // another endpoint made), and nothing for a file that is not audio — both are unreadable to this caller.
+    const file = this.#file(input.recording, input.caller);
     if (!file) return err("unreadable");
     const decided = requestTranscription(this.#rows, {
       id: input.id, recording: input.recording, language: input.language, sizeBytes: file.size,
-    }, this.#now(), this.capability());
+    }, this.#now(), this.capability(), this.#languages());
     if (!decided.ok) return decided;
     if (!this.#rows.some(row => sameRow(row, decided.value))) this.#save(decided.value);
     this.tick();
@@ -272,6 +288,8 @@ export class TranscriptionService {
   #launch(row: Transcription): boolean {
     const key = rowKey(row);
     if (this.#inflight.has(key) || row.state !== "starting") return true;
+    // No caller here on purpose: the row was accepted for its caller already, and this only asks whether the audio
+    // is still on the machine and still audio. A sweep that took the file fails the row as unreadable.
     const file = this.#file(row.recording);
     if (!file) {
       const ended = endTranscription(row, { outcome: "failed", at: this.#now(), problem: "unreadable" });

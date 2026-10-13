@@ -97,7 +97,11 @@ export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: numb
     store, transcriber: txHost,
     unavailable: txHost ? null : { ready: false, reason: "missing", detail: "missing" },
     probeTtlMs: 0, log: () => {},
-    file: recording => fileOnDisk(recording.kind === "upload" ? inbox.get(recording.id)?.path : null),
+    file: (recording, caller) => {
+      const upload = inbox.get(recording.id);
+      if (!upload || (caller && upload.endpointId !== caller.endpointId)) return null;
+      return fileOnDisk(upload.path);
+    },
   });
   await transcription.start();
   const http = startHttp({
