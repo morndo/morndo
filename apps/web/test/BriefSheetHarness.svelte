@@ -16,16 +16,23 @@
   let note = $state<string | null>(null);
   const session = new AnswerSession(initial);
 
-  $effect(() => { const t = setInterval(() => (now = Date.now()), 250); return () => clearInterval(t); });
+  $effect(() => {
+    const t = setInterval(() => { if (!(globalThis as { __freezeClock?: boolean }).__freezeClock) now = Date.now(); }, 250);
+    return () => clearInterval(t);
+  });
 
   // The sheet follows the list when nothing is held (answer-session's bind): a swapped item becomes the shown one.
   function setItem(next: DecisionItem) { item = next; session.bind(next, false); }
-  function setAnswering(next: { label: string; sending: boolean; commitAt: number } | null) { now = Date.now(); answering = next; }
+  function setAnswering(next: { label: string; sending: boolean; commitAt: number } | null) {
+    if (!(globalThis as { __freezeClock?: boolean }).__freezeClock) now = Date.now();
+    answering = next;
+  }
 
   const counts = { picks: 0, undos: 0, verifyAgain: 0, tryAgain: 0 };
   const picks: { body: unknown; label: string }[] = [];
   Object.assign(globalThis, {
-    __setItem: setItem, __setAnswering: setAnswering, __setRefusal: (v: { key: string; code: string; text: string } | null) => (refusal = v),
+    __setItem: setItem, __setAnswering: setAnswering, __setClock: (t: number) => (now = t),
+    __setRefusal: (v: { key: string; code: string; text: string } | null) => (refusal = v),
     __setRunAnswered: (v: boolean) => (runAnswered = v), __setNote: (v: string | null) => (note = v),
     __picks: picks, __counts: () => ({ ...counts }),
   });

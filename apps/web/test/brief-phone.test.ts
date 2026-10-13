@@ -261,6 +261,33 @@ describe("the sheet and cards report what happened to an answer", () => {
     t.evaluate(x => (globalThis as unknown as { __setRefusal: (r: { key: string; code: string; text: string }) => void }).__setRefusal(x), v);
   const counts = (t: Page) => t.evaluate(() => (globalThis as unknown as { __counts: () => { verifyAgain: number; tryAgain: number } }).__counts());
 
+  it("counts an answer down while the due line stays put", async () => {
+    const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+    tab = await context.newPage();
+    await tab.goto(web.url);
+    await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
+    const dialog = tab.locator("dialog.sheet");
+    await dialog.waitFor();
+    const due = await dialog.locator(".meta").innerText();
+    await tab.evaluate(() => {
+      const g = globalThis as unknown as {
+        __freezeClock?: boolean;
+        __setClock: (t: number) => void;
+        __setAnswering: (a: { label: string; sending: boolean; commitAt: number }) => void;
+      };
+      const t = Date.now();
+      g.__freezeClock = true;
+      g.__setClock(t);
+      g.__setAnswering({ label: "Extend the triage script", sending: false, commitAt: t + 5_000 });
+    });
+    await dialog.getByText("Goes in 5 s.").waitFor({ timeout: 3_000 });
+    await tab.waitForTimeout(1_300);
+    const note = await dialog.locator("footer .note").innerText();
+    expect(note === "Goes in 4 s." || note === "Goes in 3 s.").toBe(true);
+    expect(await dialog.locator(".meta").innerText()).toBe(due);
+    await context.close();
+  }, 60_000);
+
   it("counts the answer window down from a live clock, not the sheet's mount time", async () => {
     const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
     tab = await context.newPage();
