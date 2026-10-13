@@ -6,7 +6,9 @@
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 
-const here = path.dirname(path.resolve(process.argv[1]));
+// argv[1] stays the symlink path. __dirname is this file's real directory, so the .mts and the
+// install root (plugin.json, whisper-cli, the model) resolve when the executable is a symlink.
+const here = __dirname;
 import(pathToFileURL(path.join(here, "morndo-transcribe.mts")).href)
   .then((mod) => mod.main(process.argv.slice(2), here))
   .then((code) => {

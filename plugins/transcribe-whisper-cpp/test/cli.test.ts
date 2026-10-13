@@ -1,6 +1,6 @@
 // The executable, with a stand-in whisper-cli. ffmpeg is the system's. A machine without ffmpeg skips these
 // and says so; the plugin workflow installs it.
-import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -211,6 +211,33 @@ EOF
     const missing = await run(["run", "--input", note, "--language", "en", "--threads", "1", "--max-seconds", "600", "--json"], pathEnv);
     expect(missing.code).toBe(1);
     expect(missing.stdout).toBe("");
+  });
+
+  live("a symlink to morndo-transcribe still probes", async () => {
+    stage(true);
+    const linkDir = join(ROOT, "links");
+    mkdirSync(linkDir);
+    const link = join(linkDir, "morndo-transcribe");
+    symlinkSync(join(BIN, "morndo-transcribe"), link);
+    const probe = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, [link, "probe", "--json"], {
+        env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: tmpdir() },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+      child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+      child.on("error", reject);
+      child.on("close", code => resolve({ code, stdout, stderr }));
+    });
+    expect(probe.code).toBe(0);
+    expect(JSON.parse(probe.stdout)).toEqual({
+      protocol: 1, ready: true, engine: "whisper.cpp", engineVersion: "1.9.5", model: "base",
+      languages: "multi", maxSeconds: 600, missing: [],
+    });
   });
 
   live("SIGTERM removes the converted clip before the process exits", async () => {
