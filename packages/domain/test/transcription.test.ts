@@ -4,8 +4,11 @@
 // the text it produced. No engine name, no file, no clock of its own.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { afterRestart, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
-  composerText, editText, type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
+import {
+  afterRestart, audioDurationMs, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
+  composerText, editText, type EngineText, type Transcription, type TranscriptionBody,
+} from "../src/index.ts";
+import { mp3Bytes, mp4Bytes, opusBytes, vorbisBytes, wavBytes, webmBytes } from "./audio-bytes.ts";
 
 it("a language choice is the code's body, or auto, written once", () => {
   const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
@@ -399,5 +402,38 @@ describe("the words a done transcription offers the composer (TX8)", () => {
     const heardAttachment = done({ recording: { kind: "attachment", id: "file-9" } });
     expect(heardAttachment.state).toBe("done");
     expect(composerText(heardAttachment)).toBeNull();
+  });
+});
+
+describe("audioDurationMs", () => {
+  // The head is what a reader takes from the front of the file; `tail`/`tailAt` are the last bytes with the
+  // offset they start at, where a container keeps its length (an m4a's moov, an Ogg's last page).
+  const whole = (head: Uint8Array) => ({ head, size: head.length });
+  const withTail = (head: Uint8Array, tail: Uint8Array) => ({ head, tail, tailAt: head.length, size: head.length + tail.length });
+
+  it("reads each container's own duration", () => {
+    expect(audioDurationMs(whole(wavBytes(1000)))).toBe(1000);                       // PCM: data over byte rate
+    const inHead = mp4Bytes(1000, 2500);
+    expect(audioDurationMs(whole(inHead.head))).toBe(2500);                          // mvhd: duration over timescale
+    const moovLast = mp4Bytes(1000, 2500, true);                                     // a recorder's moov at the end
+    expect(audioDurationMs({ head: moovLast.head, tail: moovLast.moov, tailAt: moovLast.head.length, size: moovLast.head.length + moovLast.moov.length })).toBe(2500);
+    const cbr = mp3Bytes(100, "44100");
+    expect(audioDurationMs({ head: cbr, size: 110 + 16_000 })).toBe(1000);           // constant 128 kbit/s from the tag's end
+    const vbr = mp3Bytes(0, "48000", { frames: 1000 });
+    expect(audioDurationMs(whole(vbr))).toBe(24_000);                                // a Xing header's frame count
+    expect(audioDurationMs(withTail(opusBytes(5000).head, opusBytes(5000).tail))).toBe(5000);   // Opus granule at 48 kHz
+    expect(audioDurationMs(withTail(vorbisBytes(1000, 8000).head, vorbisBytes(1000, 8000).tail))).toBe(1000);   // Vorbis granule at its own rate
+    expect(audioDurationMs(whole(webmBytes(7500)))).toBe(7500);                      // Duration × TimecodeScale
+  });
+
+  it("answers null whenever the bytes do not say, so a caller falls back rather than guess", () => {
+    expect(audioDurationMs(whole(new Uint8Array(0)))).toBeNull();
+    expect(audioDurationMs(whole(new Uint8Array([...new Array<number>(44).fill(0)])))).toBeNull();   // no container's magic
+    const noData = new Uint8Array([...wavBytes(1000).slice(0, 36), ...new TextEncoder().encode("LIST")]);  // fmt, then no data chunk
+    expect(audioDurationMs(whole(noData))).toBeNull();
+    const tailOnly = mp4Bytes(1000, 2500, true);
+    expect(audioDurationMs(whole(tailOnly.head))).toBeNull();                        // the moov is in no part we were given
+    const noFrames = mp3Bytes(0, "48000", { frames: 0 });                            // Xing present, no frames counted
+    expect(audioDurationMs(whole(noFrames))).toBeNull();
   });
 });

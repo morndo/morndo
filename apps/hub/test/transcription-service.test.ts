@@ -1,5 +1,8 @@
 // TranscriptionService (design §9, §13): one class, FIFO, cancel, a timeout, and lost after a restart.
 // The transcriber here is scripted. The process host has its own suite.
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   MAX_TEXT_BYTES, requestTranscription, utf8ByteLength,
@@ -7,7 +10,8 @@ import {
 } from "@morndo/domain";
 import type { TranscribeInput, Transcriber, TranscriberProbe } from "@morndo/protocol";
 import { until } from "../../../packages/protocol/test/proc.ts";
-import { TranscriptionService, type TranscriptionStore } from "../src/application/transcription-service.ts";
+import { wavBytes } from "../../../packages/domain/test/audio-bytes.ts";
+import { fileOnDisk, TranscriptionService, type TranscriptionStore } from "../src/application/transcription-service.ts";
 
 const READY: TranscriberProbe = {
   ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture", languages: "multi", maxSeconds: 600,
@@ -61,11 +65,13 @@ function memory(seed: Transcription[] = []): TranscriptionStore {
   };
 }
 
-const files = new Map<string, { path: string; size: number }>([
-  ["a", { path: "/audio/a.wav", size: 12 }],
-  ["b", { path: "/audio/b.wav", size: 12 }],
-  ["hang", { path: "/audio/hang.wav", size: 12 }],
-  ["long", { path: "/audio/long.wav", size: 12 }],
+const files = new Map<string, { path: string; size: number; durationMs: number | null }>([
+  ["a", { path: "/audio/a.wav", size: 12, durationMs: null }],
+  ["b", { path: "/audio/b.wav", size: 12, durationMs: null }],
+  ["hang", { path: "/audio/hang.wav", size: 12, durationMs: null }],
+  ["long", { path: "/audio/long.wav", size: 12, durationMs: null }],
+  ["short", { path: "/audio/short.wav", size: 12, durationMs: 10_000 }],
+  ["over", { path: "/audio/over.wav", size: 12, durationMs: 900_000 }],
 ]);
 
 function service(store: TranscriptionStore, gate: Gate, extra: { guard?: () => "off" | "load"; timeoutFor?: () => number; now?: () => number } = {}) {
@@ -86,6 +92,18 @@ const body = (id: string, recording: string, language = "auto") =>
   ({ id, recording: { kind: "upload" as const, id: recording }, language });
 
 describe("transcription service", () => {
+  it("fileOnDisk reads a recording's duration out of its container", () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-dur-"));
+    try {
+      const file = join(dir, "note.wav");
+      const made = wavBytes(1000);
+      writeFileSync(file, made);
+      expect(fileOnDisk(file)).toMatchObject({ path: file, size: made.length, durationMs: 1000 });
+      expect(fileOnDisk(join(dir, "no-such.wav"))).toBeNull();
+    }
+    finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it("runs one at a time and starts the next when the first ends", async () => {
     const gate = new Gate();
     const { svc } = service(memory(), gate);
@@ -248,6 +266,20 @@ describe("transcription service", () => {
     await svc.request(body("tx-hang", "hang"));
     expect(await until(() => svc.get("tx-hang")?.state === "timed_out", 2000)).toBe(true);
     expect(svc.get("tx-hang")?.text).toBeNull();
+    svc.close();
+  });
+
+  it("scales the timeout with the recording's own duration, capped at the run's cap", async () => {
+    const seen: number[] = [];
+    const gate = new Gate();
+    const { svc } = service(memory(), gate, { timeoutFor: ms => (seen.push(ms), 40) });
+    await svc.start();
+    await svc.request(body("tx-short", "short"));
+    expect(seen).toEqual([10_000]);                    // a 10 s note: 120 s + 6 × 10 s, not 120 s + 6 × the cap
+    await svc.request(body("tx-over", "over"));
+    expect(seen[1]).toBe(600_000);                     // longer than the cap counts as the cap
+    await svc.request(body("tx-plain", "a"));
+    expect(seen[2]).toBe(600_000);                     // a duration the container does not say: the cap, never less
     svc.close();
   });
 
