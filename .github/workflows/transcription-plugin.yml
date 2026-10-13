@@ -74,6 +74,28 @@ jobs:
           MORNDO_HOME: ${{ runner.temp }}/morndo-home
         run: npm run plugin:transcribe -- --model base
 
+      # Ubuntu 24.04 lets an unprivileged process create a user namespace, then denies
+      # capabilities inside it, so `unshare -rn` exits 1. Release notes, read 2026-10-13:
+      # https://discourse.ubuntu.com/t/ubuntu-24.04-lts-noble-numbat-release-notes/39890
+      # The documented allow is an unconfined profile with `userns` (apparmor.d(5), same date):
+      # https://manpages.ubuntu.com/manpages/noble/man5/apparmor.d.5.html
+      # GitHub's ubuntu-24.04 image keeps that default (read 2026-10-13):
+      # https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md
+      # https://github.com/actions/runner-images/issues/10443
+      # The suite still runs the transcription under `unshare -rn`, a network namespace with no interfaces.
+      - name: Allow unshare to open a network namespace
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        run: |
+          sudo tee /etc/apparmor.d/usr.bin.unshare >/dev/null <<'EOF'
+          abi <abi/4.0>,
+          include <tunables/global>
+
+          /usr/bin/unshare flags=(unconfined) {
+            userns,
+          }
+          EOF
+          sudo apparmor_parser -r /etc/apparmor.d/usr.bin.unshare
+
       - name: Contract suite and the no-network run
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
         env:
