@@ -122,21 +122,22 @@ describe("install choices", () => {
     expect(workflow.slice(allow, suite)).toContain("userns,");
   });
 
-  it("places an unchanged model by hard link so a reinstall does not copy it", () => {
-    const dir = mkdtempSync(join(tmpdir(), "morndo-link-"));
+  it("refuses to copy the model when the disk cannot hold a second copy", () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-room-"));
     const cached = join(dir, "cached.bin");
     const installed = join(dir, "installed.bin");
-    const copied = join(dir, "copied.bin");
     writeFileSync(cached, "weights");
     try {
-      placeCachedFile(cached, installed);
-      expect(statSync(installed).ino).toBe(statSync(cached).ino);
+      expect(() => placeCachedFile(cached, installed, () => 3)).toThrow(
+        "not enough free space to install the model (need 7 bytes, 3 free)",
+      );
+      expect(readdirSync(dir)).toEqual(["cached.bin"]);
+      placeCachedFile(cached, installed, () => 7);
       expect(readFileSync(installed, "utf8")).toBe("weights");
-      placeCachedFile(cached, copied, () => {
-        throw Object.assign(new Error("cross device"), { code: "EXDEV" });
-      });
-      expect(statSync(copied).ino).not.toBe(statSync(cached).ino);
-      expect(readFileSync(copied, "utf8")).toBe("weights");
+      expect(statSync(installed).ino).not.toBe(statSync(cached).ino);
+      const again = join(dir, "again.bin");
+      placeCachedFile(cached, again);
+      expect(readFileSync(again, "utf8")).toBe("weights");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

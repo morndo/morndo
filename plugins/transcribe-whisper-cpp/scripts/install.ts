@@ -16,7 +16,7 @@
 //   that the bytes are the pin; the host check refuses any other site.
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, statfsSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, totalmem } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -245,17 +245,18 @@ async function sha256Of(path: string): Promise<{ sha256: string; bytes: number }
   return { sha256: hash.digest("hex"), bytes };
 }
 
-// A reinstall used to copy the model into staging while the previous copy was still in place.
-// Linking the cached file shares the inode, so the second name does not need another copy of the bytes.
-// A cross-device cache falls back to a copy.
-export function placeCachedFile(from: string, to: string, link: (from: string, to: string) => void = linkSync): void {
-  try {
-    link(from, to);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "EXDEV" && code !== "ENOTSUP" && code !== "EPERM") throw error;
-    copyFileSync(from, to);
-  }
+function freeBytes(dir: string): number {
+  const stats = statfsSync(dir);
+  return Number(stats.bavail) * Number(stats.bsize);
+}
+
+// The model is copied, so the cache inode stays private. A reinstall still has the previous copy
+// until the swap, so the copy is refused when the filesystem cannot hold a second one.
+export function placeCachedFile(from: string, to: string, free: (dir: string) => number = freeBytes): void {
+  const size = statSync(from).size;
+  const room = free(dirname(to));
+  if (room < size) throw new Error(`not enough free space to install the model (need ${size} bytes, ${room} free)`);
+  copyFileSync(from, to);
 }
 
 function modelHost(hostname: string): boolean {
