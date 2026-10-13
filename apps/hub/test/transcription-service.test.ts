@@ -171,6 +171,27 @@ describe("transcription service", () => {
     }
   });
 
+  it("a launch that finds the file gone fails its row and hands the slot on", async () => {
+    files.set("a-swept", { path: "/audio/a-swept.wav", size: 12 });   // sorts before "b": with the clock fixed, FIFO
+    try {                                                             // breaks the tie by key
+      const gate = new Gate();
+      const { svc, setGuard } = service(memory(), gate);
+      await svc.start();
+      setGuard("load");                                        // both accepted while the guard holds the line
+      await svc.request(body("tx-a", "a-swept"));
+      await svc.request(body("tx-b", "b"));
+      files.delete("a-swept");                                 // the upload's TTL sweeps it before any start
+      setGuard("off");
+      svc.tick();
+      expect(svc.get("tx-a")).toMatchObject({ state: "failed", problem: "unreadable" });
+      expect(await until(() => svc.get("tx-b")?.state === "running", 2000)).toBe(true);
+      expect(gate.calls).toEqual(["/audio/b.wav"]);
+      svc.close();
+    } finally {
+      files.delete("a-swept");
+    }
+  });
+
   it("the same recording and language returns the attempt already in flight", async () => {
     const gate = new Gate();
     const { svc } = service(memory(), gate);
