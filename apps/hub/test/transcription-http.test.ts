@@ -2,7 +2,7 @@
 // a short upload comes back as text. A temporary data dir and a random port, never a running hub.
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { UPLOAD_NAME_HEADER } from "@morndo/protocol";
+import { UPLOAD_NAME_HEADER, type Transcriber } from "@morndo/protocol";
 import { SENTENCE } from "../../../packages/protocol/test/answers.mjs";
 import { processTranscriber } from "../src/adapters/transcriber-process.ts";
 import { ORIGIN, startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
@@ -72,5 +72,23 @@ describe("transcription http", () => {
     }
     expect(view.state).toBe("done");
     expect(view.text?.text).toBe(SENTENCE);
+  });
+
+  it("serves the app shell's microphone policy from a fresh probe, not the stale cache", async () => {
+    let ready = false;
+    const transcriber: Transcriber = {
+      probe: async () => ready
+        ? { ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture", languages: "multi", maxSeconds: 600 }
+        : { ready: false, reason: "missing", detail: "missing" },
+      transcribe: () => Promise.reject(new Error("not used")),
+    };
+    const hub = await startInProcessHub({ transcriber });
+    hubs.push(hub);
+    const before = await fetch(`${hub.base}/`);
+    expect(before.headers.get("permissions-policy")).toContain("microphone=()");     // off at start
+    ready = true;                                                                    // installed while the hub runs
+    const after = await fetch(`${hub.base}/`);
+    // The document, not just /api/me, must ask again: its Permissions-Policy is what gates getUserMedia.
+    expect(after.headers.get("permissions-policy")).toContain("microphone=(self)");
   });
 });
