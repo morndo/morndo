@@ -242,7 +242,9 @@
       briefNote = "Not sent: this sheet isn't showing the answer that passkey check was for.";
       return;
     }
-    if (!(await verify())) return;
+    briefNote = null;
+    if (feed.status !== "live" || navigator.onLine === false) { briefNote = "Still offline. It goes when you try again online."; return; }
+    if (!(await verify())) { briefNote = "Not sent: the passkey check didn't finish."; return; }
     await session.retry(p.key, p.id, p.body, p.label, p.seen);
   }
   function go(t: Tab) {

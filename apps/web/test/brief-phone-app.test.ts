@@ -345,6 +345,30 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
+  it("says when a passkey confirm can't be sent, offline or when the check doesn't finish", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true);
+    await queue(tab, [STEP_UP]);
+    await push(tab, [release]);
+    await tab.locator("button.banner.you").click();
+    await tab.locator('[data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    const before = (await calls(tab)).length;
+    await context.setOffline(true);
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
+    await dialog.getByText("Still offline. It goes when you try again online.").waitFor({ timeout: 3_000 });
+    expect(await calls(tab)).toHaveLength(before);
+    await context.setOffline(false);
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
+    await dialog.getByText("Not sent: the passkey check didn't finish.").waitFor({ timeout: 3_000 });
+    expect(await calls(tab)).toHaveLength(before);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("says why a passkey confirm does nothing when the sheet never started that answer", { timeout: 45_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track, "", true);
