@@ -623,7 +623,7 @@ export function startHttp(p: {
   }
 
   let cachedIndex: { html: string; csp: string; file: string; mtimeMs: number } | null = null;
-  function staticFile(req: IncomingMessage, res: ServerResponse, path: string) {
+  async function staticFile(req: IncomingMessage, res: ServerResponse, path: string) {
     const root = normalize(config.webDir);
     // Each segment decoded on its own (decodeSegment); a path with one that doesn't decode is no file, and the app shell
     // answers it, as any path the app doesn't know.
@@ -642,6 +642,9 @@ export function startHttp(p: {
     }
     // Every page is the app shell (SPA fallback); its CSP allows exactly its own inline bootstrap. Read again after a
     // rebuild, so the shell never points at assets the build replaced.
+    // The document's Permissions-Policy is what gates the microphone, so it is served from a probe as fresh as
+    // /api/me's — never a cache that went stale while nobody asked.
+    await p.transcription?.refresh();
     const file = ["200.html", "index.html"].map(f => join(root, f)).find(f => existsSync(f));
     if (!file) throw new HttpError(503, "web app not built: run `npm run build`");
     const mtimeMs = statSync(file).mtimeMs;
@@ -670,7 +673,7 @@ export function startHttp(p: {
         finally { end?.(); }
       }
       if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError(405, "method not allowed");
-      staticFile(req, res, path);
+      await staticFile(req, res, path);
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
       if (status === 500) log.error(`${req.method ?? "?"} request failed`, e);            // no URL: it may be what failed to parse
