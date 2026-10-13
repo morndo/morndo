@@ -48,7 +48,21 @@ export type Pins = {
   models: Record<ModelId, ModelPin>;
 };
 
-export const BUILD_FLAGS = readFileSync(join(PACKAGE, "build-flags.txt"), "utf8").split("\n").filter(line => line !== "");
+export function parseBuildFlags(text: string): string[] {
+  return text.split("\n").map(line => line.trim()).filter(line => line !== "");
+}
+
+export function loadBuildFlags(read: () => string): string[] {
+  return parseBuildFlags(read());
+}
+
+let cachedFlags: string[] | undefined;
+export function buildFlags(): string[] {
+  if (cachedFlags === undefined) {
+    cachedFlags = loadBuildFlags(() => readFileSync(join(PACKAGE, "build-flags.txt"), "utf8"));
+  }
+  return cachedFlags;
+}
 
 export function buildDir(src: string, flags: readonly string[]): string {
   const key = createHash("sha256").update(flags.join("\n")).digest("hex").slice(0, 16);
@@ -415,7 +429,8 @@ async function ensureSource(pins: Pins, src: string): Promise<void> {
 }
 
 async function ensureBinary(src: string): Promise<string> {
-  const dir = buildDir(src, BUILD_FLAGS);
+  const flags = buildFlags();
+  const dir = buildDir(src, flags);
   pruneBuildDirs(src, dir);
   const bin = join(dir, "bin", "whisper-cli");
   try {
@@ -424,7 +439,7 @@ async function ensureBinary(src: string): Promise<string> {
     // build it
   }
   process.stderr.write("building whisper-cli\n");
-  await run("cmake", ["-S", src, "-B", dir, ...BUILD_FLAGS]);
+  await run("cmake", ["-S", src, "-B", dir, ...flags]);
   await run("nice", ["-n", "10", "cmake", "--build", dir, "--target", "whisper-cli", "--parallel", String(availableParallelism())]);
   if (!statSync(bin).isFile()) throw new Error("whisper-cli was not produced");
   return bin;

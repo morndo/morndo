@@ -6,7 +6,7 @@ import { basename, join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { commandOnPath } from "../src/morndo-transcribe.mts";
-import { BUILD_FLAGS, absentTools, buildDir, commitModel, memAvailableFrom, memoryBudget, parseInstallArgs, placeCachedFile, pruneBuildDirs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
+import { absentTools, buildDir, buildFlags, commitModel, loadBuildFlags, memAvailableFrom, memoryBudget, parseBuildFlags, parseInstallArgs, placeCachedFile, pruneBuildDirs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
@@ -69,8 +69,12 @@ describe("install choices", () => {
     const src = "/cache/src/d1be6fde11ac6e0407606b4e42fe72d34add8037";
     expect(buildDir(src, ["-DBUILD_SHARED_LIBS=OFF"])).toBe(join(src, "build", flagKey(["-DBUILD_SHARED_LIBS=OFF"])));
     expect(buildDir(src, ["-DBUILD_SHARED_LIBS=ON"])).toBe(join(src, "build", flagKey(["-DBUILD_SHARED_LIBS=ON"])));
-    const flags = readFileSync(join(import.meta.dirname, "../build-flags.txt"), "utf8").split("\n").filter(line => line !== "");
-    expect(BUILD_FLAGS).toEqual(flags);
+    expect(parseBuildFlags(" -DA=ON \r\n\n-DB=OFF\r\n")).toEqual(["-DA=ON", "-DB=OFF"]);
+    let reads = 0;
+    expect(loadBuildFlags(() => { reads += 1; return " -DA=ON \r\n"; })).toEqual(["-DA=ON"]);
+    expect(reads).toBe(1);
+    const flags = buildFlags();
+    expect(flags).toEqual(parseBuildFlags(readFileSync(join(import.meta.dirname, "../build-flags.txt"), "utf8")));
     expect(buildDir(src, flags)).toBe(join(src, "build", flagKey(flags)));
     const workflow = readFileSync(join(import.meta.dirname, "../../../.github/workflows/transcription-plugin.yml"), "utf8");
     const key = workflow.split("\n").find(line => line.includes("key: transcribe-")) ?? "";
@@ -81,7 +85,7 @@ describe("install choices", () => {
 
   it("drops build directories other than the current flag hash", () => {
     const src = mkdtempSync(join(tmpdir(), "morndo-builds-"));
-    const current = buildDir(src, BUILD_FLAGS);
+    const current = buildDir(src, buildFlags());
     mkdirSync(join(current, "bin"), { recursive: true });
     writeFileSync(join(current, "bin", "whisper-cli"), "new");
     mkdirSync(join(src, "build", "old-hash", "bin"), { recursive: true });
