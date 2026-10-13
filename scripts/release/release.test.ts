@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/protocol";
 import { packTree, type TreeFile } from "./archive.ts";
+import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
 import { syncFeed } from "./feed-sync.ts";
 import { listFiles } from "./files.ts";
@@ -357,6 +358,28 @@ describe("stage, launchers, node pin, notice", () => {
     expect(lstatSync(join(dest, "app/node_modules/@morndo/domain")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/src/index.js"), "utf8")).toBe("export const n = 1;\n");
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/package.json"), "utf8")).toContain("./src/index.js");
+  });
+
+  it("copies brand assets into the compiled package", () => {
+    const tree = join(import.meta.dirname, "../..");
+    const compiled = temp();
+    compilePackage(tree, join(tree, "packages/brand"), join(compiled, "brand"), join(compiled, "brand.tsconfig.json"));
+    const repo = temp();
+    const nodeDir = temp();
+    mkdirSync(join(repo, "packages/brand"), { recursive: true });
+    mkdirSync(join(repo, "node_modules/@morndo"), { recursive: true });
+    mkdirSync(join(nodeDir, "bin"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0","workspaces":["packages/*"]}\n');
+    writeFileSync(join(repo, "package-lock.json"), '{"name":"morndo","lockfileVersion":3,"packages":{}}\n');
+    writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+    writeFileSync(join(repo, "packages/brand/package.json"), '{"name":"@morndo/brand"}\n');
+    symlinkSync("../../packages/brand", join(repo, "node_modules/@morndo/brand"));
+    writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n");
+    const dest = join(temp(), "out");
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", compiled });
+    const css = readFileSync(join(dest, "app/node_modules/@morndo/brand/assets/tokens/morndo-tokens.css"), "utf8");
+    expect(css.length).toBeGreaterThan(0);
+    expect(readFileSync(join(dest, "app/node_modules/@morndo/brand/assets/mark/morndo-mark-black.svg"), "utf8")).toContain("<svg");
   });
 
   it("names the pinned Node 24 tarballs and notices a newer 24", () => {
