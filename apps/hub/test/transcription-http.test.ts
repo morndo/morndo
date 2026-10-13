@@ -52,7 +52,7 @@ describe("transcription http", () => {
     expect(await me.json()).toMatchObject({
       transcription: { engine: "fixture-ear", model: "tiny-fixture", languages: "multi", maxSeconds: 600 },
     });
-    const png = await upload(hub, cookie, "dot.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const png = await upload(hub, cookie, "dot.png", Buffer.from("not-a-png"));
     expect(png.status).toBe(415);
     const fake = await upload(hub, cookie, "note.ogg", Buffer.from("not-audio"));
     expect(fake.status).toBe(415);

@@ -7,7 +7,7 @@ import { err, ok, unreachable, type EndpointId, type Result } from "./shared.ts"
 
 export type ImageMime = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 export type TextMime = "text/plain" | "text/markdown" | "application/json" | "text/csv" | "application/yaml";
-export type UploadMime = ImageMime | TextMime | "application/pdf";
+export type UploadMime = ImageMime | TextMime | "application/pdf" | "audio/ogg" | "audio/webm" | "audio/mp4" | "audio/mpeg" | "audio/wav";
 export type UploadKind = "image" | "text" | "pdf" | "audio";
 export type Upload = { id: string; endpointId: EndpointId; path: string; mime: UploadMime; size: number; at: number };
 

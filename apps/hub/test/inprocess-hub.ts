@@ -2,6 +2,7 @@
 // and a synthetic terminal for pane %1. For tests that need the HTTP and WebSocket edges but no crash isolation
 // (crash tests use http-crash-fixture.ts). Synthetic data only.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { Transcriber } from "@morndo/protocol";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -26,6 +27,7 @@ import { BoardService } from "../src/application/board-service.ts";
 import { AgentAccess } from "../src/application/agent-access.ts";
 import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
+import { fileOnDisk, TranscriptionService } from "../src/application/transcription-service.ts";
 import type { Config } from "../src/config.ts";
 
 export const ORIGIN = "https://hub.example.test";
@@ -47,7 +49,7 @@ export type InProcessHub = {
 // `now`: the hub's clock for access and rate limits (a test moves it to expire tokens, requests and verifications).
 // `observation`: the service the feed reads from, when a test needs its own (default: one over an empty tmux).
 // `engines`: the engine layer's CLI to run (a test's fake) and its environment; absent, the Engines page is off.
-export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService; engines?: { bin: string; env: NodeJS.ProcessEnv } } = {}): Promise<InProcessHub> {
+export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService; engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null } = {}): Promise<InProcessHub> {
   const dir = mkdtempSync(join(tmpdir(), "morndo-inproc-"));
   const web = join(dir, "web");
   mkdirSync(web);
@@ -88,12 +90,20 @@ export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: numb
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}) });
   const jobs = new JobsService({ store, board, ...(o.now ? { now: o.now } : {}) });
+  const transcription = o.transcriber
+    ? new TranscriptionService({
+      store, transcriber: o.transcriber, probeTtlMs: 0, log: () => {},
+      file: recording => fileOnDisk(recording.kind === "upload" ? inbox.get(recording.id)?.path : null),
+    })
+    : null;
+  if (transcription) await transcription.start();
   const http = startHttp({
     config, identity: loadOrCreateIdentity(dir), access, observation: o.observation ?? new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox), escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now),
     push: { publicKey: vapid.publicKey, notifications },
     board: { service: board, agents }, usage, jobs,
     engines: o.engines ? new EnginesService({ cli: enginesCli(o.engines.bin, o.engines.env), store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}) }) : null,
+    transcription,
     ...(o.limits ? { limits: o.limits } : {}), ...(o.heartbeatMs ? { heartbeatMs: o.heartbeatMs } : {}), ...(o.now ? { now: o.now } : {}),
   });
   await http.ready;
@@ -116,6 +126,6 @@ export async function startInProcessHub(o: { limits?: Limits; heartbeatMs?: numb
       ws.on("unexpected-response", (_q, res) => reject(new Error(`upgrade refused: ${res.statusCode}`)));
       ws.on("error", () => {});
     }),
-    close: async () => { notifications.stop(); await http.close(); store.close(); rmSync(dir, { recursive: true, force: true }); },
+    close: async () => { transcription?.close(); notifications.stop(); await http.close(); store.close(); rmSync(dir, { recursive: true, force: true }); },
   };
 }

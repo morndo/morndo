@@ -56,7 +56,7 @@ describe("process host", () => {
     expect(constants.priority.PRIORITY_BELOW_NORMAL).toBe(10);
     expect(getPriority(pid)).toBe(10);
     const raw = environ();
-    const keys = raw.map(row => row.split("=")[0]);
+    const keys = raw.map(row => row.split("=")[0] ?? "");
     const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
     const expected = ["HOME", "LANG", "PATH", "TMPDIR"].filter(key => key === "TMPDIR" || process.env[key]);
     expect(keys.sort(order)).toEqual(expected.sort(order));

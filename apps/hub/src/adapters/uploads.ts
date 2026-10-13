@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { IMAGE_EXTENSION, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, type EndpointId, type ImageMime, type Result, type Upload, type UploadRefusal } from "@morndo/domain";
+import { IMAGE_EXTENSION, NO_CAPABILITY, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, type AudioContainer, type EndpointId, type ImageMime, type Result, type TranscriptionCapability, type Upload, type UploadRefusal } from "@morndo/domain";
 
 const KEEP_FILES_MS = 7 * 24 * 3_600_000;
 
@@ -48,8 +48,12 @@ export function stagedUploadName(storedPath: string): string {
   return named?.[1] || base;
 }
 
+const AUDIO_MIME: Record<AudioContainer, Upload["mime"]> = {
+  ogg: "audio/ogg", webm: "audio/webm", mp4: "audio/mp4", mp3: "audio/mpeg", wav: "audio/wav",
+};
+
 export type Inbox = {
-  save(bytes: Uint8Array, endpointId: EndpointId, name?: string): Result<Upload, UploadRefusal>;
+  save(bytes: Uint8Array, endpointId: EndpointId, name?: string, capability?: TranscriptionCapability): Result<Upload, UploadRefusal>;
   get(id: string): Upload | undefined;
   sweep(): void;
 };
@@ -72,7 +76,7 @@ export function uploadInbox(opts: { dir: string; now?: () => number; registry?: 
   const known = opts.registry ?? memoryRegistry();
   const stamp = (t: number) => new Date(t).toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
   return {
-    save(bytes, endpointId, name = "") {
+    save(bytes, endpointId, name = "", capability = NO_CAPABILITY) {
       const at = now();
       const id = randomBytes(12).toString("hex");
       const id6 = id.slice(0, 6);
@@ -80,11 +84,16 @@ export function uploadInbox(opts: { dir: string; now?: () => number; registry?: 
       let mime: Upload["mime"];
       let clean: Uint8Array;
       if (name) {
-        const accepted = acceptNamedUpload(bytes, name);
+        const accepted = acceptNamedUpload(bytes, name, capability);
         if (!accepted.ok) return accepted;
         pathName = `pasted-${stamp(at)}-${id6}-${accepted.value.name}`;
-        mime = accepted.value.mime;
-        clean = accepted.value.kind === "image" ? stripMetadata(bytes, accepted.value.mime) : bytes;
+        if (accepted.value.kind === "audio") {
+          mime = AUDIO_MIME[accepted.value.container];
+          clean = bytes;
+        } else {
+          mime = accepted.value.mime;
+          clean = accepted.value.kind === "image" ? stripMetadata(bytes, accepted.value.mime) : bytes;
+        }
       } else {
         const accepted = acceptUpload(bytes);
         if (!accepted.ok) return accepted;

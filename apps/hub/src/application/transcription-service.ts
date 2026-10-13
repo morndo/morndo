@@ -1,6 +1,7 @@
 // Queue, timeout, cancel and restart for one Recording (ADR-0021; design §9). The domain decides the row.
 // This starts the Transcriber, one run at a time unless the limit says more, and remembers a run the process
 // no longer has as lost. It does not read the audio itself: the caller names the file.
+import { statSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import {
   afterRestart, capabilityReady, effectiveMaxSeconds, endTranscription, requestTranscription, scheduleTranscriptions,
@@ -11,6 +12,16 @@ import {
 import type { MeTranscription, Transcriber, TranscriberProbe } from "@morndo/protocol";
 
 export type RecordingFile = { path: string; size: number };
+
+export function fileOnDisk(path: string | null | undefined): RecordingFile | null {
+  if (!path) return null;
+  try {
+    const st = statSync(path);
+    return st.isFile() ? { path, size: st.size } : null;
+  } catch {
+    return null;
+  }
+}
 
 export type TranscriptionStore = {
   transcriptions(): Transcription[];
@@ -24,6 +35,7 @@ const live = (state: Transcription["state"]) => state === "queued" || state === 
 export class TranscriptionService {
   #store: TranscriptionStore;
   #transcriber: Transcriber | null;
+  #unavailable: TranscriberProbe | null;
   #now: () => number;
   #limit: number;
   #maxSeconds: number;
@@ -45,6 +57,7 @@ export class TranscriptionService {
   constructor(p: {
     store: TranscriptionStore;
     transcriber: Transcriber | null;
+    unavailable?: TranscriberProbe | null;
     file: (recording: Recording) => RecordingFile | null;
     now?: () => number;
     limit?: number;
@@ -59,6 +72,7 @@ export class TranscriptionService {
   }) {
     this.#store = p.store;
     this.#transcriber = p.transcriber;
+    this.#unavailable = p.unavailable ?? null;
     this.#now = p.now ?? Date.now;
     this.#limit = p.limit ?? TRANSCRIPTION_LIMIT_DEFAULT;
     this.#maxSeconds = p.maxSeconds ?? MAX_RECORDING_SECONDS;
@@ -108,7 +122,8 @@ export class TranscriptionService {
     const cap = this.capability();
     const probe = this.#cache?.probe;
     if (!cap.present || !probe || !probe.ready) return false;
-    return { engine: probe.engine, model: probe.model, languages: probe.languages, maxSeconds: cap.maxSeconds };
+    const languages = probe.languages === "multi" ? "multi" : [...probe.languages];
+    return { engine: probe.engine, model: probe.model, languages, maxSeconds: cap.maxSeconds };
   }
 
   async refresh(): Promise<TranscriptionCapability> {
@@ -158,7 +173,8 @@ export class TranscriptionService {
     const cached = this.#cache;
     if (cached && this.#now() - cached.at < this.#probeTtlMs) return this.capability();
     let probe: TranscriberProbe;
-    if (!this.#transcriber) probe = { ready: false, reason: "missing", detail: "missing" };
+    if (this.#unavailable) probe = this.#unavailable;
+    else if (!this.#transcriber) probe = { ready: false, reason: "missing", detail: "missing" };
     else {
       try { probe = await this.#transcriber.probe(); }
       catch { probe = { ready: false, reason: "not_ready", detail: "probe_failed" }; }
@@ -229,7 +245,8 @@ export class TranscriptionService {
     this.#inflight.delete(key);
     const current = this.#rows.find(row => rowKey(row) === key && live(row.state));
     if (current) {
-      const ended = endTranscription(current, event, this.capability().present ? this.capability().maxSeconds : this.#maxSeconds);
+      const cap = this.capability();
+      const ended = endTranscription(current, event, cap.present ? cap.maxSeconds : this.#maxSeconds);
       if (ended.ok && ended.value !== current) this.#save(ended.value);
     }
     this.tick();

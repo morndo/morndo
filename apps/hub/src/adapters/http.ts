@@ -7,7 +7,7 @@ import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
 import { hostname } from "node:os";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type FeedEvent } from "@morndo/domain";
+import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type FeedEvent, type Transcription } from "@morndo/domain";
 import { catchUp } from "../application/catchup.ts";
 import { chats, digest } from "../application/chats.ts";
 import type { PresenceService } from "../application/presence-service.ts";
@@ -26,12 +26,13 @@ import type { BoardService } from "../application/board-service.ts";
 import type { AgentAccess } from "../application/agent-access.ts";
 import type { JobsService } from "../application/jobs-service.ts";
 import type { UsageService } from "../application/usage-service.ts";
+import type { TranscriptionService } from "../application/transcription-service.ts";
 import { bridgeDesktop } from "./rfb.ts";
 import { servingHeaders, type Files } from "./files.ts";
 import type { Inbox } from "./uploads.ts";
 import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
-  AnswerBody, BoardActionBody, BoardCreateBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, UsageReportBody, IdentityProveBody, LinkDecisionBody, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PushSubscriptionBody, SendBody, UPLOAD_NAME_HEADER,
+  AnswerBody, BoardActionBody, BoardCreateBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, UsageReportBody, IdentityProveBody, LinkDecisionBody, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PushSubscriptionBody, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -163,6 +164,13 @@ export function workerIdFromSegment(segment: string): string | null {
   return id !== null && isWorkerOrLegacyId(id) ? id : null;
 }
 
+function transcriptionView(row: Transcription) {
+  return {
+    id: row.id, recording: row.recording, language: row.language, state: row.state,
+    position: row.position, reason: row.reason, outcome: row.outcome, problem: row.problem, text: row.text,
+  };
+}
+
 export function startHttp(p: {
   config: Config; identity: HubIdentity; access: AccessService; observation: ObservationService; steering: SteeringService; escalations: EscalationService;
   remote: RemoteService; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
@@ -174,6 +182,7 @@ export function startHttp(p: {
   board?: { service: BoardService; agents: AgentAccess } | null;            // ADR-0015: the board; null: off
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
+  transcription?: TranscriptionService | null;                              // ADR-0021; null: the plugin is not wired
 }) {
   const { config, identity, access, observation, steering, escalations, remote } = p;
   const files = p.files ?? null;
@@ -193,11 +202,12 @@ export function startHttp(p: {
     const login = req.headers["tailscale-user-login"];
     return typeof login === "string" && login ? `login:${login}` : `addr:${req.socket.remoteAddress ?? "?"}`;
   };
-  const secureHeaders = {
+  const microphone = () => p.transcription?.allowsMicrophone() ? "microphone=(self)" : "microphone=()";
+  const secureHeaders = () => ({
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
-  };
+    "Permissions-Policy": `camera=(), ${microphone()}, geolocation=(), payment=()`,
+  });
 
   const proxyOk = (req: IncomingMessage) => {
     if (!config.requireProxyIdentity) return true;
@@ -212,7 +222,7 @@ export function startHttp(p: {
 
   // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).
   const json = (res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}, path = "") => {
-    res.writeHead(status, { ...secureHeaders, "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
+    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
     res.end(JSON.stringify(redactResponse(path, body)));
   };
   const setCookie = (secret: string) =>
@@ -343,6 +353,7 @@ export function startHttp(p: {
     const a = auth(req);
     if (!a) return json(res, 401, { error: "signed_out" }, { "Set-Cookie": clearCookie });
     if (path === "/api/me" && method === "GET") {
+      await p.transcription?.refresh();
       return json(res, 200, {
         endpoint: { id: a.endpoint.id, name: a.endpoint.name, pairedAt: a.endpoint.pairedAt },
         session: { startedAt: a.session.startedAt, verifiedAt: a.session.verifiedAt },
@@ -352,6 +363,7 @@ export function startHttp(p: {
         // The links follow the probe, not merely whether MORNDO_ENGINES is set: a missing or too-old CLI hides them.
         engines: p.engines ? (await p.engines.ready().then(why => why === null, () => false)) : false,
         connections: p.connections != null,
+        transcription: p.transcription ? p.transcription.me() : false,
       });
     }
     if (path === "/api/logout" && method === "POST") {
@@ -432,7 +444,7 @@ export function startHttp(p: {
       const f = files?.get(file[1] ?? "");
       if (!f) return json(res, 404, { error: "no_such_file" });
       const download = new URL(req.url ?? "/", "http://hub").searchParams.get("download") === "1";
-      res.writeHead(200, { ...secureHeaders, ...servingHeaders(f.meta, download) });
+      res.writeHead(200, { ...secureHeaders(), ...servingHeaders(f.meta, download) });
       if (method === "HEAD") return res.end();
       createReadStream(f.file).on("error", () => res.destroy()).pipe(res);
       return;
@@ -441,9 +453,32 @@ export function startHttp(p: {
     if (path === "/api/uploads" && method === "POST") {
       if (!inbox) throw new HttpError(404, "no such route");
       limited(buckets.uploads.take(a.endpoint.id));
-      const r = inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req));
+      await p.transcription?.refresh();
+      const r = inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req), p.transcription?.capability());
       if (!r.ok) return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
       return json(res, 200, { id: r.value.id, name: r.value.path.split("/").pop(), size: r.value.size, mime: r.value.mime });
+    }
+    const tx = /^\/api\/transcriptions(?:\/([A-Za-z0-9][A-Za-z0-9:_-]{0,199})(\/cancel)?)?$/.exec(path);
+    if (tx && (method === "GET" || method === "POST")) {
+      if (!p.transcription) return json(res, 404, { error: "transcription_off" });
+      await p.transcription.refresh();
+      const id = tx[1];
+      if (!id && method === "POST") {
+        if (!p.transcription.allowsMicrophone()) return json(res, 404, { error: "transcription_off" });
+        const body = await readBody(req, TranscriptionCreateBody);
+        const created = await p.transcription.request(body);
+        if (!created.ok) return json(res, created.error === "unreadable" ? 404 : 400, { error: created.error });
+        return json(res, 200, transcriptionView(created.value));
+      }
+      if (id && !tx[2] && method === "GET") {
+        const row = p.transcription.get(id);
+        return row ? json(res, 200, transcriptionView(row)) : json(res, 404, { error: "unknown" });
+      }
+      if (id && tx[2] === "/cancel" && method === "POST") {
+        await readBody(req, TranscriptionCancelBody);
+        const cancelled = p.transcription.cancel(id);
+        return cancelled.ok ? json(res, 200, transcriptionView(cancelled.value)) : json(res, 404, { error: "unknown" });
+      }
     }
     if (path === "/api/escalations" && method === "GET") return json(res, 200, escalations.board());
     const answer = /^\/api\/escalations\/([A-Za-z0-9_-]{1,80})\/answer$/.exec(path);
@@ -540,7 +575,7 @@ export function startHttp(p: {
     if (isFile && extname(candidate) !== ".html") {
       const immutable = path.startsWith("/_app/immutable/");
       res.writeHead(200, {
-        ...secureHeaders, "Content-Type": TYPES[extname(candidate)] ?? "application/octet-stream",
+        ...secureHeaders(), "Content-Type": TYPES[extname(candidate)] ?? "application/octet-stream",
         "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
         ...(path === "/service-worker.js" ? { "Service-Worker-Allowed": "/" } : {}),
       });
@@ -555,7 +590,7 @@ export function startHttp(p: {
       const html = readFileSync(file, "utf8");
       cachedIndex = { html, csp: cspFor(html), file, mtimeMs };
     }
-    res.writeHead(200, { ...secureHeaders, "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache", "Content-Security-Policy": cachedIndex.csp });
+    res.writeHead(200, { ...secureHeaders(), "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache", "Content-Security-Policy": cachedIndex.csp });
     res.end(req.method === "HEAD" ? undefined : cachedIndex.html);
   }
 

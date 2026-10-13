@@ -40,6 +40,10 @@ import { BoardService } from "./application/board-service.ts";
 import { AgentAccess } from "./application/agent-access.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
+import { locateTranscriber } from "./adapters/transcriber-path.ts";
+import { processTranscriber } from "./adapters/transcriber-process.ts";
+import { guardNow, loadTranscriptionSettings, readMachine } from "./adapters/transcription-config.ts";
+import { fileOnDisk, TranscriptionService } from "./application/transcription-service.ts";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,7 +68,8 @@ inbox directory: its answers and messages queue there instead of being typed), M
 VNC server), MORNDO_VNC_PASSWORD_FILE, MORNDO_FLEET_SOCKET (the fleet service's client socket; unset, this
 machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane registry directory; off unless set),
 MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet) and MORNDO_ENGINES (the engine layer's
-CLI, engine-layer bin/engines: the Engines page).`;
+CLI, engine-layer bin/engines: the Engines page). MORNDO_TRANSCRIBER (absolute path of a protocol-1 plugin;
+otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcribe).`;
 
 exitOnCrash(log);
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
@@ -190,7 +195,20 @@ switch (cmd) {
     const usage = new UsageService({ store });
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
-    const http = startHttp({ config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence, push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs });
+    const located = locateTranscriber(process.env, config.dataDir);
+    const txSettings = loadTranscriptionSettings(config.dataDir, line => log.warn(line));
+    const absent = "reason" in located;
+    const transcription = new TranscriptionService({
+      store,
+      transcriber: absent ? null : processTranscriber(located.path),
+      unavailable: absent ? { ready: false, reason: located.reason, detail: located.detail } : null,
+      file: recording => fileOnDisk(recording.kind === "upload" ? inbox.get(recording.id)?.path : files.get(recording.id)?.file),
+      limit: txSettings.limit, timeoutSec: txSettings.timeoutSec, maxSeconds: txSettings.maxSeconds, threads: txSettings.threads,
+      guard: () => guardNow(txSettings.guard, readMachine),
+      log: line => log.info(line),
+    });
+    void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
+    const http = startHttp({ config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence, push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, transcription });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
     // Old pairing tokens and long-ended sessions, on start and daily; never the audit or the decisions (A8).
     const stopRetention = startRetention(store, Date.now,
@@ -231,7 +249,7 @@ switch (cmd) {
     }, Math.max(config.pollMs, 1000));
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin}`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.close(); store.close(); process.exit(0); };
+    const stop = async () => { transcription.close(); clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.close(); store.close(); process.exit(0); };
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     break;
