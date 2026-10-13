@@ -389,7 +389,7 @@ export class EscalationService {
     for (const [k, r] of this.#rowOrder) if (now - r.at > ROW_KEEP_MS) this.#rowOrder.delete(k);   // its row is pruned by now
     // The answer rows this poll judges taps against, read once and grouped by key (round 2.7): one query per poll, not
     // one per tap line in the manager's whole history.
-    const answers = new Map(this.#store.answerRows().map(r => [r.key, r]));
+    const answers = new Map(this.#store.answersOfAsk("answer:").map(r => [r.key, r]));
     const sightings = [...this.#managerSightings(ledger, now, answers), ...this.#workerSightings(now), ...this.#hubSightings(answers)];
     const changed = this.#x.reconcile(sightings, now, ledger?.ok ?? true);
     for (const id of this.#buttons.keys()) if (!this.#x.get(id)) this.#buttons.delete(id);   // kept as long as its ask

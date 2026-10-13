@@ -495,7 +495,6 @@ describe("a Decision the record can no longer attribute", () => {
     store.finishSend(own, T0 - 30_500);                                                          // its own answer's row, done
     const sends = vi.spyOn(store, "send");
     const ofAsk = vi.spyOn(store, "answersOfAsk");
-    const rows = vi.spyOn(store, "answerRows");
     const s = new EscalationService({
       watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
       send: async () => ({ problem: null, typedAt: 0 }),
@@ -504,7 +503,6 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");                     // its own answer's paste
     expect(s.board().items.find(i => i.id === "ny-8")?.status).toBe("answered");                 // a hand's tap
     expect(sends).toHaveBeenCalledTimes(0);                                                      // no query per tap
-    expect(ofAsk).toHaveBeenCalledTimes(0);
-    expect(rows).toHaveBeenCalledTimes(1);                                                       // one read per poll
+    expect(ofAsk.mock.calls).toEqual([["answer:"]]);                                             // one read per poll, the store's own (round 3.8)
   });
 });

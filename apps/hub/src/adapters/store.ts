@@ -168,18 +168,13 @@ export class Store {
     return r ? sendRow(r) : null;
   }
   // Every answer to one ask kept here (24 hours), whatever its choice: the rows whose answer key starts with `prefix`
-  // (escalation-service.ts askPrefix), oldest first. SQLite's substr counts characters, so the prefix is counted in
-  // code points, not UTF-16 units.
+  // (escalation-service.ts askPrefix), oldest first. "answer:" is every answer row, one read for a whole poll's
+  // pane-tap filter (rounds 2.7 and 3.8 of the PR #55 review). SQLite's substr counts characters, so the prefix is
+  // counted in code points, not UTF-16 units.
   answersOfAsk(prefix: string): SendRow[] {
     return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE substr(key, 1, ?) = ? ORDER BY at, key`)
       // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: SQLite's substr counts them (above)
       .all([...prefix].length, prefix) as SendRowSql[]).map(sendRow);
-  }
-  // Every answer row kept here, one read for a whole poll (round 2.7 of the PR #55 review): the pane-tap filter judges
-  // each tap against this table, and a query per tap line — the pane keeps every one in the window — is a hot path.
-  // Same ordering as answersOfAsk.
-  answerRows(): SendRow[] {
-    return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE substr(key, 1, 7) = 'answer:' ORDER BY at, key`).all() as SendRowSql[]).map(sendRow);
   }
   // The store of the node a send went to (fleet core §3.1), kept with its row: only that store can say it never started.
   // With it, the store sequence its answer gave (null when unknown): a lower one from that store later means its
