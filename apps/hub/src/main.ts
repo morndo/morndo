@@ -27,7 +27,7 @@ import { managerInbox } from "./adapters/manager-inbox.ts";
 import { EscalationService, managerOf } from "./application/escalation-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { fileStore } from "./adapters/files.ts";
-import { createFfmpegNote, uploadInbox } from "./adapters/uploads.ts";
+import { noteMissingFfmpeg, uploadInbox } from "./adapters/uploads.ts";
 import { desktopTarget, legacyPorts } from "./adapters/local-ports.ts";
 import { engineLanesFor } from "./adapters/engine-registry.ts";
 import { FleetClient, checkFleet } from "./adapters/fleet-client.ts";
@@ -149,7 +149,7 @@ switch (cmd) {
       },
     };
     const inbox = uploadInbox({ dir: config.inboxDir, registry: store });
-    void createFfmpegNote().check(line => log.warn(line));
+    void noteMissingFfmpeg(line => log.warn(line));
     // A Command is judged on arrival against what the worker waits for now (S6). With a fleet, a repeat of a send in
     // doubt asks the worker's node (op.status, spec §3.1).
     // The manager's inbox (ADR-0010): the manager's answers and messages queue there; one deliverer types each once.

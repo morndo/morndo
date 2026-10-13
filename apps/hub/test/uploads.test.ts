@@ -34,7 +34,7 @@ vi.mock("node:fs/promises", async () => {
 import { audioDurationMs, endpointId } from "@morndo/domain";
 import { webmBytes } from "../../../packages/domain/test/audio-bytes.ts";
 import { until } from "../../../packages/protocol/test/proc.ts";
-import { createFfmpegNote, stripMetadata, uploadInbox } from "../src/adapters/uploads.ts";
+import { noteMissingFfmpeg, stripMetadata, uploadInbox } from "../src/adapters/uploads.ts";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "morndo-inbox-")); });
@@ -69,19 +69,12 @@ describe("metadata a photo carries", () => {
 });
 
 describe("metadata a recording carries", () => {
-  it("logs once per hub that container metadata stays when ffmpeg is absent", async () => {
+  it("logs that container metadata stays when ffmpeg is absent", async () => {
     const lines: string[] = [];
     const log = (line: string) => lines.push(line);
-    const one = createFfmpegNote(async () => false);
-    await one.check(log);
-    await one.check(log);
-    const two = createFfmpegNote(async () => false);
-    await two.check(log);
-    await createFfmpegNote(async () => true).check(log);
-    expect(lines).toEqual([
-      "recordings keep their container metadata",
-      "recordings keep their container metadata",
-    ]);
+    await noteMissingFfmpeg(log, async () => false);
+    await noteMissingFfmpeg(log, async () => true);
+    expect(lines).toEqual(["recordings keep their container metadata"]);
   });
 
   const u32be = (n: number) => { const b = Buffer.alloc(4); b.writeUInt32BE(n); return b; };

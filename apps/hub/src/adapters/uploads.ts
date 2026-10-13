@@ -14,18 +14,11 @@ import { IMAGE_EXTENSION, NO_CAPABILITY, UPLOAD_TTL_MS, acceptNamedUpload, accep
 
 const KEEP_FILES_MS = 7 * 24 * 3_600_000;
 
-// Said once for this hub, at start. Without ffmpeg the mp4, ogg and webm files are stored unchanged: the
-// hand-written strippers for those containers stay out, because a wrong size or offset corrupts the audio.
-// The flag belongs to the instance, and the check does not spawn synchronously.
-export function createFfmpegNote(present: () => Promise<boolean> = ffmpegOnPath): { check: (log: (line: string) => void) => Promise<void> } {
-  let noted = false;
-  return {
-    async check(log) {
-      if (noted || await present()) return;
-      noted = true;
-      log("recordings keep their container metadata");
-    },
-  };
+// Said at start, from the one call in main. Without ffmpeg the mp4, ogg and webm files are stored unchanged:
+// the hand-written strippers for those containers stay out, because a wrong size or offset corrupts the audio.
+// The check does not spawn synchronously.
+export function noteMissingFfmpeg(log: (line: string) => void, present: () => Promise<boolean> = ffmpegOnPath): Promise<void> {
+  return present().then(ok => { if (!ok) log("recordings keep their container metadata"); });
 }
 function ffmpegOnPath(): Promise<boolean> {
   return new Promise(resolve => {
