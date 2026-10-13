@@ -267,7 +267,7 @@ describe("transcription service", () => {
     svc.close();
   });
 
-  it("the same recording and language returns the attempt already in flight", async () => {
+  it("the same endpoint asking again gets the row it already has", async () => {
     const gate = new Gate();
     const { svc } = service(memory(), gate);
     await svc.start();
@@ -288,6 +288,90 @@ describe("transcription service", () => {
     expect(other.ok && other.value.recording.id).toBe("b");
     expect(svc.get("same", { endpointId: "ep-1" })?.recording.id).toBe("hang");
     expect(svc.get("same", { endpointId: "ep-2" })?.recording.id).toBe("b");
+    svc.close();
+  });
+
+  it("two endpoints each run the same clip, and neither can read or cancel the other's", async () => {
+    const gate = new Gate();
+    const store = memory();
+    const { svc } = service(store, gate);
+    await svc.start();
+    const ask = (endpointId: string) => svc.request({
+      id: "t1", recording: { kind: "attachment", id: "hang" }, language: "de", caller: { endpointId },
+    });
+    expect((await ask("ep-1")).ok).toBe(true);
+    expect(await until(() => svc.get("t1", { endpointId: "ep-1" })?.state === "running", 2000)).toBe(true);
+    const second = await ask("ep-2");
+    expect(second.ok && second.value).toMatchObject({ id: "t1", state: "queued" });
+    expect(svc.get("t1", { endpointId: "ep-3" })).toBeNull();
+    expect(svc.cancel("t1", { endpointId: "ep-3" })).toEqual({ ok: false, error: "unknown" });
+    gate.release("/audio/hang.wav");
+    expect(await until(() => svc.get("t1", { endpointId: "ep-1" })?.state === "done", 2000)).toBe(true);
+    expect(await until(() => svc.get("t1", { endpointId: "ep-2" })?.state === "running", 2000)).toBe(true);
+    expect(gate.calls).toEqual(["/audio/hang.wav", "/audio/hang.wav"]);
+    svc.close();
+    const reloaded = service(store, new Gate());
+    await reloaded.svc.start();
+    expect(reloaded.svc.get("t1", { endpointId: "ep-1" })?.state).toBe("done");
+    expect(reloaded.svc.get("t1", { endpointId: "ep-2" })?.state).toBe("lost");
+    reloaded.svc.close();
+  });
+
+  it("cancel stops the caller's own row when another endpoint's row uses the same id", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    const ask = (endpointId: string) => svc.request({
+      id: "t1", recording: { kind: "attachment", id: "hang" }, language: "de", caller: { endpointId },
+    });
+    await ask("ep-1");
+    expect(await until(() => svc.get("t1", { endpointId: "ep-1" })?.state === "running", 2000)).toBe(true);
+    expect((await ask("ep-2")).ok).toBe(true);
+    expect(svc.cancel("t1", { endpointId: "ep-2" }).ok).toBe(true);
+    expect(svc.get("t1", { endpointId: "ep-2" })?.state).toBe("cancelled");
+    expect(svc.get("t1", { endpointId: "ep-1" })?.state).toBe("running");
+    svc.close();
+  });
+
+  it("the same body does not hand another endpoint the finished transcript", async () => {
+    files.set("clip", { path: "/audio/clip.wav", size: 100, durationMs: null });
+    try {
+      const gate = new Gate();
+      const { svc } = service(memory(), gate);
+      await svc.start();
+      const ask = (endpointId: string) => svc.request({
+        id: "t1", recording: { kind: "attachment", id: "clip" }, language: "en", caller: { endpointId },
+      });
+      expect((await ask("ep-1")).ok).toBe(true);
+      gate.release("/audio/clip.wav");
+      expect(await until(() => svc.get("t1", { endpointId: "ep-1" })?.state === "done", 2000)).toBe(true);
+      const again = await ask("ep-2");
+      expect(again.ok && again.value).toMatchObject({ sizeBytes: 100, text: null });
+      expect(again.ok && again.value.state).not.toBe("done");
+      expect(svc.get("t1", { endpointId: "ep-1" })?.state).toBe("done");
+      expect(svc.get("t1", { endpointId: "ep-2" })?.text).toBeNull();
+      svc.close();
+    } finally {
+      files.delete("clip");
+    }
+  });
+
+  it("a request does not adopt a row that has no owner", async () => {
+    const old: Transcription = {
+      id: "old", recording: { kind: "attachment", id: "a" }, language: "de", sizeBytes: 12,
+      acceptedAt: 1, state: "done", position: null, reason: null, outcome: "done", problem: null,
+      text: { language: "de", text: "kept", edit: null, edited: false, engine: "e", model: "m" },
+      report: null, startedAt: 1, endedAt: 2,
+    };
+    const gate = new Gate();
+    const { svc } = service(memory([old]), gate);
+    await svc.start();
+    const asked = await svc.request({
+      id: "old", recording: { kind: "attachment", id: "a" }, language: "de", caller: { endpointId: "ep-1" },
+    });
+    expect(asked.ok && asked.value.state).toBe("running");
+    expect(svc.get("old", { endpointId: "ep-1" })?.text).toBeNull();
+    expect(svc.get("old", { endpointId: "ep-2" })).toBeNull();
     svc.close();
   });
 
