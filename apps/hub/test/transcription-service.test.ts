@@ -275,6 +275,24 @@ describe("transcription service", () => {
     svc.close();
   });
 
+  it("only the endpoint that started a shared run may cancel it", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    const ask = (id: string, endpointId: string) => svc.request({
+      id, recording: { kind: "attachment", id: "hang" }, language: "de", caller: { endpointId },
+    });
+    await ask("tx-a", "ep-1");
+    expect(await until(() => svc.get("tx-a", { endpointId: "ep-1" })?.state === "running", 2000)).toBe(true);
+    const joined = await ask("tx-b", "ep-2");
+    expect(joined.ok && joined.value.id).toBe("tx-a");
+    expect(svc.cancel("tx-a", { endpointId: "ep-2" })).toEqual({ ok: false, error: "unknown" });
+    expect(svc.get("tx-a", { endpointId: "ep-1" })?.state).toBe("running");
+    expect(svc.cancel("tx-a", { endpointId: "ep-1" }).ok).toBe(true);
+    expect(svc.get("tx-a", { endpointId: "ep-1" })?.state).toBe("cancelled");
+    svc.close();
+  });
+
   it("still reads a row saved before an endpoint was recorded", async () => {
     const old: Transcription = {
       id: "old", recording: { kind: "attachment", id: "a" }, language: "de", sizeBytes: 12,

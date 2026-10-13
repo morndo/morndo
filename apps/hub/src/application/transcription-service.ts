@@ -250,6 +250,8 @@ export class TranscriptionService {
   cancel(id: string, caller?: RecordingCaller): Result<Transcription, "unknown"> {
     const row = this.get(id, caller);
     if (!row) return err("unknown");
+    // A reader joined a run someone else started. They may read it. Cancelling it is the starter's.
+    if (caller && endpointOf(row) !== caller.endpointId) return err("unknown");
     if (!live(row.state)) return ok(row);
     const key = rowKey(row);
     this.#why.set(key, "cancelled");
