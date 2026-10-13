@@ -526,7 +526,14 @@ export function startHttp(p: {
         const body = await readBody(req, TranscriptionCreateBody);
         // The endpoint is part of the ask: an upload another device made is not this caller's recording (S2).
         const created = await p.transcription.request({ ...body, caller: { endpointId: a.endpoint.id } });
-        if (!created.ok) return json(res, created.error === "unreadable" ? 404 : 400, { error: created.error });
+        if (!created.ok) {
+          if (created.error === "unreadable") return json(res, 404, { error: created.error });
+          // The live-row cap is the whole machine's queue, not this caller's bucket (that one is already 429).
+          // 503 is a temporary overload. Retry-After matches the queue's minute sweep, so a client waits
+          // instead of treating the body as a malformed request.
+          if (created.error === "too_many") return json(res, 503, { error: created.error }, { "Retry-After": "60" });
+          return json(res, 400, { error: created.error });
+        }
         return json(res, 200, transcriptionView(created.value));
       }
       // A row that exists still answers with the plugin gone: its text stays readable (design §6). An unknown id with

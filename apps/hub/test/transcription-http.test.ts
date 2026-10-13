@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { UPLOAD_NAME_HEADER, type Transcriber } from "@morndo/protocol";
 import { SENTENCE } from "../../../packages/protocol/test/answers.mjs";
+import { LIMITS } from "../src/adapters/http.ts";
 import { processTranscriber } from "../src/adapters/transcriber-process.ts";
 import { ORIGIN, startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 
@@ -135,6 +136,39 @@ describe("transcription http", () => {
     const foreign = await hub.post("/api/transcriptions", { id: "voice3", recording: { kind: "upload", id: saved.id }, language: "auto" }, { cookie: mine });
     expect(foreign.status).toBe(404);
     expect(await foreign.json()).toEqual({ error: "unreadable" });
+  });
+
+  it("answers a full queue with 503 and Retry-After, not a malformed request", async () => {
+    const transcriber: Transcriber = {
+      probe: async () => ({ ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture", languages: "multi", maxSeconds: 600 }),
+      transcribe: input => new Promise((_resolve, reject) => {
+        const stop = () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        if (input.signal.aborted) stop();
+        else input.signal.addEventListener("abort", stop);
+      }),
+    };
+    const hub = await startInProcessHub({
+      transcriber,
+      // The per-caller bucket is a different door. This test fills the machine's queue, so the bucket stays open.
+      limits: { ...LIMITS, transcriptions: { capacity: 200, refillPerSecond: 1000 } },
+    });
+    hubs.push(hub);
+    const cookie = await cookieOf(hub);
+    const ogg = await upload(hub, cookie, "note.ogg", Buffer.from("OggSrest"));
+    expect(ogg.status).toBe(200);
+    const saved = await ogg.json() as { id: string };
+    for (let i = 0; i < 100; i++) {
+      const made = await hub.post("/api/transcriptions", {
+        id: `voice${i}`, recording: { kind: "upload", id: saved.id }, language: `la-${i}`,
+      }, { cookie });
+      expect(made.status).toBe(200);
+    }
+    const over = await hub.post("/api/transcriptions", {
+      id: "voice-over", recording: { kind: "upload", id: saved.id }, language: "lb",
+    }, { cookie });
+    expect(over.status).toBe(503);
+    expect(over.headers.get("retry-after")).toBe("60");
+    expect(await over.json()).toEqual({ error: "too_many" });
   });
 
   it("serves the app shell's microphone policy from a fresh probe, not the stale cache", async () => {
