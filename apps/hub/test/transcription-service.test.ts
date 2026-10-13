@@ -11,6 +11,7 @@ import {
 import type { TranscribeInput, Transcriber, TranscriberProbe } from "@morndo/protocol";
 import { until } from "../../../packages/protocol/test/proc.ts";
 import { wavBytes } from "../../../packages/domain/test/audio-bytes.ts";
+import { guardNow, watchMachine } from "../src/adapters/transcription-config.ts";
 import { fileOnDisk, TranscriptionService, type TranscriptionStore } from "../src/application/transcription-service.ts";
 
 const READY: TranscriberProbe = {
@@ -82,7 +83,7 @@ const port = (recording: Recording, caller?: { endpointId: string }) => {
   return file;
 };
 
-function service(store: TranscriptionStore, gate: Gate, extra: { guard?: () => "off" | "load"; timeoutFor?: (durationMs: number) => number; now?: () => number } = {}) {
+function service(store: TranscriptionStore, gate: Gate, extra: { guard?: () => "off" | "load" | "memory" | "unknown"; timeoutFor?: (durationMs: number) => number; now?: () => number } = {}) {
   let guard: "off" | "load" = "off";
   const lines: string[] = [];
   const svc = new TranscriptionService({
@@ -100,6 +101,36 @@ const body = (id: string, recording: string, language = "auto", endpointId = "ep
   ({ id, recording: { kind: "upload" as const, id: recording }, language, caller: { endpointId } });
 
 describe("transcription service", () => {
+  it("tick spawns nothing while it reads the memory figure", async () => {
+    let spawns = 0;
+    const watched = watchMachine({ memAvailableMiB: 64 }, {
+      platform: "darwin",
+      vmStat: async () => {
+        spawns += 1;
+        return [
+          "Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+          "Pages free:                               100.",
+          "Pages inactive:                            50.",
+          "Pages speculative:                         25.",
+        ].join("\n");
+      },
+    });
+    const gate = new Gate();
+    const { svc } = service(memory(), gate, {
+      guard: () => guardNow({ memAvailableMiB: 64 }, watched.read),
+    });
+    await svc.start();
+    const before = spawns;
+    svc.tick();
+    expect(spawns).toBe(before);
+    await watched.refresh();
+    expect(watched.read().memAvailableMiB).toBe((100 + 50 + 25) * 16384 / (1024 * 1024));
+    svc.tick();
+    expect(spawns).toBe(1);
+    watched.close();
+    svc.close();
+  });
+
   it("fileOnDisk reads a recording's duration out of its container", () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-dur-"));
     try {

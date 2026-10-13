@@ -1,6 +1,6 @@
 // Optional transcription settings (design §9). Absent file means the defaults, and the feature is still off until a
 // plugin is found. Bad JSON is logged and ignored so the hub still starts.
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { loadavg, totalmem } from "node:os";
 import { join } from "node:path";
@@ -73,7 +73,7 @@ export function readMachine(
         return Number(line?.trim().split(/\s+/)[1]) / 1024;
       })()
       : platform === "darwin"
-        ? macAvailableMiB(o.vmStat ?? (() => execFileSync("vm_stat", { encoding: "utf8", timeout: 2000 })))
+        ? (o.vmStat ? macAvailableMiB(o.vmStat) : Number.NaN)
         : (o.totalmem ?? totalmem)() / (1024 * 1024);
   }
   return out;
@@ -89,6 +89,52 @@ function macAvailableMiB(vmStat: () => string): number {
   };
   const reclaimable = pages("free") + pages("inactive") + pages("speculative");
   return pageSize > 0 && Number.isFinite(reclaimable) ? (reclaimable * pageSize) / (1024 * 1024) : Number.NaN;
+}
+
+// The request path reads this cache. The refresh is the only place vm_stat is started, and it is asynchronous,
+// so a tick never spawns. The figure is a few seconds old.
+const MACHINE_CACHE_MS = 5_000;
+
+function vmStatText(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile("vm_stat", { encoding: "utf8", timeout: 2000 }, (error, stdout) => {
+      if (error) reject(error);
+      else resolve(String(stdout));
+    });
+  });
+}
+
+export function watchMachine(
+  policy: TranscriptionGuard | null,
+  o: {
+    platform?: NodeJS.Platform;
+    loadavg?: () => number[];
+    totalmem?: () => number;
+    vmStat?: () => Promise<string>;
+    loadPath?: string;
+    memPath?: string;
+  } = {},
+): { read: () => { load1?: number; memAvailableMiB?: number }; refresh: () => Promise<void>; close: () => void } {
+  let sample: { load1?: number; memAvailableMiB?: number } = {};
+  let pending: Promise<void> | null = null;
+  const refresh = (): Promise<void> => {
+    if (pending) return pending;
+    pending = fill().finally(() => { pending = null; });
+    return pending;
+  };
+  async function fill(): Promise<void> {
+    const platform = o.platform ?? process.platform;
+    const rest = { platform, loadavg: o.loadavg, totalmem: o.totalmem, loadPath: o.loadPath, memPath: o.memPath };
+    if (platform === "darwin" && policy?.memAvailableMiB !== undefined) {
+      const text = await (o.vmStat ?? vmStatText)();
+      sample = readMachine(policy, { ...rest, vmStat: () => text });
+      return;
+    }
+    sample = readMachine(policy, rest);
+  }
+  const timer = setInterval(() => void refresh().catch(() => {}), MACHINE_CACHE_MS);
+  timer.unref?.();
+  return { read: () => sample, refresh, close: () => clearInterval(timer) };
 }
 
 export function guardNow(policy: TranscriptionGuard | null, read: () => { load1?: number; memAvailableMiB?: number }): QueueGuard {

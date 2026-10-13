@@ -42,7 +42,7 @@ import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
 import { locateTranscriber } from "./adapters/transcriber-path.ts";
 import { processTranscriber } from "./adapters/transcriber-process.ts";
-import { guardNow, loadTranscriptionSettings, readMachine } from "./adapters/transcription-config.ts";
+import { guardNow, loadTranscriptionSettings, watchMachine } from "./adapters/transcription-config.ts";
 import { fileOnDisk, TranscriptionService } from "./application/transcription-service.ts";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -202,6 +202,9 @@ switch (cmd) {
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
     const txSettings = loadTranscriptionSettings(config.dataDir, line => log.warn(line));
+    const machine = watchMachine(txSettings.guard);
+    try { await machine.refresh(); }
+    catch (e) { log.warn("transcription: machine figure unread", e); }
     // Each probe looks again: a plugin installed while the hub runs turns the feature on, and one removed or turned
     // unsafe turns it off (design §6). The one known path, never PATH.
     const transcription = new TranscriptionService({
@@ -224,7 +227,7 @@ switch (cmd) {
         return fileOnDisk(files.get(recording.id)?.file);
       },
       limit: txSettings.limit, timeoutSec: txSettings.timeoutSec, maxSeconds: txSettings.maxSeconds, threads: txSettings.threads,
-      guard: () => guardNow(txSettings.guard, () => readMachine(txSettings.guard)),
+      guard: () => guardNow(txSettings.guard, machine.read),
       log: line => log.info(line),
     });
     void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
@@ -274,7 +277,7 @@ switch (cmd) {
     }, Math.max(config.pollMs, 1000));
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { transcription.close(); clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
+    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     break;
