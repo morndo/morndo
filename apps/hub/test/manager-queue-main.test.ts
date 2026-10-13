@@ -116,7 +116,13 @@ describe("morndo serve with a fleet slow to answer the queue's reads", () => {
       try { await fetch(`http://127.0.0.1:${port}/api/escalations`); served = Date.now(); }
       catch { await new Promise(r => setTimeout(r, 50)); }
     }
-    const read = fleet.deliveryReads.find(r => r.id === "hub:ep1:r1");
+    // The queue's first read goes out after its sticky check, a round trip of its own, so it may reach the fleet after
+    // the first answer over HTTP: wait for it rather than assume the order.
+    let read = fleet.deliveryReads.find(r => r.id === "hub:ep1:r1");
+    for (const end = Date.now() + 10_000; !read && Date.now() < end;) {
+      await new Promise(r => setTimeout(r, 50));
+      read = fleet.deliveryReads.find(r => r.id === "hub:ep1:r1");
+    }
     expect(read, out).toBeDefined();
     expect(served, out).toBeGreaterThan(0);
     // The client gives up on that read after 5 s; a hub that waits for it serves no sooner.
