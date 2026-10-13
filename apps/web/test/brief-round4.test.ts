@@ -241,3 +241,17 @@ describe("round 4: a restate during send keeps the sent confirmation", () => {
     expect(await card.getByText(/^Sent\./).count()).toBe(0);
   }, 60_000);
 });
+
+describe("round 5: Sent names whoever asked", () => {
+  it("names the lane, not the manager, when a lane asked", async () => {
+    await ready();
+    await show([tap("d-lane", "v1", "Extend the triage script", {
+      asker: { kind: "worker", name: "docs-lane", workerId: "w-docs" },
+    })]);
+    const card = tab.locator('[data-decision="d-lane"]');
+    await card.getByRole("button", { name: "Extend the triage script" }).click();
+    await card.getByRole("button", { name: "Send answer" }).click();
+    await card.getByText("Sent. Docs-lane gets it as your decision and acts on it.").waitFor();
+    expect(await card.getByText("The manager gets it").count()).toBe(0);
+  }, 60_000);
+});
