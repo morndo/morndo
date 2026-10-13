@@ -1,7 +1,8 @@
 // Where an answer stands, in the one sentence the phone sheet, the catch-up card and the desktop modal share.
+// The feed's via is the whole truth — the hub derives it per client — so every line here holds after a reload, with
+// no local memory of what this page sent, and on a second tab the same way.
 import { describe, expect, it } from "vitest";
 import { standingLine, type DecisionItem } from "../src/lib/desktop/decisions.ts";
-import { clearSends, rememberSend } from "../src/lib/sent-here.ts";
 
 const item = (over: Partial<DecisionItem>): DecisionItem => ({
   id: "d-5" as DecisionItem["id"],
@@ -17,7 +18,6 @@ const item = (over: Partial<DecisionItem>): DecisionItem => ({
 
 describe("standingLine", () => {
   it("names an answer given on another device, choice and all", () => {
-    clearSends();
     const said = standingLine(item({
       decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere", endpointId: null, sessionId: null },
     }), "Alpha");
@@ -28,44 +28,24 @@ describe("standingLine", () => {
     expect(words).toBe("Answered on another device: in words.");
   });
 
-  it("keeps this device's own send for that version, and a later version from elsewhere stays elsewhere", () => {
-    clearSends();
-    rememberSend("d-own", "req-1", "v1");
-    const decision = { choice: { kind: "option" as const, key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere" as const, endpointId: null, sessionId: null };
-    const own = item({ id: "d-own" as DecisionItem["id"], decision });
-    expect(standingLine(own, "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
-    const { via: _via, ...missing } = decision;
-    expect(standingLine(item({ id: "d-own" as DecisionItem["id"], decision: missing as typeof decision }), "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
-    expect(standingLine(item({ id: "d-own" as DecisionItem["id"], version: "v2", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
-    expect(standingLine(item({ id: "d-other" as DecisionItem["id"], decision: missing as typeof decision }), "Alpha")).toBe("Answered: Extend the triage script.");
-  });
-
-  it("an empty seen or an empty version is not this device's send", () => {
-    clearSends();
-    const decision = { choice: { kind: "option" as const, key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere" as const, endpointId: null, sessionId: null };
-    rememberSend("d-blank", "req-1", "");
-    expect(standingLine(item({ id: "d-blank" as DecisionItem["id"], version: "", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
-    rememberSend("d-blank", "req-2", "v1");
-    expect(standingLine(item({ id: "d-blank" as DecisionItem["id"], version: "", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
-    rememberSend("d-blank", "req-3", "");
-    expect(standingLine(item({ id: "d-blank" as DecisionItem["id"], version: "v1", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
-  });
-
-  // The hub now says where an answer stands for this client itself (seenBy): the feed's via is the whole truth, and a
-  // send this page remembers must not override it. A reload, which loses the local map, would otherwise say something
-  // else than the page that sent the answer.
-  it("the feed's via wins over this page's own memory of a send", () => {
-    clearSends();
-    const decision = { choice: { kind: "option" as const, key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere" as const, endpointId: null, sessionId: null };
-    rememberSend("d-mine", "req-1", "v1");
-    expect(standingLine(item({ id: "d-mine" as DecisionItem["id"], version: "v1", decision }), "Alpha"))
-      .toBe("Answered on another device: “Extend the triage script”.");
-  });
-
-  it("an answer the feed says was given here reads here, with no local memory at all (after a reload)", () => {
-    clearSends();
+  // The hub says "here" for the device whose request accepted the answer, so this holds after a reload and on a
+  // second tab: no local memory takes part.
+  it("an answer the feed says was given here reads here, with no local memory at all", () => {
     expect(standingLine(item({
       decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: 1, via: "here", endpointId: null, sessionId: null },
     }), "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
+  });
+
+  it("an answer given here says where its delivery stands", () => {
+    const d = { choice: { kind: "option" as const, key: "b", label: "Extend the triage script" }, at: 1, via: "here" as const, endpointId: null, sessionId: null };
+    expect(standingLine(item({ decision: { ...d, delivery: { state: "queued", at: null } } }), "Alpha")).toBe("Queued.");
+    expect(standingLine(item({ decision: { ...d, delivery: { state: "delivered", at: 2 } } }), "Alpha")).toBe("Delivered. You chose Extend the triage script.");
+  });
+
+  // A record that names no endpoint and wasn't seen elsewhere keeps no via on the wire: neutral, it claims neither.
+  it("an answer whose via the feed leaves out stays neutral", () => {
+    expect(standingLine(item({
+      decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: 1, endpointId: null, sessionId: null },
+    }), "Alpha")).toBe("Answered: Extend the triage script.");
   });
 });
