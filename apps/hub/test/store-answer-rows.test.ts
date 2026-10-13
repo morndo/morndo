@@ -42,16 +42,17 @@ describe("answer rows in the store", () => {
     expect(plan.filter(d => d.startsWith("SCAN sends"))).toEqual([]);
   });
 
-  // The range holds exactly the keys that start with the prefix: not a key one character past it, not another ask
-  // whose message id only begins the same way, and a prefix that ends in a character outside ASCII counts that
-  // character whole.
-  it("reads exactly the keys that start with the prefix", () => {
-    const keys = ["answer:ny-7:m1:option:ship", "answer:ny-7:m10:option:ship", "answer:ny-7:m1;", "answer;", "answe",
-      "answer:ny-7:é:option:a", "answer:ny-7:ê", "answer:ny-8:😀:option:a", "answer:ny-8:😁"];
+  // The range holds exactly the keys under an ask's prefix (round 4.4 of the PR #55 review). The prefix ends in ":", as
+  // every caller's does (askPrefix), so the bound is that ":" made ";": not a key one character past the prefix, nor
+  // another ask whose message id only begins the same way. Any other prefix is refused rather than read with a bound
+  // that may not hold (a last character of U+D7FF or U+10FFFF has no next one that SQLite keeps).
+  it("reads exactly the keys under an ask's prefix, and refuses a prefix that does not end in a colon", () => {
+    const keys = ["answer:ny-7:m1:option:ship", "answer:ny-7:m10:option:ship", "answer:ny-7:m1;", "answer:ny-7:m1", "answer;", "answe"];
     for (const key of keys) store.startAnswer(key, T0, { workerId: "%0", request: `desk:${key}` });
     expect(store.answersOfAsk("answer:ny-7:m1:").map(r => r.key)).toEqual(["answer:ny-7:m1:option:ship"]);
-    expect(store.answersOfAsk("answer:ny-7:é").map(r => r.key)).toEqual(["answer:ny-7:é:option:a"]);
-    expect(store.answersOfAsk("answer:ny-8:😀").map(r => r.key)).toEqual(["answer:ny-8:😀:option:a"]);
     expect(store.answersOfAsk("answer:").map(r => r.key).sort()).toEqual(keys.filter(k => k.startsWith("answer:")).sort());
+    for (const prefix of ["answer:ny-7:m1", "answer:x\uD7FF", "answer:x\u{10FFFF}", ""]) {
+      expect(() => store.answersOfAsk(prefix)).toThrow(/ends in ":"/);
+    }
   });
 });

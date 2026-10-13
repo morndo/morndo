@@ -49,13 +49,14 @@ type SendRowSql = {
 const sendRow = (r: SendRowSql): SendRow =>
   ({ state: r.state, at: r.at, outcome: r.outcome, typedAt: r.typed_at, store: r.node_store, storeSeq: r.node_store_seq, workerId: r.worker_id, key: r.key, request: r.request, requestSession: r.request_session });
 const SEND_COLUMNS = "key, state, at, outcome, typed_at, node_store, node_store_seq, worker_id, request, request_session";
-// The first key past every key that starts with `prefix`: the prefix with its last character one code point higher.
-// SQLite compares TEXT bytewise by default (BINARY), and UTF-8 keeps code point order, so the keys from `prefix` up to
-// this one are exactly those that start with it (https://www.sqlite.org/datatype3.html#collation).
+// The first key past every key that starts with `prefix`, an ask's prefix (escalation-service.ts askPrefix), which ends
+// in ":": the same with that ":" made ";", the next character. SQLite compares TEXT bytewise by default (BINARY), so
+// the keys from `prefix` up to this one are exactly those that start with it
+// (https://www.sqlite.org/datatype3.html#collation). Any other prefix is refused: the next code point after its last
+// character may not exist, or not survive as UTF-8 (round 4.4 of the PR #55 review).
 const keysPast = (prefix: string) => {
-  const low = prefix.charCodeAt(prefix.length - 1);
-  const at = prefix.length - (low >= 0xdc00 && low <= 0xdfff && prefix.length > 1 ? 2 : 1);   // a pair is one character
-  return prefix.slice(0, at) + String.fromCodePoint((prefix.codePointAt(at) ?? 0) + 1);
+  if (!prefix.endsWith(":")) throw new Error(`an answer key prefix ends in ":", not ${JSON.stringify(prefix.slice(-1))}`);
+  return `${prefix.slice(0, -1)};`;
 };
 
 export const READ_MARKS_KEPT = 500;
