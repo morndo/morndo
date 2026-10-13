@@ -36,9 +36,11 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
     if (parsed.cmd === "helper") return await helper(env, parsed, io);
     return await command(env, parsed, io);
   } catch (error) {
-    if (parsed.cmd === "helper") return error instanceof FileRefused || error instanceof DatabaseFromFuture ? 70 : 1;
+    // A store from a newer helper is a configuration the caller must fix, not a crash to retry into: EX_CONFIG (78),
+    // the exit the hub's main gives the same refusal. A file this helper refuses to touch keeps 70.
+    if (parsed.cmd === "helper") return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
     io.stderr(error instanceof Error ? error.message : "failed");
-    return error instanceof FileRefused || error instanceof DatabaseFromFuture ? 70 : 1;
+    return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
   }
 }
 
@@ -241,7 +243,10 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     } finally { if (released) again.close(); }
   }
   if (refusal !== null) return refusal;
-  return status === 70 || status === 75 ? 1 : status;
+  // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
+  // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
+  // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
+  return status === 70 || status === 75 || status === 78 ? 1 : status;
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {

@@ -1,8 +1,12 @@
 // Schema for the connections directory (with its events) and the routing policy (ADR-0008 A1, design section 5), and from
 // migration 2 the node's Secrets (ADR-0022; secret-requests design §6).
+// The store has no service that could be stopped for an update — its helper runs whenever an agent CLI needs a key —
+// so its migrations are additive forever (ADR-0019 §11): the floor stays at 0 and any version's store opens.
 import type Database from "better-sqlite3";
 import { emptyDirectory, emptyPolicy } from "@morndo/domain";
 import { migrate as runMigrations, type Migration } from "@morndo/service-kit";
+
+export type { Migration };
 
 export class DatabaseFromFuture extends Error {
   readonly found: number;
@@ -19,6 +23,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     name: "connections directory, events and routing policy",
+    compat: "additive",
     up: db => {
       db.exec(`
         CREATE TABLE cas (id INTEGER PRIMARY KEY CHECK (id = 1), version INTEGER NOT NULL);
@@ -33,6 +38,7 @@ export const MIGRATIONS: readonly Migration[] = [
   {
     version: 2,
     name: "secrets on the node: metadata, the fingerprint ledger, grants, uses, events and workspaces",
+    compat: "additive",
     // Design §6, "Metadata"; §3.4 SC2. A held Secret is one row, its own versions (which restart after a Delete) a JSON
     // column. secret_versions is the fingerprint ledger: one row per version ever stored here, with its vault ref, kept
     // after a Delete. secret_uses waits for the broker (PR 3).
@@ -90,6 +96,6 @@ export const MIGRATIONS: readonly Migration[] = [
   },
 ];
 
-export function migrate(db: Database.Database): { from: number; to: number } {
-  return runMigrations(db, MIGRATIONS, (found, known) => new DatabaseFromFuture(found, known));
+export function migrate(db: Database.Database, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {
+  return runMigrations(db, migrations, (found, known) => new DatabaseFromFuture(found, known));
 }
