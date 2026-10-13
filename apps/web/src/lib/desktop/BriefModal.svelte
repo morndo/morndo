@@ -1,49 +1,41 @@
 <script lang="ts">
   // The full decision brief (ADR-0023 §6.2). A native dialog: showModal makes the page inert, Escape fires cancel,
   // and focus starts on the headline so a long brief is read from the top. The answer stays in the footer.
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { cardOf } from "@morndo/domain";
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import Star from "@lucide/svelte/icons/star";
   import X from "@lucide/svelte/icons/x";
-  import { MAY_HAVE_GONE, againLabel, endsDoubt } from "../catchup/answer.ts";
-  import { renderBriefMarkdown, renderMarkdown } from "../markdown.ts";
-  import { ago, deliveryLine, dueLabel, REFUSALS, type DecisionItem } from "./decisions.ts";
-  import type { AnswerBody, AnswerProblem } from "./DecisionCard.svelte";
+  import { againLabel } from "../catchup/answer.ts";
+  import { renderBriefInline, renderBriefMarkdown, renderMarkdown } from "../markdown.ts";
+  import { AnswerSession } from "./answer-session.svelte.ts";
+  import type { AnswerBody, AnswerProblem, AskOutcome } from "./answer-session.ts";
+  import { ago, deliveryLine, dueLine, REFUSALS, type DecisionItem } from "./decisions.ts";
 
-  let { item, now, verifiedFresh, onAnswer, onOpenScreen, onAskBrief, onClose }: {
-    item: DecisionItem; now: number; verifiedFresh: boolean;
+  let { item, now, verifiedFresh, session: given, onAnswer, onOpenScreen, onAskBrief, onClose }: {
+    item: DecisionItem; now: number; verifiedFresh: boolean; session?: AnswerSession;
     onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>;
     onOpenScreen: (workerId: string) => void;
-    onAskBrief: (item: DecisionItem) => boolean | Promise<boolean>;
+    onAskBrief: (item: DecisionItem) => Promise<AskOutcome>;
     onClose: () => void;
   } = $props();
 
+  const own = new AnswerSession(item);
+  const session = $derived(given ?? own);
   let dialogEl = $state<HTMLDialogElement | null>(null);
   let headlineEl = $state<HTMLHeadingElement | null>(null);
   let wordsEl = $state<HTMLTextAreaElement | null>(null);
-  let mode = $state<"idle" | "confirm" | "words">("idle");
-  let picked = $state<{ label: string; body: AnswerBody } | null>(null);
-  let words = $state("");
-  let sending = $state(false);
-  let error = $state<string | null>(null);
-  let again = $state<{ body: AnswerBody; requestId: string; code: string } | null>(null);
-  let sent = $state(false);
-  let asked = $state(false);
-  // The version on screen when the dialog opened. A restate changes item.version; the answer still names this one
-  // until he asks for the new version, so the hub refuses it as changed (E12).
-  let seen = $state(item.version);
-  let shown = $state(item.version);
 
-  const card = $derived(cardOf(item));
-  const brief = $derived(item.brief);
-  const stale = $derived(item.version !== shown);
+  const view = $derived(session.shown);
+  const card = $derived(cardOf(view));
+  const brief = $derived(view.brief);
   const open = $derived(item.status === "open");
-  const canAnswer = $derived(open && item.answerable === null && !sent);
+  const canAnswer = $derived(open && item.answerable === null && !session.sent && !session.stale);
   const asker = $derived(item.asker.kind === "manager" ? "the manager" : item.asker.name);
   const whom = $derived(asker[0] ? asker[0].toUpperCase() + asker.slice(1) : asker);
-  const headline = $derived(card.headline ?? item.title);
-  const recommendKey = $derived(brief?.recommend ?? (item.answerBy === "tap" ? item.options[0]?.key ?? null : null));
+  const terminal = $derived(item.asker.kind === "manager" ? "the manager" : `#${item.asker.name}`);
+  const headline = $derived(card.headline ?? view.title);
+  const recommendKey = $derived(brief?.recommend ?? (view.answerBy === "tap" ? view.options[0]?.key ?? null : null));
   const standing = $derived.by(() => {
     const d = item.decision;
     if (!d) return "Sent. The manager gets it as your decision and acts on it.";
@@ -54,72 +46,61 @@
     return `Sent. You chose ${choice}. ${whom} has it.`;
   });
 
-  function dueLine(deadline: number): string {
-    const label = dueLabel(deadline, now);
-    if (deadline <= now) return label;
-    const days = Math.round((deadline - now) / 86_400_000);
-    if (days > 1) return `${label} (in ${days} days)`;
-    if (days === 1) return `${label} (in 1 day)`;
-    return label;
-  }
+  const takeFocus = (node: HTMLElement) => node.focus();
 
   onMount(() => {
     dialogEl?.showModal();
     headlineEl?.focus();
   });
-  $effect(() => { if (mode === "words") wordsEl?.focus(); });
+  $effect(() => { if (session.mode === "words") wordsEl?.focus(); });
 
-  function showNew() { shown = item.version; seen = item.version; error = null; }
-  function pick(label: string, body: AnswerBody) { picked = { label, body }; mode = "confirm"; error = null; }
-  function writeWords() { words = ""; mode = "words"; error = null; }
-  function back() { mode = "idle"; picked = null; if (!again) error = null; }
+  function showNew() { session.showNew(); tick().then(() => headlineEl?.focus()); }
+  function choose(label: string, body: AnswerBody) { session.pick(label, body); }
+  function writeWords() {
+    if (session.stale || session.sending || session.again || !open) return;
+    session.words = "";
+    session.mode = "words";
+    session.error = null;
+  }
+  function back() { session.back(); tick().then(() => headlineEl?.focus()); }
+  function requestClose() { if (!session.sending) onClose(); }
   function onCancel(e: Event) {
-    if (sending) { e.preventDefault(); return; }
-    if (mode !== "idle") { e.preventDefault(); back(); }
+    if (session.sending) { e.preventDefault(); return; }
+    if (session.mode !== "idle") { e.preventDefault(); back(); }
   }
   function onWordsKey(e: KeyboardEvent) {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (again) sendAgain(); else if (words.trim()) void send({ text: words }); }
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (session.again) sendAgain(); else if (session.words.trim()) void send({ text: session.words }); }
     if (e.key === "Escape") { e.preventDefault(); back(); }
   }
 
-  async function send(body: AnswerBody, requestId: string = crypto.randomUUID()) {
-    if (sending) return;
-    sending = true;
-    error = null;
-    const doubt = again;
-    const problem = await onAnswer(item.id, body, requestId, seen);
-    sending = false;
-    if (problem) {
-      error = problem.text;
-      again = MAY_HAVE_GONE.has(problem.code) ? { body, requestId, code: problem.code } : doubt && !endsDoubt(problem.code) ? doubt : null;
-      return;
-    }
-    again = null;
-    sent = true;
-    mode = "idle";
-    picked = null;
+  async function send(body: AnswerBody, requestId?: string) {
+    await session.send(onAnswer, body, requestId);
+    if (session.sent) headlineEl?.focus();
   }
-  function sendAgain() { if (again) void send(again.body, again.requestId); }
-  async function ask() { asked = await onAskBrief(item); }
+  function sendAgain() { if (session.again) void send(session.again.body, session.again.requestId); }
+  function ask() { void session.ask(onAskBrief); }
 </script>
 
 <dialog bind:this={dialogEl} class="brief" aria-labelledby="brief-headline" oncancel={onCancel} onclose={onClose}>
   <header>
-    {#if stale}
+    {#if session.stale}
       <p class="restated" role="status">{whom} restated this brief. <button type="button" class="link" onclick={showNew}>Show the new version</button></p>
     {/if}
     <div class="titlebar">
       <p class="kicker">Decision request{#if card.topic} · {card.topic}{/if}</p>
-      <button type="button" class="close" onclick={onClose} aria-label="Close"><X size={20} /></button>
+      <button type="button" class="close" onclick={requestClose} aria-label="Close" disabled={session.sending}><X size={20} /></button>
     </div>
     <p class="meta">
       <span>Approver · Owner</span>
-      {#if card.due !== null}<span>{dueLine(card.due)}</span>{/if}
+      {#if card.due !== null}<span>{dueLine(card.due, now)}</span>{/if}
       {#if card.minutes !== null}<span>≈{card.minutes} min</span>{/if}
-      {#if brief}<span>v{item.briefVersion}</span>{/if}
+      {#if brief}<span>v{view.briefVersion}</span>{/if}
     </p>
     <p class="from">From {asker}, {ago(item.askedAt, now)}</p>
-    {#if !card.hasBrief}<p class="plain">Filed without a brief{#if asked} <span role="status">Asked. This decision stays open.</span>{:else if open} <button type="button" class="link" onclick={ask}>Ask for a brief</button>{/if}</p>{/if}
+    {#if !card.hasBrief}
+      <p class="plain">Filed without a brief{#if session.asked} <span role="status">Asked. This decision stays open.</span>{:else if open} <button type="button" class="link" disabled={session.asking} onclick={ask}>Ask for a brief</button>{/if}</p>
+      {#if session.askError}<p class="err" role="alert">{session.askError}</p>{/if}
+    {/if}
     <h2 id="brief-headline" tabindex="-1" bind:this={headlineEl}>{headline}</h2>
     {#if card.spend}<p class="spend">Includes spend</p>{/if}
   </header>
@@ -129,8 +110,8 @@
       <section>
         <h3>The ask</h3>
         <div class="md">{@html renderBriefMarkdown(brief.ask.text)}</div>
-        <p class="pair"><b>Alternative</b> <span class="md">{@html renderBriefMarkdown(brief.ask.alternative)}</span></p>
-        <p class="pair"><b>Uncertainty</b> <span class="md">{@html renderBriefMarkdown(brief.ask.uncertainty)}</span></p>
+        <p class="pair"><b>Alternative</b> <span class="md">{@html renderBriefInline(brief.ask.alternative)}</span></p>
+        <p class="pair"><b>Uncertainty</b> <span class="md">{@html renderBriefInline(brief.ask.uncertainty)}</span></p>
       </section>
       <section>
         <h3>Why now</h3>
@@ -144,152 +125,166 @@
             <tr>
               <td></td>
               {#each brief.options as o (o.key)}
-                <th scope="col" class:rec={o.key === brief.recommend}>{o.key.toUpperCase()} · {o.label}{#if o.key === brief.recommend}<span class="mark"><Star size={12} /> Recommended</span>{/if}</th>
+                <th scope="col" class:rec={o.key === brief.recommend}>{o.key.toUpperCase()} · {@html renderBriefInline(o.label)}{#if o.key === brief.recommend}<span class="mark"><Star size={12} /> Recommended</span>{/if}</th>
               {/each}
             </tr>
           </thead>
           <tbody>
-            {#each brief.comparison.rows as row (row.factor)}
+            {#each brief.comparison.rows as row, i (i)}
               <tr>
-                <th scope="row">{row.factor}</th>
-                {#each row.cells as cell, i (i)}<td class:rec={brief.options[i]?.key === brief.recommend}>{cell}</td>{/each}
+                <th scope="row">{@html renderBriefInline(row.factor)}</th>
+                {#each row.cells as cell, j (j)}<td class:rec={brief.options[j]?.key === brief.recommend}>{@html renderBriefInline(cell)}</td>{/each}
               </tr>
             {/each}
           </tbody>
         </table>
         <div class="factors">
-          {#each brief.comparison.rows as row (row.factor)}
-            <h4>{row.factor}</h4>
+          {#each brief.comparison.rows as row, i (i)}
+            <h4>{@html renderBriefInline(row.factor)}</h4>
             <ul>
-              {#each brief.options as o, i (o.key)}
-                <li class:rec={o.key === brief.recommend}>{#if o.key === brief.recommend}★ {/if}{o.key.toUpperCase()} · {o.label} <b>{row.cells[i]}</b></li>
+              {#each brief.options as o, j (o.key)}
+                <li class:rec={o.key === brief.recommend}>{#if o.key === brief.recommend}★ {/if}{o.key.toUpperCase()} · {@html renderBriefInline(o.label)} <b>{@html renderBriefInline(row.cells[j] ?? "")}</b></li>
               {/each}
             </ul>
           {/each}
         </div>
-        <p class="note">{brief.comparison.note}</p>
+        <p class="note">{@html renderBriefInline(brief.comparison.note)}</p>
       </section>
       <section>
         <h3>Why the recommendation</h3>
         <div class="md">{@html renderBriefMarkdown(brief.why.text)}</div>
         {#if brief.why.assumptions.length}
           <h4>Assumptions</h4>
-          <ul>{#each brief.why.assumptions as a (a)}<li>{a}</li>{/each}</ul>
+          <ul>{#each brief.why.assumptions as a, i (i)}<li>{@html renderBriefInline(a)}</li>{/each}</ul>
         {/if}
-        <p class="pair"><b>Downside case</b> {brief.why.downside}</p>
+        <p class="pair"><b>Downside case</b> {@html renderBriefInline(brief.why.downside)}</p>
       </section>
       <section>
         <h3>What would change it</h3>
-        <p>{brief.changeIf}</p>
+        <div class="md">{@html renderBriefMarkdown(brief.changeIf)}</div>
       </section>
       <section>
         <h3>Main risk and control</h3>
-        <p class="pair"><b>Risk</b> {brief.risk.risk}</p>
-        <p class="pair"><b>Control</b> {brief.risk.control}</p>
+        <p class="pair"><b>Risk</b> {@html renderBriefInline(brief.risk.risk)}</p>
+        <p class="pair"><b>Control</b> {@html renderBriefInline(brief.risk.control)}</p>
       </section>
       <section>
         <h3>What approval authorizes</h3>
         <p class="commit">The asker's commitment. Morndo records your answer and doesn't enforce the limits.</p>
-        <ul>{#each brief.authorizes.limits as limit (limit)}<li>{limit}</li>{/each}</ul>
-        <p class="pair"><b>Needs fresh approval</b> {brief.authorizes.freshApproval}</p>
-        <p class="pair"><b>Review point</b> {brief.authorizes.reviewPoint}</p>
+        <ul>{#each brief.authorizes.limits as limit, i (i)}<li>{@html renderBriefInline(limit)}</li>{/each}</ul>
+        <p class="pair"><b>Needs fresh approval</b> {@html renderBriefInline(brief.authorizes.freshApproval)}</p>
+        <p class="pair"><b>Review point</b> {@html renderBriefInline(brief.authorizes.reviewPoint)}</p>
       </section>
       {#if brief.ifNoAnswer}
         <section>
           <h3>If no decision by the due date</h3>
-          <p>{brief.ifNoAnswer}</p>
+          <div class="md">{@html renderBriefMarkdown(brief.ifNoAnswer)}</div>
         </section>
       {/if}
       {#if brief.evidence.length}
         <section>
           <h3>Evidence</h3>
           <ul>
-            {#each brief.evidence as e (e.url)}
-              {#if e.url.startsWith("https://")}<li><a href={e.url} target="_blank" rel="noopener noreferrer">{e.label}</a></li>{/if}
+            {#each brief.evidence as e, i (i)}
+              {#if e.url.startsWith("https://")}<li><a href={e.url} target="_blank" rel="noopener noreferrer">{@html renderBriefInline(e.label)}</a></li>{/if}
             {/each}
           </ul>
         </section>
       {/if}
     {:else}
-      {#if item.summary && item.summary !== headline}<p>{item.summary}</p>{/if}
-      {#if item.recommendation}<p class="pair"><b>Recommended</b> {item.recommendation}</p>{/if}
-      {#if item.ifNoAnswer}<p class="pair"><b>If you don't answer</b> {item.ifNoAnswer}</p>{/if}
-      {#if item.details}<div class="md">{@html renderMarkdown(item.details)}</div>{/if}
-      {#if item.context && item.contextKind === "markdown"}<div class="md">{@html renderMarkdown(item.context)}</div>{/if}
-      {#if item.context && item.contextKind === "screen"}<pre class="screen">{item.context}</pre>{/if}
+      {#if view.summary && view.summary !== headline}<p>{view.summary}</p>{/if}
+      {#if view.recommendation}<p class="pair"><b>Recommended</b> {@html renderBriefInline(view.recommendation)}</p>{/if}
+      {#if view.ifNoAnswer}<p class="pair"><b>If you don't answer</b> {@html renderBriefInline(view.ifNoAnswer)}</p>{/if}
+      {#if view.details}<div class="md">{@html renderMarkdown(view.details)}</div>{/if}
+      {#if view.context && view.contextKind === "markdown"}<div class="md">{@html renderMarkdown(view.context)}</div>{/if}
+      {#if view.context && view.contextKind === "screen"}<pre class="screen">{view.context}</pre>{/if}
     {/if}
   </div>
 
   <footer>
-    {#if sent}
+    {#if session.sent}
       <p class="stand" role="status">{standing}</p>
-      <button type="button" class="btn ghost" onclick={onClose}>Close</button>
-    {:else if mode === "confirm" && picked}
+      <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
+    {:else if !open}
+      <p class="stand" role="status">This decision is no longer open.</p>
+      <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
+    {:else if session.stale}
+      {#if session.again}
+        <div class="actions">
+          <button type="button" class="btn primary" disabled={session.sending} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
+        </div>
+      {:else}
+        <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
+      {/if}
+    {:else if session.mode === "confirm" && session.picked}
       <div class="confirm" role="group" aria-label="Confirm your answer">
-        <p class="your">Your answer: <b>{picked.label}</b></p>
+        <p class="your">Your answer: <b>{session.picked.label}</b></p>
         <p class="how">{whom} gets it as your decision and acts on it.</p>
         <div class="actions">
-          {#if again}
-            <button type="button" class="btn primary" disabled={sending} onclick={sendAgain}>{sending ? "Checking…" : againLabel(again.code)}</button>
+          {#if session.again}
+            <button type="button" class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
           {:else}
-            <button type="button" class="btn primary" disabled={sending} onclick={() => picked && send(picked.body)}>{sending ? "Sending…" : "Send answer"}</button>
+            <button type="button" class="btn primary" disabled={session.sending || !open} use:takeFocus onclick={() => session.picked && send(session.picked.body)}>{session.sending ? "Sending…" : "Send answer"}</button>
           {/if}
-          <button type="button" class="btn ghost" disabled={sending} onclick={back}>Back</button>
+          <button type="button" class="btn ghost" disabled={session.sending} onclick={back}>Back</button>
           {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{/if}
         </div>
       </div>
-    {:else if mode === "words"}
+    {:else if session.mode === "words"}
       <div class="confirm" role="group" aria-label="Answer in words">
-        <textarea bind:this={wordsEl} bind:value={words} rows="2" readonly={!!again} placeholder="Your answer for {asker}…" onkeydown={onWordsKey} aria-label="Your answer for {asker}"></textarea>
+        <textarea bind:this={wordsEl} value={session.words} rows="2" readonly={!!session.again} placeholder="Your answer for {asker}…" onkeydown={onWordsKey} oninput={(e) => (session.words = e.currentTarget.value)} aria-label="Your answer for {asker}"></textarea>
         <div class="actions">
-          {#if again}
-            <button type="button" class="btn primary" disabled={sending} onclick={sendAgain}>{sending ? "Checking…" : againLabel(again.code)}</button>
+          {#if session.again}
+            <button type="button" class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
           {:else}
-            <button type="button" class="btn primary" disabled={sending || !words.trim()} onclick={() => send({ text: words })}>{sending ? "Sending…" : `Send to ${asker}`}</button>
+            <button type="button" class="btn primary" disabled={session.sending || !open || !session.words.trim()} onclick={() => send({ text: session.words })}>{session.sending ? "Sending…" : `Send to ${asker}`}</button>
           {/if}
-          <button type="button" class="btn ghost" disabled={sending} onclick={back}>Back</button>
+          <button type="button" class="btn ghost" disabled={session.sending} onclick={back}>Back</button>
           {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{:else}<span class="hint">Enter sends · Shift+Enter for a new line</span>{/if}
         </div>
       </div>
-    {:else if again}
+    {:else if session.again}
       <div class="actions">
-        <button type="button" class="btn primary" disabled={sending} onclick={sendAgain}>{sending ? "Checking…" : againLabel(again.code)}</button>
+        <button type="button" class="btn primary" disabled={session.sending || !open} use:takeFocus onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
+      </div>
+    {:else if open && item.answerBy === "screen"}
+      <div class="actions">
+        {#if item.asker.workerId}<button type="button" class="btn primary" onclick={() => item.asker.workerId && onOpenScreen(item.asker.workerId)}>Answer in {terminal}'s terminal</button>{/if}
+        <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
       </div>
     {:else if canAnswer}
       <div class="actions">
         <span class="decide">Decision</span>
         {#if brief}
           {#each brief.options as o (o.key)}
-            <button type="button" class="btn" class:primary={o.key === recommendKey} onclick={() => pick(`${o.key.toUpperCase()} · ${o.label}`, { key: o.key })}>
-              {#if o.key === recommendKey}<Star size={14} />{/if}{o.key.toUpperCase()} · {o.label}
+            <button type="button" class="btn" class:primary={o.key === recommendKey} onclick={() => choose(`${o.key.toUpperCase()} · ${o.label}`, { key: o.key })}>
+              {#if o.key === recommendKey}<Star size={14} />{/if}{o.key.toUpperCase()} · {@html renderBriefInline(o.label)}
             </button>
           {/each}
           <button type="button" class="link" onclick={writeWords}>Something else…</button>
-        {:else if item.answerBy === "tap"}
-          {#each item.options as o (o.key)}
-            <button type="button" class="btn" class:primary={o.key === recommendKey} onclick={() => pick(o.label, { key: o.key })}>
+        {:else if view.answerBy === "tap"}
+          {#each view.options as o (o.key)}
+            <button type="button" class="btn" class:primary={o.key === recommendKey} onclick={() => choose(o.label, { key: o.key })}>
               {#if o.key === recommendKey}<Star size={14} />{/if}{o.label}
             </button>
           {/each}
           <button type="button" class="link" onclick={writeWords}>Something else…</button>
-        {:else if item.answerBy === "screen"}
-          {#if item.asker.workerId}<button type="button" class="btn primary" onclick={() => item.asker.workerId && onOpenScreen(item.asker.workerId)}>Answer in {item.asker.kind === "manager" ? "the manager" : `#${item.asker.name}`}'s terminal</button>{/if}
-        {:else if item.need === "time"}
-          <button type="button" class="btn primary" onclick={() => pick("Done", { text: "Done" })}>Done</button>
+        {:else if view.need === "time"}
+          <button type="button" class="btn primary" onclick={() => choose("Done", { text: "Done" })}>Done</button>
           <button type="button" class="btn" onclick={writeWords}>Reply…</button>
         {:else}
           <button type="button" class="btn primary" onclick={writeWords}>Answer…</button>
         {/if}
-        <button type="button" class="btn ghost" onclick={onClose}>Close</button>
+        <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
       </div>
       {#if !verifiedFresh}<p class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</p>{/if}
     {:else if item.answerable}
       <p class="note">{REFUSALS[item.answerable]}</p>
-      <button type="button" class="btn ghost" onclick={onClose}>Close</button>
+      <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
     {:else}
-      <button type="button" class="btn ghost" onclick={onClose}>Close</button>
+      <button type="button" class="btn ghost" onclick={requestClose}>Close</button>
     {/if}
-    {#if error}<p class="err" role="alert">{error}</p>{/if}
+    {#if session.error}<p class="err" role="alert">{session.error}</p>{/if}
   </footer>
 </dialog>
 

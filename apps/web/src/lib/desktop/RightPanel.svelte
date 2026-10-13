@@ -5,34 +5,43 @@
   import X from "@lucide/svelte/icons/x";
   import type { Snippet } from "svelte";
 
-  let { waiting, width, children, onClose, onWidth }: {
-    waiting: number; width: number; children: Snippet; onClose: () => void; onWidth: (next: number) => void;
-  } = $props();
+  import { RIGHT_MAX, RIGHT_MIN, clampRight } from "./panel-width.ts";
 
-  const MIN = 360;
-  const MAX = 640;
-  const clamp = (n: number) => Math.min(MAX, Math.max(MIN, n));
+  let { waiting, width, children, onClose, onWidth, onCommit }: {
+    waiting: number; width: number; children: Snippet; onClose: () => void;
+    onWidth: (next: number) => void; onCommit: (next: number) => void;
+  } = $props();
 
   function start(e: PointerEvent) {
     if (e.button !== 0) return;
     e.preventDefault();
+    const grip = e.currentTarget as HTMLElement;
+    grip.setPointerCapture(e.pointerId);
     const startX = e.clientX, startW = width;
-    const move = (ev: PointerEvent) => onWidth(clamp(startW + startX - ev.clientX));
-    const up = () => { removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
-    addEventListener("pointermove", move);
-    addEventListener("pointerup", up);
+    const at = (ev: PointerEvent) => clampRight(startW + startX - ev.clientX);
+    const move = (ev: PointerEvent) => { if (ev.pointerId === e.pointerId) onWidth(at(ev)); };
+    const finish = (ev: PointerEvent) => {
+      if (ev.pointerId !== e.pointerId) return;
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", finish);
+      grip.removeEventListener("pointercancel", finish);
+      onCommit(at(ev));
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", finish);
+    grip.addEventListener("pointercancel", finish);
   }
   function key(e: KeyboardEvent) {
-    if (e.key === "ArrowLeft") { e.preventDefault(); onWidth(clamp(width + 16)); }
-    else if (e.key === "ArrowRight") { e.preventDefault(); onWidth(clamp(width - 16)); }
-    else if (e.key === "Home") { e.preventDefault(); onWidth(MIN); }
-    else if (e.key === "End") { e.preventDefault(); onWidth(MAX); }
+    const next = e.key === "ArrowLeft" ? width + 16 : e.key === "ArrowRight" ? width - 16 : e.key === "Home" ? RIGHT_MIN : e.key === "End" ? RIGHT_MAX : null;
+    if (next === null) return;
+    e.preventDefault();
+    onCommit(clampRight(next));
   }
 </script>
 
 <aside class="side-panel rp" aria-label="Decisions">
   <div class="grip" role="separator" aria-orientation="vertical" aria-label="Resize the decisions panel"
-    aria-valuemin={MIN} aria-valuemax={MAX} aria-valuenow={width} tabindex="0" onpointerdown={start} onkeydown={key}></div>
+    aria-valuemin={RIGHT_MIN} aria-valuemax={RIGHT_MAX} aria-valuenow={width} tabindex="0" onpointerdown={start} onkeydown={key}></div>
   <header>
     <Signpost size={18} /><h2 id="decisions-heading" tabindex="-1">Decisions</h2>{#if waiting}<span class="count">{waiting}</span>{/if}
     <button class="x" aria-label="Close the right panel" title="Close the right panel" onclick={onClose}><X size={18} /></button>

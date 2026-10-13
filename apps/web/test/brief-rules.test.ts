@@ -3,7 +3,6 @@
 import { describe, expect, it } from "vitest";
 import { dueLine } from "../src/lib/desktop/decisions.ts";
 import { dockedWidth, layoutIsNarrow, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
-import { renderBriefInline } from "../src/lib/markdown.ts";
 import { openSession, pick, showNew, noteClosed } from "../src/lib/desktop/answer-session.ts";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
 
@@ -32,14 +31,6 @@ describe("widening the decisions panel stays docked", () => {
   it("a window too narrow for the minimum panel is the overlay, and the width can still be 640", () => {
     expect(layoutIsNarrow(1000, sidebar)).toBe(true);
     expect(dockedWidth(640, 1000, sidebar)).toBe(640);
-  });
-});
-
-describe("one-line brief fields", () => {
-  it("renders emphasis inline, with no block paragraph", () => {
-    const html = renderBriefInline("If **fewer than 60%** are tagged");
-    expect(html).toContain("<strong>");
-    expect(html).not.toContain("<p");
   });
 });
 

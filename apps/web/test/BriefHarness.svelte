@@ -1,6 +1,6 @@
 <script lang="ts">
   import DecisionsPanel from "../src/lib/desktop/DecisionsPanel.svelte";
-  import type { AnswerBody, AnswerProblem } from "../src/lib/desktop/DecisionCard.svelte";
+  import type { AnswerBody, AnswerProblem, AskOutcome } from "../src/lib/desktop/answer-session.ts";
   import type { DecisionItem, LedgerState } from "../src/lib/desktop/decisions.ts";
 
   let { initial, now }: { initial: DecisionItem[]; now: number } = $props();
@@ -23,6 +23,6 @@
       onAnswer={async (id, body, requestId, seen) => { answers.push({ id, body, requestId, seen }); return problem(); }}
       onOpenScreen={() => { (globalThis as { __screen?: boolean }).__screen = true; }}
       onOpenChat={() => {}}
-      onAskBrief={async (item) => { asks.push(item); return (globalThis as { __ask?: { ok: boolean; error?: string } }).__ask ?? { ok: true }; }} />
+      onAskBrief={async (item): Promise<AskOutcome> => { asks.push(item); return (globalThis as { __ask?: AskOutcome }).__ask ?? { ok: true }; }} />
   </div>
 </div>

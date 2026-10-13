@@ -34,6 +34,18 @@ export function renderBriefMarkdown(text: string): string {
   });
 }
 
+// One line of the brief (a pair, a cell, a limit): inline marks only, so a paragraph never lands inside a paragraph.
+const BRIEF_INLINE_TAGS = ["br", "strong", "em", "del", "code", "a"] as const;
+
+export function renderBriefInline(text: string): string {
+  const html = marked.parseInline(text, { async: false });
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: [...BRIEF_INLINE_TAGS],
+    ALLOWED_ATTR: ["href", "target", "rel"],
+    ALLOWED_URI_REGEXP: /^https:/i,
+  });
+}
+
 // "STATUS: DONE …" at the start of an agent's answer becomes a pill (agents in this system lead with it). The rule is
 // the domain's, so the catch-up's "Says done" and the chat's pill read it the same way.
 export { statusOf } from "@morndo/domain";

@@ -207,17 +207,30 @@ try {
     await card.getByRole("button", { name: "Approve option B: extend the in-house triage script" }).click();
     const dialog = page.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
     await dialog.waitFor();
-    const restated = runDecide(["restate", id, "-"], brief("\n- Restated after the principal opened it.\n"));
+    const dark = await pairedPage(browser, office, { width: 1920, height: 900, colorScheme: "dark" });
+    c.watch(dark.page);
+    const darkPanel = dark.page.getByRole("complementary", { name: "Decisions" });
+    await darkPanel.locator(`[data-decision="${id}"]`).getByRole("button", { name: "Approve option B: extend the in-house triage script" }).click();
+    const darkDialog = dark.page.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    await darkDialog.waitFor();
+    const restatedBrief = brief("\n- Restated after the principal opened it.\n")
+      .replace("| B · Extend the triage script |", "| B · Buy a hosted add-on |")
+      .replace("- [b] Extend the triage script", "- [b] Buy a hosted add-on");
+    const restated = runDecide(["restate", id, "-"], restatedBrief);
     assert(restated.code === 0, `restate failed ${restated.code}: ${restated.err}`);
     await dialog.getByText("restated this brief").waitFor({ timeout: 10_000 });
-    await dialog.getByRole("button", { name: /B · Extend the triage script/ }).click();
-    await dialog.getByRole("button", { name: "Send answer" }).click();
-    await dialog.getByRole("alert").getByText(/question changed/).waitFor({ timeout: 8_000 });
+    await darkDialog.getByText("restated this brief").waitFor({ timeout: 10_000 });
+    await shot(page, "briefs-restate-light.png");
+    await shot(dark.page, "briefs-restate-dark.png");
+    await dark.context.close();
+    c.watch(page);
+    assert(await dialog.getByRole("button", { name: "Send answer" }).count() === 0, "a restated brief can be answered before it is read");
     await dialog.getByRole("button", { name: "Show the new version" }).click();
+    await dialog.getByRole("button", { name: /B · Buy a hosted add-on/ }).click();
     await dialog.getByRole("button", { name: "Send answer" }).click();
     const deadline = Date.now() + 12_000;
     let screen = "";
-    const tap = `[tap ${id}] b (Extend the triage script)`;
+    const tap = `[tap ${id}] b (Buy a hosted add-on)`;
     while (Date.now() < deadline && !screen.includes(tap)) {
       await page.waitForTimeout(300);
       screen = office.tmux("capture-pane", "-p", "-J", "-t", office.office.panes.manager ?? "", "-S", "-80");

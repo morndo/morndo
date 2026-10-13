@@ -4,8 +4,11 @@
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import PartyPopper from "@lucide/svelte/icons/party-popper";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import { untrack } from "svelte";
+  import { AnswerSession } from "./answer-session.svelte.ts";
+  import type { AnswerBody, AnswerProblem, AskOutcome } from "./answer-session.ts";
   import BriefModal from "./BriefModal.svelte";
-  import DecisionCard, { type AnswerBody, type AnswerProblem } from "./DecisionCard.svelte";
+  import DecisionCard from "./DecisionCard.svelte";
   import { groups, urgency, waitingCount, type DecisionItem, type LedgerState } from "./decisions.ts";
   import { clock } from "./grouping.ts";
 
@@ -13,11 +16,23 @@
     items: DecisionItem[]; ledger: LedgerState; now: number; verifiedFresh: boolean;
     onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>;
     onOpenScreen: (workerId: string) => void; onOpenChat: (item: DecisionItem) => void;
-    onAskBrief?: (item: DecisionItem) => boolean | Promise<boolean>;
+    onAskBrief?: (item: DecisionItem) => Promise<AskOutcome>;
   } = $props();
 
+  let sessions = $state<Record<string, AnswerSession>>({});
   let collapsed = $state<Record<string, boolean>>({});
   let openId = $state<string | null>(null);
+  $effect(() => {
+    const hold = openId;
+    const list = items;
+    untrack(() => {
+      for (const d of list) {
+        const cur = sessions[d.id];
+        if (!cur) sessions[d.id] = new AnswerSession(d);
+        else cur.bind(d, hold === d.id);
+      }
+    });
+  });
   const openItem = $derived(items.find(d => d.id === openId) ?? null);
   const list = $derived(groups(items));
   const waiting = $derived(waitingCount(items));
@@ -64,7 +79,7 @@
         {#if !isShut(g.key, g.open)}
           <div class="cards">
             {#each g.items as d (d.id)}
-              <DecisionCard item={d} variant="panel" {now} {verifiedFresh} briefOpen={openId === d.id} {onAnswer} {onOpenScreen} {onOpenChat} onOpen={item => (openId = item.id)} />
+              <DecisionCard item={d} variant="panel" {now} {verifiedFresh} briefOpen={openId === d.id} session={sessions[d.id]} {onAnswer} {onOpenScreen} {onOpenChat} onOpen={item => (openId = item.id)} />
             {/each}
           </div>
         {/if}
@@ -72,7 +87,7 @@
     {/each}
   </div>
   {#if openItem}
-    <BriefModal item={openItem} {now} {verifiedFresh} {onAnswer} {onOpenScreen} onAskBrief={onAskBrief ?? (async () => false)} onClose={closeBrief} />
+    <BriefModal item={openItem} {now} {verifiedFresh} session={sessions[openItem.id]} {onAnswer} {onOpenScreen} onAskBrief={onAskBrief ?? (async () => ({ ok: false, error: "Can't ask from here." }))} onClose={closeBrief} />
   {/if}
 </div>
 

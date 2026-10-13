@@ -29,6 +29,8 @@
   import DecisionsPanel from "./DecisionsPanel.svelte";
   import RightPanel from "./RightPanel.svelte";
   import { REFUSALS, waitingCount, type DecisionItem } from "./decisions.ts";
+  import { dockedWidth, layoutIsNarrow } from "./panel-width.ts";
+  import type { AskOutcome } from "./answer-session.ts";
   import { api, ApiError, explain } from "../api.ts";
   import { decodeJobs, type ShownJob } from "./jobs.ts";
   import { stepUp, withStepUp } from "../stepup.ts";
@@ -81,11 +83,11 @@
     if (w) open(w.id);
   }
   let sidebarWidth = $state(store.get("morndo.sidebar", 300));
-  const RIGHT_MIN = 360;
-  const RIGHT_MAX = 640;
-  const clampRight = (n: number) => Math.min(RIGHT_MAX, Math.max(RIGHT_MIN, Math.round(n)));
-  let rightWidth = $state(clampRight(store.get("morndo.right.width", 440)));
-  function setRightWidth(n: number) { rightWidth = clampRight(n); store.set("morndo.right.width", rightWidth); }
+  let rightWidth = $state(store.get("morndo.right.width", 440));
+  function setRightWidth(n: number, persist = false) {
+    rightWidth = dockedWidth(n, windowWidth, sidebarWidth);
+    if (persist) store.set("morndo.right.width", rightWidth);
+  }
   // The right-hand panel with the decisions: open by default beside every conversation. Closing it is remembered on this
   // device.
   let right = $state<{ open: boolean }>(store.get("morndo.right", { open: true }));
@@ -123,7 +125,11 @@
   // Like Slack, the right-hand panel sits beside the conversation while the conversation keeps a readable width (560px);
   // in a narrower window it stays shut until asked for, and then lies over the conversation.
   let windowWidth = $state(typeof innerWidth === "number" ? innerWidth : 1920);
-  const narrow = $derived(windowWidth - 70 - 4 - sidebarWidth - rightWidth < 560);
+  const narrow = $derived(layoutIsNarrow(windowWidth, sidebarWidth));
+  $effect(() => {
+    const next = dockedWidth(rightWidth, windowWidth, sidebarWidth);
+    if (next !== rightWidth) rightWidth = next;
+  });
   const rightShown = $derived(narrow ? overlayOpen : right.open);
   const decisionsShown = $derived(rightShown);
   function saveRight(next: { open: boolean }) { right = next; store.set("morndo.right", next); }
@@ -147,13 +153,21 @@
     }
   }
   function openScreen(workerId: string) { open(workerId); overlayOpen = false; screenRequest = { worker: workerId, n: (screenRequest?.n ?? 0) + 1 }; }
-  async function askForBrief(d: DecisionItem): Promise<boolean> {
+  async function askForBrief(d: DecisionItem): Promise<AskOutcome> {
     const worker = d.asker.workerId;
-    if (!worker) return false;
+    if (!worker) return { ok: false, error: "This decision has no one to ask." };
+    if (!verifiedFresh && navigator.onLine !== false) {
+      try { verifiedAt = await stepUp(); }
+      catch (e) { return { ok: false, error: explain(e) }; }
+    }
     const w = feed.workers.find(x => x.id === worker);
     // The command is written for the question that pane is on now, or the hub refuses it as stale (S6).
-    await onQueue({ target: worker, targetName: w?.name ?? d.asker.name, text: `Please restate ${d.id} as a decision brief: morndo-decide template`, uploads: [], images: [], files: [], seen: w?.waitingOn ?? "none" });
-    return true;
+    try {
+      await onQueue({ target: worker, targetName: w?.name ?? d.asker.name, text: `Please restate ${d.id} as a decision brief: morndo-decide template`, uploads: [], images: [], files: [], seen: w?.waitingOn ?? "none" });
+    } catch (e) {
+      return { ok: false, error: explain(e) };
+    }
+    return { ok: true };
   }
   function openChat(d: DecisionItem) {
     if (!d.asker.workerId || !d.messageId) return;
@@ -386,7 +400,7 @@
           {/if}
         </main>
         {#if rightShown}
-          <RightPanel waiting={decisionsWaiting} width={rightWidth} onWidth={setRightWidth} onClose={closeRight}>
+          <RightPanel waiting={decisionsWaiting} width={rightWidth} onWidth={(n) => setRightWidth(n)} onCommit={(n) => setRightWidth(n, true)} onClose={closeRight}>
             <DecisionsPanel items={feed.decisions} ledger={feed.ledger} {now} {verifiedFresh} onAnswer={answer}
               onOpenScreen={openScreen} onOpenChat={openChat} onAskBrief={askForBrief} />
           </RightPanel>

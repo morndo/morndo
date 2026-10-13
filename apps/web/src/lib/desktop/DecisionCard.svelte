@@ -1,7 +1,5 @@
 <script lang="ts" module>
-  export type AnswerBody = { key: string } | { text: string };
-  // Why an answer didn't go: the hub's code (or "unknown" when the hub never answered) and the words for it.
-  export type AnswerProblem = { code: string; text: string };
+  export type { AnswerBody, AnswerProblem } from "./answer-session.ts";
 </script>
 
 <script lang="ts">
@@ -25,26 +23,24 @@
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import Star from "@lucide/svelte/icons/star";
   import { cardOf } from "@morndo/domain";
-  import { MAY_HAVE_GONE, againLabel, endsDoubt } from "../catchup/answer.ts";
+  import { againLabel } from "../catchup/answer.ts";
+  import { AnswerSession } from "./answer-session.svelte.ts";
+  import type { AnswerBody, AnswerProblem } from "./answer-session.ts";
   import { ago, deliveryLine, dueLabel, REFUSALS, urgency, type DecisionItem } from "./decisions.ts";
   import { clock } from "./grouping.ts";
 
-  let { item, variant, now, verifiedFresh, briefOpen = false, onAnswer, onOpenScreen, onOpenChat, onOpen }: {
+  let { item, variant, now, verifiedFresh, briefOpen = false, session: given, onAnswer, onOpenScreen, onOpenChat, onOpen }: {
     item: DecisionItem; variant: "panel" | "inline"; now: number; verifiedFresh: boolean; briefOpen?: boolean;
+    session?: AnswerSession;
     onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>;
     onOpenScreen: (workerId: string) => void; onOpenChat?: (item: DecisionItem) => void;
     onOpen?: (item: DecisionItem) => void;
   } = $props();
 
-  let mode = $state<"idle" | "confirm" | "words">("idle");
-  let picked = $state<{ label: string; body: AnswerBody } | null>(null);
-  let words = $state("");
-  let sending = $state(false);
-  let error = $state<string | null>(null);
-  let again = $state<{ body: AnswerBody; requestId: string; code: string } | null>(null);   // may have been typed
+  const own = new AnswerSession(item);
+  const session = $derived(given ?? own);
   let wordsEl = $state<HTMLTextAreaElement | null>(null);
-  // The version he was looking at when he picked: a restate meanwhile is refused as changed (E12).
-  let seenVersion = $state(item.version);
+  $effect(() => { if (!given) own.bind(item, false); });
 
   const u = $derived(urgency(item, now));
   const open = $derived(item.status === "open");
@@ -52,14 +48,15 @@
   const card = $derived(cardOf(item));
   const asker = $derived(item.asker.kind === "manager" ? "Manager" : `#${item.asker.name}`);
   const whom = $derived(item.asker.kind === "manager" ? "the manager" : item.asker.name);
-  const recommended = $derived(item.answerBy === "tap" ? item.options[0]?.key ?? null : null);
+  const answers = $derived(variant === "panel" ? card.quickAnswers : item.options);
+  const recommended = $derived(item.answerBy === "tap" ? answers[0]?.key ?? null : null);
   // In the chat the message above is the context, so the question line shows only when it says something new.
-  const showRecommendation = $derived(!!item.recommendation && (open || variant === "panel"));
+  const showRecommendation = $derived(!!item.recommendation && open);
   const showDefault = $derived(!!item.ifNoAnswer && open);
   let root = $state<HTMLElement | null>(null);
   // Picking an option opens the confirmation inside the card: keep it in view (the chat may have it at the bottom edge).
-  $effect(() => { if (mode !== "idle") requestAnimationFrame(() => root?.querySelector(".confirm")?.scrollIntoView({ block: "nearest" })); });
-  const showTitle = $derived(variant === "panel" || !(item.context ?? "").includes(item.title.slice(0, 48)));
+  $effect(() => { if (session.mode !== "idle") requestAnimationFrame(() => root?.querySelector(".confirm")?.scrollIntoView({ block: "nearest" })); });
+  const showTitle = $derived(!(item.context ?? "").includes(item.title.slice(0, 48)));
   const byline = $derived([
     asker,
     ago(item.askedAt, now),
@@ -69,40 +66,24 @@
     item.askedAgain && open ? "Asked again" : null,
     card.hasBrief ? null : "Filed without a brief",
   ].filter((part): part is string => part !== null).join(" · "));
-  const readLabel = $derived(card.spend ? "Read and decide ›" : card.hasBrief ? "Read the brief ›" : "Details ›");
-  // Closed meanwhile (an answer that may have been typed arrived after all, say): the card says so, and nothing is left to check.
-  $effect(() => { void item.status; if (item.status !== "open") { mode = "idle"; picked = null; if (again) { again = null; error = null; } } });
-  $effect(() => { if (mode === "words") wordsEl?.focus(); });
+  const readLabel = $derived(card.hasBrief ? "Read the brief ›" : "Details ›");
+  $effect(() => { if (session.mode === "words") wordsEl?.focus(); });
 
-  function pick(label: string, body: AnswerBody) { seenVersion = item.version; picked = { label, body }; mode = "confirm"; error = null; }
-  function writeWords(prefill = "") { seenVersion = item.version; words = prefill; mode = "words"; error = null; }
-  // Back keeps an answer in doubt: the card then offers only Check again for it, never another answer (E8).
-  function back() { mode = "idle"; picked = null; if (!again) error = null; }
-  function escBack(e: KeyboardEvent) { if (e.key === "Escape") { e.preventDefault(); back(); } }
-
-  // A new answer gets a new request id; Check again sends the one that may have been typed with its own. An answer in
-  // doubt stays in doubt until Check again is taken (200) or refused by the hub after its machine said it never had it
-  // (endsDoubt); anything else (a dismissed passkey prompt, 429, 5xx, no answer) keeps it, with Check again (S7).
-  async function send(body: AnswerBody, requestId: string = crypto.randomUUID()) {
-    if (sending) return;
-    sending = true;
-    error = null;
-    const doubt = again;
-    const problem = await onAnswer(item.id, body, requestId, seenVersion);
-    sending = false;
-    if (problem) {
-      error = problem.text;
-      again = MAY_HAVE_GONE.has(problem.code) ? { body, requestId, code: problem.code } : doubt && !endsDoubt(problem.code) ? doubt : null;
-      return;
-    }
-    again = null;
-    mode = "idle"; picked = null; words = "";
+  function choose(label: string, body: AnswerBody) { session.pick(label, body); }
+  function writeWords(prefill = "") {
+    if (session.stale || session.sending || session.again || !open) return;
+    session.words = prefill;
+    session.mode = "words";
+    session.error = null;
   }
-  function sendAgain() { if (again) void send(again.body, again.requestId); }
+  function back() { session.back(); }
+  function escBack(e: KeyboardEvent) { if (e.key === "Escape") { e.preventDefault(); back(); } }
+  function send(body: AnswerBody, requestId?: string) { void session.send(onAnswer, body, requestId); }
+  function sendAgain() { if (session.again) void session.send(onAnswer, session.again.body, session.again.requestId); }
   function onWordsKey(e: KeyboardEvent) {
     // Like the message box (and Slack): Enter sends, Shift+Enter starts a new line; not while an IME is composing. While
     // an answer is in doubt, Enter is Check again: never a new answer under a new request id.
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (again) sendAgain(); else if (words.trim()) void send({ text: words }); }
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (session.again) sendAgain(); else if (session.words.trim()) void send({ text: session.words }); }
     if (e.key === "Escape") { e.preventDefault(); back(); }
   }
 </script>
@@ -115,7 +96,7 @@
       {:else}
         <h3 class="hit"><button type="button" class="headline" aria-haspopup="dialog" aria-expanded={briefOpen} id="topic-{item.id}" onclick={() => onOpen?.(item)}>{card.topic}</button></h3>
       {/if}
-      {#if card.due !== null}
+      {#if card.due !== null && (open || item.status === "answered")}
         <span class="chip" class:bad={u === "overdue"} class:warn={u === "soon"}><CalendarClock size={12} />{dueLabel(card.due, now)}</span>
       {/if}
     </div>
@@ -187,46 +168,47 @@
     <div class="actions">
       {#if item.asker.workerId}<button class="btn primary" onclick={() => item.asker.workerId && onOpenScreen(item.asker.workerId)}><SquareTerminal size={16} />Answer in {asker}'s terminal</button>{/if}
     </div>
-  {:else if mode === "confirm" && picked}
+  {:else if session.mode === "confirm" && session.picked}
     <div class="confirm" role="group" aria-label="Confirm your answer">
-      <p class="your">Your answer: <b>{picked.label}</b></p>
+      <p class="your">Your answer: <b>{session.picked.label}</b></p>
       <p class="how">{whom[0]?.toUpperCase()}{whom.slice(1)} gets it as your decision and acts on it.</p>
       <div class="actions">
         <!-- svelte-ignore a11y_autofocus -->
-        {#if again}
-          <button class="btn primary" disabled={sending} onkeydown={escBack} onclick={sendAgain}>{sending ? "Checking…" : againLabel(again.code)}</button>
+        {#if session.again}
+          <button class="btn primary" disabled={session.sending || !open} onkeydown={escBack} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
         {:else}
-          <button class="btn primary" disabled={sending} autofocus onkeydown={escBack} onclick={() => picked && send(picked.body)}>{sending ? "Sending…" : "Send answer"}</button>
+          <!-- svelte-ignore a11y_autofocus -->
+          <button class="btn primary" disabled={session.sending || !open} autofocus={!briefOpen} onkeydown={escBack} onclick={() => session.picked && send(session.picked.body)}>{session.sending ? "Sending…" : "Send answer"}</button>
         {/if}
-        <button class="btn ghost" disabled={sending} onkeydown={escBack} onclick={back}>Back</button>
+        <button class="btn ghost" disabled={session.sending} onkeydown={escBack} onclick={back}>Back</button>
         {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{/if}
       </div>
     </div>
-  {:else if mode === "words"}
+  {:else if session.mode === "words"}
     <div class="confirm" role="group" aria-label="Answer in words">
-      <textarea bind:this={wordsEl} bind:value={words} rows="2" readonly={!!again} placeholder="Your answer for {whom}…" onkeydown={onWordsKey} aria-label="Your answer for {whom}"></textarea>
+      <textarea bind:this={wordsEl} value={session.words} rows="2" readonly={!!session.again} placeholder="Your answer for {whom}…" onkeydown={onWordsKey} oninput={(e) => (session.words = e.currentTarget.value)} aria-label="Your answer for {whom}"></textarea>
       <div class="actions">
-        {#if again}
-          <button class="btn primary" disabled={sending} onclick={sendAgain}>{sending ? "Checking…" : againLabel(again.code)}</button>
+        {#if session.again}
+          <button class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
         {:else}
-          <button class="btn primary" disabled={sending || !words.trim()} onclick={() => send({ text: words })}>{sending ? "Sending…" : `Send to ${whom}`}</button>
+          <button class="btn primary" disabled={session.sending || !open || !session.words.trim()} onclick={() => send({ text: session.words })}>{session.sending ? "Sending…" : `Send to ${whom}`}</button>
         {/if}
-        <button class="btn ghost" disabled={sending} onclick={back}>Cancel</button>
+        <button class="btn ghost" disabled={session.sending} onclick={back}>Cancel</button>
         {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{:else}<span class="hint">Enter sends · Shift+Enter for a new line</span>{/if}
       </div>
     </div>
-  {:else if again}
+  {:else if session.again}
     <!-- An answer in doubt: only Check again, never another answer while it may have reached the asker (E8). -->
     <div class="actions">
-      <button class="btn primary" disabled={sending} onclick={sendAgain}>{sending ? "Checking…" : againLabel(again.code)}</button>
+      <button class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
     </div>
   {:else}
     <div class="actions">
       {#if variant === "panel" && card.spend}
         <button type="button" class="btn" disabled={!canAnswer} onclick={() => onOpen?.(item)}>Read and decide ›</button>
       {:else if item.answerBy === "tap"}
-        {#each item.options as o (o.key)}
-          <button class="btn" class:primary={o.key === recommended} disabled={!canAnswer} onclick={() => pick(o.label, { key: o.key })}
+        {#each answers as o (o.key)}
+          <button class="btn" class:primary={o.key === recommended} disabled={!canAnswer || session.stale} onclick={() => choose(o.label, { key: o.key })}
             aria-describedby={variant === "panel" ? `topic-${item.id}` : undefined}
             title={o.key === recommended ? `${o.label} (recommended)` : o.label}>
             {#if o.key === recommended}<Star size={14} aria-hidden="true" />{/if}{o.label}
@@ -235,18 +217,18 @@
         {#if canAnswer}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {:else if item.need === "time"}
-        <button class="btn primary" disabled={!canAnswer} onclick={() => pick("Done", { text: "Done" })}>Done</button>
-        <button class="btn" disabled={!canAnswer} onclick={() => writeWords()}><MessageSquareText size={14} />Reply…</button>
+        <button class="btn primary" disabled={!canAnswer || session.stale} onclick={() => choose("Done", { text: "Done" })}>Done</button>
+        <button class="btn" disabled={!canAnswer || session.stale} onclick={() => writeWords()}><MessageSquareText size={14} />Reply…</button>
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {:else}
-        <button class="btn primary" disabled={!canAnswer} onclick={() => writeWords()}><MessageSquareText size={14} />Answer…</button>
-        {#if item.ifNoAnswer}<button class="btn" disabled={!canAnswer} onclick={() => pick(`Go with the default (${item.ifNoAnswer})`, { text: `Go with the default: ${item.ifNoAnswer}` })}>Go with the default</button>{/if}
+        <button class="btn primary" disabled={!canAnswer || session.stale} onclick={() => writeWords()}><MessageSquareText size={14} />Answer…</button>
+        {#if item.ifNoAnswer}<button class="btn" disabled={!canAnswer || session.stale} onclick={() => choose(`Go with the default (${item.ifNoAnswer})`, { text: `Go with the default: ${item.ifNoAnswer}` })}>Go with the default</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {/if}
     </div>
     {#if !canAnswer && item.answerable}<p class="note">{REFUSALS[item.answerable]}</p>{/if}
   {/if}
-  {#if error}<p class="err" role="alert">{error}</p>{/if}
+  {#if session.error}<p class="err" role="alert">{session.error}</p>{/if}
   {#if variant === "panel" && onOpenChat && item.messageId}
     <button type="button" class="link chat" onclick={() => onOpenChat?.(item)}>Show in chat</button>
   {/if}
@@ -271,9 +253,7 @@
   .u-answered { --bar: var(--working); }
   .u-done { --bar: var(--idle-dot); }
   .meta { display: flex; align-items: center; gap: 6px; min-width: 0; font: 400 13px/18px var(--font); color: var(--muted); }
-  .asker { font: 900 14px/18px var(--font); color: var(--text); white-space: nowrap; }
   .kind { display: inline-flex; align-items: center; gap: 5px; font: 700 12px/18px var(--font); letter-spacing: 0.02em; text-transform: uppercase; color: var(--muted); }
-  .when { white-space: nowrap; }
   .chips { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; }
   .chip {
     display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: 10px; white-space: nowrap;
@@ -283,7 +263,6 @@
   .chip.warn { background: var(--warn-bg); color: var(--warn-fg); }
   .title { margin: 0; font: 700 15px/22px var(--font); overflow-wrap: anywhere; }
   .panel .title { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
-  .project { justify-self: start; margin-top: -4px; font: 400 12px/16px var(--font); color: var(--muted); }
   .facts { margin: 0; display: grid; gap: 4px; padding: 8px 10px; border-radius: 6px; background: var(--well); }
   .facts div { display: grid; grid-template-columns: 158px minmax(0, 1fr); gap: 8px; align-items: baseline; }
   .facts dt { display: inline-flex; align-items: center; gap: 6px; font: 700 12px/18px var(--font); color: var(--muted); white-space: nowrap; }

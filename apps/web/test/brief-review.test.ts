@@ -94,7 +94,7 @@ describe("desktop brief review", () => {
     next.briefVersion = 2;
     next.brief.options[1]!.label = "Buy a hosted add-on";
     next.brief.ask.text = "Approve the hosted add-on instead.";
-    await tab.evaluate(items => (globalThis as { __setItems: (n: unknown) => void }).__setItems(items), [next, ITEMS[1], ITEMS[2]]);
+    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [next, ITEMS[1], ITEMS[2]]);
     await dialog.getByText("restated this brief").waitFor();
     expect(await dialog.getByText("$2,400").count()).toBeGreaterThan(0);
     expect(await dialog.getByText("Approve the hosted add-on instead.").count()).toBe(0);
@@ -138,7 +138,7 @@ describe("desktop brief review", () => {
     await dialog.getByRole("button", { name: /B · Extend the triage script/ }).click();
     const next = structuredClone(ITEMS[0]) as { status: string };
     next.status = "answered";
-    await tab.evaluate(items => (globalThis as { __setItems: (n: unknown) => void }).__setItems(items), [next, ITEMS[1], ITEMS[2]]);
+    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [next, ITEMS[1], ITEMS[2]]);
     await dialog.getByText("no longer open").waitFor();
     expect(await dialog.getByRole("button", { name: "Send answer" }).count()).toBe(0);
   }, 60_000);
