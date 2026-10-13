@@ -138,12 +138,12 @@
   // The passkey retry: the answer the refusal carries. A brief restated since then (its version moved on) is not sent.
   async function verifyAgain() {
     const r = session.refusal;
-    if (top?.kind !== "decision" || !r?.retry || r.code !== "step_up" || r.key !== top.key) return;
-    const live = feed.decisions.find(d => d.id === r.retry.id)?.version ?? "";
-    if (live !== r.retry.seen) return;
+    const again = r?.retry;
+    if (top?.kind !== "decision" || !r || !again || r.code !== "step_up" || r.key !== top.key) return;
+    const live = feed.decisions.find(d => d.id === again.id)?.version ?? "";
+    if (live !== again.seen) return;
     if (!(await verify())) return;
-    const a = r.retry;
-    await session.retry(r.key, a.id, a.body, a.label, a.seen);
+    await session.retry(r.key, again.id, again.body, again.label, again.seen);
   }
   // Queued in the outbox, or false with a note (the text stays in the box).
   async function reply(text: string, seen: string): Promise<boolean> {

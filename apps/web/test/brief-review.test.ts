@@ -138,7 +138,7 @@ describe("desktop brief review", () => {
     await dialog.getByRole("button", { name: /B · Extend the triage script/ }).click();
     await dialog.getByRole("button", { name: "Send answer" }).click();
     await dialog.locator("p.stand").getByText("Sent. The manager gets it as your decision and acts on it.").waitFor();
-    const sent = structuredClone(ITEMS[0]) as { status: string; decision: { choice: { kind: string; key: string; label: string }; at: number; via?: string; endpointId: null; sessionId: null } };
+    const sent = structuredClone(ITEMS[0]) as unknown as { status: string; decision: { choice: { kind: string; key: string; label: string }; at: number; via?: string; endpointId: null; sessionId: null } };
     sent.status = "answered";
     sent.decision = { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW, via: "elsewhere", endpointId: null, sessionId: null };
     await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [sent, ITEMS[1], ITEMS[2]]);

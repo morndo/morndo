@@ -10,7 +10,7 @@
 
   let item = $state(initial);
   let now = $state(start);
-  let clock = $state(start);
+  let clock = $state(Date.now());
   let answering = $state<{ label: string; sending: boolean; commitAt: number } | null>(null);
   let refusal = $state<{ key: string; code: string; text: string } | null>(null);
   let runAnswered = $state(false);
