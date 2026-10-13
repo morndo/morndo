@@ -1,0 +1,82 @@
+# The optional transcription plugin (ADR-0021, design §13). Separate from ci.yml: a default install does not
+# build whisper.cpp or download a model. The base model and the pinned tag are cached.
+# Actions are pinned by full commit SHA, the same checkout and setup-node as ci.yml (2026-10-02), and
+# actions/cache v6.1.0 (2026-06-26), https://github.com/actions/cache/commit/55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+name: Transcription plugin
+
+on:
+  pull_request:
+    paths:
+      - "plugins/transcribe-*/**"
+      - "apps/hub/src/**/transcri*"
+      - "packages/protocol/src/transcription.ts"
+      - "packages/protocol/test/transcriber-contract.ts"
+      - ".github/workflows/transcription-plugin.yml"
+  push:
+    branches: [main]
+    paths:
+      - "plugins/transcribe-*/**"
+      - "apps/hub/src/**/transcri*"
+      - "packages/protocol/src/transcription.ts"
+      - "packages/protocol/test/transcriber-contract.ts"
+      - ".github/workflows/transcription-plugin.yml"
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: transcription-plugin-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plugin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+
+      - id: deps
+        run: npm ci
+
+      - name: ffmpeg, cmake and a C++ compiler
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg cmake g++ make
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/morndo/transcribe
+          key: transcribe-${{ hashFiles('plugins/transcribe-whisper-cpp/plugin.json') }}
+
+      - name: Install the base model into a temp home
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        env:
+          MORNDO_HOME: ${{ runner.temp }}/morndo-home
+        run: npm run plugin:transcribe -- --model base
+
+      - name: Contract suite and the no-network run
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        env:
+          MORNDO_HOME: ${{ runner.temp }}/morndo-home
+          MORNDO_TRANSCRIBER: ${{ runner.temp }}/morndo-home/plugins/transcribe/bin/morndo-transcribe
+        run: npx vitest run --project units plugins/transcribe-whisper-cpp
+
+      - name: End to end, once that script is in the tree
+        if: ${{ !cancelled() && steps.deps.outcome == 'success' }}
+        env:
+          MORNDO_HOME: ${{ runner.temp }}/morndo-home
+          MORNDO_TRANSCRIBER: ${{ runner.temp }}/morndo-home/plugins/transcribe/bin/morndo-transcribe
+        run: |
+          if [ -f e2e/transcription.e2e.ts ]; then
+            node e2e/transcription.e2e.ts
+          else
+            echo "e2e/transcription.e2e.ts arrives with the web step"
+          fi

@@ -1,6 +1,6 @@
 # Transcription: voice messages and audio files become text on the user's own machine, through an optional plugin (design v1, 2026-10-11)
 
-**Phase: building.** This document and [ADR-0021](../../adr/0021-optional-transcription-plugin.md). The domain (step 1) and the protocol, fixture and contract suite (step 2) are in the tree. The hub and the plugin package are not.
+**Phase: building.** This document and [ADR-0021](../../adr/0021-optional-transcription-plugin.md). The domain (step 1), the protocol, fixture and contract suite (step 2), and the plugin package (step 4) are in the tree. The hub is not.
 
 The principal speaks into the phone, and a lane receives text. An audio file an agent sends can be read as well as played. All of it happens on a machine the user runs. None of it is installed unless the user asks for it.
 
