@@ -706,6 +706,13 @@ export class EscalationService {
       if (!c.ok) return { ok: false, problem: c.error, item: this.#view(id, a.endpoint.id) };
       const e = c.value;
       if (seen !== undefined && seen !== this.#version(e)) return { ok: false, problem: "changed", item: this.#view(id, a.endpoint.id) };
+      const k = answerKey(e.id, e, choice);
+      // ... or of the same answer from another request, or another answer to this ask (E8), before anything is queued
+      // or typed (review #29.2): an earlier answer this hub may have typed must block a second one, or the manager can
+      // be given both. Once per answer, for the inbox and the typed path alike, which the inbox's falls back to when
+      // it can't be written (round 5.6 of the PR #55 review).
+      const inDoubt = await this.#settleEarlier(a, id, choice, e, k, key, seen);
+      if (inDoubt) return inDoubt;
       const decided = decidedChoice(choice, e.options);
       const option = decided.kind === "option" ? decided : null;
       const line = option ? tapLine(e.id, option) : wordsLine(e.id, choice.kind === "words" ? choice.text : "");
@@ -714,12 +721,7 @@ export class EscalationService {
       // The inbox switched off (`manager-inbox disable`) or not configured: typed directly, as before.
       // A manager that isn't running right now is fine: the inbox types it once it is back.
       let queued: { key: string; duplicate: boolean } | null = null;
-      const k = answerKey(e.id, e, choice);
       if (e.asker.kind === "manager" && this.#inbox) {
-        // The same in-doubt checks as the typed path, before anything is queued (E8, review #29.2): an earlier answer
-        // this hub may have typed must block a second one, or the manager can be given both.
-        const inDoubt = await this.#settleEarlier(a, id, choice, e, k, key, seen);
-        if (inDoubt) return inDoubt;
         try { queued = this.#inbox.enqueue({ id: `answer:${key}`, kind: option ? "tap" : "answer", text: line, meta: { escalation: e.id } }); }
         catch (err) { log.error(`answer to ${e.id}: the manager's inbox can't be written; typing directly`, err); }
       }
@@ -762,10 +764,6 @@ export class EscalationService {
         const conflict = e.asker.kind === "manager" && this.#watch.workers().some(w => w.name === this.#managerName && w.conflict);
         return { ok: false, problem: conflict ? "lane_conflict" : "no_pane", item: this.#view(id, a.endpoint.id) };
       }
-      // ... or of the same answer from another request, or another answer to this ask (E8). The inbox path ran these
-      // already (review #29.2): what they settled is gone, so here they find nothing.
-      const inDoubt = await this.#settleEarlier(a, id, choice, e, k, key, seen);
-      if (inDoubt) return inDoubt;
       // Written before the first await, as a send's is: a hub that stops while this is typed leaves it "started".
       if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id, label: option?.label ?? null })) return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
       let outcome: SendOutcome;
