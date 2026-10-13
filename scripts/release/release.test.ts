@@ -654,6 +654,29 @@ describe("install.sh", () => {
     expect(readFileSync(kept.marker, "utf8")).toBe("install --role node --channel stable\n");
   });
 
+  it("installs an in-tree link when temp is reached through a symlink and realpath rejects -m", () => {
+    const script = (marker: string) => Buffer.from(`#!/bin/sh\nprintf '%s\\n' "$*" > "${marker}"\n`);
+    const kept = fixture({
+      archive: marker => packTree([
+        { path: "bin/morndo", bytes: script(marker), mode: "0555" },
+        { path: "node/bin/npm", mode: "0555", link: "../lib/npm-cli.js" },
+      ], 1_700_000_000),
+    });
+    const real = join(kept.dir, "real-tmp");
+    mkdirSync(real);
+    const alias = join(kept.dir, "alias-tmp");
+    symlinkSync(real, alias);
+    const bin = join(kept.dir, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "realpath"), "#!/bin/sh\necho 'realpath: illegal option' >&2\nexit 1\n", { mode: 0o755 });
+    const run = spawnSync("sh", [kept.scriptPath, "--role", "node", "--signers", kept.signers], {
+      encoding: "utf8",
+      env: { ...process.env, MORNDO_RELEASE_BASE: `file://${kept.base}`, TMPDIR: alias, PATH: `${bin}:${process.env.PATH ?? ""}` },
+    });
+    expect(run.status, run.stderr).toBe(0);
+    expect(readFileSync(kept.marker, "utf8")).toBe("install --role node --channel stable\n");
+  });
+
   it("refuses an archive entry that climbs with .. or is absolute", () => {
     for (const name of ["./../x", "./a/../../x", "..", "./.."]) {
       const bad = fixture({ archive: craftArchive(name) });

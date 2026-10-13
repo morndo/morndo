@@ -103,16 +103,51 @@ if ! tar -xzf "$work/archive.tar.gz" -C "$work/extract"; then
   echo "refusing archive path" >&2
   exit 65
 fi
-base=$(cd "$work/extract" && pwd)
+# pwd -P is the physical directory. On macOS /var is a symlink to /private/var,
+# and a logical pwd would not match a resolved link target.
+extract_root=$(cd -P "$work/extract" && pwd -P)
 # find -P does not follow symlinks. Each name is one argument, and set -f is on,
-# so a "*" segment is not expanded.
-find -P "$work/extract" -exec sh -c '
+# so a "*" segment is not expanded. A link target is resolved with cd -P and pwd -P
+# (POSIX), not realpath -m, which macOS and busybox reject.
+find -P "$extract_root" -exec sh -c '
   set -efu
-  base=$1
+  root=$1
   shift
+  resolve() {
+    dir=$1
+    target=$2
+    case $target in
+      /*) cursor= ;;
+      *) cursor=$(cd -P -- "$dir" && pwd -P) || return 1 ;;
+    esac
+    saved=$IFS
+    IFS=/
+    for part in $target; do
+      if [ -z "$part" ] || [ "$part" = "." ]; then
+        continue
+      fi
+      if [ "$part" = ".." ]; then
+        cursor=${cursor%/*}
+        [ -n "$cursor" ] || cursor=/
+        continue
+      fi
+      if [ -z "$cursor" ] || [ "$cursor" = / ]; then
+        next=/$part
+      else
+        next=$cursor/$part
+      fi
+      if [ -d "$next" ]; then
+        cursor=$(cd -P -- "$next" && pwd -P) || return 1
+      else
+        cursor=$next
+      fi
+    done
+    IFS=$saved
+    printf "%s\n" "$cursor"
+  }
   for path do
     case "$path" in
-      "$base"|"$base"/*) ;;
+      "$root"|"$root"/*) ;;
       *) echo "refusing archive path $path" >&2; exit 65 ;;
     esac
     case "$path" in
@@ -126,17 +161,17 @@ find -P "$work/extract" -exec sh -c '
 "*) echo "refusing archive path $path" >&2; exit 65 ;;
       esac
       dir=$(dirname "$path")
-      resolved=$(cd "$dir" && realpath -m -- "$target") || {
+      resolved=$(resolve "$dir" "$target") || {
         echo "refusing archive path $path -> $target" >&2
         exit 65
       }
       case "$resolved" in
-        "$base"|"$base"/*) ;;
+        "$root"|"$root"/*) ;;
         *) echo "refusing archive path $path -> $target" >&2; exit 65 ;;
       esac
     fi
   done
-' sh "$base" {} +
+' sh "$extract_root" {} +
 mv "$work/extract" "$work/tree"
 chmod 0555 "$work/tree/bin/morndo"
 "$work/tree/bin/morndo" install --role "$role" --channel "$channel"
