@@ -112,8 +112,20 @@ const plain = item("ny-400", {
   ],
   recommendation: "Tuesday",
 });
-// A brief-backed card the hub would refuse an answer for (its list can't be read).
-const refused = item("d-3", { answerable: "cant_check" });
+// A brief-backed card the hub would refuse an answer for (its list can't be read). A free brief, so it has quick
+// answers to disable (a spend brief is read first).
+const refused = item("d-3", {
+  answerable: "cant_check",
+  brief: freeBrief(),
+  title: "Approve option A: ship the release candidate today",
+  shortTitle: "Release timing",
+  summary: "Approve option A: ship the release candidate today",
+  options: [
+    { key: "a", label: "Ship today", detail: null },
+    { key: "b", label: "Wait for Monday", detail: null },
+  ],
+  recommendation: "Ship today",
+});
 // Answered here, delivered: the footer says where the answer stands.
 const answeredHere = item("d-4", {
   status: "answered",
@@ -131,8 +143,8 @@ const wordsOnly = item("ny-401", {
   brief: null, briefVersion: 0, options: [], answerBy: "words", recommendation: null,
   title: "Name the release", shortTitle: "Release name", summary: "Name the release",
 });
-// A brief that keeps the asker's own message and the list's link.
-const withAsker = item("d-7", { context: "The manager's button said: **ship it**", contextKind: "markdown", link: "https://example.com/ledger-row" });
+// A brief that keeps the asker's own message and the list's link (a new version, so the session takes it as its own).
+const withAsker = item("d-7", { version: "v2", context: "The manager's button said: **ship it**", contextKind: "markdown", link: "https://example.com/ledger-row" });
 
 const noop = "() => {}";
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body>
@@ -270,7 +282,7 @@ describe("the sheet and cards report what happened to an answer", () => {
     tab = await context.newPage();
     await tab.goto(web.url);
     await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
-    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    const dialog = tab.getByRole("dialog");                       // one sheet: the item swaps under it
     await dialog.waitFor();
     await setRefusal(tab, { key: "d:d-1", code: "step_up", text: "Not sent: confirm with your passkey, then it goes." });
     expect(await dialog.getByRole("alert").getByText("Not sent: confirm with your passkey, then it goes.").count()).toBe(1);
@@ -291,7 +303,7 @@ describe("the sheet and cards report what happened to an answer", () => {
     tab = await context.newPage();
     await tab.goto(web.url);
     await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
-    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    const dialog = tab.getByRole("dialog");                       // one sheet: the item swaps under it
     await dialog.waitFor();
     await tab.evaluate(() => (globalThis as unknown as { __setRunAnswered: (v: boolean) => void }).__setRunAnswered(true));
     expect(await dialog.getByText("Sent. The manager gets it as your decision and acts on it.").count()).toBe(1);
@@ -302,7 +314,7 @@ describe("the sheet and cards report what happened to an answer", () => {
     expect(await dialog.getByText("Answered on another device: “Extend the triage script”.").count()).toBe(1);
     await setItem(tab, settled);
     expect(await dialog.getByText("This decision is no longer open.").count()).toBe(1);
-    expect(await dialog.getByRole("button", { name: "Back" }).count()).toBe(1);
+    expect(await dialog.locator("footer").getByRole("button", { name: "Back" }).count()).toBe(1);
     await context.close();
   }, 60_000);
 
@@ -311,7 +323,7 @@ describe("the sheet and cards report what happened to an answer", () => {
     tab = await context.newPage();
     await tab.goto(web.url);
     await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
-    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    const dialog = tab.getByRole("dialog");                       // one sheet: the item swaps under it
     await dialog.waitFor();
     await setItem(tab, refused);
     expect(await dialog.getByText("The manager's list can't be read right now, so answers are paused. Try again in a moment.").count()).toBe(1);
@@ -325,7 +337,7 @@ describe("the sheet and cards report what happened to an answer", () => {
     tab = await context.newPage();
     await tab.goto(web.url);
     await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
-    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    const dialog = tab.getByRole("dialog");                       // one sheet: the item swaps under it
     await dialog.waitFor();
     await setItem(tab, wordsOnly);
     const open = dialog.locator("footer").getByRole("button", { name: "Answer in my own words" });
@@ -340,7 +352,7 @@ describe("the sheet and cards report what happened to an answer", () => {
     tab = await context.newPage();
     await tab.goto(web.url);
     await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
-    const dialog = tab.getByRole("dialog", { name: "Approve option B: extend the in-house triage script" });
+    const dialog = tab.getByRole("dialog");                       // one sheet: the item swaps under it
     await dialog.waitFor();
     await setItem(tab, withAsker);
     await dialog.getByRole("heading", { name: "From the asker" }).waitFor({ timeout: 3_000 });
@@ -373,7 +385,7 @@ describe("the sheet and cards report what happened to an answer", () => {
     expect(await spendCard.getByText("≈4 min").count()).toBe(1);
     const refusedCard = tab.locator("#refused");
     expect(await refusedCard.getByText("The manager's list can't be read right now, so answers are paused. Try again in a moment.").count()).toBe(1);
-    expect(await refusedCard.getByRole("button", { name: "Extend the triage script" }).isDisabled()).toBe(true);
+    expect(await refusedCard.getByRole("button", { name: "Ship today" }).isDisabled()).toBe(true);
     await context.close();
   }, 60_000);
 });

@@ -42,7 +42,7 @@
   // its card was on top) gets Done; its Later is catch-up's own Later under the card (code review #11).
   const drawn = $derived(acts.filter(a => a.kind !== "later" && a.kind !== "decide"));
   // The meta line under the title, without what the kicker already says (decision, due).
-  const meta = $derived((b?.meta ?? []).filter(m => m !== "Decision" && !m.startsWith("due ") && !m.startsWith("overdue ")));
+  const meta = $derived((b?.meta ?? []).filter(m => m !== "Decision" && !m.startsWith("due ") && !m.startsWith("overdue ") && !/^≈\d+ min$/.test(m)));
   // With options, the recommended one is marked on its button; the reason for it waits behind More, so the options and
   // his own words fit on the card (and the kicker already says when it is due).
   const marked = $derived(acts.some(a => a.kind === "option" && a.recommended));
@@ -142,6 +142,7 @@
         {/each}
         <button class="pbtn read" class:primary={compact.quickAnswers.length === 0} data-open-brief={item?.id} aria-haspopup="dialog" onclick={() => onOpenBrief?.()}>Read the brief</button>
       </div>
+      {#if item.answerable}<p class="note">{REFUSALS[item.answerable] ?? item.answerable}</p>{/if}
     {:else if writing}
       <label class="sr" for="words">Your answer for {askerName}</label>
       <textarea id="words" bind:value={words} rows="3" placeholder="Your answer for {askerName}…"></textarea>

@@ -10,7 +10,7 @@
   import { renderBriefInline, renderBriefMarkdown, renderMarkdown } from "../markdown.ts";
   import { AnswerSession } from "./answer-session.svelte.ts";
   import type { AnswerBody, AnswerProblem, AskOutcome } from "./answer-session.ts";
-  import { ago, deliveryLine, dueLine, REFUSALS, type DecisionItem } from "./decisions.ts";
+  import { ago, dueLine, REFUSALS, standingLine, type DecisionItem } from "./decisions.ts";
 
   let { item, now, verifiedFresh, session: given, onAnswer, onOpenScreen, onAskBrief, onClose }: {
     item: DecisionItem; now: number; verifiedFresh: boolean; session?: AnswerSession;
@@ -36,15 +36,7 @@
   const terminal = $derived(item.asker.kind === "manager" ? "the manager" : `#${item.asker.name}`);
   const headline = $derived(card.headline ?? view.title);
   const recommendKey = $derived(brief?.recommend ?? (view.answerBy === "tap" ? view.options[0]?.key ?? null : null));
-  const standing = $derived.by(() => {
-    const d = item.decision;
-    if (!d) return "Sent. The manager gets it as your decision and acts on it.";
-    const choice = d.choice.kind === "option" ? d.choice.label : "in words";
-    const dl = deliveryLine(item);
-    if (dl?.state === "queued") return `Queued${dl.why ? `, ${dl.why}` : ""}.`;
-    if (dl?.state === "delivered") return `Delivered. You chose ${choice}.`;
-    return `Sent. You chose ${choice}. ${whom} has it.`;
-  });
+  const standing = $derived(standingLine(item, whom));
 
   const takeFocus = (node: HTMLElement) => node.focus();
 

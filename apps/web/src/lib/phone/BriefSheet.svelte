@@ -5,19 +5,27 @@
   import { onMount } from "svelte";
   import { cardOf } from "@morndo/domain";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import ExternalLink from "@lucide/svelte/icons/external-link";
+  import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import Star from "@lucide/svelte/icons/star";
   import { renderBriefInline, renderBriefMarkdown, renderMarkdown } from "../markdown.ts";
+  import { MAY_HAVE_GONE, againLabel } from "../catchup/answer.ts";
   import type { AnswerSession } from "../desktop/answer-session.svelte.ts";
   import type { AnswerBody, AskOutcome } from "../desktop/answer-session.ts";
-  import { dueLine, type DecisionItem } from "../desktop/decisions.ts";
+  import { dueLine, REFUSALS, standingLine, type DecisionItem } from "../desktop/decisions.ts";
+  import { httpLink } from "./brief.ts";
   import { followKeyboard } from "./chat/keyboard.ts";
 
-  let { item, now, session, answering, note, onPick, onUndo, onAskBrief }: {
+  let { item, now, session, answering, refusal, runAnswered, note, onPick, onUndo, onVerifyAgain, onTryAgain, onAskBrief }: {
     item: DecisionItem; now: number; session: AnswerSession;
     answering: { label: string; sending: boolean; commitAt: number } | null;
+    refusal: { code: string; text: string } | null;
+    runAnswered: boolean;
     note: string | null;
     onPick: (body: AnswerBody, label: string) => Promise<boolean>;
     onUndo: () => void;
+    onVerifyAgain: () => void;
+    onTryAgain: () => void;
     onAskBrief: (item: DecisionItem) => Promise<AskOutcome>;
   } = $props();
 
@@ -26,7 +34,6 @@
   let bodyEl = $state<HTMLElement | null>(null);
   let writing = $state(false);
   let words = $state("");
-  let tick = $state(Date.now());
 
   const view = $derived(session.shown);
   const card = $derived(cardOf(view));
@@ -34,13 +41,17 @@
   const open = $derived(item.status === "open");
   const primary = $derived(brief ? brief.options.find(o => o.key === brief.recommend) ?? brief.options[0] ?? null : view.options[0] ?? null);
   const headline = $derived(card.headline ?? view.title);
-  const left = $derived(answering ? Math.max(0, Math.ceil((answering.commitAt - tick) / 1000)) : 0);
-
-  $effect(() => {
-    if (!answering || answering.sending) return;
-    const t = setInterval(() => (tick = Date.now()), 250);
-    return () => clearInterval(t);
+  const left = $derived(answering ? Math.max(0, Math.ceil((answering.commitAt - now) / 1000)) : 0);
+  const briefLink = $derived(httpLink(view.link));
+  const asker = $derived(item.asker.kind === "manager" ? "the manager" : item.asker.name);
+  const whom = $derived(asker[0] ? asker[0].toUpperCase() + asker.slice(1) : asker);
+  // Where an answer that went through stands; the same words the catch-up card and the desktop modal use.
+  const standing = $derived.by(() => {
+    const d = item.decision;
+    if (d?.via === "elsewhere") return `Answered on another device: ${d.choice.kind === "option" ? `“${d.choice.label}”` : "in words"}.`;
+    return standingLine(item, whom);
   });
+
   $effect(() => { if (answering) writing = false; });
 
   onMount(() => {
@@ -179,6 +190,14 @@
           </ul>
         </section>
       {/if}
+      {#if view.context || briefLink}
+        <section>
+          <h3>From the asker</h3>
+          {#if view.context && view.contextKind === "markdown"}<div class="md">{@html renderMarkdown(view.context)}</div>{/if}
+          {#if view.context && view.contextKind === "screen"}<pre class="screen">{view.context}</pre>{/if}
+          {#if briefLink}<a class="out" href={briefLink} target="_blank" rel="noopener noreferrer"><ExternalLink size={16} />Open the link</a>{/if}
+        </section>
+      {/if}
     {:else}
       {#if view.summary && view.summary !== headline}<p>{view.summary}</p>{/if}
       {#if view.recommendation}<p class="pair"><b>Recommended</b> {@html renderBriefInline(view.recommendation)}</p>{/if}
@@ -192,22 +211,22 @@
       <h3>Decision</h3>
       {#if brief}
         {#each brief.options as o (o.key)}
-          <button type="button" class="act" class:primary={o.key === brief.recommend} disabled={!open || !!answering || session.stale} onclick={() => void choose(o.label, { key: o.key })}>
+          <button type="button" class="act" class:primary={o.key === brief.recommend} disabled={!open || !!answering || session.stale || item.answerable !== null} onclick={() => void choose(o.label, { key: o.key })}>
             {#if o.key === brief.recommend}<Star size={16} />{/if}{o.key.toUpperCase()} · {@html renderBriefInline(o.label)}
           </button>
         {/each}
       {:else}
         {#each view.options as o (o.key)}
-          <button type="button" class="act" class:primary={o.key === primary?.key} disabled={!open || !!answering || session.stale} onclick={() => void choose(o.label, { key: o.key })}>{o.label}</button>
+          <button type="button" class="act" class:primary={o.key === primary?.key} disabled={!open || !!answering || session.stale || item.answerable !== null} onclick={() => void choose(o.label, { key: o.key })}>{o.label}</button>
         {/each}
       {/if}
       {#if writing}
         <label class="sr" for="brief-words">Your answer</label>
         <textarea id="brief-words" bind:value={words} rows="3" placeholder="Your answer…"></textarea>
-        <button type="button" class="act primary" disabled={!words.trim() || !open || !!answering} onclick={() => void choose("your own words", { text: words.trim() })}>Send</button>
+        <button type="button" class="act primary" disabled={!words.trim() || !open || !!answering || item.answerable !== null} onclick={() => void choose("your own words", { text: words.trim() })}>Send</button>
         <button type="button" class="act" onclick={() => (writing = false)}>Cancel</button>
       {:else}
-        <button type="button" class="act" disabled={!open || !!answering || session.stale} onclick={() => (writing = true)}>Answer in my own words</button>
+        <button type="button" class="act" disabled={!open || !!answering || session.stale || item.answerable !== null} onclick={() => (writing = true)}>Answer in my own words</button>
       {/if}
     </section>
   </div>
@@ -219,13 +238,27 @@
       {#if !answering.sending}<button type="button" class="act" onclick={onUndo}>Undo</button>{/if}
     {:else if session.stale}
       <button type="button" class="act" onclick={goBack}>Back</button>
+    {:else if runAnswered || item.status === "answered"}
+      <p class="stand" role="status">{standing}</p>
+      <button type="button" class="act" onclick={goBack}>Back</button>
+    {:else if !open}
+      <p class="stand" role="status">This decision is no longer open.</p>
+      <button type="button" class="act" onclick={goBack}>Back</button>
+    {:else if item.answerable !== null}
+      <p class="note">{REFUSALS[item.answerable] ?? item.answerable}</p>
+      <button type="button" class="act" onclick={goBack}>Back</button>
     {:else if primary}
       <button type="button" class="act primary" disabled={!open || item.answerable !== null} onclick={() => void choose(primary.label, { key: primary.key })}>
         {#if brief && primary.key === brief.recommend}<Star size={16} />{/if}{primary.label}
       </button>
       <button type="button" class="act" onclick={showOthers}>Other answers</button>
     {:else}
-      <button type="button" class="act primary" disabled={!open} onclick={showOthers}>Answer in my own words</button>
+      <button type="button" class="act primary" disabled={!open} onclick={() => { writing = true; showOthers(); }}>Answer in my own words</button>
+    {/if}
+    {#if refusal}
+      <p class="err" role="alert">{refusal.text}</p>
+      {#if refusal.code === "step_up"}<button type="button" class="act" onclick={onVerifyAgain}><ShieldAlert size={16} />Confirm with passkey and send</button>
+      {:else if MAY_HAVE_GONE.has(refusal.code)}<button type="button" class="act" onclick={onTryAgain}>{againLabel(refusal.code)}</button>{/if}
     {/if}
     {#if note}<p class="err" role="alert">{note}</p>{/if}
   </footer>
@@ -250,6 +283,9 @@
   .kicker { margin: 0; font: 700 11px/16px var(--body, var(--font, sans-serif)); letter-spacing: 0.09em; text-transform: uppercase; color: var(--muted); }
   .meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 4px 0 0; font: 400 13px/18px var(--body, var(--font, sans-serif)); color: var(--muted); }
   h2 { margin: 8px 0 0; font: 600 25px/29px var(--display, var(--font, sans-serif)); letter-spacing: -0.015em; }
+  /* The headline takes focus when the sheet opens; it never shows more than the app's own focus ring. */
+  h2:focus { outline: none; }
+  h2:focus-visible { outline: var(--morndo-focus-ring); outline-offset: var(--morndo-focus-offset); }
   .spend { margin: 8px 0 0; font: 700 12px/16px var(--body, var(--font, sans-serif)); }
   .plain, .restated { margin: 8px 0 0; font: 400 14px/20px var(--body, var(--font, sans-serif)); }
   .restated { padding: 8px 10px; border-radius: 10px; background: var(--fill); }
@@ -263,6 +299,7 @@
   .md :global(p) { margin: 0 0 6px; }
   .md :global(ul), .md :global(ol) { margin: 2px 0 6px; padding-left: 22px; }
   a, a:visited, .md :global(a) { color: var(--fg); }
+  .out { display: inline-flex; align-items: center; gap: 6px; font: 700 14px/20px var(--body, var(--font, sans-serif)); }
   table.compare { width: 100%; border-collapse: collapse; font: 400 13px/18px var(--body, var(--font, sans-serif)); }
   .sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
   th, td { padding: 6px 8px; border: 1px solid var(--line, var(--edge)); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
@@ -273,7 +310,7 @@
     table.compare { display: none; }
     .factors { display: block; }
     .factors ul { list-style: none; margin: 0 0 12px; padding: 0; }
-    .factors li { padding: 4px 0; font: 400 15px/21px var(--body, var(--font, sans-serif)); overflow-wrap: anywhere; }
+    .factors li { padding: 4px 8px; font: 400 15px/21px var(--body, var(--font, sans-serif)); overflow-wrap: anywhere; }
   }
   ul { margin: 4px 0 8px; padding-left: 22px; }
   #brief-choices { display: grid; gap: 8px; }

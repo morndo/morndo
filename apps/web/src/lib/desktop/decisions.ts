@@ -80,6 +80,17 @@ export function deliveryLine(d: DecisionItem): DeliveryLine | null {
   return { state: "queued", why: reason ? INBOX_WAITS[reason] ?? null : null };
 }
 
+// Where a sent answer stands, in one line: the phone's sheet and the desktop modal say it the same way.
+export function standingLine(item: DecisionItem, whom: string): string {
+  const d = item.decision;
+  if (!d) return "Sent. The manager gets it as your decision and acts on it.";
+  const choice = d.choice.kind === "option" ? d.choice.label : "in words";
+  const dl = deliveryLine(item);
+  if (dl?.state === "queued") return `Queued${dl.why ? `, ${dl.why}` : ""}.`;
+  if (dl?.state === "delivered") return `Delivered. You chose ${choice}.`;
+  return `Sent. You chose ${choice}. ${whom} has it.`;
+}
+
 export const REFUSALS: Record<string, string> = {
   unknown: "This decision isn't on the hub's list anymore.",
   // The hub's 404 "unknown" for an answer, as the app names it (catchup/answer.ts hubRefusal): never the app's own
