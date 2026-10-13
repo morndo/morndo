@@ -109,7 +109,7 @@ jobs:
             runner: macos-15
     env:
       BUNDLED_NODE: "24.21.0"
-      NODE_RELEASE_KEYS_COMMIT: "481637f813e912c4aa3622d7964ab426c97b8e8d"
+      NODE_RELEASE_KEYS_COMMIT: "481637f813e912c4aa3622d7964ab426c97b8e8d" #gitleaks:allow
       VERSION: ${{ needs.release-please.outputs.version }}
       RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
       PLATFORM: ${{ matrix.platform }}
