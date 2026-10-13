@@ -2,7 +2,7 @@
 // child supervisor. These rows never leave a morndo-job unit on the live user manager.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
@@ -664,6 +664,9 @@ exit 0
 
 const FILL = "require('node:fs').writeSync(1, 'KEEP'); const b = Buffer.alloc(64, 97); while (true) require('node:fs').writeSync(1, b);";
 
+// Keeps writing, and stops itself at 256 KiB, under the 1 MiB per-job cap the pool test sets. The pool budget is 32.
+const POOL_WRITER = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); let n = 0; setInterval(() => { if (n >= 262144) return; require('node:fs').writeSync(1, b); n += b.length; }, 20);";
+
 describe.skipIf(!bus.ok)("systemd log cap", () => {
   it("stops a job once its log reaches the per-job cap and keeps the bytes already written", async () => {
     const { store, start, sup, dir } = await systemdRig({ logBytes: 8 });
@@ -677,12 +680,19 @@ describe.skipIf(!bus.ok)("systemd log cap", () => {
   it("marks a job truncated when the pool is full and leaves it running under its own cap", async () => {
     const { store, notices, start, sup, home, dir } = await systemdRig({ logBytes: 1_000_000, budget: 32 });
     const marker = join(home, "pid");
-    const id = await start([process.execPath, "-e", "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); while (true) require('node:fs').writeSync(1, b);", marker]);
+    const id = await start([process.execPath, "-e", POOL_WRITER, marker]);
     expect(await until(() => existsSync(marker))).toBe(true);
     const pid = Number(readFileSync(marker, "utf8"));
+    const logPath = join(dir, `${id}.log`);
+    let held = 0;
     expect(await until(async () => {
       await sup.sweep();
-      return existsSync(join(dir, `${id}.log`)) && readFileSync(join(dir, `${id}.log`)).length >= 32;
+      const job = store.get(id);
+      if (!existsSync(logPath) || job?.state !== "running" || job.outcome !== null) return false;
+      const size = statSync(logPath).size;
+      if (size < 32 || size >= 1_000_000) return false;
+      if (held === 0) { held = size; return false; }
+      return size > held;
     }, 8000)).toBe(true);
     expect(store.get(id)).toMatchObject({ state: "running", outcome: null });
     expect(existsSync(join(dir, `${id}.cap`))).toBe(false);

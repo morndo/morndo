@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { Card } from "@morndo/domain";
 import {
-  LATE_ANSWER_MS, UNDO_MS, answerFailed, answerNow, answered, bringToTop, counts, moveOn, current, dueAnswer, dueMarks, end, ended, markAllRead, markRead, newRun, parseRun,
+  LATE_ANSWER_MS, UNDO_MS, answerFailed, answerNow, answered, bringToTop, counts, moveOn, current, dueAnswer, dueMarks, end, ended, inWindow, markAllRead, markRead, newRun, parseRun,
   refresh, segments, setAside, startAnswer, undo, undoable,
 } from "../src/lib/catchup/run.ts";
 
@@ -133,6 +133,10 @@ describe("a run", () => {
   });
   it("leaving sends an answer in its window now; an answer found long past its window (the phone slept) is dropped, not sent", () => {
     const r = startAnswer(newRun([dec("a")], T), "d:a", "a", { key: "x" }, "X", T);
+    expect(inWindow(r.answering, T + 1000)).toBe(true);
+    expect(inWindow({ sending: true, commitAt: T }, T + UNDO_MS)).toBe(true);
+    expect(inWindow(null, T)).toBe(false);
+    expect(inWindow(r.answering, T + UNDO_MS)).toBe(false);
     expect(dueAnswer(answerNow(r, T + 1000), T + 1000).send?.id).toBe("a");
     expect(answerNow(r, T + 6000)).toBe(r);                                     // already due: unchanged
     const late = dueAnswer(r, T + UNDO_MS + LATE_ANSWER_MS + 1);
