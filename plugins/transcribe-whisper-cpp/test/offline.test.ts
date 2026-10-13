@@ -40,7 +40,7 @@ it.runIf(bin !== undefined)("a run with no network returns the sentence", async 
     child.on("error", reject);
     child.on("close", code => resolve({ code, stdout, stderr }));
   });
-  expect(result.code).toBe(0);
+  expect(result.code, result.stderr).toBe(0);
   const parsed = parseRun(result.stdout);
   expect(parsed.ok).toBe(true);
   if (!parsed.ok) return;
