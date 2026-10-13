@@ -2,9 +2,10 @@
 // and parallel across conversations, retried on its own for 2 minutes, waiting while offline, resumed after a reload,
 // and ended by its echo. A memory store and fake timers; the real IndexedDB store is tested in Chromium.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { post } from "../src/lib/outbox/device.ts";
 import { Outbox, type PostOutcome } from "../src/lib/outbox/outbox.ts";
 import { memoryStore, type OutboxStore } from "../src/lib/outbox/store.ts";
-import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, RETRY_WINDOW_MS, canRetry, type OutboxRecord } from "../src/lib/outbox/state.ts";
+import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, RETRY_MS, RETRY_WINDOW_MS, canRetry, type OutboxRecord } from "../src/lib/outbox/state.ts";
 import { sendLabel } from "../src/lib/outbox/words.ts";
 
 const T0 = Date.UTC(2026, 9, 2, 12);
@@ -669,5 +670,32 @@ describe("medium verify (2026-10-05), issue 1: a Send again the hub couldn't que
     await o.again(r.id);
     await flush();
     expect(state(o, r.id)).toMatchObject({ inbox: given, resendFailed: true });
+  });
+});
+
+describe("a hub that is updating", () => {
+  it("retries a send the hub answers 503", async () => {
+    let n = 0;
+    vi.stubGlobal("fetch", async () => {
+      n += 1;
+      if (n === 1) return new Response(JSON.stringify({ error: "updating" }), { status: 503, headers: { "retry-after": "1", "content-type": "application/json" } });
+      return new Response(JSON.stringify({ at: 1 }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const o = new Outbox({
+      store: memoryStore(),
+      post,
+      timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id as ReturnType<typeof setTimeout>) },
+      connected: () => true,
+      onChange: () => {},
+      newId: () => "00000000-0000-4000-8000-000000000099",
+    });
+    const r = await o.enqueue(cmd("%1"));
+    await flush();
+    expect(n).toBe(1);
+    expect(state(o, r.id)?.state === "queued" || state(o, r.id)?.state === "sending").toBe(true);
+    await advance(RETRY_MS[0]);
+    expect(n).toBe(2);
+    expect(state(o, r.id)?.state).toBe("sent");
+    vi.unstubAllGlobals();
   });
 });

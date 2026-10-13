@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { NotLocalDisk } from "@morndo/service-kit";
+import { NotLocalDisk, argvWantsVersion, holdFile, productVersion } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
 import { startRetention } from "./application/retention.ts";
@@ -66,6 +66,11 @@ VNC server), MORNDO_VNC_PASSWORD_FILE, MORNDO_FLEET_SOCKET (the fleet service's 
 machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane registry directory; off unless set),
 MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet) and MORNDO_ENGINES (the engine layer's
 CLI, engine-layer bin/engines: the Engines page).`;
+
+if (argvWantsVersion(process.argv)) {
+  process.stdout.write(`${productVersion()}\n`);
+  process.exit(0);
+}
 
 exitOnCrash(log);
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
@@ -195,7 +200,11 @@ switch (cmd) {
     const usage = new UsageService({ store });
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
-    const http = startHttp({ config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence, push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, briefs });
+    const http = startHttp({
+      config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
+      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs,
+      briefs, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
+    });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
     // Old pairing tokens and long-ended sessions, on start and daily; never the audit or the decisions (A8).
     const stopRetention = startRetention(store, Date.now,
@@ -234,9 +243,9 @@ switch (cmd) {
       try { steering.withdrawOverdue(); }
       catch (e) { log.warn("a queued command's deadline could not be checked", e); }
     }, Math.max(config.pollMs, 1000));
-    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin}`);
+    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.close(); store.close(); process.exit(0); };
+    const stop = async () => { clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     break;

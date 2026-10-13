@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { chromium, type Browser } from "playwright";
+import { steady } from "./steady.ts";
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
 const WEB = join(import.meta.dirname, "..");
@@ -16,6 +17,8 @@ export const DESKTOP_PAGE = `<!doctype html><html><head><meta charset="utf-8"></
   import Desktop from "/src/lib/desktop/Desktop.svelte";
   mount(Desktop, { target: document.body, props: { device: "dev-1", office: "Test office", verifiedAt: Date.now(), policy: { stay: "7d", stepUp: "1h" }, desktop: false, onSignedOut: () => {} } });
 </script></body></html>`;
+
+export { steady };
 
 export type Web = { url: string; browser: Browser; close: () => Promise<void> };
 
@@ -39,7 +42,7 @@ export async function startWeb(html = DESKTOP_PAGE): Promise<Web> {
     optimizeDeps: { noDiscovery: true, include: [] },
   });
   await server.listen();
-  const browser = await chromium.launch();
+  const browser = steady(await chromium.launch());
   return {
     url: server.resolvedUrls?.local[0] ?? "",
     browser,

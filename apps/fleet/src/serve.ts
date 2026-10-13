@@ -4,9 +4,10 @@
 // before it opens anything. Every alert the audit records is also an `alert` event. Audit rows older than 90 days go on start
 // and daily. A revoked node's lanes go whichever way it was revoked (the client API, or the console writing fleet.db).
 import type Database from "better-sqlite3";
+import { homedir } from "node:os";
 import { dirname } from "node:path";
 import type { Pane } from "@morndo/protocol";
-import { assertLocalDisk } from "@morndo/service-kit";
+import { Flight, HoldWatch, assertLocalDisk, holdFile } from "@morndo/service-kit";
 import type { FleetConfig } from "./config.ts";
 import { Audit } from "./adapters/audit.ts";
 import { startClientApi } from "./adapters/client-api.ts";
@@ -35,6 +36,7 @@ export type FleetOptions = {
   log?: Logger; now?: () => number; pingMs?: number; agentLimits?: BucketConfig; handshakeLimits?: BucketConfig; handshakeMs?: number;
   resultSlackMs?: number; instancePongMs?: number; eventsBufferBytes?: number;
   hookBacklog?: number; delivery?: { post?: Post; backoff?: Backoff; tickMs?: number; random?: () => number };
+  holdPath?: string;
 };
 
 export type Fleet = {
@@ -69,6 +71,14 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   });
   events.subscribe(e => { if (e.t === "inventory") lanes.inventory(e.node, (e.body as { panes: Pane[] }).panes); });
   const router = new Router({ connections, lanes, audit, log });
+  const flight = new Flight();
+  const watch = new HoldWatch({
+    path: o.holdPath ?? holdFile(process.env.HOME || homedir()),
+    service: "fleet",
+    now,
+    onStale: message => log.warn(message),
+  });
+  watch.start();
   const outbox = new OutboxStore(db);
   const delivery = new DeliveryWorker({ store: outbox, subscribers: config.subscribers, audit, log, now, ...o.delivery });
   for (const path of unsubscribedScriptPaths(config.subscribers)) {
@@ -118,8 +128,10 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     await agents.ready;
     api = await startClientApi(config.socketPath, {
       router, connections, lanes, nodes, audit, events, jobs, log, ...(o.eventsBufferBytes === undefined ? {} : { eventsBufferBytes: o.eventsBufferBytes }),
+      updates: { held: () => watch.held, flight },
     });
   } catch (e) {
+    watch.stop();
     await agents.close();
     db.close();
     throw e;
@@ -134,6 +146,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   return {
     config, db, key, nodes, audit, events, connections, lanes, router, outbox, delivery, jobs, agentPort: agents.port(),
     close: async () => {
+      watch.stop();
       clearInterval(retention);
       clearInterval(noticeRetry);
       connections.stop();

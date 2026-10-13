@@ -12,9 +12,10 @@ import {
   err, ok,
   type FinishEvent, type FinishProblem, type Guard, type Job, type NotifyTarget, type Result, type StartProblem,
 } from "@morndo/domain";
-import { deniedBy, denyRoots, processAlive, resolvedRoots } from "@morndo/node-ops";
+import { deniedBy, denyRoots, processAlive, resolvedRoots, type ProcessStart } from "@morndo/node-ops";
 import { errno } from "@morndo/service-kit";
 import { psStarts, readRecorded, sameProcess, START_RECORD_GRACE_MS, writeProcessFile, type Recorded } from "./job-identity.ts";
+import { capStep, endedBeforeStop, monotonicUsec, UNIT_CAP_LOOK_MS, type CapSight } from "./job-cap.ts";
 import { MAX_TIMER_MS } from "./job-limits.ts";
 import { askHub, JobGrants } from "./job-grant.ts";
 import { killJobUnit, managerEnv, probeUserManager, resetJobUnit, runMs, showUnit, spawnFailed, startJobUnit, stopJobUnit, type ProbeResult, type UnitLook, type UnitState } from "./job-systemd.ts";
@@ -204,6 +205,15 @@ export class JobSupervisor {
   #managerEnv: Promise<string[] | null> | null = null;
   #server: Server | null = null;
   #tails = new Map<string, Promise<void>>();
+  // Design §5: the grace of each capped systemd job, running beside the sweep (see #watchCap).
+  #capWatches = new Map<string, Promise<void>>();
+  // Each open job's first sighting of its log at the cap, kept across watches: the grace runs once from it (design §5).
+  #capSights = new Map<string, CapSight>();
+  // Jobs a cancel signalled but could not confirm: how such a unit ends is the cancel's result, not the command's.
+  #signalledCancels = new Set<string>();
+  // A closed supervisor's watches stop acting, also when they already wait for the job's lock: the agent that replaces
+  // it owns the jobs. close() does not wait for them; each one sees this at its next step and returns.
+  #closed = false;
 
   constructor(store: JobStore, opts: {
     home: string;
@@ -277,6 +287,7 @@ export class JobSupervisor {
   }
 
   close(): void {
+    this.#closed = true;
     this.#server?.close();
     this.#server = null;
     try { unlinkSync(this.#socketPath); } catch (e) { if (errno(e) !== "ENOENT") throw e; }
@@ -319,12 +330,20 @@ export class JobSupervisor {
     this.#apply(guard);
     const starts = await psStarts(this.#fallbackPids());
     const jobs = this.#store.list().filter(job => job.state === "running" || job.state === "starting");
+    const watches: Promise<void>[] = [];
     if (this.#slice) {
-      await Promise.all(jobs.map(job => this.#exclusive(job.id, () => this.#sweepOne(job.id, pending, starts))));
+      await Promise.all(jobs.map(job => this.#exclusive(job.id, () => this.#sweepOne(job.id, pending, starts, watches))));
     } else {
-      for (const job of jobs) await this.#exclusive(job.id, () => this.#sweepOne(job.id, pending, starts));
+      for (const job of jobs) await this.#exclusive(job.id, () => this.#sweepOne(job.id, pending, starts, watches));
     }
     await this.#promote(this.#starting(), guard);
+    // Design §5: a capped unit's grace runs beside the sweep, so it holds up no other job and no cancel. The sweep
+    // still ends with the decisions of the watches it started (an earlier sweep's watch is that sweep's), and starts
+    // what they freed.
+    if (watches.length > 0) {
+      await Promise.all(watches);
+      await this.#promote(this.#starting());
+    }
   }
 
   async #exclusive<T>(id: string, fn: () => Promise<T> | T): Promise<T> {
@@ -391,14 +410,14 @@ export class JobSupervisor {
       if (job.state !== "running" && job.state !== "starting") continue;
       for (const kind of ["pid", "child"] as const) {
         const found = this.#recorded(job.id, kind);
-        if (found?.recorded.kind === "lstart") pids.push(found.pid);
+        if (found?.recorded.kind === "start") pids.push(found.pid);
       }
     }
     return pids;
   }
 
-  async #sweepOne(id: string, pending: Set<string>, starts: ReadonlyMap<number, number | null>): Promise<void> {
-    if (this.#slice) { await this.#sweepUnit(id, pending); return; }
+  async #sweepOne(id: string, pending: Set<string>, starts: ReadonlyMap<number, ProcessStart | null>, watches: Promise<void>[] = []): Promise<void> {
+    if (this.#slice) { await this.#sweepUnit(id, pending, watches); return; }
     if (!this.#open(id)) return;
     if (existsSync(join(this.#store.dir, `${id}.exit`))) { this.#takeExit(id); return; }
     const found = this.#recorded(id, "pid");
@@ -580,8 +599,9 @@ export class JobSupervisor {
     chmodSync(path, 0o600);
   }
 
-  async #sweepUnit(id: string, pending: Set<string>): Promise<void> {
+  async #sweepUnit(id: string, pending: Set<string>, watches: Promise<void>[] = []): Promise<void> {
     if (!this.#open(id)) return;
+    const seenUsec = monotonicUsec();
     const look = await showUnit(id, this.#toolEnv);
     const job = this.#open(id);
     if (!job) return;
@@ -597,11 +617,21 @@ export class JobSupervisor {
     const view = look.view;
     if (view.active === "activating" || (view.active === "active" && view.sub === "running")) {
       if (job.state === "starting") this.#store.started(id);
-      if (this.#overCap(id)) await this.#stopForCap(id);
+      if (this.#overCap(id)) {
+        const watch = this.#watchCap(id, view, seenUsec);
+        if (watch) watches.push(watch);
+      }
       return;
     }
+    await this.#settleUnit(id, view);
+  }
+
+  // A unit that is no longer running: its own result, read from systemd.
+  async #settleUnit(id: string, view: UnitState): Promise<void> {
+    const job = this.#open(id);
+    if (!job) return;
     const durationMs = runMs(view, job.startedAt);
-    const event = exitOf(view, durationMs);
+    const event = this.#signalledCancels.has(id) ? { outcome: "cancelled" as const, exitCode: null, durationMs } : exitOf(view, durationMs);
     if (!event) return;
     if (job.state === "starting") {
       const started = this.#store.started(id);
@@ -611,8 +641,62 @@ export class JobSupervisor {
       const decided = this.#store.settle(id, event);
       if (!decided.ok) return;
     } catch { return; }
+    this.#signalledCancels.delete(id);
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
+  }
+
+  // Design §5: on systemd the supervisor owns the cap. The sweep that sees it starts one watch per job, which runs the
+  // grace beside the sweep on the monotonic clock, looking every UNIT_CAP_LOOK_MS, and takes the job's lock only to
+  // settle or stop. The .cap file notes the sighting, so a later sweep, or a restarted agent, still knows the log is
+  // at the cap. `seenUsec`: when the look began that showed the unit running.
+  #watchCap(id: string, view: UnitState, seenUsec: bigint): Promise<void> | null {
+    if (this.#capWatches.has(id)) return null;
+    this.#requestCap(id);
+    const watch = this.#capUnit(id, view, seenUsec)
+      .catch((e: unknown) => { this.#log?.error(`the cap watch for job ${id} failed; the next sweep looks again`, e); })
+      .finally(() => { this.#capWatches.delete(id); this.#forget(id); });
+    this.#capWatches.set(id, watch);
+    return watch;
+  }
+
+  // What is kept per job for the cap goes once the job has ended, so it is bounded by the open jobs.
+  #forget(id: string): void {
+    let open: boolean;
+    try { open = this.#open(id) !== null; } catch { return; }
+    if (open) return;
+    this.#capSights.delete(id);
+    this.#signalledCancels.delete(id);
+  }
+
+  // Each look checks the log and the unit's main process; only when that process is gone does it ask systemd how the
+  // unit ended.
+  async #capUnit(id: string, view: UnitState, seenUsec: bigint): Promise<void> {
+    let sight = this.#capSights.get(id) ?? null;
+    let seen = seenUsec;
+    for (;;) {
+      const step = capStep(sight, this.#logSize(id), this.#store.logBytes, performance.now(), true);
+      if (step.kind !== "grace") break;
+      sight = step.sight;
+      this.#capSights.set(id, sight);
+      await wait(UNIT_CAP_LOOK_MS);
+      if (this.#closed || !this.#open(id)) return;
+      if (view.mainPid > 0 && processAlive(view.mainPid)) continue;
+      const lookedAt = monotonicUsec();
+      const look = await showUnit(id, this.#toolEnv);
+      if (this.#closed || look.kind === "absent") return;
+      if (look.kind === "found" && !this.#live(look.view)) {
+        const ended = look.view;
+        await this.#exclusive(id, () => (this.#closed ? undefined : this.#settleUnit(id, ended)));
+        return;
+      }
+      if (look.kind === "found") seen = lookedAt;
+    }
+    await this.#exclusive(id, () => (this.#closed ? undefined : this.#stopForCap(id, seen)));
+  }
+
+  #logSize(id: string): number {
+    try { return statSync(join(this.#store.dir, `${id}.log`)).size; } catch { return 0; }
   }
 
   async #cancelUnit(id: string): Promise<Result<NoticeHandoff, SuperviseProblem>> {
@@ -627,7 +711,7 @@ export class JobSupervisor {
     if (live) {
       const after = await this.#endLive(id);
       if (after === "unsignalled") return err("unavailable");
-      if (after === "signalled") return err("signalled");
+      if (after === "signalled") { this.#signalledCancels.add(id); return err("signalled"); }
       const current = this.#store.get(id);
       if (!current) return err("missing");
       if (current.outcome !== null) return this.#replay(current);
@@ -843,8 +927,11 @@ export class JobSupervisor {
     return after;
   }
 
-  async #stopForCap(id: string): Promise<void> {
-    this.#requestCap(id);
+  // Design §5: no code for a unit still running when the stop is sent. A main process that ended before it keeps its
+  // own result: its exit code, or 128 plus the signal when someone else killed it.
+  async #stopForCap(id: string, seenUsec: bigint): Promise<void> {
+    if (!this.#open(id)) return;
+    const sentUsec = monotonicUsec();
     const after = await this.#endLive(id);
     if (after === "unsignalled" || after === "signalled" || after.kind !== "found") return;
     const job = this.#open(id);
@@ -854,7 +941,10 @@ export class JobSupervisor {
       if (!started.ok) return;
     }
     const durationMs = runMs(after.view, job.startedAt);
-    try { this.#store.settle(id, { outcome: "exited", exitCode: null, durationMs }); } catch { return; }
+    const own = endedBeforeStop(after.view.exitedUsec, sentUsec, seenUsec) ? exitOf(after.view, durationMs) : null;
+    const event = this.#signalledCancels.has(id) ? { outcome: "cancelled" as const, exitCode: null, durationMs } : own ?? { outcome: "exited" as const, exitCode: null, durationMs };
+    try { this.#store.settle(id, event); } catch { return; }
+    this.#signalledCancels.delete(id);
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
   }
@@ -864,7 +954,7 @@ export class JobSupervisor {
     try { writeFileSync(path, "", { flag: "wx", mode: 0o600 }); } catch { /* already requested */ }
   }
 
-  async #stopChild(id: string, starts?: ReadonlyMap<number, number | null>): Promise<void> {
+  async #stopChild(id: string, starts?: ReadonlyMap<number, ProcessStart | null>): Promise<void> {
     const child = this.#recorded(id, "child");
     if (!child || !(await sameProcess(child.pid, child.recorded, starts))) return;
     // SIGKILL leaves a zombie, and kill(pid, 0) still succeeds until it is reaped

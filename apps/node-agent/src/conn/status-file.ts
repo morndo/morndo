@@ -13,7 +13,10 @@ export type ConnStatus = {
   lastClose: { code: number; reason: string } | null;
   retryInMs: number | null;
 };
-export type AgentStatus = ConnStatus & { node: string; instanceId: string; pid: number; spoolDepth: number; drops: number; jobs?: string };
+export type AgentStatus = ConnStatus & {
+  node: string; instanceId: string; pid: number; spoolDepth: number; drops: number; jobs?: string;
+  version?: string; ready?: boolean;
+};
 
 export function writeStatus(path: string, s: AgentStatus): void {
   writeFileAtomic(path, `${JSON.stringify(s)}\n`, 0o600);

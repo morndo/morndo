@@ -100,7 +100,7 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     const db = new Database(join(tempDir(), "morndo.db"));
     const failing: Migration[] = [
       ...MIGRATIONS,
-      { version: LATEST + 1, name: "half done, then fails", up: d => { d.exec("CREATE TABLE half (x)"); throw new Error("boom"); } },
+      { version: LATEST + 1, name: "half done, then fails", compat: "additive", up: d => { d.exec("CREATE TABLE half (x)"); throw new Error("boom"); } },
     ];
     expect(() => migrate(db, failing)).toThrow(/boom/);
     expect(version(db)).toBe(0);
@@ -195,7 +195,7 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     store.close();
   });
 
-  it("a database at main's version 14 gains pending_answers at 15, and a v14 hub refuses that database", () => {
+  it("a database at main's version 14 gains pending_answers at 15, and a v14 hub opens that database: its floor is 0", () => {
     const db = new Database(join(tempDir(), "morndo.db"));
     const v14 = MIGRATIONS.slice(0, 14);
     expect(v14.at(-1)?.version).toBe(14);
@@ -205,7 +205,9 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     expect(migrate(db, MIGRATIONS.slice(0, 15))).toEqual({ from: 14, to: 15 });
     expect(tables(db)).toContain("pending_answers");
     expect(version(db)).toBe(15);
-    expect(() => migrate(db, v14)).toThrow(DatabaseFromFuture);
+    // Migration 15 is additive, so the floor stayed at 0 and the v14 hub opens the database without running anything
+    // (§11.1); a database whose floor was above 14 is what schema-floors.test.ts refuses.
+    expect(migrate(db, v14)).toEqual({ from: 15, to: 15 });
     expect(version(db)).toBe(15);
     expect(tables(db)).toContain("pending_answers");
   });
