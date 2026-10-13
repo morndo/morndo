@@ -26,6 +26,16 @@ describe("answer rows in the store", () => {
     expect(store.sendOfRequest("desk:r1")?.key).toBe(v2);
   });
 
+  // The latest by insertion, never by the hub's clock (round 4.9): the clock stepped back between the two writes, so
+  // the second row has the earlier time. It is still the one the request wrote last.
+  it("reads back the row a request wrote last when the clock stepped back between the two", () => {
+    const v1 = answerKey("ny-7", { messageId: "m1", askedAt: T0 - 60_000 }, ship);
+    const v2 = answerKey("ny-7", { messageId: "m2", askedAt: T0 }, ship);
+    store.startAnswer(v1, T0, { workerId: "%0", request: "desk:r1" });
+    store.startAnswer(v2, T0 - 2000, { workerId: "%0", request: "desk:r1" });                 // NTP stepped back 2 s
+    expect(store.sendOfRequest("desk:r1")?.key).toBe(v2);
+  });
+
   // The rows under a prefix are a range of the primary key (round 3.7): the table also holds a day of steering sends,
   // which a scan of it would read too.
   it("reads the rows under a prefix by a range of the primary key, not a scan of every send", () => {
