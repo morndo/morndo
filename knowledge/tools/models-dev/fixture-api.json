@@ -1,0 +1,41 @@
+{
+  "zenith": {
+    "id": "zenith",
+    "name": "Zenith",
+    "models": {
+      "zenith-pro": {
+        "id": "zenith-pro",
+        "name": "Zenith Pro",
+        "family": "zenith-pro",
+        "release_date": "2026-09-01",
+        "limit": { "context": 200000, "output": 32000 },
+        "cost": { "input": 1.25, "output": 5 },
+        "attachment": true,
+        "reasoning": true
+      }
+    }
+  },
+  "acme": {
+    "id": "acme",
+    "name": "Acme",
+    "models": {
+      "acme-small-1": {
+        "id": "acme-small-1",
+        "name": "Acme Small 1",
+        "limit": { "context": 128000, "output": 16384 },
+        "attachment": true,
+        "reasoning": false
+      },
+      "acme-large-2": {
+        "id": "acme-large-2",
+        "name": "Acme Large 2",
+        "family": "acme-large",
+        "release_date": "2026-08-15",
+        "limit": { "context": 400000, "output": 64000 },
+        "cost": { "input": 3, "output": 12 },
+        "attachment": false,
+        "reasoning": true
+      }
+    }
+  }
+}

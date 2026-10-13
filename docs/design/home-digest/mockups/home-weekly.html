@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<title>Home digest: weekly view (mockup)</title>
+<!-- Mockup for docs/design/home-digest (issue #33, ADR-0025), section 7. Static, synthetic data: every number is made
+     up. Weeks are ISO weeks in the principal's time zone. "Now" is Tue 13 Oct 2026. -->
+<link rel="stylesheet" href="mock.css">
+</head>
+<body class="desk-tokens">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"/><path d="M3 10a2 2 0 0 1 .709-1.528l7-6a2 2 0 0 1 2.582 0l7 6A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-circle-dashed" viewBox="0 0 24 24"><path d="M10.1 2.182a10 10 0 0 1 3.8 0"/><path d="M13.9 21.818a10 10 0 0 1-3.8 0"/><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"/><path d="M2.182 13.9a10 10 0 0 1 0-3.8"/><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"/><path d="M21.818 10.1a10 10 0 0 1 0 3.8"/><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"/><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"/></symbol>
+  <symbol id="i-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-user-check" viewBox="0 0 24 24"><path d="m16 11 2 2 4-4"/><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-badge-check" viewBox="0 0 24 24"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-circle-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></symbol>
+  <symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol>
+  <symbol id="i-signpost" viewBox="0 0 24 24"><path d="M12 13v8"/><path d="M12 3v3"/><path d="M2.354 10.354a1.207 1.207 0 0 1 0-1.708l2.06-2.06A2 2 0 0 1 5.828 6h12.344a2 2 0 0 1 1.414.586l2.06 2.06a1.207 1.207 0 0 1 0 1.708l-2.06 2.06a2 2 0 0 1-1.414.586H5.828a2 2 0 0 1-1.414-.586z"/></symbol>
+  <symbol id="i-hourglass" viewBox="0 0 24 24"><path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"/><path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"/></symbol>
+  <symbol id="i-git-merge" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+  <symbol id="i-square-check" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m16 9-5.5 5.5L8 12"/></symbol>
+  <symbol id="i-git-pull-request" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><line x1="6" x2="6" y1="9" y2="21"/></symbol>
+  <symbol id="i-undo-2" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+  <symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-external-link" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+  <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-clock-3" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4"/></symbol>
+  <symbol id="i-messages-square" viewBox="0 0 24 24"><path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"/></symbol>
+  <symbol id="i-message-circle" viewBox="0 0 24 24"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></symbol>
+  <symbol id="i-square-kanban" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 7v7"/><path d="M12 7v4"/><path d="M16 7v9"/></symbol>
+  <symbol id="i-laptop" viewBox="0 0 24 24"><path d="M18 5a2 2 0 0 1 2 2v8.526a2 2 0 0 0 .212.897l1.068 2.127a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45l1.068-2.127A2 2 0 0 0 4 15.526V7a2 2 0 0 1 2-2z"/><path d="M20.054 15.987H3.946"/></symbol>
+  <symbol id="i-radio" viewBox="0 0 24 24"><path d="M16.247 7.761a6 6 0 0 1 0 8.478"/><path d="M19.075 4.933a10 10 0 0 1 0 14.134"/><path d="M4.925 19.067a10 10 0 0 1 0-14.134"/><path d="M7.753 16.239a6 6 0 0 1 0-8.478"/><circle cx="12" cy="12" r="2"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><path d="M16 3.128a4 4 0 0 1 0 7.744"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/></symbol>
+  <symbol id="i-calendar-range" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M16 2v3"/><path d="M3 9h18"/><path d="M8 2v3"/><path d="M17 13h-6"/><path d="M13 17H7"/><path d="M7 13h.01"/><path d="M17 17h.01"/></symbol>
+  <symbol id="i-git-commit-horizontal" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><line x1="3" x2="9" y1="12" y2="12"/><line x1="15" x2="21" y1="12" y2="12"/></symbol>
+  <symbol id="i-flask-conical" viewBox="0 0 24 24"><path d="M14 2v6a2 2 0 0 0 .245.96l5.51 10.08A2 2 0 0 1 18 22H6a2 2 0 0 1-1.755-2.96l5.51-10.08A2 2 0 0 0 10 8V2"/><path d="M6.453 15h11.094"/><path d="M8.5 2h7"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></symbol>
+  <symbol id="i-list-checks" viewBox="0 0 24 24"><path d="M13 5h8"/><path d="M13 12h8"/><path d="M13 19h8"/><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/></symbol>
+  <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+</svg>
+<div class="desk">
+  <div class="top"><div class="search">Search the office</div></div>
+  <div class="bodyrow">
+    <nav class="rail" aria-label="Main">
+      <div class="team">O</div>
+      <div class="tab on"><span class="ico"><svg><use href="#i-house"/></svg></span><span class="lbl">Home</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-messages-square"/></svg></span><span class="lbl">Chats</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-message-circle"/></svg></span><span class="lbl">Manager</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-signpost"/></svg><i class="badge">1</i></span><span class="lbl">Decisions</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-bell"/></svg><i class="badge">2</i></span><span class="lbl">Activity</span></div>
+      <div class="tab"><span class="ico"><svg><use href="#i-square-kanban"/></svg><i class="badge">1</i></span><span class="lbl">Board</span></div>
+    </nav>
+    <div class="workspace"><div class="panel">
+      <header class="hh"><svg style="width:18px;height:18px"><use href="#i-house"/></svg><h1>Home</h1><span class="upd">Records as of 09:40</span></header>
+      <div class="home-body">
+
+        <div class="dhead">
+          <h2>Weekly</h2>
+          <span class="since">ISO weeks in your time zone · all repos · <b>week 41</b> is final on 25 Oct</span>
+          <span class="seg" role="tablist" aria-label="View"><span role="tab">Since you looked</span><span class="on" role="tab" aria-selected="true">Weekly</span></span>
+          <button class="btn">Per repo</button>
+        </div>
+
+        <!-- The inputs first (what the pipeline controls), then the outputs, then instability beside them. -->
+        <div class="kpis" style="margin-top:0;grid-template-columns:repeat(5,1fr)">
+          <div class="tile"><span class="tl"><svg><use href="#i-user-check"/></svg>Reviewed or verified live</span><b>71%</b><span class="ts">17 of 24 done or shipped, week 41</span></div>
+          <div class="tile"><span class="tl"><svg><use href="#i-hand"/></svg>Waited on you</span><b>6 h</b><span class="ts">median per ask, week 41 (9 asks)</span></div>
+          <div class="tile"><span class="tl"><svg><use href="#i-hourglass"/></svg>Went stale</span><b>4</b><span class="ts">week 41 · 2 cleared with nobody acting</span></div>
+          <div class="tile"><span class="tl"><svg><use href="#i-rocket"/></svg>Shipped · merged · done</span><b>9 · 23 · 17</b><span class="ts">week 41</span></div>
+          <div class="tile warn"><span class="tl"><svg><use href="#i-circle-x"/></svg>Claims that later failed</span><b>3 of 41</b><span class="ts">week 41 · provisional until 25 Oct</span></div>
+        </div>
+
+        <table class="wk" aria-label="Weeks" style="margin-top:12px">
+          <thead><tr>
+            <th>Week</th><th>Shipped</th><th>Merged</th><th>Reverted</th><th>Done</th><th>Time to done<br>median · p90</th><th>Claims</th><th>Later failed</th><th>Failed deploys</th><th>Recovery<br>median</th><th>Stuck flags<br>raised · cleared alone</th>
+          </tr></thead>
+          <tbody>
+            <tr class="prov"><td>42 (Mon–Tue)</td><td>3</td><td>7</td><td>1</td><td>6</td><td>9 h · 19 h</td><td>10</td><td>1</td><td>1 of 3</td><td>26 min</td><td>2 · 0</td></tr>
+            <tr class="prov"><td>41</td><td>9</td><td>23</td><td>1</td><td>17</td><td>5.7 h · 30 h</td><td>41</td><td>3</td><td>1 of 9</td><td>40 min</td><td>4 · 2</td></tr>
+            <tr class="prov"><td>40</td><td>7</td><td>19</td><td>0</td><td>14</td><td>6.2 h · 26 h</td><td>36</td><td>2</td><td>0 of 7</td><td>–</td><td>3 · 1</td></tr>
+            <tr><td>39</td><td>4</td><td>15</td><td>2</td><td>11</td><td>8 h · 48 h</td><td>30</td><td class="bad">6</td><td>2 of 4</td><td>1.5 h</td><td>6 · 3</td></tr>
+            <tr><td>38</td><td>3</td><td>12</td><td>0</td><td>9</td><td>7.5 h · 33 h</td><td>22</td><td>2</td><td>0 of 3</td><td>–</td><td>2 · 0</td></tr>
+            <tr><td>37</td><td>2</td><td>9</td><td>1</td><td>8</td><td>9 h · 52 h</td><td>18</td><td>3</td><td>1 of 2</td><td>3 h</td><td>5 · 2</td></tr>
+            <tr><td>36</td><td>1</td><td>6</td><td>0</td><td>5</td><td>11 h · 56 h</td><td>12</td><td>1</td><td>0 of 1</td><td>–</td><td>1 · 0</td></tr>
+          </tbody>
+        </table>
+        <p class="note">Every number is a count of records, recomputed from the stores. A claim counts as later failed when, within 14 days, a check on the same revision failed, its merge was reverted, its deploy rolled back, or its task reopened from done. So a week stays provisional for 14 days after it ends. Time to done runs from a task's first move to in progress to its acceptance as done. Recovery runs from a failed deploy to the next good one on that environment.</p>
+
+        <div class="panelgrid" style="grid-template-columns:1fr 1fr">
+          <div>
+            <table class="wk" aria-label="How each level held up">
+              <thead><tr><th>Shown to you as</th><th>Claims</th><th>Later failed</th><th class="rate">Rate</th></tr></thead>
+              <tbody>
+                <tr><td><span class="lv claimed"><svg><use href="#i-circle-dashed"/></svg>Claimed</span></td><td>20</td><td class="bad">7</td><td class="rate">35%<span class="bar bad" style="width:105px"></span></td></tr>
+                <tr><td><span class="lv checked"><svg><use href="#i-circle-check"/></svg>Checked</span></td><td>30</td><td>3</td><td class="rate">10%<span class="bar" style="width:30px"></span></td></tr>
+                <tr><td><span class="lv reviewed"><svg><use href="#i-user-check"/></svg>Reviewed</span></td><td>12</td><td>1</td><td class="rate">8%<span class="bar" style="width:24px"></span></td></tr>
+                <tr><td><span class="lv live"><svg><use href="#i-badge-check"/></svg>Verified live</span></td><td>20</td><td>1</td><td class="rate">5%<span class="bar" style="width:15px"></span></td></tr>
+              </tbody>
+            </table>
+            <p class="note">Weeks 36 to 39, the closed weeks. A claim that failed counts under the level its item showed just before; one that held, under the level it showed when its 14 days ended. Experimental: it tells how much each level has been worth here, not a target. Small counts swing; the counts stand beside every rate.</p>
+          </div>
+          <div>
+            <table class="wk" aria-label="By engine">
+              <thead><tr><th>By engine and model, weeks 36 to 39</th><th>Claims</th><th>Later failed</th></tr></thead>
+              <tbody>
+                <tr><td>engine A, model 1</td><td>66</td><td>7</td></tr>
+                <tr><td>engine B, model 2</td><td>16</td><td>5</td></tr>
+              </tbody>
+            </table>
+            <p class="note">By engine and model, not by lane: lanes come and go, and a ranking of lanes invites gaming (DORA: no competing).</p>
+          </div>
+        </div>
+
+      </div>
+    </div></div>
+  </div>
+</div>
+</body>
+</html>

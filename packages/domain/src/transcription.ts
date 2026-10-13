@@ -145,7 +145,7 @@ export type EndReport = {
   text: string;
 };
 
-export type RequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size";
+export type TranscriptionRequestProblem = "no_capability" | "bad_id" | "id_conflict" | "bad_recording" | "bad_language" | "bad_size";
 
 const TX_ID = /^[A-Za-z0-9][A-Za-z0-9:_-]{0,199}$/;
 // `auto`, or a language code with optional subtags (`de`, `pt-br`). Not case-free: `DE` is not a code.
@@ -173,7 +173,7 @@ export function requestTranscription(
   body: TranscriptionBody,
   at: number,
   capability: TranscriptionCapability,
-): Result<Transcription, RequestProblem> {
+): Result<Transcription, TranscriptionRequestProblem> {
   if (!capabilityReady(capability)) return err("no_capability");
   // The pattern is for strings only: `test` would read a missing id as "undefined" and a number as its digits, and
   // a row keyed by such an id would answer for every other (TX5's queue is keyed by id).

@@ -29,7 +29,7 @@ beforeEach(async () => {
 afterEach(async () => {
   for (const s of stops.splice(0)) await s();
   await fleet.close();
-  t.kill();
+  await t.kill();
   home.cleanup();
 });
 

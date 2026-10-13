@@ -3,6 +3,7 @@
 // executor directly. Three test hooks act here (test-hooks.ts): noDoneKeys, noExpect and clockOffsetMs.
 import type Database from "better-sqlite3";
 import { sessionRegistry, stampServer, type PaneLock } from "@morndo/node-ops";
+import type { Flight } from "@morndo/service-kit";
 import type { AgentConfig } from "../config.ts";
 import type { Logger } from "../log.ts";
 import { agentPaths } from "../paths.ts";
@@ -34,6 +35,8 @@ export type RuntimeOptions = {
   afterStarted?: (key: string) => boolean;                // the executor's hook after a committed `started` (agent.ts)
   lock?: (path: string, waitS: number) => PaneLock;       // a test's slow lock; node-ops' paneLock otherwise
   room?: () => number;                                    // bytes still free in the node's disk budget (agent.ts)
+  held?: () => boolean;
+  flight?: Flight;
 };
 
 const acceptAny = () => true;
@@ -55,6 +58,8 @@ export function createOpsRuntime(o: RuntimeOptions): OpsRuntime {
   const executor = new OpExecutor({
     ops, allowed: new Set(config.policy.ops), doneKeys, invVersion: () => inventory.invVersion, log: o.log,
     ...(o.afterStarted ? { afterStarted: o.afterStarted } : {}),
+    ...(o.held ? { held: o.held } : {}),
+    ...(o.flight ? { flight: o.flight } : {}),
   });
   return {
     inventory, doneKeys, inbox, registry, executor, now,
