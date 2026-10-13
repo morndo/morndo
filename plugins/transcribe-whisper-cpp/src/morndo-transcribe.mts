@@ -67,6 +67,13 @@ function textField(value: unknown, max: number): string | null {
   return value;
 }
 
+// A region tag is a legal language choice (domain LANGUAGE_CODE, so protocol 1). whisper-cli -l takes the
+// language id, so pt-BR becomes pt. Refusing it would be exit 2, which the hub reports as an engine failure.
+export function whisperLanguage(choice: string): string {
+  if (choice === "auto") return "auto";
+  return choice.split("-")[0] ?? choice;
+}
+
 export function commandOnPath(name: string, pathEnv: string): string | null {
   for (const dir of pathEnv.split(":")) {
     if (dir === "") continue;
@@ -293,7 +300,7 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
     const out = join(dir, "out");
     let heard: Child;
     try {
-      heard = await runChild(whisper, ["-m", model, "-f", wav, "-l", language, "-t", threads, "-np", "-oj", "-of", out], dir);
+      heard = await runChild(whisper, ["-m", model, "-f", wav, "-l", whisperLanguage(language), "-t", threads, "-np", "-oj", "-of", out], dir);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       return fail(code === "ENOENT" ? EXIT.notReady : EXIT.engine, "whisper-cli failed");

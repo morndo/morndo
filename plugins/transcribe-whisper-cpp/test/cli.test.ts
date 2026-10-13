@@ -1,6 +1,6 @@
 // The executable, with a stand-in whisper-cli. ffmpeg is the system's. A machine without ffmpeg skips these
 // and says so; the plugin workflow installs it.
-import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -132,6 +132,46 @@ describe("morndo-transcribe", () => {
     expect(notReady.code).toBe(5);
     expect(notReady.stdout).toBe("");
     expect(notReady.stderr).toContain("model");
+  });
+
+  live("passes whisper the primary language of a region tag", async () => {
+    stage(true);
+    const seen = join(ROOT, "seen-lang");
+    writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh
+lang=""
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-l" ]; then lang="$2"; shift 2; continue; fi
+  if [ "$1" = "-of" ]; then out="$2"; shift 2; continue; fi
+  shift
+done
+printf '%s' "$lang" > ${JSON.stringify(seen)}
+if [ "$lang" != "pt" ]; then exit 0; fi
+cat > "$out.json" <<'EOF'
+{"result":{"language":"pt"},"transcription":[{"offsets":{"from":0,"to":400},"text":" porto"}]}
+EOF
+`);
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const note = join(ROOT, "pt.wav");
+    writeFileSync(note, pcmWav(1));
+    const heard = await run(["run", "--input", note, "--language", "pt-BR", "--threads", "1", "--max-seconds", "600", "--json"], pathEnv);
+    expect(readFileSync(seen, "utf8")).toBe("pt");
+    expect(heard.code).toBe(0);
+    expect(JSON.parse(heard.stdout)).toEqual({
+      protocol: 1, language: "pt", durationMs: 1000,
+      segments: [{ startMs: 0, endMs: 400, text: "porto" }],
+    });
+  });
+
+  live("whisper exiting 0 without a transcript is an engine error", async () => {
+    stage(true);
+    writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const note = join(ROOT, "silent.wav");
+    writeFileSync(note, pcmWav(1));
+    const missing = await run(["run", "--input", note, "--language", "en", "--threads", "1", "--max-seconds", "600", "--json"], pathEnv);
+    expect(missing.code).toBe(1);
+    expect(missing.stdout).toBe("");
   });
 
   live("SIGTERM removes the converted clip before the process exits", async () => {
