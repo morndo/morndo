@@ -15,8 +15,10 @@
     "apps/fleet/test",
     "apps/board-cli/test",
     "apps/connections/test",
+    "apps/updater/test",
     "test",
     "scripts",
+    "knowledge",
     "vitest.config.ts"
   ]
 }

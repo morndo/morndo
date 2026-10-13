@@ -16,7 +16,7 @@ const SOCKET = `morndo-val-f7-${process.pid}`;
 const FIXTURE = join(import.meta.dirname, "tmux-fake-claude.fixture.ts");
 const tmux = (...a: string[]) => execFileSync("tmux", ["-L", SOCKET, ...a], { encoding: "utf8" });
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-async function until(f: () => boolean, ms = 4000) { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await wait(100); } return false; }
+async function until(f: () => boolean, ms = 4000) { const t = performance.now(); while (performance.now() - t < ms) { if (f()) return true; await wait(100); } return false; }
 const now = Date.UTC(2026, 9, 1, 8);
 const auth: Authenticated = {
   session: { id: sessionId("s1"), endpointId: endpointId("ep1"), startedAt: now, lastSeenAt: now, verifiedAt: now - 1000, endedAt: null, endReason: null },

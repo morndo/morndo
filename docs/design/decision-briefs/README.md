@@ -226,7 +226,7 @@ With owner decision Q1's default, a worker lane's brief is a **draft**: it lands
 
 ### 5.5 Store, audit, notifications
 
-- **Store:** `decision_briefs` (id, ref, asker kind and name, token id, version, brief JSON, state: draft, open, withdrawn, settled, expired, filed and restated times, resolution) and a counter, in the next migration. A restate keeps the earlier versions' JSON for the record.
+- **Store:** `decision_briefs` (id, ref, asker kind and name, token id, version, brief JSON, state: draft, open, withdrawn, settled, expired, filed and restated times, resolution) and a counter, in migration 19. Migration 18 is `manager_deliveries` from the fleet-clients line (PR #34); that PR merges first. A restate keeps the earlier versions' JSON for the record.
 - **Audit:** `BriefFiled`, `BriefRestated`, `BriefWithdrawn`, `BriefSettled`, `BriefForwarded`, `BriefDeclined`: the id, version, asker and token id, never the text (as `BoardChanged`). Refusals are counted in the log, not audited.
 - **Notifications:** a brief that opens raises one counts-only Notification as a Decision waiting (N1, N2). Nothing new.
 - **Redaction:** brief JSON leaves the hub through the shared redactor, as every JSON body does (ADR-0018 §6.2).

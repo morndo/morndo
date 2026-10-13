@@ -36,7 +36,7 @@ beforeEach(async () => {
   h = opsHarness({ home: home.home, socket: t.socket });
   lane = await startLane(dirOf("a"));
 });
-afterEach(() => { h.close(); t.kill(); home.cleanup(); });
+afterEach(async () => { h.close(); await t.kill(); home.cleanup(); });
 
 const send = (text: string, key: string, expect: Record<string, unknown> = {}, workerId = lane.workerId, harness = h, timeoutMs?: number) =>
   harness.call("pane.send", { workerId, text, expect: { server: lane.stamp, window: "lane-a", ...expect } }, { key, ...(timeoutMs !== undefined ? { timeoutMs } : {}) });
@@ -96,7 +96,7 @@ describe("pane.send", () => {
 
 describe("pane reuse after a tmux restart (spec §9)", () => {
   async function restartWithReusedPane() {
-    t.kill();
+    await t.kill();
     const fresh = dirOf("b");
     t.tmux("new-session", "-d", "-s", "main", "-n", "lane-a", "-x", "100", "-y", "20", claude(fresh));
     expect(await until(() => screen("=main:0").includes("❯"))).toBe(true);
@@ -261,9 +261,9 @@ describe("pane.send with a tmux that stalls at the paste", () => {
     const saved = process.env.PATH;
     process.env.PATH = `${bin}:${saved}`;
     try {
-      const t0 = Date.now();
+      const t0 = performance.now();
       const first = await send("first", "hub:v31a", {}, lane.workerId, h, 10_000);
-      expect(Date.now() - t0).toBeLessThan(6500);
+      expect(performance.now() - t0).toBeLessThan(6500);
       expect(first).toMatchObject({ ok: false, error: { code: "internal", executed: "maybe" } });
       const second = await send("second", "hub:v31b", {}, lane.workerId, h, 10_000);
       expect(second).toMatchObject({ ok: true, result: { problem: null } });
@@ -297,9 +297,9 @@ describe("pane.send with a tmux that stalls at the paste", () => {
     const saved = process.env.PATH;
     process.env.PATH = `${bin}:${saved}`;
     try {
-      const t0 = Date.now();
+      const t0 = performance.now();
       const first = await send("typed once", "hub:killed-late", {}, lane.workerId, h, 2000);
-      expect(Date.now() - t0).toBeGreaterThan(2000);                     // answered after the deadline, at the kill
+      expect(performance.now() - t0).toBeGreaterThan(2000);                     // answered after the deadline, at the kill
       expect(first).toMatchObject({ ok: false, error: { code: "internal", executed: "maybe" } });
       expect(h.doneKeys.status("hub:killed-late")).toMatchObject({ state: "started" });
       expect(await until(() => submitted(join(home.home, "a")).length === 1)).toBe(true);

@@ -10,7 +10,7 @@ let home: { home: string; cleanup: () => void };
 let t: TestTmux;
 let h: Harness;
 beforeEach(() => { home = tempHome(); t = isolatedTmux(); h = opsHarness({ home: home.home, socket: t.socket }); });
-afterEach(() => { h.close(); t.kill(); home.cleanup(); });
+afterEach(async () => { h.close(); await t.kill(); home.cleanup(); });
 
 describe("the node's upload inbox is readable by the fleet", () => {
   it("serves a finished upload by path", async () => {

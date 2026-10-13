@@ -8,7 +8,8 @@ import { formatStatus, readStatus } from "./conn/status-file.ts";
 import { exitOnCrash } from "./crash.ts";
 import { DatabaseFromFuture } from "./db/migrations.ts";
 import { DatabaseUnreadable } from "./db/open.ts";
-import { NotLocalDisk } from "@morndo/service-kit";
+import { NotLocalDisk, productVersion } from "@morndo/service-kit";
+import { hostTmuxServer } from "@morndo/node-ops";
 import { JoinError, join } from "./join.ts";
 import { log } from "./log.ts";
 import { agentPaths } from "./paths.ts";
@@ -55,6 +56,11 @@ function ensureUtf8Locale() {
   else process.env.LC_CTYPE = "C.UTF-8";
 }
 
+if (cmd === "--version") {
+  print(productVersion());
+  process.exit(0);
+}
+
 switch (cmd) {
   case "join": {
     if (args.length !== 1) { process.stderr.write("usage: morndo-node join '<join string>'\n"); process.exit(2); }
@@ -80,6 +86,10 @@ switch (cmd) {
     if (Object.keys(hooks).length) log.warn(`test hooks are on (${Object.keys(hooks).join(", ")}): this agent is for tests only`);
     ensureUtf8Locale();
     const config = configOrExit();
+    try {
+      const hosted = await hostTmuxServer({ socket: config.policy.tmuxSocket });
+      log.info(`tmux server: ${hosted}`);
+    } catch (e) { log.error("could not start the tmux server outside this service", e); }
     let agent: RunningAgent;
     try { agent = await startAgent({ config, log, hooks }); }
     catch (e) {

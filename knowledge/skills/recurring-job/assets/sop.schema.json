@@ -1,0 +1,389 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SOP: a recurring job as data",
+  "description": "The shape of an SOP. sop-check enforces this shape and the safety rules a schema can't state: a gate before every outward step, round limits on loops, a why per engine step, citations that resolve (packages/domain/src/knowledge.ts).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sop",
+    "version",
+    "trigger",
+    "steps",
+    "done",
+    "stop",
+    "budget",
+    "report",
+    "metrics"
+  ],
+  "properties": {
+    "sop": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "The SOP's id."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "A changed step is a new version."
+    },
+    "kind": {
+      "enum": [
+        "template",
+        "instance"
+      ],
+      "description": "A template may keep <blanks>; an instance, the default, may not, and its schedule must be a valid POSIX cron line and a known time zone."
+    },
+    "patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The pattern skills it composes, by name."
+    },
+    "trigger": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "schedule": {
+          "type": "object",
+          "required": [
+            "cron",
+            "timezone"
+          ],
+          "properties": {
+            "cron": {
+              "type": "string"
+            },
+            "timezone": {
+              "type": "string"
+            }
+          }
+        },
+        "event": {
+          "type": "string"
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "description": "What a run needs and where it comes from. A missing input is a stop rule, not an error."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "gates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/gate"
+      }
+    },
+    "done": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string"
+      },
+      "description": "The checks that make a run done."
+    },
+    "stop": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "when",
+          "then"
+        ],
+        "properties": {
+          "when": {
+            "type": "string"
+          },
+          "then": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "required": [
+        "per_run",
+        "per_month",
+        "on_exceed"
+      ],
+      "properties": {
+        "per_run": {
+          "oneOf": [
+            {
+              "const": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^(0|\\d+(\\.\\d{1,2})? [A-Z]{3}|<[^<>]+>)$"
+            }
+          ],
+          "description": "A number with a currency, such as 5 USD; 0 means nothing may be spent and no engine step may run; a <blank> only in a template."
+        },
+        "per_month": {
+          "oneOf": [
+            {
+              "const": 0
+            },
+            {
+              "type": "string",
+              "pattern": "^(0|\\d+(\\.\\d{1,2})? [A-Z]{3}|<[^<>]+>)$"
+            }
+          ],
+          "description": "A number with a currency, such as 5 USD; 0 means nothing may be spent and no engine step may run; a <blank> only in a template."
+        },
+        "on_exceed": {
+          "enum": [
+            "stop",
+            "ask"
+          ]
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "required": [
+        "to",
+        "holds"
+      ],
+      "properties": {
+        "to": {
+          "type": "string"
+        },
+        "holds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "contains": {
+            "const": "citations"
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "from",
+          "every"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "every": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "class"
+      ],
+      "description": "A model class and a family rule, never a model id. The role's chain picks the engine.",
+      "properties": {
+        "class": {
+          "enum": [
+            "flagship",
+            "everyday",
+            "fast"
+          ]
+        },
+        "family": {
+          "oneOf": [
+            {
+              "const": "any"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "other-than"
+              ],
+              "properties": {
+                "other-than": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "effect",
+        "output",
+        "check"
+      ],
+      "oneOf": [
+        {
+          "required": [
+            "role",
+            "model",
+            "why"
+          ]
+        },
+        {
+          "required": [
+            "tool"
+          ]
+        }
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "The pattern skill this step follows."
+        },
+        "role": {
+          "type": "string",
+          "description": "An engine-layer role."
+        },
+        "model": {
+          "$ref": "#/$defs/model"
+        },
+        "options": {
+          "type": "object",
+          "description": "Engine options, such as grounding: off."
+        },
+        "tool": {
+          "type": "string",
+          "description": "A deterministic program; no model runs."
+        },
+        "effect": {
+          "enum": [
+            "local",
+            "outward",
+            "irreversible"
+          ],
+          "description": "Every step says it. outward and irreversible need a gate before the step."
+        },
+        "why": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          },
+          "description": "Citations: a skill name, notes/<id>, pref:<id>, models.dev@<date>, or 'no evidence: default'."
+        },
+        "input": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "check": {
+          "type": "string"
+        },
+        "on_fail": {
+          "type": "string",
+          "description": "The earlier step a failed check returns to."
+        },
+        "max_rounds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "before",
+        "who",
+        "shows",
+        "options",
+        "on_silence"
+      ],
+      "properties": {
+        "before": {
+          "type": "string",
+          "description": "The step the gate sits before."
+        },
+        "who": {
+          "const": "principal"
+        },
+        "shows": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "contains": {
+            "const": "approve"
+          }
+        },
+        "on_change": {
+          "type": "string",
+          "description": "The earlier step a requested change returns to."
+        },
+        "max_changes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "on_silence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "after",
+            "then"
+          ],
+          "description": "Silence never approves.",
+          "properties": {
+            "after": {
+              "type": "string"
+            },
+            "then": {
+              "enum": [
+                "expire",
+                "drop",
+                "pause"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

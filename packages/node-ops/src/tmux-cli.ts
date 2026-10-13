@@ -28,10 +28,11 @@ export const tmuxLiteral = (s: string): string => {
 
 // What a failed tmux call means (tmux 3.6a, seen 2026-10-07): with no server, no session or no such pane, tmux exits 1 and
 // says so ("no server running on ...", "error connecting to ... (No such file or directory)", "can't find session|window|
-// pane: ..."). Anything else (a timeout kill, a spawn error such as EMFILE, another exit code or other words) is a tmux
-// that did not answer, which says nothing about what exists. The caller must not read it as "nothing there".
+// pane: ..."). A server that is up but has no session says "no current target" (tmux 3.4, seen 2026-10-11), which is the
+// same fact: nothing is there. Anything else (a timeout kill, a spawn error such as EMFILE, another exit code or other
+// words) is a tmux that did not answer, which says nothing about what exists. The caller must not read it as "nothing there".
 export type TmuxFailure = "absent" | "unavailable";
-const ABSENT = /^(can't find (session|window|pane)\b|no server running\b|error connecting to .+ \((No such file or directory|Connection refused)\))/m;
+const ABSENT = /^(can't find (session|window|pane)\b|no server running\b|no current target\b|error connecting to .+ \((No such file or directory|Connection refused)\))/m;
 export function tmuxFailure(e: unknown): TmuxFailure {
   const x = (typeof e === "object" && e !== null ? e : {}) as { code?: unknown; killed?: unknown; signal?: unknown; stderr?: unknown };
   return x.code === 1 && x.killed !== true && (x.signal === null || x.signal === undefined) && typeof x.stderr === "string" && ABSENT.test(x.stderr)

@@ -99,7 +99,7 @@ export async function startInProcessHub(o: {
     briefs: () => filed.briefs?.sightings() ?? [],
   });
   const briefs = new BriefService({
-    store, escalations, managerName: "manager", ...(o.now ? { now: o.now } : {}),
+    store, escalations, managerName: "manager", hasLedger: o.ledger != null, ...(o.now ? { now: o.now } : {}),
     managerWorkerId: () => {
       const named = watch.workers().filter(w => w.name === "manager");
       return named.some(w => w.conflict) ? null : named[0]?.id ?? null;

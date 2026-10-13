@@ -8,7 +8,7 @@ let home: { home: string; cleanup: () => void };
 let t: TestTmux;
 let h: Harness;
 beforeEach(() => { home = tempHome(); t = isolatedTmux(); h = opsHarness({ home: home.home, socket: t.socket }); });
-afterEach(() => { h.close(); t.kill(); home.cleanup(); });
+afterEach(async () => { h.close(); await t.kill(); home.cleanup(); });
 
 describe("an inventory read that tmux did not answer", () => {
   it("rejects and keeps the last snapshot, and recovers when tmux answers again", async () => {
@@ -33,7 +33,7 @@ describe("an inventory read that tmux did not answer", () => {
   it("still answers [] when the server is gone (control)", async () => {
     t.tmux("new-session", "-d", "-s", "main", "-n", "api", "sleep 600");
     await h.inventory.refresh();
-    t.kill();
+    await t.kill();
     expect((await h.inventory.refresh()).panes).toEqual([]);
   });
 });
