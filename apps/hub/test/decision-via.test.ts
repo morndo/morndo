@@ -113,7 +113,8 @@ describe("the via of an answer, per client", () => {
 // longer for which client, so no device may claim it. The record itself is unchanged.
 describe("a Decision the record can no longer attribute", () => {
   let dir: string, store: Store, ledgerPath: string;
-  const manager: Message[] = [{
+  let manager: Message[];
+  const aManager = (): Message[] => [{
     id: "m1", at: T0 - MIN, author: { kind: "agent", name: "manager" }, kind: "text",
     text: "The demo release is ready. CI is green.\n\n[buttons ny-7] ship=Ship it | hold=Hold for a day",
   }];
@@ -125,6 +126,7 @@ describe("a Decision the record can no longer attribute", () => {
 
   beforeEach(() => {
     now = T0;
+    manager = aManager();
     dir = mkdtempSync(join(tmpdir(), "morndo-via-"));
     store = new Store(dir);
     ledgerPath = join(dir, "ledger.json");
@@ -154,6 +156,31 @@ describe("a Decision the record can no longer attribute", () => {
     expect(r.ok).toBe(true);
     expect(r.item?.decision?.via).toBe("here");                                              // the endpoint that answered
     expect(s.seenBy(endpointId("ep1")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
+  });
+
+  // The direct (non-inbox) path's race (review of PR #55): the hub has typed its own tap into the manager's pane, and a
+  // poll reads it in the manager's conversation while the send is still in flight — before #delivered records the
+  // answer. That sighting must not settle the Decision as "elsewhere" with no endpoint: the endpoint whose request
+  // typed it is recorded, and it reads "here".
+  it("the hub's own typed tap, seen in the manager's history before the answer is recorded, stays the answering endpoint's", async () => {
+    let s: EscalationService;
+    const send = async (_pane: string, text: string) => {
+      manager.push({ id: "m-tap", at: now, author: { kind: "principal", name: "You" }, kind: "text", text });   // the pane has the tap
+      s.poll();                                                                                                  // the hub's own poll reads it first
+      return { problem: null, typedAt: 0 };
+    };
+    s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now, send,
+    });
+    s.poll();
+    const r = await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, randomUUID());
+    expect(r.ok).toBe(true);
+    expect(r.item?.decision?.via).toBe("here");                                              // not "elsewhere": this endpoint's answer
+    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
+    expect(s.seenBy(endpointId("ep1")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("ep2"));   // recorded, not just said
+    s.poll();                                                                                // the tap line stays in the history
     expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
 });
