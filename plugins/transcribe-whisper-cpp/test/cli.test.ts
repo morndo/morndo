@@ -1,12 +1,13 @@
 // The executable, with a stand-in whisper-cli. ffmpeg is the system's. A machine without ffmpeg skips these
 // and says so; the plugin workflow installs it.
-import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseProbe, parseRun } from "@morndo/protocol";
 import { commandOnPath } from "../src/morndo-transcribe.mts";
+import { contractSubject } from "./host.ts";
 import { pcmWav } from "./audio.ts";
 
 const ffmpeg = commandOnPath("ffmpeg", process.env.PATH ?? "");
@@ -132,7 +133,95 @@ describe("morndo-transcribe", () => {
     expect(notReady.stdout).toBe("");
     expect(notReady.stderr).toContain("model");
   });
+
+  live("SIGTERM removes the converted clip before the process exits", async () => {
+    await expectStopped("SIGTERM");
+  });
+
+  live("SIGINT removes the converted clip before the process exits", async () => {
+    await expectStopped("SIGINT");
+  });
+
+  live("an abort leaves the host's temp dir empty", async () => {
+    stage(true);
+    writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nsleep 30\n");
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const note = join(ROOT, "abort.wav");
+    writeFileSync(note, pcmWav(1));
+    const watch = mkdtempSync(join(tmpdir(), "morndo-abort-"));
+    const previous = process.env.TMPDIR;
+    process.env.TMPDIR = watch;
+    const ac = new AbortController();
+    const subject = contractSubject(join(BIN, "morndo-transcribe"), join(BIN, "morndo-transcribe"), join(ROOT, "unused.wav"));
+    const pending = subject.transcriber.transcribe({
+      path: note, language: "auto", threads: 1, maxSeconds: 600, signal: ac.signal,
+    });
+    try {
+      expect(await until(() => hasClip(watch), 5000)).toBe(true);
+      ac.abort();
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      expect(readdirSync(watch)).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previous;
+      rmSync(watch, { recursive: true, force: true });
+      for (const pid of subject.group?.() ?? []) {
+        try { process.kill(-pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+  });
 });
+
+function hasClip(dir: string): boolean {
+  try {
+    return readdirSync(dir, { recursive: true }).some(name => String(name).endsWith("in.wav"));
+  } catch {
+    return false;
+  }
+}
+
+function until(ready: () => boolean, ms: number): Promise<boolean> {
+  const start = Date.now();
+  return new Promise(resolve => {
+    const tick = () => {
+      if (ready()) resolve(true);
+      else if (Date.now() - start > ms) resolve(false);
+      else setTimeout(tick, 20);
+    };
+    tick();
+  });
+}
+
+async function expectStopped(signal: NodeJS.Signals): Promise<void> {
+  stage(true);
+  writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nsleep 30\n");
+  chmodSync(join(BIN, "whisper-cli"), 0o755);
+  const watch = mkdtempSync(join(tmpdir(), "morndo-stop-"));
+  const note = join(ROOT, `stop-${signal}.wav`);
+  writeFileSync(note, pcmWav(1));
+  const child: ChildProcess = spawn(process.execPath, [
+    join(BIN, "morndo-transcribe"), "run",
+    "--input", note, "--language", "auto", "--threads", "1", "--max-seconds", "600", "--json",
+  ], {
+    detached: true,
+    env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: watch },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout?.resume();
+  child.stderr?.resume();
+  try {
+    expect(await until(() => hasClip(watch), 5000)).toBe(true);
+    if (child.pid !== undefined) process.kill(-child.pid, signal);
+    const code = await new Promise<number | null>(resolve => child.on("close", resolve));
+    expect(code).toBe(signal === "SIGINT" ? 130 : 143);
+    expect(readdirSync(watch)).toEqual([]);
+  } finally {
+    if (child.pid !== undefined) {
+      try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+    }
+    rmSync(watch, { recursive: true, force: true });
+  }
+}
 
 it.runIf(ffmpeg === null)("the CLI runs need ffmpeg, which this machine does not have on PATH", () => {
   expect(ffmpeg).toBeNull();

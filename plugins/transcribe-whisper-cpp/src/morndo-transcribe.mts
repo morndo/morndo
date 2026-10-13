@@ -4,12 +4,38 @@
 // whisper-cli writes its JSON, which this maps to one protocol document on stdout. Nothing here uses the
 // network. whisper.cpp's -oj offsets are milliseconds: examples/cli/cli.cpp writes t0 * 10, and t0 is
 // whisper's 10 ms unit (v1.9.5, read 2026-10-13).
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 const EXIT = { usage: 2, unreadable: 3, tooLong: 4, notReady: 5, engine: 1 } as const;
+// Node's default SIGTERM and SIGINT end the process without running an async `finally`, so the converted
+// clip would stay under the temp directory. The handler removes it, then exits.
+let scratch: string | null = null;
+const children = new Set<ChildProcess>();
+
+function clearScratch(): void {
+  const dir = scratch;
+  scratch = null;
+  if (dir !== null) rmSync(dir, { recursive: true, force: true });
+}
+
+function onStop(signal: NodeJS.Signals): void {
+  for (const child of children) {
+    try { child.kill("SIGTERM"); } catch { /* already gone */ }
+  }
+  clearScratch();
+  process.exit(signal === "SIGINT" ? 130 : 143);
+}
+
+let stopsBound = false;
+function bindStops(): void {
+  if (stopsBound) return;
+  stopsBound = true;
+  process.on("SIGTERM", () => onStop("SIGTERM"));
+  process.on("SIGINT", () => onStop("SIGINT"));
+}
 const CHOICE = /^(auto|[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*)$/;
 const LANGUAGE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
 const POSITIVE = /^[1-9]\d*$/;
@@ -221,13 +247,17 @@ type Child = { code: number; stderr: string };
 function runChild(cmd: string, args: string[], cwd: string): Promise<Child> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd, stdio: ["ignore", "ignore", "pipe"] });
+    children.add(child);
     let stderr = "";
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       if (stderr.length < 4096) stderr += chunk.slice(0, 4096 - stderr.length);
     });
     child.on("error", reject);
-    child.on("close", (code) => resolve({ code: code ?? 1, stderr }));
+    child.on("close", (code) => {
+      children.delete(child);
+      resolve({ code: code ?? 1, stderr });
+    });
   });
 }
 
@@ -246,6 +276,7 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
   const model = join(root, "models", manifest.modelFile);
   if (ffmpeg === null) return fail(EXIT.notReady, "missing: ffmpeg");
   const dir = mkdtempSync(join(tmpdir(), "morndo-transcribe-"));
+  scratch = dir;
   try {
     const wav = join(dir, "in.wav");
     let converted: Child;
@@ -278,11 +309,12 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
     if (mapped === null) return fail(EXIT.engine, "whisper-cli json was not protocol 1");
     return finish(mapped);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    clearScratch();
   }
 }
 
 export async function main(argv: readonly string[], binDir: string): Promise<number> {
+  bindStops();
   const root = join(binDir, "..");
   const pathEnv = process.env.PATH ?? "";
   const [cmd, ...rest] = argv;
