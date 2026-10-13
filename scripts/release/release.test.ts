@@ -281,6 +281,7 @@ describe("feed", () => {
     const tampered = files.map(file => file.name === "latest.json" ? { ...file, body: "{\"seq\":9}\n" } : file);
     expect(() => writeVerifiedSite(site, signers, tampered)).toThrow(/signature/i);
     expect(existsSync(join(site, "latest.json"))).toBe(false);
+    expect(existsSync(join(site, ".check"))).toBe(false);
     writeVerifiedSite(site, signers, files);
     expect(readFileSync(join(site, "latest.json"), "utf8")).toBe(latest);
   });

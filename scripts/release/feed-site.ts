@@ -1,7 +1,8 @@
 // Pages reads the feed branch and writes the site. This file loads no app code:
 // gh and ssh-keygen are enough, so the job does not need npm ci.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { freshSite } from "./pages.ts";
@@ -46,16 +47,19 @@ export function readAt(repository: string, sha: string, file: string): string | 
 }
 
 export function writeVerifiedSite(dir: string, signers: string, files: readonly { name: string; body: string }[]): void {
-  const scratch = join(dir, ".check");
-  mkdirSync(scratch, { recursive: true });
-  for (const channel of ["latest", "stable"] as const) {
-    const body = files.find(file => file.name === `${channel}.json`)?.body;
-    const signature = files.find(file => file.name === `${channel}.json.sig`)?.body;
-    if (body === undefined || signature === undefined) throw new Error(`feed ${channel} is missing`);
-    verifyFeed(signers, body, signature, scratch);
+  const scratch = mkdtempSync(join(tmpdir(), "morndo-feed-"));
+  try {
+    for (const channel of ["latest", "stable"] as const) {
+      const body = files.find(file => file.name === `${channel}.json`)?.body;
+      const signature = files.find(file => file.name === `${channel}.json.sig`)?.body;
+      if (body === undefined || signature === undefined) throw new Error(`feed ${channel} is missing`);
+      verifyFeed(signers, body, signature, scratch);
+    }
+    mkdirSync(dir, { recursive: true });
+    for (const file of files) writeFileSync(join(dir, file.name), file.body);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
-  rmSync(scratch, { recursive: true, force: true });
-  for (const file of files) writeFileSync(join(dir, file.name), file.body);
 }
 
 export function materialiseFeed(repository: string, dir: string, signers = "trust/feed_allowed_signers"): void {
