@@ -25,9 +25,10 @@ import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
 import { managerInbox } from "./adapters/manager-inbox.ts";
 import { EscalationService, managerOf } from "./application/escalation-service.ts";
+import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { fileStore } from "./adapters/files.ts";
-import { uploadInbox } from "./adapters/uploads.ts";
+import { noteMissingFfmpeg, uploadInbox } from "./adapters/uploads.ts";
 import { desktopTarget, legacyPorts } from "./adapters/local-ports.ts";
 import { engineLanesFor } from "./adapters/engine-registry.ts";
 import { FleetClient, checkFleet } from "./adapters/fleet-client.ts";
@@ -40,6 +41,10 @@ import { BoardService } from "./application/board-service.ts";
 import { AgentAccess } from "./application/agent-access.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
+import { locateTranscriber } from "./adapters/transcriber-path.ts";
+import { processTranscriber } from "./adapters/transcriber-process.ts";
+import { guardNow, loadTranscriptionSettings, openMachineGuard } from "./adapters/transcription-config.ts";
+import { fileOnDisk, TranscriptionService } from "./application/transcription-service.ts";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -64,7 +69,8 @@ inbox directory: its answers and messages queue there instead of being typed), M
 VNC server), MORNDO_VNC_PASSWORD_FILE, MORNDO_FLEET_SOCKET (the fleet service's client socket; unset, this
 machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane registry directory; off unless set),
 MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet) and MORNDO_ENGINES (the engine layer's
-CLI, engine-layer bin/engines: the Engines page).`;
+CLI, engine-layer bin/engines: the Engines page). MORNDO_TRANSCRIBER (absolute path of a protocol-1 plugin;
+otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcribe).`;
 
 if (argvWantsVersion(process.argv)) {
   process.stdout.write(`${productVersion()}\n`);
@@ -144,6 +150,7 @@ switch (cmd) {
       },
     };
     const inbox = uploadInbox({ dir: config.inboxDir, registry: store });
+    void noteMissingFfmpeg(line => log.warn(line));
     // A Command is judged on arrival against what the worker waits for now (S6). With a fleet, a repeat of a send in
     // doubt asks the worker's node (op.status, spec §3.1).
     // The manager's inbox (ADR-0010): the manager's answers and messages queue there; one deliverer types each once.
@@ -151,6 +158,7 @@ switch (cmd) {
     const steering = new SteeringService(store, typist, Date.now, () => access.policy(), inbox, id => observation.waitingOn(id),
       id => observation.nameOf(id), ports.uploads, ports.sendStatus,
       queue ? { isManager: id => id === managerPane(), inbox: queue } : null);
+    const filed: { briefs: BriefService | null } = { briefs: null };
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -163,7 +171,10 @@ switch (cmd) {
       // An answer in doubt is settled as a send is, with its node (op.status; final review C1).
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
       inbox: queue,
+      briefs: () => filed.briefs?.sightings() ?? [],
     });
+    const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
+    filed.briefs = briefs;
     const remote = new RemoteService({
       store, terminal: ports.terminal, policy: () => access.policy(),
       panes: () => observation.snapshot().workers.map(w => w.id as string),
@@ -195,10 +206,40 @@ switch (cmd) {
     const usage = new UsageService({ store });
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
+    const txSettings = loadTranscriptionSettings(config.dataDir, line => log.warn(line));
+    const machine = openMachineGuard(txSettings.guard);
+    try { await machine.refresh(); }
+    catch (e) { log.warn("transcription: machine figure unread", e); }
+    // Each probe looks again: a plugin installed while the hub runs turns the feature on, and one removed or turned
+    // unsafe turns it off (design §6). The one known path, never PATH.
+    const transcription = new TranscriptionService({
+      store,
+      transcriber: null,
+      locate: () => {
+        const located = locateTranscriber(process.env, config.dataDir);
+        return located.path !== null
+          ? { transcriber: processTranscriber(located.path), unavailable: null }
+          : { transcriber: null, unavailable: { ready: false, reason: located.reason, detail: located.detail } };
+      },
+      // An upload is a recording only for the endpoint that made it (S2's rule); an agent's file is anyone's, as
+      // the design has it. Whatever the id names, the bytes settle whether it is audio (S1).
+      file: (recording, caller) => {
+        if (recording.kind === "upload") {
+          const upload = inbox.get(recording.id);
+          if (!upload || (caller && upload.endpointId !== caller.endpointId)) return null;
+          return fileOnDisk(upload.path);
+        }
+        return fileOnDisk(files.get(recording.id)?.file);
+      },
+      limit: txSettings.limit, timeoutSec: txSettings.timeoutSec, maxSeconds: txSettings.maxSeconds, threads: txSettings.threads,
+      guard: () => guardNow(txSettings.guard, machine.read),
+      log: line => log.info(line),
+    });
+    void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
       push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs,
-      updates: { holdPath: holdFile(process.env.HOME || homedir()) },
+      transcription, briefs, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
     });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
     // Old pairing tokens and long-ended sessions, on start and daily; never the audit or the decisions (A8).
@@ -240,7 +281,7 @@ switch (cmd) {
     }, Math.max(config.pollMs, 1000));
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
+    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     break;

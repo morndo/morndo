@@ -675,10 +675,14 @@ export class JobSupervisor {
     let sight = this.#capSights.get(id) ?? null;
     let seen = seenUsec;
     for (;;) {
-      const step = capStep(sight, this.#logSize(id), this.#store.logBytes, performance.now(), true);
-      if (step.kind !== "grace") break;
-      sight = step.sight;
-      this.#capSights.set(id, sight);
+      // A failed stat is not a size of 0. Skip this look: no sighting, and no stop.
+      const size = this.#logSize(id);
+      if (size !== null) {
+        const step = capStep(sight, size, this.#store.logBytes, performance.now(), true);
+        if (step.kind !== "grace") break;
+        sight = step.sight;
+        this.#capSights.set(id, sight);
+      }
       await wait(UNIT_CAP_LOOK_MS);
       if (this.#closed || !this.#open(id)) return;
       if (view.mainPid > 0 && processAlive(view.mainPid)) continue;
@@ -695,8 +699,8 @@ export class JobSupervisor {
     await this.#exclusive(id, () => (this.#closed ? undefined : this.#stopForCap(id, seen)));
   }
 
-  #logSize(id: string): number {
-    try { return statSync(join(this.#store.dir, `${id}.log`)).size; } catch { return 0; }
+  #logSize(id: string): number | null {
+    try { return statSync(join(this.#store.dir, `${id}.log`)).size; } catch { return null; }
   }
 
   async #cancelUnit(id: string): Promise<Result<NoticeHandoff, SuperviseProblem>> {

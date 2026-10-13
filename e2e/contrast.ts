@@ -7,8 +7,8 @@ import { TARGETS, measure } from "../packages/brand/src/contrast.ts";
 // ---- the contrast of what a screen renders (criterion 17): every text's colour against the background it sits on, as
 // the brand's tokens; each pair must be one the brand's contrast test holds to its target (packages/brand).
 const hex = (rgb: string) => { const m = /rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)/.exec(rgb); return m && (m[4] === undefined || Number(m[4]) === 1) ? `#${[m[1], m[2], m[3]].map(x => Number(x).toString(16).padStart(2, "0")).join("")}` : null; };
-export async function contrastProblems(page: Page, theme: ThemeName): Promise<string[]> {
-  const pairs = await page.evaluate(() => {
+export async function contrastProblems(page: Page, theme: ThemeName, root = "body"): Promise<string[]> {
+  const pairs = await page.evaluate((root) => {
     const out: { fg: string; bg: string; text: string }[] = [];
     // A colour as [r, g, b, a] (0-255, alpha 0-1), from rgb()/rgba() or color(srgb …), as browsers compute them.
     const parse = (c: string): [number, number, number, number] | null => {
@@ -32,7 +32,8 @@ export async function contrastProblems(page: Page, theme: ThemeName): Promise<st
       for (const l of layers.reverse()) base = [0, 1, 2].map(i => l[3] * (l[i] ?? 0) + (1 - l[3]) * (base[i] ?? 0)).concat(1) as [number, number, number, number];
       return `rgb(${base.slice(0, 3).map(v => Math.round(v)).join(", ")})`;
     };
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const start = document.querySelector(root) ?? document.body;
+    const walker = document.createTreeWalker(start, NodeFilter.SHOW_TEXT);
     for (let t = walker.nextNode(); t; t = walker.nextNode()) {
       const el = t.parentElement;
       if (!el || !t.textContent?.trim() || el.closest("pre.screen, .sr, [aria-hidden='true']")) continue;
@@ -41,7 +42,7 @@ export async function contrastProblems(page: Page, theme: ThemeName): Promise<st
       out.push({ fg: s.color, bg: bgOf(el), text: t.textContent.trim().slice(0, 30) });
     }
     return out;
-  });
+  }, root);
   const names = (h: string) => (Object.entries(themes[theme]) as [TokenName, string][]).filter(([, v]) => v.toLowerCase() === h).map(([k]) => k);
   const problems = new Set<string>();
   for (const p of pairs) {

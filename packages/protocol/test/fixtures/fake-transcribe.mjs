@@ -75,6 +75,11 @@ if (cmd === "probe") {
     hanger = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e9)"], { stdio: "ignore" });
     hanger.ref();
     setInterval(() => {}, 1e9);
+  } else if (base.startsWith("stubborn")) {
+    // A group member that ignores SIGTERM and holds no pipe: only the group's SIGKILL takes it.
+    hanger = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1e9)"], { stdio: "ignore" });
+    hanger.ref();
+    setInterval(() => {}, 1e9);
   } else {
     const heard = language === "auto" ? "de" : language;
     const body = JSON.stringify({

@@ -171,6 +171,51 @@ export const MIGRATIONS: readonly Migration[] = [
     compat: "additive",
     up: db => { if (!hasColumn(db, "job_notices", "acked")) db.exec("ALTER TABLE job_notices ADD COLUMN acked INTEGER NOT NULL DEFAULT 0"); },
   },
+  {
+    // PR #34 (fleet-clients) merges first. 18 is that line's manager_deliveries, already running live.
+    // A database at 18 runs only 19. Numbers stay contiguous, so this list and that one agree on 18.
+    version: 18,
+    name: "manager_deliveries (migration 18): the manager's answers and messages in the fleet's delivery queue, followed across hub restarts (fleet-clients §9.1)",
+    compat: "additive",
+    up: db => {
+      db.exec(`CREATE TABLE IF NOT EXISTS manager_deliveries (
+        delivery_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('answer', 'command')),
+        escalation_id TEXT, ask TEXT, choice TEXT, endpoint_id TEXT NOT NULL, session_id TEXT NOT NULL, request_id TEXT NOT NULL,
+        queued_at INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('sending', 'queued', 'typed', 'held', 'delivered', 'uncertain', 'given_up')),
+        updated_at INTEGER NOT NULL)`);
+      db.exec("CREATE INDEX IF NOT EXISTS manager_deliveries_request ON manager_deliveries (endpoint_id, request_id)");
+      db.exec("CREATE INDEX IF NOT EXISTS manager_deliveries_answer ON manager_deliveries (escalation_id, queued_at)");
+    },
+  },
+  {
+    version: 19,
+    name: "decision briefs (ADR-0023): one row per version, so a restate keeps the earlier brief; the counter lives in settings",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS decision_briefs (
+        id TEXT NOT NULL, version INTEGER NOT NULL, ref TEXT,
+        asker_kind TEXT NOT NULL, asker_name TEXT NOT NULL, token_id TEXT NOT NULL,
+        filed_by_kind TEXT NOT NULL, filed_by_name TEXT NOT NULL,
+        brief TEXT NOT NULL, state TEXT NOT NULL, filed_at INTEGER NOT NULL,
+        resolution TEXT, drafted_by TEXT, closed_at INTEGER,
+        PRIMARY KEY (id, version));
+      CREATE INDEX IF NOT EXISTS decision_briefs_state ON decision_briefs (state, asker_kind, asker_name);
+    `),
+  },
+  {
+    version: 20,
+    name: "transcriptions (ADR-0021): one row per endpoint, recording and language, the body the domain already decided",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS transcriptions (
+        id TEXT NOT NULL, recording_kind TEXT NOT NULL, recording_id TEXT NOT NULL, language TEXT NOT NULL,
+        endpoint_id TEXT NOT NULL,
+        accepted_at INTEGER NOT NULL, body TEXT NOT NULL,
+        PRIMARY KEY (id, recording_kind, recording_id, language, endpoint_id));
+      CREATE INDEX IF NOT EXISTS transcriptions_id ON transcriptions (id);
+    `),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
