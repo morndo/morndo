@@ -629,6 +629,28 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
+  it("keeps a cancelled passkey note on the card that started it", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true, passkeyHold);
+    await push(tab, [release, patch]);
+    await queue(tab, [STEP_UP]);
+    await tab.locator("button.banner.you").click();
+    const card = tab.getByRole("article");
+    await card.getByRole("button", { name: "Ship today" }).click();
+    const confirm = card.getByRole("button", { name: "Confirm with passkey and send" });
+    await confirm.waitFor({ timeout: 15_000 });
+    const started = await card.locator("h2").innerText();
+    await confirm.click();
+    await tab.waitForFunction(() => (globalThis as unknown as { __passkeyAsks: number }).__passkeyAsks >= 1);
+    await tab.getByRole("button", { name: "Later", exact: true }).click();
+    await expect.poll(async () => card.locator("h2").innerText()).not.toBe(started);
+    await releasePasskey(tab, false);
+    await tab.waitForTimeout(500);
+    expect(await card.getByText("Not answered: the passkey check didn't finish.").count()).toBe(0);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("carries an answer from the sheet through an unknown outcome to Try again", { timeout: 60_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track, "", true);

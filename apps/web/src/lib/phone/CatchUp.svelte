@@ -137,7 +137,10 @@
     if (top?.kind === "decision" && session.refusal?.key === top.key && MAY_HAVE_GONE.has(session.refusal.code) && item?.status === "answered" && viaOf(item) === "here") session.confirmAnswered(top.key);
   });
   async function verifyAgain() {
-    note = await session.retryStepUp(feed, verify);
+    const key = top?.key ?? null;
+    const said = await session.retryStepUp(feed, verify);
+    if ((top?.key ?? null) !== key) return;
+    note = said;
   }
   // Queued in the outbox, or false with a note (the text stays in the box).
   async function reply(text: string, seen: string): Promise<boolean> {
