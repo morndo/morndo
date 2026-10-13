@@ -28,3 +28,12 @@ export function widthAfterWindowChange(chosen: number, windowWidth: number, side
   const kept = clampRight(chosen);
   return { chosen: kept, drawn: dockedWidth(kept, windowWidth, sidebarWidth) };
 }
+
+// Arrow keys and drags add `delta` to the chosen width (wider is positive), not to the narrower width
+// a tight window is drawing. While that drawn width is below the choice, only a gesture that lands
+// wider than what is drawn replaces it. A click, or a nudge that would store the drawn width, does not.
+export function commitWidth(chosen: number, drawn: number, delta: number): number {
+  const next = clampRight(chosen + delta);
+  if (drawn < chosen && !(delta > 0 && next > drawn)) return clampRight(chosen);
+  return next;
+}

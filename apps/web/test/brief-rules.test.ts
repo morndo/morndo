@@ -2,7 +2,7 @@
 // inline markdown, and the shared answer session (restate resets a pick; the shown brief stays put).
 import { describe, expect, it } from "vitest";
 import { dueLine } from "../src/lib/desktop/decisions.ts";
-import { dockedWidth, layoutIsNarrow, widthAfterWindowChange, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
+import { commitWidth, dockedWidth, layoutIsNarrow, widthAfterWindowChange, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
 import { openSession, pick, showNew, noteClosed, releaseAbsentSession, ABSENT_GRACE_MS } from "../src/lib/desktop/answer-session.ts";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
 
@@ -41,6 +41,14 @@ describe("widening the decisions panel stays docked", () => {
     const restored = widthAfterWindowChange(tight.chosen, windowWidth, 260);
     expect(restored.drawn).toBe(546);
     expect(restored.chosen).toBe(600);
+  });
+  it("an arrow or a drag on a narrow window commits relative to the chosen width", () => {
+    expect(commitWidth(640, 480, 0)).toBe(640);
+    expect(commitWidth(640, 480, 16)).toBe(640);
+    expect(commitWidth(640, 480, -16)).toBe(640);
+    expect(commitWidth(500, 480, 16)).toBe(516);
+    expect(commitWidth(480, 480, 16)).toBe(496);
+    expect(commitWidth(480, 480, -16)).toBe(464);
   });
 });
 

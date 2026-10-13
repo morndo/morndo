@@ -398,7 +398,7 @@
           {/if}
         </main>
         {#if rightShown}
-          <RightPanel waiting={decisionsWaiting} width={drawnRight} onWidth={(n) => setRightWidth(n)} onCommit={(n) => setRightWidth(n, true)} onClose={closeRight}>
+          <RightPanel waiting={decisionsWaiting} width={drawnRight} chosen={rightWidth} onWidth={(n) => setRightWidth(n)} onCommit={(n) => setRightWidth(n, true)} onClose={closeRight}>
             <DecisionsPanel items={feed.decisions} ledger={feed.ledger} {now} {verifiedFresh} onAnswer={answer}
               onOpenScreen={openScreen} onOpenChat={openChat} onAskBrief={askForBrief} />
           </RightPanel>
