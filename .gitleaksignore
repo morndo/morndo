@@ -10,3 +10,9 @@ d752906f6d555537b5f9044cb4a96d9e2270524e:docs/design/fleet-core/plan/03-agent.md
 29674697f741692cb6b9dbc4adc972da19cad5fd:apps/hub/test/log-agreement.test.ts:generic-api-key:13
 # A secrets wire test's view fixture: keyedFingerprint "0123456789ab", a made-up 12-hex value (later replaced by an all-zero one).
 2ebda4874c58fab304c5bfdcbd93629fff234ded:packages/protocol/test/secrets-wire-review.test.ts:generic-api-key:12
+# The public nodejs/release-keys commit pin, not a secret.
+b60872718c9405192374cd81ae414bf02b7dcd4b:scripts/release/node-pin.ts:generic-api-key:8
+# The public nodejs/release-keys commit pin, not a secret.
+14ee7b51b59853933da0ea75a2d74e7a1b433a7d:.github/workflows/release.yml:generic-api-key:79
+# The public actions/create-github-app-token commit pin, not a secret.
+ee5672b79729e9fdf9e7366a973ffba5552eb545:scripts/release/workflow.test.ts:generic-api-key:9
