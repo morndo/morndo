@@ -1,0 +1,101 @@
+# Re-sign the live feeds once a week, and fail when a newer Node 24 is published (design §9.5, §9.3).
+# Promotion and withdrawal are a later change. Job permissions replace the workflow permissions.
+# Cron is Monday 06:17 UTC, off the hour.
+#
+# Pins, resolved from the release tags on 2026-10-13:
+#   actions/checkout v7.0.1                3d3c42e5aac5ba805825da76410c181273ba90b1
+#   actions/setup-node v7.0.0              820762786026740c76f36085b0efc47a31fe5020
+#   actions/upload-pages-artifact v5.0.0   fc324d3547104276b827a68afc52ff2a11cc49c9
+#   actions/deploy-pages v5.0.1            368f82528645a54fb793d4d04e342629a3f51346
+name: Feed
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: morndo-release
+  cancel-in-progress: false
+
+jobs:
+  resign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: feed
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - name: Verify the live feed, then re-sign
+        env:
+          FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY}"
+          owner="${repo%%/*}"
+          name="${repo#*/}"
+          base="https://${owner}.github.io/${name}"
+          now=$(node -e "process.stdout.write(String(Date.now()))")
+          mkdir -p site
+          test -s trust/feed_allowed_signers
+          umask 077
+          key="$RUNNER_TEMP/feed.key"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$FEED_SSH_KEY" > "$key"
+          for channel in latest stable; do
+            curl -fsSL -o "site/${channel}.json" "${base}/${channel}.json"
+            curl -fsSL -o "site/${channel}.json.sig" "${base}/${channel}.json.sig"
+            ssh-keygen -Y verify -f trust/feed_allowed_signers -I feed@morndo.github.io -n feed@morndo.github.io -s "site/${channel}.json.sig" < "site/${channel}.json"
+            node scripts/release/main.ts feed-resign --in "site/${channel}.json" --out "site/${channel}.json" --now "$now"
+            node scripts/release/main.ts sign --namespace feed@morndo.github.io --key "$key" --in "site/${channel}.json" --out "site/${channel}.json.sig" --dest "$RUNNER_TEMP"
+          done
+          rm -f "$key"
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  pages:
+    needs: resign
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  node-pin:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - name: Fail when a newer Node 24 exists
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "$RUNNER_TEMP/index.json" https://nodejs.org/dist/index.json
+          node scripts/release/main.ts node-check --index "$RUNNER_TEMP/index.json"
