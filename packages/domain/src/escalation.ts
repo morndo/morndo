@@ -69,8 +69,8 @@ export type Delivery = { state: "queued" | "delivered"; at: number | null };
 export type Decision = {
   choice: DecidedChoice;
   at: number;
-  // Absent when the record didn't say. That is not "elsewhere": only an explicit elsewhere was answered on another device.
-  via?: "here" | "elsewhere";
+  // Absent when the record didn't say, including a via this app doesn't know. That is not "elsewhere".
+  via?: "here" | "elsewhere" | undefined;
   endpointId: EndpointId | null;
   sessionId: SessionId | null;
   delivery?: Delivery | undefined;
