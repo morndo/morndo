@@ -2,9 +2,15 @@
 // user's own machine, through a plugin the default install does not include. Pure states: the capability, the
 // recording caps, sniffAudio, one attempt per recording, one terminal outcome, the queue via the shared rule, and
 // the text it produced. No engine name, no file, no clock of its own.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { afterRestart, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
   composerText, editText, type EngineText, type Transcription, type TranscriptionBody } from "../src/index.ts";
+
+it("a language choice is the code's body, or auto, written once", () => {
+  const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
+  expect(src.split("[a-z]{2,3}").length - 1).toBe(1);
+});
 
 const bytes = (head: number[], ...rest: number[]) => new Uint8Array([...head, ...rest]);
 const AT = 1_700_000_000_000;

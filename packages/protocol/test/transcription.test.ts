@@ -27,6 +27,24 @@ const VIEW = {
 };
 
 describe("plugin protocol 1", () => {
+  it("the fixture and the fakes share one sentence, and the wait helpers live in one module", () => {
+    const fixture = readFileSync(new URL("./fixtures/fake-transcribe.mjs", import.meta.url), "utf8");
+    const contract = readFileSync(new URL("./transcriber-contract.ts", import.meta.url), "utf8");
+    const fake = readFileSync(new URL("./fake-transcribe.test.ts", import.meta.url), "utf8");
+    const memory = readFileSync(new URL("./memory-transcriber.ts", import.meta.url), "utf8");
+    expect(fixture).toContain('from "./answers.mjs"');
+    expect(fixture).not.toContain("Notiz an den Hafen");
+    expect(contract).toContain('from "./answers.mjs"');
+    expect(memory).toContain('from "./answers.mjs"');
+    expect(fake).toContain('from "./answers.mjs"');
+    expect(readFileSync(new URL("./memory-transcriber.test.ts", import.meta.url), "utf8")).toContain('from "./answers.mjs"');
+    expect(readFileSync(new URL("./transcription.test.ts", import.meta.url), "utf8")).toContain('from "./answers.mjs"');
+    expect(contract).toContain('from "./proc.ts"');
+    expect(fake).toContain('from "./proc.ts"');
+    expect(contract).not.toContain("function alive");
+    expect(fake).not.toContain("function alive");
+  });
+
   it("declares the transcriber port on the protocol module", () => {
     const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
     expect(src).toContain("export type TranscriberProbe ");
