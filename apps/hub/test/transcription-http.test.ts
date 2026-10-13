@@ -18,6 +18,13 @@ afterEach(async () => { for (const h of hubs.splice(0)) await h.close(); });
 
 const cookieOf = async (hub: InProcessHub) => `__Host-morndo=${await hub.cookie()}`;
 
+function spawnFfmpeg(args: string[]) {
+  const made = spawnSync("ffmpeg", args, { encoding: "utf8" });
+  const detail = [made.stderr?.trim(), made.error?.message].filter(Boolean).join("\n");
+  if (made.status !== 0) process.stderr.write(`ffmpeg spawn failed: ${detail || "no stderr"}\n`);
+  return made;
+}
+
 async function upload(hub: InProcessHub, cookie: string, name: string, bytes: Uint8Array) {
   return fetch(hub.base + "/api/uploads", {
     method: "POST",
@@ -243,8 +250,8 @@ describe("transcription http", () => {
   it("answers another request while a recording is remuxed", async () => {
     const folder = mkdtempSync(join(tmpdir(), "morndo-remux-"));
     const sample = join(folder, "note.m4a");
-    const made = spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample], { encoding: "utf8" });
-    expect(made.status).toBe(0);
+    const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
+    expect(made.status, made.stderr || made.error?.message).toBe(0);
     const bytes = readFileSync(sample);
     const flag = join(folder, "started");
     const done = join(folder, "finished");

@@ -136,8 +136,8 @@ describe("metadata a recording carries", () => {
   it("kills a remux that outlives its timeout and keeps the bytes", async () => {
     const folder = mkdtempSync(join(tmpdir(), "morndo-slow-"));
     const sample = join(folder, "note.m4a");
-    const made = spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample], { encoding: "utf8" });
-    expect(made.status).toBe(0);
+    const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
+    expect(made.status, made.stderr || made.error?.message).toBe(0);
     const bytes = readFileSync(sample);
     writeFileSync(join(folder, "ffmpeg"), "#!/bin/sh\nsleep 30\n", { mode: 0o755 });
     const path = process.env.PATH;
@@ -157,8 +157,8 @@ describe("metadata a recording carries", () => {
   it("runs at most two remuxes at once", async () => {
     const folder = mkdtempSync(join(tmpdir(), "morndo-remux-cap-"));
     const sample = join(folder, "note.m4a");
-    const made = spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample], { encoding: "utf8" });
-    expect(made.status).toBe(0);
+    const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
+    expect(made.status, made.stderr || made.error?.message).toBe(0);
     const bytes = readFileSync(sample);
     const log = join(folder, "starts");
     writeFileSync(join(folder, "ffmpeg"), `#!/bin/sh
@@ -197,8 +197,8 @@ exit 0
   it("a remux writes and reads its temp files asynchronously", async () => {
     const folder = mkdtempSync(join(tmpdir(), "morndo-remux-async-"));
     const sample = join(folder, "note.m4a");
-    const made = spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample], { encoding: "utf8" });
-    expect(made.status).toBe(0);
+    const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
+    expect(made.status, made.stderr || made.error?.message).toBe(0);
     const bytes = readFileSync(sample);
     remuxAsync.mkdtemp = 0;
     remuxAsync.write = 0;
@@ -216,11 +216,11 @@ exit 0
     const folder = mkdtempSync(join(tmpdir(), "morndo-long-"));
     try {
       const file = join(folder, "note.m4a");
-      const made = spawnSync("ffmpeg", [
+      const made = spawnFfmpeg([
         "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100:duration=420",
         "-c:a", "aac", "-b:a", "16k", "-f", "mp4", file,
-      ], { encoding: "utf8" });
-      expect(made.status, made.stderr).toBe(0);
+      ]);
+      expect(made.status, made.stderr || made.error?.message).toBe(0);
       const out = Buffer.from(await stripMetadata(readFileSync(file), "mp4"));
       const headLen = Math.min(out.length, 256 * 1024);
       const tailLen = Math.min(out.length - headLen, 64 * 1024);
@@ -239,24 +239,26 @@ exit 0
       const meta = join(folder, "chapters.txt");
       const file = join(folder, "note.m4a");
       writeFileSync(meta, ";FFMETADATA1\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=200\ntitle=Opening at home\n");
-      const made = spawnSync("ffmpeg", [
+      const made = spawnFfmpeg([
         "-nostdin", "-v", "error", "-y",
         "-f", "lavfi", "-i", "sine=frequency=440:duration=0.4",
         "-f", "lavfi", "-i", "color=c=blue:s=16x16:d=0.4",
         "-i", meta, "-map_metadata", "2", "-map", "0:a", "-map", "1:v",
         "-c:a", "aac", "-c:v", "mjpeg", "-disposition:v", "attached_pic", "-f", "mp4", file,
-      ], { encoding: "utf8" });
-      expect(made.status, made.stderr).toBe(0);
+      ]);
+      expect(made.status, made.stderr || made.error?.message).toBe(0);
       const raw = readFileSync(file);
       expect(raw.includes("Opening at home")).toBe(true);
       const out = Buffer.from(await stripMetadata(raw, "mp4"));
       expect(out.includes("Opening at home")).toBe(false);
       const probed = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:chapter=id", "-of", "csv=p=0", "-i", file], { encoding: "utf8" });
+      if (probed.status !== 0) process.stderr.write(`ffprobe spawn failed: ${probed.stderr?.trim() || probed.error?.message || "no stderr"}\n`);
       expect(probed.stdout).toContain("video");
       const kept = join(folder, "kept.m4a");
       writeFileSync(kept, out);
       const after = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=codec_type:chapter=id", "-of", "csv=p=0", "-i", kept], { encoding: "utf8" });
-      expect(after.status).toBe(0);
+      if (after.status !== 0) process.stderr.write(`ffprobe spawn failed: ${after.stderr?.trim() || after.error?.message || "no stderr"}\n`);
+      expect(after.status, after.stderr || after.error?.message).toBe(0);
       expect(after.stdout.trim()).toBe("audio");
     } finally {
       rmSync(folder, { recursive: true, force: true });
@@ -304,6 +306,13 @@ exit 0
 
 const ffmpegOk = spawnSync("ffmpeg", ["-version"], { encoding: "utf8" }).status === 0;
 
+function spawnFfmpeg(args: string[]) {
+  const made = spawnSync("ffmpeg", args, { encoding: "utf8" });
+  const detail = [made.stderr?.trim(), made.error?.message].filter(Boolean).join("\n");
+  if (made.status !== 0) process.stderr.write(`ffmpeg spawn failed: ${detail || "no stderr"}\n`);
+  return made;
+}
+
 function generatedAudio(ext: string, codec: string[]): Buffer {
   const folder = mkdtempSync(join(tmpdir(), "morndo-gen-"));
   try {
@@ -312,7 +321,11 @@ function generatedAudio(ext: string, codec: string[]): Buffer {
       "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.3",
       ...codec, "-metadata", "title=memo at home", file,
     ], { encoding: "utf8" });
-    if (run.status !== 0) throw new Error(run.stderr || "ffmpeg could not write a sample");
+    if (run.status !== 0) {
+      const detail = run.stderr?.trim() || run.error?.message || "no stderr";
+      process.stderr.write(`ffmpeg spawn failed: ${detail}\n`);
+      throw new Error(detail);
+    }
     return readFileSync(file);
   } finally {
     rmSync(folder, { recursive: true, force: true });
