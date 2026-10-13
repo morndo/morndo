@@ -227,6 +227,27 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
+  it("does not carry an earlier ask's refusal onto a decision that was asked again", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true);
+    await queue(tab, [{ status: 503 }]);
+    await push(tab, [triage, other]);
+    await tab.locator("button.banner.you").click();
+    await tab.getByRole("button", { name: "Ship today" }).click();
+    await tab.getByRole("button", { name: "Try again" }).waitFor({ timeout: 15_000 });
+    await tab.getByRole("button", { name: "Later" }).click();
+    await push(tab, [triageAgain, other]);
+    await tab.locator('button.back[aria-label="Back to Today"]').click();
+    await tab.getByRole("button", { name: "Today" }).click();
+    await tab.locator('li[data-row="d:d-1"] [data-open-brief="d-1"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    expect(await dialog.getByRole("button", { name: "Try again" }).count()).toBe(0);
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).waitFor({ timeout: 3_000 });
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("offers a re-asked decision, and does not treat an earlier answer in this run as this ask", { timeout: 45_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track, "", true);

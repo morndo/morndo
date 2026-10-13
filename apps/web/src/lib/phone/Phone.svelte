@@ -141,14 +141,7 @@
     : null);
   // What the run holds for the decision on screen: its refusal (the sheet sits over the card that would show it) and
   // whether it was answered here already. The run's own clock feeds the sheet's countdown, as it feeds the card's.
-  const briefRefusal = $derived.by(() => {
-    const r = session.refusal;
-    if (!r) return null;
-    const c = session.run?.cards[r.key];
-    return c?.kind === "decision" && c.id === briefId ? r : null;
-  });
-  // The run's current entry for the decision on screen, re-ask suffix included. An earlier entry of the
-  // same id (answered, or refused) is not this ask.
+  // The current entry, re-ask suffix included. An earlier entry of the same id is not this ask.
   const briefCardKey = $derived.by(() => {
     const run = session.run;
     if (!briefId || !run) return null;
@@ -156,6 +149,12 @@
     let key: string | null = null;
     for (const k of run.order) if (baseKey(k) === base) key = k;
     return key;
+  });
+  const briefRefusal = $derived.by(() => {
+    const r = session.refusal;
+    const key = briefCardKey;
+    if (!r || !key || r.key !== key) return null;
+    return r;
   });
   const briefRunAnswered = $derived.by(() => {
     const key = briefCardKey;
