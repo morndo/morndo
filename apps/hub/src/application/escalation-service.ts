@@ -5,8 +5,8 @@
 // adapters, read through Observation; nothing is decided from them, O4).
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_POLICY, Escalations, answered, askFromBrief, askIdentity, askVersion, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
-  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecidedChoice, type DecisionBrief, type EndpointId, type Escalation, type Message, type SessionId, type Sighting,
+  DEFAULT_POLICY, Escalations, answered, askFromBrief, askIdentity, askVersion, decidedChoice, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
+  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecisionBrief, type EndpointId, type Escalation, type Message, type SessionId, type Sighting,
 } from "@morndo/domain";
 import type { BriefSighting } from "./brief-service.ts";
 import { menuEscalationId } from "@morndo/protocol";
@@ -69,6 +69,9 @@ const MISSED_ANSWER = "The answer did not reach the manager. Answer again.";
 const TYPED = new Set<InboxStatus>(["typing", "sent", "stuck", "accepted"]);
 
 const digest = (words: string) => createHash("sha256").update(words.trim()).digest("hex").slice(0, 16);
+// What the record keeps of an answer in words beside its Decision (E9): their length and a hash, never the text.
+const wordsKept = (choice: Choice): { length?: number; digest?: string } =>
+  (choice.kind === "words" ? { length: choice.text.trim().length, digest: digest(choice.text) } : {});
 // The key an answer carries to the asker's node (fleet core §3.1): one choice for one ask is one key, so a repeat after a
 // dropped connection gets the node's outcome of the first instead of the line typed again. The ask is the message that
 // asked it (its time when it has none): the same choice for a question asked again is a new answer, typed again. Words
@@ -702,9 +705,10 @@ export class EscalationService {
       if (!c.ok) return { ok: false, problem: c.error, item: this.#view(id, a.endpoint.id) };
       const e = c.value;
       if (seen !== undefined && seen !== this.#version(e)) return { ok: false, problem: "changed", item: this.#view(id, a.endpoint.id) };
-      const option = choice.kind === "option" ? e.options.find(o => o.key === choice.key) : undefined;
+      const decided = decidedChoice(choice, e.options);
+      const option = decided.kind === "option" ? decided : null;
       const line = option ? tapLine(e.id, option) : wordsLine(e.id, choice.kind === "words" ? choice.text : "");
-      const words = choice.kind === "words" ? { length: choice.text.trim().length, digest: digest(choice.text) } : {};
+      const words = wordsKept(choice);
       // The manager's answers go through its inbox (ADR-0010): queued now, delivered exactly once, recorded then.
       // The inbox switched off (`manager-inbox disable`) or not configured: typed directly, as before.
       // A manager that isn't running right now is fine: the inbox types it once it is back.
@@ -896,8 +900,7 @@ export class EscalationService {
     const e = this.#x.get(id);
     if (!e || e.status !== "open") return;
     const option = part.startsWith("option:") ? part.slice("option:".length) : null;
-    const decided: DecidedChoice = option === null ? { kind: "words" } : { kind: "option", key: option, label: e.options.find(o => o.key === option)?.label ?? option };
-    const r = this.#x.recordTyped(id, decided, requester, this.#now());
+    const r = this.#x.recordTyped(id, decidedChoice(option === null ? { kind: "words" } : { kind: "option", key: option }, e.options), requester, this.#now());
     if (!r.ok) { log.warn(`answer to ${id} found typed but not recorded: ${r.error}`); return; }
     const decision = this.#x.get(id)?.decision;
     if (decision) this.#store.saveDecision(id, decision);
@@ -921,13 +924,11 @@ export class EscalationService {
   // as it stands is not answered by it (E11, E12): asked again, it stays open. The aggregate records it, as every
   // answered event (round 4.6), and says null when the row's asking is the ask as it stands: no earlier answer.
   #deliveredEarlier(a: Authenticated, id: string, choice: Choice, row: SendRow, key: string, at: number, by: { endpointId: EndpointId; sessionId: SessionId | null } | null): AnswerResult | null {
-    const option = choice.kind === "option" ? choice.key : null;
-    const decided: DecidedChoice = option === null ? { kind: "words" } : { kind: "option", key: option, label: row.label ?? option };
-    const event = this.#x.recordEarlier(id, askingOf(row.key, id, choice), decided, by ?? { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
+    const shown = choice.kind === "option" && row.label !== null ? [{ key: choice.key, label: row.label }] : [];   // as that version showed it
+    const event = this.#x.recordEarlier(id, askingOf(row.key, id, choice), decidedChoice(choice, shown), by ?? { endpointId: a.endpoint.id, sessionId: a.session.id }, this.#now());
     if (!event) return null;
     this.#seen.set(key, this.#now());
-    const words = choice.kind === "words" ? { length: choice.text.trim().length, digest: digest(choice.text) } : {};
-    this.#store.record([{ ...event, ...words }]);
+    this.#store.record([{ ...event, ...wordsKept(choice) }]);
     log.info(`answer to ${id} found typed, for an earlier version of its ask: recorded as that version's answer`);
     return { ok: true, item: this.#view(id, a.endpoint.id), duplicate: true, at };
   }
@@ -938,8 +939,7 @@ export class EscalationService {
     if (r.ok) {
       const decision = this.#x.get(id)?.decision;
       if (decision) this.#store.saveDecision(id, decision);
-      const words = choice.kind === "words" ? { length: choice.text.trim().length, digest: digest(choice.text) } : {};
-      this.#store.record([{ ...r.value, ...words }]);
+      this.#store.record([{ ...r.value, ...wordsKept(choice) }]);
     } else {
       log.warn(`answer to ${id} delivered but not recorded: ${r.error}`);
     }

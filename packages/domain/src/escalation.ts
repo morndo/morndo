@@ -60,6 +60,11 @@ export type Sighting = { ask: Ask; source: SourceState; answered: SeenAnswer | n
 
 export type Choice = { kind: "option"; key: string } | { kind: "words"; text: string };
 export type DecidedChoice = { kind: "option"; key: string; label: string } | { kind: "words" };
+// A choice as a Decision keeps it (E9): an option with the label `options` give it (its key when they don't), or
+// words, never their text. The one place a Decision's label is looked up (round 4.8 of the PR #55 review).
+export function decidedChoice(choice: { kind: "option"; key: string } | { kind: "words" }, options: readonly { key: string; label: string }[]): DecidedChoice {
+  return choice.kind === "option" ? { kind: "option", key: choice.key, label: options.find(o => o.key === choice.key)?.label ?? choice.key } : { kind: "words" };
+}
 
 // A Decision for the manager goes through its inbox (the box's queue for its terminal, ADR-0010): "queued" until the
 // inbox reports it in the manager's conversation, then "delivered". Absent: it reached the asker when it was taken
@@ -358,10 +363,7 @@ export class Escalations {
     const c = this.check(id, choice, now);
     if (!c.ok) return c;
     const e = c.value;
-    const decided: DecidedChoice = choice.kind === "option"
-      ? { kind: "option", key: choice.key, label: e.options.find(o => o.key === choice.key)?.label ?? choice.key }
-      : { kind: "words" };
-    e.decision = { choice: decided, at: now, via: "here", endpointId: by.endpointId, sessionId: by.sessionId, ...(delivery ? { delivery } : {}) };
+    e.decision = { choice: decidedChoice(choice, e.options), at: now, via: "here", endpointId: by.endpointId, sessionId: by.sessionId, ...(delivery ? { delivery } : {}) };
     e.status = "answered";
     e.askedAgain = false;
     return ok(e);
