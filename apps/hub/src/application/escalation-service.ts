@@ -103,6 +103,7 @@ export class EscalationService {
   #listeners = new Set<(b: Board) => void>();
   #firstSeen = new Map<string, number>();
   #inFlight = new Set<string>();
+  #typing = new Set<string>();                         // the answer keys being typed now: started rows with no store yet
   #seen = new Map<string, number>();
   #lastLedger: LedgerRead | null = null;
   #filed = new Map<string, LedgerItem>();              // the last readable list's items: wording while it can't be read
@@ -576,16 +577,17 @@ export class EscalationService {
   // answer (E8). So it is no sighting: the answer path records it (review of PR #55). The row that says so is this
   // ask's own answer key — the key carries the ask's version (the message that asked it), so an earlier version's row
   // is another answer to an ask asked again, and a row written after the tap is not this tap's source either (the row
-  // goes down before its own paste) — and one still waiting to be recorded: in flight here, done, or in doubt with a
-  // store to ask a node about. One row nothing can ever record — "started", no store, nothing in flight (the hub
+  // goes down before its own paste) — and one still waiting to be recorded: being typed here, done, or in doubt with a
+  // store to ask a node about. One row nothing can ever record — "started", no store, not being typed (the hub
   // stopped while typing it, or the port threw after the paste and no node can be asked) — would leave that tap as the
   // ask's only record: it settles the ask, as it did before the filter (rounds 2.1 and 2.2, PR #55 review). The rows
-  // come as this poll's one read (round 2.7), keyed by answer key.
+  // come as this poll's one read (round 2.7), keyed by answer key. Being typed is that answer's own key, never the
+  // whole ask: a tap of another choice is no paste of this one, and still refuses it (E8, round 3.1).
   #ownTapOf(ask: Ask, tap: Sighting["answered"], answers: ReadonlyMap<string, SendRow>): Sighting["answered"] {
     if (tap === null) return null;
-    if (this.#inFlight.has(ask.id)) return null;            // being typed now: recorded when the send lands
-    const row = answers.get(answerKey(ask.id, ask, { kind: "option", key: tap.key })) ?? null;
-    if (row !== null && row.at <= tap.at && (row.state === "done" || row.store !== null)) return null;
+    const k = answerKey(ask.id, ask, { kind: "option", key: tap.key });
+    const row = answers.get(k) ?? null;
+    if (row !== null && row.at <= tap.at && (row.state === "done" || row.store !== null || this.#typing.has(k))) return null;
     return tap;
   }
 
@@ -766,6 +768,7 @@ export class EscalationService {
       let outcome: SendOutcome;
       // A node that may have typed it (SendInDoubt): "uncertain", the hub's 409, never a 500 the app reads as a refusal
       // (final review I1), and kept for its repeat with the store it went to. Any other throw keeps its row too (below).
+      this.#typing.add(k);
       try { outcome = await this.#send(e.asker.workerId, line, k); }
       catch (err) {
         // Any other throw (the legacy port's tmux command list, which can fail after the paste) may have typed it too:
@@ -777,7 +780,7 @@ export class EscalationService {
         keepInDoubt(this.#store, k, err);
         log.warn(`answer to ${e.id} in doubt: its node may have typed it; a repeat asks the node`, err);
         return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
-      }
+      } finally { this.#typing.delete(k); }
       settleOutcome(this.#store, k, outcome);                           // a retry may type it; "not_submitted" keeps its row
       if (outcome.problem) {
         log.warn(`answer to ${e.id} not delivered: ${outcome.problem}`);

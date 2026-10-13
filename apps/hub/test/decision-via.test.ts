@@ -185,6 +185,23 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
 
+  // The hub's own answer in flight hides only its own paste (round 3.1): a tap from elsewhere that the hub has not read
+  // yet when an answer arrives is still read by that answer's own poll, and refuses it (E8). Before, every tap of the
+  // ask was hidden while any answer to it was in flight, so a second answer was typed after a hand's.
+  it("a tap from elsewhere, read while an answer is in flight, refuses that answer", async () => {
+    const typed: string[] = [];
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async (_pane, text) => { typed.push(text); return { problem: null, typedAt: 0 }; },
+    });
+    s.poll();
+    manager.push({ id: "m-tap", at: now, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] ship (Ship it)" });   // by hand, not polled yet
+    const r = await s.answer(auth("phone"), "ny-7", { kind: "option", key: "hold" }, "r1");
+    expect(r).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(typed).toEqual([]);                                                                   // nothing typed after the hand's tap
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision).toMatchObject({ choice: { key: "ship" }, via: "elsewhere" });
+  });
+
   // An answer in doubt that its node typed after all, learnt while another endpoint answers the same ask otherwise
   // (review of PR #55): the Decision is the endpoint that typed it — the row in doubt names it — not the endpoint whose
   // answer happened to settle the question.
