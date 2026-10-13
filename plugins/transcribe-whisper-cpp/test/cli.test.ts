@@ -1,6 +1,6 @@
 // The executable, with a stand-in whisper-cli. ffmpeg is the system's. A machine without ffmpeg skips these
 // and says so; the plugin workflow installs it.
-import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -137,22 +137,8 @@ describe("morndo-transcribe", () => {
   live("stops a long input at the cap and reports too_long from the wav header", async () => {
     stage(true);
     const seen = join(ROOT, "ffmpeg-args");
-    const header = Buffer.alloc(44);
-    header.write("RIFF", 0);
-    header.writeUInt32LE(36 + 16_000 * 2 * 601, 4);
-    header.write("WAVE", 8);
-    header.write("fmt ", 12);
-    header.writeUInt32LE(16, 16);
-    header.writeUInt16LE(1, 20);
-    header.writeUInt16LE(1, 22);
-    header.writeUInt32LE(16_000, 24);
-    header.writeUInt32LE(16_000 * 2, 28);
-    header.writeUInt16LE(2, 32);
-    header.writeUInt16LE(16, 34);
-    header.write("data", 36);
-    header.writeUInt32LE(16_000 * 2 * 601, 40);
     const declared = join(ROOT, "declared.wav");
-    writeFileSync(declared, header);
+    writeSparseWav(declared, 601);
     writeFileSync(join(BIN, "ffmpeg"), `#!/bin/sh
 printf '%s\\n' "$@" > ${JSON.stringify(seen)}
 out=""
@@ -171,6 +157,40 @@ cp ${JSON.stringify(declared)} "$out"
     expect(args.indexOf("-t")).toBeLessThan(args.indexOf("-i"));
     expect(tooLong.code).toBe(4);
     expect(tooLong.stdout).toBe("");
+  });
+
+  live("a placeholder data size is an engine error, not too_long", async () => {
+    stage(true);
+    const header = Buffer.alloc(44);
+    header.write("RIFF", 0);
+    header.writeUInt32LE(36, 4);
+    header.write("WAVE", 8);
+    header.write("fmt ", 12);
+    header.writeUInt32LE(16, 16);
+    header.writeUInt16LE(1, 20);
+    header.writeUInt16LE(1, 22);
+    header.writeUInt32LE(16_000, 24);
+    header.writeUInt32LE(16_000 * 2, 28);
+    header.writeUInt16LE(2, 32);
+    header.writeUInt16LE(16, 34);
+    header.write("data", 36);
+    header.writeUInt32LE(0xffffffff, 40);
+    const declared = join(ROOT, "placeholder.wav");
+    writeFileSync(declared, header);
+    writeFileSync(join(BIN, "ffmpeg"), `#!/bin/sh
+out=""
+for arg in "$@"; do out="$arg"; done
+cp ${JSON.stringify(declared)} "$out"
+`);
+    chmodSync(join(BIN, "ffmpeg"), 0o755);
+    const note = join(ROOT, "placeholder-input.wav");
+    writeFileSync(note, pcmWav(1));
+    const failed = await run(
+      ["run", "--input", note, "--language", "en", "--threads", "1", "--max-seconds", "600", "--json"],
+      `${BIN}:${pathEnv}`,
+    );
+    expect(failed.code).toBe(1);
+    expect(failed.stdout).toBe("");
   });
 
   live("passes whisper the primary language of a region tag", async () => {
@@ -299,6 +319,31 @@ EOF
     }
   });
 });
+
+function writeSparseWav(path: string, seconds: number): void {
+  const dataBytes = 16_000 * 2 * seconds;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + dataBytes, 4);
+  header.write("WAVE", 8);
+  header.write("fmt ", 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20);
+  header.writeUInt16LE(1, 22);
+  header.writeUInt32LE(16_000, 24);
+  header.writeUInt32LE(16_000 * 2, 28);
+  header.writeUInt16LE(2, 32);
+  header.writeUInt16LE(16, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(dataBytes, 40);
+  const fd = openSync(path, "w");
+  try {
+    writeSync(fd, header);
+    ftruncateSync(fd, 44 + dataBytes);
+  } finally {
+    closeSync(fd);
+  }
+}
 
 function hasClip(dir: string): boolean {
   try {

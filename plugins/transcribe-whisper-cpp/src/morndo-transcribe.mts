@@ -151,9 +151,11 @@ export function wavDurationMs(bytes: Uint8Array): number | null {
   return Math.round((dataBytes / block / rate) * 1000);
 }
 
-// Duration from the WAV header's data-chunk size. The sample bytes are not read, so a clip past the
-// 2 GiB readFileSync limit still reports too_long instead of throwing.
-export function wavDurationFile(path: string): number | null {
+// Duration from the WAV header when the data-chunk size fits in the file. The sample bytes are not
+// read. A size past the end of the file, or the 0xFFFFFFFF placeholder ffmpeg writes when it cannot
+// seek back, is not a length: the bytes actually in the file are. If those bytes are not a clip, the
+// caller treats the result as an engine failure rather than too_long.
+export function wavDurationFile(path: string): number | "engine" | null {
   let fd: number;
   try { fd = openSync(path, "r"); } catch { return null; }
   try {
@@ -170,6 +172,7 @@ export function wavDurationFile(path: string): number | null {
     let channels = 0;
     let bits = 0;
     let dataBytes = -1;
+    let fromFile = false;
     const limit = Math.min(size, 1024 * 1024);
     while (offset + 8 <= limit) {
       const hdr = readAt(offset, 8);
@@ -185,14 +188,22 @@ export function wavDurationFile(path: string): number | null {
         rate = fmt.readUInt32LE(4);
         bits = fmt.readUInt16LE(14);
       } else if (id === "data") {
-        dataBytes = chunk;
+        if (chunk === 0xffffffff || body + chunk > size) {
+          dataBytes = size - body;
+          fromFile = true;
+        } else {
+          dataBytes = chunk;
+        }
         break;
       }
-      offset += 8 + chunk + (chunk % 2);
+      if (body + chunk < body) return null;
+      offset = body + chunk + (chunk % 2);
     }
     if (rate < 1 || channels < 1 || bits < 8 || bits % 8 !== 0 || dataBytes < 0) return null;
     const block = channels * (bits / 8);
-    if (block < 1 || dataBytes % block !== 0) return null;
+    if (block < 1) return null;
+    if (fromFile && (dataBytes < block || dataBytes % block !== 0)) return "engine";
+    if (dataBytes % block !== 0) return null;
     return Math.round((dataBytes / block / rate) * 1000);
   } finally {
     closeSync(fd);
@@ -338,6 +349,7 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
     }
     if (converted.code !== 0) return fail(EXIT.unreadable, "not audio");
     const duration = wavDurationFile(wav);
+    if (duration === "engine") return fail(EXIT.engine, "wav length");
     if (duration === null) return fail(EXIT.unreadable, "not audio");
     if (duration > cap * 1000) return fail(EXIT.tooLong, "too long");
     const out = join(dir, "out");
