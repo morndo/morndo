@@ -34,7 +34,11 @@ export async function startWeb(html = DESKTOP_PAGE): Promise<Web> {
     configFile: false, root: WEB, cacheDir, logLevel: "error", clearScreen: false,
     plugins: [svelte({ configFile: false }), page],
     // The one SvelteKit module a component here imports (Phone.svelte's goto): a stand-in that records where it went.
-    resolve: { alias: { "$app/navigation": join(WEB, "test/app-navigation.stub.ts"), $lib: join(WEB, "src/lib") } },
+    resolve: { alias: {
+      "$app/navigation": join(WEB, "test/app-navigation.stub.ts"),
+      "$app/state": join(WEB, "test/app-state.stub.ts"),
+      $lib: join(WEB, "src/lib"),
+    } },
     server: { host: "127.0.0.1", port: 0, hmr: false, watch: null },
     optimizeDeps: { noDiscovery: true, include: [] },
   });

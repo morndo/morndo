@@ -24,10 +24,10 @@
   import type { QuickAnswers } from "./quick.svelte.ts";
   import { tookLabel } from "./words.ts";
 
-  let { feed, session, quick, outgoing, verifiedFresh, verify, onBack, onDay, onQueue, onRetry, onDiscard, onEchoes, onScreen }: {
+  let { feed, session, quick, outgoing, verifiedFresh, verify, onBack, onDay, onQueue, onRetry, onDiscard, onEchoes, onScreen, onOpenBrief }: {
     feed: LiveFeed; session: CatchUpSession; quick: QuickAnswers; outgoing: OutboxRecord[]; verifiedFresh: boolean; verify: () => Promise<boolean>;
     onBack: () => void; onDay: () => void; onQueue: (c: NewCommand) => Promise<void>; onRetry: (id: string) => void; onDiscard: (id: string) => void;
-    onEchoes: (worker: string, echoes: Echo[]) => void; onScreen: (workerId: string) => void;
+    onEchoes: (worker: string, echoes: Echo[]) => void; onScreen: (workerId: string) => void; onOpenBrief: (id: string) => void;
   } = $props();
 
   const run = $derived(session.run);
@@ -209,7 +209,7 @@
           {#if top.kind === "decision"}
             <DecisionCard {item} primed={feed.primed} index={decisionIndex} of={c?.decisionsInRun ?? 0} {now} {answering} {refusal} {note}
               onPick={(b, l) => pick(b, l)} onUndo={() => session.undo()} onVerifyAgain={() => void verifyAgain()} onTryAgain={() => void tryAgain()}
-              onScreen={id => onScreen(id)} onNext={() => session.moveOn(top.key)} />
+              onScreen={id => onScreen(id)} onNext={() => session.moveOn(top.key)} onOpenBrief={() => item && onOpenBrief(item.id)} />
           {:else}
             <UpdateCard worker={feed.workers.find(w => w.id === top.worker) ?? null} name={top.conversation} {view} mark={view?.mark ?? feed.reads[top.conversation] ?? null}
               {now} outgoing={outgoing.filter(o => o.worker === top.worker)} loading={online} {note}

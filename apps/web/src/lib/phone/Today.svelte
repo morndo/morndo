@@ -9,6 +9,7 @@
   import ExternalLink from "@lucide/svelte/icons/external-link";
   import PenLine from "@lucide/svelte/icons/pen-line";
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
+  import { cardOf } from "@morndo/domain";
   import type { LiveFeed } from "../feed.svelte.ts";
   import type { CatchUpSession } from "../catchup/session.svelte.ts";
   import { REFUSALS, type DecisionItem } from "../desktop/decisions.ts";
@@ -19,9 +20,9 @@
   import { renderMarkdown } from "../markdown.ts";
   import type { QuickAnswers } from "./quick.svelte.ts";
 
-  let { feed, session, quick, verifiedFresh, verify, onCatchUp, onDecide }: {
+  let { feed, session, quick, verifiedFresh, verify, onCatchUp, onDecide, onReadBrief }: {
     feed: LiveFeed; session: CatchUpSession; quick: QuickAnswers; verifiedFresh: boolean; verify: () => Promise<boolean>;
-    onCatchUp: () => void; onDecide: (id: string) => void;
+    onCatchUp: () => void; onDecide: (id: string) => void; onReadBrief?: (id: string) => void;
   } = $props();
 
   let now = $state(Date.now());
@@ -94,7 +95,7 @@
   {@const isKept = d ? kept.has(d.id) : false}
   {@const ownWords = acts.some(a => a.kind === "words") && !isKept}
   {@const said = d?.context && d.contextKind === "markdown" ? d.context : null}
-  {@const hasMore = !!b && (!!b.more.text || !!said || !!b.more.link || !!b.more.ifNoAnswer || !!b.more.recommendation || ownWords)}
+  {@const hasMore = !!b && d !== null && !d.brief && (!!b.more.text || !!said || !!b.more.link || !!b.more.ifNoAnswer || !!b.more.recommendation || ownWords)}
   <li class="ev" class:you={r.needsYou} data-row={r.key} data-needs={r.needsYou ? "you" : "without-you"} data-kind={d ? (d.need === "time" ? "task" : "decision") : r.item ? "answered" : "agent"}>
     {#if r.at === null}
       <span class="time ready" aria-hidden="true"></span>
@@ -127,6 +128,14 @@
         {#if failed?.again}<button class="pbtn small primary" onclick={() => void confirmAndSend(d)}><ShieldAlert size={16} />Confirm with passkey and send</button>{/if}
         {#if isKept}
           <button class="pbtn small" onclick={() => quick.back(d.id)}>Bring back</button>
+        {:else if d.brief}
+          {@const compact = cardOf(d)}
+          {#if compact.spend && compact.recommended}<p class="s"><b>Recommended:</b> {compact.recommended}</p>{/if}
+          {#if compact.spend}<p class="meta">Includes spend</p>{/if}
+          {#each compact.quickAnswers as a, i (a.key)}
+            <button class="pbtn brief-act" class:primary={i === 0} disabled={!!paused(d)} onclick={() => void answer(d, { key: a.key }, a.label)}>{a.label}</button>
+          {/each}
+          <button class="pbtn brief-act" class:primary={compact.quickAnswers.length === 0} data-open-brief={d.id} aria-haspopup="dialog" onclick={() => onReadBrief?.(d.id)}>Read the brief</button>
         {:else}
           {#each acts as a (a.kind === "option" ? `o:${a.key}` : a.kind)}
             {#if a.kind === "decide"}<button class="pbtn small primary" onclick={() => onDecide(d.id)}>Decide now</button>
@@ -261,6 +270,7 @@
   .meta { margin: 3px 0 0; font: 400 13px/18px var(--body); color: var(--muted); }
   .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 9px; }
   .acts .opt { max-width: 100%; text-align: left; }
+  .acts .brief-act { flex: 1 1 100%; min-height: 48px; justify-content: flex-start; text-align: left; }
   .acts .pbtn.ghost { border-color: transparent; padding: 0 8px; gap: 4px; }
   .caret { display: inline-flex; transition: transform 150ms; }
   .caret.up { transform: rotate(180deg); }

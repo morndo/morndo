@@ -12,6 +12,7 @@
   import PenLine from "@lucide/svelte/icons/pen-line";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import { cardOf } from "@morndo/domain";
   import { renderMarkdown } from "../markdown.ts";
   import { REFUSALS, ago, deliveryLine, type DecisionItem } from "../desktop/decisions.ts";
   import { byLabel } from "./horizon.ts";
@@ -19,12 +20,12 @@
   import type { Body } from "../catchup/run.ts";
   import { MAY_HAVE_GONE, againLabel } from "../catchup/answer.ts";
 
-  let { item, primed, index, of, now, answering, refusal, note, onPick, onUndo, onVerifyAgain, onTryAgain, onScreen, onNext }: {
+  let { item, primed, index, of, now, answering, refusal, note, onPick, onUndo, onVerifyAgain, onTryAgain, onScreen, onNext, onOpenBrief }: {
     item: DecisionItem | null; primed: boolean; index: number; of: number; now: number;
     answering: { label: string; sending: boolean; commitAt: number } | null;
     refusal: { code: string; text: string } | null; note: string | null;
     onPick: (body: Body, label: string) => Promise<boolean>; onUndo: () => void; onVerifyAgain: () => void; onTryAgain: () => void;
-    onScreen: (workerId: string) => void; onNext: () => void;
+    onScreen: (workerId: string) => void; onNext: () => void; onOpenBrief?: () => void;
   } = $props();
 
   let words = $state("");
@@ -35,6 +36,7 @@
   const askerName = $derived(item ? (item.asker.kind === "manager" ? "Manager" : item.asker.name) : "");
   const dueText = $derived(item?.deadline == null ? null : item.deadline <= now ? due(item.deadline, now) : `due ${byLabel(item.deadline, now).replace(/^by (the )?/, "")}`);
   const b = $derived(item ? brief(item, now) : null);
+  const compact = $derived(item?.brief ? cardOf(item) : null);
   const acts = $derived(item ? actions(item, "card") : []);
   // What the card draws, once, for the loop, the "or" and which button is primary. A task (an Ask that became one while
   // its card was on top) gets Done; its Later is catch-up's own Later under the card (code review #11).
@@ -44,7 +46,7 @@
   // With options, the recommended one is marked on its button; the reason for it waits behind More, so the options and
   // his own words fit on the card (and the kicker already says when it is due).
   const marked = $derived(acts.some(a => a.kind === "option" && a.recommended));
-  const hasMore = $derived(!!b && (!!b.more.text || !!b.more.link || !!item?.context || (marked && !!b.more.recommendation)));
+  const hasMore = $derived(!compact && !!b && (!!b.more.text || !!b.more.link || !!item?.context || (marked && !!b.more.recommendation)));
   const sentenceCase = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
   const left = $derived(answering ? Math.max(0, Math.ceil((answering.commitAt - now) / 1000)) : 0);
   // ADR-0010: an answer for the manager waits in its inbox until it reached the manager.
@@ -75,9 +77,11 @@
 </header>
 
 <div class="card-body">
-  <p class="kicker">Decision {index} of {of}{dueText ? ` · ${dueText}` : ""}</p>
-  <h2 class="q">{b?.title ?? "A decision"}</h2>
-  {#if b?.sentence}<p class="sum">{b.sentence}</p>{/if}
+  <p class="kicker">{compact ? compact.topic : `Decision ${index} of ${of}`}{dueText ? ` · ${dueText}` : ""}{#if compact?.minutes != null} · ≈{compact.minutes} min{/if}</p>
+  <h2 class="q">{compact?.headline ?? b?.title ?? "A decision"}</h2>
+  {#if compact?.spend}<p class="spend">Includes spend</p>{/if}
+  {#if !compact && b?.sentence}<p class="sum">{b.sentence}</p>{/if}
+  {#if compact?.spend && compact.recommended}<p class="sum"><b>Recommended:</b> {compact.recommended}</p>{/if}
   {#if item?.context && item.contextKind === "screen"}
     {#if meta.length}<p class="meta">{sentenceCase(meta.join(" · "))}</p>{/if}
     <pre class="screen">{item.context}</pre>
@@ -129,6 +133,15 @@
       {/if}
       {#if item.asker.workerId}<button class="pbtn block" onclick={() => item.asker.workerId && onScreen(item.asker.workerId)}><SquareTerminal size={18} />Answer on its screen</button>{/if}
       <p class="note">{askerName} waits at a prompt on its own screen; Morndo never presses keys in it.</p>
+    {:else if compact}
+      <div class="opts">
+        {#each compact.quickAnswers as a, i (a.key)}
+          <button class="pbtn opt" class:primary={i === 0} disabled={!canAnswer} onclick={() => void onPick({ key: a.key }, a.label)}>
+            <span>{a.label}</span>{#if i === 0}<small>Recommended</small>{/if}
+          </button>
+        {/each}
+        <button class="pbtn read" class:primary={compact.quickAnswers.length === 0} data-open-brief={item?.id} aria-haspopup="dialog" onclick={() => onOpenBrief?.()}>Read the brief</button>
+      </div>
     {:else if writing}
       <label class="sr" for="words">Your answer for {askerName}</label>
       <textarea id="words" bind:value={words} rows="3" placeholder="Your answer for {askerName}…"></textarea>
@@ -196,7 +209,8 @@
   .opt small.def { order: 0; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 13px; line-height: 17px; }
   .or { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--muted); font: 400 13px/1 var(--body); }
   .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-  .words { min-height: 52px; gap: 8px; font-size: 16px; }
+  .words, .read { min-height: 48px; gap: 8px; font-size: 16px; width: 100%; }
+  .spend { margin: 6px 0 0; font: 700 12px/16px var(--body); }
   .state { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: var(--fill); }
   .state p { margin: 0; color: var(--fg); }
   .state .note { color: var(--fg); }

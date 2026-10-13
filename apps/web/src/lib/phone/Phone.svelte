@@ -4,8 +4,10 @@
   // Status (every lane in one line), plus the board (ADR-0015) and Home (ADR-0016). Decisions keep their cards (catch-up, decisions only), opened from Today, the chat
   // list, a chat that waits, or a push. Updates no longer come as cards: they wait in each chat, and a digest sums them
   // up only when he comes back after a real absence. One live feed and one outbox serve it all.
-  import { onDestroy, onMount } from "svelte";
-  import { goto } from "$app/navigation";
+  import { onDestroy, onMount, untrack } from "svelte";
+  import { goto, pushState } from "$app/navigation";
+  import { page } from "$app/state";
+  import { decisionKey } from "@morndo/domain";
   import { LiveFeed } from "../feed.svelte.ts";
   import LinkedNotice from "../LinkedNotice.svelte";
   import FleetNotice from "../FleetNotice.svelte";
@@ -17,6 +19,12 @@
   import { stepUp, withStepUp } from "../stepup.ts";
   import { STEP_UP_MS, type Policy } from "../SecurityChoices.svelte";
   import { postAnswer } from "../catchup/answer.ts";
+  import type { Body } from "../catchup/run.ts";
+  import { AnswerSession } from "../desktop/answer-session.svelte.ts";
+  import type { AskOutcome } from "../desktop/answer-session.ts";
+  import type { DecisionItem } from "../desktop/decisions.ts";
+  import { briefFromPageState, decisionFromSearch } from "./brief-route.ts";
+  import BriefSheet from "./BriefSheet.svelte";
   import { startDeviceOutbox } from "../outbox/device.ts";
   import type { Outbox } from "../outbox/outbox.ts";
   import type { OutboxRecord } from "../outbox/state.ts";
@@ -89,11 +97,15 @@
   // The cards open once the feed has said what waits (the roster, the board, the read marks), so a run holds the real
   // cards and never ends empty on a page that is still connecting.
   let want = $state<{ decision?: string; decisions?: boolean } | null>(null);
+  // `/?decision=<id>` opens catch-up with that brief's sheet. The query is dropped; the sheet is a history entry.
+  let linkedBrief = $state<string | null>(null);
   if (typeof location !== "undefined") {
+    const linked = decisionFromSearch(location.search);
     const v = new URLSearchParams(location.search).get("view");
-    if (v === "decisions") { deciding = true; want = { decisions: true }; }
+    if (linked) { deciding = true; want = { decision: linked }; linkedBrief = linked; }
+    else if (v === "decisions") { deciding = true; want = { decisions: true }; }
     else if (v === "activity") tab = "chats";
-    if (v) history.replaceState(history.state, "", location.pathname);
+    if (linked || v) history.replaceState(history.state, "", location.pathname);
   }
   $effect(() => {
     if (!deciding || !feed.primed || !want) return;
@@ -102,6 +114,67 @@
   });
   function decide(o: { decision?: string } = {}) { want = o; deciding = true; scrollTo(0, 0); }
   function stopDeciding() { session.leave(); deciding = false; }
+  const briefId = $derived(briefFromPageState(page.state));
+  let sessions = $state<Record<string, AnswerSession>>({});
+  let briefNote = $state<string | null>(null);
+  $effect(() => {
+    const id = briefId;
+    const list = feed.decisions;
+    untrack(() => {
+      if (!id) { briefNote = null; return; }
+      const d = list.find(x => x.id === id);
+      if (!d) return;
+      const cur = sessions[id];
+      if (!cur) sessions[id] = new AnswerSession(d);
+      else cur.bind(d, true);
+    });
+  });
+  const briefItem = $derived(briefId ? feed.decisions.find(d => d.id === briefId) ?? null : null);
+  const briefSession = $derived(briefId ? sessions[briefId] ?? null : null);
+  const briefAnswering = $derived(session.run?.answering && briefId && session.run.answering.id === briefId
+    ? { label: session.run.answering.label, sending: session.run.answering.sending, commitAt: session.run.answering.commitAt }
+    : null);
+  // The sheet is open while page.state.brief is set. Back (and the browser's back) pop that entry.
+  function openBrief(id: string) {
+    if (!deciding) { want = { decision: id }; deciding = true; }
+    else if (!(session.top?.kind === "decision" && session.top.id === id)) session.open({ decision: id });
+    if (briefFromPageState(page.state) !== id) pushState("", { brief: id });
+    scrollTo(0, 0);
+  }
+  $effect(() => {
+    const id = linkedBrief;
+    if (!id || !feed.primed || !feed.decisions.some(d => d.id === id)) return;
+    linkedBrief = null;
+    if (briefFromPageState(page.state) !== id) pushState("", { brief: id });
+  });
+  async function answerFromSheet(body: Body, label: string): Promise<boolean> {
+    const id = briefId;
+    const held = id ? sessions[id] : null;
+    if (!id || !held || held.stale) return false;
+    briefNote = null;
+    if (feed.status !== "live" || navigator.onLine === false) {
+      briefNote = "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here.";
+      return false;
+    }
+    if (!verifiedFresh && !(await verify())) { briefNote = "Not answered: the passkey check didn't finish."; return false; }
+    if (!session.opened || session.top?.kind !== "decision" || session.top.id !== id) session.open({ decision: id });
+    const key = decisionKey(id);
+    if (!session.run?.cards[key]) return false;
+    session.answer(key, id, body, label, held.seen);
+    return session.run.answering?.id === id;
+  }
+  async function askForBrief(d: DecisionItem): Promise<AskOutcome> {
+    const worker = d.asker.workerId;
+    if (!worker) return { ok: false, error: "This decision has no one to ask." };
+    if (!verifiedFresh && navigator.onLine !== false && !(await verify())) return { ok: false, error: "Not sent: the passkey check didn't finish." };
+    const w = feed.workers.find(x => x.id === worker);
+    try {
+      await queue({ worker, workerName: w?.name ?? d.asker.name, text: `Please restate ${d.id} as a decision brief: morndo-decide template`, uploads: [], seen: w?.waitingOn ?? "none" });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  }
   function go(t: Tab) {
     if (deciding) stopDeciding();
     tab = t;
@@ -208,17 +281,17 @@
   });
 </script>
 
-<div class="phone" class:full={deciding || chat !== null || away.open}>
+<div class="phone" class:full={deciding || chat !== null || away.open || briefId !== null}>
   {#if deciding}
     <CatchUp {feed} {session} {quick} {outgoing} {verifiedFresh} {verify} onBack={stopDeciding} onDay={() => { session.finish(); stopDeciding(); }}
       onQueue={queue} onRetry={id => void outbox?.retry(id)} onDiscard={id => void outbox?.discard(id)}
       onEchoes={(worker, e) => void outbox?.echoes(worker, e)}
-      onScreen={id => { stopDeciding(); openChat(id, true); }} />
+      onScreen={id => { stopDeciding(); openChat(id, true); }} onOpenBrief={openBrief} />
   {:else if tab === "chats"}
     <ChatList {rows} status={feed.status} {now} decisions={feed.primed ? session.count : 0} digestWaiting={!!away.pending && !away.open}
       onOpen={openChat} onDecide={() => decide()} onDigest={() => (away.open = true)} onSettings={() => (settings = true)} />
   {:else if tab === "today"}
-    <Today {feed} {session} {quick} {verifiedFresh} {verify} onCatchUp={() => decide()} onDecide={id => decide({ decision: id })} />
+    <Today {feed} {session} {quick} {verifiedFresh} {verify} onCatchUp={() => decide()} onDecide={id => decide({ decision: id })} onReadBrief={openBrief} />
   {:else if tab === "status"}
     <Status {rows} status={feed.status} primed={feed.primed} onOpen={openChat} />
   {:else if tab === "board"}
@@ -246,6 +319,10 @@
       onMarkRead={markDigestRead} onLater={() => (away.open = false)} />
   {/if}
   {#if settings}<SettingsSheet setting={away.setting} {engines} onChoose={v => away.choose(v)} onClose={() => (settings = false)} />{/if}
+  {#if briefItem && briefSession}
+    <BriefSheet item={briefItem} {now} session={briefSession} answering={briefAnswering} note={briefNote}
+      onPick={answerFromSheet} onUndo={() => session.undo()} onAskBrief={askForBrief} />
+  {/if}
   <LinkedNotice linked={feed.linked} onReview={() => void goto("/devices")} onSeen={at => feed.seeLinked(at)} />
   <FleetNotice available={feed.fleetAvailable} />
 </div>
