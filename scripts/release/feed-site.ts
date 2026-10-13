@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { freshSite } from "./pages.ts";
+import { freshSite, type SiteHead } from "./pages.ts";
 import { FEED_NAMESPACE } from "./sign.ts";
 
 export const FEED_FILES = ["latest.json", "latest.json.sig", "stable.json", "stable.json.sig"] as const;
@@ -54,6 +54,7 @@ export function writeVerifiedSite(dir: string, signers: string, files: readonly 
       const signature = files.find(file => file.name === `${channel}.json.sig`)?.body;
       if (body === undefined || signature === undefined) throw new Error(`feed ${channel} is missing`);
       verifyFeed(signers, body, signature, scratch);
+      feedDocument(body, channel);
     }
     mkdirSync(dir, { recursive: true });
     for (const file of files) writeFileSync(join(dir, file.name), file.body);
@@ -64,20 +65,65 @@ export function writeVerifiedSite(dir: string, signers: string, files: readonly 
 
 export function materialiseFeed(repository: string, dir: string, signers = "trust/feed_allowed_signers"): void {
   freshSite(
-    () => {
-      const sha = readFeedHead(repository);
-      if (sha === null) throw new Error("branch feed has no feed yet");
-      return sha;
-    },
-    sha => {
+    () => readSiteHead(repository),
+    head => {
       const files = FEED_FILES.map(name => {
-        const body = readAt(repository, sha, name);
-        if (body === null) throw new Error(`feed ${name} is missing at ${sha}`);
+        const body = readAt(repository, head.sha, name);
+        if (body === null) throw new Error(`feed ${name} is missing at ${head.sha}`);
         return { name, body };
       });
       writeVerifiedSite(dir, signers, files);
+      return head;
     },
   );
+}
+
+function readSiteHead(repository: string): SiteHead {
+  const sha = readFeedHead(repository);
+  if (sha === null) throw new Error("branch feed has no feed yet");
+  const latest = readAt(repository, sha, "latest.json");
+  if (latest === null) throw new Error("branch feed has no feed yet");
+  return { sha, seq: feedDocument(latest, "latest") };
+}
+
+// The same document the protocol's ChannelFeed checks, without loading that package:
+// exact keys, schema 1, the channel named by the file, a seq and key-set version of
+// at least 1, UTC instants, and arrays for releases and withdrawals.
+const FEED_KEYS = ["schema", "channel", "seq", "issuedAt", "expiresAt", "keySetVersion", "releases", "withdrawn"] as const;
+
+function feedDocument(body: string, channel: "latest" | "stable"): number {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    throw new Error("feed is not the wire's shape");
+  }
+  if (!isRecord(parsed)) throw new Error("feed is not the wire's shape");
+  const keys = Object.keys(parsed);
+  if (keys.length !== FEED_KEYS.length || FEED_KEYS.some(key => !Object.hasOwn(parsed, key))) {
+    throw new Error("feed is not the wire's shape");
+  }
+  if (parsed.schema !== 1 || parsed.channel !== channel) throw new Error("feed is not the wire's shape");
+  if (!whole(parsed.seq) || parsed.seq < 1) throw new Error("feed is not the wire's shape");
+  if (!instant(parsed.issuedAt) || !instant(parsed.expiresAt)) throw new Error("feed is not the wire's shape");
+  if (!whole(parsed.keySetVersion) || parsed.keySetVersion < 1) throw new Error("feed is not the wire's shape");
+  if (!Array.isArray(parsed.releases) || !parsed.releases.every(isRecord)) throw new Error("feed is not the wire's shape");
+  if (!Array.isArray(parsed.withdrawn) || !parsed.withdrawn.every(item => typeof item === "string")) {
+    throw new Error("feed is not the wire's shape");
+  }
+  return parsed.seq;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function whole(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
+function instant(value: unknown): boolean {
+  return typeof value === "string" && value.endsWith("Z") && Number.isFinite(Date.parse(value));
 }
 
 function main(argv: string[]): void {

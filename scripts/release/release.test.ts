@@ -269,8 +269,8 @@ describe("feed", () => {
     const pub = spawnSync("ssh-keygen", ["-y", "-f", key], { encoding: "utf8" });
     const signers = join(dir, "allowed");
     writeFileSync(signers, `${allowedSignerLine({ identity: FEED_NAMESPACE, namespace: FEED_NAMESPACE, publicKey: pub.stdout.trim() })}\n`);
-    const latest = "{\"seq\":4}\n";
-    const stable = "{\"seq\":4}\n";
+    const latest = emptyFeed({ channel: "latest", now: WHEN, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
     const files = [
       { name: "latest.json", body: latest },
       { name: "latest.json.sig", body: signBytes({ bytes: Buffer.from(latest), keyPath: key, namespace: FEED_NAMESPACE, dir }).toString("utf8") },
@@ -284,6 +284,17 @@ describe("feed", () => {
     expect(existsSync(join(site, ".check"))).toBe(false);
     writeVerifiedSite(site, signers, files);
     expect(readFileSync(join(site, "latest.json"), "utf8")).toBe(latest);
+
+    const malformed = "{\"seq\":4}\n";
+    const bad = [
+      { name: "latest.json", body: malformed },
+      { name: "latest.json.sig", body: signBytes({ bytes: Buffer.from(malformed), keyPath: key, namespace: FEED_NAMESPACE, dir }).toString("utf8") },
+      { name: "stable.json", body: malformed },
+      { name: "stable.json.sig", body: signBytes({ bytes: Buffer.from(malformed), keyPath: key, namespace: FEED_NAMESPACE, dir }).toString("utf8") },
+    ];
+    const refused = join(dir, "refused");
+    expect(() => writeVerifiedSite(refused, signers, bad)).toThrow(/shape/i);
+    expect(existsSync(join(refused, "latest.json"))).toBe(false);
   });
 
   it("retries a feed ref only when GitHub says it moved or already exists", () => {
@@ -295,15 +306,29 @@ describe("feed", () => {
   });
 
   it("does not deploy a site older than the feed head", () => {
-    const heads = ["aaa", "bbb", "bbb"];
+    const heads = [
+      { sha: "aaa", seq: 4 },
+      { sha: "bbb", seq: 5 },
+      { sha: "bbb", seq: 5 },
+      { sha: "bbb", seq: 5 },
+    ];
     let i = 0;
     const built: string[] = [];
     const site = freshSite(
       () => heads[i++] ?? heads[heads.length - 1]!,
-      (sha) => { built.push(sha); },
+      (head) => { built.push(head.sha); return head; },
     );
     expect(built).toEqual(["aaa", "bbb"]);
-    expect(site).toBe("bbb");
+    expect(site).toEqual({ sha: "bbb", seq: 5 });
+  });
+
+  it("does not deploy a feed whose seq went backwards", () => {
+    const reads = [{ sha: "bbb", seq: 4 }, { sha: "bbb", seq: 5 }];
+    let i = 0;
+    expect(() => freshSite(
+      () => reads[i++] ?? reads[reads.length - 1]!,
+      head => head,
+    )).toThrow(/backwards/);
   });
 
   it("retries the feed read when the branch moved, and commits the head it just read", () => {
