@@ -6,7 +6,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { untrack } from "svelte";
   import { AnswerSession } from "./answer-session.svelte.ts";
-  import type { AnswerBody, AnswerProblem, AskOutcome } from "./answer-session.ts";
+  import { releaseAbsentSession, type AnswerBody, type AnswerProblem, type AskOutcome } from "./answer-session.ts";
   import BriefModal from "./BriefModal.svelte";
   import DecisionCard from "./DecisionCard.svelte";
   import { groups, urgency, waitingCount, type DecisionItem, type LedgerState } from "./decisions.ts";
@@ -22,19 +22,33 @@
   let sessions = $state<Record<string, AnswerSession>>({});
   let collapsed = $state<Record<string, boolean>>({});
   let openId = $state<string | null>(null);
+  // Wall time the decision was first missing. Not state: the effect re-reads it when `now` or the list changes.
+  const absentSince = new Map<string, number>();
   $effect(() => {
     const hold = openId;
     const list = items;
+    const t = now;
     untrack(() => {
       const ids = new Set<string>(list.map(d => d.id));
       for (const d of list) {
+        absentSince.delete(d.id);
         const cur = sessions[d.id];
         if (!cur) sessions[d.id] = new AnswerSession(d);
         else cur.bind(d, hold === d.id);
       }
-      // A decision that left the list takes its session with it. The one whose brief is still open stays until
-      // that brief closes, so the dialog is not left without the session it is reading.
-      for (const id of Object.keys(sessions)) if (!ids.has(id) && id !== hold) delete sessions[id];
+      // Gone for good: closed, or missing past the grace. A brief absence keeps an answer in doubt, a sent
+      // flag, or typed words, so the same request comes back with it. The open brief stays until it closes.
+      for (const id of Object.keys(sessions)) {
+        if (ids.has(id) || id === hold) continue;
+        const s = sessions[id];
+        if (!s) continue;
+        const since = absentSince.get(id) ?? t;
+        if (!absentSince.has(id)) absentSince.set(id, since);
+        if (releaseAbsentSession(s, t - since)) {
+          delete sessions[id];
+          absentSince.delete(id);
+        }
+      }
     });
   });
   const openItem = $derived(items.find(d => d.id === openId) ?? null);

@@ -54,6 +54,16 @@ export function back(s: AnswerState): AnswerState {
 
 // Closed meanwhile: nothing is left to confirm. An answer in doubt is cleared, error included, because there is
 // nothing left to check. A refusal with nothing in doubt stays, so the reason it did not go is still on screen.
+// A hub restart can drop an open decision for a moment. An answer in doubt, a sent flag, or words already
+// typed stay with that id so a return cannot send a second request. A closed decision, or one gone this long, does not.
+export const ABSENT_GRACE_MS = 60_000;
+
+export function releaseAbsentSession(s: Pick<AnswerState, "again" | "sent" | "words" | "live">, absentMs: number): boolean {
+  if (s.live.status !== "open") return true;
+  if (s.again === null && !s.sent && s.words.trim() === "") return true;
+  return absentMs >= ABSENT_GRACE_MS;
+}
+
 export function noteClosed(s: AnswerState): AnswerState {
   const error = s.again ? null : s.error;
   if (s.mode === "idle" && s.picked === null && s.again === null && s.error === error) return s;

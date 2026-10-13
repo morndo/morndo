@@ -124,7 +124,7 @@ describe("round 3: the card and the brief share one answer footer", () => {
 });
 
 describe("round 3: a decision that leaves the list drops its session", () => {
-  it("comes back open, not still sent, when the same id returns", async () => {
+  it("keeps Sent across a brief gap, and is fresh once the gap has lasted a minute", async () => {
     const errors = await ready();
     const item = tap("d-gone", "v1", "Extend the triage script");
     await show([item]);
@@ -139,8 +139,17 @@ describe("round 3: a decision that leaves the list drops its session", () => {
     await show([item]);
     await tab.locator('[data-decision="d-gone"]').getByRole("button", { name: "Ship the weekly notes" }).click();
     const again = tab.getByRole("dialog");
-    await again.getByRole("button", { name: "Extend the triage script" }).waitFor();
-    expect(await again.getByText(/^Sent\./).count()).toBe(0);
+    await again.getByText(/^Sent\./).waitFor();
+    expect(await again.getByRole("button", { name: "Extend the triage script" }).count()).toBe(0);
+    await tab.keyboard.press("Escape");
+    await again.waitFor({ state: "hidden" });
+    await show([]);
+    await tab.evaluate(t => (globalThis as unknown as { __setNow: (n: number) => void }).__setNow(t), NOW + 60_000);
+    await show([item]);
+    await tab.locator('[data-decision="d-gone"]').getByRole("button", { name: "Ship the weekly notes" }).click();
+    const fresh = tab.getByRole("dialog");
+    await fresh.getByRole("button", { name: "Extend the triage script" }).waitFor();
+    expect(await fresh.getByText(/^Sent\./).count()).toBe(0);
     expect(errors).toEqual([]);
   }, 60_000);
 });

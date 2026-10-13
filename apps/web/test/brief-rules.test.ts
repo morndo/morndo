@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { dueLine } from "../src/lib/desktop/decisions.ts";
 import { dockedWidth, layoutIsNarrow, widthAfterWindowChange, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
-import { openSession, pick, showNew, noteClosed } from "../src/lib/desktop/answer-session.ts";
+import { openSession, pick, showNew, noteClosed, releaseAbsentSession, ABSENT_GRACE_MS } from "../src/lib/desktop/answer-session.ts";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
 
 const at = (iso: string) => Date.parse(iso);
@@ -78,6 +78,17 @@ describe("answer session", () => {
     expect(closed.error).toBeNull();
     expect(closed.mode).toBe("idle");
     expect(closed.picked).toBeNull();
+  });
+  it("an answer in doubt, a sent flag, or typed words survive a brief absence and not a closed one", () => {
+    const open = openSession(item("v1", "Extend the triage script"));
+    const doubt = { ...open, again: { body: { key: "b" }, requestId: "req-1", code: "uncertain" } };
+    expect(releaseAbsentSession(doubt, 0)).toBe(false);
+    expect(releaseAbsentSession(doubt, ABSENT_GRACE_MS - 1)).toBe(false);
+    expect(releaseAbsentSession(doubt, ABSENT_GRACE_MS)).toBe(true);
+    expect(releaseAbsentSession({ ...open, sent: true }, 0)).toBe(false);
+    expect(releaseAbsentSession({ ...open, words: "Ship on Tuesday" }, 0)).toBe(false);
+    expect(releaseAbsentSession(open, 0)).toBe(true);
+    expect(releaseAbsentSession({ ...doubt, live: item("v1", "Extend the triage script", "expired") }, 0)).toBe(true);
   });
   it("a refusal stays visible when the item closes and nothing is in doubt", () => {
     const s = openSession(item("v1", "Extend the triage script"));
