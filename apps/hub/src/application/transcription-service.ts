@@ -284,6 +284,12 @@ export class TranscriptionService {
         this.#inflight.delete(key);
         return;
       }
+      // A rejection with the signal still live is the host's own failure (no space, a spawn that threw): the run
+      // failed, and no reason an earlier attempt on this recording left behind may decide it.
+      if (!ac.signal.aborted) {
+        this.#finish(key, timer, { outcome: "failed", at: this.#now(), problem: "engine" });
+        return;
+      }
       const why = this.#why.get(key) ?? "cancelled";
       this.#finish(key, timer, why === "timed_out"
         ? { outcome: "timed_out", at: this.#now() }
@@ -296,6 +302,7 @@ export class TranscriptionService {
     clearTimeout(timer);
     this.#timers.delete(timer);
     this.#inflight.delete(key);
+    this.#why.delete(key);
     const current = this.#rows.find(row => rowKey(row) === key && live(row.state));
     if (current) {
       const cap = this.capability();

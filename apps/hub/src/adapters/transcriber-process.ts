@@ -79,11 +79,30 @@ function childEnv(tmp: string): NodeJS.ProcessEnv {
 }
 
 function runProgram(program: string, args: string[], signal: AbortHandle, onLeader: (pid: number | null) => void): Promise<Run> {
-  const tmp = realpathSync(mkdtempSync(join(tmpdir(), "morndo-tx-")));
+  // The working directory is made before anything can fail inside the promise, and a throw here (no space, a
+  // symlink loop in tmpdir) still rejects the caller's await: what was made is removed on the way out.
+  let tmp = "";
+  try {
+    const made = mkdtempSync(join(tmpdir(), "morndo-tx-"));
+    tmp = made;
+    tmp = realpathSync(made);
+  }
+  catch (e) {
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
+    throw e;
+  }
   return new Promise(resolve => {
-    const child = spawn(program, args, {
-      cwd: tmp, env: childEnv(tmp), detached: true, shell: false, stdio: ["ignore", "pipe", "pipe"],
-    });
+    let child;
+    try {
+      child = spawn(program, args, {
+        cwd: tmp, env: childEnv(tmp), detached: true, shell: false, stdio: ["ignore", "pipe", "pipe"],
+      });
+    }
+    catch (e) {
+      // spawn throws synchronously on a bad argument (an empty program): the directory is the host's to remove.
+      rmSync(tmp, { recursive: true, force: true });
+      throw e;
+    }
     const pid = child.pid;
     if (pid !== undefined && pid > 0) {
       onLeader(pid);
