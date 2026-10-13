@@ -54,6 +54,19 @@ describe("install choices", () => {
     expect(workflow).toContain("hashFiles('plugins/transcribe-whisper-cpp/plugin.json', 'plugins/transcribe-whisper-cpp/scripts/install.ts')");
   });
 
+  it("the plugin workflow runs when a file its tests depend on changes", () => {
+    const workflow = readFileSync(join(import.meta.dirname, "../../../.github/workflows/transcription-plugin.yml"), "utf8");
+    const paths = [
+      "packages/domain/src/transcription.ts",
+      "packages/protocol/src/index.ts",
+      "packages/protocol/test/proc.ts",
+      "packages/protocol/test/answers.mjs",
+      "vitest.config.ts",
+      "package.json",
+    ];
+    for (const path of paths) expect(workflow.split(`- "${path}"`).length - 1).toBe(2);
+  });
+
   it("a failed install leaves the previous plugin in place", async () => {
     const root = mkdtempSync(join(tmpdir(), "morndo-swap-"));
     const dest = join(root, "transcribe");

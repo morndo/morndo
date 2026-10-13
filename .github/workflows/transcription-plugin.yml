@@ -9,16 +9,28 @@ on:
     paths:
       - "plugins/transcribe-*/**"
       - "apps/hub/src/**/transcri*"
+      - "packages/domain/src/transcription.ts"
       - "packages/protocol/src/transcription.ts"
+      - "packages/protocol/src/index.ts"
       - "packages/protocol/test/transcriber-contract.ts"
+      - "packages/protocol/test/proc.ts"
+      - "packages/protocol/test/answers.mjs"
+      - "vitest.config.ts"
+      - "package.json"
       - ".github/workflows/transcription-plugin.yml"
   push:
     branches: [main]
     paths:
       - "plugins/transcribe-*/**"
       - "apps/hub/src/**/transcri*"
+      - "packages/domain/src/transcription.ts"
       - "packages/protocol/src/transcription.ts"
+      - "packages/protocol/src/index.ts"
       - "packages/protocol/test/transcriber-contract.ts"
+      - "packages/protocol/test/proc.ts"
+      - "packages/protocol/test/answers.mjs"
+      - "vitest.config.ts"
+      - "package.json"
       - ".github/workflows/transcription-plugin.yml"
   schedule:
     - cron: "17 6 * * 1"
