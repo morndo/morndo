@@ -28,7 +28,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  signers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: check
+        run: |
+          set -euo pipefail
+          if [ -s trust/release_allowed_signers ] && [ -s trust/feed_allowed_signers ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skipping release: trust/release_allowed_signers or trust/feed_allowed_signers is not in the tree yet" >&2
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
   release-please:
+    # The manifest releaser creates the tag and the draft only when this job runs
+    # (draft, force-tag-creation). https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md
+    # read 2026-10-13. Missing signer files skip the job, so no tag and no draft are left behind.
+    needs: signers
+    if: needs.signers.outputs.ready == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -63,33 +89,9 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  signers:
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    outputs:
-      ready: ${{ steps.check.outputs.ready }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ needs.release-please.outputs.sha }}
-          persist-credentials: false
-      - id: check
-        run: |
-          set -euo pipefail
-          if [ -s trust/release_allowed_signers ] && [ -s trust/feed_allowed_signers ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skipping release: trust/release_allowed_signers or trust/feed_allowed_signers is not in the tree yet" >&2
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          fi
-
   build:
     needs: [release-please, signers]
-    if: needs.signers.outputs.ready == 'true'
+    if: needs.signers.outputs.ready == 'true' && needs.release-please.outputs.release_created == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:

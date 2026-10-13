@@ -100,7 +100,11 @@ describe("release pipeline files", () => {
     expect(signers).toContain("skipping release:");
     expect(signers).toContain("trust/release_allowed_signers");
     expect(signers).toContain("trust/feed_allowed_signers");
+    expect(signers).not.toContain("release-please");
     expect(job(release, "build")).toContain("needs.signers.outputs.ready");
+    expect(job(release, "build")).toContain("needs.release-please.outputs.release_created");
+    expect(job(release, "release-please")).toContain("needs: signers");
+    expect(job(release, "release-please")).toContain("needs.signers.outputs.ready");
     const prepare = job(release, "release-please");
     expect(prepare).toContain("contents: write");
     expect(prepare).toContain("pull-requests: write");
