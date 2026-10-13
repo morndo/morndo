@@ -171,21 +171,36 @@ describe("transcription http", () => {
     expect(await over.json()).toEqual({ error: "too_many" });
   });
 
-  it("serves the app shell's microphone policy from a fresh probe, not the stale cache", async () => {
-    let ready = false;
+  it("serves the app shell from the cached probe and refreshes it in the background", async () => {
+    let calls = 0;
+    let release = () => {};
+    const missing = { ready: false as const, reason: "missing" as const, detail: "missing" };
+    const ready = { ready: true as const, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture", languages: "multi" as const, maxSeconds: 600 };
     const transcriber: Transcriber = {
-      probe: async () => ready
-        ? { ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture", languages: "multi", maxSeconds: 600 }
-        : { ready: false, reason: "missing", detail: "missing" },
+      probe: () => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve(missing);
+        if (calls === 2) return new Promise<typeof ready>(resolve => { release = () => resolve(ready); });
+        return Promise.resolve(ready);
+      },
       transcribe: () => Promise.reject(new Error("not used")),
     };
     const hub = await startInProcessHub({ transcriber });
     hubs.push(hub);
-    const before = await fetch(`${hub.base}/`);
-    expect(before.headers.get("permissions-policy")).toContain("microphone=()");     // off at start
-    ready = true;                                                                    // installed while the hub runs
-    const after = await fetch(`${hub.base}/`);
-    // The document, not just /api/me, must ask again: its Permissions-Policy is what gates getUserMedia.
-    expect(after.headers.get("permissions-policy")).toContain("microphone=(self)");
+    const shell = fetch(`${hub.base}/`);
+    const winner = await Promise.race([
+      shell.then(() => "served" as const),
+      new Promise<"waited">(resolve => setTimeout(() => resolve("waited"), 200)),
+    ]);
+    release();
+    const before = await shell;
+    expect(winner).toBe("served");
+    expect(before.headers.get("permissions-policy")).toContain("microphone=()");
+    let policy = "";
+    for (let i = 0; i < 20 && !policy.includes("microphone=(self)"); i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      policy = (await fetch(`${hub.base}/`)).headers.get("permissions-policy") ?? "";
+    }
+    expect(policy).toContain("microphone=(self)");
   });
 });

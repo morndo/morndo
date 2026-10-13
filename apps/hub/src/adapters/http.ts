@@ -656,9 +656,9 @@ export function startHttp(p: {
     }
     // Every page is the app shell (SPA fallback); its CSP allows exactly its own inline bootstrap. Read again after a
     // rebuild, so the shell never points at assets the build replaced.
-    // The document's Permissions-Policy is what gates the microphone, so it is served from a probe as fresh as
-    // /api/me's — never a cache that went stale while nobody asked.
-    await p.transcription?.refresh();
+    // The document's Permissions-Policy is what gates the microphone. It is served from the last probe, and a
+    // refresh runs behind the response so a slow probe never holds the page. The next document sees what it found.
+    void p.transcription?.refresh();
     const file = ["200.html", "index.html"].map(f => join(root, f)).find(f => existsSync(f));
     if (!file) throw new HttpError(503, "web app not built: run `npm run build`");
     const mtimeMs = statSync(file).mtimeMs;
