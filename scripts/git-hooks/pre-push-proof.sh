@@ -2,6 +2,12 @@
 # Proves the pre-push hook: a clean tree passes; a made-up home path fails;
 # a marker this script writes into its own leak-patterns file fails; a
 # committed home path fails in a throwaway clone, and a clean commit passes.
+# Every commit the push adds is checked on its own, published meaning the
+# remote being pushed to: a line one commit adds and a later one removes
+# fails, a merge of the pushed-to remote's main passes, a commit only a
+# second remote holds still fails, a push to a URL checks everything, a
+# symlink replaced by a regular file is scanned, a pure rename adds no
+# lines, and a home path in a conflict resolution fails.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
@@ -37,6 +43,16 @@ trap cleanup EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 commit_ok() { git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q "$@"; }
+
+# The published claim in the docs is exactly what the hook guarantees, and
+# nothing broader.
+claim='commits already on the remote you push to (its remote-tracking refs; fetch first) are not checked again'
+for doc in "$root/CONTRIBUTING.md" "$root/docs/public-repo.md"; do
+  grep -F -q "$claim" "$doc" || fail "$doc must state the published claim exactly"
+  if grep -q 'no remote-tracking ref contains' "$doc"; then
+    fail "$doc must not claim any remote-tracking ref publishes"
+  fi
+done
 
 sh "$hook" </dev/null || fail "hook should exit 0 on the current tree"
 
@@ -93,12 +109,12 @@ commit_ok -m 'clean proof'
 parent=$(git rev-parse HEAD~1)
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/proof "$tip" refs/heads/proof "$parent" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/proof "$tip" refs/heads/proof "$parent" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "clean commit should exit 0, got $code"
 set +e
-printf '%s %s %s %s\n' refs/heads/proof "$tip" refs/heads/proof "$zero" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/proof "$tip" refs/heads/proof "$zero" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "clean new branch should exit 0, got $code"
@@ -109,12 +125,12 @@ commit_ok -m 'planted proof'
 parent=$(git rev-parse HEAD~1)
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/proof "$tip" refs/heads/proof "$parent" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/proof "$tip" refs/heads/proof "$parent" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "planted commit should exit 1, got $code"
 set +e
-printf '%s %s %s %s\n' refs/heads/proof "$tip" refs/heads/proof "$zero" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/proof "$tip" refs/heads/proof "$zero" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "planted new branch should exit 1, got $code"
@@ -128,7 +144,7 @@ git add readme.txt .gitleaks.toml
 commit_ok -m 'first clean'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "first push of a clean tree should exit 0, got $code"
@@ -137,7 +153,7 @@ git add planted-note.txt
 commit_ok -m 'first planted'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "first push of a planted tree should exit 1, got $code"
@@ -175,7 +191,7 @@ git add pkg/test/old-marker.test.ts
 commit_ok -m 'touch the test'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "edit beside an old test header should exit 0, got $code"
@@ -188,7 +204,7 @@ git add pkg/test/fresh.test.ts
 commit_ok -m 'fresh fixture'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "new test header should exit 0, got $code"
@@ -199,7 +215,7 @@ git add pkg/src/app.ts
 commit_ok -m 'source marker'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "header outside a test should exit 1, got $code"
@@ -209,7 +225,7 @@ git add pkg/test/home.test.ts
 commit_ok -m 'home in a test'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "home path in a test should exit 1, got $code"
@@ -229,7 +245,7 @@ git add a.md
 commit_ok -m 'plus plus then a path'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "path after a plus-plus line should exit 1, got $code"
@@ -239,7 +255,7 @@ git add a.md
 commit_ok -m 'path alone'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "path without a plus-plus line should exit 1, got $code"
@@ -259,7 +275,7 @@ git add apps/fleet/test/client-api.test.ts
 commit_ok -m 'two paths'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "second path on an allowlisted line should exit 1, got $code"
@@ -272,7 +288,7 @@ git add apps/fleet/test/client-api.test.ts
 commit_ok -m 'path and a local pattern'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "local pattern beside an allowlisted path should exit 1, got $code"
@@ -321,7 +337,7 @@ base=$(git rev-parse HEAD)
 git -c user.name='dependabot[bot]' -c user.email='49699333+dependabot[bot]@users.noreply.github.com' commit -q --allow-empty -m 'chore: bump a fixture'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "bot noreply address should exit 0, got $code"
@@ -329,7 +345,7 @@ git reset -q --hard "$base"
 env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'author mail'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "author email should exit 1, got $code"
@@ -337,10 +353,365 @@ git reset -q --hard "$base"
 env GIT_COMMITTER_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'committer mail'
 tip=$(git rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook"
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "committer email should exit 1, got $code"
+cd "$root"
+
+# A branch that merges main never re-checks published history. The repo is
+# throwaway and its origin/main is fabricated: one published commit with a
+# personal author address, carrying a synthetic key that only gitleaks flags.
+# The remote-tip range of the push fails the plain range check, while the
+# hook, limited to commits the pushed-to remote does not already hold,
+# passes it. A new home path, a personal author address, or an unpublished
+# synthetic key on the merged branch still fails.
+git init -q "$scratch/merged"
+cp "$root/.gitleaks.toml" "$scratch/merged/.gitleaks.toml"
+git -C "$scratch/merged" remote add origin "$scratch/merged-remote.git"
+cd "$scratch/merged"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'merged base'
+base=$(git rev-parse HEAD)
+# The key is assembled at runtime so this proof file stays scanner-clean.
+mkdir -p src
+key=$(printf '%s-%s-%s' 9f8e7d6c5b 4a3f2e1d0c9b 8a7f6e5d4c)
+printf 'export const apiKey = "%s";\n' "$key" > src/config.ts
+git add src/config.ts
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q -m 'published main commit'
+published=$(git rev-parse HEAD)
+git checkout -q -b feature "$base"
+printf 'clean\n' > feature.txt
+git add feature.txt
+commit_ok -m 'feature work'
+remote_tip=$(git rev-parse HEAD)
+git update-ref refs/remotes/origin/main "$published"
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com merge -q --no-edit refs/remotes/origin/main
+merge_tip=$(git rev-parse HEAD)
+git rev-list "$remote_tip..$merge_tip" | grep -F -x -q "$published" || fail "the pushed range should hold the published commit"
+set +e
+sh "$root/scripts/git-hooks/commit-traces" mails "$remote_tip..$merge_tip"
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "the remote-tip range alone should fail on published commits, got $code"
+set +e
+printf '%s %s %s %s\n' refs/heads/feature "$merge_tip" refs/heads/feature "$remote_tip" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a branch that merges main should exit 0, got $code"
+
+printf '/%s/%s/notes\n' home example-user > merged-note.txt
+git add merged-note.txt
+commit_ok -m 'home path after the merge'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/feature "$tip" refs/heads/feature "$remote_tip" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a home path after the merge should exit 1, got $code"
+git reset -q --hard "$merge_tip"
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com \
+  commit -q --allow-empty -m 'bad author after the merge'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/feature "$tip" refs/heads/feature "$remote_tip" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a personal author address after the merge should exit 1, got $code"
+git reset -q --hard "$merge_tip"
+printf 'export const apiKey = "%s";\n' "$key" > branch-key.ts
+git add branch-key.ts
+commit_ok -m 'unpublished synthetic key'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/feature "$tip" refs/heads/feature "$remote_tip" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "an unpublished synthetic key should exit 1, got $code"
+cd "$root"
+
+# A merge commit can carry lines neither parent has, so the combined diff of
+# every merge in the push is scanned beside the patches of its commits.
+evil=$scratch/evil
+git init -q --initial-branch=main "$evil"
+cp "$root/.gitleaks.toml" "$evil/.gitleaks.toml"
+cd "$evil"
+printf 'ok\n' > file.txt
+git add file.txt .gitleaks.toml
+commit_ok -m 'evil base'
+git checkout -q -b side
+printf 'side\n' > side.txt
+git add side.txt
+commit_ok -m 'side work'
+side=$(git rev-parse HEAD)
+git checkout -q main
+printf 'main\n' > main.txt
+git add main.txt
+commit_ok -m 'main work'
+remote_tip=$(git rev-parse HEAD)
+git merge --no-commit --no-ff -q "$side"
+printf '/%s/%s/notes\n' home example-user >> file.txt
+git add file.txt
+commit_ok -m 'merge the side branch'
+merge_tip=$(git rev-parse HEAD)
+git show "$merge_tip:file.txt" | grep -q example-user || fail "the merge commit should carry the smuggled line"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$merge_tip" refs/heads/main "$remote_tip" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a smuggled line inside a merge should exit 1, got $code"
+cd "$root"
+
+# Published means the remote being pushed to. A commit that only a second
+# remote contains is rejected when pushed to the first, and the same commit
+# is spared once the pushed-to remote's own tracking ref holds it.
+cross=$scratch/cross
+git init -q --initial-branch=main "$cross"
+cp "$root/.gitleaks.toml" "$cross/.gitleaks.toml"
+cd "$cross"
+git remote add origin "$scratch/cross-origin.git"
+git remote add mirror "$scratch/cross-mirror.git"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'cross base'
+base=$(git rev-parse HEAD)
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'cross carry'
+carry=$(git rev-parse HEAD)
+printf 'work\n' > work.txt
+git add work.txt
+commit_ok -m 'cross work'
+tip=$(git rev-parse HEAD)
+git update-ref refs/remotes/origin/main "$base"
+git update-ref refs/remotes/mirror/main "$carry"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a commit only a second remote holds should exit 1, got $code"
+git update-ref refs/remotes/origin/main "$carry"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a commit the pushed-to remote holds should exit 0, got $code"
+cd "$root"
+
+# A push to a URL, or to a configured remote with no tracking refs, checks
+# everything the remote tip does not already hold: with no tip known, the
+# whole history, including a commit the origin tracking refs spare.
+url=$scratch/url
+git init -q --initial-branch=main "$url"
+cp "$root/.gitleaks.toml" "$url/.gitleaks.toml"
+cd "$url"
+git remote add origin "$scratch/url-origin.git"
+git remote add unfetched "$scratch/url-unfetched.git"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'url base'
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'url carry'
+carry=$(git rev-parse HEAD)
+printf 'work\n' > work.txt
+git add work.txt
+commit_ok -m 'url work'
+tip=$(git rev-parse HEAD)
+git update-ref refs/remotes/origin/main "$carry"
+dest=git@example.invalid:someone/repo.git
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" "$dest" >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a URL push with no known remote tip should exit 1, got $code"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$carry" | sh "$root/$hook" "$dest" >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a URL push past a known remote tip should exit 0, got $code"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" unfetched >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a remote with no tracking refs and no known tip should exit 1, got $code"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$carry" | sh "$root/$hook" unfetched >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a remote with no tracking refs past a known tip should exit 0, got $code"
+cd "$root"
+
+# Each commit is checked on its own: a line one commit adds and a later
+# commit of the same push removes is caught in the commit that added it.
+churnr=$scratch/churnr
+git init -q --bare "$scratch/churnr-remote.git"
+git init -q --initial-branch=main "$churnr"
+cp "$root/.gitleaks.toml" "$churnr/.gitleaks.toml"
+cd "$churnr"
+git remote add origin "$scratch/churnr-remote.git"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'churnr base'
+git push -q origin main
+printf '/%s/%s/notes\n' home example-user > churn.txt
+git add churn.txt
+commit_ok -m 'add the churn file'
+git rm -q churn.txt
+commit_ok -m 'remove the churn file'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a home path added then removed inside the push should exit 1, got $code"
+cd "$root"
+
+# The hook reads the commits with its own diff flags: an external diff tool
+# and forced color in the repository change nothing.
+extr=$scratch/extr
+git init -q --bare "$scratch/extr-remote.git"
+git init -q --initial-branch=main "$extr"
+cp "$root/.gitleaks.toml" "$extr/.gitleaks.toml"
+cd "$extr"
+git remote add origin "$scratch/extr-remote.git"
+git config diff.external false
+git config color.ui always
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'extr base'
+git push -q origin main
+token=$(printf '%s%s' ghp_ 0123456789abcdef0123)
+printf 'export const session = "%s";\n' "$token" > session.ts
+git add session.ts
+commit_ok -m 'token in source'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a token with an external diff and color set should exit 1, got $code"
+cd "$root"
+
+# Published commits are never re-checked: the remote's main carries a commit
+# with a personal author address and a home-path line, and a branch that
+# merges that main and adds a clean commit pushes. The branch's own commits
+# are still checked: a new branch with a personal author address fails.
+webm=$scratch/webm
+git init -q --bare "$scratch/webm-remote.git"
+git init -q --initial-branch=main "$webm"
+cp "$root/.gitleaks.toml" "$webm/.gitleaks.toml"
+cd "$webm"
+git remote add origin "$scratch/webm-remote.git"
+printf 'ok\n' > readme.txt
+git add readme.txt .gitleaks.toml
+commit_ok -m 'webm base'
+git push -q origin main
+printf '/%s/%s/notes\n' home example-user > published-note.txt
+git add published-note.txt
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q -m 'published home path'
+git push -q origin main
+git checkout -q -b topic
+printf 'topic\n' > topic.txt
+git add topic.txt
+commit_ok -m 'topic work'
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com merge -q --no-edit origin/main
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/topic "$tip" refs/heads/topic "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a branch that merges published main should exit 0, got $code"
+git checkout -q -b fresh origin/main
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada \
+  -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'fresh work'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/fresh "$tip" refs/heads/fresh "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a new branch with a personal author address should exit 1, got $code"
+cd "$root"
+
+# A merge is read through its combined diff, which holds only the conflict
+# resolution: a home path written into the resolution fails, with both
+# parents already published.
+resol=$scratch/resol
+git init -q --bare "$scratch/resol-remote.git"
+git init -q --initial-branch=main "$resol"
+cp "$root/.gitleaks.toml" "$resol/.gitleaks.toml"
+cd "$resol"
+git remote add origin "$scratch/resol-remote.git"
+printf 'base\n' > file.txt
+git add file.txt .gitleaks.toml
+commit_ok -m 'resol base'
+git push -q origin main
+git checkout -q -b side
+printf 'side\n' > file.txt
+git add file.txt
+commit_ok -m 'side edit'
+git push -q origin side
+git checkout -q main
+printf 'main\n' > file.txt
+git add file.txt
+commit_ok -m 'main edit'
+git push -q origin main
+remote_tip=$(git rev-parse HEAD)
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com merge --no-commit --no-ff -q origin/side >/dev/null 2>&1 || true
+printf 'resolved\n/%s/%s/notes\n' home example-user > file.txt
+git add file.txt
+commit_ok -m 'merge the side branch'
+tip=$(git rev-parse HEAD)
+git show "$tip:file.txt" | grep -q example-user || fail "the merge resolution should carry the added line"
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$remote_tip" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a home path in a merge resolution should exit 1, got $code"
+cd "$root"
+
+# A type change is scanned: a symlink replaced by a regular file that holds
+# a home path fails.
+typec=$scratch/typec
+git init -q --initial-branch=main "$typec"
+cp "$root/.gitleaks.toml" "$typec/.gitleaks.toml"
+cd "$typec"
+printf 'target\n' > target.txt
+ln -s target.txt link.md
+git add target.txt link.md .gitleaks.toml
+commit_ok -m 'typec base'
+base=$(git rev-parse HEAD)
+rm link.md
+printf '/%s/%s/notes\n' home example-user > link.md
+git add link.md
+commit_ok -m 'replace the symlink with a file'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$base" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a home path behind a type change should exit 1, got $code"
+cd "$root"
+
+# A pure rename is not a full add: moving a file whose home-path line the
+# allowlist covers by path passes; the line was checked when it was added.
+ren=$scratch/ren
+git init -q --initial-branch=main "$ren"
+cp "$root/.gitleaks.toml" "$ren/.gitleaks.toml"
+cd "$ren"
+mkdir -p apps/fleet/test
+printf 'see /%s/%s/notes\n' home u > apps/fleet/test/client-api.test.ts
+git add apps/fleet/test/client-api.test.ts .gitleaks.toml
+commit_ok -m 'ren base'
+git mv apps/fleet/test/client-api.test.ts apps/fleet/test/renamed.test.ts
+commit_ok -m 'rename the file'
+tip=$(git rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | sh "$root/$hook" origin
+code=$?
+set -e
+[ "$code" -eq 0 ] || fail "a pure rename of an allowlisted file should exit 0, got $code"
 cd "$root"
 
 echo "pre-push proof ok"

@@ -1,4 +1,6 @@
 // The settings page is a view: budget in words and a percentage, keys-only drops subscriptions, and no key material.
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   acknowledge, addKey, addSubscription, emptyDirectory, emptyPolicy, ensureRole, parseEngine, setOverride, setPicks, setPriority,
@@ -26,6 +28,19 @@ function preset(): VendorPreset {
 }
 
 describe("the connections page view", () => {
+  it("lists Z.ai from the shipped catalog", () => {
+    const presets = JSON.parse(readFileSync(join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json"), "utf8")) as VendorPreset[];
+    const page = buildPage({
+      version: 1, directory: emptyDirectory(), policy: emptyPolicy(), presets, alerts: [], outside: [], usage: {}, now: 1,
+    });
+    expect(page.catalog.find(item => item.id === "zai")).toEqual({
+      id: "zai", label: "Z.ai", kinds: ["api-key"], runtimes: ["claude"],
+      termsSummary: "API input is processed in real time and not saved on Z.ai's servers.",
+      termsSources: ["https://docs.z.ai/legal-agreement/privacy-policy"],
+      isolation: "os",
+    });
+  });
+
   it("shows one subscription and one key, a keys-only chain, and an alert, with no secret", () => {
     let directory = must(addSubscription(emptyDirectory(), { name: "sub-a", vendor: "vendor-a", runtime: "runtime-a", isolation: "none", floor: "none", configDir: null }, who, 1));
     directory = must(acknowledge(directory, "sub-a", "r1", "owner", who, 2));

@@ -213,6 +213,8 @@ export const MIGRATIONS: readonly Migration[] = [
   },
 ];
 
+export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
+
 // Runs every migration newer than the database's user_version, in order, in one IMMEDIATE transaction that ends by
 // setting user_version and the floor. Throws DatabaseFromFuture, changing nothing, if the database's floor is above
 // this service (§11.1). Migration 7 is the newest breaking one, so the fleet's floor is 7.

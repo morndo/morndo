@@ -119,13 +119,13 @@ describe("token cache", () => {
     const { grants, adb } = rig();
     const tokenHash = createHash("sha256").update(TOKEN).digest("hex");
     grants.remember("builder", tokenHash);
-    const started = Date.now();
+    const started = performance.now();
     try {
       const verdict = await askHub(`http://127.0.0.1:${address.port}`, TOKEN, {
         lane: "builder", id: "job-1", jobClass: "default", notify: { kind: "lane", name: "builder" }, cwdHash: "ab".repeat(32),
       }, 200);
       expect(verdict).toEqual({ kind: "unavailable" });
-      expect(Date.now() - started).toBeLessThan(1000);
+      expect(performance.now() - started).toBeLessThan(1000);
       expect(grants.admit("builder", TOKEN, verdict)).toBe("ok");
       expect(adb.db.prepare("SELECT lane, hash FROM token_cache").all()).toEqual([{ lane: "builder", hash: tokenHash }]);
     } finally {

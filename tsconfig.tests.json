@@ -18,6 +18,7 @@
     "apps/updater/test",
     "test",
     "scripts",
+    "knowledge",
     "vitest.config.ts"
   ]
 }

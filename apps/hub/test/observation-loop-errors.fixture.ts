@@ -22,8 +22,8 @@ service.subscribe(listener);
 
 service.start(20);
 const until = async (ok: () => boolean, ms: number) => {
-  const end = Date.now() + ms;
-  while (!ok() && Date.now() < end) await new Promise(r => setTimeout(r, 10));
+  const end = performance.now() + ms;
+  while (!ok() && performance.now() < end) await new Promise(r => setTimeout(r, 10));
 };
 await until(() => polls >= 1, 5_000);
 listing = [...listing, { id: "%2", name: "reviewer", location: "demo", node: "local", offline: false }];

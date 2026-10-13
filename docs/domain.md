@@ -23,6 +23,7 @@ The product serves the **principal**, not the workers. The trial scorer (a scrip
 | Mandate (consent) | Consent the principal gave from an Endpoint: effect (allow or deny), scope (kind plus target pattern), uses (once or standing), expiry, provenance (endpoint, inbound message ID, time). Revocable. | A vendor permission rule, a quote relayed by an agent, silence, a timeout. |
 | Decision | The principal's answer to one Ask. Only an answer to a policy Ask, given here with a fresh step-up, issues a Mandate: once, unless he chose "always" (K-1). Any other Decision goes to the asker and grants nothing. | Its delivery or acknowledgement; a Mandate, unless the Ask was a policy Ask. |
 | Policy Ask | An Ask raised when Authorize returns NeedsPrincipal for an Action. Its options are Mandates: allow once, allow always, deny. None exist on the web endpoint yet (ADR-0002, Proposed). | A manager's needs-you item; a worker's question or menu. |
+| Ask | Anything that waits for the principal's answer and shows as a decision card. A role, not an aggregate: an Escalation that is an Ask (E1–E13), and a Secret request (SR1–SR11, [ADR-0022](adr/0022-secret-requests.md); its domain is built, the hub doesn't raise one yet). Catch-up (C1), Notifications (N2) and lane status (H3) count Asks, whichever aggregate holds them. Each aggregate keeps its own answer rules. | A Report or an Alert, which wait for no answer; an aggregate of its own. |
 | Escalation | One item that needs the principal: an Ask, a Report (outcome plus Verdict) or an Alert, identified by a dedupe key. | A message. Re-delivered, it stays one item. |
 | Delivery | One attempt to show an Escalation on an Endpoint: accepted, failed or unknown. | Proof he saw it; a transport "ok" is only "accepted". |
 | Acknowledgement | An explicit tap or reply from an Endpoint, bound to one Escalation ID. | A read receipt, a sent-message ID, an agent marking a message read. |
@@ -106,7 +107,7 @@ Added 2026-10-02 by [ADR-0008](adr/0008-patterns-borrowed-from-signal.md), with 
 | # | Invariant | Guards |
 |---|---|---|
 | N1 | A Notification carries counts only: how many Decisions wait, how many workers need you, and (AC13, the product lane's amendment 7) how many devices were linked, which rides the same counts-only Notification. It never carries a name, a worker, a question or any text; the device builds its words from the numbers. | privacy |
-| N2 | A Notification is raised only when a Decision starts waiting, a worker starts needing you, or a device is linked (AC13). Ordinary agent messages raise none. A worker's question or menu is an Ask, so it raises one Notification, as a Decision waiting, never a second as a worker; a worker raises its own only for a need that isn't an Ask. A muted Conversation's worker raises none, except for Decisions (an Ask breaks mute, as a mention does in Signal). | F1 |
+| N2 | A Notification is raised only when a Decision starts waiting, a worker starts needing you, or a device is linked (AC13). A Secret request that opens counts as a Decision starting to wait (ADR-0022). Ordinary agent messages raise none. A worker's question or menu is an Ask, so it raises one Notification, as a Decision waiting, never a second as a worker; a worker raises its own only for a need that isn't an Ask. A muted Conversation's worker raises none, except for Decisions (an Ask breaks mute, as a mention does in Signal). | F1 |
 | N3 | No Notification goes to any Endpoint while the principal is attending on one of them, except that a device was linked (AC13): the device that approved or issued the link is usually the one he attends on, and every other device must still hear of it. Per Endpoint, the latest one wins after a 1-second pause, and it replaces the previous one of the same kind. | F2 |
 | N4 | An Endpoint has at most one Push subscription. Revoking the Endpoint deletes it, and so does a push service answering that it is gone. | AC4 |
 | N5 | A Notification grants and starts nothing: no Mandate, Decision, Acknowledgement or Settled state, and no timer started, shortened or ended. E10's clocks keep running from when the Ask was asked. It records no DeliveryAttempted or DeliveryFailed: a counts-only ping would otherwise satisfy E4 for every Escalation it counts, and EscalationOverdue would never fire. | F1, A1, O4 |
@@ -172,13 +173,13 @@ Added 2026-10-02 by [ADR-0008](adr/0008-patterns-borrowed-from-signal.md), model
 
 Events: LinkRequested, LinkApproved, LinkDenied, LinkExpired, LinkCancelled, LinkCodeMismatched; PairingTokenIssued (issuedBy the Endpoint), PairingTokenCodeMismatched, PairingTokenWithdrawn (by its issuer, or when its issuer is revoked).
 
-### Steering: images sent with a Command
+### Steering: files sent with a Command
 
-Added 2026-10-01; code in `packages/domain/src/steering.ts`. An **Upload** is an image the principal pasted or attached. It is saved on the office's machine, and a worker opens it by its path.
+Added 2026-10-01; extended 2026-10-11; code in `packages/domain/src/steering.ts`. An **Upload** is a file the principal pasted or attached. It is saved on the office's machine, and a worker opens it by its path. The UI shows a file chip (name, type, size). Markdown and PDF are never rendered as HTML unless the existing sanitiser has already cleaned that HTML.
 
 | # | Invariant |
 |---|---|
-| S1 | An Upload is an image by its own bytes (PNG, JPEG, GIF or WebP), never by the type its sender claims, and at most 10 MB. |
+| S1 | An Upload is allowed only when its extension and its bytes agree. An image extension (PNG, JPEG, GIF, WebP) is accepted by its bytes even when they are a different one of those types, and is refused when the bytes are not an image; images and PDF are at most 10 MB, and PDF bytes start with `%PDF-`. Text (`.md`, `.txt`, `.json`, `.csv`, `.yaml`, `.yml`, `.log`) is valid UTF-8 with no NUL byte and at most 1 MB; a text file is not judged by a binary's ASCII prefix. Executables, archives, HTML and SVG are refused. A name is the last path segment, with no leading dots and no characters outside letters, digits, `.`, `_` and `-`, at most 80 characters: a longer name loses stem and keeps its extension. The name and the size are checked before the bytes are read. |
 | S2 | A Command attaches only Uploads made from its own Endpoint, within a day of upload, each once, at most six. |
 | S3 | The Command names each attached image after the principal's own text, one note per image, in the form the workers already read; a Command may be only images. |
 
@@ -269,12 +270,12 @@ Added 2026-10-04 by [ADR-0009](adr/0009-phone-catch-up-and-horizon.md); code in 
 
 | # | Invariant |
 |---|---|
-| C1 | Every open Ask that waits for his call has a card, whatever he read or muted. It leaves the stack only by being answered, settled or expired; "later" takes it out of one run only. A decision card is never marked read. |
+| C1 | Every open Ask that waits for his call has a card, whatever he read or muted. It leaves the stack only by being answered, settled or expired; "later" takes it out of one run only. A decision card is never marked read. A Secret request is an Ask: its card is the insert-secret card ([ADR-0022](adr/0022-secret-requests.md)). |
 | C2 | A Conversation has an update card when it isn't muted and has a message after its Read mark. Two panes with one name share one card, as they share one Read mark (O7). |
 | C3 | Decisions come first: blocking, then the earliest due or default time, then the oldest. Then updates: needs you, then "says done", then the most recent. Cards that join during a run take their place among those still to come; the card on top and the ones passed don't move. |
 | C4 | A muted Conversation gets no card; its unread messages are only counted, so the end of the run can say how many were skipped. An Ask from it still has its card (as in N2). Amended by ADR-0011: on the phone's decisions-only run no lane's updates are shown, so nothing is counted as skipped and the end shows no "muted, skipped". |
 | C5 | An update card shows what came after the Read mark: the newest messages and the whole of it in counts. "Mark as read" moves the mark to the last message shown, never further. "Says done" is the worker's own word (its last answer led with STATUS: DONE), never a Verdict (V1). |
-| C6 | Catch-up grants and starts nothing, as O8 and N5: marking read, keeping unread, later and last caught up never answer, settle or delay an Ask and start no timer. Keeping unread and later stay on the Endpoint. An answer from a card is a Decision under E8 to E11 and AC7, sent only after a 5-second window in which Undo sends nothing; offline it is refused, not queued. A reply from a card is a Command in the Outbox (S4 to S8). |
+| C6 | Catch-up grants and starts nothing, as O8 and N5: marking read, keeping unread, later and last caught up never answer, settle or delay an Ask and start no timer. Keeping unread and later stay on the Endpoint. An answer from a card is a Decision under E8 to E11 and AC7, sent only after a 5-second window in which Undo sends nothing; offline it is refused, not queued. A card that carries a value (an insert-secret card, ADR-0022) has no such window and keeps nothing on the Endpoint: Store sends at once, after its fresh check (SR5), and the value is cleared. A reply from a card is a Command in the Outbox (S4 to S8). |
 | C7 | Last caught up only moves forward and is clamped to the hub's clock, as a Read mark (O7). Nothing is decided from it. |
 
 Events: none in the audit. Last caught up is a preference kept as its current state and told to every device; its history is not kept.
@@ -365,6 +366,57 @@ Aggregate **Connection**, with its open leases inside it. Closed leases leave as
 
 Events: ConnectionAdded, ConnectionRotated, ConnectionRevoked, ConnectionTurnedOn, ConnectionTurnedOff, TermsAcknowledged, TermsChanged, RepoListChanged, IsolationChanged, BudgetChanged, ExpiryChanged, LeaseGranted, LeaseRefused, LeaseRefreshed, LeaseRefreshRefused, LeaseClosed, LeaseLost, SpendRecorded, SpendReconciled, ThresholdCrossed. Widening events carry the command id.
 
+## Secrets: what agents use without seeing ([ADR-0022](adr/0022-secret-requests.md))
+
+A value an agent's tools need, which the principal enters on an insert-secret card and agents use by Reference only. Design: [`design/secret-requests/README.md`](design/secret-requests/README.md). Code in `packages/domain/src/secrets.ts`. Two aggregates, the Secret request on the hub and the Secret on each node, and two domain services for the rules that span many aggregates. No value exists in this context: a version holds a keyed fingerprint computed outside it. Shapes of vendor tokens are data (`packages/protocol/catalog/secret-shapes.json`); no vendor name appears here.
+
+| Term | Means | Is not |
+|---|---|---|
+| Secret | One Reference on one node: status (`active`, `disabled`, `revoked`), versions, Grants, Destinations, Expiry, shape id. The same Reference on two nodes is two Secrets; each node is the system of record for its own. | The value; an LLM connection's key; a replica the hub owns. |
+| Value | The bytes the principal entered. Only on the Endpoint while typed, sealed in a node's vault, and in a program a Use started. | Anything this context, the hub, the fleet, an event or a log holds. |
+| Reference | `secret://<scope>/<name>`, lower case: what agents and configs hold. Safe to commit and show. | A permission; a vault ref. |
+| Version | One value of a Secret over time: a number, its keyed fingerprint, when and by which Command. One is current. | A copy on another node. |
+| Keyed fingerprint | 12 hex characters of HMAC-SHA-256 under a key that stays on the node. | A plain hash, which a short value would not survive. |
+| Workspace | A repository root the principal registered on a node, with every worktree that shares its git directory. | A folder with a matching git remote. |
+| Grant | Who may resolve a Reference on a node: a subject (a lane, a workspace, or every lane on the node), the use modes, and an end (none, an instant, or the lane's end). | An agent token; a Mandate. |
+| Use, use mode | One resolution for one program: `exec` (environment), `file` (a 0600 file), `helper` (a credential helper's output to the tool), `inject` (the agent CLI's sandbox puts it into requests; the command sees a placeholder). | Printing the value: no mode does. |
+| Secret request | An agent's ask, as its node saw it: Reference, purpose, kind (`new`, `access`, `rotate`, `renew`), its waiters (lanes, and callers without one by workspace), a proposed Grant. One answer: Stored, Granted, Rejected; or Withdrawn, or Expired. | An Escalation; a chat message. |
+| Request admission | The domain service for SR1 and SR10. | A rate limiter in an adapter. |
+| Fingerprint ledger | The domain service for SC2, over every version's keyed fingerprint on the node, revoked ones included. | The vault. |
+
+Layer, as in design §3.3: **domain** (decided in `secrets.ts`, proved by a domain test), **domain service + store** (a domain service decides, the store holds the uniqueness), **application** (a service's order or policy), **adapter** (an edge). Only the first two are proved by domain tests; the rest by application, contract and end-to-end tests.
+
+| # | Invariant | Layer |
+|---|---|---|
+| SR1 | One open request per (node, Reference). A repeat from another lane joins it; the same waiter again changes nothing. A waiter is its lane, or, without a lane, its workspace (below). | domain service + store |
+| SR2 | The requester's broker answers `available` when the use gate admits the caller; with a value but no Grant the request opens as `access`, a card with no field. | application |
+| SR3 | A request carries a purpose (plain text, 1 to 300 characters), a valid Reference and Grant. No type has a field a value could travel in; the wire refuses a value-like key whole. | domain + adapter |
+| SR4 | One answer. Withdrawn only when its last waiter withdraws, a lane or a caller without one; an earlier withdrawal takes only that waiter off. Expired 7 days after it opened. | domain |
+| SR5 | Store and Grant need a user verification from the last 5 minutes. | application |
+| SR6 | An answer names the version it saw; a join or a withdrawal since makes it `changed`. | domain |
+| SR7 | The value is sealed on the Endpoint to each target node's pinned recipient; the hub and the fleet hold ciphertext in memory only, for one operation. | adapter |
+| SR8 | Stored only when the requester's node confirmed. An `access` request is granted, never stored; any other kind is stored, never granted. A `renew` is stored only by a store that names an Expiry later than now and than the Secret's current one: the node, which holds the Expiry, refuses any other before it stores anything (`renew_expiry`), so the request stays open and nothing is kept (decided on T-80). The hub marks a renew Stored only when every confirming node, the requester's included, confirms that the renew rule held there (`renewed`), each with the Expiry later than its own time of the store and that time between five minutes before the request opened and five minutes after the hub's now (T-83; decided on T-85; every node, not only the requester's, since review 8 of PR #40 on T-94). The confirmation names the Reference it stored under, which must be the one the answer names; a `rotate` or `renew` is answered only under the request's own Reference, while a `new` one may be stored under the Reference the principal chose on the card (SR6; T-88). The answer carries every confirming node's confirmation, each node once, and each must name that Reference and lie in the same window; SecretRequestStored names exactly the nodes that confirmed (decided on T-94). | domain + application |
+| SR9 | Answerable only on Morndo's web endpoint; never in a chat adapter, a pane or the manager's inbox. | adapter |
+| SR10 | A lane holds at most 5 open requests and opens 20 a day; a node 20 and 100. A request holds at most 20 waiters, with or without a lane, so joins can't grow its card or move its version without end; a waiter already on it still joins, which changes nothing. | domain service + store |
+| SR11 | A request grants nothing beyond the Grant stored. | domain |
+| SC1 | No value in the model: no type, event or wire shape has a field one could travel in. | domain + adapter |
+| SC2 | A Reference is unique on a node. A value matching a revoked version anywhere on the node, or an earlier version of the same Reference, is refused; a duplicate of another active Secret is stored with a warning that names it. | domain service + store |
+| SC3 | Default deny. The use gate, in order: status active, a current version, before Expiry, a live Grant admits the caller, the Grant allows the mode. The first failure is the refusal, so a Grant past its end time admits nobody from that moment. Removing it, with GrantEnded, is the node's sweep (`endTimedGrants`, run with the expiry sweep from PR 6); until then the list can still show it. | domain |
+| SC4 | A Use is recorded before the vault opens the value; refusals are recorded too. | application |
+| SC5 | A value reaches a program only through the use modes; no command prints one. | application + adapter |
+| SC6 | Every output path on the node passes the exact filter before it leaves. | adapter |
+| SC7 | Narrowing is anyone's; widening, judged by effect, is the principal's. Disable is anyone's. | domain + application |
+| SC8 | Disable and Revoke refuse new Uses at once. Revoke destroys the current value and keeps the Reference, history and Grants; Delete removes the Reference and Grants; the ledger keeps the fingerprints, and a value stored again under that Reference takes the next version, so (Reference, version) always names one value. | domain + adapter |
+| SC9 | Expiry warns once at 7, 2 and 1 days, then refuses. Only a later Expiry clears the warnings, whoever sets it (below). | domain |
+| SC10 | A Secret grants nothing: a Use is not a Mandate. | domain |
+| SC11 | A transfer starts from a Secret that could be used now and carries only the Grants that haven't ended. The target stores it through its own ledger, naming any active Secret there with the same value, as a store does; onto a Reference it already holds, it is a Rotation there (below). | domain + adapter |
+
+**Expiry on a Rotation or a transfer, and waiters without a lane** (design §10, SC7, SC9, SR1, SR6). A store or a transfer onto a Reference the node already holds is a Rotation there. It keeps the Secret's Grants and Destinations, and its Expiry unless it names one. It names the new value's shape, or none when the value matches no shape, which clears the old one, so nothing looks for a format the value no longer has; or it says to keep the shape there. A store always says which, so a store with no shape is refused, never taken as keep (T-83). A named Expiry replaces the old one, is recorded as ExpiryChanged with the Command, and clears the warnings only when it is later. A store or a transfer never removes an Expiry: that is `setSecretExpiry`, a widening the principal makes on purpose (SC7). Renewing an expired Secret is a Rotation that names a later Expiry, and only such a store answers a `renew` request (SR8); a node that holds no Secret under the Reference refuses a renew as `missing` instead of storing a new one (T-83). A renew of a revoked or disabled Secret is refused as `revoked` or `disabled`: renewing never revives a revoked value, and a disabled one would be reported renewed while every Use is still refused (T-85). On the hub, a waiter is its lane; a caller without a lane is identified by its workspace, and no workspace counts as one. A repeat by the same waiter changes nothing (SR1). A caller without a lane from another workspace is another waiter, with its own purpose (SR6). A withdrawal names its waiter and takes only that one off. SecretRequestJoined, SecretRequestLeft and SecretRequestWithdrawn name the waiter by its lane and workspace, so the audit tells waiters without a lane apart, the one that ended the request included.
+
+Aggregate **Secret request**: its state, version and the requester node's confirmation. Aggregate **Secret**, one per Reference per node: its status, versions and Grants, and the gate. **Request admission** decides over a node's requests of the last day; the store holds a unique index on (node, Reference) over open requests and runs the decision and the insert in one write transaction. The **Fingerprint ledger** decides over every version on the node; the store holds unique indexes on the Reference and on (Reference, keyed fingerprint) and runs the check and the insert in one write transaction. The clock is the `now` argument.
+
+Events: SecretRequested, SecretRequestJoined, SecretRequestLeft, SecretRequestWithdrawn, SecretRequestStored, SecretRequestGranted, SecretRequestRejected, SecretRequestExpired; SecretStored, SecretRotated, SecretTransferred, SecretDisabled, SecretEnabled, SecretRevoked, SecretDeleted, SecretExpired, ExpiryWarned, ExpiryChanged, GrantAdded, GrantRemoved, GrantEnded, DestinationsChanged, SecretUsed, UseRefused, UseEnded. Widening events carry the Command id.
+
 ## Engines: which AI does each role's work ([ADR-0013](adr/0013-engines-settings-page.md))
 
 The principal picks, per **Role**, which provider and model does the work, and what falls back. The settings belong to the engine layer outside Morndo (its own file, written only by its CLI). Morndo holds the language and the rules of the page that edits them. It reads and writes only through that CLI, behind an adapter (see the context map).
@@ -439,13 +491,13 @@ A read model, like Observation: what each connected account has used of its rate
 | Term | Means | Is not |
 |---|---|---|
 | Account | A subscription the lanes run on, by the name the principal gives it. | A device, an Endpoint, a lane. |
-| Window | One rate limit of an account: the 5-hour, the weekly, or a gateway's spend limit, as a percentage used and when it resets. | A quota the hub measures. |
+| Window | One rate limit of an account: the 5-hour, the weekly, a gateway's spend limit, or a window the account names itself (its label, the percentage used, and when it resets). | A quota the hub measures. |
 | Report | One status line's JSON from one session, under an agent token, named for an account. | A claim about work. |
 
 | # | Invariant |
 |---|---|
 | U1 | A Report is taken only under an agent token (B1), for the account the call names (none: the default account), with the lane the token acts as. Nothing in a conversation's text is a Report. |
-| U2 | Per account, the newest Report sets the windows. A window a Report lacks is kept until its reset time has passed, then dropped (the CLI drops it then too). A Report older than the account's last never moves the windows, though its session is noted. |
+| U2 | Per account, the newest Report sets the windows. A window a Report lacks is kept until its reset time has passed, then dropped (the CLI drops it then too). A Report older than the account's last never moves the windows, though its session is noted. A Report may name its own windows (`limits`) instead of the 5-hour and the weekly; an empty list does not. A bad named row is dropped and does not reject the Report, and an on-demand line is cut to its limit. A Report that doesn't leaves those named windows as they were until each reset passes, and then the 5-hour and weekly rows show again. On-demand state goes when those named windows do. The notice counts a named card's spend meter as well as its named windows. |
 | U3 | A session counts as reporting for 10 minutes after its last Report; the account keeps each session's last context used. |
 | U4 | Usage grants and decides nothing (as O4): no Mandate, Decision, Verdict or engine choice follows from it. The engines' availability stays the engine layer's (ADR-0013). |
 
@@ -518,6 +570,43 @@ Ports the domain owns (adapters arrive with `apps/updater`, PR 4): **Verifier** 
 
 Relations: Releases stands beside the Fleet (see the context map). The `updating` refusal and the hub's store id are Steering's (S5, S7); the revocation journal is Access's and the Fleet's (AC4, FL4). Releases decides when they apply; those contexts enforce them.
 
+## Knowledge: what the orchestrator reads to plan work ([ADR-0026](adr/0026-capability-knowledge.md))
+
+Loop patterns and the recurring-job procedure, shipped as Agent Skills under `knowledge/skills/`, and the SOPs a user writes with them. The SOP check is pure, in `packages/domain/src/knowledge.ts`: the caller passes the installed skills, the notes and their re-check dates, the engine layer's roles, today's date and a time-zone test, and, when the user gives them, the ids in their preferences file and the dates of their model snapshots. Design: [`docs/design/capability-knowledge/README.md`](design/capability-knowledge/README.md).
+
+| Term | Means | Is not |
+|---|---|---|
+| Pattern | A named agent loop shipped as a skill (`loop-one-shot`, `loop-review-fix`, ...): when to use it, when not, its failure modes and the guards that catch them. | An SOP; a rule the check enforces. |
+| SOP | A recurring job as data: a trigger, steps, gates, done checks, stop rules, a budget, a report and metrics. | A brief; a Job (one run of one command). |
+| Template | An SOP marked `kind: template`, shared as a starting point. It may keep blanks in angle brackets. | Something that runs. |
+| Instance | An SOP a user runs: `kind: instance`, the default. No blank left, a POSIX cron line, a known time zone. | A Job. |
+| Step | One stage of an SOP: a Role and a model class (an engine step) or a deterministic tool; its output, its Check and its Effect. | A lane; a model. |
+| Effect | What a step does to the world: `local`, `outward` (leaves the user's machines) or `irreversible`. Declared on every step. | A guess from the step's name. |
+| Gate | A point before an outward or irreversible step that waits for the principal's Decision. Silence never approves. | A review by another model. |
+| Stop rule | A condition and what then happens: no input, the budget spent, a loop past its rounds. | A timeout alone. |
+| Budget amount | A number with a currency, such as `5 USD`, or 0: nothing may be spent. | Unlimited. |
+| Model class | `flagship`, `everyday` or `fast`, as auto routing takes it from the vendor's words. | A model id. |
+| Family rule | `any`, or `other-than` earlier engine steps: a judge from another family than the worker. | The other-provider rule of Engines, though it serves the same end. |
+| Citation | Why a step runs as it does: a skill, `notes/<id>`, `pref:<id>`, `models.dev@<date>`, or `no evidence: default`. A preference or snapshot resolves against the user's file or cache when the check is given them (a snapshot only if it reads and was fetched on that date; one left out is refused with the reason); without them only its form is checked, and the check warns. | A pasted quote. |
+| Note | A short file in a skill's references: per source a link, the date read, its basis and a sentence in our words, and a re-check date. | A quote store; a ranking. |
+| Preference | A user's stated view, with its holder, date and words, kept in the user's own file under an id no other entry of the file uses. | A fact. |
+| Model snapshot | A dated, trimmed copy of models.dev's model list in the user's cache: provider, model, context, output limit, prices per million tokens, release date, with its source and licence. Stale after 30 days, and an anomaly when dated after today: both shown with a warning, never a failure, and a snapshot dated after today is never fresh. | A vendor's own page; a value the gate enforces (K13). |
+| Scorecard cell | What auto routing records of this user's own runs, per engine, role group and model class (ADR-0020). A step's role group and class select the cells shown beside it. | A ranking made by Knowledge (K9). |
+
+| # | Invariant |
+|---|---|
+| K4 | A Preference is shown as its holder's, with its date, never as a fact. |
+| K6 | A Note or skill past its re-check date is stale: shown and cited as stale, warned about, never dropped, never a failure. |
+| K9 | Knowledge grants nothing. It never admits, excludes, fences or ranks a candidate engine; a step's class and family rule are advisory, and the Role's chain decides what runs. |
+| K10 | Every step declares its Effect and has an output and a Check. An outward or irreversible step comes after a Gate whose silence never approves. Every loop and every change loop has a round limit, the SOP at least one Stop rule, and spending past its Budget stops or asks. Every engine step cites why. |
+| K11 | An SOP's report names where it goes and holds the Citations its steps used. |
+| K12 | Shipped knowledge holds no per-user data: no Preferences, no Instances. |
+| K13 | No code that grants, fences or prices a lease reads the model snapshot; the catalog stays the one source of what the gate enforces. |
+| K14 | An SOP names a Role and a Model class, never a model id. To run a given engine, the user puts it in the Role's chain. |
+| K15 | Lineup, context, output limit and price come from the model snapshot with its fetch date, not from hand-written notes. |
+
+Rules the check refuses by, each naming its step: `effect-declared`, `gate-before-outward`, `silence-never-approves`, `gate-shape`, `round-limit`, `stop-required`, `budget-stop`, `engine-why`, `why-resolves`, `preference-in-template`, `step-check`, `no-model-id`, `model-class`, `role-known`, `step-kind`, `pattern-known`, `trigger`, `blanks-filled`, `done-required`, `report-citations`, `metrics-required`, `shape`. It warns on `stale-citation`, on `outward-sounding` (a local step whose name or tool sounds outward) and on `unchecked-citation` (a preference or snapshot it could only check for form).
+
 ## On the phone: chats, status, and a digest after an absence ([ADR-0011](adr/0011-phone-chat-app.md))
 
 Since ADR-0011 the phone's catch-up holds decision cards only (C2 and C3's update cards are no longer made there). Updates wait in each lane's chat; a digest sums them up only after a real absence.
@@ -534,9 +623,41 @@ Since ADR-0011 the phone's catch-up holds decision cards only (C2 and C3's updat
 |---|---|
 | H1 | A chat's unread count counts only messages that matter, after its Read mark. A muted chat shows no count. Reading a chat to its end, with the page visible, moves its Read mark as the desktop does (O7). |
 | H2 | The chat list puts the manager first, then the newest activity on top; a worker that never spoke comes last. |
-| H3 | A lane waits for him while an open Ask of its own waits (since the oldest), while its last report says STATUS: NEEDS DECISION and he hasn't written to it since (since that report), or while a prompt shows on its screen; otherwise it works while its screen moves; otherwise its last answer's own STATUS word says finished or blocked, else idle. |
+| H3 | A lane waits for him while an open Ask of its own waits (since the oldest; a Secret request it waits on included, ADR-0022), while its last report says STATUS: NEEDS DECISION and he hasn't written to it since (since that report), or while a prompt shows on its screen; otherwise it works while its screen moves; otherwise its last answer's own STATUS word says finished or blocked, else idle. |
 | H4 | A digest shows when he comes back (the app starts, or shows again after a minute hidden) only if his last activity on this Endpoint and on every other one is older than his setting: 2, 4 (the default) or 8 hours, only after a night (4 am on the device's clock in between, and at least 3 hours), or never. Nothing known: no digest. The hub keeps his last activity per Endpoint from the attending reports; it grants and starts nothing. |
 | H5 | The digest has one line per unmuted lane that spoke since he left or needs him now: needs you, blocked, finished, then the rest, most recent first; the manager first. "Mark all read" moves each lane's mark to the last message the digest covered, never further; "Later" moves nothing. Decisions keep their cards; the digest only links to them. |
+
+## Home digest: since he last looked, with proof ([ADR-0025](adr/0025-home-digest.md))
+
+One list of everything that changed since the principal last looked, every line one click from the record that made it. A read model over the board, the forge, Escalation, jobs and the decision log, recomputed from records (DG1). Code in `packages/domain/src/digest.ts`, the claim and evidence records in `verification.ts`. Pure functions: the clock arrives as `now`, and no disk, forge or fleet is read.
+
+| Term | Means | Is not |
+|---|---|---|
+| Subject | What a line is about: a task (`T-12`), a change (`owner/repo#87`, a pull request at a revision), a deploy (an environment at a revision), an ask, a decision taken for the principal, a lane, or a job. | A message. |
+| Revision | The commit a claim or a check is about (a SHA), with its patch id. | A branch name. |
+| Event | One fact about a subject from one record, with its record's time and the hub's sequence number: needs you, decided for you, failed or rolled back, stale or stuck, shipped, merged, opened or pushed, done. | A summary. |
+| Claim | A lane's statement that an outcome holds on a revision: done, merged, shipped, fixed. Filed through the agents' door (`via` filed), read from the board (a task moved to review, `via` review), or read from a lane event (its last answer said done, `via` lane_event). Each of those is one claim row, with a sequence and a time. The row carries `revisions`: for a change, the revision the lane named, or that change's head then if it named none; for a task, each change rooted under the task then, at its head then, including a deploy linked then. A task with no change carries `round`, the sequence of that round's first claim. A board or lane-event claim is about the task (for a lane event, the task that lane has in progress, B5; none, and it is counted as unattached and shown nowhere). | Evidence (V1). |
+| Evidence | The result of one check on one revision, with its producer: a CI run, test counts, a review, a live check, a screenshot, a deploy status. | Output the claimant produced about itself. |
+| Producer | Who made the evidence: the hub's forge adapter (CI, deploy status), the manager, a lane, or the principal. | The lane named in the evidence's text. |
+| Level | Who has checked a subject at its current revision: claimed, checked, reviewed, verified live; or failed. | A Verdict. "Verified live" says one live check passed on this revision, and its chip says what it checked. The Verdict Verified needs Evidence for every Check of a Done-means (V1); the digest shows no Verdict until Done-means exists. |
+| Item | One line: a group of linked subjects (a task with its changes and deploys), its section, its level, its events since the mark, its evidence. | A stored summary. It is recomputed from records. |
+| Link | A record that a change or a deploy belongs to a task: filed with a claim or evidence that names both, or on its own (`morndo-verify link`), always under a token. The hub stamps its sequence and its time together. The first link is the lowest sequence (DG5). An assignment of a lane to a task carries a sequence and a time too. A link or an assignment raises the item only when it changes the line (DG8). | A task key found in a branch name or a title. |
+| Mark | The hub's sequence number up to which the principal has seen the digest, on any Endpoint, with the items seen above it. | A Read mark of a Conversation; an Acknowledgement. |
+
+| # | Invariant |
+|---|---|
+| DG1 | Every item, count and level is derived from records with an Actor or a producer: board events, Escalations, claims, evidence, links, lane events, jobs, forge facts and the decision log. A worker's free text never sets a level, a section, a verb or a count of anything but claims; it shows only as a quoted claim. Task and pull-request titles are shown as names, as on the board and the forge. |
+| DG2 | An item's level is the highest level whose evidence is on the subject's current revision and comes from a producer other than its claimants. A claimant's own evidence never raises it (V1). |
+| DG3 | Any failing evidence on the current revision, a revert, a rollback or a reopen shows the item as failed, whatever else passed (V2). Failed lasts while its cause is current: a new revision clears failing evidence (DG4); a reverted change and a rolled-back deploy stay failed; a reopened task is failed until it is accepted as done again, then its level is recomputed. The failure stays in the trail and in DG12's count. Placement in the Failed section follows section 3.2. |
+| DG4 | A new revision without the same patch id voids earlier evidence for the level. The voided evidence stays visible as voided. |
+| DG5 | One item per root subject. A task groups its linked changes and their deploys. The first link is the lowest sequence; the hub stamps a link's sequence and time together. A claim's root is that first link at or below the claim's own sequence. A task the claim itself names counts as such a link. Time sets the week, not the root. The item sits in the first section, in the order of section 5, that a live condition of its own (DG6) or one of its events since the mark belongs to; its other events form its trail. A needs-you or stale event places its item only while that condition holds. |
+| DG6 | Needs you and Stale or stuck are live state: an item stays while its condition holds and leaves when it clears, whatever the mark. A Needs you item leaves only by being answered, settled or expired (C1). The end of a live condition is a trail entry and raises nothing. |
+| DG7 | The mark only moves forward. "Mark all seen" names the items the device covered: every line it displayed, and the items of a section folded by design (Opened or pushed), whose fold line shows their count and kinds. Items behind "N more" are not covered. A prior-seen item is covered only when both its sequence and its level match; the section is never compared. The hub marks those items seen and moves the mark to the highest sequence number below which every item is seen; it never passes an item that wasn't covered, nor the hub's newest. Kept on the hub and told to every Endpoint (O7, C7). |
+| DG8 | An item is new while its sequence is above the mark and it was not seen at that sequence, or while its level differs from the level it was seen at. Its sequence is the highest among its events, evidence and claims, and among the links, assignments and change heads that changed its line when they were replayed in sequence order against the records before them. The line is its subjects with their revisions, its level, and its chips. Neither the mark nor the section enters the sequence. |
+| DG9 | A rebuild of the digest from the stores gives the same items, levels and counts. Section counts are counts of items; weekly counts are counts of records. |
+| DG10 | Stale and stuck are computed from records and side effects (section 6.3), never from a worker's own report. Their limits come from config. |
+| DG11 | The digest grants and starts nothing (O4, B8, C6): seeing, marking, opening, and a veto are not a Mandate, a Decision, an Acknowledgement, a Verdict or a board move. A veto is a Command (AC7) that sends the manager a message naming the decision. |
+| DG12 | A claim is judged at the revisions it was made at. The claim row carries them, filled in by the hub when it files the claim: a change claim's named revision, or the change's head then; for a task claim, each change rooted under the task then, at its head then, and a deploy linked then. Never a later head, never the live head. Its root is the first link at or below its own sequence. A claim is counted once per root and set of revisions, at the lowest sequence of its sources. A task with no change has one round per hand-over, stamped on the row, and that round counts once at its lowest sequence. It counts as later failed when, within 14 days, failing evidence lands on one of its revisions, a change it names is reverted, a deploy it carries is rolled back, or its task is reopened. A claim with no entries fails on failing evidence against the task itself, with no revision, inside its round, or on a reopen. A deploy's failure record fails the claims that carry that deploy, not every claim under the deploy's root task. Its level is the level of those revisions computed from records before the failure, or at the end of the 14 days. Links and claims count as claimants by sequence: at or below the claim, and later sequences whose clock falls between the claim and that moment. Assignments are read up to that moment. Only a round's evidence is limited to the round. A round is keyed by its sequence (`r`), and a claim that joins none by its own sequence (`s`), so a clock cannot collide with a round. A revision the hub could not learn stays unknown, and the claim counts as claimed. |
 
 ## Candidate: Record context (ADR-0002 after the name)
 
@@ -556,6 +677,12 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Fleet supplies Observation and Steering* (customer and supplier). Observation reads workers, screens and transcripts through it. A Command (S5) and the delivery of a Decision (E8) reach a pane as keyed operations, so neither is typed twice across a dropped connection (FL7). The Hook bus feeds the chat bot, a subscriber, which turns hook events into Escalations through its own adapter.
 - *Engines is downstream of Connections* (customer and supplier). A connection name is the provider name the routing policy orders. Connections never reads the routing policy, and no spend figure decides anything but the lease gate (CN15).
 - *Connections stands beside Usage*. Usage shows a subscription's windows. It does not grant a lease.
+- *Access supplies Secrets*: the Session and its fresh verification (SR5).
+- *Secrets supplies Catch-up, Notifications and Observation with Asks*: an open Secret request has a card (C1), raises one Notification (N2), and makes its lane wait (H3).
+- *The Fleet carries Secrets' typed operations*, keyed (FL7), and one node event, `secrets.requested`, routed to the hub only (SR9). No plaintext secret and no agent-CLI credential crosses the Fleet (FL14); a value sealed to one node's recipient may.
+- *Secrets stands beside Connections*: they share the vault, the identity and the process adapters, not a model. An LLM key is a Connection; a value a lane's tools need is a Secret.
+- *Secrets stands beside Authority*: a Use is not a Mandate (SC10).
+- *Knowledge stands beside Engines*. An SOP step names a Role and a Model class; the Role's chain and auto routing decide what runs, and nothing in Knowledge ranks or excludes an engine (K9). A Gate is answered through Escalation as a Decision; a run starts as a Job.
 
 **Anti-corruption layers** (adapters translate; the domain never sees a vendor payload):
 
@@ -576,4 +703,11 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 | Node job supervisor (`morndo-node`) | a class limit and an optional load or memory reading to the domain's queue decision (J5); a process exit to one Outcome; a completion to one Notice. The domain never sees a pid, a unit name, or `/proc`. |
 | Event store | persistence and replay (the scorer reads raw trial logs through it) |
 | Engine layer's CLI (engine-layer `bin/engines`) | its roles, providers and resolver output (JSON) to Roles, Engines and Availability; a save to `set` and `other-provider --effective` calls; its refusal (exit 2) to "refused" with its words; a shape it doesn't know to "unavailable", never a guess; a CLI older than engine-layer 9f3a28c (no `other-provider --effective`) to "unsupported" (R1, R2, R5) |
+| SOP files and skill folders (`knowledge/`, the `sop-check` command) | an SOP's YAML to the plain data the check judges; the skills beside the recurring-job skill to the names of installed patterns; a note's front matter to its id and re-check date; the runtime's time-zone data to a yes or no. The domain never parses YAML |
 | Vendor catalog (`packages/protocol/catalog/vendors.json`) | a preset's id, runtimes, terms and isolation floor to the values Connections and the routing policy take. The domain never names a vendor |
+| Agent CLI sandbox credentials (Claude Code `sandbox.credentials`, `mask`) | a Grant's `inject` mode and Destinations to a `--settings` entry for the lane; a platform or version without it to "inject unavailable here", never a weaker mode chosen silently |
+| Git credential helper protocol (`git credential-*` with `get`) | git's request on stdin to a Use of the Reference configured for that remote; the value to `password=` on stdout, to git only |
+| Browser age encryption (`age-encryption` in the web app) | the typed bytes and a pinned recipient to a SealedValue; a recipient that differs from the pin to "stop and compare" |
+| Peer credentials and the pane table (`SO_PEERCRED` or `LOCAL_PEERPID`, process ancestry, tmux `#{pane_pid}`, `git rev-parse --git-common-dir`) | a socket connection to a Caller: a lane or none, a workspace or none. The domain never sees a pid, a pane id or a path |
+| Fleet hook path `/secrets/requested` | a node's request, as the node saw it, to SecretRequested at the hub |
+| Token shape catalog (`packages/protocol/catalog/secret-shapes.json`) | a vendor's documented token prefix to a shape id the redactor uses. The domain never names a vendor |

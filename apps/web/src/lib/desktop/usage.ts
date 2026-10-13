@@ -1,10 +1,10 @@
 // How usage is shown on Home (ADR-0016): the words for a window and its reset, the meter's level, and the decoding of
 // the `usage` feed frame. The rules (which level, which account is tightest) are the domain's.
-import { tightest, usageLevel, type AccountUsage, type UsageLevel, type UsageWindow } from "@morndo/domain";
+import { onDemandLine, resetsOnLabel, shownLevel, tightestShown, usageLevel, type AccountUsage, type UsageLevel, type UsageWindow } from "@morndo/domain";
 import { AccountUsageSchema, parseBody } from "@morndo/protocol";
 
 export type { AccountUsage, UsageLevel, UsageWindow };
-export { tightest, usageLevel };
+export { onDemandLine, resetsOnLabel, shownLevel, tightestShown, usageLevel };
 
 export function decodeAccounts(raw: unknown[]): { accounts: AccountUsage[]; dropped: number } {
   const accounts: AccountUsage[] = [];

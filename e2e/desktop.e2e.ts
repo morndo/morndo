@@ -154,9 +154,9 @@ try {
       const input = page.locator('.box input[type="file"]');
       await input.setInputFiles({ name: "photo.jpg", mimeType: "image/jpeg", buffer: jpeg });
       await page.locator(".shots .shot.ready").nth(1).waitFor({ timeout: 6000 });
-      await input.setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not an image") });
-      await page.getByText("Only images can be attached").waitFor();
-      assert(await page.locator(".shots .shot").count() === 2, "the text file was attached");
+      await input.setInputFiles({ name: "run.exe", mimeType: "application/octet-stream", buffer: Buffer.from("MZ") });
+      await page.getByText("run.exe can't be attached").waitFor();
+      assert(await page.locator(".shots .shot, .shots .filechip").count() === 2, "the executable was attached");
       await page.screenshot({ path: join(OUT, "paste-composer.png") });
       await page.locator("#composer").fill("what is wrong here?");
       await page.keyboard.press("Enter");
