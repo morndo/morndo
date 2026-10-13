@@ -19,6 +19,7 @@
   import { stepUp, withStepUp } from "../stepup.ts";
   import { STEP_UP_MS, type Policy } from "../SecurityChoices.svelte";
   import { postAnswer } from "../catchup/answer.ts";
+  import { askForBrief as sharedAsk } from "../ask-brief.ts";
   import type { Body } from "../catchup/run.ts";
   import { AnswerSession } from "../desktop/answer-session.svelte.ts";
   import type { AskOutcome } from "../desktop/answer-session.ts";
@@ -134,6 +135,23 @@
   const briefAnswering = $derived(session.run?.answering && briefId && session.run.answering.id === briefId
     ? { label: session.run.answering.label, sending: session.run.answering.sending, commitAt: session.run.answering.commitAt }
     : null);
+  // What the run holds for the decision on screen: its refusal (the sheet sits over the card that would show it) and
+  // whether it was answered here already. The run's own clock feeds the sheet's countdown, as it feeds the card's.
+  const briefRefusal = $derived.by(() => {
+    const r = session.refusal;
+    if (!r) return null;
+    const c = session.run?.cards[r.key];
+    return c?.kind === "decision" && c.id === briefId ? r : null;
+  });
+  const briefRunAnswered = $derived.by(() => {
+    const run = session.run;
+    if (!briefId || !run) return false;
+    for (const k of run.order) {
+      const c = run.cards[k];
+      if (c?.kind === "decision" && c.id === briefId && run.done[k] === "answered") return true;
+    }
+    return false;
+  });
   // The sheet is open while page.state.brief is set. Back (and the browser's back) pop that entry.
   function openBrief(id: string) {
     if (!deciding) { want = { decision: id }; deciding = true; }
@@ -160,20 +178,32 @@
     if (!session.opened || session.top?.kind !== "decision" || session.top.id !== id) session.open({ decision: id });
     const key = decisionKey(id);
     if (!session.run?.cards[key]) return false;
+    lastSheetPick = { key, id, body, label, seen: held.seen };
     session.answer(key, id, body, label, held.seen);
     return session.run.answering?.id === id;
   }
+  // What the sheet last started, for its passkey retry (the card's own lastPick serves the card the same way).
+  let lastSheetPick: { key: string; id: string; body: Body; label: string; seen: string } | null = null;
   async function askForBrief(d: DecisionItem): Promise<AskOutcome> {
-    const worker = d.asker.workerId;
-    if (!worker) return { ok: false, error: "This decision has no one to ask." };
-    if (!verifiedFresh && navigator.onLine !== false && !(await verify())) return { ok: false, error: "Not sent: the passkey check didn't finish." };
-    const w = feed.workers.find(x => x.id === worker);
-    try {
-      await queue({ worker, workerName: w?.name ?? d.asker.name, text: `Please restate ${d.id} as a decision brief: morndo-decide template`, uploads: [], seen: w?.waitingOn ?? "none" });
-      return { ok: true };
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : String(e) };
-    }
+    return sharedAsk(d, feed.workers, c => queue({ ...c, uploads: [] }), async () => {
+      if (verifiedFresh || navigator.onLine === false) return null;
+      return (await verify()) ? null : "Not sent: the passkey check didn't finish.";
+    });
+  }
+  // "Try again" after an unknown outcome, from the sheet: the same answer with the same request id (typed at most once).
+  async function trySheetAgain() {
+    const r = briefRefusal;
+    if (!r?.retry) return;
+    briefNote = null;
+    if (feed.status !== "live" || navigator.onLine === false) { briefNote = "Still offline. It goes when you try again online."; return; }
+    if (!verifiedFresh && !(await verify())) { briefNote = "Not sent: the passkey check didn't finish."; return; }
+    await session.retry(r.key, r.retry.id, r.retry.body, r.retry.label, r.retry.seen, r.retry.requestId);
+  }
+  // The passkey retry, from the sheet: the same answer with a new request id.
+  async function verifySheetAgain() {
+    const p = lastSheetPick;
+    if (!p || !(await verify())) return;
+    await session.retry(p.key, p.id, p.body, p.label, p.seen);
   }
   function go(t: Tab) {
     if (deciding) stopDeciding();
@@ -320,8 +350,8 @@
   {/if}
   {#if settings}<SettingsSheet setting={away.setting} {engines} onChoose={v => away.choose(v)} onClose={() => (settings = false)} />{/if}
   {#if briefItem && briefSession}
-    <BriefSheet item={briefItem} {now} session={briefSession} answering={briefAnswering} note={briefNote}
-      onPick={answerFromSheet} onUndo={() => session.undo()} onAskBrief={askForBrief} />
+    <BriefSheet item={briefItem} now={session.now} session={briefSession} answering={briefAnswering} refusal={briefRefusal} runAnswered={briefRunAnswered} note={briefNote}
+      onPick={answerFromSheet} onUndo={() => session.undo()} onVerifyAgain={() => void verifySheetAgain()} onTryAgain={() => void trySheetAgain()} onAskBrief={askForBrief} />
   {/if}
   <LinkedNotice linked={feed.linked} onReview={() => void goto("/devices")} onSeen={at => feed.seeLinked(at)} />
   <FleetNotice available={feed.fleetAvailable} />
