@@ -128,6 +128,11 @@ export class LaneEvents {
   take(e: HookEvent): { event: LaneEvent | null; own: boolean } {
     const own = e.path === "/lane";
     this.#watch?.saw(e);
+    // A Stop the relay asked to go on still tells the watch that the lane's turn may end there: if the lane never acts on
+    // the ask (a hook that can't block), it is a turn without a status, and goes stale as one.
+    const asked = e.path === "/hook/stop" && isObject(e.body) && e.body.statusAsked === true
+      ? laneEventOf({ ...e, body: { ...e.body, statusAsked: false } }, this.#rules) : null;
+    if (asked) this.#watch?.turn({ ...asked, seq: 0 } as LaneEvent);
     const d = laneEventOf(e, this.#rules);
     if (!d) return { event: null, own };
     if (d.event === "needs_input" && d.sessionId !== undefined && this.#store.lastOf(d.sessionId) === "needs_input") return { event: null, own };
