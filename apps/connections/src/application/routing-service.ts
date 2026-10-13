@@ -16,9 +16,10 @@ export class RoutingService {
   }
 
   // A page command is one check, then one persist. A refusal or a failed chain write leaves the stored policy as it was.
-  commitPriority(mode: Mode, order: readonly string[], command: string): Result<void, Failure> {
+  commitPriority(mode: Mode, order: readonly string[], command: string, auto?: boolean): Result<void, Failure> {
     const { directory, policy, version } = this.#deps.store.load();
-    const next = setPriority(policy, { mode, order }, this.#listed(), command, this.#deps.clock.now());
+    const priority = auto === undefined ? { mode, order } : { mode, order, auto };
+    const next = setPriority(policy, priority, this.#listed(), command, this.#deps.clock.now(), auto === undefined ? "session" : "step-up");
     if (!next.ok) return problem(next.error);
     return this.#write(directory, next.value, version, this.#deps.engines.chains(), policy);
   }

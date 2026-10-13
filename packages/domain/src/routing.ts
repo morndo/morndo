@@ -41,7 +41,7 @@ export const emptyPolicy = (): Policy => ({
   autoSettings: { ...DEFAULT_AUTO_SETTINGS, dailyCaps: {}, reserves: {} },
 });
 
-export type RouteProblem = "duplicate" | "unknown" | "empty" | "too_long" | "fit" | "principal" | "missing" | "same" | "copied";
+export type RouteProblem = "duplicate" | "unknown" | "empty" | "too_long" | "fit" | "principal" | "missing" | "same" | "copied" | "step-up";
 
 const fail = (problem: RouteProblem, role?: string, name?: string): Result<never, { problem: RouteProblem; role?: string; name?: string }> =>
   err({ problem, ...(role ? { role } : {}), ...(name ? { name } : {}) });
@@ -147,13 +147,20 @@ function derivedProblem(policy: Policy, row: RoleRoute, listed: readonly Listed[
   return null;
 }
 
-export function setPriority(policy: Policy, priority: Priority, listed: readonly Listed[], command: string, at: number): Result<Policy, { problem: RouteProblem; role?: string; name?: string }> {
+export function setPriority(policy: Policy, priority: Priority, listed: readonly Listed[], command: string, at: number, authority: AutoAuthority = "session"): Result<Policy, { problem: RouteProblem; role?: string; name?: string }> {
   const who = principal(command);
   if (!who.ok) return who;
   const order = checkOrder(priority.order, listed.map(l => l.name));
   if (!order.ok) return order;
-  const auto = priority.auto ?? policy.priority.auto ?? false;
-  const next: Policy = { ...policy, priority: { mode: priority.mode, order: order.value, auto }, events: [...policy.events, { type: "PriorityChanged", at, command }] };
+  const currentAuto = policy.priority.auto ?? false;
+  const auto = priority.auto ?? currentAuto;
+  const events: RouteEvent[] = [...policy.events, { type: "PriorityChanged", at, command }];
+  if (priority.auto !== undefined && priority.auto !== currentAuto) {
+    const allowed = allow(changeEffect({ kind: "global-auto", on: priority.auto }), authority, command);
+    if (!allowed.ok) return fail(allowed.error.problem === "principal" ? "principal" : "step-up");
+    events.push({ type: "AutoSwitched", scope: "global", role: null, on: priority.auto, at, command });
+  }
+  const next: Policy = { ...policy, priority: { mode: priority.mode, order: order.value, auto }, events };
   for (const row of next.roles) {
     const usesGlobal = row.override === "follow" || (row.override === "own" && row.priority === null);
     if (!usesGlobal) continue;
@@ -412,7 +419,11 @@ function alreadyKept(policy: Policy, role: string): boolean {
 }
 
 export type AutoAuthority = "session" | "step-up";
-export type AutoProblem = { problem: "step-up" | "principal" | "missing" };
+export type AutoProblem = { problem: "step-up" | "principal" | "missing" | "range" };
+
+function amountOk(to: number): boolean {
+  return Number.isFinite(to) && to >= 0;
+}
 
 function allow(effect: "session" | "step-up", authority: AutoAuthority, command: string): Result<true, AutoProblem> {
   if (!command) return err({ problem: "principal" });
@@ -449,6 +460,7 @@ function putSetting(
 }
 
 export function setTaskCeiling(policy: Policy, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if (!amountOk(to)) return err({ problem: "range" });
   const from = policy.autoSettings.taskCeiling;
   if (from === to) return ok(policy);
   return putSetting(policy, { kind: "task-ceiling", from, to }, authority, command, at,
@@ -457,6 +469,7 @@ export function setTaskCeiling(policy: Policy, to: number, authority: AutoAuthor
 }
 
 export function setSaveLine(policy: Policy, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if (!amountOk(to)) return err({ problem: "range" });
   const from = policy.autoSettings.saveLine;
   if (from === to) return ok(policy);
   return putSetting(policy, { kind: "save-line", from, to }, authority, command, at,
@@ -465,6 +478,7 @@ export function setSaveLine(policy: Policy, to: number, authority: AutoAuthority
 }
 
 export function setDailyCap(policy: Policy, name: string, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if (!amountOk(to)) return err({ problem: "range" });
   const from = dailyCapFor(policy.autoSettings, name);
   if (from === to) return ok(policy);
   return putSetting(policy, { kind: "daily-cap", from, to }, authority, command, at,
@@ -473,11 +487,89 @@ export function setDailyCap(policy: Policy, name: string, to: number, authority:
 }
 
 export function setReserve(policy: Policy, role: string, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if (!amountOk(to)) return err({ problem: "range" });
   const from = reserveFor(policy.autoSettings, role);
   if (from === to) return ok(policy);
   return putSetting(policy, { kind: "reserve", from, to }, authority, command, at,
     settings => ({ ...settings, reserves: { ...settings.reserves, [role]: to } }),
     { type: "AutoSettingsChanged", setting: "reserve", name: role, from, to, at, command });
+}
+
+const MODES: readonly Mode[] = ["subscriptions-first", "keys-first", "subscriptions-only", "keys-only", "custom"];
+
+function isMode(value: unknown): value is Mode {
+  return typeof value === "string" && (MODES as readonly string[]).includes(value);
+}
+
+function isEngine(value: unknown): value is Engine {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.provider === "string" && typeof row.model === "string" && typeof row.effort === "string";
+}
+
+function stringList(value: unknown): readonly string[] | null | undefined {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.some(item => typeof item !== "string")) return undefined;
+  return value;
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function numberMap(value: unknown): Record<string, number> {
+  if (typeof value !== "object" || value === null) return {};
+  const out: Record<string, number> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "number" && Number.isFinite(item) && item >= 0) out[key] = item;
+  }
+  return out;
+}
+
+// A policy saved before Auto has no switch and no settings. Missing fields take the design defaults.
+export function parsePolicy(raw: unknown): Policy | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const body = raw as Record<string, unknown>;
+  if (typeof body.priority !== "object" || body.priority === null || !Array.isArray(body.roles) || !Array.isArray(body.events)) return null;
+  const priority = body.priority as Record<string, unknown>;
+  if (!isMode(priority.mode) || !Array.isArray(priority.order) || priority.order.some(name => typeof name !== "string")) return null;
+  const roles: RoleRoute[] = [];
+  for (const item of body.roles) {
+    if (typeof item !== "object" || item === null) return null;
+    const row = item as Record<string, unknown>;
+    if (typeof row.role !== "string" || (row.override !== "follow" && row.override !== "own" && row.override !== "hand")) return null;
+    if (!Array.isArray(row.picks) || !row.picks.every(isEngine)) return null;
+    if (row.riskPicks !== null && (!Array.isArray(row.riskPicks) || !row.riskPicks.every(isEngine))) return null;
+    let rolePriority: Priority | null = null;
+    if (row.priority !== null && row.priority !== undefined) {
+      if (typeof row.priority !== "object") return null;
+      const inner = row.priority as Record<string, unknown>;
+      if (!isMode(inner.mode) || !Array.isArray(inner.order) || inner.order.some(name => typeof name !== "string")) return null;
+      rolePriority = { mode: inner.mode, order: inner.order, ...(typeof inner.auto === "boolean" ? { auto: inner.auto } : {}) };
+    }
+    const written = stringList(row.written);
+    const writtenRisk = stringList(row.writtenRisk);
+    const seenChain = stringList(row.seenChain);
+    const seenRisk = stringList(row.seenRisk);
+    if (written === undefined || writtenRisk === undefined || seenChain === undefined || seenRisk === undefined) return null;
+    roles.push({
+      role: row.role, override: row.override, priority: rolePriority, picks: row.picks, riskPicks: row.riskPicks as Engine[] | null,
+      written, writtenRisk, seenChain, seenRisk,
+      auto: typeof row.auto === "boolean" ? row.auto : roleGroup(row.role) === "implement",
+    });
+  }
+  const settings = typeof body.autoSettings === "object" && body.autoSettings !== null ? body.autoSettings as Record<string, unknown> : {};
+  return {
+    priority: { mode: priority.mode, order: priority.order, auto: typeof priority.auto === "boolean" ? priority.auto : false },
+    roles,
+    events: body.events as RouteEvent[],
+    autoSettings: {
+      taskCeiling: finiteOr(settings.taskCeiling, DEFAULT_AUTO_SETTINGS.taskCeiling),
+      saveLine: finiteOr(settings.saveLine, DEFAULT_AUTO_SETTINGS.saveLine),
+      dailyCaps: numberMap(settings.dailyCaps),
+      reserves: numberMap(settings.reserves),
+    },
+  };
 }
 
 export function stillNamed(policy: Policy, name: string): boolean {

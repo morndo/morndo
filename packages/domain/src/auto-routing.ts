@@ -28,9 +28,9 @@ const PRIOR_MILLIONS: Record<Size, readonly [number, number]> = {
 };
 
 const ROUTINE_KINDS: readonly TaskKind[] = ["docs", "test", "chore", "fix", "review-fix"];
-const TITLE_PREFIX: readonly (readonly [string, TaskKind])[] = [
-  ["fix:", "fix"], ["docs:", "docs"], ["test:", "test"], ["refactor:", "refactor"], ["chore:", "chore"], ["feat:", "feature"],
-];
+const TITLE_KIND: Readonly<Record<string, TaskKind>> = {
+  fix: "fix", docs: "docs", test: "test", refactor: "refactor", chore: "chore", feat: "feature",
+};
 const BRANCH_PREFIX: readonly (readonly [string, TaskKind])[] = [
   ["fix/", "fix"], ["docs/", "docs"], ["test/", "test"], ["refactor/", "refactor"], ["chore/", "chore"], ["feat/", "feature"],
 ];
@@ -141,12 +141,19 @@ export function roleGroup(role: string): string {
   return cut === -1 ? role : role.slice(0, cut);
 }
 
+function modelId(model: string): string {
+  const cut = model.indexOf("[");
+  return cut === -1 ? model : model.slice(0, cut);
+}
+
 export function familyOf(model: string, families: readonly { pattern: string; family: string }[], presetFamily: string): string {
-  return families.find(row => glob(row.pattern, model))?.family ?? presetFamily;
+  const id = modelId(model);
+  return families.find(row => glob(row.pattern, id))?.family ?? presetFamily;
 }
 
 export function modelClassOf(model: string, rows: readonly { pattern: string; class: ModelClass }[]): ModelClass {
-  return rows.find(row => glob(row.pattern, model))?.class ?? "unknown";
+  const id = modelId(model);
+  return rows.find(row => glob(row.pattern, id))?.class ?? "unknown";
 }
 
 function glob(pattern: string, model: string): boolean {
@@ -202,7 +209,11 @@ export function taskProfile(input: ProfileInput): TaskProfile {
 function kindOf(input: ProfileInput): Signal<TaskKind> {
   if (input.kind) return { value: input.kind, source: "flag" };
   const title = input.title?.trim().toLowerCase() ?? "";
-  for (const [prefix, kind] of TITLE_PREFIX) if (title.startsWith(prefix)) return { value: kind, source: "board" };
+  const titled = /^(fix|docs|test|refactor|chore|feat)(\([^)]*\))?!?:/.exec(title);
+  if (titled?.[1]) {
+    const kind = TITLE_KIND[titled[1]];
+    if (kind) return { value: kind, source: "board" };
+  }
   const branch = input.branch?.trim().toLowerCase() ?? "";
   for (const [prefix, kind] of BRANCH_PREFIX) if (branch.startsWith(prefix)) return { value: kind, source: "branch" };
   for (const [word, kind] of KEYWORDS) if (new RegExp(`\\b${word}\\b`, "i").test(title)) return { value: kind, source: "board" };
@@ -286,7 +297,7 @@ export function decide(input: DecideInput): RulesResult {
     if (reason) excluded.push({ entry: candidate.entry, reason });
     else eligible.push(candidate);
   }
-  const ranked = eligible.map(candidate => ({ candidate, keys: sortKey(tier, candidate, input.settings) }))
+  const ranked = eligible.map(candidate => ({ candidate, keys: sortKey(tier, candidate, input.settings, input.derived) }))
     .sort((a, b) => compare(a.keys, b.keys));
   const pick = ranked[0]?.candidate ?? null;
   const chain = pick === null ? [...input.derived] : [pick.entry, ...input.derived.filter(entry => entry !== pick.entry)];
@@ -297,7 +308,7 @@ export function decide(input: DecideInput): RulesResult {
     chain,
     ranked: ranked.map(row => row.candidate.entry),
     excluded,
-    reasons: pick ? [pickReason(tier, pick, ranked[1]?.candidate, input.settings)] : [],
+    reasons: pick ? [pickReason(tier, pick, ranked[1]?.candidate, input.settings, input.derived)] : [],
     stage: "rules",
     declined: pick === null ? "none-eligible" : null,
   };
@@ -307,7 +318,9 @@ function firstExclusion(candidate: CandidateFacts, input: DecideInput): Reason |
   if (!candidate.inChain || !input.derived.includes(candidate.entry)) return { code: "not-in-chain", stage: "rules" };
   if (candidate.family === "unknown") return { code: "unknown-family", stage: "rules" };
   if (candidate.available !== true) {
-    const reason: Reason = { code: "unavailable", stage: "rules", name: candidate.available.reason };
+    const reason: Reason = { code: "unavailable", stage: "rules" };
+    const name = tokenName(candidate.available.reason);
+    if (name) reason.name = name;
     if (candidate.available.until !== null) reason.n = candidate.available.until;
     return reason;
   }
@@ -321,37 +334,60 @@ function firstExclusion(candidate: CandidateFacts, input: DecideInput): Reason |
   if (review) return review;
   if (candidate.level === "held") {
     const reason: Reason = { code: "held", stage: "rules" };
-    if (candidate.heldWhy) reason.name = candidate.heldWhy;
+    const held = tokenName(candidate.heldWhy ?? undefined);
+    if (held) reason.name = held;
     if (candidate.heldSince !== null) reason.n = candidate.heldSince;
     return reason;
   }
   return null;
 }
 
+function cents(usd: number): number {
+  return Math.round(usd * 100);
+}
+
 function budgetExclusion(candidate: CandidateFacts): Reason | null {
-  if (candidate.kindOf !== "api-key" || candidate.expectedUsd === null) return null;
-  if (candidate.reservation !== null && candidate.expectedUsd > candidate.reservation) {
+  if (candidate.kindOf !== "api-key") return null;
+  const cap = candidate.dailyCap;
+  const spent = candidate.committedToday;
+  if (candidate.expectedUsd === null) {
+    if (cap !== null && spent !== null && cents(spent) >= cents(cap)) return { code: "budget", stage: "rules", name: "daily-cap" };
+    return null;
+  }
+  if (candidate.reservation !== null && cents(candidate.expectedUsd) > cents(candidate.reservation)) {
     return { code: "budget", stage: "rules", name: "reservation", n: candidate.expectedUsd };
   }
-  if (candidate.dailyCap !== null && candidate.committedToday !== null && candidate.committedToday + candidate.expectedUsd > candidate.dailyCap) {
+  if (cap !== null && spent !== null && cents(spent) + cents(candidate.expectedUsd) > cents(cap)) {
     return { code: "budget", stage: "rules", name: "daily-cap", n: candidate.expectedUsd };
   }
   return null;
 }
 
+function knownFamilies(families: readonly string[]): string[] {
+  return families.filter(family => family !== "unknown");
+}
+
 function reviewExclusion(candidate: CandidateFacts, input: DecideInput): Reason | null {
   if (!input.reviewRule) return null;
   if (roleGroup(input.role) === "review") {
-    return input.implementerFamilies.includes(candidate.family) ? { code: "review", stage: "rules", name: candidate.family } : null;
+    return knownFamilies(input.implementerFamilies).includes(candidate.family) ? { code: "review", stage: "rules", name: candidate.family } : null;
   }
-  if (input.reviewFamilies.length === 0) return null;
-  const others = input.reviewFamilies.filter(family => family !== candidate.family);
-  return others.length === 0 ? { code: "review", stage: "rules", name: candidate.family } : null;
+  const reviewers = knownFamilies(input.reviewFamilies);
+  if (reviewers.length === 0) return null;
+  const blocked = new Set([...knownFamilies(input.implementerFamilies), candidate.family].filter(family => family !== "unknown"));
+  return reviewers.some(family => !blocked.has(family)) ? null : { code: "review", stage: "rules", name: candidate.family };
+}
+
+function tokenName(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const name = raw.trim().toLowerCase().replace(/[\s_]+/g, "-").replace(/[^a-z0-9-]/g, "").replace(/-+/g, "-").replace(/^-|-$/g, "");
+  return TOKEN.test(name) ? name : undefined;
 }
 
 type CostRank = { rank: number; usd: number };
 
 function costRank(candidate: CandidateFacts, settings: AutoSettings): CostRank {
+  if (candidate.gate === "not-ours") return { rank: 4, usd: 0 };
   if (candidate.kindOf === "subscription") {
     if (candidate.window !== null && candidate.window < settings.saveLine) return { rank: 0, usd: 0 };
     return { rank: 2, usd: 0 };
@@ -366,15 +402,17 @@ function trustedFor(level: Level, tier: Tier): boolean {
   return LEVEL_RANK[level] >= LEVEL_RANK[tier];
 }
 
-function sortKey(tier: Tier, candidate: CandidateFacts, settings: AutoSettings): number[] {
+function sortKey(tier: Tier, candidate: CandidateFacts, settings: AutoSettings, derived: readonly string[]): number[] {
   const trust = tier === "routine" ? 0 : trustedFor(candidate.level, tier) ? 0 : 1;
   const band = BAND_RANK[candidate.band];
   const model = CLASS_RANK[candidate.modelClass];
   const minutes = candidate.minutes ?? Number.POSITIVE_INFINITY;
   const cost = costRank(candidate, settings);
-  if (tier === "hard") return [trust, band, model, candidate.rank];
-  if (tier === "standard") return [trust, cost.rank, cost.usd, band, minutes, candidate.rank];
-  if (tier === "routine") return [cost.rank, cost.usd, band, minutes, candidate.rank];
+  const place = derived.indexOf(candidate.entry);
+  const order = place === -1 ? Number.POSITIVE_INFINITY : place;
+  if (tier === "hard") return [trust, band, model, order];
+  if (tier === "standard") return [trust, cost.rank, cost.usd, band, minutes, order];
+  if (tier === "routine") return [cost.rank, cost.usd, band, minutes, order];
   return unreachable(tier);
 }
 
@@ -391,11 +429,11 @@ function compare(a: readonly number[], b: readonly number[]): number {
   return 0;
 }
 
-function pickReason(tier: Tier, winner: CandidateFacts, other: CandidateFacts | undefined, settings: AutoSettings): Reason {
+function pickReason(tier: Tier, winner: CandidateFacts, other: CandidateFacts | undefined, settings: AutoSettings, derived: readonly string[]): Reason {
   if (tier !== "routine" && !trustedFor(winner.level, tier)) return { code: "no-trusted-available", stage: "rules" };
   if (!other) return { code: soleCode(tier, winner, settings), stage: "rules" };
-  const left = sortKey(tier, winner, settings);
-  const right = sortKey(tier, other, settings);
+  const left = sortKey(tier, winner, settings, derived);
+  const right = sortKey(tier, other, settings, derived);
   for (let i = 0; i < left.length; i++) {
     if (left[i] !== right[i]) return { code: keyCode(tier, i, winner, settings), stage: "rules" };
   }
@@ -472,8 +510,10 @@ export function parseFact(raw: unknown): Result<OutcomeFact, { problem: "refused
   const row = raw as Record<string, unknown>;
   if (typeof row.source !== "string" || !SOURCES.includes(row.source as OutcomeSource)) return err({ problem: "refused" });
   if (typeof row.kind !== "string" || !KINDS.includes(row.kind as FactKind)) return err({ problem: "refused" });
-  if (typeof row.route !== "string" || typeof row.at !== "number") return err({ problem: "refused" });
+  if (typeof row.route !== "string" || typeof row.at !== "number" || !Number.isFinite(row.at)) return err({ problem: "refused" });
   if (typeof row.text === "string" && row.text.includes("STATUS:")) return err({ problem: "refused" });
+  if (typeof row.n === "number" && !Number.isFinite(row.n)) return err({ problem: "refused" });
+  if (typeof row.usd === "number" && !Number.isFinite(row.usd)) return err({ problem: "refused" });
   const fact: OutcomeFact = { route: row.route, at: row.at, kind: row.kind as FactKind, source: row.source as OutcomeSource };
   if (typeof row.n === "number") fact.n = row.n;
   if (typeof row.usd === "number") fact.usd = row.usd;
@@ -490,6 +530,10 @@ export function recordFact(
   fact: OutcomeFact,
   judged: { lane: string | null },
 ): Result<readonly OutcomeFact[], { problem: "refused" | "trust" | "estimate" | "lane" | "by" }> {
+  if (!Number.isFinite(fact.at)) return err({ problem: "refused" });
+  if (fact.n !== undefined && !Number.isFinite(fact.n)) return err({ problem: "refused" });
+  if (fact.usd !== undefined && !Number.isFinite(fact.usd)) return err({ problem: "refused" });
+  if (typeof fact.text === "string" && fact.text.includes("STATUS:")) return err({ problem: "refused" });
   if (fact.source === "review") {
     if (!fact.by) return err({ problem: "by" });
     if (!fact.byLane || !judged.lane) return err({ problem: "lane" });
@@ -516,7 +560,7 @@ export type ScoreCell = {
   coverage: number;
   n: number;
   k: number;
-  findings: number;
+  findings: number | null;
   fixRounds: number;
   medianUsd: number | null;
   medianMinutes: number | null;
@@ -578,17 +622,17 @@ function cellOf(list: readonly { run: ScoreRun; entry: string }[], facts: readon
   const head = first ?? { run: { id: "", at: 0, group: "", tier: "routine" as const, task: null, lane: null }, entry: "" };
   return {
     entry: head.entry, group: head.run.group, tier: head.run.tier, coverage, n, k,
-    findings: knownFindings === 0 ? 0 : findings / knownFindings,
+    findings: knownFindings === 0 ? null : findings / knownFindings,
     fixRounds: n === 0 ? 0 : fixRounds / n,
     medianUsd: median(costs), medianMinutes: median(minutes), fellBack, mismatches,
-    band: bandOf(k, n, knownFindings === 0 ? 0 : findings / knownFindings),
+    band: bandOf(k, n, knownFindings === 0 ? null : findings / knownFindings),
   };
 }
 
-function bandOf(k: number, n: number, findings: number): Band {
+function bandOf(k: number, n: number, findings: number | null): Band {
   if (n < 5) return "new";
   const rate = k / n;
-  if (rate >= 0.8 && findings <= 1) return "A";
+  if (rate >= 0.8 && findings !== null && findings <= 1) return "A";
   if (rate >= 0.6) return "B";
   return "C";
 }
