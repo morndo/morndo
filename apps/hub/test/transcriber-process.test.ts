@@ -74,4 +74,19 @@ describe("process host", () => {
     await expect(host.transcribe(call("/audio/a.wav"))).rejects.toThrow();
     expect(dirs()).toBe(before);                              // the run's working directory is the host's to remove
   });
+
+  it("a group member that ignores SIGTERM is still killed after the leader closes", async () => {
+    const host = processTranscriber(FIXTURE);
+    const ac = new AbortController();
+    const pending = host.transcribe(call("/audio/stubborn.wav", ac.signal));
+    expect(await until(() => host.group().length > 1, 2000)).toBe(true);   // the leader and its stubborn child
+    const member = host.group()[1];
+    if (member === undefined) throw new Error("the group never named the member");
+    await new Promise(r => setTimeout(r, 500));               // let the member install its SIGTERM handler
+    ac.abort();                                               // SIGTERM to the group: the leader ends, the member stays
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });   // 'close' has fired by now
+    expect(alive(member)).toBe(true);                         // SIGTERM alone was not enough for it
+    // The SIGKILL escalation must outlive the leader's stdio: the member dies without the hub's help.
+    expect(await until(() => !alive(member), 15_000)).toBe(true);
+  });
 });
