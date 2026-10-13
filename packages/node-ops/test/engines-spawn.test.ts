@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ENGINES_MAX_OUTPUT, runEngines, runEnginesSync } from "../src/engines-spawn.ts";
+import { ENGINES_MAX_OUTPUT, EnginesError, enginesEnabledOf, runEngines, runEnginesSync } from "../src/engines-spawn.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -28,5 +28,18 @@ describe("engines spawn", () => {
     expect(Date.now() - t0).toBeLessThan(5000);
     expect(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0)).toThrow();          // gone, and reaped
     await expect(runEngines(process.execPath, ["-e", ""], process.env, stop.signal)).rejects.toThrow(/was stopped/);   // not started
+  });
+});
+
+// The hub's Engines page and the node's lane.start read the kill switch here, so they can't disagree.
+describe("the engine layer's kill switch", () => {
+  it("is on only for JSON true, off for any other JSON, and unavailable when it isn't JSON", () => {
+    expect(enginesEnabledOf("true\n")).toBe(true);
+    for (const out of ["false", "null", "1", "\"true\"", "{}"]) expect([out, enginesEnabledOf(out)]).toEqual([out, false]);
+    for (const out of ["", "False", "yes"]) {
+      let thrown: unknown = null;
+      try { enginesEnabledOf(out); } catch (e) { thrown = e; }
+      expect([out, thrown instanceof EnginesError && thrown.kind]).toEqual([out, "unavailable"]);
+    }
   });
 });
