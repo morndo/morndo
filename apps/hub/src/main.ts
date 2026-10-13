@@ -42,7 +42,7 @@ import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
 import { locateTranscriber } from "./adapters/transcriber-path.ts";
 import { processTranscriber } from "./adapters/transcriber-process.ts";
-import { guardNow, loadTranscriptionSettings, watchMachine } from "./adapters/transcription-config.ts";
+import { guardNow, loadTranscriptionSettings, openMachineGuard } from "./adapters/transcription-config.ts";
 import { fileOnDisk, TranscriptionService } from "./application/transcription-service.ts";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -202,7 +202,7 @@ switch (cmd) {
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
     const txSettings = loadTranscriptionSettings(config.dataDir, line => log.warn(line));
-    const machine = watchMachine(txSettings.guard);
+    const machine = openMachineGuard(txSettings.guard);
     try { await machine.refresh(); }
     catch (e) { log.warn("transcription: machine figure unread", e); }
     // Each probe looks again: a plugin installed while the hub runs turns the feature on, and one removed or turned

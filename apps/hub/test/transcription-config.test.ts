@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { guardNow, readMachine, watchMachine } from "../src/adapters/transcription-config.ts";
+import { guardNow, openMachineGuard, readMachine, watchMachine } from "../src/adapters/transcription-config.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -67,6 +67,40 @@ describe("transcription guard reads", () => {
       expect(guardNow({ memAvailableMiB: 64 }, watched.read)).toBe("unknown");
     } finally {
       watched.close();
+    }
+  });
+
+  it("watches memory only on macOS when a memory line is set", async () => {
+    const pages = [
+      "Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+      "Pages free:                               100000.",
+      "Pages inactive:                             10000.",
+      "Pages speculative:                          10000.",
+    ].join("\n");
+    let calls = 0;
+    const vmStat = async () => { calls += 1; return pages; };
+    const linux = openMachineGuard({ memAvailableMiB: 64 }, { platform: "linux", vmStat, ...procFiles("0.1", 2_097_152) });
+    const other = openMachineGuard({ memAvailableMiB: 64 }, { platform: "freebsd", vmStat, totalmem: () => 1024 * 1024 * 1024 });
+    const loadOnly = openMachineGuard({ load1: 2 }, { platform: "darwin", vmStat, loadavg: () => [0.5, 0, 0] });
+    try {
+      expect(linux.read().memAvailableMiB).toBe(2048);
+      expect(other.read().memAvailableMiB).toBe(1024);
+      expect(loadOnly.read().load1).toBe(0.5);
+      expect(calls).toBe(0);
+      const mac = openMachineGuard({ memAvailableMiB: 64 }, { platform: "darwin", vmStat });
+      try {
+        expect(calls).toBe(0);
+        await mac.refresh();
+        expect(calls).toBe(1);
+        expect(guardNow({ memAvailableMiB: 64 }, mac.read)).toBe("off");
+      } finally {
+        mac.close();
+      }
+      expect(calls).toBe(1);
+    } finally {
+      linux.close();
+      other.close();
+      loadOnly.close();
     }
   });
 

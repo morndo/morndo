@@ -93,7 +93,8 @@ function macAvailableMiB(vmStat: () => string): number {
 }
 
 // The request path reads this cache. The refresh is the only place vm_stat is started, and it is asynchronous,
-// so a tick never spawns. The figure is a few seconds old.
+// so a tick never spawns. The figure is a few seconds old. openMachineGuard starts this watcher only on macOS
+// when a memory line is set. Linux reads /proc on the request, and so does every other case.
 const MACHINE_CACHE_MS = 5_000;
 
 function vmStatText(): Promise<string> {
@@ -145,6 +146,27 @@ export function watchMachine(
   const timer = setInterval(() => void refresh().catch(() => {}), MACHINE_CACHE_MS);
   timer.unref?.();
   return { read: () => sample, refresh, close: () => clearInterval(timer) };
+}
+
+export function openMachineGuard(
+  policy: TranscriptionGuard | null,
+  o: {
+    platform?: NodeJS.Platform;
+    loadavg?: () => number[];
+    totalmem?: () => number;
+    vmStat?: () => Promise<string>;
+    loadPath?: string;
+    memPath?: string;
+  } = {},
+): { read: () => { load1?: number; memAvailableMiB?: number }; refresh: () => Promise<void>; close: () => void } {
+  const platform = o.platform ?? process.platform;
+  if (platform === "darwin" && policy?.memAvailableMiB !== undefined) return watchMachine(policy, o);
+  const rest: { platform: NodeJS.Platform; loadavg?: () => number[]; totalmem?: () => number; loadPath?: string; memPath?: string } = { platform };
+  if (o.loadavg) rest.loadavg = o.loadavg;
+  if (o.totalmem) rest.totalmem = o.totalmem;
+  if (o.loadPath) rest.loadPath = o.loadPath;
+  if (o.memPath) rest.memPath = o.memPath;
+  return { read: () => readMachine(policy, rest), refresh: async () => {}, close: () => {} };
 }
 
 export function guardNow(policy: TranscriptionGuard | null, read: () => { load1?: number; memAvailableMiB?: number }): QueueGuard {
