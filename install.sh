@@ -87,23 +87,64 @@ else
 fi
 [ "$sum" = "$hash" ] || { echo "archive digest does not match the manifest" >&2; exit 65; }
 
-# GNU tar 1.35 does not refuse a symlink target that climbs out
+# An escape-style listing encodes a newline as \n. A doubled backslash is a backslash.
+name_has_newline() {
+  rest=$1
+  while [ -n "$rest" ]; do
+    case $rest in
+      \\n*) return 0 ;;
+      \\\\*) rest=${rest#\\\\} ;;
+      \\*) rest=${rest#\\}; rest=${rest#?} ;;
+      *) rest=${rest#?} ;;
+    esac
+  done
+  return 1
+}
+
+# Drop "." and empty segments. ".." stays, so the climb check still sees it.
+normalise_path() {
+  out=
+  old=$IFS
+  IFS=/
+  for part in $1; do
+    if [ -z "$part" ] || [ "$part" = "." ]; then
+      continue
+    fi
+    if [ -z "$out" ]; then out=$part; else out=$out/$part; fi
+  done
+  IFS=$old
+  printf '%s\n' "$out"
+}
+
+# GNU tar 1.35 --list prints one stored name per line. --quoting-style=escape keeps a
+# space in that line and writes a newline as \n (GNU tar manual, "Listing Archive
+# Members" and --quoting-style; https://www.gnu.org/software/tar/manual/tar.html,
+# read 2026-10-13). bsdtar -t / --list does the same for the name
+# (https://man.freebsd.org/cgi/man.cgi?query=tar&sektion=1, FreeBSD 14.2, read 2026-10-13).
+# Neither extract option refuses a symlink target that climbs
 # (https://www.gnu.org/software/tar/manual/html_section/Security.html, read 2026-10-13).
-# bsdtar secures member names, not every link target. Read the target from tar -tv and refuse it here.
-tar -tvzf "$work/archive.tar.gz" > "$work/list"
-while IFS= read -r line; do
-  [ -n "$line" ] || continue
+# The name comes from --list. The link target, when the verbose line has one, is the
+# text after " -> ". "." segments are dropped before the depth count.
+if tar --version 2>/dev/null | grep -q 'GNU tar'; then
+  tar --absolute-names --quoting-style=escape -tzf "$work/archive.tar.gz" > "$work/names"
+  tar --absolute-names --quoting-style=escape -tvzf "$work/archive.tar.gz" > "$work/verbose"
+else
+  tar -tzf "$work/archive.tar.gz" > "$work/names"
+  tar -tvzf "$work/archive.tar.gz" > "$work/verbose"
+fi
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  IFS= read -r verbose <&3 || verbose=
   target=
-  case $line in
-    *" -> "*)
-      target=${line#* -> }
-      left=${line%% -> *}
-      entry=${left##* }
-      ;;
-    *) entry=${line##* } ;;
+  case $verbose in
+    *" -> "*) target=${verbose#* -> } ;;
   esac
-  path=${entry#./}
-  case $path in
+  if name_has_newline "$entry" || name_has_newline "$target"; then
+    echo "refusing archive path $entry" >&2
+    exit 65
+  fi
+  path=$(normalise_path "${entry#./}")
+  case $entry in
     /*) echo "refusing archive path $entry" >&2; exit 65 ;;
   esac
   saved=$IFS
@@ -115,17 +156,15 @@ while IFS= read -r line; do
     fi
   done
   if [ -n "$target" ]; then
-    rel=${target#./}
-    case $rel in
+    rel=$(normalise_path "${target#./}")
+    case $target in
       /*) echo "refusing archive path $entry -> $target" >&2; exit 65 ;;
     esac
     depth=0
-    IFS=/
     for part in $path; do
       [ -n "$part" ] || continue
       depth=$((depth + 1))
     done
-    # The last segment is the link itself, not a directory.
     depth=$((depth - 1))
     for part in $rel; do
       if [ "$part" = ".." ]; then
@@ -134,13 +173,13 @@ while IFS= read -r line; do
           exit 65
         fi
         depth=$((depth - 1))
-      elif [ -n "$part" ] && [ "$part" != "." ]; then
+      elif [ -n "$part" ]; then
         depth=$((depth + 1))
       fi
     done
   fi
   IFS=$saved
-done < "$work/list"
+done < "$work/names" 3< "$work/verbose"
 
 mkdir -p "$work/tree"
 tar -xzf "$work/archive.tar.gz" -C "$work/tree"

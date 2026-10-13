@@ -490,6 +490,26 @@ describe("install.sh", () => {
     expect(() => packTree([{ path: "node/bin/npm", mode: "0555", link: "../lib/npm-cli.js" }], 1_700_000_000)).not.toThrow();
   });
 
+  it("refuses a dot-segment path and a name that contains a space", () => {
+    for (const [name, link] of [["app/././x", "../../../outside"], ["../ x", ""]] as const) {
+      const bad = fixture({ archive: craftArchive(name, link) });
+      const run = spawnSync("sh", [bad.scriptPath, "--role", "node", "--signers", bad.signers], {
+        encoding: "utf8",
+        env: { ...process.env, MORNDO_RELEASE_BASE: `file://${bad.base}` },
+      });
+      expect(run.status, `${name}: ${run.stderr}`).not.toBe(0);
+      expect(run.stderr, name).toMatch(/refusing archive path/);
+      expect(spawnSync("test", ["-f", bad.marker]).status).not.toBe(0);
+    }
+    const newline = fixture({ archive: craftArchive("app/a\nb") });
+    const run = spawnSync("sh", [newline.scriptPath, "--role", "node", "--signers", newline.signers], {
+      encoding: "utf8",
+      env: { ...process.env, MORNDO_RELEASE_BASE: `file://${newline.base}` },
+    });
+    expect(run.status, run.stderr).not.toBe(0);
+    expect(run.stderr).toMatch(/refusing archive path/);
+  });
+
   it("refuses a symlink whose target climbs out of the tree", () => {
     const bad = fixture({ archive: craftArchive("app/x", "../../../../outside") });
     const run = spawnSync("sh", [bad.scriptPath, "--role", "node", "--signers", bad.signers], {
