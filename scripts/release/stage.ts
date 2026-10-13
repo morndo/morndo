@@ -66,7 +66,8 @@ function walkCopied(
       if (!inside(real, root)) throw new Error(`symlink escapes the tree: ${rel}`);
       const built = compiledPackage(real, compiled);
       if (built) out.push(...walkCopied(built, rel, mode, built));
-      else out.push({ path: rel, mode: "0555", link: linkTarget(abs, real) });
+      else if (shipped(real, root)) out.push({ path: rel, mode: "0555", link: linkTarget(abs, real) });
+      else out.push(copiedUnshipped(abs, rel, real, mode));
       continue;
     }
     if (st.isDirectory()) out.push(...walkCopied(abs, rel, mode, root, compiled));
@@ -95,6 +96,22 @@ function workspaceName(real: string): string | null {
   if (typeof value !== "object" || value === null || !("name" in value) || typeof value.name !== "string") return null;
   if (!value.name.startsWith("@morndo/")) return null;
   return value.name.slice("@morndo/".length);
+}
+
+function shipped(real: string, root: string): boolean {
+  const rel = relative(root, real).split(sep).join("/");
+  const parts = rel.split("/");
+  if (parts.some(part => SKIP_DIR.has(part))) return false;
+  const base = parts.at(-1) ?? "";
+  return !base.endsWith(".test.ts") && !base.endsWith(".test.js");
+}
+
+function copiedUnshipped(abs: string, rel: string, real: string, mode: (rel: string) => "0444" | "0555"): TreeFile {
+  let st;
+  try { st = lstatSync(real); }
+  catch { throw new Error(`symlink target is not shipped: ${rel}`); }
+  if (!st.isFile()) throw new Error(`symlink target is not shipped: ${rel}`);
+  return { path: rel, bytes: readFileSync(abs), mode: mode(rel) };
 }
 
 function linkTarget(from: string, real: string): string {
