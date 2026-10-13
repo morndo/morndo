@@ -200,4 +200,22 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.seenBy(endpointId("phone")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
     expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("desk"));
   });
+
+  // An answer in doubt found by its answer key (review of PR #55): another endpoint taps the same choice, its repeat
+  // settles the row with the node and learns it was typed there. The Decision is the row's own endpoint, whose answer
+  // it was, not the endpoint whose repeat happened to learn it.
+  it("an answer in doubt, settled by another endpoint's repeat of the same choice, is recorded as the endpoint that created it", async () => {
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("the connection was lost while typing"); },            // in doubt: typed at the node
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                     // its node typed it after all
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    const r = await s.answer(auth("phone"), "ny-7", { kind: "option", key: "ship" }, "r2");      // same choice: the same key
+    expect(r).toMatchObject({ ok: true, duplicate: true });
+    expect(s.seenBy(endpointId("desk")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");    // its row, its answer
+    expect(s.seenBy(endpointId("phone")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("desk"));
+  });
 });
