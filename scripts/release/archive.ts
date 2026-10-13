@@ -49,7 +49,9 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
     else emit(entry.path, parseInt(entry.file.mode, 8), "0", Buffer.from(entry.file.bytes));
   }
   chunks.push(Buffer.alloc(BLOCK * 2));
-  return gzipSync(Buffer.concat(chunks), { level: 9, mtime: 0 });
+  // gzipSync writes header mtime 0 (gzip -n). ZlibOptions has no mtime field (@types/node 24);
+  // passing one is ignored on Node 24.5.0, checked 2026-10-13.
+  return gzipSync(Buffer.concat(chunks), { level: 9 });
 }
 
 export function assertTreePath(path: string): void {

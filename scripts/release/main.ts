@@ -27,7 +27,7 @@ function channel(text: string): Channel {
   throw new Error(`unknown channel ${text}`);
 }
 
-function flag(values: Record<string, string | boolean | undefined>, name: string): string {
+function flag(values: Record<string, string | string[] | boolean | undefined>, name: string): string {
   const value = values[name];
   if (typeof value !== "string" || value === "") throw new Error(`missing --${name}`);
   return value;
