@@ -257,7 +257,13 @@
     if (chatEntry(restoredChat(entryChatState(history.state)), worker) === "stay") { replaceState("", entry); return; }
     pushState("", entry);
   }
-  function closeChat() { if (page.state.chat) history.back(); else { chat = null; chatScreen = false; } }
+  // page.state is {} after a reload until the next navigation (SvelteKit 2.70.3 sets it so on hydrate;
+  // https://kit.svelte.dev/docs/shallow-routing#caveats, read 2026-10-13). The entry itself is still in
+  // history, which is what onMount restores the chat from, so Back pops that entry.
+  function closeChat() {
+    if (restoredChat(entryChatState(history.state))) history.back();
+    else { chat = null; chatScreen = false; }
+  }
   const onPop = () => {
     const entry = entryChatState(history.state);
     chat = restoredChat(entry);

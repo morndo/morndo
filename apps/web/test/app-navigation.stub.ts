@@ -20,7 +20,11 @@ function compose(state: PageState): Record<string, unknown> {
 }
 
 if (typeof history !== "undefined" && typeof history.replaceState === "function") {
-  history.replaceState(compose({}), "", location.href);
+  // Kit's start() numbers a first entry and leaves one that already has an index alone, so a reload
+  // keeps its shallow state. page.state stays {} until a navigation: on hydrate client.js sets it to
+  // {} (SvelteKit 2.70.3), and the shallow-routing caveat says state is not applied on the first load
+  // (https://kit.svelte.dev/docs/shallow-routing#caveats, read 2026-10-13).
+  if (history.state?.[HISTORY_INDEX] == null) history.replaceState(compose({}), "", location.href);
 }
 
 export function pushState(url: string, state: PageState): void {

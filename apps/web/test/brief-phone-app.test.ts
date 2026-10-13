@@ -137,6 +137,24 @@ const calls = (tab: Page) => tab.evaluate(() => (globalThis as unknown as FeedWi
 const runDone = (tab: Page) => tab.evaluate(() => (JSON.parse(localStorage.getItem("morndo.catchup.run") ?? "{}") as { run?: { done?: Record<string, string> } }).run?.done ?? {});
 
 describe("the phone around the brief sheet", () => {
+  it("pops the chat's history entry when Back is used after a reload", { timeout: 30_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track);
+    await push(tab, [release]);
+    await tab.locator('button.row[data-chat="alpha"]').click();
+    await tab.locator('button.back[aria-label="Back to chats"]').waitFor({ timeout: 5_000 });
+    await tab.reload();
+    await tab.locator('button.back[aria-label="Back to chats"]').waitFor({ timeout: 5_000 });
+    const state = await tab.evaluate(() => (history.state as { "sveltekit:states"?: { chat?: string } } | null)?.["sveltekit:states"]);
+    expect(state?.chat).toBe(ALPHA);                                         // the entry survived; page.state did not
+    await tab.locator('button.back[aria-label="Back to chats"]').click();
+    await tab.locator('button.row[data-chat="alpha"]').waitFor({ timeout: 3_000 });
+    const after = await tab.evaluate(() => (history.state as { "sveltekit:states"?: { chat?: string } } | null)?.["sveltekit:states"]?.chat ?? null);
+    expect(after).toBeNull();                                                 // Back popped the entry, it did not only hide the chat
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("closes the sheet on the first Back from a conversation, and lands back in it", { timeout: 30_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track);
