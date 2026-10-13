@@ -207,7 +207,6 @@
       briefNote = "Not sent: this decision isn't in your catch-up right now.";   // …and why, not silence (finding 7)
       return false;
     }
-    lastSheetPick = { key: card.key, id, body, label, seen: held.seen };
     session.answer(card.key, id, body, label, held.seen);
     const a = session.run?.answering;
     if (!a || a.id !== id || a.key !== card.key) {
@@ -216,8 +215,6 @@
     }
     return true;
   }
-  // What the sheet last started, for its passkey retry (the card's own lastPick serves the card the same way).
-  let lastSheetPick: { key: string; id: string; body: Body; label: string; seen: string } | null = null;
   async function askForBrief(d: DecisionItem): Promise<AskOutcome> {
     return sharedAsk(d, feed.workers, c => queue({ ...c, uploads: [] }), async () => {
       if (verifiedFresh || navigator.onLine === false) return null;
@@ -233,19 +230,17 @@
     if (!verifiedFresh && !(await verify())) { briefNote = PASSKEY_UNFINISHED; return; }
     await session.retry(r.key, r.retry.id, r.retry.body, r.retry.label, r.retry.seen, r.retry.requestId);
   }
-  // The passkey retry, from the sheet: the same answer with a new request id. Only the pick for the decision
-  // and card key this sheet is showing — a confirm left over from another card must not resend that one.
+  // The passkey retry, from the sheet: the answer the refusal itself carries, with a new request id.
+  // A brief restated since that answer (the same stale check as starting one) is not sent again.
   async function verifySheetAgain() {
-    const p = lastSheetPick;
     const r = briefRefusal;
-    if (!p || p.id !== briefId || p.key !== r?.key) {
-      briefNote = "Not sent: this sheet isn't showing the answer that passkey check was for.";
-      return;
-    }
+    const held = briefId ? sessions[briefId] : null;
+    if (!r?.retry || r.code !== "step_up" || !held || held.stale) return;
     briefNote = null;
     if (feed.status !== "live" || navigator.onLine === false) { briefNote = STILL_OFFLINE; return; }
     if (!(await verify())) { briefNote = PASSKEY_UNFINISHED; return; }
-    await session.retry(p.key, p.id, p.body, p.label, p.seen);
+    const a = r.retry;
+    await session.retry(r.key, a.id, a.body, a.label, a.seen);
   }
   function go(t: Tab) {
     if (deciding) stopDeciding();

@@ -19,8 +19,8 @@ export const RESUME_MS = 30 * 60_000;
 // The answer's outcome and the may-have-gone codes live with the answer POST (answer.ts); re-exported for catch-up's card.
 export { MAY_HAVE_GONE, type AnswerOutcome };
 
-// Why the card's answer didn't go, and (for an unknown outcome) what "Try again" sends: the same request id, so the hub
-// types it at most once (review of PR #7, finding 6).
+// Why the card's answer didn't go, and the answer to send again: "Try again" reuses the request id (an unknown
+// outcome, typed at most once; review of PR #7, finding 6), and a passkey confirm sends the same body with a new id.
 export type Retry = { id: string; body: Body; label: string; seen: string; requestId: string };
 export type Refusal = { key: string; code: string; text: string; retry?: Retry };
 
@@ -211,7 +211,8 @@ export class CatchUpSession {
       else {
         this.run = answerFailed(this.run);
         const retry = { id: a.id, body: a.body, label: a.label, seen: a.seen, requestId: a.requestId };
-        this.refusal = { key: a.key, code: outcome.code, text: outcome.text, ...(MAY_HAVE_GONE.has(outcome.code) ? { retry } : {}) };
+        const again = MAY_HAVE_GONE.has(outcome.code) || outcome.code === "step_up";
+        this.refusal = { key: a.key, code: outcome.code, text: outcome.text, ...(again ? { retry } : {}) };
       }
       this.#lastStep = this.#clock();
       this.#changed();

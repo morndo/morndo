@@ -132,7 +132,6 @@ const push = (tab: Page, items: DecisionItem[]) =>
 const queue = (tab: Page, answers: { status: number; body?: unknown }[]) =>
   tab.evaluate(x => { (globalThis as unknown as FeedWin).__answerReplies!.push(...x); }, answers);
 const STEP_UP = { status: 403, body: { error: "step_up" } };
-const WRONG_PICK = "Not sent: this sheet isn't showing the answer that passkey check was for.";
 const calls = (tab: Page) => tab.evaluate(() => (globalThis as unknown as FeedWin).__answerCalls ?? []);
 const runDone = (tab: Page) => tab.evaluate(() => (JSON.parse(localStorage.getItem("morndo.catchup.run") ?? "{}") as { run?: { done?: Record<string, string> } }).run?.done ?? {});
 
@@ -351,9 +350,10 @@ describe("the phone around the brief sheet", () => {
     await dialog.waitFor();
     const before = (await calls(tab)).length;
     await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
-    await dialog.getByText(WRONG_PICK).waitFor({ timeout: 3_000 });
-    const posts = await calls(tab) as { url: string }[];
-    expect(posts).toHaveLength(before);                                      // nothing new: not d-3, and not d-2 again
+    await expect.poll(async () => (await calls(tab)).length, { timeout: 5_000 }).toBe(before + 1);
+    const posts = await calls(tab) as { url: string; body: { key?: string } }[];
+    expect(posts.at(-1)?.url).toContain("/d-3/");
+    expect(posts.at(-1)?.body.key).toBe("a");
     expect(posts.filter(p => p.url.includes("/d-2/"))).toHaveLength(1);
     expect(errors).toEqual([]);
     await context.close();
@@ -383,20 +383,69 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
-  it("says why a passkey confirm does nothing when the sheet never started that answer", { timeout: 45_000 }, async () => {
+  it("resends the card's refused answer when the sheet confirms it", { timeout: 45_000 }, async () => {
     const { errors, track } = errorsOf();
-    const { context, tab } = await phone(track, "", true);
+    const { context, tab } = await phone(track, "", true, passkeyOk);
     await push(tab, [release]);
-    await queue(tab, [STEP_UP]);
+    await queue(tab, [STEP_UP, { status: 200 }]);
     await tab.locator("button.banner.you").click();
     await tab.getByRole("button", { name: "Ship today" }).click();
     await tab.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
     await tab.locator('[data-open-brief="d-2"]').click();
     const dialog = tab.getByRole("dialog");
     await dialog.waitFor();
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
+    await expect.poll(async () => (await calls(tab) as { body: { key?: string } }[]).length, { timeout: 5_000 }).toBe(2);
+    const posts = await calls(tab) as { url: string; body: { key?: string } }[];
+    expect(posts[1]?.url).toContain("/d-2/");
+    expect(posts[1]?.body.key).toBe("a");
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("resends the latest refused answer, not an earlier pick the sheet started", { timeout: 60_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true, passkeyOk);
+    await push(tab, [release]);
+    await queue(tab, [STEP_UP, STEP_UP, { status: 200 }]);
+    await tab.locator("button.banner.you").click();
+    await tab.locator('[data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    await dialog.locator("button.back").click();
+    await expect.poll(() => dialog.count(), { timeout: 3_000 }).toBe(0);
+    await tab.getByRole("button", { name: "Wait for Monday" }).click();
+    await tab.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    await tab.locator('[data-open-brief="d-2"]').click();
+    await dialog.waitFor();
     const before = (await calls(tab)).length;
     await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
-    await dialog.getByText(WRONG_PICK).waitFor({ timeout: 3_000 });
+    await expect.poll(async () => (await calls(tab)).length, { timeout: 5_000 }).toBe(before + 1);
+    const posts = await calls(tab) as { body: { key?: string } }[];
+    expect(posts.at(-1)?.body.key).toBe("b");
+    expect(posts.filter(p => p.body.key === "a")).toHaveLength(1);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("does not resend a passkey confirm after the brief was restated", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true, passkeyOk);
+    await push(tab, [release]);
+    await queue(tab, [STEP_UP]);
+    await tab.locator("button.banner.you").click();
+    await tab.locator('[data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    await push(tab, [releaseRestated]);
+    await dialog.getByText("Alpha restated this brief.").waitFor({ timeout: 3_000 });
+    const before = (await calls(tab)).length;
+    await dialog.getByRole("button", { name: "Confirm with passkey and send" }).click();
+    await tab.waitForTimeout(500);
     expect(await calls(tab)).toHaveLength(before);
     expect(errors).toEqual([]);
     await context.close();

@@ -110,7 +110,6 @@
     session.markAllRead(marks);
   }
   function aside() { if (top) session.setAside(top.key); }
-  let lastPick: { key: string; id: string; body: Body; label: string; seen: string } | null = null;
   // Whether the answer started (its 5 seconds run): the card keeps words that didn't go (review of PR #7, 13).
   async function pick(body: Body, label: string): Promise<boolean> {
     if (top?.kind !== "decision") return false;
@@ -121,7 +120,6 @@
     if (!verifiedFresh && !(await verify())) { note = PASSKEY_UNFINISHED; return false; }
     // The version of the ask on screen now goes with it (review of PR #7, finding 5).
     const seen = feed.decisions.find(d => d.id === card.id)?.version ?? "";
-    lastPick = { key: card.key, id: card.id, body, label, seen };
     session.answer(card.key, card.id, body, label, seen);
     return session.run?.answering?.key === card.key;
   }
@@ -137,10 +135,15 @@
   $effect(() => {
     if (top?.kind === "decision" && session.refusal?.key === top.key && MAY_HAVE_GONE.has(session.refusal.code) && item?.status === "answered" && item.decision?.via === "here") session.confirmAnswered(top.key);
   });
+  // The passkey retry: the answer the refusal carries. A brief restated since then (its version moved on) is not sent.
   async function verifyAgain() {
-    const p = lastPick;
-    if (!p || !(await verify())) return;
-    await session.retry(p.key, p.id, p.body, p.label, p.seen);
+    const r = session.refusal;
+    if (top?.kind !== "decision" || !r?.retry || r.code !== "step_up" || r.key !== top.key) return;
+    const live = feed.decisions.find(d => d.id === r.retry.id)?.version ?? "";
+    if (live !== r.retry.seen) return;
+    if (!(await verify())) return;
+    const a = r.retry;
+    await session.retry(r.key, a.id, a.body, a.label, a.seen);
   }
   // Queued in the outbox, or false with a note (the text stays in the box).
   async function reply(text: string, seen: string): Promise<boolean> {
