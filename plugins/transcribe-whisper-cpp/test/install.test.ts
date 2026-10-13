@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { commandOnPath } from "../src/morndo-transcribe.mts";
-import { absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
+import { absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, placeCachedFile, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
@@ -96,6 +96,26 @@ describe("install choices", () => {
     expect(allow).toBeGreaterThanOrEqual(0);
     expect(allow).toBeLessThan(suite);
     expect(offline).toContain('spawn("unshare", [\n      "-rn",');
+  });
+
+  it("places an unchanged model by hard link so a reinstall does not copy it", () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-link-"));
+    const cached = join(dir, "cached.bin");
+    const installed = join(dir, "installed.bin");
+    const copied = join(dir, "copied.bin");
+    writeFileSync(cached, "weights");
+    try {
+      placeCachedFile(cached, installed);
+      expect(statSync(installed).ino).toBe(statSync(cached).ino);
+      expect(readFileSync(installed, "utf8")).toBe("weights");
+      placeCachedFile(cached, copied, () => {
+        throw Object.assign(new Error("cross device"), { code: "EXDEV" });
+      });
+      expect(statSync(copied).ino).not.toBe(statSync(cached).ino);
+      expect(readFileSync(copied, "utf8")).toBe("weights");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("a failed install leaves the previous plugin in place", async () => {

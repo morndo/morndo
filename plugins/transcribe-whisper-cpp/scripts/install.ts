@@ -16,7 +16,7 @@
 //   that the bytes are the pin; the host check refuses any other site.
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, homedir, totalmem } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -223,6 +223,19 @@ async function sha256Of(path: string): Promise<{ sha256: string; bytes: number }
   return { sha256: hash.digest("hex"), bytes };
 }
 
+// A reinstall used to copy the model into staging while the previous copy was still in place.
+// Linking the cached file shares the inode, so the second name does not need another copy of the bytes.
+// A cross-device cache falls back to a copy.
+export function placeCachedFile(from: string, to: string, link: (from: string, to: string) => void = linkSync): void {
+  try {
+    link(from, to);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EXDEV" && code !== "ENOTSUP" && code !== "EPERM") throw error;
+    copyFileSync(from, to);
+  }
+}
+
 function modelHost(hostname: string): boolean {
   return hostname === "huggingface.co" || hostname.endsWith(".huggingface.co") || hostname.endsWith(".hf.co");
 }
@@ -415,7 +428,7 @@ async function install(request: { model: ModelId | null; home: string | null }):
       mkdirSync(join(dir, "models"), { recursive: true, mode: 0o755 });
       copyFileSync(whisper, join(dir, "bin", "whisper-cli"));
       chmodSync(join(dir, "bin", "whisper-cli"), 0o755);
-      copyFileSync(modelCache, join(dir, "models", pin.file));
+      placeCachedFile(modelCache, join(dir, "models", pin.file));
       chmodSync(join(dir, "models", pin.file), 0o644);
       copyFileSync(join(PACKAGE, "src", "morndo-transcribe.cjs"), join(dir, "bin", "morndo-transcribe"));
       chmodSync(join(dir, "bin", "morndo-transcribe"), 0o755);
