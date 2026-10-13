@@ -11,6 +11,7 @@ import { parseBriefMarkdown } from "../src/adapters/brief-template.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
 import { EscalationService, type Watch } from "../src/application/escalation-service.ts";
 import { ORIGIN, startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
+import { frameText } from "./http-crash-fixture.ts";
 import type { RawData, WebSocket } from "ws";
 
 const NOW = new Date(2026, 9, 1, 12).getTime();
@@ -58,8 +59,7 @@ function frames(ws: WebSocket) {
   const seen: Record<string, unknown>[] = [];
   const waiters: { t: string; resolve: (m: Record<string, unknown>) => void }[] = [];
   ws.on("message", (d: RawData) => {
-    const text = Array.isArray(d) ? Buffer.concat(d).toString("utf8") : Buffer.from(d).toString("utf8");
-    const m = JSON.parse(text) as Record<string, unknown>;
+    const m = JSON.parse(frameText(d)) as Record<string, unknown>;
     seen.push(m);
     const i = waiters.findIndex(w => w.t === m.t);
     if (i !== -1) { waiters[i]?.resolve(m); waiters.splice(i, 1); }
