@@ -1,6 +1,6 @@
 // The relay's one question per turn (reliable lanes §3.1): which Stop bodies are asked for a status line, and, over real
-// HTTP, that an asked Stop is answered {"decision":"block","reason"} and not spooled, while the Stop that follows (Claude
-// Code's stop_hook_active) is spooled as the turn's end.
+// HTTP, that an asked Stop is answered {"decision":"block","reason"} and kept marked statusAsked (its answer still reaches
+// subscribers), while the Stop that follows (Claude Code's stop_hook_active) is kept as the turn's end.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { StatusContract } from "../src/config.ts";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
@@ -58,16 +58,16 @@ describe("the relay asks over HTTP", () => {
   afterEach(async () => { await relay.close(); adb.close(); home.cleanup(); });
   const post = (body: unknown) => fetch(`http://127.0.0.1:${relay.port}/hook/stop`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-  it("blocks the first Stop without spooling it, and spools the one Claude Code sends after (negative control: a status line is spooled at once)", async () => {
+  it("blocks the first Stop and keeps it marked statusAsked; the one Claude Code sends after is kept as it is (negative control: a status line is not asked)", async () => {
     const asked = await post(stop());
     expect(asked.status).toBe(200);
     expect(asked.headers.get("content-type")).toBe("application/json");
     expect(await asked.json()).toEqual({ decision: "block", reason: STATUS_ASK });
-    expect(spool.after(0, 10)).toEqual([]);
+    expect(spool.after(0, 10).map(e => e.body)).toEqual([{ ...stop(), statusAsked: true }]);
     const after = await post(stop({ stop_hook_active: true, last_assistant_message: "STATUS: DONE\nPushed." }));
     expect(await after.json()).toEqual({ ok: true, queued: true });
-    expect(spool.after(0, 10).map(e => e.path)).toEqual(["/hook/stop"]);
-    await post(stop({ last_assistant_message: "STATUS: BLOCKED on the key" }));
-    expect(spool.after(0, 10)).toHaveLength(2);
+    const plain = await post(stop({ last_assistant_message: "STATUS: BLOCKED on the key" }));
+    expect(await plain.json()).toEqual({ ok: true, queued: true });
+    expect(spool.after(0, 10).map(e => (e.body as { statusAsked?: boolean }).statusAsked ?? false)).toEqual([true, false, false]);
   });
 });

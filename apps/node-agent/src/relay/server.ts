@@ -6,8 +6,9 @@
 //   session (spec §1, hooks docs checked 2026-10-06);
 // - /hook/stop: 200 {"ok":true,"queued":true}; /hook/failure, /notify and /file: 202; when the spool can't be written
 //   they answer 503, so the calling script's own fallback runs;
-// - /hook/stop that `ask` asks (status-ask.ts, reliable lanes §3.1): 200 {"decision":"block","reason":…}, and nothing is
-//   spooled: the turn goes on, and its next Stop is the one that counts;
+// - /hook/stop that `ask` asks (status-ask.ts, reliable lanes §3.1): 200 {"decision":"block","reason":…}; the turn goes
+//   on, and its next Stop is the one that counts. The asked one is spooled with `statusAsked: true` added to its body, so
+//   subscribers still get the answer it carried, and the fleet makes no lane event of it;
 // - /file {path, …}: the file is copied under today's confinement rules into relay-files and the event carries
 //   {…, ref, name, size} instead of the path; 413 over 25 MiB, 403 where files are never shared, 404 when missing, 503
 //   when the node's disk budget can't hold the copy (counted as a drop, like a spool that can't be written).
@@ -84,10 +85,7 @@ export async function startRelay(d: RelayDeps): Promise<Relay> {
     const session = field(body, "session_id");
     const event = { path: path as "/hook/stop" | "/hook/failure" | "/notify" | "/file", at: now(), session: typeof session === "string" ? session : null, window: d.windowOf(body) };
     const asked = path === "/hook/stop" ? d.ask?.(body, event.window) ?? null : null;
-    if (asked !== null) {
-      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ decision: "block", reason: asked }));
-      return;
-    }
+    if (asked !== null) body = { ...(body as Record<string, unknown>), statusAsked: true };
     let appended: Appended;
     if (path === "/file") {
       const target = field(body, "path");
@@ -109,7 +107,8 @@ export async function startRelay(d: RelayDeps): Promise<Relay> {
       appended = d.spool.append({ ...event, body });
     }
     if (!appended.ok) { answer(res, 503); return; }
-    if (path === "/hook/stop") res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true,"queued":true}');
+    if (asked !== null) res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ decision: "block", reason: asked }));
+    else if (path === "/hook/stop") res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true,"queued":true}');
     else answer(res, 202);
     after();
   };

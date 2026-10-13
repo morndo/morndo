@@ -43,6 +43,11 @@ describe("lane events from hooks", () => {
     expect(statusOf("STATUS: WAITING on review")).toBe("waiting");
   });
 
+  it("none for a Stop the relay asked to go on for its status line: the turn didn't end there", () => {
+    expect(laneEventOf(hook("/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "Pushed.", statusAsked: true }), RULES)).toBeNull();
+    expect(laneEventOf(hook("/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "Pushed.", statusAsked: false }), RULES)).toMatchObject({ event: "finished" });
+  });
+
   it("stop_failure from either form: error_type, else error, else unknown, at most 60 characters", () => {
     expect(laneEventOf(hook("/hook/failure", { session_id: SID, hook_event_name: "StopFailure", error_type: "rate_limit" }), RULES)).toEqual({ ...base, event: "stop_failure", error: "rate_limit" });
     expect(laneEventOf(hook("/hook/failure", { window: "studio", session_id: SID, error: "overloaded" }), RULES)).toMatchObject({ error: "overloaded" });

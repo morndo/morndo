@@ -8,6 +8,7 @@
 // - when nothing is left running or scheduled in the session (background_tasks, session_crons): that turn waits on it, and
 //   the fleet's lane watch gives it a deadline;
 // - when the answer is there to read (last_assistant_message) and its first line states no status.
+// The asked Stop is still kept, marked `statusAsked` (server.ts): its answer reaches the subscribers, but it is no turn end.
 import { firstLineOf, statusLineOf } from "@morndo/protocol";
 import type { StatusContract } from "../config.ts";
 

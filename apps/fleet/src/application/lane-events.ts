@@ -1,6 +1,7 @@
 // Lane events (fleet clients spec §7): what a lane did that its manager and its clients act on, built by the fleet per
 // node and window from the hook stream:
-//   finished      /hook/stop: status (the status line, lane-status.ts, on the answer's first line), firstLine, bg, crons;
+//   finished      /hook/stop (not one the relay asked for a status line: statusAsked): status (the status line,
+//                 lane-status.ts, on the answer's first line), firstLine, bg, crons;
 //                 a WAITING line adds waitingOn and until (its `for`, else laneWatch.waitingMin: reliable lanes §3.1)
 //   stale         made by the lane watch (lane-watch.ts), not by a hook: a turn past its deadline with nothing since
 //   stop_failure  /hook/failure: error
@@ -56,6 +57,8 @@ export function laneEventOf(e: HookEvent, rules: LaneEventRules): LaneEventDraft
   const sid = e.path === "/lane" ? b.sessionId : b.session_id;
   const base = { v: 1 as const, t: "lane" as const, node: e.node, window: e.window, lane, at: e.at, ...(typeof sid === "string" && SESSION_ID.test(sid) ? { sessionId: sid } : {}) };
   if (e.path === "/hook/stop") {
+    // A Stop the node's relay asked to go on for its status line (reliable lanes §3.1): the turn didn't end there.
+    if (b.statusAsked === true) return null;
     const first = firstLineOf(textOf(b.last_assistant_message ?? b.text).trim());
     const line = statusLineOf(first);
     const waiting = line?.status === "waiting" ? { ...(line.waitingOn ? { waitingOn: line.waitingOn } : {}), until: e.at + (line.forMs ?? rules.waitMs) } : {};
