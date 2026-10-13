@@ -52,8 +52,10 @@ export function back(s: AnswerState): AnswerState {
   return { ...s, mode: "idle", picked: null, error: s.again ? s.error : null };
 }
 
-// Closed meanwhile: nothing is left to confirm or to check again.
+// Closed meanwhile: nothing is left to confirm. An answer in doubt is cleared, error included, because there is
+// nothing left to check. A refusal with nothing in doubt stays, so the reason it did not go is still on screen.
 export function noteClosed(s: AnswerState): AnswerState {
-  if (s.mode === "idle" && s.picked === null && s.again === null && s.error === null) return s;
-  return { ...s, mode: "idle", picked: null, again: null, error: null };
+  const error = s.again ? null : s.error;
+  if (s.mode === "idle" && s.picked === null && s.again === null && s.error === error) return s;
+  return { ...s, mode: "idle", picked: null, again: null, error };
 }

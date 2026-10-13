@@ -62,9 +62,19 @@ describe("answer session", () => {
   it("a decision that closed meanwhile clears an answer in doubt", () => {
     const s = openSession(item("v1", "Extend the triage script"));
     s.again = { body: { key: "b" }, requestId: "req-1", code: "uncertain" };
+    s.error = "May have been sent.";
     const closed = noteClosed(s);
     expect(closed.again).toBeNull();
+    expect(closed.error).toBeNull();
     expect(closed.mode).toBe("idle");
     expect(closed.picked).toBeNull();
+  });
+  it("a refusal stays visible when the item closes and nothing is in doubt", () => {
+    const s = openSession(item("v1", "Extend the triage script"));
+    s.mode = "confirm";
+    s.error = "This was already answered.";
+    const closed = noteClosed(s);
+    expect(closed.mode).toBe("idle");
+    expect(closed.error).toBe("This was already answered.");
   });
 });

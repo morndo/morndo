@@ -106,6 +106,42 @@ async function releaseAnswer() {
   await tab.evaluate(() => (globalThis as { __releaseAnswer?: () => void }).__releaseAnswer?.());
 }
 
+describe("round 3: a refusal stays when the item closes in the same tick", () => {
+  it("shows the refusal when the feed closes the item before the POST returns", async () => {
+    await ready();
+    await holdAnswer();
+    await tab.evaluate(() => { (globalThis as { __problem?: { code: string; text: string } }).__problem = { code: "already_answered", text: "This was already answered." }; });
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Ship the weekly notes" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Extend the triage script" }).click();
+    await dialog.getByRole("button", { name: "Send answer" }).click();
+    await tab.waitForFunction(() => ((globalThis as { __answers?: unknown[] }).__answers?.length ?? 0) >= 1);
+    await show([tap("d-re", "v1", "Extend the triage script", { status: "answered" })]);
+    await releaseAnswer();
+    await dialog.getByText("This was already answered.").waitFor();
+  }, 60_000);
+
+  it("clears an in-doubt answer when the item closes before Check again returns", async () => {
+    await ready();
+    await holdAnswer();
+    await tab.evaluate(() => { (globalThis as { __problem?: { code: string; text: string } }).__problem = { code: "uncertain", text: "May have been sent." }; });
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Ship the weekly notes" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Extend the triage script" }).click();
+    await dialog.getByRole("button", { name: "Send answer" }).click();
+    await tab.waitForFunction(() => ((globalThis as { __answers?: unknown[] }).__answers?.length ?? 0) >= 1);
+    await show([tap("d-re", "v1", "Extend the triage script", { status: "expired" })]);
+    await releaseAnswer();
+    await dialog.getByText("no longer open").waitFor();
+    expect(await dialog.getByText("May have been sent.").count()).toBe(0);
+    expect(await dialog.getByRole("button", { name: "Check again" }).count()).toBe(0);
+  }, 60_000);
+});
+
 describe("round 3: a successful answer that the feed already shows is sent", () => {
   it("shows Sent when the answered status arrives before the POST returns", async () => {
     await ready();

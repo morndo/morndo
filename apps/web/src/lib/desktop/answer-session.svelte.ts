@@ -58,8 +58,17 @@ export class AnswerSession {
       if (follow) this.shown = live;
     }
     if (live.status !== "open" && (this.mode !== "idle" || this.picked !== null || this.again !== null || this.error !== null)) {
-      this.mode = "idle"; this.picked = null; this.again = null; this.error = null;
+      this.#settleClosed();
     }
+  }
+
+  // Apply a close without touching the brief on screen. A refusal stays unless an answer is in doubt.
+  #settleClosed() {
+    const next = noteClosed(this.snapshot());
+    this.mode = next.mode;
+    this.picked = next.picked;
+    this.again = next.again;
+    this.error = next.error;
   }
 
   pick(label: string, body: AnswerBody) { this.apply(pick(this.snapshot(), label, body)); }
@@ -79,9 +88,9 @@ export class AnswerSession {
     const problem = await onAnswer(this.live.id, body, requestId, this.seen);
     this.sending = false;
     if (problem) {
-      if (this.live.status !== "open") { this.apply(noteClosed(this.snapshot())); return; }
       this.error = problem.text;
       this.again = MAY_HAVE_GONE.has(problem.code) ? { body, requestId, code: problem.code } : doubt && !endsDoubt(problem.code) ? doubt : null;
+      if (this.live.status !== "open") this.#settleClosed();
       return;
     }
     // The POST was accepted. The feed may already show the item answered; that is this answer, not a close.
