@@ -14,9 +14,13 @@ export function tempHome(prefix = "morndo-node-"): { home: string; cleanup: () =
 
 export const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 
+// The monotonic clock, as it was when this module loaded: the wall clock jumps when time sync steps it, and a test may
+// stub performance.now (job-systemd.test.ts freezes it) while it waits here.
+const monotonic = performance.now.bind(performance);
+
 export async function until(f: () => boolean | Promise<boolean>, ms = 5000, step = 25): Promise<boolean> {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { if (await f()) return true; await wait(step); }
+  const end = monotonic() + ms;
+  while (monotonic() < end) { if (await f()) return true; await wait(step); }
   return f();
 }
 

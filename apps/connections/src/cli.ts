@@ -4,18 +4,18 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { dirname, join } from "node:path";
 import { engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
-import { findPreset as presetOf } from "./application/catalog.ts";
+import { findPreset as presetOf, firstPartyHost } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
-import { fetchModelIds, modelMissing, sameModel, wantedModel } from "./adapters/models.ts";
+import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { ClaudeRuntime, helperCommand, isStatusRefusal } from "./adapters/runtime-claude.ts";
+import { baseUrlProblem, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
-import { costFromOutput, modelFromOutput } from "./adapters/spend.ts";
+import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
@@ -36,9 +36,11 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
     if (parsed.cmd === "helper") return await helper(env, parsed, io);
     return await command(env, parsed, io);
   } catch (error) {
-    if (parsed.cmd === "helper") return error instanceof FileRefused || error instanceof DatabaseFromFuture ? 70 : 1;
+    // A store from a newer helper is a configuration the caller must fix, not a crash to retry into: EX_CONFIG (78),
+    // the exit the hub's main gives the same refusal. A file this helper refuses to touch keeps 70.
+    if (parsed.cmd === "helper") return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
     io.stderr(error instanceof Error ? error.message : "failed");
-    return error instanceof FileRefused || error instanceof DatabaseFromFuture ? 70 : 1;
+    return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
   }
 }
 
@@ -163,24 +165,36 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return fail(io, LOGIN_KEY_REFUSAL);
   const preset = presetOf(home.catalog, connection.vendor);
   if (!preset) return fail(io, "missing");
-  const model = wantedModel(preset.defaultPicks["*"]) ?? "default";
+  const baseUrl = preset.runtimes.find(item => item.runtime === connection.runtime)?.baseUrl ?? "";
+  const party = firstPartyHost(home.catalog.presets());
+  if (connection.kind === "api-key" && connection.runtime === "claude") {
+    const problem = baseUrlProblem(baseUrl);
+    if (problem) return fail(io, problem);
+  }
+  const choice = launchChoice(preset.defaultPicks, parsed.get("role") ?? "run");
+  const model = choice.model;
+  const listed = preset.models.source === "static" ? preset.models.ids : preset.prices.map(row => row.model);
+  const small = smallModel(listed, model) ?? "";
   const reserve = Number(parsed.get("reserve") ?? "5");
-  const granted = ask(home, name, parsed, false, reserve);
+  const granted = ask(home, name, parsed, false, reserve, choice.model || "default");
   if (!granted.ok) return fail(io, granted.problem, granted.exit);
   const row = findConnection(home.store.load().directory, name);
   const lease = row && row.custody === "morndo" ? row.leases.find(item => item.id === granted.id) : undefined;
   if (!lease) return fail(io, "missing");
-  const main = join(import.meta.dirname, "main.ts");
+  const keys = keysProgram(home.env.HOME ?? "", home.env.MORNDO_KEYS, existsSync, {
+    command: process.execPath,
+    args: ["--experimental-strip-types", join(import.meta.dirname, "main.ts")],
+  });
+  const helperLine = [keys.command, ...keys.args, "helper", "--lease", lease.id].join(" ");
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
     lease: lease.id, connection: name, ref: connection.kind === "api-key" ? connection.ref : null,
-    configDir, model, effort: "high", workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
+    configDir, model, effort: choice.effort, smallModel: small, workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
     deny: [home.vaultDir, home.db, home.identity, ...(connection.repo?.deny ?? [])],
     reservation: lease.reservation, probe: false, subscription,
   };
   const bin = connection.runtime === "codex" ? home.env.MORNDO_CODEX_BIN ?? "codex" : home.env.MORNDO_CLAUDE_BIN ?? "claude";
-  const baseUrl = preset.runtimes.find(item => item.runtime === connection.runtime)?.baseUrl ?? "";
   const saved = home.env;
   let released = false;
   let refusal: number | null = null;
@@ -199,14 +213,15 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       onStdout: (chunk: string) => { io.stdout(outRedactor.push(chunk)); },
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
     };
+    const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
       ? await new CodexRuntime({
         bin, profilePath: saved.MORNDO_CODEX_CONFIG ?? join(home.dir, "codex-profile.toml"), configDir,
-        ...helperParts(process.execPath, main, lease.id), baseUrl, parent: saved,
+        command: codexHelper.command, args: [...keys.args, ...codexHelper.args], baseUrl, parent: saved,
       }).execute(plan, parsed.rest, hooks)
       : connection.runtime === "cursor"
         ? await new CursorRuntime(saved.MORNDO_CURSOR_BIN ?? "agent", saved).execute(plan, parsed.rest, hooks)
-        : await new ClaudeRuntime(bin, helperCommand(process.execPath, main, lease.id), saved).execute(plan, parsed.rest, hooks);
+        : await new ClaudeRuntime(bin, helperLine, saved, baseUrl, party).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
   } catch (error) {
@@ -220,13 +235,18 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const again = released ? openHome(saved) : home;
     try {
       const outcome = failure !== "" ? failure : status === 0 ? "done" : "failed";
-      again.leases.close(name, lease.id, outcome, costFromOutput(stdout));
+      const catalogPrices = preset.spend.includes("token-price") && connection.runtime === "claude" && !subscription && isThirdPartyAnthropicBase(baseUrl, party);
+      const cost = catalogPrices ? catalogTokenCost(stdout, preset.prices, model) : costFromOutput(stdout);
+      again.leases.close(name, lease.id, outcome, cost);
       const seen = modelFromOutput(stdout);
-      if (seen && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
+      if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
     } finally { if (released) again.close(); }
   }
   if (refusal !== null) return refusal;
-  return status === 70 || status === 75 ? 1 : status;
+  // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
+  // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
+  // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
+  return status === 70 || status === 75 || status === 78 ? 1 : status;
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
@@ -442,9 +462,14 @@ async function rotate(home: Opened, name: string, io: Io): Promise<number> {
   await home.seal(ref, text);
   const rotated = await home.connections.rotate(name, ref, ACTOR);
   if (!rotated.ok) { home.vault.remove(ref); return done(rotated, io); }
-  home.vault.remove(current.ref);
+  // The rotation is committed: an old file that can't be removed, or is gone already, is named as left to clean, never
+  // thrown in place of the rotation (round 3, point 1).
+  let left: string | null = null;
+  try { home.vault.remove(current.ref); } catch (error) { left = error instanceof Error ? error.message : "failed"; }
   io.stdout(`${JSON.stringify({ fingerprint: await home.vault.fingerprint(ref) })}\n`);
-  return 0;
+  if (left === null) return 0;
+  io.stderr(`left to clean: vault: ${left}\n`);
+  return PARTIAL;
 }
 
 async function probe(home: Opened, name: string, io: Io, body: (connection: Connection) => Promise<number>): Promise<number> {
@@ -463,7 +488,7 @@ async function probe(home: Opened, name: string, io: Io, body: (connection: Conn
   finally { home.leases.close(name, granted.value.id, "done", null); }
 }
 
-function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, reserve: number): { ok: true; id: string } | { ok: false; problem: string; exit?: number } {
+function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, reserve: number, entry?: string): { ok: true; id: string } | { ok: false; problem: string; exit?: number } {
   const connection = findConnection(home.store.load().directory, name);
   if (!connection) return { ok: false, problem: "missing" };
   if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return { ok: false, problem: LOGIN_KEY_REFUSAL };
@@ -471,8 +496,10 @@ function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, re
   if (!holder) return { ok: false, problem: "holder" };
   home.runtime.current = gateRuntime(home, connection.runtime);
   const workspace = parsed.get("workspace") ?? home.env.PWD ?? process.cwd();
+  const recorded = entry ?? (launchChoice(presetOf(home.catalog, connection.vendor)?.defaultPicks ?? {}, parsed.get("role") ?? "run").model || "default");
   const granted = home.leases.lease(name, {
-    role: parsed.get("role") ?? "run", entry: wantedModel(presetOf(home.catalog, connection.vendor)?.defaultPicks["*"]) ?? "default",
+    role: parsed.get("role") ?? "run",
+    entry: recorded,
     holder, workspacePath: workspace, limit: LEASES, reserve, margin: 0, probe: probeLease,
   });
   if (!granted.ok) return { ok: false, problem: granted.error.problem, ...(granted.error.exit === undefined ? {} : { exit: granted.error.exit }) };
@@ -505,6 +532,9 @@ function view(connection: Connection): { name: string; kind: string; vendor: str
   const fingerprint = connection.kind === "api-key" && connection.custody === "morndo" ? connection.fingerprint : null;
   return { name: connection.name, kind: connection.kind, vendor: connection.vendor, runtime: connection.runtime, status: connection.status, fingerprint };
 }
+
+// Done, with something left to clean that the command names on stderr, as morndo-secrets says it.
+const PARTIAL = 3;
 
 function done(result: { ok: true } | { ok: false; error: { problem: string; role?: string; exit?: number } }, io: Io): number {
   if (result.ok) return 0;

@@ -1,0 +1,6 @@
+#!/bin/sh
+# Reject a commit message that attributes the change to an assistant.
+# Install with scripts/install-git-hooks.sh. Does not change git config.
+set -eu
+dir=$(dirname "$(readlink -f "$0")")
+exec "$dir/commit-traces" message "$1"

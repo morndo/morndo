@@ -53,6 +53,22 @@ describe("the inbox", () => {
     const inbox = uploadInbox({ dir });
     expect(inbox.save(Buffer.from("<svg><script>alert(1)</script></svg>"), endpointId("ep1"))).toEqual({ ok: false, error: "not_an_image" });
   });
+  it("saves a markdown file under a safe name and refuses an executable, HTML, bad UTF-8, and a text file over 1 MB", () => {
+    const inbox = uploadInbox({ dir });
+    const md = inbox.save(Buffer.from("# Notes\n"), endpointId("ep1"), "My Notes.md");
+    if (!md.ok) throw new Error(md.error);
+    expect(md.value.path).toMatch(/My_Notes\.md$/);
+    expect(md.value.mime).toBe("text/markdown");
+    expect(readFileSync(md.value.path).toString("utf8")).toBe("# Notes\n");
+    expect(inbox.save(Buffer.from("MZ"), endpointId("ep1"), "run.exe")).toEqual({ ok: false, error: "not_allowed" });
+    expect(inbox.save(Buffer.from("<!doctype html>"), endpointId("ep1"), "page.html")).toEqual({ ok: false, error: "not_allowed" });
+    expect(inbox.save(Buffer.from([0xff, 0xfe, 0x61]), endpointId("ep1"), "notes.md")).toEqual({ ok: false, error: "not_utf8" });
+    expect(inbox.save(Buffer.alloc(1024 * 1024 + 1), endpointId("ep1"), "big.md")).toEqual({ ok: false, error: "too_big" });
+    const pdf = inbox.save(Buffer.from("%PDF-1.7\n"), endpointId("ep1"), "spec.pdf");
+    if (!pdf.ok) throw new Error(pdf.error);
+    expect(pdf.value.mime).toBe("application/pdf");
+    expect(readFileSync(pdf.value.path).subarray(0, 5).toString("utf8")).toBe("%PDF-");
+  });
   it("removes files after a week", () => {
     let t = Date.now();
     const inbox = uploadInbox({ dir, now: () => t });

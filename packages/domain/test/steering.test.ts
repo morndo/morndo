@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_UPLOAD_BYTES, UPLOAD_TTL_MS, acceptUpload, attachable, commandText, endpointId, sniffImage, type Upload } from "../src/index.ts";
+import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, screenNamedUpload, sniffImage, utf8Text, type Upload } from "../src/index.ts";
 
 const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(16).fill(0)]);
 const T0 = Date.UTC(2026, 9, 1, 12);
@@ -18,6 +18,108 @@ describe("S1: an upload is an image by its own bytes", () => {
     expect(sniffImage(bytes(0x52, 0x49, 0x46, 0x46, 1, 2, 3, 4, 0x57, 0x41, 0x56, 0x45))).toBeNull();
     expect(acceptUpload(new Uint8Array(MAX_UPLOAD_BYTES + 1))).toEqual({ ok: false, error: "too_big" });
     expect(acceptUpload(new TextEncoder().encode("hello"))).toEqual({ ok: false, error: "not_an_image" });
+  });
+});
+
+const png = () => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+const jpeg = () => new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0]);
+const text = (s: string) => new TextEncoder().encode(s);
+
+describe("S1: a named upload is allowed only when its extension and its bytes agree", () => {
+  it("accepts markdown, text, json, csv, yaml, yml and a log when they are UTF-8", () => {
+    expect(acceptNamedUpload(text("# Notes\n"), "notes.md")).toEqual({ ok: true, value: { kind: "text", mime: "text/markdown", name: "notes.md" } });
+    expect(acceptNamedUpload(text("hello"), "plain.txt")).toEqual({ ok: true, value: { kind: "text", mime: "text/plain", name: "plain.txt" } });
+    expect(acceptNamedUpload(text("{\"a\":1}\n"), "data.json")).toEqual({ ok: true, value: { kind: "text", mime: "application/json", name: "data.json" } });
+    expect(acceptNamedUpload(text("a,b\n1,2\n"), "rows.csv")).toEqual({ ok: true, value: { kind: "text", mime: "text/csv", name: "rows.csv" } });
+    expect(acceptNamedUpload(text("a: 1\n"), "cfg.yaml")).toEqual({ ok: true, value: { kind: "text", mime: "application/yaml", name: "cfg.yaml" } });
+    expect(acceptNamedUpload(text("a: 1\n"), "cfg.yml")).toEqual({ ok: true, value: { kind: "text", mime: "application/yaml", name: "cfg.yml" } });
+    expect(acceptNamedUpload(text("line\n"), "run.log")).toEqual({ ok: true, value: { kind: "text", mime: "text/plain", name: "run.log" } });
+    expect(acceptNamedUpload(text("MZ,Mozambique\n"), "countries.csv")).toMatchObject({ ok: true, value: { kind: "text" } });
+    expect(acceptNamedUpload(text("RIFF....WAVE\n"), "notes.txt")).toMatchObject({ ok: true });
+    expect(acceptNamedUpload(text("GIF8 is a note\n"), "note.log")).toMatchObject({ ok: true });
+    expect(acceptNamedUpload(text("Rar! not an archive\n"), "note.md")).toMatchObject({ ok: true });
+  });
+  it("accepts a PDF by its magic bytes and an image only when the extension matches the bytes", () => {
+    expect(acceptNamedUpload(text("%PDF-1.7\n"), "spec.pdf")).toEqual({ ok: true, value: { kind: "pdf", mime: "application/pdf", name: "spec.pdf" } });
+    const shot = acceptNamedUpload(png(), "shot.png");
+    expect(shot.ok && shot.value).toMatchObject({ kind: "image", mime: "image/png", name: "shot.png" });
+    expect(acceptNamedUpload(jpeg(), "photo.jpg")).toMatchObject({ ok: true, value: { kind: "image", mime: "image/jpeg" } });
+    expect(acceptNamedUpload(jpeg(), "photo.jpeg")).toMatchObject({ ok: true, value: { mime: "image/jpeg" } });
+    expect(acceptNamedUpload(jpeg(), "shot.png")).toMatchObject({ ok: true, value: { kind: "image", mime: "image/jpeg", name: "shot.png" } });
+  });
+  it("keeps a safe file name and drops a path", () => {
+    expect(acceptNamedUpload(text("hi\n"), "../../My Notes.md")).toMatchObject({ ok: true, value: { name: "My_Notes.md" } });
+    expect(acceptNamedUpload(text("hi\n"), ".hidden.md")).toMatchObject({ ok: true, value: { name: "hidden.md" } });
+  });
+  it("shortens a long name by its stem and keeps the extension", () => {
+    const md51 = `${"n".repeat(48)}.md`;
+    const md90 = `${"n".repeat(87)}.md`;
+    const pdf90 = `${"p".repeat(86)}.pdf`;
+    expect(md51).toHaveLength(51);
+    expect(md90).toHaveLength(90);
+    expect(pdf90).toHaveLength(90);
+    expect(acceptNamedUpload(text("# Hi\n"), md51)).toMatchObject({ ok: true, value: { name: md51 } });
+    const longMd = acceptNamedUpload(text("# Hi\n"), md90);
+    expect(longMd.ok && longMd.value.name.endsWith(".md") && longMd.value.name.length <= 80).toBe(true);
+    const longPdf = acceptNamedUpload(text("%PDF-1.7\n"), pdf90);
+    expect(longPdf.ok && longPdf.value.name.endsWith(".pdf") && longPdf.value.name.length <= 80).toBe(true);
+  });
+  it("refuses executables, archives, HTML, SVG, a mismatched type, bad UTF-8, and a file over its limit", () => {
+    expect(acceptNamedUpload(text("MZ"), "run.exe")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), "a.zip")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("<!doctype html><script>"), "page.html")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'/>"), "pic.svg")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'/>"), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "notes.md")).toEqual({ ok: false, error: "not_utf8" });
+    expect(acceptNamedUpload(new Uint8Array([0x61, 0x00, 0x62]), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("not a picture"), "shot.png")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("not a pdf"), "spec.pdf")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(new Uint8Array([0xff, 0xfe, 0x61]), "notes.md")).toEqual({ ok: false, error: "not_utf8" });
+    expect(acceptNamedUpload(new Uint8Array(TEXT_MAX_BYTES + 1), "notes.md")).toEqual({ ok: false, error: "too_big" });
+    expect(acceptNamedUpload(new Uint8Array(MAX_UPLOAD_BYTES + 1), "spec.pdf")).toEqual({ ok: false, error: "too_big" });
+    expect(acceptNamedUpload(text("hi"), "")).toEqual({ ok: false, error: "not_allowed" });
+  });
+});
+
+describe("S1: UTF-8 is read from the bytes themselves, with no platform decoder", () => {
+  it("reads ASCII and two-, three- and four-byte characters", () => {
+    expect(utf8Text(new Uint8Array(0))).toBe("");
+    expect(utf8Text(text("plain notes\n"))).toBe("plain notes\n");
+    expect(utf8Text(text("café"))).toBe("café");
+    expect(utf8Text(text("日本語"))).toBe("日本語");
+    expect(utf8Text(text("a 😀 note"))).toBe("a 😀 note");
+    expect(acceptNamedUpload(text("日本語のメモ\n"), "notes.md")).toMatchObject({ ok: true, value: { kind: "text" } });
+  });
+  it("refuses an overlong form of every length", () => {
+    expect(utf8Text(new Uint8Array([0xc0, 0xaf]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xe0, 0x80, 0xaf]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xf0, 0x80, 0x80, 0xaf]))).toBeNull();
+  });
+  it("refuses a surrogate half and a code point past U+10FFFF", () => {
+    expect(utf8Text(new Uint8Array([0xed, 0xa0, 0x80]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xed, 0xbf, 0xbf]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xf4, 0x90, 0x80, 0x80]))).toBeNull();
+  });
+  it("refuses a sequence cut short, a stray continuation and an impossible lead", () => {
+    expect(utf8Text(new Uint8Array([0xe2, 0x82]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xf0, 0x9f, 0x98]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0x61, 0x80]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0xfe, 0xff]))).toBeNull();
+  });
+  it("refuses a NUL byte", () => {
+    expect(utf8Text(new Uint8Array([0]))).toBeNull();
+    expect(utf8Text(new Uint8Array([0x61, 0x00, 0x62]))).toBeNull();
+  });
+  it("still notices HTML behind a BOM", () => {
+    expect(acceptNamedUpload(new Uint8Array([0xef, 0xbb, 0xbf, ...text("<html><script>")]), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
+  });
+});
+
+describe("S1: a file is screened by its name and size before its bytes", () => {
+  it("refuses a movie and an oversized note without looking at the bytes", () => {
+    expect(screenNamedUpload("clip.mov", 3 * 1024 * 1024 * 1024)).toEqual({ ok: false, error: "not_allowed" });
+    expect(screenNamedUpload("big.md", TEXT_MAX_BYTES + 1)).toEqual({ ok: false, error: "too_big" });
+    expect(screenNamedUpload("notes.md", 8)).toMatchObject({ ok: true, value: { kind: "text", name: "notes.md" } });
   });
 });
 

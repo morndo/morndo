@@ -16,6 +16,7 @@
   import type { RosterEntry } from "@morndo/domain";
   import type { DecisionItem } from "./decisions.ts";
   import type { ConversationPrefs } from "./present.ts";
+  import type { SentFile } from "../attach.ts";
   import type { LiveFeed } from "../feed.svelte.ts";
   import Avatar from "./Avatar.svelte";
   import Composer from "./Composer.svelte";
@@ -33,7 +34,7 @@
     decisions: number; decisionsOpen: boolean; onDecisions: () => void; screenRequest: { worker: string; n: number } | null;
     desktop: boolean;
     decisionOf: (messageId: string) => DecisionItem | undefined; card: Snippet<[DecisionItem]>; focus: { id: string; n: number } | null;
-    onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; seen: string; held?: string }) => Promise<void>;
+    onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; files: SentFile[]; seen: string; held?: string }) => Promise<void>;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onVerify: (id: string) => void; onEdit: (id: string) => void;
     editRequest: { worker: string; text: string; n: number } | null; onEdited: () => void; onVerified: (at: number) => void;
     dividerMark?: number | null | undefined; onAtBottom?: (atBottom: boolean, worker: string) => void;
@@ -110,8 +111,10 @@
     border: 1px solid var(--border); border-radius: 12px; background: var(--ok-bg); color: var(--ok-fg); font: 400 13px/18px var(--font); cursor: pointer;
   }
   .task:hover { border-color: var(--border-strong); }
-  .task .tk { font: 700 12px/18px var(--mono); }
-  .task .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .task :global(svg) { flex: none; }
+  /* The key is one word that must not shrink: a hyphen is a break, so without nowrap "T-18" wraps inside the chip. */
+  .task .tk { font: 700 12px/18px var(--mono); white-space: nowrap; flex: none; }
+  .task .tt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--text); }
   @container (max-width: 560px) { .task { display: none; } }
   .right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
   .state { font: 700 12px/1 var(--font); padding: 5px 8px; border-radius: 999px; background: var(--muted-bg); color: var(--text); }

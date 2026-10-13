@@ -62,7 +62,7 @@ export class SourceUnavailable extends Error {
   constructor(message: string, options?: ErrorOptions) { super(message, options); this.name = "SourceUnavailable"; }
 }
 export type RemoteFiles = { register(workerId: string, path: string): Promise<{ id: string | null; size: number | null }> };
-export type UploadSink = { stage(upload: Upload, workerId: string): Promise<{ ok: true; path: string } | { ok: false; problem: "no_pane" | "too_large" | "node_offline" }> };
+export type UploadSink = { stage(upload: Upload, workerId: string): Promise<{ ok: true; path: string } | { ok: false; problem: "no_pane" | "too_large" | "node_offline" | "not_allowed" }> };
 // Which nodes answer now (fleet core §3.1: a node that is not online is skipped at once). A node missing from the map is
 // not online. Unset (legacy single-host mode), every node counts as online.
 export type NodeState = "online" | "stale" | "offline";

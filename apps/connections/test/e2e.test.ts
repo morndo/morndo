@@ -4,6 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSyn
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 const KEY = "sk-ant-synthetic-test-key-0001";
 const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
@@ -84,6 +85,211 @@ describe("keys run", () => {
     expect(added.code, added.stderr).not.toBe(0);
     expect(added.stderr).toContain("browser login");
     expect((await cli(["log", "work"], env)).stdout).not.toContain("LeaseGranted");
+  }, 20_000);
+
+  it("honours the implement role's model and effort", async () => {
+    const dir = homeDir();
+    const env = envOf(dir);
+    expect((await cli(["add", "glm", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "20"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "glm", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "glm", "--role", "implement", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { exit: 0 })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    const recorded = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { argv: string[]; env: Record<string, string> };
+    expect(recorded.env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(recorded.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("glm-5.3-flash");
+    expect(recorded.argv[recorded.argv.indexOf("--effort") + 1]).toBe("max");
+    expect(recorded.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("max");
+    expect(recorded.env.CLAUDE_CODE_ALWAYS_ENABLE_EFFORT).toBe("1");
+    const other = await cli(["run", "--connection", "glm", "--role", "review", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { exit: 0 })], env);
+    expect(other.code, other.stderr).toBe(0);
+    const again = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { argv: string[]; env: Record<string, string> };
+    expect(again.env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(again.argv[again.argv.indexOf("--effort") + 1]).toBe("high");
+    expect(again.env.CLAUDE_CODE_EFFORT_LEVEL).toBe("high");
+  }, 20_000);
+
+  it("sends a Z.ai key only as the helper header to the catalog base URL", async () => {
+    const dir = homeDir();
+    const hits: { url?: string | undefined; authorization?: string | undefined; apiKey?: string | undefined }[] = [];
+    const server = createServer((req, res) => {
+      hits.push({
+        url: req.url,
+        authorization: req.headers.authorization,
+        apiKey: typeof req.headers["x-api-key"] === "string" ? req.headers["x-api-key"] : undefined,
+      });
+      res.end("{}");
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("port");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[] }[];
+    const zai = body.find(row => row.id === "zai");
+    if (!zai) throw new Error("preset");
+    const runtime = zai.runtimes[0];
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = origin;
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "glm", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "20"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "glm", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "glm", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { base: true, model: "glm-5.3" })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(ran.stdout).not.toContain(KEY);
+    expect(hits).toEqual([{ url: "/v1/messages", authorization: `Bearer ${KEY}`, apiKey: KEY }]);
+    const recorded = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { env: Record<string, string>; bashEnv: string };
+    expect(recorded.env.ANTHROPIC_BASE_URL).toBe(origin);
+    expect(recorded.env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(JSON.stringify(recorded.env)).not.toContain(KEY);
+    expect(recorded.bashEnv).not.toContain(KEY);
+  }, 20_000);
+
+  it("refuses a claude run whose base URL is missing", async () => {
+    const dir = homeDir();
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[]; terms: { revision: string; summary: string; sources: string[] } }[];
+    const custom = body.find(row => row.id === "custom-anthropic");
+    if (!custom) throw new Error("preset");
+    custom.terms = { revision: "2026-01-01", summary: "Named by the test.", sources: ["https://example.com/terms"] };
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "gate", "--vendor", "custom-anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "gate", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "gate", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { exit: 0 })], env);
+    expect(ran.code).not.toBe(0);
+    expect(ran.stderr).toContain("base URL");
+    expect(existsSync(join(dir, "record.json"))).toBe(false);
+    expect((await cli(["log", "gate"], env)).stdout).not.toContain("LeaseGranted");
+  }, 20_000);
+
+  it("does not mark a placeholder pick as a missing model after a successful run", async () => {
+    const dir = homeDir();
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[]; terms: { revision: string; summary: string; sources: string[] } }[];
+    const custom = body.find(row => row.id === "custom-anthropic");
+    if (!custom) throw new Error("preset");
+    custom.terms = { revision: "2026-01-01", summary: "Named by the test.", sources: ["https://example.com/terms"] };
+    const runtime = custom.runtimes[0];
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = "http://127.0.0.1:9";
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "gate", "--vendor", "custom-anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "gate", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "gate", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { model: "glm-5.3" })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    const enginesPath = join(dir, "engines.json");
+    const marks = existsSync(enginesPath)
+      ? (JSON.parse(readFileSync(enginesPath, "utf8")) as { marks: { reason: string }[] }).marks
+      : [];
+    expect(marks.some(mark => mark.reason.includes("missing"))).toBe(false);
+  }, 20_000);
+
+  it("records a placeholder lease entry as default", async () => {
+    const dir = homeDir();
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[]; terms: { revision: string; summary: string; sources: string[] } }[];
+    const custom = body.find(row => row.id === "custom-anthropic");
+    if (!custom) throw new Error("preset");
+    custom.terms = { revision: "2026-01-01", summary: "Named by the test.", sources: ["https://example.com/terms"] };
+    const runtime = custom.runtimes[0];
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = "http://127.0.0.1:9";
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "gate", "--vendor", "custom-anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "gate", "--by", "owner"], env)).code).toBe(0);
+    const running = cli(["run", "--connection", "gate", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, {
+      hold: { ready: join(dir, "ready"), release: join(dir, "release") },
+      helperOut: join(dir, "helpers.json"),
+    })], env);
+    while (!existsSync(join(dir, "ready"))) await new Promise(resolve => setTimeout(resolve, 20));
+    const db = new Database(join(dir, "connections.db"), { readonly: true, fileMustExist: true });
+    const stored = db.prepare("SELECT body FROM directory WHERE id = 1").get() as { body: string };
+    db.close();
+    const directory = JSON.parse(stored.body) as { connections: { leases: { entry: string }[] }[] };
+    expect(directory.connections.flatMap(connection => connection.leases).map(lease => lease.entry)).toEqual(["default"]);
+    writeFileSync(join(dir, "release"), "go");
+    const ran = await running;
+    expect(ran.code, ran.stderr).toBe(0);
+  }, 20_000);
+
+  it("charges a Z.ai lease from catalog token prices, not total_cost_usd", async () => {
+    const dir = homeDir();
+    const hits: { url?: string | undefined }[] = [];
+    const server = createServer((_req, res) => {
+      hits.push({ url: _req.url });
+      res.end("{}");
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("port");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { baseUrl: string | null }[] }[];
+    const zai = body.find(row => row.id === "zai");
+    if (!zai) throw new Error("preset");
+    const runtime = zai.runtimes[0];
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = origin;
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", "glm", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "20"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", "glm", "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", "glm", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, {
+      base: true,
+      model: "glm-5.3",
+      cost: 99,
+      modelUsage: { "glm-5.3": { inputTokens: 1_000_000, outputTokens: 0 } },
+    })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(hits).toEqual([{ url: "/v1/messages" }]);
+    const spent = JSON.parse((await cli(["spend", "glm"], env)).stdout) as { spent: number };
+    expect(spent.spent).toBe(1.4);
+  }, 20_000);
+
+  it.each([
+    ["deepseek", "deepseek-v4-pro"],
+    ["moonshot", "kimi-k3"],
+    ["openrouter", "openrouter/auto"],
+  ])("sends a %s key to its catalog base as %s", async (vendor, model) => {
+    const dir = homeDir();
+    const hits: { url?: string | undefined; authorization?: string | undefined; apiKey?: string | undefined }[] = [];
+    const server = createServer((req, res) => {
+      hits.push({
+        url: req.url,
+        authorization: req.headers.authorization,
+        apiKey: typeof req.headers["x-api-key"] === "string" ? req.headers["x-api-key"] : undefined,
+      });
+      res.end("{}");
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (address === null || typeof address === "string") throw new Error("port");
+    const origin = `http://127.0.0.1:${address.port}`;
+    const body = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { runtime: string; baseUrl: string | null }[] }[];
+    const row = body.find(item => item.id === vendor);
+    if (!row) throw new Error("preset");
+    const runtime = row.runtimes.find(item => item.runtime === "claude");
+    if (!runtime) throw new Error("runtime");
+    runtime.baseUrl = origin;
+    const catalog = join(dir, "vendors.json");
+    writeFileSync(catalog, JSON.stringify(body));
+    const env = envOf(dir, { MORNDO_CATALOG: catalog });
+    expect((await cli(["add", vendor, "--vendor", vendor, "--runtime", "claude", "--billing", "metered", "--budget", "20"], env, KEY)).code).toBe(0);
+    expect((await cli(["ack", vendor, "--by", "owner"], env)).code).toBe(0);
+    const ran = await cli(["run", "--connection", vendor, "--workspace", join(dir, "work"), "--reserve", "2", "--", "--job", job(dir, { base: true, model })], env);
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(hits).toEqual([{ url: "/v1/messages", authorization: `Bearer ${KEY}`, apiKey: KEY }]);
+    const recorded = JSON.parse(readFileSync(join(dir, "record.json"), "utf8")) as { env: Record<string, string> };
+    expect(recorded.env.ANTHROPIC_BASE_URL).toBe(origin);
+    expect(recorded.env.ANTHROPIC_MODEL).toBe(model);
+    expect(recorded.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(JSON.stringify(recorded.env)).not.toContain(KEY);
   }, 20_000);
 
   it("sends the key only as the helper header and keeps it out of env", async () => {
@@ -173,6 +379,13 @@ describe("keys run", () => {
     const dir = homeDir();
     await ready(dir);
     const ran = await cli(["run", "--connection", "credit", "--workspace", join(dir, "work"), "--", "--job", job(dir, { exit: 70 })], envOf(dir));
+    expect(ran.code).toBe(1);
+  }, 20_000);
+
+  it("turns a child exit of 78 into 1: 78 is the launcher's own store refusal (§8.4), not a child's to give", async () => {
+    const dir = homeDir();
+    await ready(dir);
+    const ran = await cli(["run", "--connection", "credit", "--workspace", join(dir, "work"), "--", "--job", job(dir, { exit: 78 })], envOf(dir));
     expect(ran.code).toBe(1);
   }, 20_000);
 

@@ -16,7 +16,7 @@ beforeEach(async () => {
   fleet = await startFakeFleet({ welcome: { connEpoch: 1, ackSeq: 0, streamKnown: true } });
   home = tempHome(); t = isolatedTmux(); config = await joinedConfig(home.home, fleet, t.socket);
 });
-afterEach(async () => { for (const s of stops.splice(0)) await s(); await fleet.close(); t.kill(); home.cleanup(); });
+afterEach(async () => { for (const s of stops.splice(0)) await s(); await fleet.close(); await t.kill(); home.cleanup(); });
 type Hook = { streamId: string; seq: number; body: { n?: string } };
 const hooks = (from = 0): Hook[] => fleet.received.slice(from).filter(r => r.msg.t === "ev.hook").map(r => (r.msg as Msg & { event: Hook }).event);
 
