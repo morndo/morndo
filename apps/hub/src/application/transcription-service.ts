@@ -65,8 +65,8 @@ const live = (state: Transcription["state"]) => state === "queued" || state === 
 
 // The endpoint that asked for the row (S2). It rides on the stored body so a restart still knows. One attempt
 // per Recording and Language (TX2) stays one row: a second endpoint that asks for that same attachment is added
-// to `readers` and can read the same row. A row saved before an endpoint was recorded has neither field, and
-// stays readable by every endpoint — ownership is not guessed onto it.
+// to `readers` and can read the same row. A row saved before an endpoint was recorded has neither field.
+// It answers nobody: ownership is not guessed onto it.
 type OwnedTranscription = Transcription & { endpointId: string; readers?: string[] };
 
 function endpointOf(row: Transcription): string | null {
@@ -74,17 +74,16 @@ function endpointOf(row: Transcription): string | null {
   const value = row.endpointId;
   return typeof value === "string" && value.length > 0 ? value : null;
 }
-function readersOf(row: Transcription): string[] | "everyone" {
+function readersOf(row: Transcription): string[] {
   if ("readers" in row && Array.isArray(row.readers)) {
     const ids = row.readers.filter((value): value is string => typeof value === "string" && value.length > 0);
     if (ids.length > 0) return ids;
   }
   const owner = endpointOf(row);
-  return owner === null ? "everyone" : [owner];
+  return owner === null ? [] : [owner];
 }
 function canRead(row: Transcription, endpointId: string): boolean {
-  const readers = readersOf(row);
-  return readers === "everyone" || readers.includes(endpointId);
+  return readersOf(row).includes(endpointId);
 }
 function owned(row: Transcription, endpointId: string): OwnedTranscription {
   return { ...row, endpointId };
@@ -238,7 +237,7 @@ export class TranscriptionService {
     }
     if (!decided.ok) return decided;
     // A new row belongs to the endpoint that asked. The one in-flight attempt on a shared attachment gains this
-    // endpoint as a reader (TX2: still one run). A row with no owner was stored before that field existed.
+    // endpoint as a reader (TX2: still one run). A stored row with no owner is left unanswered.
     const row = this.#share(decided.value, input.caller.endpointId);
     if (this.#rows.find(item => sameRow(item, row)) !== row) this.#save(row);
     this.tick();
@@ -400,12 +399,12 @@ export class TranscriptionService {
   #share(row: Transcription, endpointId: string): Transcription {
     const stored = this.#rows.find(item => sameRow(item, row));
     if (!stored) return owned(row, endpointId);
+    if (endpointOf(stored) === null) return stored;
     if (canRead(stored, endpointId)) return stored;
-    const readers = readersOf(stored);
     const next: OwnedTranscription = {
       ...stored,
       endpointId: endpointOf(stored) ?? endpointId,
-      readers: readers === "everyone" ? [endpointId] : [...readers, endpointId],
+      readers: [...readersOf(stored), endpointId],
     };
     return next;
   }

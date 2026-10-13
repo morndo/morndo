@@ -293,20 +293,17 @@ describe("transcription service", () => {
     svc.close();
   });
 
-  it("still reads a row saved before an endpoint was recorded", async () => {
+  it("a row with no recorded owner answers nobody", async () => {
     const old: Transcription = {
       id: "old", recording: { kind: "attachment", id: "a" }, language: "de", sizeBytes: 12,
-      acceptedAt: 1, state: "queued", position: null, reason: null, outcome: null, problem: null,
-      text: null, report: null, startedAt: null, endedAt: null,
+      acceptedAt: 1, state: "done", position: null, reason: null, outcome: "done", problem: null,
+      text: null, report: null, startedAt: 1, endedAt: 2,
     };
     const gate = new Gate();
     const { svc } = service(memory([old]), gate);
     await svc.start();
-    const again = await svc.request({
-      id: "newer", recording: { kind: "attachment", id: "a" }, language: "de", caller: { endpointId: "ep-1" },
-    });
-    expect(again.ok && again.value.id).toBe("old");
-    expect(svc.get("old", { endpointId: "ep-1" })?.id).toBe("old");
+    expect(svc.get("old", { endpointId: "ep-1" })).toBeNull();
+    expect(svc.cancel("old", { endpointId: "ep-1" })).toEqual({ ok: false, error: "unknown" });
     svc.close();
   });
 
