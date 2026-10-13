@@ -112,6 +112,7 @@ function copiedUnshipped(abs: string, rel: string, real: string, mode: (rel: str
   let st;
   try { st = lstatSync(real); }
   catch { throw new Error(`symlink target is not shipped: ${rel}`); }
+  if (st.isDirectory()) throw new Error(`symlink target is an unshipped directory: ${real}`);
   if (!st.isFile()) throw new Error(`symlink target is not shipped: ${rel}`);
   return { path: rel, bytes: readFileSync(abs), mode: mode(rel) };
 }

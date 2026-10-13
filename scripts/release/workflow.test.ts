@@ -146,7 +146,7 @@ describe("release pipeline files", () => {
     });
     expect(dry.status, dry.stderr).toBe(0);
     const calls = readFileSync(log, "utf8");
-    expect(calls).toContain("morndo/morndo release download v0.0.0");
+    expect(calls).not.toContain("release download");
     expect(calls).not.toContain("verify-asset");
     expect(calls).toContain("morndo/morndo release verify v0.0.0");
     const summary = join(dir, "summary");

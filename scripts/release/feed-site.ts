@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { freshSite, type SiteHead } from "./pages.ts";
+import { freshSite } from "./pages.ts";
 import { FEED_NAMESPACE } from "./sign.ts";
 
 export const FEED_FILES = ["latest.json", "latest.json.sig", "stable.json", "stable.json.sig"] as const;
@@ -60,29 +60,20 @@ export function writeVerifiedSite(dir: string, signers: string, files: readonly 
 
 export function materialiseFeed(repository: string, dir: string, signers = "trust/feed_allowed_signers"): void {
   freshSite(
-    () => readSiteHead(repository),
-    head => {
+    () => {
+      const sha = readFeedHead(repository);
+      if (sha === null) throw new Error("branch feed has no feed yet");
+      return sha;
+    },
+    sha => {
       const files = FEED_FILES.map(name => {
-        const body = readAt(repository, head.sha, name);
-        if (body === null) throw new Error(`feed ${name} is missing at ${head.sha}`);
+        const body = readAt(repository, sha, name);
+        if (body === null) throw new Error(`feed ${name} is missing at ${sha}`);
         return { name, body };
       });
       writeVerifiedSite(dir, signers, files);
-      return head;
     },
   );
-}
-
-function readSiteHead(repository: string): SiteHead {
-  const sha = readFeedHead(repository);
-  if (sha === null) throw new Error("branch feed has no feed yet");
-  const latest = readAt(repository, sha, "latest.json");
-  if (latest === null) throw new Error("branch feed has no feed yet");
-  const parsed: unknown = JSON.parse(latest);
-  if (typeof parsed !== "object" || parsed === null || !("seq" in parsed) || typeof parsed.seq !== "number") {
-    throw new Error("feed has no seq");
-  }
-  return { sha, seq: parsed.seq };
 }
 
 function main(argv: string[]): void {

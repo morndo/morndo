@@ -1,13 +1,11 @@
-// A Pages deploy must not publish a site older than the feed branch. The caller reads the
-// head, builds from that commit, then reads again. A moved branch is built again.
-export type SiteHead = { sha: string; seq: number };
-
-export function freshSite(read: () => SiteHead, build: (head: SiteHead) => SiteHead, attempts = 5): SiteHead {
+// A Pages deploy must not publish a site from a feed commit that is already stale.
+// Read the branch head, build from that commit, then read the head again. Build once more
+// when the head moved. The sequence number moves with the commit, so the sha is the check.
+export function freshSite(read: () => string, build: (sha: string) => void, attempts = 5): string {
   for (let n = 1; n <= attempts; n++) {
-    const head = read();
-    const built = build(head);
-    const again = read();
-    if (built.sha === head.sha && again.sha === head.sha && built.seq >= again.seq) return built;
+    const sha = read();
+    build(sha);
+    if (read() === sha) return sha;
   }
   throw new Error("the feed branch moved on every attempt");
 }

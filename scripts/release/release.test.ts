@@ -292,19 +292,15 @@ describe("feed", () => {
   });
 
   it("does not deploy a site older than the feed head", () => {
-    const heads = [
-      { sha: "aaa", seq: 4 },
-      { sha: "bbb", seq: 5 },
-      { sha: "bbb", seq: 5 },
-    ];
+    const heads = ["aaa", "bbb", "bbb"];
     let i = 0;
     const built: string[] = [];
     const site = freshSite(
       () => heads[i++] ?? heads[heads.length - 1]!,
-      (head) => { built.push(head.sha); return { ...head }; },
+      (sha) => { built.push(sha); },
     );
     expect(built).toEqual(["aaa", "bbb"]);
-    expect(site).toEqual({ sha: "bbb", seq: 5 });
+    expect(site).toBe("bbb");
   });
 
   it("retries the feed read when the branch moved, and commits the head it just read", () => {
@@ -442,7 +438,7 @@ describe("stage, launchers, node pin, notice", () => {
     expect(lstatSync(join(withLinks, "app/apps/hub/src/doc.md")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(withLinks, "app/apps/hub/src/doc.md"), "utf8")).toBe("outside the staged set\n");
     symlinkSync("../test", join(repo, "apps/hub/src/skipped-dir"));
-    expect(() => stageRelease({ repo, nodeDir, dest: join(temp(), "bad-link"), version: "0.1.0", compiled })).toThrow(/not shipped/);
+    expect(() => stageRelease({ repo, nodeDir, dest: join(temp(), "bad-link"), version: "0.1.0", compiled })).toThrow(new RegExp(`unshipped directory: ${join(repo, "apps/hub/test")}`));
     expect(lstatSync(join(dest, "app/node_modules/@morndo/domain")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/src/index.js"), "utf8")).toBe("export const n = 1;\n");
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/package.json"), "utf8")).toContain("./src/index.js");
