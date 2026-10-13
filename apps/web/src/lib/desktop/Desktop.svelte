@@ -29,7 +29,7 @@
   import DecisionsPanel from "./DecisionsPanel.svelte";
   import RightPanel from "./RightPanel.svelte";
   import { REFUSALS, waitingCount, type DecisionItem } from "./decisions.ts";
-  import { dockedWidth, layoutIsNarrow } from "./panel-width.ts";
+  import { clampRight, layoutIsNarrow, widthAfterWindowChange } from "./panel-width.ts";
   import type { AskOutcome } from "./answer-session.ts";
   import { api, ApiError, explain } from "../api.ts";
   import { askForBrief as sharedAsk } from "../ask-brief.ts";
@@ -84,9 +84,10 @@
     if (w) open(w.id);
   }
   let sidebarWidth = $state(store.get("morndo.sidebar", 300));
-  let rightWidth = $state(store.get("morndo.right.width", 440));
+  // The stored width is the one the owner chose. A narrow window only changes what is drawn.
+  let rightWidth = $state(clampRight(store.get("morndo.right.width", 440)));
   function setRightWidth(n: number, persist = false) {
-    rightWidth = dockedWidth(n, windowWidth, sidebarWidth);
+    rightWidth = clampRight(n);
     if (persist) store.set("morndo.right.width", rightWidth);
   }
   // The right-hand panel with the decisions: open by default beside every conversation. Closing it is remembered on this
@@ -126,11 +127,8 @@
   // Like Slack, the right-hand panel sits beside the conversation while the conversation keeps a readable width (560px);
   // in a narrower window it stays shut until asked for, and then lies over the conversation.
   let windowWidth = $state(typeof innerWidth === "number" ? innerWidth : 1920);
+  const drawnRight = $derived(widthAfterWindowChange(rightWidth, windowWidth, sidebarWidth).drawn);
   const narrow = $derived(layoutIsNarrow(windowWidth, sidebarWidth));
-  $effect(() => {
-    const next = dockedWidth(rightWidth, windowWidth, sidebarWidth);
-    if (next !== rightWidth) rightWidth = next;
-  });
   const rightShown = $derived(narrow ? overlayOpen : right.open);
   const decisionsShown = $derived(rightShown);
   function saveRight(next: { open: boolean }) { right = next; store.set("morndo.right", next); }
@@ -362,7 +360,7 @@
       decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
       onView={v => (view = v)} onManager={() => manager && open(manager.id)} onPreferences={t => (preferences = t)} />
     <div class="workspace">
-      <div class="panel" class:over={narrow && rightShown} style:--right-w="{rightWidth}px" style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${rightWidth}px` : ''}">
+      <div class="panel" class:over={narrow && rightShown} style:--right-w="{drawnRight}px" style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${drawnRight}px` : ''}">
         <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines}
           decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
           {prefsOf} onMenu={(id, x, y) => (menu = { x, y, id })}
@@ -392,7 +390,7 @@
           {/if}
         </main>
         {#if rightShown}
-          <RightPanel waiting={decisionsWaiting} width={rightWidth} onWidth={(n) => setRightWidth(n)} onCommit={(n) => setRightWidth(n, true)} onClose={closeRight}>
+          <RightPanel waiting={decisionsWaiting} width={drawnRight} chosen={rightWidth} onWidth={(n) => setRightWidth(n)} onCommit={(n) => setRightWidth(n, true)} onClose={closeRight}>
             <DecisionsPanel items={feed.decisions} ledger={feed.ledger} {now} {verifiedFresh} onAnswer={answer}
               onOpenScreen={openScreen} onOpenChat={openChat} onAskBrief={askForBrief} />
           </RightPanel>

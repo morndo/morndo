@@ -3,7 +3,7 @@
 import { MAY_HAVE_GONE, endsDoubt } from "../catchup/answer.ts";
 import { rememberSend } from "../sent-here.ts";
 import {
-  back, noteClosed, openSession, pick, showNew, seenOf, stale,
+  back, noteClosed, openSession, pick, settledElsewhere, showNew,
   type AnswerBody, type AnswerProblem, type AnswerState, type AskOutcome,
 } from "./answer-session.ts";
 import type { DecisionItem } from "./decisions.ts";
@@ -16,17 +16,18 @@ export class AnswerSession {
   error = $state<string | null>(null);
   again = $state<AnswerState["again"]>(null);
   sent = $state(false);
-  shown = $state<DecisionItem>(null as unknown as DecisionItem);
-  live = $state<DecisionItem>(null as unknown as DecisionItem);
+  // Raw, not a deep proxy: the list's item compares by identity, and a field the old sameness list forgot
+  // (inbox, asked again, blocking) is not left behind. Svelte 5.57 $state.raw (svelte.dev/docs/svelte/$state).
+  shown = $state.raw<DecisionItem>(null as unknown as DecisionItem);
+  live = $state.raw<DecisionItem>(null as unknown as DecisionItem);
   asking = $state(false);
   asked = $state(false);
   askError = $state<string | null>(null);
+  // A restate that arrived while this send was in flight. `sent` stays on the version that was posted
+  // until the new version is shown; a later push must not clear it and offer another answer.
+  #keepSent = false;
 
-  // The last item `bind` took, outside the state: `live`'s proxy wraps a plain item's nested objects anew on every
-  // write, so they would never compare same, and the bind would keep rewriting the state its caller's effect reads.
-  #bound: DecisionItem | null = null;
-
-  constructor(item: DecisionItem) { this.apply(openSession(item)); this.#bound = item; }
+  constructor(item: DecisionItem) { this.apply(openSession(item)); }
 
   snapshot(): AnswerState {
     return {
@@ -45,44 +46,62 @@ export class AnswerSession {
   get holdingAnswer() { return this.mode !== "idle" || this.again !== null || this.sending || this.sent; }
 
   // `hold` while the brief is open: the body stays on the version he has seen. Otherwise a quiet card follows the list.
-  // Compare the version, not object identity: a state proxy is never === the item the list just passed.
+  // `sent` belongs to the version it was sent for. A re-ask (same id, new version) is a new question: a closed brief
+  // follows it, and an open brief drops `sent` only once that version is shown.
   bind(live: DecisionItem, hold: boolean) {
-    if (this.#bound && this.#bound.version !== live.version) this.sent = false;
+    if (this.sent && live.version !== this.shown.version && !hold && !this.#keepSent) this.sent = false;
     const follow = !hold && !this.holdingAnswer;
-    const bound = this.#bound;
-    const same = bound !== null && bound.version === live.version && bound.status === live.status && bound.briefVersion === live.briefVersion && bound.answerable === live.answerable && bound.decision === live.decision && bound.notice === live.notice && this.shown.version === (follow ? live.version : this.shown.version);
-    if (!same) {
-      this.#bound = live;
-      this.live = live;
-      if (follow) this.shown = live;
-    }
+    if (this.live !== live) this.live = live;
+    if (follow && this.shown !== live) this.shown = live;
     if (live.status !== "open" && (this.mode !== "idle" || this.picked !== null || this.again !== null || this.error !== null)) {
-      this.mode = "idle"; this.picked = null; this.again = null; this.error = null;
+      this.#settleClosed();
     }
   }
 
+  // Apply a close without touching the brief on screen. A refusal stays unless an answer is in doubt.
+  #settleClosed() {
+    const next = noteClosed(this.snapshot());
+    this.mode = next.mode;
+    this.picked = next.picked;
+    this.again = next.again;
+    this.error = next.error;
+  }
+
   pick(label: string, body: AnswerBody) { this.apply(pick(this.snapshot(), label, body)); }
-  showNew() { this.apply(showNew(this.snapshot(), this.live)); }
+  showNew() { this.#keepSent = false; this.apply(showNew(this.snapshot(), this.live)); }
   back() { this.apply(back(this.snapshot())); }
-  get stale() { return stale(this.snapshot()); }
-  get seen() { return seenOf(this.snapshot()); }
+  get stale() { return this.live.version !== this.shown.version; }
+  get seen() { return this.shown.version; }
 
   async send(onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>, body: AnswerBody, requestId: string = crypto.randomUUID()) {
-    if (this.sending || this.stale || this.live.status !== "open") return;
+    // A new answer waits until the version on screen is current. An answer already in doubt is checked again on the
+    // version it was sent for, even after a restate: that is the same request, not a silent no-op.
+    if (this.sending || this.live.status !== "open") return;
+    if (this.stale && this.again === null) return;
     this.sending = true;
     this.error = null;
     const doubt = this.again;
     const problem = await onAnswer(this.live.id, body, requestId, this.seen);
     this.sending = false;
-    if (this.live.status !== "open") { this.apply(noteClosed(this.snapshot())); return; }
     if (problem) {
       this.error = problem.text;
       this.again = MAY_HAVE_GONE.has(problem.code) ? { body, requestId, code: problem.code } : doubt && !endsDoubt(problem.code) ? doubt : null;
+      if (this.live.status !== "open") this.#settleClosed();
       return;
     }
+    // The POST was accepted. Answered here, including when that status won the race, is this answer.
+    // Settled from somewhere else (another device, expired) is a close: say so, don't claim Sent.
+    const sentFor = this.seen;
+    if (settledElsewhere(this.live)) {
+      this.#keepSent = false;
+      this.#settleClosed();
+      return;
+    }
+    // A restate that landed during the request does not undo this: sent stays on the version that was posted.
     this.again = null;
     this.sent = true;
-    rememberSend(this.live.id, requestId, this.seen);
+    this.#keepSent = this.live.version !== sentFor;
+    rememberSend(this.live.id, requestId, sentFor);
     this.mode = "idle";
     this.picked = null;
     this.words = "";

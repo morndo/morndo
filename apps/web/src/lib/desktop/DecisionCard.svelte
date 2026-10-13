@@ -18,12 +18,11 @@
   import Lightbulb from "@lucide/svelte/icons/lightbulb";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import Repeat from "@lucide/svelte/icons/repeat-2";
-  import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import Signpost from "@lucide/svelte/icons/signpost";
   import SquareTerminal from "@lucide/svelte/icons/square-terminal";
   import Star from "@lucide/svelte/icons/star";
   import { cardOf } from "@morndo/domain";
-  import { againLabel } from "../catchup/answer.ts";
+  import AnswerFooter from "./AnswerFooter.svelte";
   import { AnswerSession } from "./answer-session.svelte.ts";
   import type { AnswerBody, AnswerProblem } from "./answer-session.ts";
   import { ago, deliveryLine, dueLabel, REFUSALS, urgency, type DecisionItem } from "./decisions.ts";
@@ -40,35 +39,35 @@
 
   const own = new AnswerSession(item);
   const session = $derived(given ?? own);
-  let wordsEl = $state<HTMLTextAreaElement | null>(null);
   $effect(() => { if (!given) own.bind(item, false); });
 
-  const u = $derived(urgency(item, now));
+  // The body is the version the pending answer targets. A restate stays behind the banner until it is shown.
+  const view = $derived(session.shown);
+  const u = $derived(urgency(view, now));
   const open = $derived(item.status === "open");
   const canAnswer = $derived(open && item.answerable === null);
-  const card = $derived(cardOf(item));
-  const asker = $derived(item.asker.kind === "manager" ? "Manager" : `#${item.asker.name}`);
-  const whom = $derived(item.asker.kind === "manager" ? "the manager" : item.asker.name);
-  const answers = $derived(variant === "panel" ? card.quickAnswers : item.options);
-  const recommended = $derived(item.answerBy === "tap" ? answers[0]?.key ?? null : null);
+  const card = $derived(cardOf(view));
+  const asker = $derived(view.asker.kind === "manager" ? "Manager" : `#${view.asker.name}`);
+  const whom = $derived(view.asker.kind === "manager" ? "the manager" : view.asker.name);
+  const answers = $derived(variant === "panel" ? card.quickAnswers : view.options);
+  const recommended = $derived(view.answerBy === "tap" ? answers[0]?.key ?? null : null);
   // In the chat the message above is the context, so the question line shows only when it says something new.
-  const showRecommendation = $derived(!!item.recommendation && open);
-  const showDefault = $derived(!!item.ifNoAnswer && open);
+  const showRecommendation = $derived(!!view.recommendation && open);
+  const showDefault = $derived(!!view.ifNoAnswer && open);
   let root = $state<HTMLElement | null>(null);
   // Picking an option opens the confirmation inside the card: keep it in view (the chat may have it at the bottom edge).
   $effect(() => { if (session.mode !== "idle") requestAnimationFrame(() => root?.querySelector(".confirm")?.scrollIntoView({ block: "nearest" })); });
-  const showTitle = $derived(!(item.context ?? "").includes(item.title.slice(0, 48)));
+  const showTitle = $derived(!(view.context ?? "").includes(view.title.slice(0, 48)));
   const byline = $derived([
     asker,
-    ago(item.askedAt, now),
+    ago(view.askedAt, now),
     card.minutes !== null ? `≈${card.minutes} min` : null,
     card.spend ? "Includes spend" : null,
-    item.blocking && open ? "Blocking" : null,
-    item.askedAgain && open ? "Asked again" : null,
+    view.blocking && open ? "Blocking" : null,
+    view.askedAgain && open ? "Asked again" : null,
     card.hasBrief ? null : "Filed without a brief",
   ].filter((part): part is string => part !== null).join(" · "));
   const readLabel = $derived(card.hasBrief ? "Read the brief ›" : "Details ›");
-  $effect(() => { if (session.mode === "words") wordsEl?.focus(); });
 
   function choose(label: string, body: AnswerBody) { session.pick(label, body); }
   function writeWords(prefill = "") {
@@ -77,16 +76,7 @@
     session.mode = "words";
     session.error = null;
   }
-  function back() { session.back(); }
-  function escBack(e: KeyboardEvent) { if (e.key === "Escape") { e.preventDefault(); back(); } }
   function send(body: AnswerBody, requestId?: string) { void session.send(onAnswer, body, requestId); }
-  function sendAgain() { if (session.again) void session.send(onAnswer, session.again.body, session.again.requestId); }
-  function onWordsKey(e: KeyboardEvent) {
-    // Like the message box (and Slack): Enter sends, Shift+Enter starts a new line; not while an IME is composing. While
-    // an answer is in doubt, Enter is Check again: never a new answer under a new request id.
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (session.again) sendAgain(); else if (session.words.trim()) void send({ text: session.words }); }
-    if (e.key === "Escape") { e.preventDefault(); back(); }
-  }
 </script>
 
 <article bind:this={root} class="dc {variant} u-{u}" data-decision={item.id} aria-label="Decision: {card.topic}">
@@ -108,23 +98,26 @@
     {#if card.spend && card.recommended}<p class="rec"><Star size={14} aria-hidden="true" /> Recommended: {card.recommended}</p>{/if}
   {:else}
   <header class="meta">
-    <span class="kind"><Signpost size={14} />{item.need === "time" ? "Needs your time" : "Decision"}</span>
+    <span class="kind"><Signpost size={14} />{view.need === "time" ? "Needs your time" : "Decision"}</span>
     <span class="chips">
-      {#if item.askedAgain && open}<span class="chip info"><Repeat size={12} />Asked again</span>{/if}
-      {#if item.blocking && open}<span class="chip bad"><Flag size={12} />Blocking</span>{/if}
-      {#if item.deadline !== null && (open || item.status === "answered")}
-        <span class="chip" class:bad={u === "overdue"} class:warn={u === "soon"}><CalendarClock size={12} />{dueLabel(item.deadline, now)}</span>
+      {#if view.askedAgain && open}<span class="chip info"><Repeat size={12} />Asked again</span>{/if}
+      {#if view.blocking && open}<span class="chip bad"><Flag size={12} />Blocking</span>{/if}
+      {#if view.deadline !== null && (open || item.status === "answered")}
+        <span class="chip" class:bad={u === "overdue"} class:warn={u === "soon"}><CalendarClock size={12} />{dueLabel(view.deadline, now)}</span>
       {/if}
     </span>
   </header>
-  {#if showTitle}<h3 class="title">{item.title}</h3>{/if}
+  {#if showTitle}<h3 class="title">{view.title}</h3>{/if}
   {/if}
-  {#if item.status === "open" && item.notice}<p class="sub" role="status">{item.notice}</p>{/if}
+  {#if item.status === "open" && view.notice}<p class="sub" role="status">{view.notice}</p>{/if}
+  {#if open && session.stale}
+    <p class="restated" role="status">{whom[0] ? whom[0].toUpperCase() + whom.slice(1) : whom} restated this brief. <button type="button" class="link" onclick={() => session.showNew()}>Show the new version</button></p>
+  {/if}
 
   {#if variant !== "panel" && (showRecommendation || showDefault)}
     <dl class="facts">
-      {#if showRecommendation}<div><dt><Lightbulb size={14} />Recommended</dt><dd>{item.recommendation}</dd></div>{/if}
-      {#if showDefault}<div><dt><Hourglass size={14} />If you don't answer</dt><dd>{item.ifNoAnswer}</dd></div>{/if}
+      {#if showRecommendation}<div><dt><Lightbulb size={14} />Recommended</dt><dd>{view.recommendation}</dd></div>{/if}
+      {#if showDefault}<div><dt><Hourglass size={14} />If you don't answer</dt><dd>{view.ifNoAnswer}</dd></div>{/if}
     </dl>
   {/if}
 
@@ -162,55 +155,26 @@
     </div>
   {:else if item.status === "expired"}
     <div class="state done" role="status"><Hourglass size={18} /><p>Expired: nobody answered within a day.</p></div>
-  {:else if item.answerBy === "screen"}
-    {#if item.options.length}
+  {:else if session.sent}
+    <div class="state ok" role="status"><CircleCheckBig size={18} /><p>Sent. {whom[0] ? whom[0].toUpperCase() + whom.slice(1) : whom} gets it as your decision and acts on it.</p></div>
+  {:else if view.answerBy === "screen"}
+    {#if view.options.length}
       <ul class="readonly">
-        {#each item.options as o (o.key)}<li><span class="n">{o.key}</span><span><b>{o.label}</b>{#if o.detail}<small>{o.detail}</small>{/if}</span></li>{/each}
+        {#each view.options as o (o.key)}<li><span class="n">{o.key}</span><span><b>{o.label}</b>{#if o.detail}<small>{o.detail}</small>{/if}</span></li>{/each}
       </ul>
     {/if}
-    {#if item.context && item.contextKind === "screen"}<pre class="screen">{item.context}</pre>{/if}
+    {#if view.context && view.contextKind === "screen"}<pre class="screen">{view.context}</pre>{/if}
     <div class="actions">
-      {#if item.asker.workerId}<button class="btn primary" onclick={() => item.asker.workerId && onOpenScreen(item.asker.workerId)}><SquareTerminal size={16} />Answer in {asker}'s terminal</button>{/if}
+      {#if view.asker.workerId}<button class="btn primary" onclick={() => view.asker.workerId && onOpenScreen(view.asker.workerId)}><SquareTerminal size={16} />Answer in {asker}'s terminal</button>{/if}
     </div>
-  {:else if session.mode === "confirm" && session.picked}
-    <div class="confirm" role="group" aria-label="Confirm your answer">
-      <p class="your">Your answer: <b>{session.picked.label}</b></p>
-      <p class="how">{whom[0]?.toUpperCase()}{whom.slice(1)} gets it as your decision and acts on it.</p>
-      <div class="actions">
-        <!-- svelte-ignore a11y_autofocus -->
-        {#if session.again}
-          <button class="btn primary" disabled={session.sending || !open} onkeydown={escBack} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-        {:else}
-          <!-- svelte-ignore a11y_autofocus -->
-          <button class="btn primary" disabled={session.sending || !open} autofocus={!briefOpen} onkeydown={escBack} onclick={() => session.picked && send(session.picked.body)}>{session.sending ? "Sending…" : "Send answer"}</button>
-        {/if}
-        <button class="btn ghost" disabled={session.sending} onkeydown={escBack} onclick={back}>Back</button>
-        {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{/if}
-      </div>
-    </div>
-  {:else if session.mode === "words"}
-    <div class="confirm" role="group" aria-label="Answer in words">
-      <textarea bind:this={wordsEl} value={session.words} rows="2" readonly={!!session.again} placeholder="Your answer for {whom}…" onkeydown={onWordsKey} oninput={(e) => (session.words = e.currentTarget.value)} aria-label="Your answer for {whom}"></textarea>
-      <div class="actions">
-        {#if session.again}
-          <button class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-        {:else}
-          <button class="btn primary" disabled={session.sending || !open || !session.words.trim()} onclick={() => send({ text: session.words })}>{session.sending ? "Sending…" : `Send to ${whom}`}</button>
-        {/if}
-        <button class="btn ghost" disabled={session.sending} onclick={back}>Cancel</button>
-        {#if !verifiedFresh}<span class="shield"><ShieldAlert size={14} />Face ID or Touch ID first</span>{:else}<span class="hint">Enter sends · Shift+Enter for a new line</span>{/if}
-      </div>
-    </div>
-  {:else if session.again}
+  {:else if session.mode === "confirm" || session.mode === "words" || session.again}
     <!-- An answer in doubt: only Check again, never another answer while it may have reached the asker (E8). -->
-    <div class="actions">
-      <button class="btn primary" disabled={session.sending || !open} onclick={sendAgain}>{session.sending ? "Checking…" : againLabel(session.again.code)}</button>
-    </div>
+    <AnswerFooter {session} {open} {verifiedFresh} asker={whom} focusSend={!briefOpen} escapeBack onSend={send} />
   {:else}
     <div class="actions">
       {#if variant === "panel" && card.spend}
         <button type="button" class="btn" disabled={!canAnswer} onclick={() => onOpen?.(item)}>Read and decide ›</button>
-      {:else if item.answerBy === "tap"}
+      {:else if view.answerBy === "tap"}
         {#each answers as o (o.key)}
           <button class="btn" class:primary={o.key === recommended} disabled={!canAnswer || session.stale} onclick={() => choose(o.label, { key: o.key })}
             aria-describedby={variant === "panel" ? `topic-${item.id}` : undefined}
@@ -218,15 +182,15 @@
             {#if o.key === recommended}<Star size={14} aria-hidden="true" />{/if}{o.label}
           </button>
         {/each}
-        {#if canAnswer}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
+        {#if canAnswer && !session.stale}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
-      {:else if item.need === "time"}
+      {:else if view.need === "time"}
         <button class="btn primary" disabled={!canAnswer || session.stale} onclick={() => choose("Done", { text: "Done" })}>Done</button>
         <button class="btn" disabled={!canAnswer || session.stale} onclick={() => writeWords()}><MessageSquareText size={14} />Reply…</button>
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {:else}
         <button class="btn primary" disabled={!canAnswer || session.stale} onclick={() => writeWords()}><MessageSquareText size={14} />Answer…</button>
-        {#if item.ifNoAnswer}<button class="btn" disabled={!canAnswer || session.stale} onclick={() => choose(`Go with the default (${item.ifNoAnswer})`, { text: `Go with the default: ${item.ifNoAnswer}` })}>Go with the default</button>{/if}
+        {#if view.ifNoAnswer}<button class="btn" disabled={!canAnswer || session.stale} onclick={() => choose(`Go with the default (${view.ifNoAnswer})`, { text: `Go with the default: ${view.ifNoAnswer}` })}>Go with the default</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {/if}
     </div>
@@ -281,18 +245,7 @@
   .btn.primary { background: var(--send); border-color: var(--send); color: var(--send-fg); }
   .btn.primary:hover:not(:disabled) { background: var(--send-hover); border-color: transparent; }
   .btn:disabled { opacity: 0.45; cursor: default; }
-  .btn.ghost { border-color: transparent; background: transparent; }
-  .btn.ghost:hover:not(:disabled) { background: var(--hover); }
   .link { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: var(--link); font: 700 13px/19px var(--font); cursor: pointer; text-decoration: underline; }
-  .confirm { display: grid; gap: 8px; padding: 10px 12px; border-radius: 8px; border: 1px solid color-mix(in srgb, var(--send) 45%, transparent); background: color-mix(in srgb, var(--send) 7%, var(--main-bg)); }
-  .your { margin: 0; font: 400 15px/22px var(--font); }
-  .how { margin: -6px 0 0; font: 400 13px/18px var(--font); color: var(--muted); }
-  textarea {
-    width: 100%; min-height: 60px; resize: vertical; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-strong);
-    background: var(--main-bg); color: var(--text); font: 400 15px/22px var(--font); outline: 0;
-  }
-  textarea:focus { border-color: var(--link); box-shadow: 0 0 0 1px var(--link); }
-  .shield, .hint { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font: 400 12px/1 var(--font); color: var(--muted); }
   .state { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; }
   .state p { margin: 0; font: 400 14px/20px var(--font); }
   .state .sub { font-size: 13px; color: var(--muted); }
@@ -326,5 +279,6 @@
   .byline { margin: 0; font: 400 13px/18px var(--font); color: var(--muted); }
   .rec { margin: 0; display: flex; align-items: center; gap: 6px; font: 400 13px/18px var(--font); }
   .chat { justify-self: start; }
-  .actions, .confirm, .state, .err, .note, .chat, .readonly, .screen { position: relative; z-index: 1; }
+  .restated { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); font: 400 13px/18px var(--font); }
+  .actions, .state, .err, .note, .chat, .readonly, .screen, .restated { position: relative; z-index: 1; }
 </style>

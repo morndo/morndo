@@ -21,3 +21,20 @@ export function dockedWidth(requested: number, windowWidth: number, sidebarWidth
   if (layoutIsNarrow(windowWidth, sidebarWidth)) return clamped;
   return Math.min(clamped, maxDockedWidth(windowWidth, sidebarWidth));
 }
+
+// A window or sidebar change never replaces the width the owner chose. The panel draws `drawn`;
+// only a grip or an arrow key stores a new `chosen`.
+export function widthAfterWindowChange(chosen: number, windowWidth: number, sidebarWidth: number): { chosen: number; drawn: number } {
+  const kept = clampRight(chosen);
+  return { chosen: kept, drawn: dockedWidth(kept, windowWidth, sidebarWidth) };
+}
+
+// Wider is positive. Narrowing starts from the edge on screen and always stores that width.
+// Widening is added to the chosen width, and replaces it when the result passes what is drawn.
+// A click stores neither the drawn width nor a new one.
+export function commitWidth(chosen: number, drawn: number, delta: number): number {
+  if (delta < 0) return clampRight(drawn + delta);
+  const next = clampRight(chosen + delta);
+  if (drawn < chosen && next <= drawn) return clampRight(chosen);
+  return next;
+}

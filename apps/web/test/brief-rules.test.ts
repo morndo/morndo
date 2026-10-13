@@ -2,8 +2,8 @@
 // inline markdown, and the shared answer session (restate resets a pick; the shown brief stays put).
 import { describe, expect, it } from "vitest";
 import { dueLine } from "../src/lib/desktop/decisions.ts";
-import { dockedWidth, layoutIsNarrow, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
-import { openSession, pick, showNew, noteClosed } from "../src/lib/desktop/answer-session.ts";
+import { commitWidth, dockedWidth, layoutIsNarrow, widthAfterWindowChange, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
+import { openSession, pick, showNew, noteClosed, releaseAbsentSession, settledElsewhere, ABSENT_GRACE_MS } from "../src/lib/desktop/answer-session.ts";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
 
 const at = (iso: string) => Date.parse(iso);
@@ -31,6 +31,25 @@ describe("widening the decisions panel stays docked", () => {
   it("a window too narrow for the minimum panel is the overlay, and the width can still be 640", () => {
     expect(layoutIsNarrow(1000, sidebar)).toBe(true);
     expect(dockedWidth(640, 1000, sidebar)).toBe(640);
+  });
+  it("a narrower window draws less and the chosen width is still there when it widens", () => {
+    const chosen = 600;
+    const windowWidth = 1440;
+    const tight = widthAfterWindowChange(chosen, windowWidth, 400);
+    expect(tight.drawn).toBe(406);
+    expect(tight.chosen).toBe(600);
+    const restored = widthAfterWindowChange(tight.chosen, windowWidth, 260);
+    expect(restored.drawn).toBe(546);
+    expect(restored.chosen).toBe(600);
+  });
+  it("narrowing always sets the chosen width, and widening past the drawn width does too", () => {
+    expect(commitWidth(640, 480, -16)).toBe(464);
+    expect(commitWidth(640, 480, -100)).toBe(380);
+    expect(commitWidth(480, 480, -16)).toBe(464);
+    expect(commitWidth(500, 480, 16)).toBe(516);
+    expect(commitWidth(640, 480, 16)).toBe(640);
+    expect(commitWidth(640, 480, 0)).toBe(640);
+    expect(commitWidth(480, 480, 16)).toBe(496);
   });
 });
 
@@ -62,9 +81,40 @@ describe("answer session", () => {
   it("a decision that closed meanwhile clears an answer in doubt", () => {
     const s = openSession(item("v1", "Extend the triage script"));
     s.again = { body: { key: "b" }, requestId: "req-1", code: "uncertain" };
+    s.error = "May have been sent.";
     const closed = noteClosed(s);
     expect(closed.again).toBeNull();
+    expect(closed.error).toBeNull();
     expect(closed.mode).toBe("idle");
     expect(closed.picked).toBeNull();
+  });
+  it("an answer in doubt, a sent flag, or typed words survive a brief absence and not a closed one", () => {
+    const open = openSession(item("v1", "Extend the triage script"));
+    const doubt = { ...open, again: { body: { key: "b" }, requestId: "req-1", code: "uncertain" } };
+    expect(releaseAbsentSession(doubt, 0)).toBe(false);
+    expect(releaseAbsentSession(doubt, ABSENT_GRACE_MS - 1)).toBe(false);
+    expect(releaseAbsentSession(doubt, ABSENT_GRACE_MS)).toBe(true);
+    expect(releaseAbsentSession({ ...open, sent: true }, 0)).toBe(false);
+    expect(releaseAbsentSession({ ...open, words: "Ship on Tuesday" }, 0)).toBe(false);
+    expect(releaseAbsentSession(open, 0)).toBe(true);
+    expect(releaseAbsentSession({ ...doubt, live: item("v1", "Extend the triage script", "expired") }, 0)).toBe(true);
+  });
+  it("an accepted answer that another device settled is a close, and one answered here is not", () => {
+    const here = item("v1", "Extend the triage script", "answered");
+    here.decision = { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: 0, via: "here", endpointId: null, sessionId: null };
+    const elsewhere = item("v1", "Hold the notes", "answered");
+    elsewhere.decision = { choice: { kind: "option", key: "a", label: "Hold the notes" }, at: 0, via: "elsewhere", endpointId: null, sessionId: null };
+    expect(settledElsewhere(item("v1", "Extend the triage script"))).toBe(false);
+    expect(settledElsewhere(here)).toBe(false);
+    expect(settledElsewhere(elsewhere)).toBe(true);
+    expect(settledElsewhere(item("v1", "Extend the triage script", "expired"))).toBe(true);
+  });
+  it("a refusal stays visible when the item closes and nothing is in doubt", () => {
+    const s = openSession(item("v1", "Extend the triage script"));
+    s.mode = "confirm";
+    s.error = "This was already answered.";
+    const closed = noteClosed(s);
+    expect(closed.mode).toBe("idle");
+    expect(closed.error).toBe("This was already answered.");
   });
 });
