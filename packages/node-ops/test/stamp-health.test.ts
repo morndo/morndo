@@ -10,7 +10,7 @@ import { isolatedTmux, type TestTmux } from "./isolated-tmux.ts";
 
 let t: TestTmux;
 beforeEach(() => { t = isolatedTmux(); });
-afterEach(() => { t.kill(); });
+afterEach(() => t.kill());
 const stored = () => t.tmux("show-options", "-gqv", "@morndo-server").trim();
 
 describe("stampServer", () => {
@@ -21,7 +21,7 @@ describe("stampServer", () => {
     expect(first).toMatch(/^[0-9a-f]{8}$/);
     expect(stored()).toMatch(new RegExp(`^${first}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`));
     expect(await stampServer(t.socket)).toBe(first);
-    t.kill();
+    await t.kill();
     t.tmux("new-session", "-d", "-s", "main", "sleep 600");
     expect(await stampServer(t.socket)).not.toBe(first);
   });

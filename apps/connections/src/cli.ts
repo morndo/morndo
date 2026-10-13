@@ -10,7 +10,7 @@ import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { baseUrlProblem, ClaudeRuntime, helperCommand, isStatusRefusal, isThirdPartyAnthropicBase } from "./adapters/runtime-claude.ts";
+import { baseUrlProblem, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
@@ -36,9 +36,11 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
     if (parsed.cmd === "helper") return await helper(env, parsed, io);
     return await command(env, parsed, io);
   } catch (error) {
-    if (parsed.cmd === "helper") return error instanceof FileRefused || error instanceof DatabaseFromFuture ? 70 : 1;
+    // A store from a newer helper is a configuration the caller must fix, not a crash to retry into: EX_CONFIG (78),
+    // the exit the hub's main gives the same refusal. A file this helper refuses to touch keeps 70.
+    if (parsed.cmd === "helper") return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
     io.stderr(error instanceof Error ? error.message : "failed");
-    return error instanceof FileRefused || error instanceof DatabaseFromFuture ? 70 : 1;
+    return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
   }
 }
 
@@ -179,7 +181,11 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const row = findConnection(home.store.load().directory, name);
   const lease = row && row.custody === "morndo" ? row.leases.find(item => item.id === granted.id) : undefined;
   if (!lease) return fail(io, "missing");
-  const main = join(import.meta.dirname, "main.ts");
+  const keys = keysProgram(home.env.HOME ?? "", home.env.MORNDO_KEYS, existsSync, {
+    command: process.execPath,
+    args: ["--experimental-strip-types", join(import.meta.dirname, "main.ts")],
+  });
+  const helperLine = [keys.command, ...keys.args, "helper", "--lease", lease.id].join(" ");
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
@@ -207,14 +213,15 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       onStdout: (chunk: string) => { io.stdout(outRedactor.push(chunk)); },
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
     };
+    const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
       ? await new CodexRuntime({
         bin, profilePath: saved.MORNDO_CODEX_CONFIG ?? join(home.dir, "codex-profile.toml"), configDir,
-        ...helperParts(process.execPath, main, lease.id), baseUrl, parent: saved,
+        command: codexHelper.command, args: [...keys.args, ...codexHelper.args], baseUrl, parent: saved,
       }).execute(plan, parsed.rest, hooks)
       : connection.runtime === "cursor"
         ? await new CursorRuntime(saved.MORNDO_CURSOR_BIN ?? "agent", saved).execute(plan, parsed.rest, hooks)
-        : await new ClaudeRuntime(bin, helperCommand(process.execPath, main, lease.id), saved, baseUrl, party).execute(plan, parsed.rest, hooks);
+        : await new ClaudeRuntime(bin, helperLine, saved, baseUrl, party).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
   } catch (error) {
@@ -236,7 +243,10 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     } finally { if (released) again.close(); }
   }
   if (refusal !== null) return refusal;
-  return status === 70 || status === 75 ? 1 : status;
+  // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
+  // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
+  // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
+  return status === 70 || status === 75 || status === 78 ? 1 : status;
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
@@ -452,9 +462,14 @@ async function rotate(home: Opened, name: string, io: Io): Promise<number> {
   await home.seal(ref, text);
   const rotated = await home.connections.rotate(name, ref, ACTOR);
   if (!rotated.ok) { home.vault.remove(ref); return done(rotated, io); }
-  home.vault.remove(current.ref);
+  // The rotation is committed: an old file that can't be removed, or is gone already, is named as left to clean, never
+  // thrown in place of the rotation (round 3, point 1).
+  let left: string | null = null;
+  try { home.vault.remove(current.ref); } catch (error) { left = error instanceof Error ? error.message : "failed"; }
   io.stdout(`${JSON.stringify({ fingerprint: await home.vault.fingerprint(ref) })}\n`);
-  return 0;
+  if (left === null) return 0;
+  io.stderr(`left to clean: vault: ${left}\n`);
+  return PARTIAL;
 }
 
 async function probe(home: Opened, name: string, io: Io, body: (connection: Connection) => Promise<number>): Promise<number> {
@@ -517,6 +532,9 @@ function view(connection: Connection): { name: string; kind: string; vendor: str
   const fingerprint = connection.kind === "api-key" && connection.custody === "morndo" ? connection.fingerprint : null;
   return { name: connection.name, kind: connection.kind, vendor: connection.vendor, runtime: connection.runtime, status: connection.status, fingerprint };
 }
+
+// Done, with something left to clean that the command names on stderr, as morndo-secrets says it.
+const PARTIAL = 3;
 
 function done(result: { ok: true } | { ok: false; error: { problem: string; role?: string; exit?: number } }, io: Io): number {
   if (result.ok) return 0;

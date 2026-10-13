@@ -10,18 +10,17 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Users from "@lucide/svelte/icons/users";
   import Avatar from "./Avatar.svelte";
-  import { LEVEL_WORDS, ago, pct, resetsIn, tightest, usageLevel, usd, type AccountUsage, type UsageWindow } from "./usage.ts";
+  import { LEVEL_WORDS, ago, onDemandLine, pct, resetsIn, resetsOnLabel, shownLevel, tightestShown, usageLevel, usd, type AccountUsage, type UsageWindow } from "./usage.ts";
 
   let { accounts, at, now, live, onOpenLane }: { accounts: AccountUsage[]; at: number | null; now: number; live: boolean; onOpenLane: (name: string) => void } = $props();
 
   const sessions = $derived(accounts.reduce((n, a) => n + a.sessions.length, 0));
-  const five = $derived(tightest(accounts, "fiveHour"));
-  const week = $derived(tightest(accounts, "sevenDay"));
-  const worst = $derived([five, week].flatMap(t => (t ? [usageLevel(t.window.usedPercentage)] : [])));
-  const headline = $derived(worst.includes("critical") ? "critical" : worst.includes("warning") ? "warning" : "ok");
+  const five = $derived(tightestShown(accounts, "fiveHour"));
+  const week = $derived(tightestShown(accounts, "sevenDay"));
+  const headline = $derived(shownLevel(accounts));
 </script>
 
-{#snippet meter(label: string, w: UsageWindow | null)}
+{#snippet meter(label: string, w: UsageWindow | null, when: string | null)}
   {#if w}
     {@const level = usageLevel(w.usedPercentage)}
     <div class="meter l-{level}" role="group" aria-label="{label}: {pct(w.usedPercentage)} used, {LEVEL_WORDS[level]}">
@@ -29,7 +28,7 @@
       <div class="track" aria-hidden="true"><div class="fill" style:width="{Math.max(1, Math.min(100, w.usedPercentage))}%"></div></div>
       <div class="mf">
         <span class="lvl">{#if level === "ok"}<CircleCheck size={13} />{:else if level === "warning"}<TriangleAlert size={13} />{:else}<CircleAlert size={13} />{/if}{LEVEL_WORDS[level]}</span>
-        {#if resetsIn(w.resetsAt, now)}<span class="reset">{resetsIn(w.resetsAt, now)}</span>{/if}
+        {#if when}<span class="reset">{when}</span>{:else if resetsIn(w.resetsAt, now)}<span class="reset">{resetsIn(w.resetsAt, now)}</span>{/if}
       </div>
     </div>
   {:else}
@@ -74,10 +73,17 @@
         {#each accounts as a (a.account)}
           <article class="card" data-account={a.account} aria-label="Account {a.account}">
             <header><Avatar name={a.account} kind="agent" size={28} /><h3>{a.account}</h3><span class="when">reported {ago(a.reportedAt, now)}</span></header>
-            {@render meter("5-hour window", a.fiveHour)}
-            {@render meter("Weekly window", a.sevenDay)}
+            {#if a.limits?.length}
+              {#each a.limits as w, i (`${w.label}:${i}`)}
+                {@render meter(w.label, w, resetsOnLabel(w.resetsOn))}
+              {/each}
+              {#if onDemandLine(a.onDemand)}<p class="ondemand">{onDemandLine(a.onDemand)}</p>{/if}
+            {:else}
+            {@render meter("5-hour window", a.fiveHour, null)}
+            {@render meter("Weekly window", a.sevenDay, null)}
+            {/if}
             {#if a.spend}
-              {@render meter(`Spend limit${a.spend.period ? ` (${a.spend.period})` : ""}`, a.spend)}
+              {@render meter(`Spend limit${a.spend.period ? ` (${a.spend.period})` : ""}`, a.spend, null)}
               {#if a.spend.usedUsd !== null}<p class="spend">{usd(a.spend.usedUsd)}{a.spend.limitUsd !== null ? ` of ${usd(a.spend.limitUsd)}` : ""}</p>{/if}
             {/if}
             <div class="sessions">
@@ -142,6 +148,7 @@
   .l-warning .lvl { color: var(--warn-fg); }
   .l-critical .lvl { color: var(--bad-fg); }
   .spend { margin: -6px 0 0; font: 400 13px/18px var(--font); color: var(--muted); }
+  .ondemand { margin: 0; font: 400 13px/18px var(--font); color: var(--muted); }
   .sessions { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
   .sl { font: 700 12px/16px var(--font); color: var(--muted); margin-bottom: 2px; }
   .sess { display: flex; align-items: center; gap: 10px; padding: 4px 6px; margin: 0 -6px; border: 0; border-radius: 6px; background: transparent; color: var(--text); font: 400 13px/18px var(--font); text-align: left; cursor: pointer; }

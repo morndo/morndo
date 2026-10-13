@@ -72,6 +72,85 @@ describe("reports under an agent token (U1)", () => {
     expect(a).toMatchObject({ fiveHour: { usedPercentage: 23.5 }, sevenDay: { usedPercentage: 41.2 } });
     expect((a.sessions as Body[]).map(s => s.sessionId)).toEqual(["s2", "s1"]);
   });
+  it("a report that names its windows keeps those bars and does not invent a 5-hour window", async () => {
+    const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
+    const body = {
+      session_id: "cursor-plan", model: { display_name: "Cursor Ultra" },
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "included usage, monthly" } },
+      limits: [
+        { label: "Cursor models", used_percentage: 88, resets_at: resets, resets_on: "2026-11-07" },
+        { label: "Other models", used_percentage: 45, resets_at: resets, resets_on: "2026-11-07" },
+      ],
+      on_demand: "off",
+    };
+    const a = (await json(await post(body, "cursor"))).account as Body;
+    expect(a.fiveHour).toBeNull();
+    expect(a.sevenDay).toBeNull();
+    expect(a.onDemand).toBe("off");
+    expect(a.limits).toEqual([
+      { label: "Cursor models", usedPercentage: 88, resetsAt: resets * 1000, resetsOn: "2026-11-07" },
+      { label: "Other models", usedPercentage: 45, resetsAt: resets * 1000, resetsOn: "2026-11-07" },
+    ]);
+  });
+  it("a bad named row is dropped and the session and spend are kept; nine windows keep eight", async () => {
+    const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
+    const limits = [{ label: "", used_percentage: 1 }, ...Array.from({ length: 8 }, (_, i) => ({ label: `W${i}`, used_percentage: 10 + i, resets_at: resets }))];
+    const posted = await post({
+      session_id: "cursor-plan",
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "monthly" } },
+      limits, on_demand: "off",
+    }, "cursor");
+    expect(posted.status).toBe(200);
+    const a = (await json(posted)).account as Body;
+    expect((a.limits as Body[]).map(w => w.label)).toEqual(Array.from({ length: 8 }, (_, i) => `W${i}`));
+    expect((a.spend as Body).usedPercentage).toBe(85);
+    expect((a.sessions as Body[])[0]?.sessionId).toBe("cursor-plan");
+    const junk = { label: "\u0001", used_percentage: 10, resets_at: resets };
+    const kept = Array.from({ length: 9 }, (_, i) => ({ label: `W${i}`, used_percentage: 10 + i, resets_at: resets }));
+    const capped = await post({
+      session_id: "cursor-plan",
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
+      limits: [...Array.from({ length: 8 }, () => junk), ...kept],
+    }, "slots");
+    expect(capped.status).toBe(200);
+    const b = (await json(capped)).account as Body;
+    expect((b.limits as Body[]).map(w => w.label)).toEqual(Array.from({ length: 8 }, (_, i) => `W${i}`));
+  });
+  it("a row of the wrong type and an over-long on-demand line do not reject the report", async () => {
+    const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
+    const phrase = `on-demand ${"y".repeat(100)}`;
+    const posted = await post({
+      session_id: "cursor-plan",
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
+      limits: [
+        { label: 42, used_percentage: 10 },
+        { used_percentage: "50" },
+        { label: "Kept", used_percentage: 12, resets_on: 20261107, resets_at: resets },
+        null,
+      ],
+      on_demand: phrase,
+    }, "cursor");
+    expect(posted.status).toBe(200);
+    const a = (await json(posted)).account as Body;
+    expect((a.limits as Body[]).map(w => w.label)).toEqual(["Kept"]);
+    expect((a.spend as Body).usedPercentage).toBe(85);
+    expect((a.sessions as Body[])[0]?.sessionId).toBe("cursor-plan");
+    expect(a.onDemand).toBe(phrase.slice(0, 80));
+  });
+  it("once the named windows reset, the account is a normal card and on-demand is gone", async () => {
+    const resets = Math.floor((now + 2 * HOUR) / 1000);
+    await post({
+      session_id: "cursor-plan",
+      limits: [{ label: "Cursor models", used_percentage: 88, resets_at: resets }],
+      on_demand: "off",
+    }, "cursor");
+    now += 3 * HOUR;
+    const cookie = await hub.cookie();
+    const later = await json(await fetch(`${hub.base}/api/usage`, { headers: { cookie: `__Host-morndo=${cookie}` } }));
+    const cursor = (later.accounts as Body[]).find(a => a.account === "cursor");
+    expect(cursor?.limits).toBeNull();
+    expect(cursor?.onDemand).toBeNull();
+  });
   it("the manager's token reports as the manager's lane", async () => {
     const manager = hub.agents.issue("manager", "manager").secret;
     const a = (await json(await post(statusLine(), "max-1", "", manager))).account as Body;
