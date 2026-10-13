@@ -187,18 +187,37 @@ function runProgram(program: string, args: string[], signal: AbortHandle, onLead
 }
 
 export function processTranscriber(program: string): ProcessHost {
-  let leader: number | null = null;
+  // One leader per run. A probe during a run is its own process: it never becomes the run's leader, and its close
+  // takes nothing away — group() answers for the runs in progress (design §5), so a probe that starts and ends
+  // while a run lives must change nothing it says.
+  const runs = new Set<number>();
   let detail = "";
-  const setLeader = (pid: number | null) => { leader = pid; };
+  const leaderOf = () => {
+    let mine: number | null = null;
+    return (pid: number | null) => {
+      if (pid === null) {
+        if (mine !== null) runs.delete(mine);
+        mine = null;
+        return;
+      }
+      mine = pid;
+      runs.add(pid);
+    };
+  };
 
   return {
-    group: () => leader === null ? [] : groupOf(leader),
+    group: () => {
+      const seen = new Set<number>();
+      for (const pid of runs) for (const member of groupOf(pid)) seen.add(member);
+      return [...seen];
+    },
     detail: () => detail,
     async probe(): Promise<TranscriberProbe> {
       const ac = new AbortController();
       const timer = setTimeout(() => ac.abort(), PROBE_MS);
       try {
-        const run = await runProgram(program, ["probe", "--json"], ac.signal, setLeader);
+        // A probe holds no leader slot: it is not a run, whatever /api/me asks while one is going.
+        const run = await runProgram(program, ["probe", "--json"], ac.signal, () => {});
         if (run.aborted) return { ready: false, reason: "not_ready", detail: "probe_timeout" };
         if (run.code === null) return { ready: false, reason: "missing", detail: "missing" };
         if (run.code !== 0) return { ready: false, reason: "not_ready", detail: redact(run.stderr).slice(0, STDERR_CAP) || "probe_failed" };
@@ -219,7 +238,8 @@ export function processTranscriber(program: string): ProcessHost {
         "run", "--input", input.path, "--language", input.language,
         "--threads", String(input.threads), "--max-seconds", String(input.maxSeconds), "--json",
       ];
-      const run = await runProgram(program, args, input.signal, setLeader);
+      const track = leaderOf();
+      const run = await runProgram(program, args, input.signal, track);
       if (run.aborted) {
         detail = "";
         throw abortError();
