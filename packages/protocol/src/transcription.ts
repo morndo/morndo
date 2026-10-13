@@ -5,7 +5,7 @@
 // (https://zod.dev/api, read 2026-10-13). Unknown keys on a plugin document fail; they are not dropped.
 import {
   LANGUAGE_CHOICE, LANGUAGE_CODE, MAX_RECORDING_SECONDS, MAX_TEXT_BYTES, QUEUE_REASONS, TRANSCRIPTION_ID,
-  TX_PROBLEMS, TX_STATES, TX_TERMINAL, err, ok, type EngineText, type Result, type TranscriptionProblem,
+  TX_PROBLEMS, TX_STATES, TX_TERMINAL, err, ok, utf8ByteLength, type EngineText, type Result, type TranscriptionProblem,
 } from "@morndo/domain";
 import * as z from "./z.ts";
 
@@ -42,6 +42,9 @@ export function problemFromExit(code: number): TranscriptionProblem | null {
 }
 
 const text = (max: number) => z.string().check(z.minLength(1), z.maxLength(max));
+// TX6: the cap is UTF-8 bytes, the same count the domain uses. A string of code units under the cap can still be over it.
+const withinText = (s: string) => utf8ByteLength(s) <= MAX_TEXT_BYTES;
+const textBytes = () => z.string().check(z.refine(withinText));
 const id = () => z.string().check(z.regex(TRANSCRIPTION_ID));
 const choice = () => z.string().check(z.regex(LANGUAGE_CHOICE));
 const code = () => z.string().check(z.regex(LANGUAGE_CODE));
@@ -86,8 +89,8 @@ export const ProbeDocument = z.discriminatedUnion("ready", [probeReady, probeAbs
 export type ProbeDocument = z.output<typeof ProbeDocument>;
 
 // A run may report a duration past the cap: the domain then ends it too_long. Past a day, the document is not
-// protocol 1. Segment text is bounded so a plugin cannot hand the hub an unbounded string; the domain still caps
-// the joined words.
+// protocol 1. Segment text is capped at MAX_TEXT_BYTES of UTF-8, the same bound as a view's words; the domain still
+// caps the joined words.
 const MS_DAY = 24 * 60 * 60 * 1000;
 const ms = () => z.int().check(z.gte(0), z.lte(MS_DAY));
 
@@ -98,7 +101,7 @@ export const RunDocument = z.strictObject({
   segments: z.array(z.strictObject({
     startMs: ms(),
     endMs: ms(),
-    text: z.string().check(z.maxLength(MAX_TEXT_BYTES)),
+    text: textBytes(),
   })).check(z.maxLength(10_000)),
 }).check(z.refine(doc => doc.segments.every(seg => seg.endMs >= seg.startMs && seg.endMs <= doc.durationMs)));
 export type RunDocument = z.output<typeof RunDocument>;
@@ -141,8 +144,8 @@ export type TranscriptionCreateBody = z.output<typeof TranscriptionCreateBody>;
 
 const words = z.strictObject({
   language: code(),
-  text: z.string().check(z.maxLength(MAX_TEXT_BYTES)),
-  edit: z.nullable(z.string().check(z.minLength(1), z.maxLength(MAX_TEXT_BYTES))),
+  text: textBytes(),
+  edit: z.nullable(z.string().check(z.minLength(1), z.refine(withinText))),
   edited: z.boolean(),
   engine: text(64),
   model: text(128),

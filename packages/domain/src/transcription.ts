@@ -299,11 +299,11 @@ export function effectiveMaxSeconds(configured: number, pluginMaxSeconds: number
   return Math.min(configured, pluginMaxSeconds);
 }
 
-const utf8Len = (s: string): number => {
+export function utf8ByteLength(s: string): number {
   let n = 0;
   for (const ch of s) n += utf8Bytes(ch);
   return n;
-};
+}
 
 // TX7, TextEdited (3.5): the engine's words are never overwritten. An edit is kept beside them, trimmed and within
 // the Text cap, and the result is marked `edited`. The Recording stays; the Text grants nothing (TX8).
@@ -312,7 +312,7 @@ export type EditProblem = "not_done" | "bad_text";
 export function editText(tx: Transcription, text: string): Result<Transcription, EditProblem> {
   if (tx.state !== "done" || tx.text === null) return err("not_done");
   const clean = text.trim();
-  if (clean === "" || utf8Len(clean) > MAX_TEXT_BYTES) return err("bad_text");
+  if (clean === "" || utf8ByteLength(clean) > MAX_TEXT_BYTES) return err("bad_text");
   // Going back to the engine's words takes the edit away: they are the words again, unmarked. Words identical to
   // the engine's were never an edit, and an edit that returns to them no longer is one either.
   if (clean === tx.text.text) {
