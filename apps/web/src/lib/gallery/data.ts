@@ -87,7 +87,7 @@ export function decisions(now: number): { label: string; item: DecisionItem }[] 
     options: [{ key: "a", label: "Ship Friday", detail: "Before the demo" }, { key: "b", label: "Wait a week", detail: null }],
     answerBy: "tap", recommendation: "Ship Friday: the change is small and reviewed.", ifNoAnswer: "It waits; nothing ships.",
     deadline: null, blocking: false, project: "Search", askedAt: now - 40 * MIN, messageId: null, tracking: "ledger",
-    status: "open", source: "open", decision: null, resolution: null, settledAt: null, askedAgain: false, answerable: null, version: `v-${id}`, inbox: null, ...over,
+    status: "open", source: "open", decision: null, resolution: null, settledAt: null, askedAgain: false, answerable: null, version: `v-${id}`, inbox: null, brief: null, briefVersion: 0, draftedBy: null, ...over,
   });
   return [
     { label: "Blocking", item: d("blocking", { blocking: true, title: "Use the new billing provider's sandbox keys?" }) },
