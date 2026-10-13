@@ -37,6 +37,6 @@ describe("standingLine", () => {
     const { via: _via, ...missing } = decision;
     expect(standingLine(item({ id: "d-own" as DecisionItem["id"], decision: missing as typeof decision }), "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
     expect(standingLine(item({ id: "d-own" as DecisionItem["id"], version: "v2", decision }), "Alpha")).toBe("Answered on another device: “Extend the triage script”.");
-    expect(standingLine(item({ id: "d-other" as DecisionItem["id"], decision: missing as typeof decision }), "Alpha")).toBe("Sent. You chose Extend the triage script. Alpha has it.");
+    expect(standingLine(item({ id: "d-other" as DecisionItem["id"], decision: missing as typeof decision }), "Alpha")).toBe("Answered: Extend the triage script.");
   });
 });

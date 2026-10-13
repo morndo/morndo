@@ -92,14 +92,17 @@ export const STEP_UP_MISMATCH = "Not sent: this isn't the answer that passkey ch
 
 // Where a sent answer stands, in one line: the phone's sheet and the desktop modal say it the same way.
 // "Answered on another device" only when the record says elsewhere and this device did not send this version.
+// A record that doesn't say, and no send from here, stays neutral: it claims neither.
 export function standingLine(item: DecisionItem, whom: string): string {
   const d = item.decision;
   if (!d) return "Sent. The manager gets it as your decision and acts on it.";
-  if (viaOf(item) === "elsewhere") {
+  const where = viaOf(item);
+  if (where === "elsewhere") {
     const said = d.choice.kind === "option" ? `“${d.choice.label}”` : "in words";
     return `Answered on another device: ${said}.`;
   }
   const choice = d.choice.kind === "option" ? d.choice.label : "in words";
+  if (where !== "here") return `Answered: ${choice}.`;
   const dl = deliveryLine(item);
   if (dl?.state === "queued") return `Queued${dl.why ? `, ${dl.why}` : ""}.`;
   if (dl?.state === "delivered") return `Delivered. You chose ${choice}.`;

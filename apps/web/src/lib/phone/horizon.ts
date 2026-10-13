@@ -66,6 +66,7 @@ export function horizon(p: {
       const mine = p.said?.[d.id];
       const here = mine && dec && mine.at >= dec.at - SAID_SKEW_MS ? mine : undefined;
       const said = !dec ? "Answered." : viaOf(d) === "elsewhere" ? "Answered on another device."
+        : viaOf(d) !== "here" ? `Answered: ${dec.choice.kind === "option" ? dec.choice.label : "in words"}.`
         : dec.choice.kind === "option" ? `You said “${dec.choice.label}” at ${hm(dec.at)}.`
         : here?.label === "your own words" ? `You answered in your own words at ${hm(dec.at)}.`
         : here ? `You said “${here.label}” at ${hm(dec.at)}.` : `You answered in words at ${hm(dec.at)}.`;
