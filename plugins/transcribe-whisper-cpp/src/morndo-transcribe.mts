@@ -13,7 +13,9 @@ const EXIT = { usage: 2, unreadable: 3, tooLong: 4, notReady: 5, engine: 1 } as 
 // Node's default SIGTERM and SIGINT end the process without running an async `finally`, so the converted
 // clip would stay under the temp directory. The handler removes it, then exits.
 const scratches = new Set<string>();
-const children = new Set<ChildProcess>();
+// The live children, exported for tests: a listener attached after runChild's own runs behind it in
+// the same close dispatch, which is where a stop signal's own handler sits in production.
+export const children = new Set<ChildProcess>();
 
 export function sweepScratch(dirs: Set<string>, remove: (dir: string) => void): void {
   for (const dir of [...dirs]) {
@@ -31,9 +33,12 @@ function dropScratch(dir: string): void {
   try {
     rmSync(dir, { recursive: true, force: true });
     scratches.delete(dir);
-  } catch {
+  } catch (error) {
     // The dir stays in the set, as a failed sweep leaves its dir: a stop's sweep retries it. A clip
-    // that cannot be removed must not replace the run's own exit code with a crash.
+    // that cannot be removed must not replace the run's own exit code with a crash, but a leaked clip
+    // must not be silent either: the hub and the operator get the path and the error code.
+    const code = (error as NodeJS.ErrnoException).code ?? String(error);
+    process.stderr.write(`scratch dir not removed: ${dir} (${code})\n`);
   }
 }
 
@@ -41,20 +46,44 @@ function clearScratch(): void {
   sweepScratch(scratches, (dir) => rmSync(dir, { recursive: true, force: true }));
 }
 
-function onStop(signal: NodeJS.Signals): void {
+// Set when this process itself was told to stop. The hub's cancel and a Ctrl-C signal the whole
+// group, and the engine child can die and report its close before this process's own handler for the
+// same signal runs, so how a child died never says why: ffmpeg traps the stop signals and exits 255,
+// and a pkill aimed at the engine alone kills it with a SIGTERM this process never got. The flag is
+// what a child's close is settled against, never the child's exit report.
+let stopSignal: NodeJS.Signals | null = null;
+
+export function setStopSignal(signal: NodeJS.Signals | null): void {
+  stopSignal = signal;
+}
+
+// runChild settles a close with this when the death turned out to be a stop of the run. The field is
+// assigned in the constructor body, not as a parameter property: the file runs on Node's type
+// stripping, which carries no transform for those.
+export class StoppedRun extends Error {
+  readonly signal: NodeJS.Signals;
+  constructor(signal: NodeJS.Signals) {
+    super(`stopped by ${signal}`);
+    this.name = "StoppedRun";
+    this.signal = signal;
+  }
+}
+
+function onStop(signal: NodeJS.Signals): number {
+  setStopSignal(signal);
   for (const child of children) {
     try { child.kill("SIGTERM"); } catch { /* already gone */ }
   }
   clearScratch();
-  process.exit(signal === "SIGINT" ? 130 : 143);
+  return signal === "SIGINT" ? 130 : 143;
 }
 
 let stopsBound = false;
 function bindStops(): void {
   if (stopsBound) return;
   stopsBound = true;
-  process.on("SIGTERM", () => onStop("SIGTERM"));
-  process.on("SIGINT", () => onStop("SIGINT"));
+  process.on("SIGTERM", () => process.exit(onStop("SIGTERM")));
+  process.on("SIGINT", () => process.exit(onStop("SIGINT")));
 }
 const CHOICE = /^(auto|[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*)$/;
 const LANGUAGE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
@@ -280,23 +309,27 @@ function fail(code: number, detail: string): number {
 
 type Child = { code: number };
 
-function runChild(cmd: string, args: string[], cwd: string): Promise<Child> {
+export function runChild(cmd: string, args: string[], cwd: string): Promise<Child> {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
     children.add(child);
     child.on("error", reject);
     child.on("close", (code, signal) => {
       children.delete(child);
-      // A child killed by a stop signal was stopped, not failed. The hub's cancel and a Ctrl-C
-      // signal the whole group, and the kernel may reach the small engine child before this
-      // process, so the child's close is dispatched while this process's own handler for the same
-      // signal is still behind it in the loop. Stopping here, exactly as onStop would, keeps the
-      // exit at 128+N instead of an engine failure the sender never caused.
-      if (code === null && (signal === "SIGTERM" || signal === "SIGINT")) {
-        onStop(signal);
-        return;
-      }
-      resolve({ code: code ?? 1 });
+      // A stop signal reaches the child and this process at the same time, and this process's own
+      // handler for it can still be queued behind the child's close, because signal events run
+      // through the event loop like any other (nodejs.org/api/process, signal events, read
+      // 2026-10-13). The close is settled one loop turn later, in the check phase, which only runs
+      // once this iteration's poll callbacks are through: a pending stop handler has then had its
+      // chance to record the stop. A death without that record is the engine's own, whatever the
+      // child reported, and never a stop nobody sent.
+      setImmediate(() => {
+        if (stopSignal !== null) {
+          reject(new StoppedRun(stopSignal));
+          return;
+        }
+        resolve({ code: code ?? 1 });
+      });
     });
   });
 }
@@ -323,6 +356,7 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
     try {
       converted = await runChild(ffmpeg, ["-nostdin", "-hide_banner", "-loglevel", "error", "-t", String(cap + 1), "-i", input, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-y", wav], dir);
     } catch (error) {
+      if (error instanceof StoppedRun) return onStop(error.signal);
       const code = (error as NodeJS.ErrnoException).code;
       return fail(code === "ENOENT" ? EXIT.notReady : EXIT.unreadable, "ffmpeg failed");
     }
@@ -336,6 +370,7 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
     try {
       heard = await runChild(whisper, ["-m", model, "-f", wav, "-l", whisperLanguage(language), "-t", threads, "-np", "-oj", "-of", out], dir);
     } catch (error) {
+      if (error instanceof StoppedRun) return onStop(error.signal);
       const code = (error as NodeJS.ErrnoException).code;
       return fail(code === "ENOENT" ? EXIT.notReady : EXIT.engine, "whisper-cli failed");
     }
