@@ -108,6 +108,8 @@
     "balance": null,
     "defaultPicks": { "implement": "glm-5.3@max", "*": "glm-5.3@high" },
     "isolation": "os",
+    "families": [],
+    "class": [{"pattern":"glm-5.3-flash","class":"fast"},{"pattern":"glm-5.3","class":"flagship"}],
     "terms": {
       "revision": "2025-09-29",
       "summary": "API input is processed in real time and not saved on Z.ai's servers.",
