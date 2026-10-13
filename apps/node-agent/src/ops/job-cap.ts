@@ -11,11 +11,19 @@ export type CapSight = { size: number; at: number };
 export type CapStep = { kind: "under" } | { kind: "grace"; sight: CapSight } | { kind: "stop" };
 
 // One look at a running job's log: its size now, and whether a .cap file notes that the supervisor saw the cap.
-// `sight` is what the owner saw first; the log never shrinks (the store never rewrites one), so it only grows from it.
+// `sight` is what the owner saw first. The log never shrinks. Once the sight is at the cap, growth past it stops
+// the command. A sight still under the cap is the note arriving before those bytes, not a later write.
 export function capStep(sight: CapSight | null, size: number, cap: number, now: number, noted = false): CapStep {
   if (sight === null) {
     if (!noted && !(cap > 0 && size >= cap)) return { kind: "under" };
     return { kind: "grace", sight: { size, at: now } };
+  }
+  // A .cap note can start the clock before the bytes that crossed the cap are visible. That first
+  // capped size is the sighting. Only a later write, or the end of the grace, stops the command.
+  if (sight.size < cap) {
+    if (now - sight.at >= CAP_GRACE_MS) return { kind: "stop" };
+    if (size >= cap) return { kind: "grace", sight: { size, at: sight.at } };
+    return { kind: "grace", sight };
   }
   if (size > sight.size || now - sight.at >= CAP_GRACE_MS) return { kind: "stop" };
   return { kind: "grace", sight };

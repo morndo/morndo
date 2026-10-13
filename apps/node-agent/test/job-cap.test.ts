@@ -16,6 +16,13 @@ describe("capStep", () => {
     expect(capStep(null, 0, 8, 1000, true)).toEqual({ kind: "grace", sight: { size: 0, at: 1000 } });
   });
 
+  it("takes the first capped size after a note as the sighting, not as a later write", () => {
+    const noted = { size: 0, at: 1000 };
+    expect(capStep(noted, 4, 8, 1010)).toEqual({ kind: "grace", sight: noted });
+    expect(capStep(noted, 64, 8, 1020)).toEqual({ kind: "grace", sight: { size: 64, at: 1000 } });
+    expect(capStep({ size: 64, at: 1000 }, 65, 8, 1030)).toEqual({ kind: "stop" });
+  });
+
   it("keeps the grace while the log stays the same size", () => {
     const sight = { size: 64, at: 1000 };
     expect(capStep(sight, 64, 8, 1000 + CAP_GRACE_MS - 1)).toEqual({ kind: "grace", sight });

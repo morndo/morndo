@@ -2,7 +2,7 @@
 // child supervisor. These rows never leave a morndo-job unit on the live user manager.
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
@@ -677,12 +677,17 @@ describe.skipIf(!bus.ok)("systemd log cap", () => {
   it("marks a job truncated when the pool is full and leaves it running under its own cap", async () => {
     const { store, notices, start, sup, home, dir } = await systemdRig({ logBytes: 1_000_000, budget: 32 });
     const marker = join(home, "pid");
-    const id = await start([process.execPath, "-e", "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); while (true) require('node:fs').writeSync(1, b);", marker]);
+    // One write past the pool budget, then idle. A loop would cross the per-job cap while a sweep is slow and the
+    // cap rule would stop the job, which is a different case.
+    const id = await start([process.execPath, "-e", "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); require('node:fs').writeSync(1, Buffer.alloc(64, 97)); setInterval(() => {}, 1000);", marker]);
     expect(await until(() => existsSync(marker))).toBe(true);
     const pid = Number(readFileSync(marker, "utf8"));
+    const logPath = join(dir, `${id}.log`);
     expect(await until(async () => {
+      if (!existsSync(logPath) || statSync(logPath).size < 64) return false;
       await sup.sweep();
-      return existsSync(join(dir, `${id}.log`)) && readFileSync(join(dir, `${id}.log`)).length >= 32;
+      const job = store.get(id);
+      return job?.state === "running" && job.outcome === null;
     }, 8000)).toBe(true);
     expect(store.get(id)).toMatchObject({ state: "running", outcome: null });
     expect(existsSync(join(dir, `${id}.cap`))).toBe(false);
