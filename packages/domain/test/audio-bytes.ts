@@ -78,3 +78,17 @@ export function webmBytes(ms: number): Uint8Array {
   const streamed = new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);   // all data bits one
   return concat(ebml, new Uint8Array([0x18, 0x53, 0x80, 0x67]), streamed, info);
 }
+
+// A streamed webm whose Info has a timescale and no Duration, then a Cluster whose payload happens to
+// contain the Duration element id. Only Segment > Info may answer.
+const f32be = (n: number) => { const b = new ArrayBuffer(4); new DataView(b).setFloat32(0, n); return [...new Uint8Array(b)]; };
+
+export function webmClusterLooksLikeDuration(): Uint8Array {
+  const ebml = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x84, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81, 0x01]);
+  const scale = new Uint8Array([0x2a, 0xd7, 0xb1, 0x83, 0x0f, 0x42, 0x40]);
+  const info = new Uint8Array([0x15, 0x49, 0xa9, 0x66, 0x80 | scale.length, ...scale]);
+  const fake = new Uint8Array([0x44, 0x89, 0x84, ...f32be(1)]);                         // Duration, float32, inside audio
+  const cluster = new Uint8Array([0x1f, 0x43, 0xb6, 0x75, 0x80 | fake.length, ...fake]);
+  const streamed = new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+  return concat(ebml, new Uint8Array([0x18, 0x53, 0x80, 0x67]), streamed, info, cluster);
+}

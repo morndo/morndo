@@ -48,7 +48,7 @@ export function sniffAudio(b: Uint8Array): AudioContainer | null {
 // timescale and duration, version 0 or 1 (ISO/IEC 14496-12); an mp3's Xing frame count (VBR) or its frame
 // bitrate over the bytes that follow the ID3v2 tag (id3.org/id3v2.3.0); an Ogg page's granule position — always
 // 48 kHz for Opus (RFC 7845 §4), the identification header's rate for Vorbis; a webm's Duration element scaled
-// by TimecodeScale (Matroska's EBML).
+// by TimecodeScale, both read only from Segment > Info (Matroska's EBML).
 export type AudioBytes = { head: Uint8Array; tail?: Uint8Array; tailAt?: number; size: number };
 
 const fits = (b: Uint8Array, i: number, n: number) => i >= 0 && i + n <= b.length;
@@ -177,40 +177,68 @@ const vintSize = (b: Uint8Array, i: number, len: number) => {
   return v;
 };
 
+// One EBML element at `i`, or null when the header does not fit. The payload is not walked here: Duration and
+// TimecodeScale live in Segment > Info, and a Cluster's audio must not be searched for those ids.
+function ebmlAt(b: Uint8Array, i: number, end: number): { id: number; data: number; stop: number } | null {
+  const idLen = vintLen(b, i);
+  if (idLen === 0 || i + idLen > end) return null;
+  const id = vintId(b, i, idLen);
+  let j = i + idLen;
+  const sizeLen = vintLen(b, j);
+  if (sizeLen === 0 || j + sizeLen > end) return null;
+  const size = vintSize(b, j, sizeLen);
+  j += sizeLen;
+  const stop = size === 2 ** (7 * sizeLen) - 1 ? end : Math.min(end, j + size);   // all ones: streamed to the end
+  if (stop < j) return null;
+  return { id, data: j, stop };
+}
+
+const ebmlUint = (b: Uint8Array, data: number, stop: number): number | null => {
+  const width = stop - data;
+  if (width <= 0 || width > 8) return null;
+  let v = 0;
+  for (let k = 0; k < width; k++) v = v * 256 + b[data + k]!;
+  return v;
+};
+
+const ebmlFloat = (b: Uint8Array, data: number, stop: number): number | null => {
+  const width = stop - data;
+  if (width !== 4 && width !== 8) return null;
+  const view = new DataView(b.buffer, b.byteOffset + data, width);       // big-endian, as EBML writes it
+  return width === 4 ? view.getFloat32(0) : view.getFloat64(0);
+};
+
 function webmDuration(head: Uint8Array): number | null {
-  const found: { scale: number | null; duration: number | null } = { scale: null, duration: null };
-  const walk = (b: Uint8Array, start: number, end: number, depth: number): void => {
-    if (depth > 8) return;
-    let i = start;
-    while (i + 2 <= end) {
-      const idLen = vintLen(b, i);
-      if (idLen === 0) return;
-      const id = vintId(b, i, idLen);
-      let j = i + idLen;
-      const sizeLen = vintLen(b, j);
-      if (sizeLen === 0) return;
-      const size = vintSize(b, j, sizeLen);
-      j += sizeLen;
-      const stop = size === 2 ** (7 * sizeLen) - 1 ? end : Math.min(end, j + size);   // all ones: streamed to the end
-      const width = stop - j;
-      if (id === 0x2ad7b1 && width > 0 && width <= 8) {                    // TimecodeScale: nanoseconds a unit
-        let v = 0;
-        for (let k = 0; k < width; k++) v = v * 256 + b[j + k]!;
-        found.scale = v;
+  // Matroska: Duration and TimestampScale are children of Segment > Info, nowhere else. A Cluster is skipped
+  // by its size. Descending into it would treat audio bytes that happen to match those ids as the length.
+  let scale: number | null = null;
+  let duration: number | null = null;
+  let i = 0;
+  while (i + 2 <= head.length) {
+    const top = ebmlAt(head, i, head.length);
+    if (!top || top.stop <= i) break;
+    if (top.id === 0x18538067) {                                          // Segment
+      let j = top.data;
+      while (j + 2 <= top.stop) {
+        const child = ebmlAt(head, j, top.stop);
+        if (!child || child.stop <= j) break;
+        if (child.id === 0x1549a966) {                                    // Info, and only Info
+          let k = child.data;
+          while (k + 2 <= child.stop) {
+            const field = ebmlAt(head, k, child.stop);
+            if (!field || field.stop <= k) break;
+            if (field.id === 0x2ad7b1) scale = ebmlUint(head, field.data, field.stop);
+            else if (field.id === 0x4489) duration = ebmlFloat(head, field.data, field.stop);
+            k = field.stop;
+          }
+        }
+        j = child.stop;
       }
-      else if (id === 0x4489 && (width === 4 || width === 8)) {            // Duration, in those units
-        const view = new DataView(b.buffer, b.byteOffset + j, width);      // big-endian, as EBML writes it
-        found.duration = width === 4 ? view.getFloat32(0) : view.getFloat64(0);
-      }
-      else if (width > 0) walk(b, j, stop, depth + 1);
-      if (found.scale !== null && found.duration !== null) return;
-      if (stop <= i) return;                                    // nothing consumed: not EBML here
-      i = stop;
     }
-  };
-  walk(head, 0, head.length, 0);
-  const scale = found.scale ?? 1_000_000;                       // the spec's default unit: one millisecond
-  const ms = found.duration !== null ? (found.duration * scale) / 1e6 : null;
+    i = top.stop;
+  }
+  const unit = scale ?? 1_000_000;                                        // the spec's default unit: one millisecond
+  const ms = duration !== null ? (duration * unit) / 1e6 : null;
   return ms !== null && ms > 0 && Number.isFinite(ms) ? Math.round(ms) : null;
 }
 

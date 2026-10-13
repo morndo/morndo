@@ -8,7 +8,7 @@ import {
   afterRestart, audioDurationMs, effectiveMaxSeconds, endTranscription, makeText, MAX_RECORDING_BYTES, NO_CAPABILITY, requestTranscription, scheduleTranscriptions, sniffAudio, startTranscription, MAX_TEXT_BYTES, threadsFor, transcriptionTimeoutMs,
   composerText, editText, type EngineText, type Transcription, type TranscriptionBody,
 } from "../src/index.ts";
-import { mp3Bytes, mp4Bytes, opusBytes, vorbisBytes, wavBytes, webmBytes } from "./audio-bytes.ts";
+import { mp3Bytes, mp4Bytes, opusBytes, vorbisBytes, wavBytes, webmBytes, webmClusterLooksLikeDuration } from "./audio-bytes.ts";
 
 it("a language choice is the code's body, or auto, written once", () => {
   const src = readFileSync(new URL("../src/transcription.ts", import.meta.url), "utf8");
@@ -444,6 +444,7 @@ describe("audioDurationMs", () => {
     expect(audioDurationMs(withTail(opusBytes(5000).head, opusBytes(5000).tail))).toBe(5000);   // Opus granule at 48 kHz
     expect(audioDurationMs(withTail(vorbisBytes(1000, 8000).head, vorbisBytes(1000, 8000).tail))).toBe(1000);   // Vorbis granule at its own rate
     expect(audioDurationMs(whole(webmBytes(7500)))).toBe(7500);                      // Duration × TimecodeScale
+    expect(audioDurationMs(whole(webmClusterLooksLikeDuration()))).toBeNull();       // a Cluster's bytes are not Info
   });
 
   it("answers null whenever the bytes do not say, so a caller falls back rather than guess", () => {
