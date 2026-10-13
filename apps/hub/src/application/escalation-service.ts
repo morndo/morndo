@@ -378,11 +378,7 @@ export class EscalationService {
     const ledger = this.#ledger ? this.#ledger() : null;
     this.#lastLedger = ledger;
     this.#briefOf = new Map((this.#briefs?.() ?? []).map(b => [b.id, b]));
-    // The answer rows this poll judges taps against, grouped by key: read once (round 2.7), not once per tap line in the
-    // manager's whole history, and only when a tap is there to judge (round 3.7).
-    let read: ReadonlyMap<string, SendRow> | null = null;
-    const answers = () => (read ??= new Map(this.#store.answersOfAsk("answer:").map(r => [r.key, r])));
-    const sightings = [...this.#managerSightings(ledger, now, answers), ...this.#workerSightings(now), ...this.#hubSightings(answers)];
+    const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now), ...this.#hubSightings()];
     const changed = this.#x.reconcile(sightings, now, ledger?.ok ?? true);
     for (const id of this.#buttons.keys()) if (!this.#x.get(id)) this.#buttons.delete(id);   // kept as long as its ask
     const pending = this.#store.pendingAnswers();       // one read per poll, shared by the notice and the echo prune
@@ -480,7 +476,7 @@ export class EscalationService {
   }
 
   // The manager's asks: button messages in its conversation joined with its list, by id.
-  #managerSightings(ledger: LedgerRead | null, now: number, answers: () => ReadonlyMap<string, SendRow>): Sighting[] {
+  #managerSightings(ledger: LedgerRead | null, now: number): Sighting[] {
     const managerId = managerOf(this.#watch.workers(), this.#managerName);
     const manager = managerId === null ? null : { id: managerId };
     const messages = manager ? this.#watch.history(manager.id) : [];
@@ -571,7 +567,7 @@ export class EscalationService {
         };
         if (filed.closed) source = { kind: "settled", resolution: filed.closed.resolution, at: filed.closed.at };
       }
-      out.push({ ask: shown, source, answered: this.#ownTapOf(shown, taps.get(id) ?? null, answers) });
+      out.push({ ask: shown, source, answered: this.#ownTapOf(shown, taps.get(id) ?? null) });
     }
     return out;
   }
@@ -588,20 +584,20 @@ export class EscalationService {
   // No tap the hub read before it wrote the row is that row's paste, and none needs telling apart: the hub writes no
   // answer row after it read a tap that answers the ask (#settleEarlier), so a row's paste and a hand tap read only
   // after the row are the two left, and those the hub can't tell apart (docs/domain.md, E8's known limit). Nothing
-  // here is kept in memory, so a restart judges every tap as before it (round 4.1). The rows come as this poll's one
-  // read (round 2.7), keyed by answer key, made on the first tap that needs it (round 3.7). Being typed is that
-  // answer's own key, never the whole ask: a tap of another choice is no paste of this one, and still refuses it (E8,
-  // round 3.1).
-  #ownTapOf(ask: Ask, tap: PaneTap | null, answers: () => ReadonlyMap<string, SendRow>): Sighting["answered"] {
+  // here is kept in memory, so a restart judges every tap as before it (round 4.1). An ask is judged by its latest tap
+  // alone, so one read of the row under that tap's key, by the primary key, is all it takes (round 4.7), and an ask
+  // without a tap reads nothing. Being typed is that answer's own key, never the whole ask: a tap of another choice is
+  // no paste of this one, and still refuses it (E8, round 3.1).
+  #ownTapOf(ask: Ask, tap: PaneTap | null): Sighting["answered"] {
     if (tap === null) return null;
     const k = answerKey(ask.id, ask, { kind: "option", key: tap.key });
-    const row = answers().get(k) ?? null;
+    const row = this.#store.send(k);
     if (row !== null && (row.state === "done" || row.store !== null || this.#typing.has(k))) return null;
     return { key: tap.key, label: tap.label, at: tap.at };
   }
 
   // Briefs the hub holds open itself (E14). A `ref` is sighted with its list item, above, not here.
-  #hubSightings(answers: () => ReadonlyMap<string, SendRow>): Sighting[] {
+  #hubSightings(): Sighting[] {
     const out: Sighting[] = [];
     for (const b of this.#briefOf.values()) {
       if (b.ref !== null) continue;
@@ -610,7 +606,7 @@ export class EscalationService {
       out.push({
         ask: shown,
         source: b.closed ? { kind: "settled", resolution: b.closed.resolution, at: b.closed.at } : { kind: "open" },
-        answered: this.#ownTapOf(ask, this.#paneTaps.get(b.id) ?? null, answers),
+        answered: this.#ownTapOf(ask, this.#paneTaps.get(b.id) ?? null),
       });
     }
     return out;

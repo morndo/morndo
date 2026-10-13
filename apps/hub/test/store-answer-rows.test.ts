@@ -26,8 +26,8 @@ describe("answer rows in the store", () => {
     expect(store.sendOfRequest("desk:r1")?.key).toBe(v2);
   });
 
-  // The rows under a prefix are a range of the primary key (round 3.7): a poll reads every answer row, and the table
-  // also holds a day of steering sends, which a scan of it would read too.
+  // The rows under a prefix are a range of the primary key (round 3.7): the table also holds a day of steering sends,
+  // which a scan of it would read too.
   it("reads the rows under a prefix by a range of the primary key, not a scan of every send", () => {
     store.startSend("pc.aaaaaaaa.0:3fa2c1d0-0000-4000-8000-000000000001", T0);              // a steering send
     store.startAnswer(answerKey("ny-7", { messageId: "m1", askedAt: T0 }, ship), T0, { workerId: "%0", request: "desk:r1" });

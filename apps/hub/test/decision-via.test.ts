@@ -528,11 +528,11 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.seenBy(endpointId("pair:ep9")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
 
-  // One read of the answer rows per poll, not one query per tap line (round 2.7): the pane keeps every tap of the
-  // conversation in the window — dozens, across asks and versions — and each is judged against the same table. The
-  // result is unchanged: ny-7's tap is its own answer's paste (the row, done, is this version's, written before it),
-  // ny-8's tap is a hand's and settles the ask.
-  it("judges every tap of a poll against one read of the answer rows", async () => {
+  // One read per ask that has a tap, by its own answer key (round 4.7 of the PR #55 review): the pane keeps every tap
+  // line in the window — dozens, across asks and versions — but an ask is judged by its latest tap alone, against the
+  // one row under that tap's key. Never the whole day's answer rows. The result is unchanged: ny-7's tap is its own
+  // answer's paste (the row, done, is this version's), ny-8's tap is a hand's and settles the ask.
+  it("judges each ask's tap by one read of its own answer row", async () => {
     manager.push({ id: "m2", at: T0 - MIN / 2, author: { kind: "agent", name: "manager" }, kind: "text",
       text: "Another release is ready.\n\n[buttons ny-8] ship=Ship it | hold=Hold for a day" });
     manager.push({ id: "m-tap-1", at: T0 - 30_000, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] ship (Ship it)" });
@@ -549,12 +549,13 @@ describe("a Decision the record can no longer attribute", () => {
     s.poll();
     expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");                     // its own answer's paste
     expect(s.board().items.find(i => i.id === "ny-8")?.status).toBe("answered");                 // a hand's tap
-    expect(sends).toHaveBeenCalledTimes(0);                                                      // no query per tap
-    expect(ofAsk.mock.calls).toEqual([["answer:"]]);                                             // one read per poll, the store's own (round 3.8)
+    expect(sends.mock.calls).toEqual([[own], [answerKey("ny-8", { messageId: "m2", askedAt: T0 - MIN / 2 }, { kind: "option", key: "hold" })]]);
+    expect(ofAsk).toHaveBeenCalledTimes(0);                                                      // no range of rows
   });
 
   // And none when there is no tap to judge (round 3.7): a pane without a tap line reads no answer row at all.
   it("reads no answer rows in a poll that has no tap to judge", () => {
+    const sends = vi.spyOn(store, "send");
     const ofAsk = vi.spyOn(store, "answersOfAsk");
     const s = new EscalationService({
       watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
@@ -562,6 +563,7 @@ describe("a Decision the record can no longer attribute", () => {
     });
     s.poll();
     expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");
+    expect(sends).toHaveBeenCalledTimes(0);
     expect(ofAsk).toHaveBeenCalledTimes(0);
   });
 });
