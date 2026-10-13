@@ -89,4 +89,18 @@ describe("process host", () => {
     // The SIGKILL escalation must outlive the leader's stdio: the member dies without the hub's help.
     expect(await until(() => !alive(member), 15_000)).toBe(true);
   });
+
+  it("a probe during a run neither takes the run's group nor empties it", async () => {
+    const host = processTranscriber(FIXTURE);
+    const ac = new AbortController();
+    const pending = host.transcribe(call("/audio/hang.wav", ac.signal));
+    expect(await until(() => host.group().length > 0, 2000)).toBe(true);   // the run's leader is in place
+    const leader = host.group()[0];
+    const probe = await host.probe();                         // /api/me's probe, while the run lives
+    expect(probe.ready).toBe(true);
+    await new Promise(r => setTimeout(r, 300));               // the probe's close has run its microtasks
+    expect(host.group()).toContain(leader);                   // the run still owns its group
+    ac.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
 });
