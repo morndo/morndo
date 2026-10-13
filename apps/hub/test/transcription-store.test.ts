@@ -49,7 +49,7 @@ describe("transcription store", () => {
     first.close();
     const again = new Store(dir);
     const saved = again.transcriptions() as (Transcription & { endpointId?: string })[];
-    expect(saved.map(item => [item.endpointId, item.sizeBytes]).sort()).toEqual([["ep-1", 100], ["ep-2", 120]]);
+    expect(saved.map(item => [item.endpointId, item.sizeBytes]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))).toEqual([["ep-1", 100], ["ep-2", 120]]);
     again.close();
   });
 });
