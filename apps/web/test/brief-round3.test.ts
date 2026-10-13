@@ -251,7 +251,8 @@ describe("round 3: a restated card does not offer a send that does nothing", () 
     await show([tap("d-re", "v2", "Buy a hosted add-on")]);
     await card.getByRole("button", { name: "Back" }).click();
     await card.getByText("restated this brief").waitFor();
-    expect(await card.getByRole("button", { name: "Buy a hosted add-on", exact: true }).isDisabled()).toBe(true);
+    expect(await card.getByRole("button", { name: "Extend the triage script", exact: true }).isDisabled()).toBe(true);
+    expect(await card.getByRole("button", { name: "Buy a hosted add-on", exact: true }).count()).toBe(0);
     expect(await card.getByRole("button", { name: "Something else…" }).count()).toBe(0);
     await card.getByRole("button", { name: "Show the new version" }).click();
     expect(await card.getByRole("button", { name: "Buy a hosted add-on", exact: true }).isDisabled()).toBe(false);

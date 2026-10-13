@@ -1,4 +1,6 @@
 // Review round 4 of the desktop brief (PR #47). The real DecisionsPanel, headless Chromium, synthetic data.
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Page } from "playwright";
 import { startWeb, type Web } from "./harness.ts";
@@ -175,6 +177,32 @@ describe("round 4: a success settled elsewhere is not Sent", () => {
     await releaseAnswer();
     await dialog.getByText("no longer open").waitFor();
     expect(await dialog.getByText(/^Sent\./).count()).toBe(0);
+  }, 60_000);
+});
+
+describe("round 4: a stale card shows the version the pending answer targets", () => {
+  it("keeps the old brief under the pick, with the banner, until the new version is shown", async () => {
+    await ready();
+    await show([tap("d-stale", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-stale"]');
+    await card.getByRole("button", { name: "Extend the triage script" }).click();
+    await card.getByText("Your answer: Extend the triage script").waitFor();
+    await show([tap("d-stale", "v2", "Buy a hosted add-on", { summary: "Buy the hosted add-on" })]);
+    await card.getByText("restated this brief").waitFor();
+    await card.getByRole("button", { name: "Ship the weekly notes" }).waitFor();
+    expect(await card.getByRole("button", { name: "Buy the hosted add-on" }).count()).toBe(0);
+    expect(await card.getByText("Your answer: Extend the triage script").count()).toBe(1);
+    const qa = process.env.QA_DIR;
+    if (qa) {
+      mkdirSync(qa, { recursive: true });
+      await tab.emulateMedia({ colorScheme: "light" });
+      await card.screenshot({ path: join(qa, "briefs-card-stale-light.png") });
+      await tab.emulateMedia({ colorScheme: "dark" });
+      await card.screenshot({ path: join(qa, "briefs-card-stale-dark.png") });
+      await tab.emulateMedia({ colorScheme: "light" });
+    }
+    await card.getByRole("button", { name: "Show the new version" }).click();
+    await card.getByRole("button", { name: "Buy the hosted add-on" }).waitFor();
   }, 60_000);
 });
 

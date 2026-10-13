@@ -40,28 +40,30 @@
   const session = $derived(given ?? own);
   $effect(() => { if (!given) own.bind(item, false); });
 
-  const u = $derived(urgency(item, now));
+  // The body is the version the pending answer targets. A restate stays behind the banner until it is shown.
+  const view = $derived(session.shown);
+  const u = $derived(urgency(view, now));
   const open = $derived(item.status === "open");
   const canAnswer = $derived(open && item.answerable === null);
-  const card = $derived(cardOf(item));
-  const asker = $derived(item.asker.kind === "manager" ? "Manager" : `#${item.asker.name}`);
-  const whom = $derived(item.asker.kind === "manager" ? "the manager" : item.asker.name);
-  const answers = $derived(variant === "panel" ? card.quickAnswers : item.options);
-  const recommended = $derived(item.answerBy === "tap" ? answers[0]?.key ?? null : null);
+  const card = $derived(cardOf(view));
+  const asker = $derived(view.asker.kind === "manager" ? "Manager" : `#${view.asker.name}`);
+  const whom = $derived(view.asker.kind === "manager" ? "the manager" : view.asker.name);
+  const answers = $derived(variant === "panel" ? card.quickAnswers : view.options);
+  const recommended = $derived(view.answerBy === "tap" ? answers[0]?.key ?? null : null);
   // In the chat the message above is the context, so the question line shows only when it says something new.
-  const showRecommendation = $derived(!!item.recommendation && open);
-  const showDefault = $derived(!!item.ifNoAnswer && open);
+  const showRecommendation = $derived(!!view.recommendation && open);
+  const showDefault = $derived(!!view.ifNoAnswer && open);
   let root = $state<HTMLElement | null>(null);
   // Picking an option opens the confirmation inside the card: keep it in view (the chat may have it at the bottom edge).
   $effect(() => { if (session.mode !== "idle") requestAnimationFrame(() => root?.querySelector(".confirm")?.scrollIntoView({ block: "nearest" })); });
-  const showTitle = $derived(!(item.context ?? "").includes(item.title.slice(0, 48)));
+  const showTitle = $derived(!(view.context ?? "").includes(view.title.slice(0, 48)));
   const byline = $derived([
     asker,
-    ago(item.askedAt, now),
+    ago(view.askedAt, now),
     card.minutes !== null ? `≈${card.minutes} min` : null,
     card.spend ? "Includes spend" : null,
-    item.blocking && open ? "Blocking" : null,
-    item.askedAgain && open ? "Asked again" : null,
+    view.blocking && open ? "Blocking" : null,
+    view.askedAgain && open ? "Asked again" : null,
     card.hasBrief ? null : "Filed without a brief",
   ].filter((part): part is string => part !== null).join(" · "));
   const readLabel = $derived(card.hasBrief ? "Read the brief ›" : "Details ›");
@@ -95,26 +97,26 @@
     {#if card.spend && card.recommended}<p class="rec"><Star size={14} aria-hidden="true" /> Recommended: {card.recommended}</p>{/if}
   {:else}
   <header class="meta">
-    <span class="kind"><Signpost size={14} />{item.need === "time" ? "Needs your time" : "Decision"}</span>
+    <span class="kind"><Signpost size={14} />{view.need === "time" ? "Needs your time" : "Decision"}</span>
     <span class="chips">
-      {#if item.askedAgain && open}<span class="chip info"><Repeat size={12} />Asked again</span>{/if}
-      {#if item.blocking && open}<span class="chip bad"><Flag size={12} />Blocking</span>{/if}
-      {#if item.deadline !== null && (open || item.status === "answered")}
-        <span class="chip" class:bad={u === "overdue"} class:warn={u === "soon"}><CalendarClock size={12} />{dueLabel(item.deadline, now)}</span>
+      {#if view.askedAgain && open}<span class="chip info"><Repeat size={12} />Asked again</span>{/if}
+      {#if view.blocking && open}<span class="chip bad"><Flag size={12} />Blocking</span>{/if}
+      {#if view.deadline !== null && (open || item.status === "answered")}
+        <span class="chip" class:bad={u === "overdue"} class:warn={u === "soon"}><CalendarClock size={12} />{dueLabel(view.deadline, now)}</span>
       {/if}
     </span>
   </header>
-  {#if showTitle}<h3 class="title">{item.title}</h3>{/if}
+  {#if showTitle}<h3 class="title">{view.title}</h3>{/if}
   {/if}
-  {#if item.status === "open" && item.notice}<p class="sub" role="status">{item.notice}</p>{/if}
+  {#if item.status === "open" && view.notice}<p class="sub" role="status">{view.notice}</p>{/if}
   {#if open && session.stale}
     <p class="restated" role="status">{whom[0] ? whom[0].toUpperCase() + whom.slice(1) : whom} restated this brief. <button type="button" class="link" onclick={() => session.showNew()}>Show the new version</button></p>
   {/if}
 
   {#if variant !== "panel" && (showRecommendation || showDefault)}
     <dl class="facts">
-      {#if showRecommendation}<div><dt><Lightbulb size={14} />Recommended</dt><dd>{item.recommendation}</dd></div>{/if}
-      {#if showDefault}<div><dt><Hourglass size={14} />If you don't answer</dt><dd>{item.ifNoAnswer}</dd></div>{/if}
+      {#if showRecommendation}<div><dt><Lightbulb size={14} />Recommended</dt><dd>{view.recommendation}</dd></div>{/if}
+      {#if showDefault}<div><dt><Hourglass size={14} />If you don't answer</dt><dd>{view.ifNoAnswer}</dd></div>{/if}
     </dl>
   {/if}
 
@@ -151,15 +153,15 @@
     <div class="state done" role="status"><Hourglass size={18} /><p>Expired: nobody answered within a day.</p></div>
   {:else if session.sent}
     <div class="state ok" role="status"><CircleCheckBig size={18} /><p>Sent. The manager gets it as your decision and acts on it.</p></div>
-  {:else if item.answerBy === "screen"}
-    {#if item.options.length}
+  {:else if view.answerBy === "screen"}
+    {#if view.options.length}
       <ul class="readonly">
-        {#each item.options as o (o.key)}<li><span class="n">{o.key}</span><span><b>{o.label}</b>{#if o.detail}<small>{o.detail}</small>{/if}</span></li>{/each}
+        {#each view.options as o (o.key)}<li><span class="n">{o.key}</span><span><b>{o.label}</b>{#if o.detail}<small>{o.detail}</small>{/if}</span></li>{/each}
       </ul>
     {/if}
-    {#if item.context && item.contextKind === "screen"}<pre class="screen">{item.context}</pre>{/if}
+    {#if view.context && view.contextKind === "screen"}<pre class="screen">{view.context}</pre>{/if}
     <div class="actions">
-      {#if item.asker.workerId}<button class="btn primary" onclick={() => item.asker.workerId && onOpenScreen(item.asker.workerId)}><SquareTerminal size={16} />Answer in {asker}'s terminal</button>{/if}
+      {#if view.asker.workerId}<button class="btn primary" onclick={() => view.asker.workerId && onOpenScreen(view.asker.workerId)}><SquareTerminal size={16} />Answer in {asker}'s terminal</button>{/if}
     </div>
   {:else if session.mode === "confirm" || session.mode === "words" || session.again}
     <!-- An answer in doubt: only Check again, never another answer while it may have reached the asker (E8). -->
@@ -168,7 +170,7 @@
     <div class="actions">
       {#if variant === "panel" && card.spend}
         <button type="button" class="btn" disabled={!canAnswer} onclick={() => onOpen?.(item)}>Read and decide ›</button>
-      {:else if item.answerBy === "tap"}
+      {:else if view.answerBy === "tap"}
         {#each answers as o (o.key)}
           <button class="btn" class:primary={o.key === recommended} disabled={!canAnswer || session.stale} onclick={() => choose(o.label, { key: o.key })}
             aria-describedby={variant === "panel" ? `topic-${item.id}` : undefined}
@@ -178,13 +180,13 @@
         {/each}
         {#if canAnswer && !session.stale}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
-      {:else if item.need === "time"}
+      {:else if view.need === "time"}
         <button class="btn primary" disabled={!canAnswer || session.stale} onclick={() => choose("Done", { text: "Done" })}>Done</button>
         <button class="btn" disabled={!canAnswer || session.stale} onclick={() => writeWords()}><MessageSquareText size={14} />Reply…</button>
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {:else}
         <button class="btn primary" disabled={!canAnswer || session.stale} onclick={() => writeWords()}><MessageSquareText size={14} />Answer…</button>
-        {#if item.ifNoAnswer}<button class="btn" disabled={!canAnswer || session.stale} onclick={() => choose(`Go with the default (${item.ifNoAnswer})`, { text: `Go with the default: ${item.ifNoAnswer}` })}>Go with the default</button>{/if}
+        {#if view.ifNoAnswer}<button class="btn" disabled={!canAnswer || session.stale} onclick={() => choose(`Go with the default (${view.ifNoAnswer})`, { text: `Go with the default: ${view.ifNoAnswer}` })}>Go with the default</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
       {/if}
     </div>
