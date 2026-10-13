@@ -529,6 +529,22 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.seenBy(endpointId("phone")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
 
+  // Two answers to one ask in doubt, both typed at their node: the first written is his Decision, whatever the hub's
+  // clock said when each was written (round 5.4). Here it stepped back between them, so the second has the earlier time.
+  it("of two answers in doubt that were both typed, the first written is the Decision when the clock stepped back", async () => {
+    const asking = { messageId: "m1", askedAt: T0 - MIN };
+    store.startAnswer(answerKey("ny-7", asking, { kind: "option", key: "ship" }), T0, { workerId: "%0", request: "desk:r1", label: "Ship it" });
+    store.startAnswer(answerKey("ny-7", asking, { kind: "option", key: "hold" }), T0 - 2000, { workerId: "%0", request: "tablet:r2", label: "Hold for a day" });
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("not reached"); },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                    // both typed there
+    });
+    s.poll();
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "words", text: "Ship it tomorrow" }, "r3")).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision).toMatchObject({ choice: { key: "ship" }, endpointId: endpointId("desk") });
+  });
+
   // The request names "<endpoint>:<request id>", and the part known to carry no colon is the request id (a uuid), not
   // the endpoint (round 2.6): a prefixed endpoint id with a colon of its own splits at the last colon, so the answer is
   // recorded for the endpoint that sent it and that endpoint reads "here", not a cut-off prefix no device owns.

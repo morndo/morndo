@@ -181,11 +181,12 @@ export class Store {
     return r ? sendRow(r) : null;
   }
   // Every answer to one ask kept here (24 hours), whatever its choice: the rows whose answer key starts with `prefix`
-  // (escalation-service.ts askPrefix), oldest first: what an answer settles before it is typed (E8). A range of the
+  // (escalation-service.ts askPrefix), in the order they were written, by insertion as sendOfRequest's, never by the
+  // hub's clock (round 5.4): what an answer settles before it is typed (E8), the first written first. A range of the
   // primary key, never a scan of every send (round 3.7 of the PR #55 review): the keys from the prefix up to the prefix
   // with its last character one higher (keysPast).
   answersOfAsk(prefix: string): SendRow[] {
-    return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE key >= ? AND key < ? ORDER BY at, key`)
+    return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE key >= ? AND key < ? ORDER BY rowid`)
       .all(prefix, keysPast(prefix)) as SendRowSql[]).map(sendRow);
   }
   // The store of the node a send went to (fleet core §3.1), kept with its row: only that store can say it never started.

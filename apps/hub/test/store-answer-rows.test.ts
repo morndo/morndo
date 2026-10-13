@@ -36,6 +36,17 @@ describe("answer rows in the store", () => {
     expect(store.sendOfRequest("desk:r1")?.key).toBe(v2);
   });
 
+  // An ask's rows come back in the order they were written, as a request's last row does (round 5.4): the clock stepped
+  // back between two answers of other choices, so the second has the earlier time, and its key sorts first too. The
+  // first written still comes first: it is the one an answer settles first (#otherAnswer).
+  it("reads an ask's rows in the order they were written when the clock stepped back between them", () => {
+    const first = answerKey("ny-7", { messageId: "m1", askedAt: T0 - 60_000 }, ship);
+    const second = answerKey("ny-7", { messageId: "m1", askedAt: T0 - 60_000 }, { kind: "option", key: "hold" });
+    store.startAnswer(first, T0, { workerId: "%0", request: "desk:r1" });
+    store.startAnswer(second, T0 - 2000, { workerId: "%0", request: "phone:r2" });          // NTP stepped back 2 s
+    expect(store.answersOfAsk("answer:ny-7:m1:").map(r => r.key)).toEqual([first, second]);
+  });
+
   // The rows under a prefix are a range of the primary key (round 3.7): the table also holds a day of steering sends,
   // which a scan of it would read too.
   it("reads the rows under a prefix by a range of the primary key, not a scan of every send", () => {
