@@ -4,7 +4,7 @@
 // the metadata a photo carries (location, camera, text): JPEG APP1/APP13/comment segments and PNG text, time and
 // EXIF chunks are dropped. A recording loses its tags only where that can be done without corrupting the audio
 // (docs/design/transcription, section 8). Files older than a week are removed.
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -14,21 +14,23 @@ import { IMAGE_EXTENSION, NO_CAPABILITY, UPLOAD_TTL_MS, acceptNamedUpload, accep
 
 const KEEP_FILES_MS = 7 * 24 * 3_600_000;
 
-// Said once, at hub start. Without ffmpeg the mp4, ogg and webm files are stored unchanged: the hand-written
-// strippers for those containers stay out, because a wrong size or offset corrupts the audio.
-let ffmpegNoted = false;
-export function noteMissingFfmpeg(log: (line: string) => void, present: () => boolean = ffmpegOnPath): void {
-  if (ffmpegNoted || present()) return;
-  ffmpegNoted = true;
-  log("recordings keep their container metadata");
+// Said once for this hub, at start. Without ffmpeg the mp4, ogg and webm files are stored unchanged: the
+// hand-written strippers for those containers stay out, because a wrong size or offset corrupts the audio.
+// The flag belongs to the instance, and the check does not spawn synchronously.
+export function createFfmpegNote(present: () => Promise<boolean> = ffmpegOnPath): { check: (log: (line: string) => void) => Promise<void> } {
+  let noted = false;
+  return {
+    async check(log) {
+      if (noted || await present()) return;
+      noted = true;
+      log("recordings keep their container metadata");
+    },
+  };
 }
-function ffmpegOnPath(): boolean {
-  try {
-    execFileSync("ffmpeg", ["-hide_banner", "-version"], { stdio: "ignore", timeout: 2000 });
-    return true;
-  } catch {
-    return false;
-  }
+function ffmpegOnPath(): Promise<boolean> {
+  return new Promise(resolve => {
+    execFile("ffmpeg", ["-hide_banner", "-version"], { stdio: "ignore", timeout: 2000 }, error => resolve(!error));
+  });
 }
 
 // What an audio file loses on the way in. A photo's segments can be dropped because each one names its own length.
