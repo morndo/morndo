@@ -65,7 +65,7 @@ function memory(seed: Transcription[] = []): TranscriptionStore {
   };
 }
 
-const files = new Map<string, { path: string; size: number; durationMs: number | null }>([
+const files = new Map<string, { path: string; size: number; durationMs: number | null; owner?: string }>([
   ["a", { path: "/audio/a.wav", size: 12, durationMs: null }],
   ["b", { path: "/audio/b.wav", size: 12, durationMs: null }],
   ["hang", { path: "/audio/hang.wav", size: 12, durationMs: null }],
@@ -74,12 +74,20 @@ const files = new Map<string, { path: string; size: number; durationMs: number |
   ["over", { path: "/audio/over.wav", size: 12, durationMs: 900_000 }],
 ]);
 
+// The port production wires: a file the caller may read, an upload only its own endpoint's (S2's rule).
+const port = (recording: Recording, caller?: { endpointId: string }) => {
+  const file = files.get(recording.id);
+  if (!file) return null;
+  if (file.owner && caller && file.owner !== caller.endpointId) return null;
+  return file;
+};
+
 function service(store: TranscriptionStore, gate: Gate, extra: { guard?: () => "off" | "load"; timeoutFor?: (durationMs: number) => number; now?: () => number } = {}) {
   let guard: "off" | "load" = "off";
   const lines: string[] = [];
   const svc = new TranscriptionService({
     store, transcriber: gate.transcriber, now: extra.now ?? (() => 1_700_000_000_000),
-    file: (recording: Recording) => files.get(recording.id) ?? null,
+    file: port,
     guard: () => extra.guard?.() ?? guard,
     log: line => lines.push(line),
     probeTtlMs: 0,
@@ -88,8 +96,8 @@ function service(store: TranscriptionStore, gate: Gate, extra: { guard?: () => "
   return { svc, lines, setGuard: (g: "off" | "load") => { guard = g; } };
 }
 
-const body = (id: string, recording: string, language = "auto") =>
-  ({ id, recording: { kind: "upload" as const, id: recording }, language });
+const body = (id: string, recording: string, language = "auto", endpointId = "ep-1") =>
+  ({ id, recording: { kind: "upload" as const, id: recording }, language, caller: { endpointId } });
 
 describe("transcription service", () => {
   it("fileOnDisk reads a recording's duration out of its container", () => {
@@ -100,6 +108,9 @@ describe("transcription service", () => {
       writeFileSync(file, made);
       expect(fileOnDisk(file)).toMatchObject({ path: file, size: made.length, durationMs: 1000 });
       expect(fileOnDisk(join(dir, "no-such.wav"))).toBeNull();
+      // S1: audio is known by its own bytes. A file that is not one of the containers is no recording, whatever its name.
+      writeFileSync(join(dir, "note.wav"), "%PDF-1.7 made up");
+      expect(fileOnDisk(join(dir, "note.wav"))).toBeNull();
     }
     finally { rmSync(dir, { recursive: true, force: true }); }
   });
@@ -322,6 +333,37 @@ describe("transcription service", () => {
     svc.close();
   });
 
+  it("a language this engine does not list is refused before anything runs", async () => {
+    const gate = new Gate();
+    gate.ready = { ...READY, languages: ["de", "en"] };
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    const refused = await svc.request(body("tx-xx", "a", "xx"));
+    expect(refused).toEqual({ ok: false, error: "bad_language" });
+    expect(gate.calls).toEqual([]);
+    const taken = await svc.request(body("tx-de", "a", "de"));
+    expect(taken.ok && taken.value.state).toBe("running");
+    svc.close();
+  });
+
+  it("an upload another endpoint made is not a recording for the caller", async () => {
+    files.set("foreign", { path: "/audio/foreign.wav", size: 12, durationMs: null, owner: "ep-2" });
+    try {
+      const gate = new Gate();
+      const { svc } = service(memory(), gate);
+      await svc.start();
+      const refused = await svc.request(body("tx-f", "foreign", "auto", "ep-1"));
+      expect(refused).toEqual({ ok: false, error: "unreadable" });
+      expect(gate.calls).toEqual([]);
+      const own = await svc.request(body("tx-f", "foreign", "auto", "ep-2"));
+      expect(own.ok && own.value.state).toBe("running");
+      expect(gate.calls).toEqual(["/audio/foreign.wav"]);
+      svc.close();
+    } finally {
+      files.delete("foreign");
+    }
+  });
+
   it("a rejection that is not an abort is a failure, whichever reason an earlier attempt left", async () => {
     const gate = new Gate();
     const { svc } = service(memory(), gate, { timeoutFor: () => 40 });
@@ -351,7 +393,7 @@ describe("transcription service", () => {
     const lines: string[] = [];
     const svc = new TranscriptionService({
       store: memory(), transcriber: null, locate: () => found,
-      now: () => 1_700_000_000_000, file: (recording: Recording) => files.get(recording.id) ?? null,
+      now: () => 1_700_000_000_000, file: port,
       log: line => lines.push(line), probeTtlMs: 0,
     });
     await svc.start();

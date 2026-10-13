@@ -74,6 +74,27 @@ describe("transcription http", () => {
     expect(view.text?.text).toBe(SENTENCE);
   });
 
+  it("refuses a recording that is not audio, or another device's upload", async () => {
+    const hub = await startInProcessHub({ transcriber: processTranscriber(FIXTURE) });
+    hubs.push(hub);
+    const mine = await cookieOf(hub);
+    const other = await cookieOf(hub);                       // a second paired device: another endpoint
+    // A PDF is a fine upload but no recording: audio is known by its own bytes (S1), never by the id alone.
+    const pdf = await upload(hub, mine, "note.pdf", Buffer.concat([Buffer.from("%PDF-1.7 "), Buffer.alloc(4064, 0x20)]));
+    expect(pdf.status).toBe(200);
+    const paper = await pdf.json() as { id: string };
+    const forPaper = await hub.post("/api/transcriptions", { id: "voice2", recording: { kind: "upload", id: paper.id }, language: "auto" }, { cookie: mine });
+    expect(forPaper.status).toBe(404);
+    expect(await forPaper.json()).toEqual({ error: "unreadable" });
+    // An upload belongs to the endpoint that made it (S2's rule for attachments): not another device's to transcribe.
+    const ogg = await upload(hub, other, "note.ogg", Buffer.from("OggSrest"));
+    expect(ogg.status).toBe(200);
+    const saved = await ogg.json() as { id: string };
+    const foreign = await hub.post("/api/transcriptions", { id: "voice3", recording: { kind: "upload", id: saved.id }, language: "auto" }, { cookie: mine });
+    expect(foreign.status).toBe(404);
+    expect(await foreign.json()).toEqual({ error: "unreadable" });
+  });
+
   it("serves the app shell's microphone policy from a fresh probe, not the stale cache", async () => {
     let ready = false;
     const transcriber: Transcriber = {

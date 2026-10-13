@@ -27,7 +27,7 @@ const ask = (over: Partial<TranscriptionBody> = {}): TranscriptionBody => ({
 });
 const heard = (text = "guten Morgen", durationMs = 30_000): EngineText =>
   ({ language: "de", durationMs, segments: [{ startMs: 0, endMs: durationMs, text }] });
-const live = (over: Partial<Transcription> = {}): Transcription => ({ ...value(requestTranscription([], ask(), AT, READY)), ...over });
+const live = (over: Partial<Transcription> = {}): Transcription => ({ ...value(requestTranscription([], ask(), AT, READY, "multi")), ...over });
 
 describe("sniffAudio", () => {
   it("knows each audio container by its own bytes", () => {
@@ -59,28 +59,37 @@ describe("sniffAudio", () => {
 
 describe("requesting a transcription", () => {
   it("runs nothing and offers nothing while no ready Transcriber is there, whatever the body (TX9)", () => {
-    expect(requestTranscription([], ask(), AT, NO_CAPABILITY)).toEqual({ ok: false, error: "no_capability" });
-    expect(requestTranscription([], ask({ id: "" }), AT, { present: false, reason: "not_ready" })).toEqual({ ok: false, error: "no_capability" });
-    expect(requestTranscription([], ask(), AT, { present: true, maxSeconds: Number.NaN })).toEqual({ ok: false, error: "no_capability" });
+    expect(requestTranscription([], ask(), AT, NO_CAPABILITY, "multi")).toEqual({ ok: false, error: "no_capability" });
+    expect(requestTranscription([], ask({ id: "" }), AT, { present: false, reason: "not_ready" }, "multi")).toEqual({ ok: false, error: "no_capability" });
+    expect(requestTranscription([], ask(), AT, { present: true, maxSeconds: Number.NaN }, "multi")).toEqual({ ok: false, error: "no_capability" });
   });
   it("refuses a bad id, recording, language or size before it queues anything", () => {
-    expect(requestTranscription([], ask({ id: "../up" }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
-    expect(requestTranscription([], ask({ recording: { kind: "upload", id: "" } }), AT, READY)).toEqual({ ok: false, error: "bad_recording" });
+    expect(requestTranscription([], ask({ id: "../up" }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_id" });
+    expect(requestTranscription([], ask({ recording: { kind: "upload", id: "" } }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_recording" });
     const agentKind = { kind: "agent", id: "up-1" } as unknown as TranscriptionBody["recording"];   // not one of the two kinds
-    expect(requestTranscription([], ask({ recording: agentKind }), AT, READY)).toEqual({ ok: false, error: "bad_recording" });
-    expect(requestTranscription([], ask({ language: "DE" }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
-    expect(requestTranscription([], ask({ language: "auto-detected" }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
-    expect(requestTranscription([], ask({ sizeBytes: -1 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
-    expect(requestTranscription([], ask({ sizeBytes: 4096.5 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
+    expect(requestTranscription([], ask({ recording: agentKind }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_recording" });
+    expect(requestTranscription([], ask({ language: "DE" }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ language: "auto-detected" }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ sizeBytes: -1 }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_size" });
+    expect(requestTranscription([], ask({ sizeBytes: 4096.5 }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_size" });
+  });
+
+  it("refuses a language the engine does not list, whatever the code's shape", () => {
+    expect(requestTranscription([], ask({ language: "xx" }), AT, READY, ["de", "en"])).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ language: "en-US" }), AT, READY, ["de", "en"])).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ language: "de" }), AT, READY, ["de", "en"]).ok).toBe(true);
+    expect(requestTranscription([], ask({ language: "pt-BR" }), AT, READY, ["de", "pt-BR"]).ok).toBe(true);
+    expect(requestTranscription([], ask({ language: "auto" }), AT, READY, []).ok).toBe(true);      // auto asks; it chooses no code
+    expect(requestTranscription([], ask({ language: "xx" }), AT, READY, "multi").ok).toBe(true);  // a multilingual engine takes any code
   });
 
   it("refuses an id that is missing or not a string, instead of reading it as its own spelling", () => {
-    expect(requestTranscription([], ask({ id: undefined as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
-    expect(requestTranscription([], ask({ id: 42 as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_id" });
-    expect(requestTranscription([], ask({ recording: { kind: "upload", id: 7 as unknown as string } }), AT, READY))
+    expect(requestTranscription([], ask({ id: undefined as unknown as string }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_id" });
+    expect(requestTranscription([], ask({ id: 42 as unknown as string }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_id" });
+    expect(requestTranscription([], ask({ recording: { kind: "upload", id: 7 as unknown as string } }), AT, READY, "multi"))
       .toEqual({ ok: false, error: "bad_recording" });
     // An array stringifies to "de", and RegExp.test would accept that. The language has to be a string first.
-    expect(requestTranscription([], ask({ language: ["de"] as unknown as string }), AT, READY)).toEqual({ ok: false, error: "bad_language" });
+    expect(requestTranscription([], ask({ language: ["de"] as unknown as string }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_language" });
   });
   it("queues one attempt, waiting for a slot, with no outcome and no text", () => {
     expect(live()).toMatchObject({
@@ -91,32 +100,32 @@ describe("requesting a transcription", () => {
   });
   it("returns the attempt already in flight for the same recording and language (TX2)", () => {
     const first = live();
-    expect(value(requestTranscription([first], ask({ id: "tx-2" }), AT + 5, READY))).toBe(first);
+    expect(value(requestTranscription([first], ask({ id: "tx-2" }), AT + 5, READY, "multi"))).toBe(first);
     const german = live({ id: "tx-3", language: "de" });
-    const again = value(requestTranscription([german], ask({ id: "tx-4", language: "de", recording: { kind: "upload", id: "up-2" } }), AT + 5, READY));
+    const again = value(requestTranscription([german], ask({ id: "tx-4", language: "de", recording: { kind: "upload", id: "up-2" } }), AT + 5, READY, "multi"));
     expect(again).not.toBe(german);   // another recording is another attempt, not a conflict
     expect(again.acceptedAt).toBe(AT + 5);
-    const otherLanguage = value(requestTranscription([first], ask({ id: "tx-5", language: "de" }), AT + 6, READY));
+    const otherLanguage = value(requestTranscription([first], ask({ id: "tx-5", language: "de" }), AT + 6, READY, "multi"));
     expect(otherLanguage.id).toBe("tx-5");
   });
   it("an agent's attachment and the principal's upload of the same id are two recordings", () => {
     const first = live({ recording: { kind: "attachment", id: "file-1" } });
-    const second = requestTranscription([first], ask({ recording: { kind: "upload", id: "file-1" } }), AT + 5, READY);
+    const second = requestTranscription([first], ask({ recording: { kind: "upload", id: "file-1" } }), AT + 5, READY, "multi");
     expect(second.ok && second.value.id).toBe("tx-1");   // a new attempt: not the one in flight
     expect(second.ok && second.value.recording.kind).toBe("upload");
   });
   it("a finished attempt does not hold the recording: asking again makes a new one (TX3)", () => {
     const done = { ...live(), state: "failed" as const, outcome: "failed" as const, problem: "engine" as const };
-    const again = value(requestTranscription([done], ask({ id: "tx-9" }), AT + 9, READY));
+    const again = value(requestTranscription([done], ask({ id: "tx-9" }), AT + 9, READY, "multi"));
     expect(again).toMatchObject({ id: "tx-9", state: "queued", acceptedAt: AT + 9 });
     expect(done.state).toBe("failed");
   });
 
   it("an id that names a finished attempt takes its own body again, and only its body (TX3)", () => {
     const done = { ...live(), state: "failed" as const, outcome: "failed" as const, problem: "engine" as const };
-    expect(requestTranscription([done], ask(), AT + 5, READY)).toEqual({ ok: true, value: done });
+    expect(requestTranscription([done], ask(), AT + 5, READY, "multi")).toEqual({ ok: true, value: done });
     const finished = { ...live({ id: "tx-7" }), state: "done" as const, outcome: "done" as const };
-    expect(requestTranscription([finished], ask({ id: "tx-7", recording: { kind: "upload", id: "up-9" } }), AT + 5, READY))
+    expect(requestTranscription([finished], ask({ id: "tx-7", recording: { kind: "upload", id: "up-9" } }), AT + 5, READY, "multi"))
       .toEqual({ ok: false, error: "id_conflict" });
   });
 });
@@ -287,8 +296,8 @@ describe("the caps on a recording, a run and its text (TX6)", () => {
   const run = (): Transcription => ({ ...live(), state: "running", startedAt: AT + 10 });
 
   it("a recording over 10 MiB is refused at the request; one exactly at the line is taken", () => {
-    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES + 1 }), AT, READY)).toEqual({ ok: false, error: "bad_size" });
-    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES }), AT, READY).ok).toBe(true);
+    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES + 1 }), AT, READY, "multi")).toEqual({ ok: false, error: "bad_size" });
+    expect(requestTranscription([], ask({ sizeBytes: MAX_RECORDING_BYTES }), AT, READY, "multi").ok).toBe(true);
   });
 
   it("words that took longer than the cap are failed: too_long, not done", () => {
