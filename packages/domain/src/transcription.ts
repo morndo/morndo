@@ -39,6 +39,192 @@ export function sniffAudio(b: Uint8Array): AudioContainer | null {
   return null;
 }
 
+// §9: how long one Recording's audio is, read from its own container — the timeout scales with it. The bytes are
+// what a reader took of the file: `head` from the front, and the last `tail` bytes starting at `tailAt`, where
+// some containers keep their length (an m4a's moov can sit at the end, and an Ogg's last page holds the final
+// granule position). Null whenever the bytes do not say: the caller uses its cap, never a guess.
+//
+// Where each container keeps it: a wav's `data` chunk over the `fmt ` chunk's byte rate (RIFF); an mp4's mvhd
+// timescale and duration, version 0 or 1 (ISO/IEC 14496-12); an mp3's Xing frame count (VBR) or its frame
+// bitrate over the bytes that follow the ID3v2 tag (id3.org/id3v2.3.0); an Ogg page's granule position — always
+// 48 kHz for Opus (RFC 7845 §4), the identification header's rate for Vorbis; a webm's Duration element scaled
+// by TimecodeScale (Matroska's EBML).
+export type AudioBytes = { head: Uint8Array; tail?: Uint8Array; tailAt?: number; size: number };
+
+const fits = (b: Uint8Array, i: number, n: number) => i >= 0 && i + n <= b.length;
+const u32be = (b: Uint8Array, i: number) => b[i]! * 2 ** 24 + b[i + 1]! * 2 ** 16 + b[i + 2]! * 2 ** 8 + b[i + 3]!;
+const u32le = (b: Uint8Array, i: number) => b[i]! + b[i + 1]! * 256 + b[i + 2]! * 2 ** 16 + b[i + 3]! * 2 ** 24;
+const u64le = (b: Uint8Array, i: number) => u32le(b, i) + u32le(b, i + 4) * 2 ** 32;
+const text = (b: Uint8Array, i: number, n: number) => String.fromCharCode(...b.subarray(i, i + n));
+
+function wavDuration(head: Uint8Array): number | null {
+  let byteRate: number | null = null;
+  let dataBytes: number | null = null;
+  let i = 12;                                                // past RIFF <size> WAVE
+  while (i + 8 <= head.length && (byteRate === null || dataBytes === null)) {
+    const id = text(head, i, 4);
+    const size = u32le(head, i + 4);
+    if (id === "fmt " && fits(head, i + 20, 4)) byteRate = u32le(head, i + 16);              // body: … byteRate @ 8
+    if (id === "data") dataBytes = size;
+    i += 8 + size + (size % 2);                              // chunks are word-aligned
+  }
+  return byteRate !== null && byteRate > 0 && dataBytes !== null && dataBytes > 0
+    ? Math.round((dataBytes / byteRate) * 1000)
+    : null;
+}
+
+// moov may sit at the end of the file, so the head is tried first and then the tail. `b` is whichever slice holds
+// the boxes; they say their own sizes.
+function mp4Duration(b: Uint8Array): number | null {
+  let i = 0;
+  while (i + 8 <= b.length) {
+    const size = u32be(b, i);
+    if (size < 8) return null;                               // a broken box ends the walk, never a guess
+    if (text(b, i + 4, 4) === "moov") {
+      let j = i + 8;
+      while (j + 8 <= Math.min(i + size, b.length)) {
+        const inner = u32be(b, j);
+        if (inner < 8) return null;
+        if (text(b, j + 4, 4) === "mvhd") {
+          const version = b[j + 8];                           // 0: 32-bit fields; 1: 64-bit dates, then the same
+          const scaleAt = j + 8 + (version === 1 ? 20 : 12);   // v1 carries 64-bit dates first
+          const durationAt = scaleAt + 4;
+          if (!fits(b, scaleAt, 4) || !fits(b, durationAt, version === 1 ? 8 : 4)) return null;
+          const scale = u32be(b, scaleAt);
+          const duration = version === 1
+            ? u32be(b, durationAt) * 2 ** 32 + u32be(b, durationAt + 4)
+            : u32be(b, durationAt);
+          return scale > 0 && duration > 0 && duration < 2 ** 32 - 1
+            ? Math.round((duration / scale) * 1000)
+            : null;
+        }
+        j += inner;
+      }
+      return null;                                            // a moov without a readable mvhd
+    }
+    i += size;
+  }
+  return null;
+}
+
+// MPEG audio frame header tables (MPEG-1/2/2.5, Layer III), as every decoder reads them.
+const MP3_BITRATE_V1 = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+const MP3_BITRATE_V2 = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+const MP3_RATES: Record<number, number[]> = { 3: [44_100, 48_000, 32_000], 2: [22_050, 24_000, 16_000], 0: [11_025, 12_000, 8_000] };
+
+function mp3Duration(head: Uint8Array, size: number): number | null {
+  let i = 0;
+  if (at(head, 0, 0x49, 0x44, 0x33)) {                        // an ID3v2 tag first: a sync-safe size
+    if (!fits(head, 0, 10)) return null;
+    const flags = head[5]!;
+    i = 10 + (((head[6]! & 0x7f) << 21) | ((head[7]! & 0x7f) << 14) | ((head[8]! & 0x7f) << 7) | (head[9]! & 0x7f))
+      + (flags & 0x10 ? 5 : 0);
+  }
+  if (!fits(head, i, 4) || head[i] !== 0xff || (head[i + 1]! & 0xe0) !== 0xe0) return null;
+  const version = (head[i + 1]! >> 3) & 0x3;                  // 3: MPEG-1; 2: MPEG-2; 0: MPEG-2.5
+  const layer = (head[i + 1]! >> 1) & 0x3;                    // 1: Layer III
+  if (version === 1 || layer !== 1) return null;              // a reserved version, or not Layer III
+  const bitrate = (version === 3 ? MP3_BITRATE_V1 : MP3_BITRATE_V2)[head[i + 2]! >> 4] ?? 0;
+  const rate = MP3_RATES[version]?.[(head[i + 2]! >> 2) & 0x3] ?? 0;
+  if (bitrate <= 0 || rate <= 0) return null;
+  // A VBR file names its frames in a Xing/Info tag inside the first frame (Xing header specification).
+  const scanEnd = Math.min(head.length, i + 200);
+  for (let k = i + 4; k + 12 <= scanEnd; k++) {
+    const tag = text(head, k, 4);
+    if (tag !== "Xing" && tag !== "Info") continue;
+    if (u32be(head, k + 4) & 0x1) {                           // the frames flag
+      const frames = u32be(head, k + 8);
+      return frames > 0 ? Math.round((frames * (version === 3 ? 1152 : 576) / rate) * 1000) : null;
+    }
+    break;
+  }
+  return size > i ? Math.round(((size - i) / (bitrate * 125)) * 1000) : null;   // CBR: the bytes over the bitrate
+}
+
+function oggDuration(head: Uint8Array, tail: Uint8Array | undefined): number | null {
+  if (!fits(head, 0, 28)) return null;
+  const payload = 27 + head[26]!;                             // page header, then the segment table
+  let rate: number | null = null;
+  if (fits(head, payload, 8) && head[payload] === 0x7f && text(head, payload + 1, 8) === "OpusHead") rate = 48_000;
+  else if (fits(head, payload, 16) && head[payload] === 0x01 && text(head, payload + 1, 6) === "vorbis") {
+    const rate2 = u32le(head, payload + 12);                  // the identification header names its rate
+    if (rate2 > 0) rate = rate2;
+  }
+  if (rate === null) return null;
+  const granuleOf = (b: Uint8Array): number | null => {
+    for (let k = b.length - 4; k >= 0; k--) {
+      if (!at(b, k, 0x4f, 0x67, 0x67, 0x53)) continue;        // the last page in the slice
+      return fits(b, k, 14) && u64le(b, k + 6) > 0 ? u64le(b, k + 6) : null;
+    }
+    return null;
+  };
+  const granule = (tail ? granuleOf(tail) : null) ?? granuleOf(head);
+  return granule !== null ? Math.round((granule / rate) * 1000) : null;
+}
+
+// Matroska's EBML: lengths are vints, a size of all ones means "to the end" (a streamed file).
+const vintLen = (b: Uint8Array, i: number): number => {
+  for (let k = 0; k < 8; k++) {
+    if (!fits(b, i, k + 1)) return 0;
+    if (b[i]! & (0x80 >> k)) return k + 1;
+  }
+  return 0;
+};
+const vintId = (b: Uint8Array, i: number, len: number) => { let v = 0; for (let k = 0; k < len; k++) v = v * 256 + b[i + k]!; return v; };
+const vintSize = (b: Uint8Array, i: number, len: number) => {
+  let v = b[i]! & (0xff >> len);
+  for (let k = 1; k < len; k++) v = v * 256 + b[i + k]!;
+  return v;
+};
+
+function webmDuration(head: Uint8Array): number | null {
+  const found: { scale: number | null; duration: number | null } = { scale: null, duration: null };
+  const walk = (b: Uint8Array, start: number, end: number, depth: number): void => {
+    if (depth > 8) return;
+    let i = start;
+    while (i + 2 <= end) {
+      const idLen = vintLen(b, i);
+      if (idLen === 0) return;
+      const id = vintId(b, i, idLen);
+      let j = i + idLen;
+      const sizeLen = vintLen(b, j);
+      if (sizeLen === 0) return;
+      const size = vintSize(b, j, sizeLen);
+      j += sizeLen;
+      const stop = size === 2 ** (7 * sizeLen) - 1 ? end : Math.min(end, j + size);   // all ones: streamed to the end
+      const width = stop - j;
+      if (id === 0x2ad7b1 && width > 0 && width <= 8) {                    // TimecodeScale: nanoseconds a unit
+        let v = 0;
+        for (let k = 0; k < width; k++) v = v * 256 + b[j + k]!;
+        found.scale = v;
+      }
+      else if (id === 0x4489 && (width === 4 || width === 8)) {            // Duration, in those units
+        const view = new DataView(b.buffer, b.byteOffset + j, width);      // big-endian, as EBML writes it
+        found.duration = width === 4 ? view.getFloat32(0) : view.getFloat64(0);
+      }
+      else if (width > 0) walk(b, j, stop, depth + 1);
+      if (found.scale !== null && found.duration !== null) return;
+      if (stop <= i) return;                                    // nothing consumed: not EBML here
+      i = stop;
+    }
+  };
+  walk(head, 0, head.length, 0);
+  const scale = found.scale ?? 1_000_000;                       // the spec's default unit: one millisecond
+  const ms = found.duration !== null ? (found.duration * scale) / 1e6 : null;
+  return ms !== null && ms > 0 && Number.isFinite(ms) ? Math.round(ms) : null;
+}
+
+export function audioDurationMs(bytes: AudioBytes): number | null {
+  const container = sniffAudio(bytes.head);
+  if (!container) return null;
+  const ms = container === "wav" ? wavDuration(bytes.head)
+    : container === "mp4" ? mp4Duration(bytes.head) ?? (bytes.tail ? mp4Duration(bytes.tail) : null)
+      : container === "mp3" ? mp3Duration(bytes.head, bytes.size)
+        : container === "ogg" ? oggDuration(bytes.head, bytes.tail)
+          : webmDuration(bytes.head);
+  return ms !== null && Number.isFinite(ms) && ms > 0 ? Math.round(ms) : null;
+}
+
 // The Capability (TX9): `present` only when the probe says a Transcriber is ready, with the longest Recording it
 // will take. It follows the probe; it is not a setting. A malformed `present` counts as absent.
 export const CAPABILITY_REASONS = ["missing", "not_ready", "protocol"] as const;

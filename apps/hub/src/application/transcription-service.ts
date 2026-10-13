@@ -1,25 +1,49 @@
 // Queue, timeout, cancel and restart for one Recording (ADR-0021; design §9). The domain decides the row.
 // This starts the Transcriber, one run at a time unless the limit says more, and remembers a run the process
 // no longer has as lost. It does not read the audio itself: the caller names the file.
-import { statSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { availableParallelism } from "node:os";
 import {
-  afterRestart, capabilityReady, effectiveMaxSeconds, endTranscription, requestTranscription, scheduleTranscriptions,
+  afterRestart, audioDurationMs, capabilityReady, effectiveMaxSeconds, endTranscription, requestTranscription, scheduleTranscriptions,
   startTranscription, threadsFor, transcriptionTimeoutMs, TRANSCRIPTION_LIMIT_DEFAULT, MAX_RECORDING_SECONDS,
   type QueueGuard, type Recording, type Result, type Transcription, type TranscriptionCapability, type TranscriptionRequestProblem,
   err, ok,
 } from "@morndo/domain";
 import type { MeTranscription, Transcriber, TranscriberProbe } from "@morndo/protocol";
 
-export type RecordingFile = { path: string; size: number };
+export type RecordingFile = { path: string; size: number; durationMs: number | null };
 
 export function fileOnDisk(path: string | null | undefined): RecordingFile | null {
   if (!path) return null;
   try {
     const st = statSync(path);
-    return st.isFile() ? { path, size: st.size } : null;
+    if (!st.isFile()) return null;
+    return { path, size: st.size, durationMs: durationOnDisk(path, st.size) };
   } catch {
     return null;
+  }
+}
+
+// §9's timeout scales with the recording's length, and the container's own header says it: the head and the tail
+// carry what each one keeps (an m4a's moov may sit at the end, an Ogg's last page too). Whatever the bytes do not
+// say stays null — the caller then uses its cap, never a guess.
+const DURATION_HEAD = 256 * 1024;
+const DURATION_TAIL = 64 * 1024;
+function durationOnDisk(path: string, size: number): number | null {
+  const fd = openSync(path, "r");
+  try {
+    const head = Buffer.alloc(Math.min(size, DURATION_HEAD));
+    readSync(fd, head, 0, head.length, 0);
+    if (size <= head.length) return audioDurationMs({ head, size });
+    const tail = Buffer.alloc(Math.min(size - head.length, DURATION_TAIL));
+    readSync(fd, tail, 0, tail.length, size - tail.length);
+    return audioDurationMs({ head, tail, tailAt: size - tail.length, size });
+  }
+  catch {
+    return null;
+  }
+  finally {
+    closeSync(fd);
   }
 }
 
@@ -261,11 +285,14 @@ export class TranscriptionService {
     this.#inflight.set(key, ac);
     const cap = this.capability();
     const maxSeconds = cap.present ? cap.maxSeconds : this.#maxSeconds;
+    // §9: 120 s + 6 × the recording's own duration, never longer than the cap says. A container that does not
+    // say its length counts as the cap — the run is not cut short on a guess.
+    const durationMs = Math.min(Math.max(file.durationMs ?? maxSeconds * 1000, 0), maxSeconds * 1000);
     const timer = setTimeout(() => {
       this.#timers.delete(timer);
       this.#why.set(key, "timed_out");
       ac.abort();
-    }, this.#timeoutFor(maxSeconds * 1000));
+    }, this.#timeoutFor(durationMs));
     this.#timers.add(timer);
     const transcriber = this.#active ?? this.#transcriber;
     if (!transcriber) return true;

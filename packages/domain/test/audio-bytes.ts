@@ -14,7 +14,7 @@ export const concat = (...parts: Uint8Array[]) => {
 
 // A PCM wav at 8000 Hz, one channel, one byte per sample: `ms` milliseconds of audio.
 export function wavBytes(ms: number): Uint8Array {
-  const data = Math.round(ms);                                     // byteRate 8000: 8 bytes a millisecond
+  const data = Math.round(ms * 8);                                 // byteRate 8000: 8 bytes a millisecond
   return new Uint8Array([
     0x52, 0x49, 0x46, 0x46, ...u32le(36 + data), 0x57, 0x41, 0x56, 0x45,    // RIFF <size> WAVE
     0x66, 0x6d, 0x74, 0x20, ...u32le(16), 1, 0, 1, 0,                      // fmt  16  PCM mono
@@ -68,12 +68,13 @@ export const vorbisBytes = (ms: number, rate: number) => {
 
 const f64be = (n: number) => { const b = new ArrayBuffer(8); new DataView(b).setFloat64(0, n); return [...new Uint8Array(b)]; };
 
-// A webm: EBML header, a streamed Segment (unknown size), and an Info with TimecodeScale 1 ms and the duration.
+// A webm: EBML header, a streamed Segment (the 8-octet unknown size a recorder writes), and an Info with
+// TimecodeScale 1 ms and the duration.
 export function webmBytes(ms: number): Uint8Array {
   const ebml = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x84, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81, 0x01]);
   const scale = new Uint8Array([0x2a, 0xd7, 0xb1, 0x83, 0x0f, 0x42, 0x40]);            // TimecodeScale 1e6 ns
   const duration = new Uint8Array([0x44, 0x89, 0x88, ...f64be(ms)]);                    // Duration, float64
-  const info = new Uint8Array([0x15, 0x49, 0xa9, 0x66, 0x80 | scale.length + duration.length, ...scale, ...duration]);
-  const segment = new Uint8Array([0x18, 0x53, 0x80, 0x67, 0x01, 0xff, 0xff, 0xff, ...info]);
-  return concat(ebml, segment);
+  const info = new Uint8Array([0x15, 0x49, 0xa9, 0x66, 0x80 | (scale.length + duration.length), ...scale, ...duration]);
+  const streamed = new Uint8Array([0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);   // all data bits one
+  return concat(ebml, new Uint8Array([0x18, 0x53, 0x80, 0x67]), streamed, info);
 }

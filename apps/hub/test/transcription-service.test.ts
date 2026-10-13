@@ -74,7 +74,7 @@ const files = new Map<string, { path: string; size: number; durationMs: number |
   ["over", { path: "/audio/over.wav", size: 12, durationMs: 900_000 }],
 ]);
 
-function service(store: TranscriptionStore, gate: Gate, extra: { guard?: () => "off" | "load"; timeoutFor?: () => number; now?: () => number } = {}) {
+function service(store: TranscriptionStore, gate: Gate, extra: { guard?: () => "off" | "load"; timeoutFor?: (durationMs: number) => number; now?: () => number } = {}) {
   let guard: "off" | "load" = "off";
   const lines: string[] = [];
   const svc = new TranscriptionService({
@@ -192,7 +192,7 @@ describe("transcription service", () => {
   });
 
   it("a launch that finds the file gone fails its row and hands the slot on", async () => {
-    files.set("a-swept", { path: "/audio/a-swept.wav", size: 12 });   // sorts before "b": with the clock fixed, FIFO
+    files.set("a-swept", { path: "/audio/a-swept.wav", size: 12, durationMs: null });   // sorts before "b": with the clock fixed, FIFO
     try {                                                             // breaks the tie by key
       const gate = new Gate();
       const { svc, setGuard } = service(memory(), gate);
@@ -276,8 +276,10 @@ describe("transcription service", () => {
     await svc.start();
     await svc.request(body("tx-short", "short"));
     expect(seen).toEqual([10_000]);                    // a 10 s note: 120 s + 6 × 10 s, not 120 s + 6 × the cap
+    expect(await until(() => svc.get("tx-short")?.state === "timed_out", 2000)).toBe(true);
     await svc.request(body("tx-over", "over"));
     expect(seen[1]).toBe(600_000);                     // longer than the cap counts as the cap
+    expect(await until(() => svc.get("tx-over")?.state === "timed_out", 2000)).toBe(true);
     await svc.request(body("tx-plain", "a"));
     expect(seen[2]).toBe(600_000);                     // a duration the container does not say: the cap, never less
     svc.close();
