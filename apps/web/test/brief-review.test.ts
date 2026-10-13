@@ -44,7 +44,7 @@ const base = (id: string, over: Record<string, unknown>) => ({
   options: [{ key: "b", label: "Extend the triage script", detail: null }],
   answerBy: "tap", recommendation: null, ifNoAnswer: null, deadline: DUE, blocking: true, project: "support",
   askedAt: NOW - 3_600_000, messageId: null, tracking: "hub", status: "open", source: "open", decision: null,
-  resolution: null, settledAt: null, askedAgain: false, answerable: null, version: "v1", inbox: null,
+  resolution: null, settledAt: null, askedAgain: false, answerable: null, version: "v1",
   brief: brief(), briefVersion: 1, ...over,
 });
 

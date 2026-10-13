@@ -12,7 +12,7 @@
   },
   "scripts": {
     "test": "vitest run",
-    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/fleet-client && tsc -p packages/brand && tsc -p apps/hub && tsc -p apps/board-cli && tsc -p apps/connections && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && npm run check -w @morndo/web",
+    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/fleet-client && tsc -p packages/brand && tsc -p apps/hub && tsc -p apps/board-cli && tsc -p apps/connections && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && tsc -p plugins/transcribe-whisper-cpp && npm run check -w @morndo/web",
     "build": "npm run build -w @morndo/web",
     "check:build": "npm run check:build -w @morndo/web --",
     "hub": "node apps/hub/src/main.ts",
@@ -24,7 +24,8 @@
     "knowledge:models": "node knowledge/tools/models-dev/main.ts",
     "e2e:engines": "npm run build && node e2e/engines.e2e.ts",
     "e2e:board": "npm run build && node e2e/board.e2e.ts",
-    "e2e:home": "npm run build && node e2e/home.e2e.ts"
+    "e2e:home": "npm run build && node e2e/home.e2e.ts",
+    "plugin:transcribe": "node plugins/transcribe-whisper-cpp/scripts/install.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

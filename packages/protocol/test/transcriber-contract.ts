@@ -1,6 +1,9 @@
-// The Transcriber port's contract (design §4, §13). One suite, run against MemoryTranscriber here and, in the hub
-// PR, against ProcessTranscriber with the fixture plugin. A fake that ignores the abort signal stays pending, so
-// the abort case fails. A process adapter reports the pids it started; a timeout must leave that group dead.
+// The Transcriber port's contract (design §4, §13). One suite, run against MemoryTranscriber here, against the
+// hub's process host with the fixture plugin, and against the whisper.cpp plugin. The fixture scene is the default,
+// so those callers stay on the fixed sentence. The plugin passes its own scene: a real clip, and the words that
+// clip must contain, because a real engine's timestamps are not the fixture's. A fake that ignores the abort
+// signal stays pending, so the abort case fails. A process adapter reports the pids it started; a timeout must
+// leave that group dead.
 import { describe, expect, it } from "vitest";
 import type { EngineText } from "@morndo/domain";
 import type { TranscribeInput, Transcriber, TranscriberProbe } from "../src/index.ts";
@@ -25,8 +28,35 @@ const HEARD: EngineText = {
   language: "de", durationMs: 5200, segments: [{ startMs: 0, endMs: 5200, text: SENTENCE }],
 };
 
-const call = (path: string, signal: AbortSignal): TranscribeInput =>
-  ({ path, language: "auto", threads: 1, maxSeconds: 600, signal });
+export type ContractHeard = EngineText | { language: string; includes: string };
+
+export type ContractScene = {
+  probe: Extract<TranscriberProbe, { ready: true }>;
+  paths: { note: string; unreadable: string; tooLong: string; notReady: string; hang: string };
+  heard: ContractHeard;
+};
+
+const FIXTURE_SCENE: ContractScene = {
+  probe: {
+    ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture",
+    languages: "multi", maxSeconds: 600,
+  },
+  paths: {
+    note: "/audio/note.wav",
+    unreadable: "/audio/unreadable.bin",
+    tooLong: "/audio/too-long.wav",
+    notReady: "/audio/not-ready.wav",
+    hang: "/audio/hang.wav",
+  },
+  heard: HEARD,
+};
+
+const call = (path: string, signal: AbortSignal, maxSeconds: number): TranscribeInput =>
+  ({ path, language: "auto", threads: 1, maxSeconds, signal });
+
+function keyword(heard: ContractHeard): heard is { language: string; includes: string } {
+  return "includes" in heard;
+}
 
 type Settled<T> = { kind: "value"; value: T } | { kind: "error"; error: unknown } | { kind: "hung" };
 
@@ -37,32 +67,41 @@ function settle<T>(pending: Promise<T>, ms: number): Promise<Settled<T>> {
   ]);
 }
 
-export function transcriberContract(make: () => ContractSubject): void {
+export function transcriberContract(make: () => ContractSubject, scene: ContractScene = FIXTURE_SCENE, timeoutMs = 20_000): void {
+  const slow = (name: string, fn: () => unknown) => it(name, fn, timeoutMs);
   describe("transcriber contract", () => {
-    it("probes a ready engine with a model and a cap", async () => {
-      expect(await make().transcriber.probe()).toEqual({
-        ready: true, engine: "fixture-ear", engineVersion: "1.0.0", model: "tiny-fixture",
-        languages: "multi", maxSeconds: 600,
-      });
+    const run = (path: string, signal: AbortSignal) => call(path, signal, scene.probe.maxSeconds);
+
+    slow("probes a ready engine with a model and a cap", async () => {
+      expect(await make().transcriber.probe()).toEqual(scene.probe);
     });
 
-    it("returns the heard segments for a run", async () => {
+    slow("returns the heard segments for a run", async () => {
       const signal = new AbortController().signal;
-      expect(await make().transcriber.transcribe(call("/audio/note.wav", signal))).toEqual({ ok: true, value: HEARD });
+      const result = await make().transcriber.transcribe(run(scene.paths.note, signal));
+      if (keyword(scene.heard)) {
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.value.language).toBe(scene.heard.language);
+        expect(result.value.segments.map(seg => seg.text).join(" ").toLowerCase()).toContain(scene.heard.includes);
+        expect(result.value.segments.every(seg => seg.endMs >= seg.startMs && seg.endMs <= result.value.durationMs)).toBe(true);
+        return;
+      }
+      expect(result).toEqual({ ok: true, value: scene.heard });
     });
 
-    it("refuses an unreadable file, a file past the cap, and an engine that is not ready", async () => {
+    slow("refuses an unreadable file, a file past the cap, and an engine that is not ready", async () => {
       const signal = () => new AbortController().signal;
       const tx = make().transcriber;
-      expect(await tx.transcribe(call("/audio/unreadable.bin", signal()))).toEqual({ ok: false, error: "unreadable" });
-      expect(await tx.transcribe(call("/audio/too-long.wav", signal()))).toEqual({ ok: false, error: "too_long" });
-      expect(await tx.transcribe(call("/audio/not-ready.wav", signal()))).toEqual({ ok: false, error: "not_ready" });
+      expect(await tx.transcribe(run(scene.paths.unreadable, signal()))).toEqual({ ok: false, error: "unreadable" });
+      expect(await tx.transcribe(run(scene.paths.tooLong, signal()))).toEqual({ ok: false, error: "too_long" });
+      expect(await tx.transcribe(run(scene.paths.notReady, signal()))).toEqual({ ok: false, error: "not_ready" });
     });
 
-    it("an abort mid-run ends with no text", async () => {
+    slow("an abort mid-run ends with no text", async () => {
       const { transcriber, started, group } = make();
       const ac = new AbortController();
-      const pending = transcriber.transcribe(call("/audio/hang.wav", ac.signal));
+      const pending = transcriber.transcribe(run(scene.paths.hang, ac.signal));
       const began = group ? () => group().length > 0 : started;
       if (!began) throw new Error("abort mid-run needs started() or group()");
       expect(await until(began, 2000)).toBe(true);
@@ -74,7 +113,7 @@ export function transcriberContract(make: () => ContractSubject): void {
       expect(leaked(outcome.error, SENTENCE)).toBe(false);
     });
 
-    it("the leak check reads an error's message and its stack, which stringify skips", () => {
+    slow("the leak check reads an error's message and its stack, which stringify skips", () => {
       const loud = new Error(SENTENCE);
       expect(JSON.stringify(loud)).not.toContain(SENTENCE);
       expect(leaked(loud, SENTENCE)).toBe(true);
@@ -84,10 +123,10 @@ export function transcriberContract(make: () => ContractSubject): void {
       expect(leaked(stacked, SENTENCE)).toBe(true);
     });
 
-    it("a timeout aborts the run with no text, and a process group it started is gone", async () => {
+    slow("a timeout aborts the run with no text, and a process group it started is gone", async () => {
       const { transcriber, group } = make();
       const ac = new AbortController();
-      const pending = transcriber.transcribe(call("/audio/hang.wav", ac.signal));
+      const pending = transcriber.transcribe(run(scene.paths.hang, ac.signal));
       let pids: readonly number[] = [];
       if (group) {
         expect(await until(() => group().length > 0, 2000)).toBe(true);
