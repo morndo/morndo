@@ -29,7 +29,7 @@ export function createFfmpegNote(present: () => Promise<boolean> = ffmpegOnPath)
 }
 function ffmpegOnPath(): Promise<boolean> {
   return new Promise(resolve => {
-    execFile("ffmpeg", ["-hide_banner", "-version"], { stdio: "ignore", timeout: 2000 }, error => resolve(!error));
+    execFile("ffmpeg", ["-hide_banner", "-version"], { timeout: 2000 }, (error: Error | null) => resolve(error === null));
   });
 }
 
