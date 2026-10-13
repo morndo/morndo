@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { dueLine } from "../src/lib/desktop/decisions.ts";
 import { commitWidth, dockedWidth, layoutIsNarrow, widthAfterWindowChange, RIGHT_MIN } from "../src/lib/desktop/panel-width.ts";
-import { openSession, pick, showNew, noteClosed, releaseAbsentSession, ABSENT_GRACE_MS } from "../src/lib/desktop/answer-session.ts";
+import { openSession, pick, showNew, noteClosed, releaseAbsentSession, settledElsewhere, ABSENT_GRACE_MS } from "../src/lib/desktop/answer-session.ts";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
 
 const at = (iso: string) => Date.parse(iso);
@@ -97,6 +97,16 @@ describe("answer session", () => {
     expect(releaseAbsentSession({ ...open, words: "Ship on Tuesday" }, 0)).toBe(false);
     expect(releaseAbsentSession(open, 0)).toBe(true);
     expect(releaseAbsentSession({ ...doubt, live: item("v1", "Extend the triage script", "expired") }, 0)).toBe(true);
+  });
+  it("an accepted answer that another device settled is a close, and one answered here is not", () => {
+    const here = item("v1", "Extend the triage script", "answered");
+    here.decision = { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: 0, via: "here", endpointId: null, sessionId: null };
+    const elsewhere = item("v1", "Hold the notes", "answered");
+    elsewhere.decision = { choice: { kind: "option", key: "a", label: "Hold the notes" }, at: 0, via: "elsewhere", endpointId: null, sessionId: null };
+    expect(settledElsewhere(item("v1", "Extend the triage script"))).toBe(false);
+    expect(settledElsewhere(here)).toBe(false);
+    expect(settledElsewhere(elsewhere)).toBe(true);
+    expect(settledElsewhere(item("v1", "Extend the triage script", "expired"))).toBe(true);
   });
   it("a refusal stays visible when the item closes and nothing is in doubt", () => {
     const s = openSession(item("v1", "Extend the triage script"));

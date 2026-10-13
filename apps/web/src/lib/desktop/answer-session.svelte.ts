@@ -2,7 +2,7 @@
 // answer that may have been typed.
 import { MAY_HAVE_GONE, endsDoubt } from "../catchup/answer.ts";
 import {
-  back, noteClosed, openSession, pick, showNew,
+  back, noteClosed, openSession, pick, settledElsewhere, showNew,
   type AnswerBody, type AnswerProblem, type AnswerState, type AskOutcome,
 } from "./answer-session.ts";
 import type { DecisionItem } from "./decisions.ts";
@@ -91,8 +91,7 @@ export class AnswerSession {
     // The POST was accepted. Answered here, including when that status won the race, is this answer.
     // Settled from somewhere else (another device, expired) is a close: say so, don't claim Sent.
     const sentFor = this.seen;
-    const answeredByThis = this.live.status === "answered" && this.live.decision?.via !== "elsewhere";
-    if (this.live.status !== "open" && !answeredByThis) {
+    if (settledElsewhere(this.live)) {
       this.#keepSent = false;
       this.#settleClosed();
       return;

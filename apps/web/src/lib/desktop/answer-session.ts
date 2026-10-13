@@ -64,6 +64,11 @@ export function releaseAbsentSession(s: Pick<AnswerState, "again" | "sent" | "wo
   return absentMs >= ABSENT_GRACE_MS;
 }
 
+// After the POST: open, or answered on this request, is this answer. Anything else was settled elsewhere.
+export function settledElsewhere(item: DecisionItem): boolean {
+  return item.status !== "open" && !(item.status === "answered" && item.decision?.via !== "elsewhere");
+}
+
 export function noteClosed(s: AnswerState): AnswerState {
   const error = s.again ? null : s.error;
   if (s.mode === "idle" && s.picked === null && s.again === null && s.error === error) return s;
