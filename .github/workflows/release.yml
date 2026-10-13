@@ -103,20 +103,16 @@ jobs:
         include:
           - platform: linux-x64
             runner: ubuntu-24.04
-            triple: linux-x64
           - platform: linux-arm64
             runner: ubuntu-24.04-arm
-            triple: linux-arm64
           - platform: darwin-arm64
             runner: macos-15
-            triple: darwin-arm64
     env:
       BUNDLED_NODE: "24.21.0"
       NODE_RELEASE_KEYS_COMMIT: "481637f813e912c4aa3622d7964ab426c97b8e8d"
       VERSION: ${{ needs.release-please.outputs.version }}
       RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
       PLATFORM: ${{ matrix.platform }}
-      TRIPLE: ${{ matrix.triple }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -134,7 +130,7 @@ jobs:
             "https://raw.githubusercontent.com/nodejs/release-keys/${NODE_RELEASE_KEYS_COMMIT}/gpg/pubring.kbx"
 
       - name: Verify and unpack Node
-        run: sh scripts/release/verify-node.sh "$BUNDLED_NODE" "$TRIPLE" "$RUNNER_TEMP/node" "$RUNNER_TEMP/pubring.kbx"
+        run: sh scripts/release/verify-node.sh "$BUNDLED_NODE" "$PLATFORM" "$RUNNER_TEMP/node" "$RUNNER_TEMP/pubring.kbx"
 
       - name: Test, build and pack
         run: |

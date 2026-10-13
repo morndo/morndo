@@ -146,7 +146,7 @@ function main(argv: string[]): void {
       writeFileSync(flag(values, "out"), sha256Sums(positionals.map(name => ({ name: name.split("/").pop() ?? name, bytes: readFileSync(name) }))));
       return;
     case "node-check": {
-      const index = readJson(readFileSync(flag(values, "index"), "utf8"));
+      const index: unknown = JSON.parse(readFileSync(flag(values, "index"), "utf8"));
       if (!Array.isArray(index)) throw new Error("node index is not a list");
       const rows = index.flatMap(row => {
         if (typeof row === "object" && row !== null && "version" in row && typeof row.version === "string") return [{ version: row.version }];
@@ -166,10 +166,6 @@ function pair(item: string): [string, string] {
   const eq = item.indexOf("=");
   if (eq <= 0) throw new Error(`expected name=path, got ${item}`);
   return [item.slice(0, eq), item.slice(eq + 1)];
-}
-
-function readJson(text: string): unknown {
-  return JSON.parse(text);
 }
 
 if (import.meta.main) {

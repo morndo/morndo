@@ -7,14 +7,8 @@ import type { Platform } from "@morndo/domain";
 export const BUNDLED_NODE = "24.21.0";
 export const NODE_RELEASE_KEYS_COMMIT = "481637f813e912c4aa3622d7964ab426c97b8e8d";
 
-const TRIPLE: Record<Platform, string> = {
-  "linux-x64": "linux-x64",
-  "linux-arm64": "linux-arm64",
-  "darwin-arm64": "darwin-arm64",
-};
-
 export function nodeTarball(platform: Platform): string {
-  return `node-v${BUNDLED_NODE}-${TRIPLE[platform]}.tar.gz`;
+  return `node-v${BUNDLED_NODE}-${platform}.tar.gz`;
 }
 
 export function newerNode24(index: readonly { version: string }[]): string | null {

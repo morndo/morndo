@@ -18,7 +18,7 @@ import { launcherSource, LAUNCHERS } from "./launchers.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, schemaFrom } from "./manifest.ts";
 import { BUNDLED_NODE, newerNode24, nodeTarball } from "./node-pin.ts";
 import { sha256Sums } from "./checksums.ts";
-import { allowedSignerLine, FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes, verifyBytes } from "./sign.ts";
+import { FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes } from "./sign.ts";
 import { stageRelease } from "./stage.ts";
 import { stampVersion, UNSTAMPED_VERSION } from "./stamp.ts";
 import { thirdPartyNotice } from "./notice.ts";
@@ -145,6 +145,28 @@ describe("file list and manifest", () => {
     expect(sums).toBe(`${sha256(new TextEncoder().encode("a"))}  a.txt\n${sha256(new TextEncoder().encode("b"))}  b.txt\n`);
   });
 });
+
+function allowedSignerLine(p: { identity: string; namespace: string; publicKey: string }): string {
+  return `${p.identity} namespaces="${p.namespace}" ${p.publicKey}`;
+}
+
+function verifyBytes(p: {
+  bytes: Uint8Array; signature: Uint8Array; allowedSignersPath: string; identity: string; namespace: string;
+}): void {
+  const dir = mkdtempSync(join(tmpdir(), "morndo-verify-"));
+  const payload = join(dir, "payload");
+  const sig = join(dir, "payload.sig");
+  try {
+    writeFileSync(payload, p.bytes);
+    writeFileSync(sig, p.signature);
+    const run = spawnSync("ssh-keygen", [
+      "-Y", "verify", "-f", p.allowedSignersPath, "-I", p.identity, "-n", p.namespace, "-s", sig,
+    ], { input: p.bytes, encoding: "utf8" });
+    if (run.status !== 0) throw new Error(`ssh-keygen -Y verify failed: ${run.stderr}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 describe("signatures", () => {
   it("signs with a throwaway key and ssh-keygen -Y verify accepts only that namespace and those bytes", () => {

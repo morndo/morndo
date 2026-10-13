@@ -37,7 +37,7 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
   } catch { /* the enterprise licence is absent from a fixture */ }
   const lockPath = join(p.repo, "package-lock.json");
   try {
-    const lock = readJson(readFileSync(lockPath, "utf8"));
+    const lock: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
     if (isLock(lock)) files.push({ path: "LICENSES/NOTICE", bytes: Buffer.from(thirdPartyNotice(lock)), mode: "0444" });
   } catch { /* a fixture may omit the lock */ }
   files.push({ path: "units", mode: "0555", directory: true }, { path: "trust", mode: "0555", directory: true });
@@ -116,10 +116,6 @@ function refuseEscapingLinks(repo: string): void {
 function inside(path: string, root: string): boolean {
   const base = root.endsWith(sep) ? root : `${root}${sep}`;
   return path === root || path.startsWith(base);
-}
-
-function readJson(text: string): unknown {
-  return JSON.parse(text);
 }
 
 function isLock(value: unknown): value is { packages: Record<string, { version?: string; dev?: boolean }> } {
