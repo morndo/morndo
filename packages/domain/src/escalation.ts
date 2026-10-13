@@ -18,7 +18,7 @@ export type AnswerBy = "tap" | "words" | "screen";
 // How long an ask stays answerable: while the manager's list has it open ("ledger"), for a day after it was asked
 // ("age", button messages whose id isn't on the list), or while its source still shows it ("source", a worker's
 // question or menu).
-export type Tracking = "ledger" | "age" | "source";
+export type Tracking = "ledger" | "age" | "source" | "hub";   // hub: the hub itself holds it open (E14, ADR-0023)
 
 export type Ask = {
   id: EscalationId;
@@ -97,6 +97,7 @@ export type EscalationAnswered = {
 
 export const LEDGER_GRACE_MS = 10 * 60_000;          // E10: the manager may post buttons before it files the item
 export const TAP_TTL_MS = 24 * 3_600_000;            // E10: an id that isn't on the list expires after a day
+export const HUB_TTL_MS = 7 * 24 * 3_600_000;        // E14: a hub-tracked ask expires seven days after its due
 export const KEEP_SETTLED_MS = 3 * 24 * 3_600_000;   // how long decided items stay listed once no source shows them
 
 const isOpen = (s: EscalationStatus) => s === "open" || s === "answered";
@@ -104,11 +105,14 @@ const isOpen = (s: EscalationStatus) => s === "open" || s === "answered";
 // What the principal was shown of an Ask, as one short string: when and in which message it was asked, its wording,
 // options and terms. An answer that waited (the phone's 5-second window) carries it, and is refused if the Ask was
 // restated meanwhile (E12; review of PR #7, finding 5). FNV-1a over the fields: pure, with no hashing library.
-// The short form counts as shown when it is given (2026-10-04); without it the version is as before.
-export function askVersion(a: Pick<Ask, "askedAt" | "messageId" | "title" | "context" | "options" | "recommendation" | "ifNoAnswer" | "deadline"> & Partial<Pick<Ask, "shortTitle" | "summary" | "minutes" | "link" | "details">>): string {
+// The short form counts as shown when it is given (2026-10-04); without it the version is as before. A brief's
+// version number joins the hash when there is one (ADR-0023), so a restate counts even if the markdown reads the same.
+export function askVersion(a: Pick<Ask, "askedAt" | "messageId" | "title" | "context" | "options" | "recommendation" | "ifNoAnswer" | "deadline"> & Partial<Pick<Ask, "shortTitle" | "summary" | "minutes" | "link" | "details">> & { briefVersion?: number }): string {
   const form = [a.shortTitle ?? null, a.summary ?? null, a.minutes ?? null, a.link ?? null, a.details ?? null];
   const short = form.some(x => x !== null && x !== "") ? form : [];
-  const s = JSON.stringify([a.askedAt, a.messageId, a.title, a.context, a.options.map(o => [o.key, o.label]), a.recommendation, a.ifNoAnswer, a.deadline, ...short]);
+  const shown = [a.askedAt, a.messageId, a.title, a.context, a.options.map(o => [o.key, o.label]), a.recommendation, a.ifNoAnswer, a.deadline, ...short];
+  if (a.briefVersion !== undefined) shown.push(a.briefVersion);
+  const s = JSON.stringify(shown);
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return `v${h.toString(16).padStart(8, "0")}${s.length.toString(16)}`;
@@ -123,6 +127,7 @@ export function refusal(e: Escalation | undefined, now: number): AnswerRefusal |
   if (e.source === "unreadable") return "cant_check";
   if (e.tracking === "ledger" && e.source === "missing") return "not_filed_yet";
   if (e.tracking === "age" && now - e.askedAt >= TAP_TTL_MS) return "expired";
+  if (e.tracking === "hub" && now >= (e.deadline ?? e.askedAt) + HUB_TTL_MS) return "expired";   // E14: overdue is not expired
   if (e.answerBy === "screen") return "on_screen";
   return null;
 }
@@ -175,6 +180,13 @@ export class Escalations {
         else if (e.status === "answered" && now - e.askedAt > TAP_TTL_MS + KEEP_SETTLED_MS) this.#items.delete(e.id);
         continue;
       }
+      if (e.tracking === "hub") {                         // E14: the hub holds it open; time alone ends it, past its due
+        const ttl = (e.deadline ?? e.askedAt) + HUB_TTL_MS;
+        if (e.status === "open" && now >= ttl) { e.status = "expired"; e.settledAt = ttl; }
+        else if (e.status === "answered" && now - ttl > KEEP_SETTLED_MS) this.#items.delete(e.id);   // decided: listed that long past the TTL, as the age branch keeps its own
+        else if (!isOpen(e.status) && now - (e.settledAt ?? e.askedAt) > KEEP_SETTLED_MS) this.#items.delete(e.id);
+        continue;
+      }
       if (isOpen(e.status)) { e.status = "settled"; e.source = "missing"; e.settledAt = now; }
       else if (now - (e.settledAt ?? e.askedAt) > KEEP_SETTLED_MS) this.#items.delete(e.id);
     }
@@ -187,14 +199,22 @@ export class Escalations {
     if (!known) {
       e = { ...s.ask, status: "open", source: s.source.kind, decision: null, resolution: null, settledAt: null, askedAgain: false };
       // A sighting without a message (a list item without buttons) has no time of its own, only when the hub first saw
-      // it: it is never a newer ask, so a Decision restored after a restart still answers it (E8, E11).
+      // it: it is never a newer ask, so a Decision restored after a restart still answers it (E8, E11). A hub-tracked
+      // ask also has no message, but its askedAt is its version's own time (a restate files the next version later,
+      // DB9): a Decision older than that no longer answers the new version.
       const restored = this.#restored.get(s.ask.id);
-      if (restored && (s.ask.messageId === null || restored.at >= s.ask.askedAt)) e.decision = restored;
+      if (restored) {
+        const stillAnswers = s.ask.tracking === "hub"
+          ? restored.at >= s.ask.askedAt
+          : s.ask.messageId === null || restored.at >= s.ask.askedAt;
+        if (stillAnswers) e.decision = restored;
+      }
       this.#items.set(e.id, e);
     } else {
       e = known;
-      const newer = s.ask.messageId !== null && s.ask.askedAt > e.askedAt;
-      // E1: asked again (a newer message for the same id) is the same Escalation with the newest wording and options.
+      const newer = s.ask.askedAt > e.askedAt && (s.ask.messageId !== null || s.ask.tracking === "hub");
+      // E1: asked again (a newer message for the same id, or a hub-tracked brief restated as the next version, DB9) is
+      // the same Escalation with the newest wording and options.
       // An answer given before the new ask doesn't answer it (the asker asked again on purpose).
       const reopened = newer && (e.decision !== null || e.status === "settled" || e.status === "expired") && s.source.kind !== "settled";
       Object.assign(e, s.ask);
@@ -215,6 +235,18 @@ export class Escalations {
       return;
     }
     if (s.source.kind === "unreadable") return;          // keep the status we had
+    if (s.source.kind === "missing" && e.tracking === "hub") {
+      // E14: a missing sighting is not a withdrawal, but time still ends an ask that is open and undecided: it
+      // expires at its due's TTL, as the sweep and refusal() already say, so the card never looks answerable past
+      // the refusal. A Decision — restored after a restart, or seen at the asker's end earlier in this same
+      // sighting — answers it before time can: answered stays answered, the status the end of #sight would derive,
+      // and the sweep keeps it as any decided hub ask. An ask already withdrawn or settled stays as its asker left
+      // it (as the sweep's own hub branch does).
+      const ttl = (e.deadline ?? e.askedAt) + HUB_TTL_MS;
+      if (e.status === "open" && !e.decision && now >= ttl) { e.status = "expired"; e.settledAt = ttl; }
+      else if (e.status === "open" && e.decision) e.status = "answered";
+      return;
+    }
     if (s.source.kind === "missing" && e.tracking !== "ledger") { e.status = "settled"; e.settledAt ??= now; return; }
     if (s.source.kind === "missing" && now - e.askedAt >= LEDGER_GRACE_MS) {
       if (e.status !== "settled") { e.status = "settled"; e.settledAt = now; }
@@ -223,6 +255,10 @@ export class Escalations {
     if (e.tracking === "age" && now - e.askedAt >= TAP_TTL_MS && !e.decision) {
       if (e.status !== "expired") { e.status = "expired"; e.settledAt = e.askedAt + TAP_TTL_MS; }
       return;
+    }
+    if (e.tracking === "hub" && !e.decision) {           // E14: at most seven days past its due, then it expires
+      const ttl = (e.deadline ?? e.askedAt) + HUB_TTL_MS;
+      if (now >= ttl) { if (e.status !== "expired") { e.status = "expired"; e.settledAt = ttl; } return; }
     }
     if (e.status === "settled" || e.status === "expired") {
       if (e.tracking === "age") return;                  // a day-old ask comes back only when asked again

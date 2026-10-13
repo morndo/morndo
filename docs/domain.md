@@ -32,6 +32,10 @@ The product serves the **principal**, not the workers. The trial scorer (a scrip
 | Evidence | The result of a Check run by a producer other than the claimant, on the claimed revision. | Worker output, logs or transcript. |
 | Verdict | Verified, Refuted or Unverified. | A boolean. Unverified is never shown as success. |
 | Violation | A broken invariant found in a recorded history, tagged F1–F4. | A runtime error. |
+| Decision brief | The asker's case for one decision, in the fixed template ([ADR-0023](adr/0023-decision-briefs.md)): the ask, the options compared, why now, what approval authorizes. Filed as one value, shown as one compact card. | A message, a report, or a Mandate request: an answer to a brief grants nothing (DB8). |
+| Version | A brief's own number, starting at 1; a restate makes the next. An answer given for an earlier version is refused (E12). | A hash, a timestamp. |
+| Lint | The one check a filed brief passes (DB10): errors refuse it, warnings advise the asker and never refuse. | Sanitisation, rendering. |
+| Compact card | The card every Ask derives, brief or plain: topic, headline, recommended option, due, minutes, whether it spends. | A preview the asker writes itself. |
 
 ## Authority: consent he gave
 
@@ -76,7 +80,7 @@ Added 2026-10-01 by the [ADR-0006](adr/0006-slack-style-desktop-client.md) adden
   - *Expired*.
 - An Ask also says:
   - how it is answered: a tap on an option, words, or on the worker's own screen;
-  - how long it stays answerable: while the manager's list has it open, for a day, or while its source shows it.
+  - how long it stays answerable: while the manager's list has it open, for a day, while its source shows it, or while the hub holds it open (E14).
 
 | # | Invariant | Guards |
 |---|---|---|
@@ -86,6 +90,7 @@ Added 2026-10-01 by the [ADR-0006](adr/0006-slack-style-desktop-client.md) adden
 | E11 | Asked again (a newer ask for the same id) after a Decision, the Escalation is open again: the earlier Decision doesn't answer the new question. | F2 |
 | E12 | An answer that names the version of the Ask it was given for (when and in which message it was asked, its wording, options and terms) is refused as changed if the Ask was restated since: it never answers a question the principal didn't see. (ADR-0009: the phone holds an answer 5 seconds.) | F2, F4 |
 | E13 | A Decision for the manager goes through its inbox ([ADR-0010](adr/0010-manager-inbox.md)): Queued until the inbox reports it in the manager's conversation, then Delivered. Queued, it counts as given (E8). Given up by the inbox (expired, or cancelled by hand), the Escalation is open again and nothing is recorded. | F1, F2 |
+| E14 | An Ask filed through the hub (`tracking: "hub"`) is answerable while the hub holds it open: until its asker withdraws or settles it, and at most 7 days after its due time, when it expires. Overdue is not expired: he can still answer an overdue brief. | F2, F4 |
 
 A Decision is a Command under Access (AC7). It is recorded only after the asker has it (delivered into its pane; for the manager, Delivered by its inbox, E13), with the endpoint, session and time as provenance (A1).
 
@@ -93,6 +98,23 @@ A Decision is a Command under Access (AC7). It is recorded only after the asker 
 - **Decision or task:** the manager's list decides by its kind. `tap` is a decision; `time` is a task, an Ask for his time or hands, never "decided". A button message alone asks a decision.
 - **The short form:** an Ask may carry the asker's own short form: `shortTitle` (a few words), `summary` (one sentence), `minutes`, `link` (http(s) only) and `details`. The list's own `options` make it answerable by a tap, under E9 like any option.
 - **A task's Done** is an answer in words ("Done") under E8 to E12. Its Later is this device's memory only (C6).
+
+### Decision briefs: the case for one decision
+
+Added 2026-10-11 by [ADR-0023](adr/0023-decision-briefs.md); code in `packages/domain/src/brief.ts`. A Decision brief is one value in this context, linted once (DB10) and shown as one compact card, brief or plain. The guide an asker follows is `docs/agents/decision-requests.md`.
+
+| # | Invariant | Guards |
+|---|---|---|
+| DB1 | A brief has 2 to 6 options. Keys are letters, digits, `-` and `_`, at most 16, unique; labels are 1 to 40 characters with no control character. This is the manager protocol's grammar (`optionsProblem`), so every answer can be typed back as a tap line. | E9 |
+| DB2 | `recommend` is one of the options. The headline names exactly that option, as `option <KEY>` (any case), and names no other key. | F2: an answer he didn't mean |
+| DB3 | A brief has a due time after the time it is filed or restated, and `minutes` from 1 to 30. | the owner's "decision due" |
+| DB4 | The comparison has 3 to 10 factor rows and one column per option, in the options' order: every row has exactly one non-empty cell per option ("n/a" is a value; an empty cell is not). It has a note on what the numbers include. | "every option has a column" |
+| DB5 | A money figure anywhere in the brief (a currency sign or code next to a number) needs at least one stated assumption. Every brief states a downside case. | the owner's rule for money |
+| DB6 | Each required section of the template is present, non-empty and within its cap. An unknown section is refused, so a misspelt heading never drops its text. | vague briefs |
+| DB7 | Prose fields use the subset: paragraphs, lists, bold, italic, strikethrough, inline and fenced code, block quotes, GFM tables, and links whose target is `https:`. No headings (the format owns the outline), no raw HTML, no images. What lint accepts, the renderer shows; what the renderer would drop, lint refuses. | A1, the app's sanitiser |
+| DB8 | A brief grants nothing. An answer to it is a Decision under E8 to E13, to the asker, never a Mandate. "What approval authorizes" is the asker's commitment, shown to the principal and recorded with the brief; the hub does not enforce it. | B8, O4 |
+| DB9 | Restating a brief makes the next version and a new ask message: an answer given for the earlier version is refused as `changed` (E12), and a Decision already given no longer answers the new version (E11). | F2 |
+| DB10 | Lint is one function. The CLI's `lint`, the agent route and the dry run call the same `lintBrief`, so an agent sees exactly what the hub will refuse. Warnings never refuse. | |
 
 ### Notifications: a nudge, not a Delivery
 
