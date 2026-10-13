@@ -131,7 +131,7 @@ describe("file list and manifest", () => {
     const probe = join(dir, "probe.js");
     writeFileSync(probe, "process.stdout.write(JSON.stringify({ cwd: process.cwd(), execArgv: process.execArgv }));\n");
     const realRoot = dirname(fileURLToPath(new URL("../../package.json", import.meta.url)));
-    expect(readSchemaJson(probe)).toEqual({ cwd: realRoot, execArgv: process.execArgv });
+    expect(readSchemaJson(probe)).toEqual({ cwd: realRoot, execArgv: [] });
   });
 
   it("states this tree's schemas, including a floor of 0 where nothing breaking has shipped", () => {

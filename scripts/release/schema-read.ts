@@ -8,10 +8,11 @@ import { fileURLToPath } from "node:url";
 // (the directory that holds package.json), not scripts/.
 export const repoRoot = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
-// spawn has no execArgv option (that option is on fork). The parent's node flags are
-// passed on the child command, which is what the child reports as process.execArgv.
+// No parent flags are passed. Node 24 strips TypeScript types by default, so the child
+// needs none (https://nodejs.org/docs/latest-v24.x/api/typescript.html, read 2026-10-13).
+// --watch, --inspect, and --test would hang or clash, and vitest's --require must not leak in.
 export function readSchemaJson(script = fileURLToPath(new URL("./schema-child.ts", import.meta.url))): unknown {
-  const run = spawnSync(process.execPath, [...process.execArgv, script], {
+  const run = spawnSync(process.execPath, [script], {
     cwd: repoRoot,
     encoding: "utf8",
   });
