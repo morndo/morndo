@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { emptyFeed, publishRelease } from "./feed.ts";
+import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
 import { FEED_NAMESPACE, signBytes } from "./sign.ts";
 
 const FEED_FILES = ["latest.json", "latest.json.sig", "stable.json", "stable.json.sig"] as const;
@@ -130,4 +130,34 @@ export function publishChannelFeeds(p: {
     },
     commit: parent => writeRef(p.repository, parent, p.dir, "Publish the channel feeds"),
   });
+}
+
+export function resignChannelFeeds(p: {
+  repository: string; dir: string; now: number; keyPath: string; signers: string; scratch: string;
+}): "absent" | "resigned" {
+  let outcome: "absent" | "resigned" = "absent";
+  syncFeed({
+    readHead: () => readFeedHead(p.repository),
+    prepare: head => {
+      mkdirSync(p.dir, { recursive: true });
+      for (const file of FEED_FILES) rmSync(join(p.dir, file), { force: true });
+      if (head === null) { outcome = "absent"; return; }
+      const latest = readAt(p.repository, head, "latest.json");
+      if (latest === null) { outcome = "absent"; return; }
+      outcome = "resigned";
+      for (const channel of ["latest", "stable"] as const) {
+        const body = channel === "latest" ? latest : readAt(p.repository, head, `${channel}.json`);
+        const signature = readAt(p.repository, head, `${channel}.json.sig`);
+        if (body === null || signature === null) throw new Error(`feed ${channel} is missing at ${head}`);
+        verifyFeed(p.signers, body, signature, p.scratch);
+        const next = resignFeed(body, p.now);
+        writeFileSync(join(p.dir, `${channel}.json`), next);
+        writeFileSync(join(p.dir, `${channel}.json.sig`), signBytes({
+          bytes: Buffer.from(next), keyPath: p.keyPath, namespace: FEED_NAMESPACE, dir: p.scratch,
+        }));
+      }
+    },
+    commit: parent => outcome === "absent" ? "ok" : writeRef(p.repository, parent, p.dir, "Re-sign the channel feeds"),
+  });
+  return outcome;
 }

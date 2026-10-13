@@ -140,11 +140,13 @@ describe("release pipeline files", () => {
     expect(first).toContain("feed-publish");
     expect(first).toContain("contents: write");
     expect(job(feed, "resign")).not.toContain(".github.io/");
-    expect(job(feed, "resign")).toContain("?ref=feed");
+    expect(job(feed, "resign")).not.toContain("?ref=feed");
+    expect(job(feed, "resign")).toContain("feed-resign-branch");
     expect(first).toContain("trust/feed_allowed_signers");
     const sync = readFileSync("scripts/release/feed-sync.ts", "utf8");
     expect(sync).toContain("publishRelease");
     expect(sync).toContain("emptyFeed");
+    expect(sync).toContain("resignFeed");
     expect(sync).toContain("ssh-keygen");
     expect(first).toContain(`actions/upload-pages-artifact@${UPLOAD_PAGES}`);
     const pages = job(release, "pages");
@@ -166,8 +168,8 @@ describe("release pipeline files", () => {
     const resign = job(feed, "resign");
     expect(resign).toContain("environment: feed");
     expect(resign).toContain("FEED_SSH_KEY");
-    expect(resign).toContain("feed-resign");
-    expect(resign).toContain("ssh-keygen -Y verify");
+    expect(resign).toContain("feed-resign-branch");
+    expect(resign).not.toContain("git/blobs");
     expect(resign).toContain("trust/feed_allowed_signers");
     expect(job(feed, "node-pin")).toContain("node-check");
     expect(feed).toContain("https://nodejs.org/dist/index.json");
