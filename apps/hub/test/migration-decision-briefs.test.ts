@@ -29,7 +29,7 @@ describe("the decision-brief migration", () => {
       session_id TEXT NOT NULL, request_id TEXT NOT NULL, queued_at INTEGER NOT NULL,
       state TEXT NOT NULL, updated_at INTEGER NOT NULL)`);
     db.pragma("user_version = 18");
-    expect(migrate(db)).toEqual({ from: 18, to: 19 });
-    expect(tables(db)).toEqual(expect.arrayContaining(["manager_deliveries", "decision_briefs"]));
+    expect(migrate(db)).toEqual({ from: 18, to: 20 });
+    expect(tables(db)).toEqual(expect.arrayContaining(["manager_deliveries", "decision_briefs", "transcriptions"]));
   });
 });

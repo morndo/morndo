@@ -203,6 +203,19 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS decision_briefs_state ON decision_briefs (state, asker_kind, asker_name);
     `),
   },
+  {
+    version: 20,
+    name: "transcriptions (ADR-0021): one row per endpoint, recording and language, the body the domain already decided",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS transcriptions (
+        id TEXT NOT NULL, recording_kind TEXT NOT NULL, recording_id TEXT NOT NULL, language TEXT NOT NULL,
+        endpoint_id TEXT NOT NULL,
+        accepted_at INTEGER NOT NULL, body TEXT NOT NULL,
+        PRIMARY KEY (id, recording_kind, recording_id, language, endpoint_id));
+      CREATE INDEX IF NOT EXISTS transcriptions_id ON transcriptions (id);
+    `),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

@@ -576,7 +576,7 @@ The wire is `packages/protocol/src/transcription.ts`: plugin protocol 1 and the 
 | # | Invariant |
 |---|---|
 | TX1 | A Transcription runs on the hub's machine, from a file already there. No adapter in this design sends audio or text off that machine. |
-| TX2 | A Recording has at most one Transcription in flight per Recording and Language. A repeat request for the same Recording and Language choice returns it. |
+| TX2 | One endpoint has at most one Transcription in flight per Recording and Language. A repeat from that endpoint returns it. Another endpoint's ask for the same clip is its own attempt. |
 | TX3 | A Transcription becomes terminal once (`done`, `failed`, `timed_out`, `cancelled`, `lost`). It is never re-run on its own. The principal may ask again, which makes a new Transcription. |
 | TX4 | A Transcription whose run is gone with no recorded end (a hub restart) becomes `lost`. The row stays. |
 | TX5 | At most `limit` Transcriptions run at once (default 1). Others wait in the order accepted, each with a visible position. The guard delays a start and never stops a run (as J5). |

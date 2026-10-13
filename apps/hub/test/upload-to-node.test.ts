@@ -18,7 +18,7 @@ async function through(name: string, bytes: Buffer) {
   rmSync(nodeDir, { recursive: true, force: true });
   hubDir = mkdtempSync(join(tmpdir(), "morndo-hub-inbox-"));
   nodeDir = mkdtempSync(join(tmpdir(), "morndo-node-inbox-"));
-  const saved = uploadInbox({ dir: hubDir }).save(bytes, endpointId("ep1"), name);
+  const saved = await uploadInbox({ dir: hubDir }).save(bytes, endpointId("ep1"), name);
   if (!saved.ok) throw new Error(saved.error);
   const asked = stagedUploadName(saved.value.path);
   const node = new UploadInbox({ dir: nodeDir });

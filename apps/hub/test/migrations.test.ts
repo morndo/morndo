@@ -178,13 +178,15 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
       "queued_at", "state", "updated_at",
     ]);
     expect(tables(db)).not.toContain("decision_briefs");
-    expect(migrate(db)).toEqual({ from: 18, to: 19 });
+    expect(migrate(db)).toEqual({ from: 18, to: 20 });
     expect(columns(db, "decision_briefs")).toEqual([
       "id", "version", "ref", "asker_kind", "asker_name", "token_id", "filed_by_kind", "filed_by_name",
       "brief", "state", "filed_at", "resolution", "drafted_by", "closed_at",
     ]);
     expect(() => MIGRATIONS[17]?.up(db)).not.toThrow();
     expect(() => MIGRATIONS[18]?.up(db)).not.toThrow();
+    expect(tables(db)).toContain("transcriptions");
+    expect(() => MIGRATIONS[19]?.up(db)).not.toThrow();
   });
 
   it("the Store migrates the database it opens", () => {

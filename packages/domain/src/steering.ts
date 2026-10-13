@@ -7,7 +7,7 @@ import { err, ok, unreachable, type EndpointId, type Result } from "./shared.ts"
 
 export type ImageMime = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 export type TextMime = "text/plain" | "text/markdown" | "application/json" | "text/csv" | "application/yaml";
-export type UploadMime = ImageMime | TextMime | "application/pdf";
+export type UploadMime = ImageMime | TextMime | "application/pdf" | "audio/ogg" | "audio/webm" | "audio/mp4" | "audio/mpeg" | "audio/wav";
 export type UploadKind = "image" | "text" | "pdf" | "audio";
 export type Upload = { id: string; endpointId: EndpointId; path: string; mime: UploadMime; size: number; at: number };
 
@@ -40,7 +40,7 @@ export function sniffImage(b: Uint8Array): ImageMime | null {
   return null;
 }
 
-export type UploadRefusal = "not_an_image" | "too_big" | "not_allowed" | "not_utf8" | "bad_name";
+export type UploadRefusal = "not_an_image" | "too_big" | "not_allowed" | "not_utf8" | "bad_name" | "too_many";
 
 // A name with no extension: an image by its bytes only (a paste that didn't carry a name). Anything else is refused.
 export function acceptUpload(bytes: Uint8Array): Result<ImageMime, UploadRefusal> {

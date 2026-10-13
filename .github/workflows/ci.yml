@@ -43,10 +43,15 @@ jobs:
         run: npm ci
 
       - id: tools
-        name: tmux and Playwright's Chromium (with its system libraries)
+        name: tmux, ffmpeg and Playwright's Chromium (with its system libraries)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tmux
+          # ubuntu-24.04 does not ship ffmpeg. Noble's universe package is 6.1.1, the build the design cites
+          # (https://packages.ubuntu.com/noble/ffmpeg, read 2026-10-13). The debian revision is left unpinned:
+          # a security update rebuilds ffmpeg and libav* together, and an exact revision would not install.
+          sudo apt-get install -y --no-install-recommends tmux ffmpeg
+          dpkg-query -W ffmpeg
+          ffmpeg -version
           npx playwright install --with-deps chromium
 
       # Each check below runs and reports even when another failed (a step's default condition is success();

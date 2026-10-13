@@ -1918,7 +1918,7 @@ export const CONTROLS: Control[] = [
     replace: "  if (held) return err(\"id_conflict\");",
     run: ["packages/domain/test/transcription.test.ts"], expect: "takes its own body again" },
   { id: "tx-queue-key", task: "tx", file: "packages/domain/src/transcription.ts",
-    find: "const rowKey = (tx: Transcription): string => `${tx.recording.kind}:${tx.recording.id}:${tx.language}`;",
+    find: "const rowKey = (tx: Transcription): string => {\n  const owner = \"endpointId\" in tx && typeof tx.endpointId === \"string\" ? tx.endpointId : \"\";\n  return `${owner}|${tx.recording.kind}|${tx.recording.id}|${tx.language}`;\n};",
     replace: "const rowKey = (tx: Transcription): string => tx.id;",
     run: ["packages/domain/test/transcription.test.ts"], expect: "each get their own slot" },
   // ---- ADR-0023 (decision briefs): the lint's key rules and the wire's fallback, each with the test that notices it gone.
