@@ -864,7 +864,7 @@ export const CONTROLS: Control[] = [
     find: "      const other = await this.#otherAnswer(a, id, askPrefix(e.id, e), k);\n      if (other) return other;\n", replace: "",
     run: ["apps/hub/test/escalation-in-doubt.test.ts"], expect: "another answer to the same ask while one is in doubt" },
   { id: "b1-v7-typed-earlier-not-recorded", task: "B1-V7", file: "apps/hub/src/application/escalation-service.ts",
-    find: "        this.#typedEarlier(other, id, other.key.slice(prefix.length));\n", replace: "",
+    find: "        this.#typedEarlier(other, id, other.key.slice(prefix.length), { endpointId: a.endpoint.id, sessionId: a.session.id });\n", replace: "",
     run: ["apps/hub/test/escalation-in-doubt.test.ts"], expect: "the first recorded once" },
   { id: "b1-v7-every-refusal-ends-doubt", task: "B1-V7", file: "apps/web/src/lib/catchup/answer.ts",
     find: "Object.hasOwn(REFUSALS, code) && !STILL_IN_DOUBT.has(code)", replace: "true",

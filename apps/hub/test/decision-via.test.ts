@@ -313,4 +313,23 @@ describe("a Decision the record can no longer attribute", () => {
     expect(r).toMatchObject({ ok: true });
     expect(r.item?.decision?.via).toBe("here");                                                    // this version's own answer
   });
+
+  // A row from before requests were kept names no requester (round 2.3): its node typed the answer after all, learnt
+  // from another endpoint's answer. The Decision is still recorded — under whoever's repeat learnt it, as before the
+  // request column — so the ask closes. Without it, the same answer is refused as already answered for the row's 24
+  // hours while the board keeps the ask open: it can never close.
+  it("an answer found typed on a row that names no request is recorded under whoever learnt it", async () => {
+    store.db.prepare("INSERT INTO sends (key, state, at, worker_id) VALUES (?, 'started', ?, '%0')")
+      .run(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "ship" }), T0 - 1000);
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("not reached"); },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                    // its node typed it after all
+    });
+    s.poll();
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "hold" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("phone"));
+    expect(s.seenBy(endpointId("phone")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
+  });
 });

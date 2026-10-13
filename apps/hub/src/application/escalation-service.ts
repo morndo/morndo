@@ -815,7 +815,7 @@ export class EscalationService {
         : await this.#settle(other.key, other.workerId);
       if (settled === null) continue;
       if (!settled.ok && settled.problem === "duplicate") {
-        this.#typedEarlier(other, id, other.key.slice(prefix.length));
+        this.#typedEarlier(other, id, other.key.slice(prefix.length), { endpointId: a.endpoint.id, sessionId: a.session.id });
         return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
       }
       log.warn(`answer to ${id} refused: another answer to it is in doubt (its node can't say it never typed it)`);
@@ -834,10 +834,11 @@ export class EscalationService {
 
   // An answer found typed at the asker (an answer in doubt that its node had typed): his Decision (E8), once, as it was
   // decided: its option, labelled from the ask, or words, whose digest its key carries (their length isn't kept). The
-  // row it was found under names whose answer it was, not whoever's repeat settled it (review of PR #55).
-  #typedEarlier(row: SendRow, id: string, part: string) {
-    const requester = this.#requesterOf(row);
-    if (!requester) { log.warn(`answer to ${id} found typed but its row names no requester; not recorded`); return; }
+  // row it was found under names whose answer it was, not whoever's repeat settled it (review of PR #55). A row that
+  // names no requester — from before requests were kept — is recorded under whoever's repeat learnt it, as before the
+  // request column: unrecorded, the ask could never close, every answer refused as already answered (round 2.3).
+  #typedEarlier(row: SendRow, id: string, part: string, by: { endpointId: EndpointId; sessionId: SessionId | null }) {
+    const requester = this.#requesterOf(row) ?? by;
     const e = this.#x.get(id);
     if (!e || e.status !== "open") return;
     const option = part.startsWith("option:") ? part.slice("option:".length) : null;
