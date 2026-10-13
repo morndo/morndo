@@ -1,6 +1,6 @@
 // Design §13: the run step passes with networking disabled. unshare -rn gives the process a network
 // namespace with no interfaces up, so a plugin that fetched a URL would fail.
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
@@ -18,9 +18,20 @@ afterAll(() => { rmSync(dir, { recursive: true, force: true }); });
 it.runIf(bin !== undefined)("a run with no network returns the sentence", async () => {
   if (bin === undefined) return;
   await speechWav(note, PHRASE);
+  const gate = join(dir, "gate.cjs");
+  writeFileSync(gate, [
+    "const { networkInterfaces } = require('node:os');",
+    "const { spawn } = require('node:child_process');",
+    "const external = Object.entries(networkInterfaces()).filter(([name, addrs]) =>",
+    "  name !== 'lo' && (addrs ?? []).some((addr) => addr.internal === false));",
+    "if (external.length > 0) { process.stderr.write('network is up\\n'); process.exit(2); }",
+    "const child = spawn(process.execPath, process.argv.slice(2), { stdio: 'inherit' });",
+    "child.on('exit', (code) => process.exit(code ?? 1));",
+    "",
+  ].join("\n"));
   const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
     const child = spawn("unshare", [
-      "-rn", process.execPath, bin, "run",
+      "-rn", process.execPath, gate, bin, "run",
       "--input", note, "--language", "en", "--threads", "2", "--max-seconds", "600", "--json",
     ], {
       env: {

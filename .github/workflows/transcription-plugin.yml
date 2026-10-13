@@ -95,6 +95,8 @@ jobs:
           }
           EOF
           sudo apparmor_parser -r /etc/apparmor.d/usr.bin.unshare
+          sudo grep -F '/usr/bin/unshare' /sys/kernel/security/apparmor/profiles
+          unshare -rn true
 
       - name: Contract suite and the no-network run
         if: ${{ !cancelled() && steps.deps.outcome == 'success' }}

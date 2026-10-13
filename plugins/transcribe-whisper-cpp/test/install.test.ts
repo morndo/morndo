@@ -109,18 +109,6 @@ describe("install choices", () => {
     for (const path of paths) expect(workflow.split(`- "${path}"`).length - 1).toBe(2);
   });
 
-  it("the workflow allows unshare a user namespace and the run still has no network", () => {
-    const workflow = readFileSync(join(import.meta.dirname, "../../../.github/workflows/transcription-plugin.yml"), "utf8");
-    const offline = readFileSync(join(import.meta.dirname, "offline.test.ts"), "utf8");
-    const allow = workflow.indexOf("apparmor_parser -r /etc/apparmor.d/usr.bin.unshare");
-    const suite = workflow.indexOf("Contract suite and the no-network run");
-    expect(workflow).toContain("/usr/bin/unshare flags=(unconfined)");
-    expect(workflow).toContain("userns,");
-    expect(allow).toBeGreaterThanOrEqual(0);
-    expect(allow).toBeLessThan(suite);
-    expect(offline).toContain('spawn("unshare", [\n      "-rn",');
-  });
-
   it("places an unchanged model by hard link so a reinstall does not copy it", () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-link-"));
     const cached = join(dir, "cached.bin");
