@@ -62,6 +62,15 @@ describe("what a start runs", () => {
     expect(l.asked).toEqual(["implement"]);
   });
 
+  it("a start by role passes its account only to a pick whose command takes one; a named engine refuses one it can't take", async () => {
+    const withDefault = policy({ ...ENGINES, defaultRole: "implement" });
+    expect(await laneLaunch(withDefault, { ...start, account: "a1" }, layer(FIRST)))
+      .toMatchObject({ command: ["acme-lane", "--engine", "acme", "--model", "large-2", "--effort", "high", "--window", "w1"] });
+    expect(await laneLaunch(withDefault, { ...start, account: "a1" }, layer({ picked: "beta:mid-3", skipped: [] })))
+      .toMatchObject({ command: ["claude-as", "a1", "--model", "mid-3"] });
+    expect(await laneLaunch(withDefault, { ...start, account: "a1", engine: "acme:large-2", reason: "r" }, layer(FIRST))).toMatchObject({ refused: { code: "bad_args" } });
+  });
+
   it("the default role fills a start that names nothing, but not a resume or a protected lane", async () => {
     const l = layer(FIRST);
     const withDefault = policy({ ...ENGINES, defaultRole: "implement" });

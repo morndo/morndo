@@ -14,7 +14,8 @@
 // The launch command's words: `{model}`, `{effort}`, `{account}` and `{lane}` are filled in. A word that is only a
 // placeholder whose value is missing is left out, with the option word just before it (`--effort {effort}` for a model
 // without an effort); a placeholder inside a longer word whose value is missing refuses the start. An account given to a
-// command without `{account}` is refused, as for `launch`. `resume` adds `--resume <session>`.
+// command without `{account}` is refused for a named engine, as for `launch`; for a role, whose pick the caller can't know,
+// it goes only to a command that takes one. `resume` adds `--resume <session>`.
 import { parseEngine, type Engine } from "@morndo/domain";
 import { EnginesError, enginesText, runEngines } from "@morndo/node-ops";
 import type { ErrorCode, LaneEngine, OpArgs } from "@morndo/protocol";
@@ -133,7 +134,9 @@ export async function laneLaunch(policy: Policy, a: OpArgs["lane.start"], layer:
   if (!engine) return refuse("internal", cut(`the engine layer picked an entry this node can't read: ${entry}`));
   const launch = engines.launch[engine.provider];
   if (!launch) return refuse("denied", `this node has no launch command for the provider ${engine.provider} (engines.launch)`);
-  const command = engineCommand(launch, engine, a);
+  // A role's pick is the resolver's, so its account goes only to a command that takes one.
+  const { account: _account, ...withoutAccount } = a;
+  const command = engineCommand(launch, engine, role !== undefined && !launch.command.some(w => w.includes("{account}")) ? withoutAccount : a);
   if (!Array.isArray(command)) return refuse("bad_args", command.refused);
   return {
     via: launch.via, command,

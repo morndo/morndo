@@ -805,6 +805,7 @@ A `stale` event, as `/v1/lane-events` and `/v1/events` carry it:
 **On an engine.** A node whose policy has `engines` (the node agent's README) can start a lane on an engine of the engine layer, `provider:model[@effort]`, with that provider's launch command:
 - `role` asks the node's engine layer what runs that Role now, and starts it. `engine` names one; on a node with a default role it needs a `reason`. Both at once are refused (`bad_args`).
 - A start that names neither runs the node's `engines.defaultRole` when it has one, except a `resume` and a protected lane.
+- `account` goes to the launch command when it takes one. For a role, whose pick the client can't know, a command without one ignores it; a named engine whose command takes none refuses it (`bad_args`).
 - It never falls back to `launch` quietly. A node without engines, a role nothing can fill now, a provider with no launch command there, or the engine layer switched off: `denied`, nothing started. An unknown role: `bad_args`.
 - The answer's `engine` says what ran: `{ entry, role?, skipped? }`. `skipped` lists what the resolver passed over first, each with its reason; when it isn't empty, the fleet raises `engine_fallback` (§14). The audit row of the start keeps the `role` or `engine`, the `reason` and the entry that ran (`ran`).
 
