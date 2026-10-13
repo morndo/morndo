@@ -150,11 +150,11 @@ It answers after the event is in the durable stream, and before any network I/O.
 | Path | Answer | Kept | When the spool can't be written |
 |---|---|---|---|
 | `/cc`, `/sl` | 204, empty | the latest per session | still 204 (a session never stalls); counted in `health.drops` |
-| `/hook/stop` | 200 `{ ok: true, queued: true }`, or the status ask: 200 `{ decision: "block", reason }` | every event but an asked one | 503, so the hook script's fallback runs |
+| `/hook/stop` | 200 `{ ok: true, queued: true }`, or the status ask: 200 `{ decision: "block", reason }` | every event (an asked one marked `statusAsked`) | 503, so the hook script's fallback runs |
 | `/hook/failure`, `/notify` | 202 | every event | 503 |
 | `/file` | 202 (413 over 25 MiB; 400 for a path that isn't absolute; 403 where files are never shared; 404 when missing) | a copy under `relay-files/`, by today's file rules | 503 |
 
-**The status ask** (reliable lanes §3.1). A lane's answer starts with one status line: `STATUS: DONE`, `STATUS: BLOCKED`, `STATUS: NEEDS DECISION` or `STATUS: WAITING <on what> [for <N> min|h]`. When Claude Code's own `Stop` body comes from a placed window whose answer has none, with `stop_hook_active` false and no background task or wake-up pending, the relay answers `{ "decision": "block", "reason": … }` and keeps nothing: Claude Code writes the line and stops again, and that Stop (now `stop_hook_active`) is the turn's end. So it asks at most once per turn. Off with `statusContract.mode: "off"`; never for `statusContract.exempt`.
+**The status ask** (reliable lanes §3.1). A lane's answer starts with one status line: `STATUS: DONE`, `STATUS: BLOCKED`, `STATUS: NEEDS DECISION` or `STATUS: WAITING <on what> [for <N> min|h]`. When Claude Code's own `Stop` body comes from a placed window whose answer has none, with `stop_hook_active` false and no background task or wake-up pending, the relay answers `{ "decision": "block", "reason": … }` and keeps the Stop with `statusAsked: true` in its body (subscribers get its answer; the fleet makes no lane event of it): Claude Code writes the line and stops again, and that Stop (now `stop_hook_active`) is the turn's end. So it asks at most once per turn. Off with `statusContract.mode: "off"`; never for `statusContract.exempt`.
 
 Anything but POST on the four kept paths is 405 and an unknown path 404. A request with an `Origin` header comes from a web page, not a hook: the kept paths answer it 403, progress paths drop it (204). A body over 448 KiB is 413 (dropped, for progress). A write the spool refuses changes nothing and counts one drop.
 

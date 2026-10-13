@@ -1342,14 +1342,14 @@ Each node runs a hook relay on `127.0.0.1:8787` (the agent's `relayPort`). Claud
 |---|---|---|---|
 | `/cc` | tool-call progress (`PreToolUse` and the like) | 204, empty, always: a slow answer would stall the session | the latest per session |
 | `/sl` | the status line's data | 204, empty, always | the latest per session |
-| `/hook/stop` | a turn's end (`Stop`) | 200 `{"ok":true,"queued":true}`, or the status ask (below) | every one, the asked ones not |
+| `/hook/stop` | a turn's end (`Stop`) | 200 `{"ok":true,"queued":true}`, or the status ask (below) | every one |
 | `/hook/failure` | a turn ended on an API error (`StopFailure`) | 202 | every one |
 | `/notify` | a message for the owner | 202 | every one |
 | `/file` | a file for the owner: `{ path, … }` | 202 (413 over 25 MiB, 400 for a path that isn't absolute, 403 where files are never shared, 404 when missing) | a copy, by the node's file rules |
 
 When the stream can't be written (a full disk), the script paths answer 503 so the calling script's own fallback runs, while `/cc` and `/sl` still answer 204 and count the event as dropped. Claude Code treats an HTTP hook's non-2xx answer, or no answer, as a non-blocking error (§15).
 
-**The status ask.** A lane's answer starts with a status line (§7). When Claude Code's own Stop body comes from a lane whose answer has none, the relay asks for it once: it answers 200 `{"decision":"block","reason":…}`, Claude Code goes on with the reason as its instruction, and the next Stop is the turn's end. The asked Stop isn't kept, so it makes no lane event. It asks only when all of these hold:
+**The status ask.** A lane's answer starts with a status line (§7). When Claude Code's own Stop body comes from a lane whose answer has none, the relay asks for it once: it answers 200 `{"decision":"block","reason":…}`, Claude Code goes on with the reason as its instruction, and the next Stop is the turn's end. The asked Stop is kept with `"statusAsked": true` added to its body, so subscribers still get the answer it carried; the fleet makes no lane event of it. It asks only when all of these hold:
 - the body is Claude Code's `Stop` (`hook_event_name`), from a window the relay placed (§11.2);
 - the Stop wasn't itself caused by a Stop hook (`stop_hook_active` false): so once per turn, far below Claude Code's limit of eight in a row;
 - no background task is running and no wake-up is scheduled (`background_tasks`, `session_crons` empty);
