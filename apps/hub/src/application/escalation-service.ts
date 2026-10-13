@@ -112,8 +112,9 @@ export class EscalationService {
   #policy: () => AccessPolicy;
   #listeners = new Set<(b: Board) => void>();
   #firstSeen = new Map<string, number>();
-  #inFlight = new Set<string>();
-  #typing = new Set<string>();                         // the answer keys being typed now: started rows with no store yet
+  // The answers in flight, one per escalation id (a second is refused, in_progress): the answer key being typed now (a
+  // started row with no store yet), or null while it is judged, settled or queued (round 4.10 of the PR #55 review).
+  #inFlight = new Map<string, string | null>();
   #seen = new Map<string, number>();
   #lastLedger: LedgerRead | null = null;
   #filed = new Map<string, LedgerItem>();              // the last readable list's items: wording while it can't be read
@@ -598,7 +599,7 @@ export class EscalationService {
     if (tap === null) return null;
     const k = answerKey(ask.id, ask, { kind: "option", key: tap.key });
     const row = this.#store.send(k);
-    if (row !== null && (row.state === "done" || row.store !== null || this.#typing.has(k))) return null;
+    if (row !== null && (row.state === "done" || row.store !== null || this.#inFlight.get(ask.id) === k)) return null;
     return { key: tap.key, label: tap.label, at: tap.at };
   }
 
@@ -687,7 +688,7 @@ export class EscalationService {
     const key = `${a.session.id}:${requestId}`;
     if (this.#seen.has(key)) return { ok: true, item: this.#view(id, a.endpoint.id) };
     if (this.#inFlight.has(id)) return { ok: false, problem: "in_progress", item: this.#view(id, a.endpoint.id) };
-    this.#inFlight.add(id);
+    this.#inFlight.set(id, null);
     try {
       // A repeat of this request's answer in doubt first: whatever became of the ask since — gone from the board, or
       // asked again — it must learn what became of that answer (its row names the answer: this escalation, this choice,
@@ -770,7 +771,7 @@ export class EscalationService {
       let outcome: SendOutcome;
       // A node that may have typed it (SendInDoubt): "uncertain", the hub's 409, never a 500 the app reads as a refusal
       // (final review I1), and kept for its repeat with the store it went to. Any other throw keeps its row too (below).
-      this.#typing.add(k);
+      this.#inFlight.set(id, k);
       try { outcome = await this.#send(e.asker.workerId, line, k); }
       catch (err) {
         // Any other throw (the legacy port's tmux command list, which can fail after the paste) may have typed it too:
@@ -782,7 +783,7 @@ export class EscalationService {
         keepInDoubt(this.#store, k, err);
         log.warn(`answer to ${e.id} in doubt: its node may have typed it; a repeat asks the node`, err);
         return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
-      } finally { this.#typing.delete(k); }
+      } finally { this.#inFlight.set(id, null); }
       settleOutcome(this.#store, k, outcome);                           // a retry may type it; "not_submitted" keeps its row
       if (outcome.problem) {
         log.warn(`answer to ${e.id} not delivered: ${outcome.problem}`);
