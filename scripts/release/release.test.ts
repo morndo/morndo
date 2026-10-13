@@ -4,6 +4,7 @@
 // Manifest are the wire documents, ssh-keygen accepts the signature, and re-signing a Feed moves
 // its number and its expiry only.
 import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -310,7 +311,7 @@ describe("install.sh", () => {
     throw new Error(`unsupported test platform ${os} ${arch}`);
   };
 
-  const fixture = (p: { tamper?: boolean; size?: number }) => {
+  const fixture = (p: { tamper?: boolean; size?: number; archive?: Buffer }) => {
     const dir = temp();
     const key = join(dir, "release");
     expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", "release-test", "-q"]).status).toBe(0);
@@ -319,7 +320,7 @@ describe("install.sh", () => {
     writeFileSync(signers, `${allowedSignerLine({ identity: RELEASE_NAMESPACE, namespace: RELEASE_NAMESPACE, publicKey: pub.stdout.trim() })}\n`);
     const marker = join(dir, "marker");
     const payload = new TextEncoder().encode(`#!/bin/sh\nprintf '%s\\n' "$*" > "${marker}"\n`);
-    const archive = packTree([{ path: "bin/morndo", bytes: payload, mode: "0555" }], 1_700_000_000);
+    const archive = p.archive ?? packTree([{ path: "bin/morndo", bytes: payload, mode: "0555" }], 1_700_000_000);
     const host = platform();
     const name = artifactName("0.1.0", host);
     const files = listFiles([{ path: "bin/morndo", bytes: payload, mode: "0555" }]);
@@ -369,7 +370,43 @@ describe("install.sh", () => {
     expect(refused.status).not.toBe(0);
     expect(spawnSync("test", ["-f", bad.marker]).status).not.toBe(0);
   });
+
+  it("refuses an archive entry that climbs with .. or is absolute", () => {
+    for (const name of ["./../x", "./a/../../x", "..", "./.."]) {
+      const bad = fixture({ archive: craftArchive(name) });
+      const run = spawnSync("sh", [bad.scriptPath, "--role", "node", "--signers", bad.signers], {
+        encoding: "utf8",
+        env: { ...process.env, MORNDO_RELEASE_BASE: `file://${bad.base}` },
+      });
+      expect(run.status, `${name}: ${run.stderr}`).not.toBe(0);
+      expect(run.stderr, name).toMatch(/refusing archive path/);
+      expect(spawnSync("test", ["-f", bad.marker]).status).not.toBe(0);
+    }
+  });
 });
+
+function craftArchive(entryName: string): Buffer {
+  const buf = Buffer.alloc(512);
+  buf.write(entryName, 0);
+  const oct = (at: number, width: number, value: number) => {
+    buf.write(value.toString(8).padStart(width - 1, "0"), at, width - 1, "ascii");
+  };
+  oct(100, 8, 0o644);
+  oct(108, 8, 0);
+  oct(116, 8, 0);
+  oct(124, 12, 0);
+  oct(136, 12, 0);
+  buf.fill(0x20, 148, 156);
+  buf.write("0", 156, 1, "ascii");
+  buf.write("ustar\0", 257, 6, "binary");
+  buf.write("00", 263, 2, "ascii");
+  let sum = 0;
+  for (const byte of buf) sum += byte;
+  buf.write(sum.toString(8).padStart(6, "0"), 148, 6, "ascii");
+  buf[154] = 0;
+  buf[155] = 0x20;
+  return gzipSync(Buffer.concat([buf, Buffer.alloc(1024)]));
+}
 
 // The staged tree, as the packer wants it: every file files.json names, plus files.json itself.
 function readStaged(dest: string): TreeFile[] {

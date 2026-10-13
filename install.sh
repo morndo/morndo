@@ -89,10 +89,21 @@ fi
 
 tar -tzf "$work/archive.tar.gz" > "$work/list"
 while IFS= read -r entry; do
-  case $entry in
-    "" | ./ | ./*) ;;
-    /* | ../* | */../* | */..) echo "refusing archive path $entry" >&2; exit 65 ;;
+  [ -n "$entry" ] || continue
+  path=${entry#./}
+  case $path in
+    /*) echo "refusing archive path $entry" >&2; exit 65 ;;
   esac
+  # A `..` segment is refused before any `./` pattern, including `./../x` and `./a/../../x`.
+  saved=$IFS
+  IFS=/
+  for part in $path; do
+    if [ "$part" = ".." ]; then
+      echo "refusing archive path $entry" >&2
+      exit 65
+    fi
+  done
+  IFS=$saved
 done < "$work/list"
 
 mkdir -p "$work/tree"
