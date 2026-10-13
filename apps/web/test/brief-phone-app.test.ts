@@ -112,6 +112,41 @@ function passkeyOk() {
   });
 }
 
+// The same ceremony, held open until the test releases it, so a second tap and a restated brief can land during the prompt.
+function passkeyHold() {
+  const g = globalThis as unknown as {
+    fetch: typeof fetch; navigator: { credentials: { get: (o: unknown) => Promise<unknown> } };
+    __passkeyAsks: number; __releasePasskey: (ok: boolean) => void;
+  };
+  g.__passkeyAsks = 0;
+  const real = g.fetch.bind(globalThis);
+  g.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes("/api/stepup/options")) {
+      return new Response(JSON.stringify({
+        flowId: "flow-1",
+        options: { challenge: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", timeout: 60000, rpId: "127.0.0.1", userVerification: "preferred" },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.includes("/api/stepup/verify")) return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    return real(input, init);
+  };
+  const bytes = (n: number) => new Uint8Array(n);
+  const cred = () => ({
+    id: "cred", rawId: bytes(8), type: "public-key", authenticatorAttachment: "platform",
+    getClientExtensionResults: () => ({}),
+    response: { authenticatorData: bytes(37), clientDataJSON: bytes(8), signature: bytes(8), userHandle: null },
+  });
+  const pending: ((ok: boolean) => void)[] = [];
+  g.__releasePasskey = (ok: boolean) => { const wait = pending.splice(0); for (const settle of wait) settle(ok); };
+  g.navigator.credentials.get = () => new Promise((resolve, reject) => {
+    g.__passkeyAsks += 1;
+    pending.push(ok => ok ? resolve(cred()) : reject(new Error("cancelled")));
+  });
+}
+const passkeyAsks = (tab: Page) => tab.evaluate(() => (globalThis as unknown as { __passkeyAsks: number }).__passkeyAsks);
+const releasePasskey = (tab: Page, ok: boolean) => tab.evaluate(v => (globalThis as unknown as { __releasePasskey: (ok: boolean) => void }).__releasePasskey(v), ok);
+
 async function phone(track: (tab: Page) => void, path = "", withGate = false, prelude?: () => void) {
   const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
   const tab = await context.newPage();
@@ -549,6 +584,46 @@ describe("the phone around the brief sheet", () => {
     const before = (await calls(tab)).length;
     await tab.getByRole("button", { name: "Confirm with passkey and send" }).click();
     await tab.getByRole("article").getByText("Not sent: the brief changed since that answer, so it was not sent.").waitFor({ timeout: 3_000 });
+    expect(await calls(tab)).toHaveLength(before);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("a second passkey confirm while one is running does nothing", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true, passkeyHold);
+    await push(tab, [release]);
+    await queue(tab, [STEP_UP, { status: 200 }]);
+    await tab.locator("button.banner.you").click();
+    await tab.getByRole("button", { name: "Ship today" }).click();
+    const confirm = tab.getByRole("button", { name: "Confirm with passkey and send" });
+    await confirm.waitFor({ timeout: 15_000 });
+    await confirm.click();
+    await tab.waitForFunction(() => (globalThis as unknown as { __passkeyAsks: number }).__passkeyAsks >= 1);
+    await confirm.click();
+    expect(await passkeyAsks(tab)).toBe(1);
+    await releasePasskey(tab, true);
+    await expect.poll(async () => (await calls(tab)).length, { timeout: 8_000 }).toBe(2);
+    expect(await passkeyAsks(tab)).toBe(1);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("does not send a passkey confirm when the brief changes during the check", { timeout: 45_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true, passkeyHold);
+    await push(tab, [release]);
+    await queue(tab, [STEP_UP, { status: 200 }]);
+    await tab.locator("button.banner.you").click();
+    await tab.getByRole("button", { name: "Ship today" }).click();
+    const confirm = tab.getByRole("button", { name: "Confirm with passkey and send" });
+    await confirm.waitFor({ timeout: 15_000 });
+    await confirm.click();
+    await tab.waitForFunction(() => (globalThis as unknown as { __passkeyAsks: number }).__passkeyAsks >= 1);
+    await push(tab, [releaseRestated]);
+    const before = (await calls(tab)).length;
+    await releasePasskey(tab, true);
+    await tab.getByRole("article").getByText("Not sent: the brief changed since that answer, so it was not sent.").waitFor({ timeout: 5_000 });
     expect(await calls(tab)).toHaveLength(before);
     expect(errors).toEqual([]);
     await context.close();

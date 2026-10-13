@@ -48,6 +48,8 @@ export class CatchUpSession {
   #clock: () => number;
   #timer: ReturnType<typeof setInterval> | null = null;
   #lastStep = 0;
+  // One passkey confirm at a time: a second tap while it runs does not start another prompt or another send.
+  #stepUpBusy = false;
 
   // Every decision that waits now, in order (C1, C3), and the number on Today's tab.
   cards: Card[] = $derived.by(() => catchUpCards({
@@ -162,16 +164,32 @@ export class CatchUpSession {
   // The one passkey confirm: the refusal's own answer, checked against the live ask, the card on top and the
   // connection. A reason when it cannot be sent (the card and the sheet show that); null once it has gone.
   async retryStepUp(feed: { status: string; decisions: readonly { id: string; version: string }[] }, verify: () => Promise<boolean>): Promise<string | null> {
-    const r = this.refusal;
-    const again = r?.retry;
-    const top = this.top;
-    if (!r || !again || r.code !== "step_up" || top?.kind !== "decision" || r.key !== top.key) return STEP_UP_MISMATCH;
-    const live = feed.decisions.find(d => d.id === again.id)?.version ?? "";
-    if (live !== again.seen) return STEP_UP_CHANGED;
-    if (feed.status !== "live" || navigator.onLine === false) return STILL_OFFLINE;
-    if (!(await verify())) return PASSKEY_UNFINISHED;
-    await this.retry(r.key, again.id, again.body, again.label, again.seen);
-    return null;
+    if (this.#stepUpBusy) return null;
+    this.#stepUpBusy = true;
+    try {
+      // The version, the card and the connection, before the prompt and again after it: any of them can move while it is up.
+      const blocked = (): string | null => {
+        const r = this.refusal;
+        const again = r?.retry;
+        const top = this.top;
+        if (!r || !again || r.code !== "step_up" || top?.kind !== "decision" || r.key !== top.key) return STEP_UP_MISMATCH;
+        const live = feed.decisions.find(d => d.id === again.id)?.version ?? "";
+        if (live !== again.seen) return STEP_UP_CHANGED;
+        if (feed.status !== "live" || navigator.onLine === false) return STILL_OFFLINE;
+        return null;
+      };
+      const before = blocked();
+      if (before) return before;
+      if (!(await verify())) return PASSKEY_UNFINISHED;
+      const after = blocked();
+      if (after) return after;
+      const again = this.refusal?.retry;
+      if (!again || !this.refusal) return STEP_UP_MISMATCH;
+      await this.retry(this.refusal.key, again.id, again.body, again.label, again.seen);
+      return null;
+    } finally {
+      this.#stepUpBusy = false;
+    }
   }
 
   async retry(key: string, id: string, body: Body, label: string, seen: string, requestId: string = crypto.randomUUID()) {
