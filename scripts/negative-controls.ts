@@ -861,7 +861,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/hub/test/escalation-in-doubt.test.ts", "apps/hub/test/escalation-answer-keys.test.ts"], expect: "a throw while typing keeps its row" },
   // ---- B1 validation (answers and doubt): E8 while an answer is in doubt, and the card that keeps the doubt.
   { id: "b1-v7-other-answer-not-settled", task: "B1-V7", file: "apps/hub/src/application/escalation-service.ts",
-    find: "    const other = await this.#otherAnswer(a, id, prefix, others);\n    if (other) return other;\n", replace: "",
+    find: "    const other = await this.#otherAnswer(a, id, prefix, others);\n    if (other) return { refused: other };\n", replace: "",
     run: ["apps/hub/test/escalation-in-doubt.test.ts"], expect: "another answer to the same ask while one is in doubt" },
   { id: "b1-v7-typed-earlier-not-recorded", task: "B1-V7", file: "apps/hub/src/application/escalation-service.ts",
     find: "        this.#typedEarlier(other, id, other.key.slice(prefix.length), { endpointId: a.endpoint.id, sessionId: a.session.id });\n", replace: "",

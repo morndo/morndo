@@ -383,6 +383,28 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.board().items.find(i => i.id === "ny-7")?.decision).toMatchObject({ choice: { key: "hold" }, via: "elsewhere" });
   });
 
+  // Restated while an earlier answer is settled (round 5.1 of the PR #55 review): the same message's option is renamed
+  // as the node is asked, so the ask the answer was judged against is no longer the one on the board. The answer sent no
+  // `seen`, and is still refused as changed, nothing typed: never typed with a label he did not see, nor the old one.
+  it("an answer is refused as changed when the ask is restated while an earlier answer is settled", async () => {
+    store.startAnswer(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "hold" }), T0 - 1000, { workerId: "%0", request: "desk:r0", label: "Hold for a day" });
+    store.setSendStore(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "hold" }), "st-0");
+    const typed: string[] = [];
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async (_pane, text) => { typed.push(text); return { problem: null, typedAt: 0 }; },
+      settle: async key => {
+        manager[0] = { ...manager[0]!, text: "The demo release is ready. CI is green.\n\n[buttons ny-7] ship=Ship now | hold=Hold for a day" };
+        store.dropSend(key);                                                                     // never started there
+        return null;
+      },
+    });
+    s.poll();
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "changed" });
+    expect(typed).toEqual([]);
+    expect(s.board().items.find(i => i.id === "ny-7")).toMatchObject({ status: "open", decision: null });
+  });
+
   // The known limit (docs/domain.md, E8): a hand tap of the hub's own choice that the hub first reads after it wrote
   // its row can't be told from that row's paste. While the row stands it is taken as the paste. Once the row's node
   // says it never typed it, the row goes, and the tap is then the hand's: it answers the ask before anything more is

@@ -704,15 +704,16 @@ export class EscalationService {
       this.poll();                                       // the list may have closed it a moment ago
       const c = this.#x.check(id, choice, this.#now());
       if (!c.ok) return { ok: false, problem: c.error, item: this.#view(id, a.endpoint.id) };
-      const e = c.value;
+      let e = c.value;
       if (seen !== undefined && seen !== this.#version(e)) return { ok: false, problem: "changed", item: this.#view(id, a.endpoint.id) };
       const k = answerKey(e.id, e, choice);
       // ... or of the same answer from another request, or another answer to this ask (E8), before anything is queued
       // or typed (review #29.2): an earlier answer this hub may have typed must block a second one, or the manager can
       // be given both. Once per answer, for the inbox and the typed path alike, which the inbox's falls back to when
-      // it can't be written (round 5.6 of the PR #55 review).
-      const inDoubt = await this.#settleEarlier(a, id, choice, e, k, key, seen);
-      if (inDoubt) return inDoubt;
+      // it can't be written (round 5.6 of the PR #55 review). What follows is the ask as it judged it afresh (round 5.1).
+      const judged = await this.#settleEarlier(a, id, choice, e, k, key);
+      if ("refused" in judged) return judged.refused;
+      e = judged.e;
       const decided = decidedChoice(choice, e.options);
       const option = decided.kind === "option" ? decided : null;
       const line = option ? tapLine(e.id, option) : wordsLine(e.id, choice.kind === "words" ? choice.text : "");
@@ -839,23 +840,27 @@ export class EscalationService {
   // paste was no paste: a hand typed it, and it answers the ask. So once a row went, the ask is judged again from a
   // fresh read before anything is typed (the conservative outcome, E8): the hub never writes its own row after a tap
   // that answers the ask, and no order of what it read and wrote is needed (round 4.1 of the PR #55 review). Asked
-  // again or restated meanwhile, the answer is refused as changed (E12), never typed under the earlier version's key.
-  async #settleEarlier(a: Authenticated, id: string, choice: Choice, e: Escalation, k: string, key: string, seen: string | undefined): Promise<AnswerResult | null> {
+  // again or restated meanwhile, the answer is refused as changed (E12), with or without a `seen` (round 5.1): never
+  // typed under the earlier version's key, nor with a label he did not see. Meanwhile is since the caller judged `e`
+  // (and held `seen` to it): a poll updates an escalation in place, so its version is taken before the first await.
+  // Otherwise the result is the ask as judged afresh, which the caller goes on with.
+  async #settleEarlier(a: Authenticated, id: string, choice: Choice, e: Escalation, k: string, key: string): Promise<{ refused: AnswerResult } | { e: Escalation }> {
+    const version = this.#version(e);
     const prefix = askPrefix(e.id, e);
     const own = this.#store.send(k);
     const others = this.#store.answersOfAsk(prefix).filter(r => r.key !== k);
-    if (own === null && others.length === 0) return null;
+    if (own === null && others.length === 0) return { e };
     if (own) {
       const settled = await this.#settleAnswer(a, id, choice, own, key);
-      if (settled) return settled;
+      if (settled) return { refused: settled };
     }
     const other = await this.#otherAnswer(a, id, prefix, others);
-    if (other) return other;
+    if (other) return { refused: other };
     this.poll();
     const c = this.#x.check(id, choice, this.#now());
-    if (!c.ok) return { ok: false, problem: c.error, item: this.#view(id, a.endpoint.id) };
-    if (answerKey(c.value.id, c.value, choice) !== k || (seen !== undefined && seen !== this.#version(c.value))) return { ok: false, problem: "changed", item: this.#view(id, a.endpoint.id) };
-    return null;
+    if (!c.ok) return { refused: { ok: false, problem: c.error, item: this.#view(id, a.endpoint.id) } };
+    if (answerKey(c.value.id, c.value, choice) !== k || this.#version(c.value) !== version) return { refused: { ok: false, problem: "changed", item: this.#view(id, a.endpoint.id) } };
+    return { e: c.value };
   }
 
   // Another answer to the same ask (another choice, another request) that its node may have typed (E8 while an answer is
