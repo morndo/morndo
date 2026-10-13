@@ -38,7 +38,7 @@ type Turn = {
   at: number;                      // the turn's end, by the node's clock
   status: TurnStatus | null;
   active: number;                  // the latest hook from this lane, by the node's clock: activity once later than `at`
-  deadline: number | null;         // by the fleet's clock
+  deadline: number | null;         // from the turn's end, by the node's clock (ADR-0027); after a rebuild, from the restart
   reason: "waiting" | "no_status";
   waitingOn?: string;
   reported: boolean;               // its stale event is stored
