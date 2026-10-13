@@ -5,9 +5,11 @@
 // `stale` lane event for that turn, delivered to the orchestrator with the others, and, with laneWatch.nudge, one delivery
 // to the lane itself saying what it was waiting on and the line to end with. `stalls` counts the stale events since the
 // lane last ended DONE, BLOCKED or NEEDS DECISION; from the third on, the lane is for the orchestrator to re-plan, so it is
-// not nudged again (Magentic-One's stall counter: arXiv 2411.04468). Only lanes that make lane events are watched (not the
-// orchestrator's own, not ignored ones), and a lane whose window is gone is dropped. A lane whose node is not online is
-// left as it is until the node is back: its silence is the node's, which has its own status.
+// not nudged again (Magentic-One's stall counter: arXiv 2411.04468). Only a lane running the agent CLI is nudged: a
+// delivery is typed only into a live session of it (FL18), so one to any other lane would wait for nothing. Only lanes
+// that make lane events are watched (not the orchestrator's own, not ignored ones), and a lane whose window is gone is
+// dropped. A lane whose node is not online is left as it is until the node is back: its silence is the node's, which
+// has its own status.
 // The watch lives in memory. At start it is rebuilt from the stored lane events of the last day; a restart counts as
 // activity, so a lane's deadline runs again from the restart and nothing is called stale for what the fleet did not see.
 import type { HookEvent, LaneEvent, LaneWatchEntry, TurnStatus } from "@morndo/protocol";
@@ -46,6 +48,7 @@ export class LaneWatch {
   #nudge: ((r: DeliveryRequest) => Promise<unknown>) | null;
   #alive: (node: string, window: string) => boolean;
   #online: (node: string) => boolean;
+  #nudgeable: (node: string, window: string) => boolean;
   #log: Logger;
   #now: () => number;
   #sweepMs: number;
@@ -53,13 +56,15 @@ export class LaneWatch {
 
   constructor(p: {
     config: LaneWatchConfig; raise: (d: LaneEventDraft) => LaneEvent | null; nudge?: (r: DeliveryRequest) => Promise<unknown>;
-    alive: (node: string, window: string) => boolean; online?: (node: string) => boolean; log: Logger; now?: () => number; sweepMs?: number;
+    alive: (node: string, window: string) => boolean; online?: (node: string) => boolean; nudgeable?: (node: string, window: string) => boolean;
+    log: Logger; now?: () => number; sweepMs?: number;
   }) {
     this.#config = p.config;
     this.#raise = p.raise;
     this.#nudge = p.nudge ?? null;
     this.#alive = p.alive;
     this.#online = p.online ?? (() => true);
+    this.#nudgeable = p.nudgeable ?? (() => true);
     this.#log = p.log;
     this.#now = p.now ?? Date.now;
     this.#sweepMs = p.sweepMs ?? SWEEP_MS;
@@ -127,7 +132,7 @@ export class LaneWatch {
           ...(t.waitingOn === undefined ? {} : { waitingOn: t.waitingOn }), since: t.at, stalls: t.stalls,
         });
       } catch (e) { this.#log.error(`lane watch: the stale event of ${t.window} on ${t.node} could not be stored (fleet.db busy?)`, e); }
-      if (!made || !this.#config.nudge || !this.#nudge || t.stalls > NUDGE_MAX_STALLS) continue;
+      if (!made || !this.#config.nudge || !this.#nudge || t.stalls > NUDGE_MAX_STALLS || !this.#nudgeable(t.node, t.window)) continue;
       this.#nudge({ id: `fleet:nudge:${t.node}:${t.at}`, lane: t.window, text: nudgeText(t, now), ttlMs: NUDGE_TTL_MS })
         .catch((e: unknown) => this.#log.warn(`lane watch: nudging ${t.window} on ${t.node} failed`, e));
     }

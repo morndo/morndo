@@ -82,11 +82,14 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   const deliveries = new Deliveries({
     store: new LaneDeliveriesStore(db), sticky: new StickyLanesStore(db), stickyLanes: config.stickyLanes, lanes, connections, audit, events, log, now,
   });
+  // The windows that run a session of the agent CLI now, per node: the lane watch nudges only those.
+  const sessions = new Map<string, Set<string>>();
   events.subscribe(e => {
     if (e.t !== "inventory") return;
     const panes = (e.body as { panes: Pane[] }).panes;
     lanes.inventory(e.node, panes);
     deliveries.inventory(e.node, panes);
+    sessions.set(e.node, new Set(panes.filter(p => p.sessionId !== undefined).map(p => p.window)));
   });
   const laneEventsStore = new LaneEventsStore(db);
   const laneEventsPush = new LaneEventsPush({ store: laneEventsStore, deliveries, config: config.laneEvents, log });
@@ -98,6 +101,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     config: config.laneWatch, log, now, raise: d => laneEvents.raise(d), nudge: r => deliveries.post(r, "fleet"),
     alive: (node, window) => lanes.list().some(l => l.name === window && l.node === node && l.workerId !== null),
     online: node => connections.status(node) === "online",
+    nudgeable: (node, window) => sessions.get(node)?.has(window) ?? false,
     ...(o.laneWatchSweepMs === undefined ? {} : { sweepMs: o.laneWatchSweepMs }),
   });
   laneEvents.watchWith(laneWatch);

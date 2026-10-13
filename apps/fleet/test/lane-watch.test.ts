@@ -13,14 +13,14 @@ const MIN = 60_000;
 const T0 = 1_800_000_000_000;
 const CONFIG: LaneWatchConfig = { waitingMin: 30, noStatusMin: 15, nudge: true };
 
-function rig(o: { config?: LaneWatchConfig; alive?: boolean; online?: () => boolean } = {}) {
+function rig(o: { config?: LaneWatchConfig; alive?: boolean; online?: () => boolean; nudgeable?: () => boolean } = {}) {
   let now = T0;
   let seq = 0;
   const raised: LaneEventDraft[] = [];
   const nudged: DeliveryRequest[] = [];
   const alive = { value: o.alive ?? true };
   const watch = new LaneWatch({
-    config: o.config ?? CONFIG, log: quiet, now: () => now, alive: () => alive.value, ...(o.online ? { online: o.online } : {}),
+    config: o.config ?? CONFIG, log: quiet, now: () => now, alive: () => alive.value, ...(o.online ? { online: o.online } : {}), ...(o.nudgeable ? { nudgeable: o.nudgeable } : {}),
     raise: d => { raised.push(d); return { ...d, seq: ++seq } as LaneEvent; },
     nudge: async r => { nudged.push(r); },
   });
@@ -96,6 +96,11 @@ describe("the lane watch", () => {
     gone.at(T0 + 16 * MIN);
     gone.watch.sweep();
     expect([gone.raised, gone.watch.view()]).toEqual([[], []]);
+    const noSession = rig({ nudgeable: () => false });                                 // a lane that runs no agent CLI
+    noSession.watch.turn(noSession.finished(T0));
+    noSession.at(T0 + 16 * MIN);
+    noSession.watch.sweep();
+    expect([noSession.raised.length, noSession.nudged.length]).toEqual([1, 0]);
     const quietRig = rig({ config: { ...CONFIG, nudge: false } });
     quietRig.watch.turn(quietRig.finished(T0));
     quietRig.at(T0 + 16 * MIN);
