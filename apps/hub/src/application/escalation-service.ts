@@ -492,18 +492,8 @@ export class EscalationService {
         if (t && !echoes.has(m.id)) taps.set(t.id, { key: t.key, label: t.label, at: m.at });   // not a withdrawn answer's echo (B1)
       }
     }
-    // A tap the hub itself typed for one of its own answers — a sends row under this ask's answer keys for that choice,
-    // in flight, in doubt or done — is that answer arriving in the pane, not an answer from elsewhere. Reported as a
-    // sighting it would settle the ask as "elsewhere" naming no endpoint, and the answer's own recording, which names
-    // the endpoint that accepted it, would be refused as a second answer (E8). So it is no sighting: the answer path
-    // records it (review of PR #55). One row nothing can ever record — "started", with no store to ask a node about,
-    // and no answer of this ask in flight here (the hub stopped while typing it, or the port threw after the paste and
-    // no node can be asked) — would leave that tap as the ask's only record: it settles the ask, as it did before the
-    // filter (round 2 of the PR #55 review).
-    for (const [id, t] of taps) {
-      const own = this.#store.answersOfAsk(`answer:${id}:`).find(r => r.key.endsWith(`:${choicePart({ kind: "option", key: t.key })}`));
-      if (own && (this.#inFlight.has(id) || own.state === "done" || own.store !== null)) taps.delete(id);
-    }
+    // The taps as read; whether one is this hub's own answer's paste, each ask's sighting judges for its own version
+    // (#ownTapOf). The pane keeps every tap line for as long as the history window holds it, across ask versions.
     this.#paneTaps = taps;
     const items = new Map<string, LedgerItem>((ledger?.ok ? ledger.items : []).map(i => [i.id, i]));
     if (ledger?.ok) this.#filed = items;
@@ -572,9 +562,27 @@ export class EscalationService {
         };
         if (filed.closed) source = { kind: "settled", resolution: filed.closed.resolution, at: filed.closed.at };
       }
-      out.push({ ask: shown, source, answered: taps.get(id) ?? null });
+      out.push({ ask: shown, source, answered: this.#ownTapOf(shown, taps.get(id) ?? null) });
     }
     return out;
+  }
+
+  // A tap in the manager's pane that the hub itself typed for one of its own answers is that answer arriving in the
+  // pane, not an answer from elsewhere. Reported as a sighting it would settle the ask as "elsewhere" naming no
+  // endpoint, and the answer's own recording, which names the endpoint that accepted it, would be refused as a second
+  // answer (E8). So it is no sighting: the answer path records it (review of PR #55). The row that says so is this
+  // ask's own answer key — the key carries the ask's version (the message that asked it), so an earlier version's row
+  // is another answer to an ask asked again, and a row written after the tap is not this tap's source either (the row
+  // goes down before its own paste) — and one still waiting to be recorded: in flight here, done, or in doubt with a
+  // store to ask a node about. One row nothing can ever record — "started", no store, nothing in flight (the hub
+  // stopped while typing it, or the port threw after the paste and no node can be asked) — would leave that tap as the
+  // ask's only record: it settles the ask, as it did before the filter (rounds 2.1 and 2.2, PR #55 review).
+  #ownTapOf(ask: Ask, tap: Sighting["answered"]): Sighting["answered"] {
+    if (tap === null) return null;
+    if (this.#inFlight.has(ask.id)) return null;            // being typed now: recorded when the send lands
+    const row = this.#store.send(answerKey(ask.id, ask, { kind: "option", key: tap.key }));
+    if (row !== null && row.at <= tap.at && (row.state === "done" || row.store !== null)) return null;
+    return tap;
   }
 
   // Briefs the hub holds open itself (E14). A `ref` is sighted with its list item, above, not here.
@@ -587,7 +595,7 @@ export class EscalationService {
       out.push({
         ask: shown,
         source: b.closed ? { kind: "settled", resolution: b.closed.resolution, at: b.closed.at } : { kind: "open" },
-        answered: this.#paneTaps.get(b.id) ?? null,
+        answered: this.#ownTapOf(ask, this.#paneTaps.get(b.id) ?? null),
       });
     }
     return out;
@@ -665,10 +673,13 @@ export class EscalationService {
     this.#inFlight.add(id);
     try {
       // A repeat of this request's answer in doubt first: whatever became of the ask since, it must learn what became of
-      // that answer (its row names the answer: this escalation, this choice).
+      // that answer (its row names the answer: this escalation, this choice, as asked when the row was written). A row
+      // from an earlier version of the ask is another answer's, asked again since (the answer key's own rule): the same
+      // choice of the same request is a new answer, typed again (round 2.8 of the PR #55 review).
       const request = `${a.endpoint.id}:${requestId}`;
       const earlier = this.#store.sendOfRequest(request);
-      if (earlier && earlier.key.startsWith(`answer:${id}:`) && earlier.key.endsWith(`:${choicePart(choice)}`)) {
+      const asked = this.#x.get(id);
+      if (earlier && asked && earlier.key === answerKey(id, asked, choice)) {
         const settled = await this.#settleAnswer(a, id, choice, earlier, key);
         if (settled) return settled;
       }

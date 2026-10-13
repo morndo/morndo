@@ -14,6 +14,7 @@ import { frameText } from "./http-crash-fixture.ts";
 import { Store } from "../src/adapters/store.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
 import { EscalationService, answerKey, type Watch } from "../src/application/escalation-service.ts";
+import { SendInDoubt } from "../src/application/ports.ts";
 import type { Authenticated } from "../src/application/access-service.ts";
 
 const NOW = new Date(2026, 9, 1, 12).getTime();
@@ -254,5 +255,62 @@ describe("a Decision the record can no longer attribute", () => {
     s.poll();
     expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
     expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+  });
+
+  // The filter matches the ask's own version (round 2.2): an earlier version's row — kept its 24 hours after the ask
+  // was asked again, so the old Decision no longer answers it (E11) — is not this ask's answer. A hand tap for the
+  // restated ask settles it, as any tap from elsewhere does.
+  it("a hand tap answers a restated ask even when an earlier version's row is kept", async () => {
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => ({ problem: null, typedAt: 0 }),
+    });
+    s.poll();
+    expect(await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: true });   // v1: answered, its row done
+    manager.push({ id: "m2", at: T0, author: { kind: "agent", name: "manager" }, kind: "text",
+      text: "The demo release is ready again, with the fix.\n\n[buttons ny-7] ship=Ship it | hold=Hold for a day" });
+    s.poll();                                                                                                          // asked again: open, a new version
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");
+    manager.push({ id: "m-tap", at: T0, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] ship (Ship it)" });
+    s.poll();
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
+    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+  });
+
+  // A row written after the tap is not the tap's source either (round 2.2): the row goes down before its own paste,
+  // so a tap older than the row was typed by a hand, and answers the ask. Here the later row is in doubt with a store
+  // to ask — one that may still be settled by a repeat — and the hand tap still wins.
+  it("a hand tap typed before the hub's own row was written still settles the ask", async () => {
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new SendInDoubt("st-1", "the node may have typed it"); },        // in doubt, with a store
+    });
+    s.poll();
+    expect(await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    manager.push({ id: "m-tap", at: T0 - 1, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] hold (Hold for a day)" });
+    s.poll();
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("answered");
+    expect(s.seenBy(endpointId("ep2")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("elsewhere");
+  });
+
+  // The same exact key on the answer path's own repeat (round 2.8): a request's row belongs to the version it was
+  // written under. Asked again, the same choice of the same request is a new answer, typed again (the answer key's
+  // own rule), not the earlier version's answer still in doubt.
+  it("a repeat of its own request answers a restated ask anew, not as the earlier version's answer in doubt", async () => {
+    let throws = true;
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { if (throws) throw new Error("lost while typing"); return { problem: null, typedAt: 0 }; },
+      settle: async () => ({ ok: false, problem: "uncertain" }),                                   // its node can never say
+    });
+    s.poll();
+    expect(await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    manager.push({ id: "m2", at: T0, author: { kind: "agent", name: "manager" }, kind: "text",
+      text: "The demo release is ready again, with the fix.\n\n[buttons ny-7] ship=Ship it | hold=Hold for a day" });
+    s.poll();                                                                                      // asked again: open, a new version
+    throws = false;
+    const r = await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1");          // the same request again
+    expect(r).toMatchObject({ ok: true });
+    expect(r.item?.decision?.via).toBe("here");                                                    // this version's own answer
   });
 });
