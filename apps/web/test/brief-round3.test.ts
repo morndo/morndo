@@ -94,6 +94,39 @@ describe("round 3: Check again still asks when the brief was restated", () => {
   }, 60_000);
 });
 
+async function holdAnswer() {
+  await tab.evaluate(() => {
+    let go: () => void = () => {};
+    (globalThis as { __answerGate?: Promise<void>; __releaseAnswer?: () => void }).__answerGate = new Promise<void>(r => { go = r; });
+    (globalThis as { __releaseAnswer?: () => void }).__releaseAnswer = () => go();
+  });
+}
+
+async function releaseAnswer() {
+  await tab.evaluate(() => (globalThis as { __releaseAnswer?: () => void }).__releaseAnswer?.());
+}
+
+describe("round 3: a successful answer that the feed already shows is sent", () => {
+  it("shows Sent when the answered status arrives before the POST returns", async () => {
+    await ready();
+    await holdAnswer();
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Ship the weekly notes" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Extend the triage script" }).click();
+    await dialog.getByRole("button", { name: "Send answer" }).click();
+    await tab.waitForFunction(() => ((globalThis as { __answers?: unknown[] }).__answers?.length ?? 0) >= 1);
+    await show([tap("d-re", "v1", "Extend the triage script", {
+      status: "answered",
+      decision: { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW, via: "here", endpointId: null, sessionId: null },
+    })]);
+    await releaseAnswer();
+    await dialog.getByText(/^Sent\./).waitFor();
+    expect(await dialog.getByText("no longer open").count()).toBe(0);
+  }, 60_000);
+});
+
 describe("round 3: a restated card does not offer a send that does nothing", () => {
   it("confirm mode shows the new version and keeps Send disabled", async () => {
     await ready();

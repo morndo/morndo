@@ -78,12 +78,13 @@ export class AnswerSession {
     const doubt = this.again;
     const problem = await onAnswer(this.live.id, body, requestId, this.seen);
     this.sending = false;
-    if (this.live.status !== "open") { this.apply(noteClosed(this.snapshot())); return; }
     if (problem) {
+      if (this.live.status !== "open") { this.apply(noteClosed(this.snapshot())); return; }
       this.error = problem.text;
       this.again = MAY_HAVE_GONE.has(problem.code) ? { body, requestId, code: problem.code } : doubt && !endsDoubt(problem.code) ? doubt : null;
       return;
     }
+    // The POST was accepted. The feed may already show the item answered; that is this answer, not a close.
     this.again = null;
     this.sent = true;
     this.mode = "idle";

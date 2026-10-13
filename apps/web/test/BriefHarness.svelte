@@ -20,7 +20,12 @@
 <div class="desk-tokens" style="height:720px;display:flex">
   <div style="width:440px;display:flex;flex-direction:column">
     <DecisionsPanel {items} {ledger} {now} verifiedFresh={true}
-      onAnswer={async (id, body, requestId, seen) => { answers.push({ id, body, requestId, seen }); return problem(); }}
+      onAnswer={async (id, body, requestId, seen) => {
+        answers.push({ id, body, requestId, seen });
+        const gate = (globalThis as { __answerGate?: Promise<void> }).__answerGate;
+        if (gate) await gate;
+        return problem();
+      }}
       onOpenScreen={() => { (globalThis as { __screen?: boolean }).__screen = true; }}
       onOpenChat={() => {}}
       onAskBrief={async (item): Promise<AskOutcome> => { asks.push(item); return (globalThis as { __ask?: AskOutcome }).__ask ?? { ok: true }; }} />
