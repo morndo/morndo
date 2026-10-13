@@ -442,6 +442,10 @@ describe("audioDurationMs", () => {
     const tailAt = 16 + 8 + 80 - 20;                                                // twenty bytes before moov
     expect(tailAt).toBeGreaterThan(headLen);
     expect(audioDurationMs({ head: laid.subarray(0, headLen), tail: laid.subarray(tailAt), tailAt, size: laid.length })).toBe(2500);
+    const across = mp4MoovAfterMdat(1000, 2500, 226);                               // moov starts at 250 and runs past 256
+    expect(across.length).toBeGreaterThan(256);
+    expect(audioDurationMs({ head: across.subarray(0, 256), tail: across.subarray(256), tailAt: 256, size: across.length })).toBe(2500);
+    expect(audioDurationMs({ head: across.subarray(0, 100), tail: across.subarray(280), tailAt: 280, size: across.length })).toBeNull();
     const cbr = mp3Bytes(100, "44100");
     expect(audioDurationMs({ head: cbr, size: 110 + 16_000 })).toBe(1000);           // constant 128 kbit/s from the tag's end
     const foot = mp3Bytes(20, "44100", undefined, true);                             // ID3v2.4 footer is 10 bytes, not part of the size

@@ -73,16 +73,26 @@ function wavDuration(head: Uint8Array): number | null {
     : null;
 }
 
-// Bytes at a file offset, from the head or from the tail. A hole between them is not guessed at.
+// Bytes at a file offset. A range that sits in the head, or in the tail, is that slice. A range that
+// starts in the head and ends in the tail is both slices joined, and only when they meet: a hole between
+// them is not guessed at.
 function readAt(bytes: AudioBytes, offset: number, n: number): Uint8Array | null {
   if (offset < 0 || n < 0 || offset + n > bytes.size) return null;
   if (offset + n <= bytes.head.length) return bytes.head.subarray(offset, offset + n);
   const tail = bytes.tail;
   if (!tail) return null;
   const tailAt = bytes.tailAt ?? bytes.size - tail.length;
-  if (offset < tailAt || offset + n > tailAt + tail.length) return null;
-  const i = offset - tailAt;
-  return tail.subarray(i, i + n);
+  const end = offset + n;
+  if (offset >= tailAt && end <= tailAt + tail.length) return tail.subarray(offset - tailAt, end - tailAt);
+  if (offset < bytes.head.length && bytes.head.length >= tailAt && end > tailAt && end <= tailAt + tail.length) {
+    const headPart = bytes.head.subarray(offset, tailAt);
+    const tailPart = tail.subarray(0, end - tailAt);
+    const out = new Uint8Array(headPart.length + tailPart.length);
+    out.set(headPart, 0);
+    out.set(tailPart, headPart.length);
+    return out;
+  }
+  return null;
 }
 
 // ISO/IEC 14496-12: size 1 means the next 8 bytes are the real size; size 0 means the box runs to the end of the file.
