@@ -51,9 +51,33 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  build:
+  signers:
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - id: check
+        run: |
+          set -euo pipefail
+          if [ -s trust/release_allowed_signers ] && [ -s trust/feed_allowed_signers ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skipping release: trust/release_allowed_signers or trust/feed_allowed_signers is not in the tree yet" >&2
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: [release-please, signers]
+    if: needs.signers.outputs.ready == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     permissions:
@@ -202,7 +226,7 @@ jobs:
             dist/manifest.json
             dist/install.sh
             dist/SHA256SUMS
-      - name: Publish the draft
+      - name: Upload the draft
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
@@ -213,7 +237,6 @@ jobs:
             dist/manifest.json dist/manifest.json.sig \
             dist/install.sh dist/install.sh.sig \
             dist/SHA256SUMS
-          gh release edit "$TAG" --draft=false
 
   outside:
     needs: [release-please, publish]
@@ -244,8 +267,21 @@ jobs:
           done
           gh release verify "$TAG"
 
-  feed:
+  ship:
     needs: [release-please, outside]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Publish after the outside check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release edit "$TAG" --draft=false
+
+  feed:
+    needs: [release-please, ship]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: feed
