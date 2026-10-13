@@ -787,7 +787,10 @@ export class EscalationService {
 
   // An answer in doubt, settled with the node it went to (SteeringService's settle, on its row): typed there → delivered,
   // a duplicate at the node's time; null → the node never started it (its row is gone), so the answer is judged anew;
-  // anything else → uncertain. A row already done was settled before: delivered.
+  // anything else → uncertain. A row already done was settled before: delivered. Whose duplicate it is, the row says
+  // (A1): another endpoint's row is not this caller's answer — its result says what its view says, answered from
+  // elsewhere, not a duplicate of its own (round 2.5). A row that names no request is recorded under the caller, whose
+  // answer key it holds, and stays its duplicate.
   async #settleAnswer(a: Authenticated, id: string, choice: Choice, row: SendRow, key: string): Promise<AnswerResult | null> {
     if (row.state === "done") {
       this.#seen.set(key, this.#now());
@@ -797,7 +800,12 @@ export class EscalationService {
     }
     const settled = row.workerId === null ? { ok: false as const, problem: "uncertain" as const } : await this.#settle(row.key, row.workerId);
     if (settled === null) return null;
-    if (!settled.ok && settled.problem === "duplicate") return this.#delivered(a, id, choice, key, settled.at, this.#requesterOf(row) ?? undefined);
+    if (!settled.ok && settled.problem === "duplicate") {
+      const requester = this.#requesterOf(row);
+      const r = this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
+      if (requester !== null && requester.endpointId !== a.endpoint.id) return { ok: false, problem: "already_answered", item: this.#view(id, a.endpoint.id) };
+      return r;
+    }
     log.warn(`answer to ${id} in doubt: its node can't say it never typed it; it stays uncertain`);
     return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
   }
