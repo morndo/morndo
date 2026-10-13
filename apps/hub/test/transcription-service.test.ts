@@ -275,6 +275,24 @@ describe("transcription service", () => {
     svc.close();
   });
 
+  it("finds a shared run by the id the caller asked with", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate);
+    await svc.start();
+    const ask = (id: string, endpointId: string) => svc.request({
+      id, recording: { kind: "attachment", id: "hang" }, language: "de", caller: { endpointId },
+    });
+    await ask("a1", "ep-1");
+    expect(await until(() => svc.get("a1", { endpointId: "ep-1" })?.state === "running", 2000)).toBe(true);
+    const joined = await ask("b1", "ep-2");
+    expect(joined.ok && joined.value.id).toBe("a1");
+    expect(svc.get("b1", { endpointId: "ep-2" })?.id).toBe("a1");
+    expect(svc.get("b1", { endpointId: "ep-3" })).toBeNull();
+    expect(svc.cancel("b1", { endpointId: "ep-2" })).toEqual({ ok: false, error: "unknown" });
+    expect(svc.get("a1", { endpointId: "ep-1" })?.state).toBe("running");
+    svc.close();
+  });
+
   it("only the endpoint that started a shared run may cancel it", async () => {
     const gate = new Gate();
     const { svc } = service(memory(), gate);
