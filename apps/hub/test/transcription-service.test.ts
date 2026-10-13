@@ -24,12 +24,14 @@ class Gate {
   calls: string[] = [];
   ready: TranscriberProbe = READY;
   answer: Result<EngineText, TranscriptionProblem> = { ok: true, value: HEARD };
+  boom: Error | null = null;                                        // set: transcribe rejects outright, no abort
   private held = new Map<string, () => void>();
 
   readonly transcriber: Transcriber = {
     probe: async () => this.ready,
     transcribe: (input: TranscribeInput) => {
       this.calls.push(input.path);
+      if (this.boom) return Promise.reject(this.boom);
       return new Promise((resolve, reject) => {
         const stop = () => reject(abortError());
         if (input.signal.aborted) { stop(); return; }
@@ -283,6 +285,27 @@ describe("transcription service", () => {
     expect(svc.get("tx-a")?.state).toBe("running");
     expect(svc.me()).toBe(false);
     expect(lines.at(-1)).toBe("transcription: off (missing)");
+    svc.close();
+  });
+
+  it("a rejection that is not an abort is a failure, whichever reason an earlier attempt left", async () => {
+    const gate = new Gate();
+    const { svc } = service(memory(), gate, { timeoutFor: () => 40 });
+    await svc.start();
+    gate.boom = new Error("no space left on device");        // mkdtemp or spawn failing in the host
+    await svc.request(body("tx-err", "a"));
+    expect(await until(() => svc.get("tx-err")?.state === "failed", 2000)).toBe(true);
+    expect(svc.get("tx-err")).toMatchObject({ state: "failed", problem: "engine", text: null });
+    // The same recording timed out before (so its reason lingers), then the next attempt errors: the error is
+    // still the error, not the earlier attempt's timed_out.
+    gate.boom = null;
+    await svc.request(body("tx-2", "hang"));
+    expect(await until(() => svc.get("tx-2")?.state === "timed_out", 2000)).toBe(true);
+    gate.boom = new Error("no space left on device");
+    const again = await svc.request(body("tx-3", "hang"));   // TX3: a new attempt after the end
+    expect(again.ok && again.value.id).toBe("tx-3");
+    expect(await until(() => svc.get("tx-3")?.state === "failed", 2000)).toBe(true);
+    expect(svc.get("tx-3")).toMatchObject({ state: "failed", problem: "engine", text: null });
     svc.close();
   });
 

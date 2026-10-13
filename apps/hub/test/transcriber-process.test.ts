@@ -1,7 +1,7 @@
 // ProcessTranscriber (design §5, §13): the contract suite from the protocol package, against the fixture plugin,
 // plus the host's own bounds. group() is passed so the timeout case checks the process group is dead.
-import { readFileSync, readlinkSync } from "node:fs";
-import { constants, getPriority } from "node:os";
+import { readFileSync, readlinkSync, readdirSync } from "node:fs";
+import { constants, getPriority, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { SENTENCE } from "../../../packages/protocol/test/answers.mjs";
@@ -65,5 +65,13 @@ describe("process host", () => {
     expect(readlinkSync(`/proc/${pid}/cwd`)).toBe(tmp);
     ac.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("a setup that throws synchronously leaves no temp directory behind", async () => {
+    const dirs = () => readdirSync(tmpdir()).filter(name => name.startsWith("morndo-tx-")).length;
+    const before = dirs();
+    const host = processTranscriber("");                      // spawn throws before the child exists
+    await expect(host.transcribe(call("/audio/a.wav"))).rejects.toThrow();
+    expect(dirs()).toBe(before);                              // the run's working directory is the host's to remove
   });
 });
