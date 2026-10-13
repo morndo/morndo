@@ -77,8 +77,32 @@ const frameSync = (b: Uint8Array) => b.length >= 2 && b[0] === 0xff && (b[1]! & 
 // mp4, ogg, webm: ffmpeg rewrites every size and offset when it copies the streams without metadata.
 // The spawn is asynchronous, with a timeout that kills it, so a slow remux never stalls the hub.
 // A missing ffmpeg, or a remux that fails, keeps the bytes: a hand edit of those containers would corrupt them.
+// Two remuxes run at once. The rest wait, so a burst of uploads cannot fill the process table.
 const REMUX_FORMAT = { mp4: "mp4", ogg: "ogg", webm: "webm" } as const;
+const REMUX_LIMIT = 2;
+let remuxActive = 0;
+const remuxWaiters: Array<() => void> = [];
+function acquireRemux(): Promise<void> {
+  if (remuxActive < REMUX_LIMIT) {
+    remuxActive += 1;
+    return Promise.resolve();
+  }
+  return new Promise(resolve => { remuxWaiters.push(resolve); });
+}
+function releaseRemux(): void {
+  const next = remuxWaiters.shift();
+  if (next) next();
+  else remuxActive -= 1;
+}
 async function stripByRemux(b: Uint8Array, container: keyof typeof REMUX_FORMAT, timeoutMs: number): Promise<Uint8Array> {
+  await acquireRemux();
+  try {
+    return await remuxOne(b, container, timeoutMs);
+  } finally {
+    releaseRemux();
+  }
+}
+async function remuxOne(b: Uint8Array, container: keyof typeof REMUX_FORMAT, timeoutMs: number): Promise<Uint8Array> {
   const ext = container === "mp4" ? "m4a" : container;
   const folder = mkdtempSync(join(tmpdir(), "morndo-strip-"));
   try {

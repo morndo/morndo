@@ -8,6 +8,7 @@ import { deflateSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { audioDurationMs, endpointId } from "@morndo/domain";
 import { webmBytes } from "../../../packages/domain/test/audio-bytes.ts";
+import { until } from "../../../packages/protocol/test/proc.ts";
 import { noteMissingFfmpeg, stripMetadata, uploadInbox } from "../src/adapters/uploads.ts";
 
 let dir: string;
@@ -115,6 +116,46 @@ describe("metadata a recording carries", () => {
       const out = await stripMetadata(bytes, "mp4", 200);
       expect(Date.now() - started).toBeLessThan(2000);
       expect(Buffer.compare(Buffer.from(out), bytes)).toBe(0);
+    } finally {
+      if (path === undefined) delete process.env.PATH;
+      else process.env.PATH = path;
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it("runs at most two remuxes at once", async () => {
+    const folder = mkdtempSync(join(tmpdir(), "morndo-remux-cap-"));
+    const sample = join(folder, "note.m4a");
+    const made = spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample], { encoding: "utf8" });
+    expect(made.status).toBe(0);
+    const bytes = readFileSync(sample);
+    const log = join(folder, "starts");
+    writeFileSync(join(folder, "ffmpeg"), `#!/bin/sh
+while ! mkdir "${folder}/lock" 2>/dev/null; do sleep 0.01; done
+n=$(cat "${folder}/n" 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > "${folder}/n"
+echo "$n" >> "${log}"
+rmdir "${folder}/lock"
+while [ ! -f "${folder}/go-$n" ]; do sleep 0.02; done
+exit 0
+`, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${folder}:${path ?? ""}`;
+    const started = () => {
+      try { return readFileSync(log, "utf8").trim().split("\n").filter(Boolean).length; }
+      catch { return 0; }
+    };
+    try {
+      const runs = [stripMetadata(bytes, "mp4"), stripMetadata(bytes, "mp4"), stripMetadata(bytes, "mp4")];
+      expect(await until(() => started() >= 2, 2000)).toBe(true);
+      await new Promise(resolve => setTimeout(resolve, 150));
+      expect(started()).toBe(2);
+      writeFileSync(join(folder, "go-1"), "");
+      expect(await until(() => started() >= 3, 2000)).toBe(true);
+      writeFileSync(join(folder, "go-2"), "");
+      writeFileSync(join(folder, "go-3"), "");
+      await Promise.all(runs);
     } finally {
       if (path === undefined) delete process.env.PATH;
       else process.env.PATH = path;
