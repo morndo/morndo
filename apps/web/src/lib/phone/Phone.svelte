@@ -19,7 +19,7 @@
   import { STEP_UP_MS, type Policy } from "../SecurityChoices.svelte";
   import { postAnswer } from "../catchup/answer.ts";
   import { askForBrief as sharedAsk } from "../ask-brief.ts";
-  import { latestEntry, type Body } from "../catchup/run.ts";
+  import { inWindow, latestEntry, type Body } from "../catchup/run.ts";
   import { AnswerSession } from "../desktop/answer-session.svelte.ts";
   import type { AskOutcome } from "../desktop/answer-session.ts";
   import { OFFLINE_DECISION, PASSKEY_UNFINISHED, STILL_OFFLINE, type DecisionItem } from "../desktop/decisions.ts";
@@ -162,9 +162,9 @@
   // A sheet opened from Today returns there when its entry is popped (finding 10): catch-up was never the place he
   // was, so it shouldn't become it. From anywhere else the sheet sits over catch-up, which keeps its own Back.
   let briefOver = $state<"today" | null>(null);
-  // Set when Back closes a Today sheet during the undo window. stopDeciding (and its leave()) waits
-  // until that window is gone, so the answer is not sent early; then Today comes back.
-  let returnAfter = $state(false);
+  // The card key of an answer started on a Today sheet, while that answer is still in its window.
+  // Today comes back only after that answer has committed. A refusal or Undo leaves him on the card.
+  let returnAfter = $state<string | null>(null);
   $effect(() => {
     if (briefId !== null) return;
     untrack(() => {
@@ -174,16 +174,18 @@
       // would send it now. The card underneath keeps the window, as it does for a sheet opened
       // from catch-up. With nothing in the window, Today comes back.
       const a = session.run?.answering;
-      if (a && !a.sending && a.commitAt > session.now) { returnAfter = true; return; }
+      if (inWindow(a, session.now) && a) { returnAfter = a.key; return; }
       stopDeciding();
     });
   });
   $effect(() => {
-    if (!returnAfter || briefId !== null) return;
+    const key = returnAfter;
+    if (!key || briefId !== null) return;
     const a = session.run?.answering;
-    if (a && (!a.sending && a.commitAt > session.now || a.sending)) return;
-    returnAfter = false;
-    stopDeciding();
+    if (inWindow(a, session.now)) return;
+    const committed = session.run?.done[key] === "answered";
+    returnAfter = null;
+    if (committed) stopDeciding();
   });
   function openBrief(id: string) {
     briefOver = !deciding && tab === "today" ? "today" : null;

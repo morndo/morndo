@@ -142,6 +142,10 @@ export function dueAnswer(run: Run, now: number): { run: Run; send: NonNullable<
   const sending = { ...a, sending: true };
   return { run: { ...run, answering: sending }, send: sending };
 }
+// Still waiting to send, or the send is in flight. Both effects that return to Today use this one check.
+export function inWindow(a: { sending: boolean; commitAt: number } | null | undefined, now: number): boolean {
+  return !!a && (a.sending || a.commitAt > now);
+}
 // Leaving catch-up (Back, another tab, the page hidden): an answer in its window goes now, as he left it.
 export function answerNow(run: Run, now: number): Run {
   const a = run.answering;

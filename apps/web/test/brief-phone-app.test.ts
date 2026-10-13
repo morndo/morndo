@@ -214,6 +214,49 @@ describe("the phone around the brief sheet", () => {
     await context.close();
   });
 
+  it("stays on the card when an answer started on Today is refused", { timeout: 40_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true);
+    await tab.addInitScript(() => localStorage.setItem("morndo.tab", "today"));
+    await tab.goto(tab.url());
+    await push(tab, [release]);
+    await tab.locator('li[data-row="d:d-2"] [data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByText(/Goes in \d+ s\./).waitFor({ timeout: 3_000 });
+    await queue(tab, [STEP_UP]);
+    await dialog.locator("button.back").click();
+    await expect.poll(() => dialog.count(), { timeout: 3_000 }).toBe(0);
+    const card = tab.getByRole("article");
+    await card.getByRole("button", { name: "Confirm with passkey and send" }).waitFor({ timeout: 15_000 });
+    expect(await tab.locator('li[data-row="d:d-2"]').count()).toBe(0);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
+  it("stays in catch-up when Undo takes back an answer started on Today", { timeout: 40_000 }, async () => {
+    const { errors, track } = errorsOf();
+    const { context, tab } = await phone(track, "", true);
+    await tab.addInitScript(() => localStorage.setItem("morndo.tab", "today"));
+    await tab.goto(tab.url());
+    await push(tab, [release]);
+    await tab.locator('li[data-row="d:d-2"] [data-open-brief="d-2"]').click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.waitFor();
+    await dialog.locator("footer").getByRole("button", { name: "Ship today" }).click();
+    await dialog.getByText(/Goes in \d+ s\./).waitFor({ timeout: 3_000 });
+    await dialog.locator("button.back").click();
+    await expect.poll(() => dialog.count(), { timeout: 3_000 }).toBe(0);
+    const card = tab.getByRole("article");
+    await card.getByRole("button", { name: "Undo" }).click();
+    await card.getByRole("button", { name: "Ship today" }).waitFor({ timeout: 3_000 });
+    expect(await tab.locator('li[data-row="d:d-2"]').count()).toBe(0);
+    expect(await calls(tab)).toEqual([]);
+    expect(errors).toEqual([]);
+    await context.close();
+  });
+
   it("returns to Today when the sheet was opened there and its entry is popped", { timeout: 30_000 }, async () => {
     const { errors, track } = errorsOf();
     const { context, tab } = await phone(track);
