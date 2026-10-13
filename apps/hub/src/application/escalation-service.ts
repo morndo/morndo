@@ -373,7 +373,10 @@ export class EscalationService {
     const ledger = this.#ledger ? this.#ledger() : null;
     this.#lastLedger = ledger;
     this.#briefOf = new Map((this.#briefs?.() ?? []).map(b => [b.id, b]));
-    const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now), ...this.#hubSightings()];
+    // The answer rows this poll judges taps against, read once and grouped by key (round 2.7): one query per poll, not
+    // one per tap line in the manager's whole history.
+    const answers = new Map(this.#store.answerRows().map(r => [r.key, r]));
+    const sightings = [...this.#managerSightings(ledger, now, answers), ...this.#workerSightings(now), ...this.#hubSightings(answers)];
     const changed = this.#x.reconcile(sightings, now, ledger?.ok ?? true);
     for (const id of this.#buttons.keys()) if (!this.#x.get(id)) this.#buttons.delete(id);   // kept as long as its ask
     const pending = this.#store.pendingAnswers();       // one read per poll, shared by the notice and the echo prune
@@ -471,7 +474,7 @@ export class EscalationService {
   }
 
   // The manager's asks: button messages in its conversation joined with its list, by id.
-  #managerSightings(ledger: LedgerRead | null, now: number): Sighting[] {
+  #managerSightings(ledger: LedgerRead | null, now: number, answers: ReadonlyMap<string, SendRow>): Sighting[] {
     const managerId = managerOf(this.#watch.workers(), this.#managerName);
     const manager = managerId === null ? null : { id: managerId };
     const messages = manager ? this.#watch.history(manager.id) : [];
@@ -562,7 +565,7 @@ export class EscalationService {
         };
         if (filed.closed) source = { kind: "settled", resolution: filed.closed.resolution, at: filed.closed.at };
       }
-      out.push({ ask: shown, source, answered: this.#ownTapOf(shown, taps.get(id) ?? null) });
+      out.push({ ask: shown, source, answered: this.#ownTapOf(shown, taps.get(id) ?? null, answers) });
     }
     return out;
   }
@@ -576,17 +579,18 @@ export class EscalationService {
   // goes down before its own paste) — and one still waiting to be recorded: in flight here, done, or in doubt with a
   // store to ask a node about. One row nothing can ever record — "started", no store, nothing in flight (the hub
   // stopped while typing it, or the port threw after the paste and no node can be asked) — would leave that tap as the
-  // ask's only record: it settles the ask, as it did before the filter (rounds 2.1 and 2.2, PR #55 review).
-  #ownTapOf(ask: Ask, tap: Sighting["answered"]): Sighting["answered"] {
+  // ask's only record: it settles the ask, as it did before the filter (rounds 2.1 and 2.2, PR #55 review). The rows
+  // come as this poll's one read (round 2.7), keyed by answer key.
+  #ownTapOf(ask: Ask, tap: Sighting["answered"], answers: ReadonlyMap<string, SendRow>): Sighting["answered"] {
     if (tap === null) return null;
     if (this.#inFlight.has(ask.id)) return null;            // being typed now: recorded when the send lands
-    const row = this.#store.send(answerKey(ask.id, ask, { kind: "option", key: tap.key }));
+    const row = answers.get(answerKey(ask.id, ask, { kind: "option", key: tap.key })) ?? null;
     if (row !== null && row.at <= tap.at && (row.state === "done" || row.store !== null)) return null;
     return tap;
   }
 
   // Briefs the hub holds open itself (E14). A `ref` is sighted with its list item, above, not here.
-  #hubSightings(): Sighting[] {
+  #hubSightings(answers: ReadonlyMap<string, SendRow>): Sighting[] {
     const out: Sighting[] = [];
     for (const b of this.#briefOf.values()) {
       if (b.ref !== null) continue;
@@ -595,7 +599,7 @@ export class EscalationService {
       out.push({
         ask: shown,
         source: b.closed ? { kind: "settled", resolution: b.closed.resolution, at: b.closed.at } : { kind: "open" },
-        answered: this.#ownTapOf(ask, this.#paneTaps.get(b.id) ?? null),
+        answered: this.#ownTapOf(ask, this.#paneTaps.get(b.id) ?? null, answers),
       });
     }
     return out;

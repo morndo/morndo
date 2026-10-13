@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { endpointId, sessionId, type Message } from "@morndo/domain";
 import type { WebSocket } from "ws";
 import { ORIGIN, startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
@@ -351,5 +351,32 @@ describe("a Decision the record can no longer attribute", () => {
     expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "hold" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
     expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("pair:ep9"));
     expect(s.seenBy(endpointId("pair:ep9")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
+  });
+
+  // One read of the answer rows per poll, not one query per tap line (round 2.7): the pane keeps every tap of the
+  // conversation in the window — dozens, across asks and versions — and each is judged against the same table. The
+  // result is unchanged: ny-7's tap is its own answer's paste (the row, done, is this version's, written before it),
+  // ny-8's tap is a hand's and settles the ask.
+  it("judges every tap of a poll against one read of the answer rows", async () => {
+    manager.push({ id: "m2", at: T0 - MIN / 2, author: { kind: "agent", name: "manager" }, kind: "text",
+      text: "Another release is ready.\n\n[buttons ny-8] ship=Ship it | hold=Hold for a day" });
+    manager.push({ id: "m-tap-1", at: T0 - 30_000, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-7] ship (Ship it)" });
+    manager.push({ id: "m-tap-2", at: T0 - 20_000, author: { kind: "principal", name: "You" }, kind: "text", text: "[tap ny-8] hold (Hold for a day)" });
+    const own = answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "ship" });
+    store.startSend(own, T0 - 31_000);
+    store.finishSend(own, T0 - 30_500);                                                          // its own answer's row, done
+    const sends = vi.spyOn(store, "send");
+    const ofAsk = vi.spyOn(store, "answersOfAsk");
+    const rows = vi.spyOn(store, "answerRows");
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => ({ problem: null, typedAt: 0 }),
+    });
+    s.poll();
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");                     // its own answer's paste
+    expect(s.board().items.find(i => i.id === "ny-8")?.status).toBe("answered");                 // a hand's tap
+    expect(sends).toHaveBeenCalledTimes(0);                                                      // no query per tap
+    expect(ofAsk).toHaveBeenCalledTimes(0);
+    expect(rows).toHaveBeenCalledTimes(1);                                                       // one read per poll
   });
 });

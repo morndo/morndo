@@ -173,6 +173,12 @@ export class Store {
       // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: SQLite's substr counts them (above)
       .all([...prefix].length, prefix) as SendRowSql[]).map(sendRow);
   }
+  // Every answer row kept here, one read for a whole poll (round 2.7 of the PR #55 review): the pane-tap filter judges
+  // each tap against this table, and a query per tap line — the pane keeps every one in the window — is a hot path.
+  // Same ordering as answersOfAsk.
+  answerRows(): SendRow[] {
+    return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE substr(key, 1, 7) = 'answer:' ORDER BY at, key`).all() as SendRowSql[]).map(sendRow);
+  }
   // The store of the node a send went to (fleet core §3.1), kept with its row: only that store can say it never started.
   // With it, the store sequence its answer gave (null when unknown): a lower one from that store later means its
   // database went backwards (final review I2).
