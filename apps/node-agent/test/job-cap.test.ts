@@ -23,8 +23,10 @@ describe("capStep", () => {
     expect(capStep(sight, 0, 8, 1000 + CAP_GRACE_MS)).toEqual({ kind: "stop" });
   });
 
-  it("stops when the log crosses the cap exactly at the grace boundary", () => {
-    expect(capStep({ size: 0, at: 1000 }, 8, 8, 1000 + CAP_GRACE_MS)).toEqual({ kind: "stop" });
+  it("stops at the grace boundary and waits one millisecond before it", () => {
+    const sight = { size: 64, at: 1000 };
+    expect(capStep(sight, 64, 8, 1000 + CAP_GRACE_MS - 1)).toEqual({ kind: "grace", sight });
+    expect(capStep(sight, 64, 8, 1000 + CAP_GRACE_MS)).toEqual({ kind: "stop" });
   });
 
   it("keeps the grace while the log stays the same size", () => {
