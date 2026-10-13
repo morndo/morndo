@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { afterAll, describe, expect, it } from "vitest";
 import { parseProbe, parseRun } from "@morndo/protocol";
-import { commandOnPath } from "../src/morndo-transcribe.mts";
+import { commandOnPath, main } from "../src/morndo-transcribe.mts";
 import { contractSubject } from "./host.ts";
 import { pcmWav } from "./audio.ts";
 
@@ -280,6 +280,66 @@ EOF
       protocol: 1, ready: true, engine: "whisper.cpp", engineVersion: "1.9.5", model: "base",
       languages: "multi", maxSeconds: 600, missing: [],
     });
+  });
+
+  live("two runs in one process keep their own clips", async () => {
+    stage(true);
+    const watch = mkdtempSync(join(tmpdir(), "morndo-pair-"));
+    const go = join(watch, "go");
+    const slow = join(watch, "slow");
+    writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh
+wav=""
+out=""
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-f" ]; then wav="$2"; shift 2; continue; fi
+  if [ "$1" = "-of" ]; then out="$2"; shift 2; continue; fi
+  shift
+done
+while [ ! -f ${JSON.stringify(go)} ]; do sleep 0.02; done
+mine=$(basename "$(dirname "$wav")")
+if [ "$mine" = "$(cat ${JSON.stringify(slow)})" ]; then
+  sleep 0.4
+  test -f "$wav" || exit 4
+fi
+cat > "$out.json" <<'EOF'
+{"result":{"language":"de"},"transcription":[{"offsets":{"from":0,"to":800},"text":" Hafen frei."}]}
+EOF
+`);
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const note = join(ROOT, "pair.wav");
+    writeFileSync(note, pcmWav(1));
+    const args = ["run", "--input", note, "--language", "de", "--threads", "1", "--max-seconds", "600", "--json"] as const;
+    const previousTmp = process.env.TMPDIR;
+    const previousPath = process.env.PATH;
+    process.env.TMPDIR = watch;
+    process.env.PATH = pathEnv;
+    const clips = (): string[] => {
+      try {
+        return readdirSync(watch, { recursive: true }).map(String).filter(name => name.endsWith("in.wav"));
+      } catch {
+        return [];
+      }
+    };
+    try {
+      const first = main(args, BIN);
+      expect(await until(() => clips().length >= 1, 5000)).toBe(true);
+      const early = clips()[0] ?? "";
+      const second = main(args, BIN);
+      expect(await until(() => clips().length >= 2, 5000)).toBe(true);
+      const later = clips().find(name => name !== early) ?? "";
+      writeFileSync(slow, later.split("/")[0] ?? "");
+      writeFileSync(go, "");
+      expect(await first).toBe(0);
+      expect(await second).toBe(0);
+    } finally {
+      writeFileSync(go, "");
+      writeFileSync(slow, "none");
+      if (previousTmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmp;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(watch, { recursive: true, force: true });
+    }
   });
 
   live("SIGTERM removes the converted clip before the process exits", async () => {

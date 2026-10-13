@@ -12,13 +12,16 @@ import { basename, join } from "node:path";
 const EXIT = { usage: 2, unreadable: 3, tooLong: 4, notReady: 5, engine: 1 } as const;
 // Node's default SIGTERM and SIGINT end the process without running an async `finally`, so the converted
 // clip would stay under the temp directory. The handler removes it, then exits.
-let scratch: string | null = null;
+const scratches = new Set<string>();
 const children = new Set<ChildProcess>();
 
+function dropScratch(dir: string): void {
+  if (!scratches.delete(dir)) return;
+  rmSync(dir, { recursive: true, force: true });
+}
+
 function clearScratch(): void {
-  const dir = scratch;
-  scratch = null;
-  if (dir !== null) rmSync(dir, { recursive: true, force: true });
+  for (const dir of [...scratches]) dropScratch(dir);
 }
 
 function onStop(signal: NodeJS.Signals): void {
@@ -337,7 +340,7 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
   const model = join(root, "models", manifest.modelFile);
   if (ffmpeg === null) return fail(EXIT.notReady, "missing: ffmpeg");
   const dir = mkdtempSync(join(tmpdir(), "morndo-transcribe-"));
-  scratch = dir;
+  scratches.add(dir);
   try {
     const wav = join(dir, "in.wav");
     let converted: Child;
@@ -371,7 +374,7 @@ async function transcribe(root: string, manifest: Manifest, bag: FlagBag, pathEn
     if (mapped === null) return fail(EXIT.engine, "whisper-cli json was not protocol 1");
     return finish(mapped);
   } finally {
-    clearScratch();
+    dropScratch(dir);
   }
 }
 
