@@ -70,8 +70,10 @@ export type Decision = {
   choice: DecidedChoice;
   at: number;
   // The hub's own provenance, as recorded: "here" when the hub accepted the answer (endpointId names the client whose
-  // request it was), "elsewhere" when it was only seen at the asker's end. What one client is told is derived from the
-  // record, per client (viaFor); this stored value never reaches the wire as it is.
+  // request it was), "elsewhere" when it was only seen at the asker's end. What one client is told is derived per
+  // client (viaFor): when an endpoint is named, the viewer decides and this stored value never reaches the wire; the
+  // stored "elsewhere" passes through only while no endpoint is named — the same answer for every viewer — and a
+  // stored "here" with no endpoint reaches no one at all (absent: the hub can no longer say whose it was).
   via?: "here" | "elsewhere" | undefined;
   endpointId: EndpointId | null;
   sessionId: SessionId | null;
