@@ -186,6 +186,15 @@ describe("feed", () => {
     expect(again.releases.map(r => r.version)).toEqual(["0.2.0", "0.1.0"]);
   });
 
+  it("raises seq from the last published feed", () => {
+    const published = JSON.parse(publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 })) as { seq: number };
+    published.seq = 5;
+    const next = ChannelFeedSchema.parse(JSON.parse(publishRelease(JSON.stringify(published), {
+      channel: "latest", entry: later, now: WHEN + 1000, keySetVersion: 1,
+    })));
+    expect(next.seq).toBe(6);
+  });
+
   it("a re-sign changes the number, the issue time and the expiry, and nothing else", () => {
     const base = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
     const withWithdrawal = base.replace('"withdrawn": []', '"withdrawn": ["0.0.9"]');

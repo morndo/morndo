@@ -286,7 +286,7 @@ jobs:
     timeout-minutes: 20
     environment: feed
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -306,20 +306,21 @@ jobs:
         run: |
           set -euo pipefail
           repo="${GITHUB_REPOSITORY}"
-          owner="${repo%%/*}"
-          name="${repo#*/}"
-          base="https://${owner}.github.io/${name}"
           now=$(node -e "process.stdout.write(String(Date.now()))")
           mkdir -p site "$RUNNER_TEMP/release"
           gh release download "$TAG" --pattern manifest.json --dir "$RUNNER_TEMP/release"
           manifest_url="https://github.com/${repo}/releases/download/${TAG}/manifest.json"
+          # The Contents API returns the git blob on branch feed.
+          # https://docs.github.com/en/rest/repos/contents#get-repository-content (read 2026-10-13)
           fetch() {
-            local file="$1" code
-            code=$(curl -sS -o "site/${file}" -w "%{http_code}" "${base}/${file}" || true)
-            if [ "$code" = "200" ]; then return 0; fi
+            local file="$1" err
+            if err=$(gh api -H "Accept: application/vnd.github.raw+json" \
+                "/repos/${GITHUB_REPOSITORY}/contents/${file}?ref=feed" 2>&1 > "site/${file}"); then
+              return 0
+            fi
             rm -f "site/${file}"
-            if [ "$code" = "404" ]; then return 1; fi
-            echo "feed ${file} returned ${code}" >&2
+            if printf '%s\n' "$err" | grep -q '404'; then return 1; fi
+            printf '%s\n' "$err" >&2
             exit 1
           }
           if fetch latest.json; then
@@ -346,6 +347,27 @@ jobs:
           node scripts/release/main.ts sign --namespace feed@morndo.github.io --key "$key" --in site/latest.json --out site/latest.json.sig --dest "$RUNNER_TEMP"
           node scripts/release/main.ts sign --namespace feed@morndo.github.io --key "$key" --in site/stable.json --out site/stable.json.sig --dest "$RUNNER_TEMP"
           rm -f "$key"
+          # One commit on branch feed, so the next read sees this seq.
+          # https://docs.github.com/en/rest/git/commits#create-a-commit (read 2026-10-13)
+          parent=$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/heads/feed" --jq .object.sha 2>/dev/null || true)
+          tree_args=()
+          for f in latest.json latest.json.sig stable.json stable.json.sig; do
+            blob=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/blobs" \
+              -f content="$(base64 -w0 "site/${f}")" -f encoding=base64 --jq .sha)
+            tree_args+=(-f "tree[][path]=${f}" -f "tree[][mode]=100644" -f "tree[][type]=blob" -f "tree[][sha]=${blob}")
+          done
+          tree=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/trees" "${tree_args[@]}" --jq .sha)
+          if [ -n "$parent" ]; then
+            body=$(jq -n --arg tree "$tree" --arg parent "$parent" '{message:"Publish the channel feeds", tree:$tree, parents:[$parent]}')
+          else
+            body=$(jq -n --arg tree "$tree" '{message:"Publish the channel feeds", tree:$tree, parents:[]}')
+          fi
+          commit=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/commits" --input - --jq .sha <<< "$body")
+          if [ -n "$parent" ]; then
+            gh api --method PATCH "/repos/${GITHUB_REPOSITORY}/git/refs/heads/feed" -f sha="$commit" > /dev/null
+          else
+            gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/refs" -f ref=refs/heads/feed -f sha="$commit" > /dev/null
+          fi
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site

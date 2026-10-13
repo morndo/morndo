@@ -121,6 +121,12 @@ describe("release pipeline files", () => {
     expect(first).toContain("environment: feed");
     expect(first).toContain("FEED_SSH_KEY");
     expect(first).toContain(FEED_NAMESPACE);
+    expect(first).not.toContain(".github.io/");
+    expect(first).toContain("contents/${file}?ref=feed");
+    expect(first).toContain("fetch latest.json");
+    expect(first).toContain("contents: write");
+    expect(job(feed, "resign")).not.toContain(".github.io/");
+    expect(job(feed, "resign")).toContain("?ref=feed");
     expect(first).toContain("feed-add");
     expect(first).toContain("feed-empty");
     expect(first).toContain("ssh-keygen -Y verify");

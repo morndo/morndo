@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 20
     environment: feed
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,13 +39,10 @@ jobs:
       - run: npm ci
       - name: Verify the live feed, then re-sign
         env:
+          GH_TOKEN: ${{ github.token }}
           FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
         run: |
           set -euo pipefail
-          repo="${GITHUB_REPOSITORY}"
-          owner="${repo%%/*}"
-          name="${repo#*/}"
-          base="https://${owner}.github.io/${name}"
           now=$(node -e "process.stdout.write(String(Date.now()))")
           mkdir -p site
           test -s trust/feed_allowed_signers
@@ -53,14 +50,28 @@ jobs:
           key="$RUNNER_TEMP/feed.key"
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$FEED_SSH_KEY" > "$key"
+          # https://docs.github.com/en/rest/repos/contents#get-repository-content (read 2026-10-13)
           for channel in latest stable; do
-            curl -fsSL -o "site/${channel}.json" "${base}/${channel}.json"
-            curl -fsSL -o "site/${channel}.json.sig" "${base}/${channel}.json.sig"
+            gh api -H "Accept: application/vnd.github.raw+json" \
+              "/repos/${GITHUB_REPOSITORY}/contents/${channel}.json?ref=feed" > "site/${channel}.json"
+            gh api -H "Accept: application/vnd.github.raw+json" \
+              "/repos/${GITHUB_REPOSITORY}/contents/${channel}.json.sig?ref=feed" > "site/${channel}.json.sig"
             ssh-keygen -Y verify -f trust/feed_allowed_signers -I feed@morndo.github.io -n feed@morndo.github.io -s "site/${channel}.json.sig" < "site/${channel}.json"
             node scripts/release/main.ts feed-resign --in "site/${channel}.json" --out "site/${channel}.json" --now "$now"
             node scripts/release/main.ts sign --namespace feed@morndo.github.io --key "$key" --in "site/${channel}.json" --out "site/${channel}.json.sig" --dest "$RUNNER_TEMP"
           done
           rm -f "$key"
+          parent=$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/heads/feed" --jq .object.sha)
+          tree_args=()
+          for f in latest.json latest.json.sig stable.json stable.json.sig; do
+            blob=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/blobs" \
+              -f content="$(base64 -w0 "site/${f}")" -f encoding=base64 --jq .sha)
+            tree_args+=(-f "tree[][path]=${f}" -f "tree[][mode]=100644" -f "tree[][type]=blob" -f "tree[][sha]=${blob}")
+          done
+          tree=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/trees" "${tree_args[@]}" --jq .sha)
+          body=$(jq -n --arg tree "$tree" --arg parent "$parent" '{message:"Re-sign the channel feeds", tree:$tree, parents:[$parent]}')
+          commit=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/commits" --input - --jq .sha <<< "$body")
+          gh api --method PATCH "/repos/${GITHUB_REPOSITORY}/git/refs/heads/feed" -f sha="$commit" > /dev/null
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
