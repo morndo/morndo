@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { commandOnPath } from "../src/morndo-transcribe.mts";
-import { absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, placeCachedFile, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
+import { BUILD_FLAGS, absentTools, buildDir, memAvailableFrom, memoryBudget, parseInstallArgs, placeCachedFile, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
@@ -69,8 +69,14 @@ describe("install choices", () => {
     const src = "/cache/src/d1be6fde11ac6e0407606b4e42fe72d34add8037";
     expect(buildDir(src, ["-DBUILD_SHARED_LIBS=OFF"])).toBe(join(src, "build", flagKey(["-DBUILD_SHARED_LIBS=OFF"])));
     expect(buildDir(src, ["-DBUILD_SHARED_LIBS=ON"])).toBe(join(src, "build", flagKey(["-DBUILD_SHARED_LIBS=ON"])));
+    const flags = readFileSync(join(import.meta.dirname, "../build-flags.txt"), "utf8").split("\n").filter(line => line !== "");
+    expect(BUILD_FLAGS).toEqual(flags);
+    expect(buildDir(src, flags)).toBe(join(src, "build", flagKey(flags)));
     const workflow = readFileSync(join(import.meta.dirname, "../../../.github/workflows/transcription-plugin.yml"), "utf8");
-    expect(workflow).toContain("hashFiles('plugins/transcribe-whisper-cpp/plugin.json', 'plugins/transcribe-whisper-cpp/scripts/install.ts')");
+    const key = workflow.split("\n").find(line => line.includes("key: transcribe-")) ?? "";
+    expect(key).toContain("plugins/transcribe-whisper-cpp/plugin.json");
+    expect(key).toContain("plugins/transcribe-whisper-cpp/build-flags.txt");
+    expect(key).not.toContain("install.ts");
   });
 
   it("the plugin workflow runs when a file its tests depend on changes", () => {

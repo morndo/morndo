@@ -48,14 +48,7 @@ export type Pins = {
   models: Record<ModelId, ModelPin>;
 };
 
-export const BUILD_FLAGS = [
-  "-DBUILD_SHARED_LIBS=OFF",
-  "-DWHISPER_BUILD_TESTS=OFF",
-  "-DWHISPER_BUILD_SERVER=OFF",
-  "-DWHISPER_SDL2=OFF",
-  "-DWHISPER_CURL=OFF",
-  "-DWHISPER_BUILD_EXAMPLES=ON",
-] as const;
+export const BUILD_FLAGS = readFileSync(join(PACKAGE, "build-flags.txt"), "utf8").split("\n").filter(line => line !== "");
 
 export function buildDir(src: string, flags: readonly string[]): string {
   const key = createHash("sha256").update(flags.join("\n")).digest("hex").slice(0, 16);
