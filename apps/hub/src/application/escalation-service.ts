@@ -832,10 +832,12 @@ export class EscalationService {
     return null;
   }
 
-  // Who sent the answer a row in doubt holds (A1): the endpoint its request names ("<endpoint>:<request id>", a UUID,
-  // no colon in it), and the session under it when this hub wrote the row down. Null when the row names no request.
+  // Who sent the answer a row in doubt holds (A1): the endpoint its request names ("<endpoint>:<request id>") and the
+  // session under it when this hub wrote the row down. The split is at the last colon: the request id is the uuid, the
+  // part known to carry no colon, while an endpoint id may take a prefixed form with one of its own (round 2.6). Null
+  // when the row names no request.
   #requesterOf(row: SendRow): { endpointId: EndpointId; sessionId: SessionId | null } | null {
-    const at = row.request?.indexOf(":") ?? -1;
+    const at = row.request?.lastIndexOf(":") ?? -1;
     if (at <= 0) return null;
     return { endpointId: endpointId(row.request!.slice(0, at)), sessionId: row.requestSession === null ? null : sessionId(row.requestSession) };
   }

@@ -335,4 +335,21 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("phone"));
     expect(s.seenBy(endpointId("phone")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
+
+  // The request names "<endpoint>:<request id>", and the part known to carry no colon is the request id (a uuid), not
+  // the endpoint (round 2.6): a prefixed endpoint id with a colon of its own splits at the last colon, so the answer is
+  // recorded for the endpoint that sent it and that endpoint reads "here", not a cut-off prefix no device owns.
+  it("an answer on a row whose endpoint id carries a colon is recorded for that endpoint", async () => {
+    store.db.prepare("INSERT INTO sends (key, state, at, worker_id, request) VALUES (?, 'started', ?, '%0', ?)")
+      .run(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "ship" }), T0 - 1000, "pair:ep9:r1");
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("not reached"); },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                    // its node typed it after all
+    });
+    s.poll();
+    expect(await s.answer(auth("phone"), "ny-7", { kind: "option", key: "hold" }, "r2")).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(s.board().items.find(i => i.id === "ny-7")?.decision?.endpointId).toBe(endpointId("pair:ep9"));
+    expect(s.seenBy(endpointId("pair:ep9")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
+  });
 });
