@@ -25,7 +25,7 @@ function onStop(signal: NodeJS.Signals): void {
   for (const child of children) {
     try { child.kill("SIGTERM"); } catch { /* already gone */ }
   }
-  clearScratch();
+  try { clearScratch(); } catch { /* a stuck temp dir must not replace the signal's exit */ }
   process.exit(signal === "SIGINT" ? 130 : 143);
 }
 

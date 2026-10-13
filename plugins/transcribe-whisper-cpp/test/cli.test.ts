@@ -286,6 +286,41 @@ EOF
     await expectStopped("SIGTERM");
   });
 
+  live("SIGTERM exits even when the clip directory cannot be removed", async () => {
+    stage(true);
+    writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nsleep 30\n");
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const watch = mkdtempSync(join(tmpdir(), "morndo-stuck-"));
+    const note = join(ROOT, "stuck.wav");
+    writeFileSync(note, pcmWav(1));
+    const child: ChildProcess = spawn(process.execPath, [
+      join(BIN, "morndo-transcribe"), "run",
+      "--input", note, "--language", "auto", "--threads", "1", "--max-seconds", "600", "--json",
+    ], {
+      detached: true,
+      env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: watch },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout?.resume();
+    child.stderr?.resume();
+    try {
+      expect(await until(() => hasClip(watch), 5000)).toBe(true);
+      chmodSync(watch, 0o555);
+      if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
+      const code = await Promise.race([
+        new Promise<number | null>(resolve => { child.on("close", resolve); }),
+        new Promise<number>(resolve => { setTimeout(() => resolve(-1), 3000); }),
+      ]);
+      expect(code).toBe(143);
+    } finally {
+      chmodSync(watch, 0o755);
+      if (child.pid !== undefined) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      rmSync(watch, { recursive: true, force: true });
+    }
+  });
+
   live("SIGINT removes the converted clip before the process exits", async () => {
     await expectStopped("SIGINT");
   });
