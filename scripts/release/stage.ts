@@ -98,7 +98,7 @@ function workspaceName(real: string): string | null {
 }
 
 function linkTarget(from: string, real: string): string {
-  const rel = relative(dirname(from), real).split(sep).join("/");
+  const rel = relative(realpathSync(dirname(from)), realpathSync(real)).split(sep).join("/");
   if (rel === "" || rel.startsWith("/")) throw new Error(`refusing link target ${rel}`);
   return rel;
 }

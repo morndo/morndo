@@ -329,6 +329,12 @@ describe("stage, launchers, node pin, notice", () => {
     const dest = join(temp(), "out");
     stageRelease({ repo, nodeDir, dest, version: "0.1.0", compiled });
     expect(readlinkSync(join(dest, "node/bin/npm"))).toBe("../lib/npm-cli.js");
+    const linkedRoot = temp();
+    const via = join(linkedRoot, "via");
+    symlinkSync(nodeDir, via);
+    const linkedDest = join(temp(), "linked-out");
+    stageRelease({ repo, nodeDir: via, dest: linkedDest, version: "0.1.0", compiled });
+    expect(readlinkSync(join(linkedDest, "node/bin/npm"))).toBe("../lib/npm-cli.js");
     expect(lstatSync(join(dest, "app/node_modules/@morndo/domain")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/src/index.js"), "utf8")).toBe("export const n = 1;\n");
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/package.json"), "utf8")).toContain("./src/index.js");

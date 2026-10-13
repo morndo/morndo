@@ -2,8 +2,8 @@
 // flags and files. import.meta.main: https://nodejs.org/docs/latest-v24.x/api/esm.html#importmetamain
 // (added in v24.2.0, read 2026-10-13).
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, sep } from "node:path";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import { parseArgs } from "node:util";
 import type { Channel, Platform } from "@morndo/domain";
 import { packTree, type TreeFile } from "./archive.ts";
@@ -43,8 +43,7 @@ function treeFiles(root: string): TreeFile[] {
       const rel = prefix ? `${prefix}/${name}` : name;
       const st = lstatSync(abs);
       if (st.isSymbolicLink()) {
-        const target = relative(dirname(abs), realpathSync(abs)).split(sep).join("/");
-        out.push({ path: rel, mode: "0555", link: target });
+        out.push({ path: rel, mode: "0555", link: readlinkSync(abs).split(sep).join("/") });
       } else if (st.isDirectory()) {
         if (readdirSync(abs).length === 0) out.push({ path: rel, mode: "0555", directory: true });
         else walk(abs, rel);
