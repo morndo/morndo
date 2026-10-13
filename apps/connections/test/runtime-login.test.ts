@@ -152,9 +152,9 @@ describe("subscription login", () => {
     dirs.push(dir);
     const bin = join(dir, "hang.mjs");
     writeFileSync(bin, `setInterval(() => {}, 1_000);\n`);
-    const start = Date.now();
+    const start = performance.now();
     const pending = assertSubscription(bin, ["auth", "status"], {}, "claude", 40);
-    expect(Date.now() - start).toBeLessThan(100);
+    expect(performance.now() - start).toBeLessThan(100);
     await expect(pending).rejects.toThrow("timed out");
   }, 20_000);
 
@@ -168,9 +168,9 @@ describe("subscription login", () => {
 spawn(process.execPath, [${JSON.stringify(grand)}], { stdio: "inherit" });
 setInterval(() => {}, 1_000);
 `);
-    const started = Date.now();
+    const started = performance.now();
     const reading = await readAuth(wrap, ["status"], {}, 40);
-    expect(Date.now() - started).toBeLessThan(500);
+    expect(performance.now() - started).toBeLessThan(500);
     expect(reading).toBe("timeout");
   }, 1_000);
 });

@@ -39,7 +39,7 @@ export class QuickAnswers {
   // The page is left: what waits in its window goes now.
   flush() { void this.tick(true); }
   // The board (only once current) settles the notices of answers the app closed on.
-  confirm(items: readonly { id: string; status: string; decision: { at: number; via: string } | null }[]) {
+  confirm(items: readonly { id: string; status: string; decision: { at: number; via?: string } | null }[]) {
     const next = settleFromBoard(this.state, items);
     if (next !== this.state) { this.state = next; this.#save(); }
   }

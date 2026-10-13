@@ -2,6 +2,7 @@
 // The helper and the systemd sweep both decide through these, so the rule is one piece of code.
 import { describe, expect, it } from "vitest";
 import { CAP_GRACE_MS, capStep, endedBeforeStop } from "../src/ops/job-cap.ts";
+import { lookCap } from "../src/ops/job-helper.ts";
 
 describe("capStep", () => {
   it("is under the cap until the log reaches it and nothing noted it", () => {
@@ -16,6 +17,18 @@ describe("capStep", () => {
     expect(capStep(null, 0, 8, 1000, true)).toEqual({ kind: "grace", sight: { size: 0, at: 1000 } });
   });
 
+  it("stops at the grace boundary while the log is still under the cap", () => {
+    const sight = { size: 0, at: 1000 };
+    expect(capStep(sight, 0, 8, 1000 + CAP_GRACE_MS - 1)).toEqual({ kind: "grace", sight });
+    expect(capStep(sight, 0, 8, 1000 + CAP_GRACE_MS)).toEqual({ kind: "stop" });
+  });
+
+  it("stops at the grace boundary and waits one millisecond before it", () => {
+    const sight = { size: 64, at: 1000 };
+    expect(capStep(sight, 64, 8, 1000 + CAP_GRACE_MS - 1)).toEqual({ kind: "grace", sight });
+    expect(capStep(sight, 64, 8, 1000 + CAP_GRACE_MS)).toEqual({ kind: "stop" });
+  });
+
   it("keeps the grace while the log stays the same size", () => {
     const sight = { size: 64, at: 1000 };
     expect(capStep(sight, 64, 8, 1000 + CAP_GRACE_MS - 1)).toEqual({ kind: "grace", sight });
@@ -27,6 +40,34 @@ describe("capStep", () => {
 
   it("stops when the grace is over", () => {
     expect(capStep({ size: 64, at: 1000 }, 64, 8, 1000 + CAP_GRACE_MS)).toEqual({ kind: "stop" });
+  });
+});
+
+describe("lookCap", () => {
+  const spec = { logPath: "job.log", exitPath: "job.exit", logBytes: 8 };
+
+  it("skips a look whose stat throws, then sights the real size", () => {
+    let tries = 0;
+    const fs = {
+      existsSync: () => true,
+      statSync: () => {
+        tries += 1;
+        if (tries === 1) throw Object.assign(new Error("EMFILE"), { code: "EMFILE" });
+        return { size: 64 };
+      },
+    };
+    expect(lookCap(null, spec, 1000, fs)).toBeNull();
+    expect(lookCap(null, spec, 1030, fs)).toEqual({ kind: "grace", sight: { size: 64, at: 1030 } });
+  });
+
+  it("reads the cap note before the log size", () => {
+    const order: string[] = [];
+    const fs = {
+      existsSync: () => { order.push("note"); return true; },
+      statSync: () => { order.push("size"); return { size: 64 }; },
+    };
+    lookCap(null, spec, 1000, fs);
+    expect(order).toEqual(["note", "size"]);
   });
 });
 

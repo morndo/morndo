@@ -13,7 +13,7 @@ const SOCKET = `morndo-val-f13-${process.pid}`;
 const FIXTURE = join(import.meta.dirname, "tmux-fake-claude.fixture.ts");
 const tmux = (...a: string[]) => execFileSync("tmux", ["-L", SOCKET, ...a], { encoding: "utf8" });
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
-async function until(f: () => boolean, ms = 4000) { const t = Date.now(); while (Date.now() - t < ms) { if (f()) return true; await wait(100); } return false; }
+async function until(f: () => boolean, ms = 4000) { const t = performance.now(); while (performance.now() - t < ms) { if (f()) return true; await wait(100); } return false; }
 const PROSE = "I changed the schema and wrote the migration.\nDo you want to proceed with the migration now, or should I wait for the backup?";
 let dir: string;
 let box: string;

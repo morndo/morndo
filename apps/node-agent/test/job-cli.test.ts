@@ -173,9 +173,9 @@ describe("the socket", () => {
       hung.once("error", reject);
       hung.listen(hungPath, () => resolve());
     });
-    const started = Date.now();
+    const started = performance.now();
     await expect(callNode(hungPath, { op: "list", lane: "builder", token: TOKEN }, 200)).rejects.toThrow("timeout");
-    expect(Date.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(1000);
     hung.close();
   });
 
@@ -187,13 +187,13 @@ describe("the socket", () => {
       server.once("error", reject);
       server.listen(path, () => resolve());
     });
-    const started = Date.now();
+    const started = performance.now();
     const result = await Promise.race([
       callNode(path, { op: "list", lane: "builder", token: TOKEN }, 10_000).then(() => "resolved", (e: unknown) => e),
       new Promise(resolve => setTimeout(() => resolve("hung"), 500)),
     ]);
     expect(result).toBeInstanceOf(SyntaxError);
-    expect(Date.now() - started).toBeLessThan(1000);
+    expect(performance.now() - started).toBeLessThan(1000);
     server.close();
   });
 });

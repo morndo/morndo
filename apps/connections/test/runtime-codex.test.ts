@@ -203,9 +203,9 @@ else process.exit(Number(code));
     const homeAfter = async (code: string): Promise<string> => {
       rmSync(note, { force: true });
       const pending = runtime.execute(plan(), [code]);
-      const started = Date.now();
+      const started = performance.now();
       let recorded: { codex: string; pid: number } | null = null;
-      while (recorded === null && Date.now() - started < 2_000) {
+      while (recorded === null && performance.now() - started < 2_000) {
         if (existsSync(note)) recorded = JSON.parse(readFileSync(note, "utf8")) as { codex: string; pid: number };
         else await new Promise(resolve => setTimeout(resolve, 10));
       }
