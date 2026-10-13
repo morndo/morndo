@@ -224,6 +224,12 @@ export const MIGRATIONS: readonly Migration[] = [
     compat: "additive",
     up: db => { if (!hasColumn(db, "sends", "request_session")) db.exec("ALTER TABLE sends ADD COLUMN request_session TEXT"); },
   },
+  {
+    version: 22,
+    name: "sends.label: the option label an escalation answer was typed with, so an answer found typed for an earlier version of its ask keeps that version's label (E9; review of PR #55)",
+    compat: "additive",
+    up: db => { if (!hasColumn(db, "sends", "label")) db.exec("ALTER TABLE sends ADD COLUMN label TEXT"); },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

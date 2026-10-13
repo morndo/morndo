@@ -744,7 +744,7 @@ export class EscalationService {
         this.#store.saveDecision(id, q.value);
         // The same request after the seen window, or a restart, is a duplicate (review #29.4), as a typed answer's
         // done row is. Without the row, check() refuses it as already_answered.
-        if (this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) this.#store.finishQueued(k);
+        if (this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id, label: option?.label ?? null })) this.#store.finishQueued(k);
         this.#seen.set(key, now);
         log.info(`answer to ${e.id} queued for the manager${queued.duplicate ? " (already in its inbox)" : ""}`);
         this.#notify();
@@ -759,7 +759,7 @@ export class EscalationService {
       const inDoubt = await this.#settleEarlier(a, id, choice, e, k, key, seen);
       if (inDoubt) return inDoubt;
       // Written before the first await, as a send's is: a hub that stops while this is typed leaves it "started".
-      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id })) return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
+      if (!this.#store.startAnswer(k, now, { workerId: e.asker.workerId, request, session: a.session.id, label: option?.label ?? null })) return { ok: false, problem: "uncertain", item: this.#view(id, a.endpoint.id) };
       let outcome: SendOutcome;
       // A node that may have typed it (SendInDoubt): "uncertain", the hub's 409, never a 500 the app reads as a refusal
       // (final review I1), and kept for its repeat with the store it went to. Any other throw keeps its row too (below).
@@ -815,7 +815,7 @@ export class EscalationService {
         // Its own request's row, for a version of the ask that is gone or was asked again since: delivered, but an
         // answer to that earlier version, never to the ask as it stands (E11, E12; round 3.5).
         const asked = this.#x.get(id);
-        if (!asked || row.key !== answerKey(id, asked, choice)) return this.#deliveredEarlier(a, id, choice, key, settled.at, requester);
+        if (!asked || row.key !== answerKey(id, asked, choice)) return this.#deliveredEarlier(a, id, choice, row, key, settled.at, requester);
         return this.#delivered(a, id, choice, key, settled.at, requester ?? undefined);
       }
       // Recorded for its own endpoint. This caller's request delivered nothing, so it is not remembered as delivered:
@@ -913,12 +913,13 @@ export class EscalationService {
   }
   // A request's answer found typed for a version of the ask that is gone from the board or was asked again since: it
   // reached the asker, so the caller is told so (a duplicate at the node's time) and it is recorded with its provenance
-  // (A1), as an answer to that earlier version, as the inbox records a late one. The ask as it stands is not answered
-  // by it (E11, E12): asked again, it stays open.
-  #deliveredEarlier(a: Authenticated, id: string, choice: Choice, key: string, at: number, by: { endpointId: EndpointId; sessionId: SessionId | null } | null): AnswerResult {
+  // (A1), as an answer to that earlier version, as the inbox records a late one, with the label that version showed:
+  // its row's, never the ask's as it stands (E9, round 4.5). A row from before labels were kept says the key. The ask
+  // as it stands is not answered by it (E11, E12): asked again, it stays open.
+  #deliveredEarlier(a: Authenticated, id: string, choice: Choice, row: SendRow, key: string, at: number, by: { endpointId: EndpointId; sessionId: SessionId | null } | null): AnswerResult {
     this.#seen.set(key, this.#now());
     const option = choice.kind === "option" ? choice.key : null;
-    const decided: DecidedChoice = option === null ? { kind: "words" } : { kind: "option", key: option, label: this.#x.get(id)?.options.find(o => o.key === option)?.label ?? option };
+    const decided: DecidedChoice = option === null ? { kind: "words" } : { kind: "option", key: option, label: row.label ?? option };
     const who = by ?? { endpointId: a.endpoint.id, sessionId: a.session.id };
     const words = choice.kind === "words" ? { length: choice.text.trim().length, digest: digest(choice.text) } : {};
     this.#store.record([{ ...answered(escalationId(id), { choice: decided, at: this.#now(), via: "here", ...who }), ...words }]);

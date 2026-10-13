@@ -473,6 +473,24 @@ describe("a Decision the record can no longer attribute", () => {
       .toEqual([expect.objectContaining({ escalationId: "ny-7", endpointId: "desk", choice: { kind: "option", key: "ship", label: "Ship it" } })]);
   });
 
+  // Its label is the one that version showed (round 4.5): the restate renamed the option, and the principal never saw
+  // the new name for the answer he gave. The row keeps the label it was typed with; the ask as it stands has no say.
+  it("an earlier version's answer, found typed, keeps the label that version showed", async () => {
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("lost while typing"); },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                       // its node typed it
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    manager.push({ id: "m2", at: T0, author: { kind: "agent", name: "manager" }, kind: "text",
+      text: "Only the hotfix is ready.\n\n[buttons ny-7] ship=Ship the hotfix only | hold=Hold for a day" });
+    s.poll();                                                                                       // restated, the option renamed
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: true, duplicate: true });
+    expect(store.audit().filter(e => e.type === "EscalationAnswered").map(e => e.body))
+      .toEqual([expect.objectContaining({ choice: { kind: "option", key: "ship", label: "Ship it" } })]);
+  });
+
   // And when the ask is gone from the board (settled and dropped since, or never sighted after a restart): the retry
   // still settles it with its node, is told it went through, and the answer is recorded for its endpoint.
   it("a retried request in doubt settles its answer when the ask is gone", async () => {

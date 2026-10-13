@@ -195,7 +195,7 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     const db = new Database(join(tempDir(), "morndo.db"));
     migrate(db, MIGRATIONS.slice(0, 19));
     expect(columns(db, "sends")).not.toContain("request_session");
-    expect(migrate(db)).toEqual({ from: 19, to: 21 });
+    expect(migrate(db, MIGRATIONS.slice(0, 21))).toEqual({ from: 19, to: 21 });
     expect(columns(db, "sends")).toContain("request_session");
     expect(tables(db)).toContain("transcriptions");
     expect(() => MIGRATIONS[20]?.up(db)).not.toThrow();
@@ -208,9 +208,21 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     expect(version(db)).toBe(20);
     expect(tables(db)).toContain("transcriptions");
     expect(columns(db, "sends")).not.toContain("request_session");
-    expect(migrate(db)).toEqual({ from: 20, to: 21 });
+    expect(migrate(db, MIGRATIONS.slice(0, 21))).toEqual({ from: 20, to: 21 });
     expect(columns(db, "sends")).toContain("request_session");
     expect(version(db)).toBe(21);
+  });
+
+  // The option label an escalation answer was typed with (round 4.5 of the PR #55 review): on sends, so an answer found
+  // typed for an earlier version of its ask is recorded with the label that version showed, not the ask's label now.
+  it("migration 22 keeps the label a sends row's answer was typed with", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 21));
+    expect(columns(db, "sends")).not.toContain("label");
+    expect(migrate(db)).toEqual({ from: 21, to: 22 });
+    expect(columns(db, "sends")).toContain("label");
+    expect(version(db)).toBe(22);
+    expect(() => MIGRATIONS[21]?.up(db)).not.toThrow();
   });
 
   it("the Store migrates the database it opens", () => {
