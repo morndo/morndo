@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { BUNDLED_NODE, NODE_RELEASE_KEYS_COMMIT } from "./node-pin.ts";
-import { FEED_NAMESPACE, RELEASE_NAMESPACE } from "./sign.ts";
+import { RELEASE_NAMESPACE } from "./sign.ts";
 
 const RELEASE_PLEASE = "45996ed1f6d02564a971a2fa1b5860e934307cf7";
 const APP_TOKEN = "64ab729a6294000f5aa4a4bc0b73d1f32bc45510"; //gitleaks:allow
