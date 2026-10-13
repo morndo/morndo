@@ -126,11 +126,13 @@ function writeRef(repository: string, parent: string | null, dir: string, messag
 }
 
 // force defaults to false, so a non-fast-forward update is rejected.
+// Creating a ref that is already there is also 422 "Reference already exists".
 // https://docs.github.com/en/rest/git/refs#update-a-reference (read 2026-10-13)
-// Retry only when the body says the update was not a fast forward or the reference moved.
+// https://docs.github.com/en/rest/git/refs#create-a-reference (read 2026-10-13)
+// Retry only for those races. Any other 422 or 409 fails with GitHub's message.
 export function refUpdateResult(ok: boolean, stderr: string): "ok" | "moved" {
   if (ok) return "ok";
-  if (/not a fast forward/i.test(stderr) || /reference moved/i.test(stderr)) return "moved";
+  if (/not a fast forward/i.test(stderr) || /reference moved/i.test(stderr) || /reference already exists/i.test(stderr)) return "moved";
   throw new Error(`feed ref update failed: ${stderr}`);
 }
 

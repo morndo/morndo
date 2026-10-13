@@ -266,9 +266,10 @@ describe("feed", () => {
     expect(readFileSync(join(site, "latest.json"), "utf8")).toBe(latest);
   });
 
-  it("retries a ref update only when GitHub says it was not a fast forward", () => {
+  it("retries a feed ref only when GitHub says it moved or already exists", () => {
     expect(refUpdateResult(false, "422 Update is not a fast forward")).toBe("moved");
     expect(refUpdateResult(false, "409 reference moved")).toBe("moved");
+    expect(refUpdateResult(false, "422 Reference already exists")).toBe("moved");
     expect(() => refUpdateResult(false, "422 Object does not exist")).toThrow(/Object does not exist/);
     expect(refUpdateResult(true, "")).toBe("ok");
   });
