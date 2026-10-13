@@ -15,10 +15,10 @@
 //   The resolve URL redirects to a host under .hf.co (seen: us.aws.cdn.hf.co). The sha256 is the check
 //   that the bytes are the pin; the host check refuses any other site.
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
+import { chmodSync, copyFileSync, cpSync, createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { availableParallelism, freemem, homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Readable, type Writable } from "node:stream";
 
@@ -201,6 +201,35 @@ function modelHost(hostname: string): boolean {
   return hostname === "huggingface.co" || hostname.endsWith(".huggingface.co") || hostname.endsWith(".hf.co");
 }
 
+export async function replaceInstall(dest: string, fill: (dir: string) => Promise<void>): Promise<void> {
+  const parent = dirname(dest);
+  mkdirSync(parent, { recursive: true });
+  const staging = join(parent, `.${basename(dest)}.next-${randomBytes(4).toString("hex")}`);
+  mkdirSync(staging, { recursive: true });
+  try {
+    await fill(staging);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
+  const backup = join(parent, `.${basename(dest)}.prev-${randomBytes(4).toString("hex")}`);
+  let moved = false;
+  try {
+    if (existsSync(dest)) {
+      renameSync(dest, backup);
+      moved = true;
+    }
+    renameSync(staging, dest);
+  } catch (error) {
+    if (moved && !existsSync(dest)) {
+      try { renameSync(backup, dest); } catch { /* the backup directory is the previous install */ }
+    }
+    rmSync(staging, { recursive: true, force: true });
+    throw error;
+  }
+  rmSync(backup, { recursive: true, force: true });
+}
+
 function downloadError(error: NodeJS.ErrnoException): Error {
   if (error.code === "ENOSPC") return new Error("disk full while downloading the model");
   return new Error(`could not write the model (${error.code ?? error.message})`);
@@ -323,41 +352,52 @@ async function install(request: { model: ModelId | null; home: string | null }):
   const whisper = await ensureBinary(src);
   await ensureModel(pin, modelCache);
 
-  rmSync(dest, { recursive: true, force: true });
-  mkdirSync(join(dest, "bin"), { recursive: true, mode: 0o755 });
-  mkdirSync(join(dest, "models"), { recursive: true, mode: 0o755 });
-  copyFileSync(whisper, join(dest, "bin", "whisper-cli"));
-  chmodSync(join(dest, "bin", "whisper-cli"), 0o755);
-  copyFileSync(modelCache, join(dest, "models", pin.file));
-  chmodSync(join(dest, "models", pin.file), 0o644);
-  copyFileSync(join(PACKAGE, "src", "morndo-transcribe.cjs"), join(dest, "bin", "morndo-transcribe"));
-  chmodSync(join(dest, "bin", "morndo-transcribe"), 0o755);
-  copyFileSync(join(PACKAGE, "src", "morndo-transcribe.mts"), join(dest, "bin", "morndo-transcribe.mts"));
-  chmodSync(join(dest, "bin", "morndo-transcribe.mts"), 0o644);
-  cpSync(join(PACKAGE, "LICENSES"), join(dest, "LICENSES"), { recursive: true });
-  const installed = {
-    name: "transcribe",
-    version: pins.version,
-    protocol: 1,
-    engine: pins.engine,
-    engineVersion: pins.engineVersion,
-    model: pin.model,
-    modelFile: pin.file,
-    sha256: pin.sha256,
-    languages: "multi" as const,
-    maxSeconds: pins.maxSeconds,
-  };
-  writeFileSync(join(dest, "plugin.json"), `${JSON.stringify(installed, null, 2)}\n`, { mode: 0o644 });
-
-  const probe = await capture(process.execPath, [join(dest, "bin", "morndo-transcribe"), "probe", "--json"]);
-  process.stdout.write(`${probe}\n`);
-  const body = JSON.parse(probe) as { ready?: boolean };
-  if (body.ready !== true) {
-    process.stdout.write("ready: false\n");
-    return 1;
+  let probe = "";
+  try {
+    await replaceInstall(dest, async (dir) => {
+      mkdirSync(join(dir, "bin"), { recursive: true, mode: 0o755 });
+      mkdirSync(join(dir, "models"), { recursive: true, mode: 0o755 });
+      copyFileSync(whisper, join(dir, "bin", "whisper-cli"));
+      chmodSync(join(dir, "bin", "whisper-cli"), 0o755);
+      copyFileSync(modelCache, join(dir, "models", pin.file));
+      chmodSync(join(dir, "models", pin.file), 0o644);
+      copyFileSync(join(PACKAGE, "src", "morndo-transcribe.cjs"), join(dir, "bin", "morndo-transcribe"));
+      chmodSync(join(dir, "bin", "morndo-transcribe"), 0o755);
+      copyFileSync(join(PACKAGE, "src", "morndo-transcribe.mts"), join(dir, "bin", "morndo-transcribe.mts"));
+      chmodSync(join(dir, "bin", "morndo-transcribe.mts"), 0o644);
+      cpSync(join(PACKAGE, "LICENSES"), join(dir, "LICENSES"), { recursive: true });
+      const installed = {
+        name: "transcribe",
+        version: pins.version,
+        protocol: 1,
+        engine: pins.engine,
+        engineVersion: pins.engineVersion,
+        model: pin.model,
+        modelFile: pin.file,
+        sha256: pin.sha256,
+        languages: "multi" as const,
+        maxSeconds: pins.maxSeconds,
+      };
+      writeFileSync(join(dir, "plugin.json"), `${JSON.stringify(installed, null, 2)}\n`, { mode: 0o644 });
+      probe = await capture(process.execPath, [join(dir, "bin", "morndo-transcribe"), "probe", "--json"]);
+      const body = JSON.parse(probe) as { ready?: boolean };
+      if (body.ready !== true) throw new ProbeNotReady(probe);
+    });
+  } catch (error) {
+    if (error instanceof ProbeNotReady) {
+      process.stdout.write(`${error.probe}\nready: false\n`);
+      return 1;
+    }
+    throw error;
   }
-  process.stdout.write("ready: true\n");
+  process.stdout.write(`${probe}\nready: true\n`);
   return 0;
+}
+
+class ProbeNotReady extends Error {
+  constructor(readonly probe: string) {
+    super("plugin probe was not ready");
+  }
 }
 
 async function entry(argv: readonly string[]): Promise<number> {

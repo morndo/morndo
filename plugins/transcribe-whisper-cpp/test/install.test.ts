@@ -1,9 +1,9 @@
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Writable } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { absentTools, parseInstallArgs, readPins, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
+import { absentTools, parseInstallArgs, readPins, replaceInstall, suggestedModel, toolMessage, writeModelBody } from "../scripts/install.ts";
 
 const GIB = 1024 ** 3;
 
@@ -42,6 +42,23 @@ describe("install choices", () => {
     body.models.base.url = "https://example.invalid/ggml-base.bin";
     writeFileSync(bad, JSON.stringify(body));
     expect(() => readPins(bad)).toThrow(/model base/);
+  });
+
+  it("a failed install leaves the previous plugin in place", async () => {
+    const root = mkdtempSync(join(tmpdir(), "morndo-swap-"));
+    const dest = join(root, "transcribe");
+    mkdirSync(dest);
+    writeFileSync(join(dest, "marker"), "old");
+    try {
+      await expect(replaceInstall(dest, async () => { throw new Error("ENOSPC"); })).rejects.toThrow("ENOSPC");
+      expect(readFileSync(join(dest, "marker"), "utf8")).toBe("old");
+      expect(readdirSync(root)).toEqual(["transcribe"]);
+      await replaceInstall(dest, async (dir) => { writeFileSync(join(dir, "marker"), "new"); });
+      expect(readFileSync(join(dest, "marker"), "utf8")).toBe("new");
+      expect(readdirSync(root)).toEqual(["transcribe"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("a full disk removes the partial model and says the disk is full", async () => {
