@@ -399,6 +399,26 @@ describe("stage, launchers, node pin, notice", () => {
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/package.json"), "utf8")).toContain("./src/index.js");
   });
 
+  it("does not let a package.json export replace the rewritten manifest", () => {
+    const repo = join(import.meta.dirname, "../..");
+    const dir = temp();
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/index.ts"), "export const n = 1;\n");
+    writeFileSync(join(dir, "package.json"), `${JSON.stringify({
+      name: "@morndo/sample", type: "module",
+      exports: { ".": "./src/index.ts", "./package.json": "./package.json" },
+    })}\n`);
+    writeFileSync(join(dir, "tsconfig.json"), `${JSON.stringify({
+      compilerOptions: { target: "es2022", module: "nodenext", moduleResolution: "nodenext", strict: true, noEmit: true },
+      include: ["src"],
+    })}\n`);
+    const out = temp();
+    compilePackage(repo, dir, join(out, "sample"), join(out, "sample.tsconfig.json"));
+    const staged = readFileSync(join(out, "sample/package.json"), "utf8");
+    expect(staged).toContain("./src/index.js");
+    expect(staged).not.toContain("./src/index.ts");
+  });
+
   it("copies brand assets into the compiled package", () => {
     const tree = join(import.meta.dirname, "../..");
     const compiled = temp();

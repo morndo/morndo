@@ -53,7 +53,7 @@ function copyReferenced(dir: string, dest: string, pkgText: string): void {
   const assets = join(dir, "assets");
   if (existsSync(assets)) cpSync(assets, join(dest, "assets"), { recursive: true });
   for (const target of exportTargets(pkgText)) {
-    if (/\.(tsx?|jsx?|mjs|cjs|d\.ts)$/.test(target)) continue;
+    if (target === "./package.json" || /\.(tsx?|jsx?|mjs|cjs)$/.test(target)) continue;
     const rel = target.replace(/^\.\//, "");
     const from = join(dir, rel);
     if (!existsSync(from) || !statSync(from).isFile()) throw new Error(`export target is missing: ${target}`);
