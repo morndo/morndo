@@ -505,4 +505,16 @@ describe("a Decision the record can no longer attribute", () => {
     expect(sends).toHaveBeenCalledTimes(0);                                                      // no query per tap
     expect(ofAsk.mock.calls).toEqual([["answer:"]]);                                             // one read per poll, the store's own (round 3.8)
   });
+
+  // And none when there is no tap to judge (round 3.7): a pane without a tap line reads no answer row at all.
+  it("reads no answer rows in a poll that has no tap to judge", () => {
+    const ofAsk = vi.spyOn(store, "answersOfAsk");
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => ({ problem: null, typedAt: 0 }),
+    });
+    s.poll();
+    expect(s.board().items.find(i => i.id === "ny-7")?.status).toBe("open");
+    expect(ofAsk).toHaveBeenCalledTimes(0);
+  });
 });

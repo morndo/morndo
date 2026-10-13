@@ -3,7 +3,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Store } from "../src/adapters/store.ts";
 import { answerKey } from "../src/application/escalation-service.ts";
 
@@ -24,5 +24,34 @@ describe("answer rows in the store", () => {
     store.startAnswer(v1, T0 - 2000, { workerId: "%0", request: "desk:r1" });
     store.startAnswer(v2, T0 - 1000, { workerId: "%0", request: "desk:r1" });
     expect(store.sendOfRequest("desk:r1")?.key).toBe(v2);
+  });
+
+  // The rows under a prefix are a range of the primary key (round 3.7): a poll reads every answer row, and the table
+  // also holds a day of steering sends, which a scan of it would read too.
+  it("reads the rows under a prefix by a range of the primary key, not a scan of every send", () => {
+    store.startSend("pc.aaaaaaaa.0:3fa2c1d0-0000-4000-8000-000000000001", T0);              // a steering send
+    store.startAnswer(answerKey("ny-7", { messageId: "m1", askedAt: T0 }, ship), T0, { workerId: "%0", request: "desk:r1" });
+    const proto = Object.getPrototypeOf(store.db.prepare("SELECT 1")) as { all: (...args: unknown[]) => unknown[] };
+    const all = vi.spyOn(proto, "all");
+    expect(store.answersOfAsk("answer:").map(r => r.key)).toEqual(["answer:ny-7:m1:option:ship"]);
+    const stmt = all.mock.contexts[0] as { source: string };
+    const args = all.mock.calls[0] ?? [];
+    all.mockRestore();
+    const plan = (store.db.prepare(`EXPLAIN QUERY PLAN ${stmt.source}`).all(...args) as { detail: string }[]).map(r => r.detail);
+    expect(plan.some(d => /^SEARCH sends USING INDEX sqlite_autoindex_sends_1 \(key>\? AND key<\?\)/.test(d))).toBe(true);
+    expect(plan.filter(d => d.startsWith("SCAN sends"))).toEqual([]);
+  });
+
+  // The range holds exactly the keys that start with the prefix: not a key one character past it, not another ask
+  // whose message id only begins the same way, and a prefix that ends in a character outside ASCII counts that
+  // character whole.
+  it("reads exactly the keys that start with the prefix", () => {
+    const keys = ["answer:ny-7:m1:option:ship", "answer:ny-7:m10:option:ship", "answer:ny-7:m1;", "answer;", "answe",
+      "answer:ny-7:é:option:a", "answer:ny-7:ê", "answer:ny-8:😀:option:a", "answer:ny-8:😁"];
+    for (const key of keys) store.startAnswer(key, T0, { workerId: "%0", request: `desk:${key}` });
+    expect(store.answersOfAsk("answer:ny-7:m1:").map(r => r.key)).toEqual(["answer:ny-7:m1:option:ship"]);
+    expect(store.answersOfAsk("answer:ny-7:é").map(r => r.key)).toEqual(["answer:ny-7:é:option:a"]);
+    expect(store.answersOfAsk("answer:ny-8:😀").map(r => r.key)).toEqual(["answer:ny-8:😀:option:a"]);
+    expect(store.answersOfAsk("answer:").map(r => r.key).sort()).toEqual(keys.filter(k => k.startsWith("answer:")).sort());
   });
 });

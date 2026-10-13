@@ -387,9 +387,10 @@ export class EscalationService {
     this.#lastLedger = ledger;
     this.#briefOf = new Map((this.#briefs?.() ?? []).map(b => [b.id, b]));
     for (const [k, r] of this.#rowOrder) if (now - r.at > ROW_KEEP_MS) this.#rowOrder.delete(k);   // its row is pruned by now
-    // The answer rows this poll judges taps against, read once and grouped by key (round 2.7): one query per poll, not
-    // one per tap line in the manager's whole history.
-    const answers = new Map(this.#store.answersOfAsk("answer:").map(r => [r.key, r]));
+    // The answer rows this poll judges taps against, grouped by key: read once (round 2.7), not once per tap line in the
+    // manager's whole history, and only when a tap is there to judge (round 3.7).
+    let read: ReadonlyMap<string, SendRow> | null = null;
+    const answers = () => (read ??= new Map(this.#store.answersOfAsk("answer:").map(r => [r.key, r])));
     const sightings = [...this.#managerSightings(ledger, now, answers), ...this.#workerSightings(now), ...this.#hubSightings(answers)];
     const changed = this.#x.reconcile(sightings, now, ledger?.ok ?? true);
     for (const id of this.#buttons.keys()) if (!this.#x.get(id)) this.#buttons.delete(id);   // kept as long as its ask
@@ -488,7 +489,7 @@ export class EscalationService {
   }
 
   // The manager's asks: button messages in its conversation joined with its list, by id.
-  #managerSightings(ledger: LedgerRead | null, now: number, answers: ReadonlyMap<string, SendRow>): Sighting[] {
+  #managerSightings(ledger: LedgerRead | null, now: number, answers: () => ReadonlyMap<string, SendRow>): Sighting[] {
     const managerId = managerOf(this.#watch.workers(), this.#managerName);
     const manager = managerId === null ? null : { id: managerId };
     const messages = manager ? this.#watch.history(manager.id) : [];
@@ -604,12 +605,12 @@ export class EscalationService {
   // "started", no store, not being typed (the hub stopped while typing it, or the port threw after the paste and no
   // node can be asked) — would leave that tap as the ask's only record: it settles the ask, as it did before the
   // filter (rounds 2.1 and 2.2, PR #55 review). The rows come as this poll's one read (round 2.7), keyed by answer
-  // key. Being typed is that answer's own key, never the whole ask: a tap of another choice is no paste of this one,
+  // key, made on the first tap that needs it (round 3.7). Being typed is that answer's own key, never the whole ask: a tap of another choice is no paste of this one,
   // and still refuses it (E8, round 3.1).
-  #ownTapOf(ask: Ask, tap: PaneTap | null, answers: ReadonlyMap<string, SendRow>): Sighting["answered"] {
+  #ownTapOf(ask: Ask, tap: PaneTap | null, answers: () => ReadonlyMap<string, SendRow>): Sighting["answered"] {
     if (tap === null) return null;
     const k = answerKey(ask.id, ask, { kind: "option", key: tap.key });
-    const row = answers.get(k) ?? null;
+    const row = answers().get(k) ?? null;
     const written = this.#rowOrder.get(k)?.order;
     const afterRow = written === undefined || tap.order > written;
     if (row !== null && afterRow && (row.state === "done" || row.store !== null || this.#typing.has(k))) return null;
@@ -624,7 +625,7 @@ export class EscalationService {
   }
 
   // Briefs the hub holds open itself (E14). A `ref` is sighted with its list item, above, not here.
-  #hubSightings(answers: ReadonlyMap<string, SendRow>): Sighting[] {
+  #hubSightings(answers: () => ReadonlyMap<string, SendRow>): Sighting[] {
     const out: Sighting[] = [];
     for (const b of this.#briefOf.values()) {
       if (b.ref !== null) continue;
