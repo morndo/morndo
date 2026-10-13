@@ -69,7 +69,10 @@ export class AnswerSession {
   get seen() { return seenOf(this.snapshot()); }
 
   async send(onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>, body: AnswerBody, requestId: string = crypto.randomUUID()) {
-    if (this.sending || this.stale || this.live.status !== "open") return;
+    // A new answer waits until the version on screen is current. An answer already in doubt is checked again on the
+    // version it was sent for, even after a restate: that is the same request, not a silent no-op.
+    if (this.sending || this.live.status !== "open") return;
+    if (this.stale && this.again === null) return;
     this.sending = true;
     this.error = null;
     const doubt = this.again;

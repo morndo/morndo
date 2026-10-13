@@ -56,6 +56,44 @@ async function answers() {
   return tab.evaluate(() => (globalThis as { __answers?: unknown[] }).__answers ?? []);
 }
 
+async function doubt() {
+  await tab.evaluate(() => { (globalThis as { __problem?: { code: string; text: string } }).__problem = { code: "uncertain", text: "May have been sent." }; });
+}
+
+describe("round 3: Check again still asks when the brief was restated", () => {
+  it("Check again on the card sends the in-doubt answer after a restate", async () => {
+    await ready();
+    await doubt();
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Extend the triage script" }).click();
+    await card.getByRole("button", { name: "Send answer" }).click();
+    await card.getByRole("button", { name: "Check again" }).waitFor();
+    await show([tap("d-re", "v2", "Buy a hosted add-on")]);
+    await card.getByRole("button", { name: "Check again" }).click();
+    await tab.waitForFunction(() => ((globalThis as { __answers?: { requestId: string }[] }).__answers?.length ?? 0) >= 2);
+    const sent = await tab.evaluate(() => (globalThis as { __answers?: { requestId: string }[] }).__answers ?? []);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]?.requestId).toBe(sent[1]?.requestId);
+  }, 60_000);
+
+  it("Check again in the brief sends the in-doubt answer after a restate", async () => {
+    await ready();
+    await doubt();
+    await show([tap("d-re", "v1", "Extend the triage script")]);
+    const card = tab.locator('[data-decision="d-re"]');
+    await card.getByRole("button", { name: "Ship the weekly notes" }).click();
+    const dialog = tab.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Extend the triage script" }).click();
+    await dialog.getByRole("button", { name: "Send answer" }).click();
+    await dialog.getByRole("button", { name: "Check again" }).waitFor();
+    await show([tap("d-re", "v2", "Buy a hosted add-on")]);
+    await dialog.getByRole("button", { name: "Check again" }).click();
+    await tab.waitForFunction(() => ((globalThis as { __answers?: unknown[] }).__answers?.length ?? 0) >= 2);
+    expect(await answers()).toHaveLength(2);
+  }, 60_000);
+});
+
 describe("round 3: a sent answer belongs to its version", () => {
   it("follows a re-ask on the card after the answer was sent", async () => {
     await ready();
