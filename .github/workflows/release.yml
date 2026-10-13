@@ -315,8 +315,12 @@ jobs:
 
   feed:
     needs: [release-please, published]
+    # A shared group cancels the other workflow's pending run.
+    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+    # read 2026-10-13. This group is not feed.yml's morndo-feed. The push itself
+    # refuses a moved branch and retries the read (feed-publish).
     concurrency:
-      group: morndo-feed
+      group: morndo-release-feed
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -346,64 +350,15 @@ jobs:
           mkdir -p site "$RUNNER_TEMP/release"
           gh release download "$TAG" --pattern manifest.json --dir "$RUNNER_TEMP/release"
           manifest_url="https://github.com/${repo}/releases/download/${TAG}/manifest.json"
-          # The Contents API returns the git blob on branch feed.
-          # https://docs.github.com/en/rest/repos/contents#get-repository-content (read 2026-10-13)
-          fetch() {
-            local file="$1" err
-            if err=$(gh api -H "Accept: application/vnd.github.raw+json" \
-                "/repos/${GITHUB_REPOSITORY}/contents/${file}?ref=feed" 2>&1 > "site/${file}"); then
-              return 0
-            fi
-            rm -f "site/${file}"
-            if printf '%s\n' "$err" | grep -q '404'; then return 1; fi
-            printf '%s\n' "$err" >&2
-            exit 1
-          }
-          if fetch latest.json; then
-            fetch latest.json.sig || { echo "latest.json has no signature" >&2; exit 1; }
-            test -s trust/feed_allowed_signers
-            ssh-keygen -Y verify -f trust/feed_allowed_signers -I feed@morndo.github.io -n feed@morndo.github.io -s site/latest.json.sig < site/latest.json
-            node scripts/release/main.ts feed-add --existing site/latest.json --channel latest --version "$VERSION" \
-              --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" --now "$now" --key-set 1 --out site/latest.json
-          else
-            node scripts/release/main.ts feed-add --channel latest --version "$VERSION" \
-              --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" --now "$now" --key-set 1 --out site/latest.json
-          fi
-          if fetch stable.json; then
-            fetch stable.json.sig || { echo "stable.json has no signature" >&2; exit 1; }
-            test -s trust/feed_allowed_signers
-            ssh-keygen -Y verify -f trust/feed_allowed_signers -I feed@morndo.github.io -n feed@morndo.github.io -s site/stable.json.sig < site/stable.json
-          else
-            node scripts/release/main.ts feed-empty --channel stable --now "$now" --key-set 1 --out site/stable.json
-          fi
           umask 077
           key="$RUNNER_TEMP/feed.key"
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$FEED_SSH_KEY" > "$key"
-          node scripts/release/main.ts sign --namespace feed@morndo.github.io --key "$key" --in site/latest.json --out site/latest.json.sig --dest "$RUNNER_TEMP"
-          node scripts/release/main.ts sign --namespace feed@morndo.github.io --key "$key" --in site/stable.json --out site/stable.json.sig --dest "$RUNNER_TEMP"
+          node scripts/release/main.ts feed-publish \
+            --repository "$GITHUB_REPOSITORY" --dir site --version "$VERSION" \
+            --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" \
+            --now "$now" --key-set 1 --key "$key" --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
           rm -f "$key"
-          # One commit on branch feed, so the next read sees this seq.
-          # https://docs.github.com/en/rest/git/commits#create-a-commit (read 2026-10-13)
-          parent=$(gh api "/repos/${GITHUB_REPOSITORY}/git/ref/heads/feed" --jq .object.sha 2>/dev/null || true)
-          tree_args=()
-          for f in latest.json latest.json.sig stable.json stable.json.sig; do
-            blob=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/blobs" \
-              -f content="$(base64 -w0 "site/${f}")" -f encoding=base64 --jq .sha)
-            tree_args+=(-f "tree[][path]=${f}" -f "tree[][mode]=100644" -f "tree[][type]=blob" -f "tree[][sha]=${blob}")
-          done
-          tree=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/trees" "${tree_args[@]}" --jq .sha)
-          if [ -n "$parent" ]; then
-            body=$(jq -n --arg tree "$tree" --arg parent "$parent" '{message:"Publish the channel feeds", tree:$tree, parents:[$parent]}')
-          else
-            body=$(jq -n --arg tree "$tree" '{message:"Publish the channel feeds", tree:$tree, parents:[]}')
-          fi
-          commit=$(gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/commits" --input - --jq .sha <<< "$body")
-          if [ -n "$parent" ]; then
-            gh api --method PATCH "/repos/${GITHUB_REPOSITORY}/git/refs/heads/feed" -f sha="$commit" > /dev/null
-          else
-            gh api --method POST "/repos/${GITHUB_REPOSITORY}/git/refs" -f ref=refs/heads/feed -f sha="$commit" > /dev/null
-          fi
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
@@ -411,7 +366,7 @@ jobs:
   pages:
     needs: feed
     concurrency:
-      group: morndo-feed
+      group: morndo-release-feed
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15

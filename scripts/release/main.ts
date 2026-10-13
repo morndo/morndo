@@ -10,6 +10,7 @@ import { packTree, type TreeFile } from "./archive.ts";
 import { compileWorkspaces } from "./compile.ts";
 import { sha256Sums } from "./checksums.ts";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
+import { publishChannelFeeds } from "./feed-sync.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, type ArtifactInput } from "./manifest.ts";
 import { BUNDLED_NODE, newerNode24 } from "./node-pin.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes } from "./sign.ts";
@@ -60,7 +61,7 @@ function treeFiles(root: string): TreeFile[] {
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
-  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | sums | node-check");
+  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-publish | sums | node-check");
   const { values, positionals } = parseArgs({
     args: rest,
     options: {
@@ -71,6 +72,7 @@ function main(argv: string[]): void {
       in: { type: "string" }, key: { type: "string" }, namespace: { type: "string" },
       channel: { type: "string" }, existing: { type: "string" }, manifest: { type: "string" },
       "manifest-url": { type: "string" }, now: { type: "string" }, "key-set": { type: "string" },
+      dir: { type: "string" }, signers: { type: "string" }, scratch: { type: "string" },
       index: { type: "string" },
     },
     strict: true,
@@ -141,6 +143,14 @@ function main(argv: string[]): void {
     }
     case "feed-resign":
       writeFileSync(flag(values, "out"), resignFeed(readFileSync(flag(values, "in"), "utf8"), Number(flag(values, "now"))));
+      return;
+    case "feed-publish":
+      publishChannelFeeds({
+        repository: flag(values, "repository"), dir: flag(values, "dir"), version: flag(values, "version"),
+        manifestPath: flag(values, "manifest"), manifestUrl: flag(values, "manifest-url"),
+        now: Number(flag(values, "now")), keySetVersion: Number(flag(values, "key-set")),
+        keyPath: flag(values, "key"), signers: flag(values, "signers"), scratch: flag(values, "scratch"),
+      });
       return;
     case "sums":
       writeFileSync(flag(values, "out"), sha256Sums(positionals.map(name => ({ name: name.split("/").pop() ?? name, bytes: readFileSync(name) }))));

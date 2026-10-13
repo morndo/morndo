@@ -13,6 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/protocol";
 import { packTree, type TreeFile } from "./archive.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
+import { syncFeed } from "./feed-sync.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, schemaFrom } from "./manifest.ts";
@@ -214,6 +215,22 @@ describe("feed", () => {
     const again = ChannelFeedSchema.parse(JSON.parse(second));
     expect(again.seq).toBe(2);
     expect(again.releases.map(r => r.version)).toEqual(["0.2.0", "0.1.0"]);
+  });
+
+  it("retries the feed read when the branch moved, and commits the head it just read", () => {
+    const heads = ["aaa", "bbb"];
+    const seen: Array<string | null> = [];
+    const committed: Array<string | null> = [];
+    syncFeed({
+      readHead: () => heads.shift() ?? null,
+      prepare: head => { seen.push(head); },
+      commit: parent => {
+        committed.push(parent);
+        return committed.length === 1 ? "moved" : "ok";
+      },
+    });
+    expect(seen).toEqual(["aaa", "bbb"]);
+    expect(committed).toEqual(["aaa", "bbb"]);
   });
 
   it("raises seq from the last published feed", () => {
