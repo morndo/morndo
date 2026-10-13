@@ -1,6 +1,6 @@
 // The transcription guard's machine reads (design §9, as jobs' guard): what each platform can answer, and only the
-// configured lines. Linux reads /proc. macOS has no MemAvailable, and free pages under-count a machine that is
-// using its cache, so the guard reads total memory there. Synthetic files under a temp dir.
+// configured lines. Linux reads /proc. macOS sums vm_stat's free, inactive and speculative pages. A made-up
+// vm_stat listing stands in for the command. Synthetic files under a temp dir.
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,15 +21,27 @@ function procFiles(load1: string, memAvailableKb?: number): { loadPath: string; 
 }
 
 describe("transcription guard reads", () => {
-  it("reads load and total memory where there is no /proc (macOS), not the free-page count", () => {
+  it("reads load and reclaimable pages where there is no /proc (macOS)", () => {
+    const vm = [
+      "Mach Virtual Memory Statistics: (page size of 16384 bytes)",
+      "Pages free:                               100.",
+      "Pages active:                            8000.",
+      "Pages inactive:                            50.",
+      "Pages speculative:                         25.",
+    ].join("\n");
+    const available = (100 + 50 + 25) * 16384 / (1024 * 1024);
     const mac = readMachine({ load1: 6, memAvailableMiB: 1024 }, {
-      platform: "darwin", loadavg: () => [3.25, 2, 1], totalmem: () => 8 * 1024 * 1024 * 1024,
+      platform: "darwin", loadavg: () => [3.25, 2, 1], vmStat: () => vm,
       loadPath: "/nonexistent", memPath: "/nonexistent",
     });
-    expect(mac).toEqual({ load1: 3.25, memAvailableMiB: 8 * 1024 });
-    expect(guardNow({ load1: 6, memAvailableMiB: 1024 }, () => mac)).toBe("off");
+    expect(mac).toEqual({ load1: 3.25, memAvailableMiB: available });
+    expect(available).toBeLessThan(8 * 1024);
+    expect(guardNow({ load1: 6, memAvailableMiB: 1 }, () => mac)).toBe("off");
     expect(guardNow({ load1: 3 }, () => mac)).toBe("load");
-    expect(guardNow({ memAvailableMiB: 9 * 1024 }, () => mac)).toBe("memory");
+    expect(guardNow({ memAvailableMiB: 4 }, () => mac)).toBe("memory");
+    expect(guardNow({ memAvailableMiB: 1024 }, () => readMachine({ memAvailableMiB: 1024 }, {
+      platform: "darwin", vmStat: () => { throw new Error("vm_stat failed"); },
+    }))).toBe("unknown");
   });
 
   it("reads only the configured line on linux, so a load-only guard never touches meminfo", () => {
