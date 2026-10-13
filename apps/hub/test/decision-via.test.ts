@@ -378,15 +378,15 @@ describe("a Decision the record can no longer attribute", () => {
     expect(s.seenBy(endpointId("desk")).items.find(i => i.id === "ny-7")?.decision?.via).toBe("here");
   });
 
-  // The same exact key on the answer path's own repeat (round 2.8): a request's row belongs to the version it was
-  // written under. Asked again, the same choice of the same request is a new answer, typed again (the answer key's
-  // own rule), not the earlier version's answer still in doubt.
-  it("a repeat of its own request answers a restated ask anew, not as the earlier version's answer in doubt", async () => {
+  // A request's row belongs to the version it was written under (round 2.8). Asked again, a repeat of the same request
+  // first learns what became of that earlier answer (round 3.5); its node never started it, so the same choice is a new
+  // answer to the restated ask, typed again (the answer key's own rule).
+  it("a repeat of its own request answers a restated ask anew once its earlier answer was never typed", async () => {
     let throws = true;
     const s = new EscalationService({
       watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
       send: async () => { if (throws) throw new Error("lost while typing"); return { problem: null, typedAt: 0 }; },
-      settle: async () => ({ ok: false, problem: "uncertain" }),                                   // its node can never say
+      settle: async key => { store.dropSend(key); return null; },                                 // never started at its node
     });
     s.poll();
     expect(await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
@@ -397,6 +397,52 @@ describe("a Decision the record can no longer attribute", () => {
     const r = await s.answer(auth("ep2"), "ny-7", { kind: "option", key: "hold" }, "r1");          // the same request again
     expect(r).toMatchObject({ ok: true });
     expect(r.item?.decision?.via).toBe("here");                                                    // this version's own answer
+  });
+
+  // A retried request in doubt learns what became of its answer, whatever became of the ask since (round 3.5). Asked
+  // again meanwhile: its node typed it, so the retry is told it went through (a duplicate), it is recorded as an answer
+  // to the earlier version, and the restated ask stays open — that answer never answers a question he didn't see (E11).
+  it("a retried request in doubt settles its answer when the ask was restated since", async () => {
+    const typed: string[] = [];
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async (_pane, text) => {
+        typed.push(text);
+        if (typed.length === 1) throw new Error("lost while typing");
+        return { problem: null, typedAt: 0 };
+      },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                       // its node typed it
+    });
+    s.poll();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: false, problem: "uncertain" });
+    manager.push({ id: "m2", at: T0, author: { kind: "agent", name: "manager" }, kind: "text",
+      text: "The demo release is ready again, with the fix.\n\n[buttons ny-7] ship=Ship it | hold=Hold for a day" });
+    s.poll();                                                                                       // asked again
+    const r = await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1");          // the same request
+    expect(r).toMatchObject({ ok: true, duplicate: true, at: now + 5 });
+    expect(typed).toHaveLength(1);                                                                  // not typed again
+    expect(s.board().items.find(i => i.id === "ny-7")).toMatchObject({ status: "open", decision: null });
+    expect(store.audit().filter(e => e.type === "EscalationAnswered").map(e => e.body))
+      .toEqual([expect.objectContaining({ escalationId: "ny-7", endpointId: "desk", choice: { kind: "option", key: "ship", label: "Ship it" } })]);
+  });
+
+  // And when the ask is gone from the board (settled and dropped since, or never sighted after a restart): the retry
+  // still settles it with its node, is told it went through, and the answer is recorded for its endpoint.
+  it("a retried request in doubt settles its answer when the ask is gone", async () => {
+    store.db.prepare("INSERT INTO sends (key, state, at, worker_id, request, request_session, node_store) VALUES (?, 'started', ?, '%0', ?, 's1', 'st-1')")
+      .run(answerKey("ny-7", { messageId: "m1", askedAt: T0 - MIN }, { kind: "option", key: "ship" }), T0 - 1000, "desk:r1");
+    manager.splice(0);                                                                              // no buttons in view,
+    writeFileSync(ledgerPath, JSON.stringify({ needsYou: [], needsYouClosed: [] }));                // and off the list
+    const s = new EscalationService({
+      watch: ledgerWatch, ledger: ledgerReader(ledgerPath, () => now), store, managerName: "manager", now: () => now,
+      send: async () => { throw new Error("not reached"); },
+      settle: async () => ({ ok: false, problem: "duplicate", at: now + 5 }),                       // its node typed it
+    });
+    s.poll();
+    expect(s.board().items.find(i => i.id === "ny-7")).toBeUndefined();
+    expect(await s.answer(auth("desk"), "ny-7", { kind: "option", key: "ship" }, "r1")).toMatchObject({ ok: true, duplicate: true, at: now + 5 });
+    expect(store.audit().filter(e => e.type === "EscalationAnswered").map(e => e.body))
+      .toEqual([expect.objectContaining({ escalationId: "ny-7", endpointId: "desk", sessionId: "s1" })]);
   });
 
   // A row from before requests were kept names no requester (round 2.3): its node typed the answer after all, learnt
