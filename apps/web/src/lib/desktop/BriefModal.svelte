@@ -36,7 +36,7 @@
   const terminal = $derived(item.asker.kind === "manager" ? "the manager" : `#${item.asker.name}`);
   const headline = $derived(card.headline ?? view.title);
   const recommendKey = $derived(brief?.recommend ?? (view.answerBy === "tap" ? view.options[0]?.key ?? null : null));
-  const standing = $derived(standingLine(item, whom));
+  const standing = $derived(standingLine(item, whom, session.sent));
 
   const takeFocus = (node: HTMLElement) => node.focus();
 

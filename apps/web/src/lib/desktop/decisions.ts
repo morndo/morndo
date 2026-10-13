@@ -87,10 +87,12 @@ export const STILL_OFFLINE = "Still offline. It goes when you try again online."
 export const PASSKEY_UNFINISHED = "Not answered: the passkey check didn't finish.";
 
 // Where a sent answer stands, in one line: the phone's sheet and the desktop modal say it the same way.
-export function standingLine(item: DecisionItem, whom: string): string {
+// "Answered on another device" only when this device did not send it. A send from here can still arrive
+// with via "elsewhere" (the ledger reports it first; a missing via is decoded as elsewhere).
+export function standingLine(item: DecisionItem, whom: string, sentHere = false): string {
   const d = item.decision;
   if (!d) return "Sent. The manager gets it as your decision and acts on it.";
-  if (d.via === "elsewhere") {
+  if (d.via === "elsewhere" && !sentHere) {
     const said = d.choice.kind === "option" ? `“${d.choice.label}”` : "in words";
     return `Answered on another device: ${said}.`;
   }

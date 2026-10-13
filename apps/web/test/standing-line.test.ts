@@ -25,4 +25,11 @@ describe("standingLine", () => {
     }), "Alpha");
     expect(words).toBe("Answered on another device: in words.");
   });
+
+  it("keeps this device's own send when the report says elsewhere, or omits via", () => {
+    const decision = { choice: { kind: "option" as const, key: "b", label: "Extend the triage script" }, at: 1, via: "elsewhere" as const, endpointId: null, sessionId: null };
+    expect(standingLine(item({ decision }), "Alpha", true)).toBe("Sent. You chose Extend the triage script. Alpha has it.");
+    const { via: _via, ...missing } = decision;
+    expect(standingLine(item({ decision: missing as typeof decision }), "Alpha", true)).toBe("Sent. You chose Extend the triage script. Alpha has it.");
+  });
 });
