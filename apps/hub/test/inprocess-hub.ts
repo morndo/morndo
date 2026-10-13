@@ -2,6 +2,7 @@
 // and a synthetic terminal for pane %1. For tests that need the HTTP and WebSocket edges but no crash isolation
 // (crash tests use http-crash-fixture.ts). Synthetic data only.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { Transcriber, TranscriberProbe } from "@morndo/protocol";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -28,6 +29,7 @@ import { BoardService } from "../src/application/board-service.ts";
 import { AgentAccess } from "../src/application/agent-access.ts";
 import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
+import { fileOnDisk, TranscriptionService } from "../src/application/transcription-service.ts";
 import type { LedgerRead } from "../src/adapters/ledger.ts";
 import type { SendOutcome } from "../src/application/ports.ts";
 import type { Config } from "../src/config.ts";
@@ -59,7 +61,8 @@ export type InProcessHub = {
 // `watch`, `ledger`, `send`: what the escalation service sees and how it types an answer (a test's own; default none).
 export async function startInProcessHub(o: {
   limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService;
-  engines?: { bin: string; env: NodeJS.ProcessEnv };
+  engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
+  locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
   queue?: (store: Store) => ManagerQueue; manager?: string; typed?: string[]; alerts?: AlertsService;
   watch?: Watch; ledger?: (() => LedgerRead) | null;
   send?: (pane: string, text: string, key: string) => Promise<SendOutcome>;
@@ -118,6 +121,21 @@ export async function startInProcessHub(o: {
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}) });
   const queue = o.queue ? o.queue(store) : null;
   const jobs = new JobsService({ store, board, ...(o.now ? { now: o.now } : {}) });
+  // Wired as production main.ts wires it: the service is always constructed, with the plugin's answer when there is
+  // none (the routes must answer for that shape, not only for a null port).
+  const txHost = o.transcriber ?? null;
+  const transcription = new TranscriptionService({
+    store, transcriber: txHost,
+    unavailable: txHost || o.locate ? null : { ready: false, reason: "missing", detail: "missing" },
+    ...(o.locate ? { locate: o.locate } : {}),
+    probeTtlMs: 0, log: () => {},
+    file: (recording, caller) => {
+      const upload = inbox.get(recording.id);
+      if (!upload || (caller && upload.endpointId !== caller.endpointId)) return null;
+      return fileOnDisk(upload.path);
+    },
+  });
+  await transcription.start();
   const http = startHttp({
     config, identity: loadOrCreateIdentity(dir), access, observation: o.observation ?? new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox, undefined, undefined, undefined, null,
@@ -126,6 +144,7 @@ export async function startInProcessHub(o: {
     push: { publicKey: vapid.publicKey, notifications },
     board: { service: board, agents }, usage, jobs, briefs,
     engines: o.engines ? new EnginesService({ cli: enginesCli(o.engines.bin, o.engines.env), store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}) }) : null,
+    transcription,
     ...(o.limits ? { limits: o.limits } : {}), ...(o.heartbeatMs ? { heartbeatMs: o.heartbeatMs } : {}), ...(o.now ? { now: o.now } : {}),
   });
   await http.ready;
@@ -148,6 +167,6 @@ export async function startInProcessHub(o: {
       ws.on("unexpected-response", (_q, res) => reject(new Error(`upgrade refused: ${res.statusCode}`)));
       ws.on("error", () => {});
     }),
-    close: async () => { notifications.stop(); await http.close(); store.close(); rmSync(dir, { recursive: true, force: true }); },
+    close: async () => { transcription.close(); notifications.stop(); await http.close(); store.close(); rmSync(dir, { recursive: true, force: true }); },
   };
 }

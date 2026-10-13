@@ -7,7 +7,7 @@ import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
 import { hostname } from "node:os";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type FeedEvent } from "@morndo/domain";
+import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type FeedEvent, type Transcription } from "@morndo/domain";
 import { Flight, HoldWatch, productVersion } from "@morndo/service-kit";
 import { catchUp } from "../application/catchup.ts";
 import { chats, digest } from "../application/chats.ts";
@@ -29,6 +29,7 @@ import type { AgentAccess } from "../application/agent-access.ts";
 import type { JobsService } from "../application/jobs-service.ts";
 import type { AlertsService } from "../application/alerts-service.ts";
 import type { UsageService } from "../application/usage-service.ts";
+import type { TranscriptionService } from "../application/transcription-service.ts";
 import type { BriefService } from "../application/brief-service.ts";
 import { BRIEF_TEMPLATE } from "./brief-template.ts";
 import { bridgeDesktop } from "./rfb.ts";
@@ -38,7 +39,7 @@ import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
-  RevokeCommand, RoleCommand, SendBody, UPLOAD_NAME_HEADER, UsageReportBody,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UsageReportBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -64,7 +65,7 @@ class HttpError extends Error {
 }
 
 // Rate limits (ADR-0008, A6): token buckets, refused with 429 and Retry-After in whole seconds, rounded up.
-export type Limits = Record<"passkeyPerCaller" | "passkeyGlobal" | "commands" | "uploads" | "feedFrames" | "linkRequests" | "linkPolls" | "engineReads" | "agentCalls" | "agentRefusals", BucketConfig>;
+export type Limits = Record<"passkeyPerCaller" | "passkeyGlobal" | "commands" | "uploads" | "feedFrames" | "linkRequests" | "linkPolls" | "engineReads" | "agentCalls" | "agentRefusals" | "transcriptions", BucketConfig>;
 export const LIMITS: Limits = {
   passkeyPerCaller: { capacity: 10, refillPerSecond: 1 / 6 },      // pairing and login: 10 at once, then 10 a minute per caller
   passkeyGlobal: { capacity: 60, refillPerSecond: 1 },             // and a looser ceiling for everyone together
@@ -82,6 +83,10 @@ export const LIMITS: Limits = {
   // lanes), and refused ones per caller address, so a guessed token is slow to try.
   agentCalls: { capacity: 120, refillPerSecond: 2 },
   agentRefusals: { capacity: 20, refillPerSecond: 1 / 6 },
+  // ADR-0021: an ask costs a probe and a queue slot behind runs that hold half the cores: 30 at once, then 30 a
+  // minute per Endpoint, as commands are. Spent whatever the plugin answers, so a looping client spends its own
+  // bucket and not the machine's queue alone (the queue cap is the second door).
+  transcriptions: { capacity: 30, refillPerSecond: 0.5 },
 };
 const limited = (t: Taken) => {
   if (!t.ok) throw new HttpError(429, "rate_limited", { "Retry-After": String(t.retryAfterSeconds) });
@@ -171,6 +176,13 @@ export function workerIdFromSegment(segment: string): string | null {
   return id !== null && isWorkerOrLegacyId(id) ? id : null;
 }
 
+function transcriptionView(row: Transcription) {
+  return {
+    id: row.id, recording: row.recording, language: row.language, state: row.state,
+    position: row.position, reason: row.reason, outcome: row.outcome, problem: row.problem, text: row.text,
+  };
+}
+
 // 127.0.0.1, ::1, and IPv4-mapped ::ffff:127.0.0.1. A missing address is not this machine.
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false;
@@ -202,6 +214,7 @@ export function startHttp(p: {
   queue?: ManagerQueue | null;                                              // the manager's delivery queue (fleet-clients §9.1); null without a fleet
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
   alerts?: AlertsService | null;                                            // the fleet's alerts in the app; null: no fleet
+  transcription?: TranscriptionService | null;                              // ADR-0021; null: the plugin is not wired
   briefs?: BriefService | null;                                             // ADR-0023: decision briefs; null: off
 }) {
   const { config, identity, access, observation, steering, escalations, remote } = p;
@@ -215,6 +228,7 @@ export function startHttp(p: {
     linkRequests: new RateLimiter(limits.linkRequests, clock), linkPolls: new RateLimiter(limits.linkPolls, clock),
     engineReads: new RateLimiter(limits.engineReads, clock),
     agentCalls: new RateLimiter(limits.agentCalls, clock), agentRefusals: new RateLimiter(limits.agentRefusals, clock),
+    transcriptions: new RateLimiter(limits.transcriptions, clock),
   };
   // Who is asking, for the per-caller buckets: the proxy's identity header (the person on the private network), else the
   // remote address. Never a header a caller could pick freely when the proxy doesn't set one: only the proxy's own.
@@ -222,6 +236,7 @@ export function startHttp(p: {
     const login = req.headers["tailscale-user-login"];
     return typeof login === "string" && login ? `login:${login}` : `addr:${req.socket.remoteAddress ?? "?"}`;
   };
+  const microphone = () => p.transcription?.allowsMicrophone() ? "microphone=(self)" : "microphone=()";
   const flight = new Flight();
   const watch = new HoldWatch({
     path: p.updates?.holdPath ?? join(config.dataDir, "hold.json"),
@@ -242,11 +257,11 @@ export function startHttp(p: {
     return true;
   };
 
-  const secureHeaders = {
+  const secureHeaders = () => ({
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
-  };
+    "Permissions-Policy": `camera=(), ${microphone()}, geolocation=(), payment=()`,
+  });
 
   const proxyOk = (req: IncomingMessage) => {
     if (!config.requireProxyIdentity) return true;
@@ -273,7 +288,7 @@ export function startHttp(p: {
 
   // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).
   const json = (res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}, path = "") => {
-    res.writeHead(status, { ...secureHeaders, "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
+    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
     res.end(JSON.stringify(redactResponse(path, body)));
   };
   const setCookie = (secret: string) =>
@@ -320,7 +335,7 @@ export function startHttp(p: {
     if (!briefs) return json(res, 404, { error: "briefs_off" });
     const q = new URL(req.url ?? "/", "http://hub").searchParams;
     if (path === "/api/agent/decisions/template" && method === "GET") {
-      res.writeHead(200, { ...secureHeaders, "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store" });
+      res.writeHead(200, { ...secureHeaders(), "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store" });
       res.end(BRIEF_TEMPLATE);
       return;
     }
@@ -460,6 +475,7 @@ export function startHttp(p: {
     const a = auth(req);
     if (!a) return json(res, 401, { error: "signed_out" }, { "Set-Cookie": clearCookie });
     if (path === "/api/me" && method === "GET") {
+      await p.transcription?.refresh();
       return json(res, 200, {
         endpoint: { id: a.endpoint.id, name: a.endpoint.name, pairedAt: a.endpoint.pairedAt },
         session: { startedAt: a.session.startedAt, verifiedAt: a.session.verifiedAt },
@@ -469,6 +485,7 @@ export function startHttp(p: {
         // The links follow the probe, not merely whether MORNDO_ENGINES is set: a missing or too-old CLI hides them.
         engines: p.engines ? (await p.engines.ready().then(why => why === null, () => false)) : false,
         connections: p.connections != null,
+        transcription: p.transcription ? p.transcription.me() : false,
       });
     }
     if (path === "/api/logout" && method === "POST") {
@@ -563,7 +580,7 @@ export function startHttp(p: {
       const f = files?.get(file[1] ?? "");
       if (!f) return json(res, 404, { error: "no_such_file" });
       const download = new URL(req.url ?? "/", "http://hub").searchParams.get("download") === "1";
-      res.writeHead(200, { ...secureHeaders, ...servingHeaders(f.meta, download) });
+      res.writeHead(200, { ...secureHeaders(), ...servingHeaders(f.meta, download) });
       if (method === "HEAD") return res.end();
       createReadStream(f.file).on("error", () => res.destroy()).pipe(res);
       return;
@@ -572,9 +589,51 @@ export function startHttp(p: {
     if (path === "/api/uploads" && method === "POST") {
       if (!inbox) throw new HttpError(404, "no such route");
       limited(buckets.uploads.take(a.endpoint.id));
-      const r = inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req));
-      if (!r.ok) return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
+      await p.transcription?.refresh();
+      const r = await inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req), p.transcription?.capability());
+      if (!r.ok) {
+        if (r.error === "too_many") return json(res, 503, { error: r.error }, { "Retry-After": "60" });
+        return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
+      }
       return json(res, 200, { id: r.value.id, name: r.value.path.split("/").pop(), size: r.value.size, mime: r.value.mime });
+    }
+    const tx = /^\/api\/transcriptions(?:\/([A-Za-z0-9][A-Za-z0-9:_-]{0,199})(\/cancel)?)?$/.exec(path);
+    if (tx && (method === "GET" || method === "POST")) {
+      if (!p.transcription) return json(res, 404, { error: "transcription_off" });
+      await p.transcription.refresh();
+      const id = tx[1];
+      if (!id && method === "POST") {
+        limited(buckets.transcriptions.take(a.endpoint.id));
+        if (!p.transcription.allowsMicrophone()) return json(res, 404, { error: "transcription_off" });
+        const body = await readBody(req, TranscriptionCreateBody);
+        // The endpoint is part of the ask: an upload another device made is not this caller's recording (S2).
+        const created = await p.transcription.request({ ...body, caller: { endpointId: a.endpoint.id } });
+        if (!created.ok) {
+          if (created.error === "unreadable") return json(res, 404, { error: created.error });
+          // The live-row cap is the whole machine's queue, not this caller's bucket (that one is already 429).
+          // 503 is a temporary overload. Retry-After matches the queue's minute sweep, so a client waits
+          // instead of treating the body as a malformed request.
+          if (created.error === "too_many") return json(res, 503, { error: created.error }, { "Retry-After": "60" });
+          return json(res, 400, { error: created.error });
+        }
+        return json(res, 200, transcriptionView(created.value));
+      }
+      // A row that exists still answers with the plugin gone: its text stays readable (design §6). An unknown id with
+      // no ready plugin is the feature being off, not a missing row.
+      const off = () => !p.transcription?.capability().present;
+      if (id && !tx[2] && method === "GET") {
+        const row = p.transcription.get(id, { endpointId: a.endpoint.id });
+        return row ? json(res, 200, transcriptionView(row)) : off()
+          ? json(res, 404, { error: "transcription_off" })
+          : json(res, 404, { error: "unknown" });
+      }
+      if (id && tx[2] === "/cancel" && method === "POST") {
+        await readBody(req, TranscriptionCancelBody);
+        const cancelled = p.transcription.cancel(id, { endpointId: a.endpoint.id });
+        return cancelled.ok ? json(res, 200, transcriptionView(cancelled.value)) : off()
+          ? json(res, 404, { error: "transcription_off" })
+          : json(res, 404, { error: "unknown" });
+      }
     }
     if (path === "/api/escalations" && method === "GET") return json(res, 200, escalations.board());
     const answer = /^\/api\/escalations\/([A-Za-z0-9_-]{1,80})\/answer$/.exec(path);
@@ -660,7 +719,7 @@ export function startHttp(p: {
   }
 
   let cachedIndex: { html: string; csp: string; file: string; mtimeMs: number } | null = null;
-  function staticFile(req: IncomingMessage, res: ServerResponse, path: string) {
+  async function staticFile(req: IncomingMessage, res: ServerResponse, path: string) {
     const root = normalize(config.webDir);
     // Each segment decoded on its own (decodeSegment); a path with one that doesn't decode is no file, and the app shell
     // answers it, as any path the app doesn't know.
@@ -671,7 +730,7 @@ export function startHttp(p: {
     if (isFile && extname(candidate) !== ".html") {
       const immutable = path.startsWith("/_app/immutable/");
       res.writeHead(200, {
-        ...secureHeaders, "Content-Type": TYPES[extname(candidate)] ?? "application/octet-stream",
+        ...secureHeaders(), "Content-Type": TYPES[extname(candidate)] ?? "application/octet-stream",
         "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
         ...(path === "/service-worker.js" ? { "Service-Worker-Allowed": "/" } : {}),
       });
@@ -679,6 +738,10 @@ export function startHttp(p: {
     }
     // Every page is the app shell (SPA fallback); its CSP allows exactly its own inline bootstrap. Read again after a
     // rebuild, so the shell never points at assets the build replaced.
+    // The document's Permissions-Policy is what gates the microphone. It is served from the last probe, and a
+    // refresh runs behind the response so a slow probe never holds the page. The next document sees what it found.
+    // A probe that throws is logged here: a dropped rejection is an unhandledRejection, and that exits the hub.
+    void p.transcription?.refresh()?.catch(e => log.warn("transcription: probe failed", e));
     const file = ["200.html", "index.html"].map(f => join(root, f)).find(f => existsSync(f));
     if (!file) throw new HttpError(503, "web app not built: run `npm run build`");
     const mtimeMs = statSync(file).mtimeMs;
@@ -686,7 +749,7 @@ export function startHttp(p: {
       const html = readFileSync(file, "utf8");
       cachedIndex = { html, csp: cspFor(html), file, mtimeMs };
     }
-    res.writeHead(200, { ...secureHeaders, "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache", "Content-Security-Policy": cachedIndex.csp });
+    res.writeHead(200, { ...secureHeaders(), "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache", "Content-Security-Policy": cachedIndex.csp });
     res.end(req.method === "HEAD" ? undefined : cachedIndex.html);
   }
 
@@ -707,7 +770,7 @@ export function startHttp(p: {
         finally { end?.(); }
       }
       if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError(405, "method not allowed");
-      staticFile(req, res, path);
+      await staticFile(req, res, path);
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
       if (status === 500) log.error(`${req.method ?? "?"} request failed`, e);            // no URL: it may be what failed to parse
