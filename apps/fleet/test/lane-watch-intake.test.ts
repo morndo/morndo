@@ -18,25 +18,31 @@ describe("the lane watch in the fleet", () => {
     let clock = T0;
     const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: { laneEvents: TO_MANAGER, laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: true } } });
     const pc = await fleet.online("pc");
-    pc.inventory([{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w" }]);
-    await vi.waitFor(() => expect(fleet.lanes.get("api")?.workerId).toBe("pc.3fa2c1d0.1"));
+    // api runs the agent CLI (a session); sh runs none, so it can be stale but is never nudged.
+    pc.inventory([{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w", sessionId: SID, status: "idle", pid: 1 }, { workerId: "pc.3fa2c1d0.3", window: "sh", cwd: "/w" }]);
+    await vi.waitFor(() => expect(fleet.lanes.get("sh")?.workerId).toBe("pc.3fa2c1d0.3"));
     pc.hook(1, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "I pushed the branch." }, { window: "api" });
-    expect(await pc.acked(1)).toBe(1);
+    pc.hook(2, "/hook/stop", { text: "built" }, { window: "sh" });
+    expect(await pc.acked(2)).toBe(2);
     clock = T0 + 1 + 15 * MIN - 1;
     await new Promise(r => setTimeout(r, 100));
     const rows = () => fleet.db.prepare("SELECT event, lane, to_manager, body FROM lane_events ORDER BY seq").all() as { event: string; lane: string; to_manager: number | null; body: string }[];
-    expect(rows().map(r => r.event)).toEqual(["finished"]);                            // not before its deadline
-    clock = T0 + 1 + 15 * MIN;
-    await vi.waitFor(() => expect(rows().map(r => r.event)).toEqual(["finished", "stale"]));
-    expect(rows()[1]).toMatchObject({ lane: "api", to_manager: 0 });
-    const lane = (await client(fleet.config.socketPath).get("/v1/lane-events?since=1"))?.body as { events: LaneEvent[] };
+    expect(rows().map(r => r.event)).toEqual(["finished", "finished"]);                // not before its deadline
+    clock = T0 + 2 + 15 * MIN;
+    await vi.waitFor(() => expect(rows().map(r => r.event)).toEqual(["finished", "finished", "stale", "stale"]));
+    expect(rows()[2]).toMatchObject({ lane: "api", to_manager: 0 });
+    const lane = (await client(fleet.config.socketPath).get("/v1/lane-events?since=2"))?.body as { events: LaneEvent[] };
     expect(lane.events[0]).toMatchObject({ event: "stale", node: "pc", lane: "api", reason: "no_status", stalls: 1, sessionId: SID });
     await vi.waitFor(() => expect(pc.reqs.filter(q => q.op === "lane.deliver")).toHaveLength(1));
     const nudge = pc.reqs.find(q => q.op === "lane.deliver")?.args as { id: string; target: unknown; text: string };
     expect(nudge).toMatchObject({ id: `fleet:nudge:pc:${T0 + 1}`, target: { lane: "api" } });
     expect(nudge.text).toContain("without a status line");
     const watch = (await client(fleet.config.socketPath).get("/v1/lane-watch"))?.body as { lanes: LaneWatchEntry[] };
-    expect(watch.lanes).toEqual([{ node: "pc", window: "api", at: T0 + 1, status: null, deadline: T0 + 1 + 15 * MIN, reason: "no_status", stale: true, stalls: 1 }]);
+    expect(watch.lanes).toEqual([
+      { node: "pc", window: "api", at: T0 + 1, status: null, deadline: T0 + 1 + 15 * MIN, reason: "no_status", stale: true, stalls: 1 },
+      { node: "pc", window: "sh", at: T0 + 2, status: null, deadline: T0 + 2 + 15 * MIN, reason: "no_status", stale: true, stalls: 1 },
+    ]);
+    expect(pc.reqs.filter(q => q.op === "lane.deliver")).toHaveLength(1);              // only api, which runs the agent CLI
   });
 
   it("a turn that says DONE is never stale, and the manager's own lane is not watched", async () => {
