@@ -24,7 +24,7 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   block T-12 --why "…"                  blocked, with the reason
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
-  done T-12                             accept it (manager only)
+  done T-12 --why "…"                   accept it, naming what you checked (manager only)
   todo T-12                             put it back
   move T-12 <status> [--why "…"]        any move the rules allow
   comment T-12 "…"                      a line on the task's record
@@ -47,7 +47,7 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "not_yours": return "that task is assigned to someone else";
     case "bad_transition": return `a task can't move from ${from ?? "where it is"} like that; a lane moves its own tasks to doing, blocked, review or todo, and only the manager marks done`;
     case "needs_assignee": return "nobody is assigned to it; the manager assigns first";
-    case "reason_needed": return "say why: --why \"…\"";
+    case "reason_needed": return "say why: --why \"…\" (for done: what you checked, e.g. the tests you ran, CI at a commit, a review)";
     case "one_doing": return `${other ?? "another task"} is already in progress for this lane; finish, block or put it back first`;
     case "changed": return "the task changed since you looked; show it again";
     case "same": return "it already is";
@@ -205,7 +205,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       case "start": await act(key(rest[0]), { action: "move", to: "doing" }); return 0;
       case "resume": await act(key(rest[0]), { action: "move", to: "doing" }); return 0;
       case "todo": await act(key(rest[0]), { action: "move", to: "todo" }); return 0;
-      case "done": await act(key(rest[0]), { action: "move", to: "done" }); return 0;
+      case "done": await act(key(rest[0]), { action: "move", to: "done", ...(text("why") !== undefined ? { reason: text("why") } : {}) }); return 0;
       case "block": {
         const k = key(rest[0]);
         const why = text("why");
