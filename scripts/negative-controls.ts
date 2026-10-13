@@ -869,7 +869,7 @@ export const CONTROLS: Control[] = [
   { id: "b1-v7-every-refusal-ends-doubt", task: "B1-V7", file: "apps/web/src/lib/catchup/answer.ts",
     find: "Object.hasOwn(REFUSALS, code) && !STILL_IN_DOUBT.has(code)", replace: "true",
     run: ["apps/web/test/catchup-answer.test.ts"], expect: "keeps the doubt on no answer" },
-  { id: "b1-v7-card-drops-doubt", task: "B1-V7", file: "apps/web/src/lib/desktop/DecisionCard.svelte",
+  { id: "b1-v7-card-drops-doubt", task: "B1-V7", file: "apps/web/src/lib/desktop/answer-session.svelte.ts",
     find: " : doubt && !endsDoubt(problem.code) ? doubt : null;", replace: " : null;",
     run: ["apps/web/test/answer-in-doubt-web.test.ts"], expect: "still Check again on the same request id" },
   { id: "b1-v8-check-again-drops-doubt", task: "B1-V8", file: "apps/web/src/lib/phone/quick.ts",
