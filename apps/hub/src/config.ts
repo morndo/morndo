@@ -19,7 +19,6 @@ export type Config = {
   managerWindow: string;           // the window name of the manager's pane
   ledgerPath: string | null;       // the manager's needs-you list (JSON), read-only; null = no list
   paneLock: string | null;         // a lock file the box's other typists into the manager's pane take (flock); null = none
-  managerInbox: string | null;     // the manager's inbox (a queue dir, ADR-0010): answers and messages for it go there; null = typed directly
   vnc: { host: string; port: number; passwordFile: string } | null;   // the office's desktop (VNC); null = no Desktop tab
   enginesBin?: string | null;      // the engine layer's CLI (engine-layer bin/engines, ADR-0013); null = no Engines page
   filesDir: string;                // the hub's copies of files sent in conversations
@@ -27,6 +26,9 @@ export type Config = {
   // MORNDO_FLEET_SOCKET: the fleet service's client socket (ADR-0012, spec §5.6), an absolute path. Absent or null: the
   // legacy local adapters, this machine's tmux and Claude Code directly (spec §10).
   fleetSocket?: string | null;
+  // MORNDO_MANAGER_QUEUE (fleet-clients §9.1): the manager's answers and messages through the fleet's delivery queue. On
+  // by default with a fleet; "off" or "0" types them directly, as before (step 2's rollback, §13). Never without a fleet.
+  managerQueue?: boolean;
   // MORNDO_ENGINE_SESSIONS: the engine-lane registry directory on this machine. Unset, empty, `0` or `off`: the hub
   // does not read it. MORNDO_ENGINE_NODE: this machine's fleet node name; required when a fleet is in use.
   engineSessions?: string | null;
@@ -95,14 +97,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     managerWindow: env.MORNDO_MANAGER_WINDOW || "manager",
     ledgerPath: env.MORNDO_LEDGER || null,
     paneLock: env.MORNDO_PANE_LOCK || null,
-    // A directory turns it on; unset, empty, "0" or "off" leave it off (the design report's switch is MORNDO_MANAGER_INBOX=0).
-    managerInbox: env.MORNDO_MANAGER_INBOX && !/^(0|off)$/i.test(env.MORNDO_MANAGER_INBOX) ? env.MORNDO_MANAGER_INBOX : null,
     vnc: vncTarget(env),
     // The engine layer's CLI, by path (it isn't on the box's PATH): its own ENGINES_CONFIG and ENGINES_STATE pass through.
     enginesBin: env.MORNDO_ENGINES || null,
     filesDir: env.MORNDO_FILES_DIR || join(env.MORNDO_HOME ?? join(homedir(), ".local/share/morndo"), "files"),
     inboxDir: env.MORNDO_INBOX || join(homedir(), ".cache/morndo/inbox"),
     fleetSocket: fleetSocket(env),
+    managerQueue: fleetSocket(env) !== null && !/^(off|0)$/i.test(env.MORNDO_MANAGER_QUEUE ?? ""),
     engineSessions: engineSessions(env),
     engineNode: env.MORNDO_ENGINE_NODE || null,
     // Not the hub's own address: the JWT travels in clear to the browser vendors' push services, and the origin would

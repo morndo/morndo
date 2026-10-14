@@ -48,7 +48,7 @@ describe("PR #18 review findings", () => {
   // until its first prompt, or a read failed) is driven by `lanes` instead. `engine` is parsed but never used.
   it("F3: a lane without an engine (a Claude lane) keeps its screen even when it isn't followed", async () => {
     const screens = new Map([["%1", "❯ \n"]]);
-    const sessions: Sessions = { byPane: async () => new Map([["%1", { sessionId: "s1", name: "builder", pane: "%1", cwd: "/w", version: null, pid: 1 }]]) };
+    const sessions: Sessions = { byPane: async () => new Map([["%1", { sessionId: "s1", name: "builder", pane: "%1", cwd: "/w", version: null, pid: 1, status: null }]]) };
     const transcripts: TranscriptSource = { size: async () => null, read: async () => null, locate: async () => null };
     const svc = new ObservationService(port([{ id: "%1", name: "builder", node: "local" }], screens), 60_000, () => 1_000, {
       sessions, transcripts, lanes: async () => [report("builder", "busy", null)],

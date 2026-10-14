@@ -18,7 +18,10 @@ import { exactSession, TmuxUnavailable, tmuxArgv, tmuxFailure } from "@morndo/no
 
 const run = promisify(execFile);
 
-export type PaneRow = { pane: string; paneNum: number; windowId: string; windowPanes: number; window: string; cwd: string; title: string | null; stamp: string };
+// panePid: the pane's own process (#{pane_pid}): its shell, or the command a lane was started with.
+// currentCommand: #{pane_current_command}, the foreground process's name (bash, zsh, fish, node, sleep).
+export type PaneRow = { pane: string; paneNum: number; windowId: string; windowPanes: number; window: string; cwd: string; title: string | null; stamp: string;
+  panePid: number | null; currentCommand: string };
 export type PaneFacts = { session: string; windowPanes: number; window: string; stamp: string };
 
 // SIGTERM leaves a stalled tmux client exiting 0 with empty output, so a timeout looked like success; SIGKILL cannot be
@@ -47,16 +50,17 @@ export async function listPanes(socket: string | null, session: string): Promise
   let out: string;
   try {
     out = await tmuxRun(socket, ["list-panes", "-s", "-t", exactSession(session), "-F",
-      format(nonce, ["pane_id", "window_id", "window_panes", "@morndo-server", "host", "window_name", "pane_current_path", "pane_title"])]);
+      format(nonce, ["pane_id", "window_id", "window_panes", "@morndo-server", "host", "window_name", "pane_current_path", "pane_title", "pane_pid", "pane_current_command"])]);
   } catch (e) {
     if (tmuxFailure(e) === "absent") return [];
     throw new TmuxUnavailable("tmux list-panes did not answer", { cause: e });
   }
   if (out === "" || !out.endsWith(`</${nonce}>\n`)) throw new TmuxUnavailable("tmux list-panes answered with no complete record");
-  return records(out, nonce, 8).flatMap(([pane = "", windowId = "", panes = "", stamp = "", host = "", window = "", cwd = "", title = ""]) => {
+  return records(out, nonce, 10).flatMap(([pane = "", windowId = "", panes = "", stamp = "", host = "", window = "", cwd = "", title = "", pid = "", command = ""]) => {
     const m = /^%(\d{1,9})$/.exec(pane);
     if (!m || !/^@\d+$/.test(windowId)) return [];
-    return [{ pane, paneNum: Number(m[1]), windowId, windowPanes: Number(panes), window, cwd, title: title && title !== host ? title : null, stamp: shortStamp(stamp) }];
+    return [{ pane, paneNum: Number(m[1]), windowId, windowPanes: Number(panes), window, cwd, title: title && title !== host ? title : null, stamp: shortStamp(stamp),
+      panePid: /^\d{1,10}$/.test(pid) ? Number(pid) : null, currentCommand: command.trim() }];
   });
 }
 

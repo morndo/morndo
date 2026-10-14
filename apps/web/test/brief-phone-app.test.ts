@@ -40,7 +40,7 @@ const item = (id: string, over: Partial<DecisionItem>): DecisionItem => ({
   answerBy: "tap", recommendation: "Ship today", ifNoAnswer: "It ships Monday.", deadline: DUE,
   blocking: true, project: "release", askedAt: NOW - 3_600_000, messageId: null, tracking: "hub",
   status: "open", source: "open", decision: null, resolution: null, settledAt: null, askedAgain: false,
-  answerable: null, version: "v1", inbox: null, brief: brief("Approve option A: ship the release candidate today"),
+  answerable: null, version: "v1", brief: brief("Approve option A: ship the release candidate today"),
   briefVersion: 1, draftedBy: null,
   ...over,
 });

@@ -73,7 +73,6 @@ const item = (id: string, over: Partial<DecisionItem>): DecisionItem => ({
   askedAgain: false,
   answerable: null,
   version: "v1",
-  inbox: null,
   brief: brief(),
   briefVersion: 1,
   draftedBy: null,

@@ -1,8 +1,8 @@
 // Decision briefs on the hub (ADR-0023 §5, §7): file markdown and JSON, refuse a vague brief, a worker's draft, a ref
-// on the list, an answer through the inbox, E8, E11, E12, withdraw, settle, the open cap, an audit row with no text,
+// on the list, an answer typed to the manager, E8, E11, E12, withdraw, settle, the open cap, an audit row with no text,
 // and the decisions frame carrying the brief. A temp data dir and a temp port; never a live hub.
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,11 +29,11 @@ let sent: { pane: string; text: string }[];
 const extras: string[] = [];
 const watch: Watch = { workers: () => [{ id: "%1", name: "manager" }], history: () => [], openQuestions: () => [], screen: () => undefined };
 
-async function boot(o: { inbox?: boolean; ledger?: string } = {}) {
+async function boot(o: { ledger?: string } = {}) {
   now = NOW;
   sent = [];
   hub = await startInProcessHub({
-    now: () => now, watch, withInbox: o.inbox ?? false,
+    now: () => now, watch,
     ...(o.ledger ? { ledger: ledgerReader(o.ledger, () => now) } : {}),
     send: async (pane, text) => { sent.push({ pane, text }); return { problem: null, typedAt: now }; },
   });
@@ -159,8 +159,8 @@ describe("filing a brief", () => {
 });
 
 describe("an answer", () => {
-  it("goes to the manager's inbox as a tap line, a second answer is refused, and a restate refuses the old version", async () => {
-    await boot({ inbox: true });
+  it("goes to the manager as a tap line, a second answer is refused, and a restate refuses the old version", async () => {
+    await boot();
     const token = manager();
     const api = agent(token);
     expect((await api.call("POST", "/api/agent/decisions", { markdown: example() })).status).toBe(201);
@@ -172,9 +172,7 @@ describe("an answer", () => {
       hub.post("/api/escalations/d-1/answer", { key, requestId, seen }, { cookie: `__Host-morndo=${cookie}` });
     const first = await answer("b", version, randomUUID());
     expect(first.status).toBe(200);
-    expect(sent).toEqual([]);
-    const [msg] = readdirSync(join(hub.dir, "manager-inbox", "msg")).map(f => JSON.parse(readFileSync(join(hub.dir, "manager-inbox", "msg", f), "utf8")) as { text: string });
-    expect(msg?.text).toBe("[tap d-1] b (Extend the triage script)");
+    expect(sent).toEqual([{ pane: "%1", text: "[tap d-1] b (Extend the triage script)" }]);
     expect((await answer("a", version, randomUUID())).status).toBe(409);
     now += 60_000;
     const restated = await api.call("PUT", "/api/agent/decisions/d-1", { markdown: example() });

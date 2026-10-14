@@ -17,7 +17,7 @@ import {
   SEND_REFUSALS, SendInDoubt, SourceUnavailable,
   type HubPorts, type NodeStates, type RemoteFiles, type SendOutcome, type SendRefused, type SendStatus, type Sessions, type Terminal, type Tmux, type TranscriptSource, type UploadSink,
 } from "../application/ports.ts";
-import { FleetOpFailed, FleetUnavailable, type FleetClient, type FleetEvent, type FleetLane, type NodeStatus, type OpAnswer } from "./fleet-client.ts";
+import { FleetOpFailed, FleetUnavailable, type FleetClient, type FleetEvent, type FleetLane, type NodeStatus, type OpAnswer } from "@morndo/fleet-client";
 import { log } from "./log.ts";
 import { stagedUploadName } from "./uploads.ts";
 import { perKeyLimit } from "./per-key-limit.ts";
@@ -129,7 +129,10 @@ export type JobSink = {
   ackNotice(node: string, id: string): void;
 };
 
-export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | null; stagingDir: string; timeouts?: Partial<FleetTimeouts>; jobs?: JobSink }): FleetPorts {
+// `alerts`: where the fleet's alerts go (the app shows them): its list at each connect, then each `alert` event.
+export type AlertSink = { load(list: readonly unknown[]): void; add(raw: unknown): void };
+
+export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | null; stagingDir: string; timeouts?: Partial<FleetTimeouts>; jobs?: JobSink; alerts?: AlertSink }): FleetPorts {
   const t: FleetTimeouts = { ...FLEET_TIMEOUTS, ...o.timeouts };
   const view = new NodeView();
   let unsubscribe = () => {};
@@ -315,7 +318,7 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
       for (const p of view.all()) {
         if (p.sessionId === undefined) continue;
         // The session's name from Claude Code's registry, as legacy shows it: never the pane's terminal title ("✳ <task>").
-        out.set(p.workerId, { sessionId: p.sessionId, name: p.sessionName ?? null, pane: p.workerId, cwd: p.cwd, version: p.claudeVersion ?? null, pid: 0 });
+        out.set(p.workerId, { sessionId: p.sessionId, name: p.sessionName ?? null, pane: p.workerId, cwd: p.cwd, version: p.claudeVersion ?? null, pid: 0, status: p.status ?? null });
       }
       return out;
     },
@@ -519,14 +522,22 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
         try { return await client.jobs(); }
         catch (e) { log.warn(`fleet: reading the jobs failed (${(e as Error).message}); the next connect asks again`); return null; }
       }, (list, seen) => { if (list && o.jobs) o.jobs.merge(list, seen); });
+      // The fleet's alerts, read again at each connect (an event sent while this hub was away is not replayed).
+      const loadAlerts = async () => {
+        if (!o.alerts) return;
+        try { o.alerts.load(await client.alerts()); }
+        catch (e) { log.warn(`fleet: reading the alerts failed (${(e as Error).message}); the next connect asks again`); }
+      };
       unsubscribe = client.events(e => {
         view.apply(e);
+        if (e.t === "alert") { o.alerts?.add(e.body); return; }
         if (e.t !== "job" || !o.jobs) return;
         const parsed = JobViewSchema.safeParse(e.body);
         if (parsed.success) jobsSync.note(parsed.data);
         o.jobs.apply(e.body, jobsSync.listing);
-      }, { onOpen: () => { void resync(); } });
+      }, { onOpen: () => { void resync(); void loadAlerts(); } });
       await resync();
+      await loadAlerts();
     },
     stop() {
       if (noticeTimer) clearInterval(noticeTimer);

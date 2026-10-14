@@ -54,7 +54,7 @@ async function startFleetHub(rig: FleetRig): Promise<FleetHub> {
   const config: Config = {
     dataDir: dir, port: 0, origin: ORIGIN, rpId: "hub.example.test", rpName: "Morndo", requireProxyIdentity: false, principalLogin: null,
     tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: web, officeName: null, pollMs: 1000, quietAfterMs: 60_000,
-    managerWindow: "manager", ledgerPath: null, paneLock: null, managerInbox: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
+    managerWindow: "manager", ledgerPath: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
     fleetSocket: rig.fleet.socketPath,
   };
   let n = 0;

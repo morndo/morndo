@@ -150,21 +150,22 @@ export const DecisionItemSchema = z.object({
     via: orElse(z.optional(z.enum(["here", "elsewhere"])), undefined),
     endpointId: z.nullable(z.pipe(text(), z.transform(s => s as EndpointId))),
     sessionId: z.nullable(z.pipe(text(), z.transform(s => s as SessionId))),
-    // ADR-0010: a Decision for the manager waits in its inbox ("queued") until it reached the manager ("delivered").
-    // A state this app doesn't know reads as queued: it never claims a delivery it can't vouch for.
-    delivery: z.optional(z.object({ state: orElse(z.enum(["queued", "delivered"]), "queued"), at: z.nullable(z.number()) })),
+    // E13: a Decision for the manager waits in the fleet's delivery queue ("queued") until it reached the manager
+    // ("delivered"), or was typed and never seen taken ("uncertain"). A state this app doesn't know reads as queued: it
+    // never claims a delivery it can't vouch for.
+    delivery: z.optional(z.object({ state: orElse(z.enum(["queued", "delivered", "uncertain"]), "queued"), at: z.nullable(z.number()) })),
   })),
   resolution: z.nullable(text()),
   settledAt: z.nullable(z.number()),
   askedAgain: z.boolean(),
   answerable: z.nullable(orElse(z.enum(REFUSALS), "unknown")),
   version: orElse(text(), ""),                                 // askVersion; a hub that doesn't say: "" (never matches)
-  // While a Decision waits in the manager's inbox: where it stands there (its status and why it waits). A hub that
-  // doesn't say: null.
-  inbox: orElse(z.nullable(z.object({ status: text(), reason: z.nullable(text()) })), null),
-  // A sentence on an open card: the answer reached the manager late, or did not reach the manager (ADR-0010 addendum).
-  // A hub that doesn't say: none.
+  // A sentence on an open card: the answer reached the manager late, or never reached it (E13). A hub that doesn't say:
+  // none.
   notice: z.exactOptional(z.nullable(text())),
+  // While a queued Decision waits: why, as the queue says (a WaitingReason, or "typed" or "held"; words in the app's
+  // queue-words.ts). Absent otherwise, and from a hub from before the queue.
+  waiting: z.exactOptional(text()),
   // ADR-0023: the brief this ask was filed from and its version. A hub that doesn't send them (an older hub, or a plain
   // ask), or a brief this app can't read: none and zero — never a half brief, the card falls back to the plain fields.
   brief: orElse(z.nullable(DecisionBriefSchema), null),
@@ -172,6 +173,17 @@ export const DecisionItemSchema = z.object({
   // Who drafted a forwarded brief. A hub that doesn't say, or a plain ask: null.
   draftedBy: orElse(z.nullable(text()), null),
 });
+// Where one of this device's messages to the manager stands in the fleet's delivery queue (fleet-clients §9.1), by its
+// request id: "queued" (typed and held included: not in the conversation yet), with why it waits; "delivered";
+// "uncertain" (typed, never seen taken: it may have reached the manager); "given_up", with why (nothing reached it). A
+// state this app doesn't know reads as queued.
+export const QueuedCommandSchema = z.object({
+  requestId: text(),
+  state: orElse(z.enum(["queued", "delivered", "uncertain", "given_up"]), "queued"),
+  waiting: z.nullable(text()),
+  why: z.nullable(text()),
+});
+export type QueuedCommand = z.output<typeof QueuedCommandSchema>;
 export const LedgerStateSchema = z.object({ configured: z.boolean(), ok: z.boolean(), at: z.nullable(z.number()) });
 
 // Catch-up (ADR-0009, C5): what one Conversation brings since its Read mark: the newest messages to show and the whole
@@ -190,6 +202,10 @@ export const ChatRowSchema = z.object({
 });
 
 // Hub → app.
+// One of the fleet's alerts (fleet-api §14), as the app shows it: `kind` may be one a newer fleet added (shown in general
+// words), `detail` is per kind, `node` the machine it concerns (none for the fleet itself).
+const AlertWireSchema = z.object({ id: z.int().check(z.gte(0)), at: count(), node: z.nullable(text()), kind: text(), detail: z.record(z.string(), z.unknown()) });
+
 export const ServerFeedFrames = {
   snapshot: z.object({ t: z.literal("snapshot"), epoch: text(), seq: z.int().check(z.gte(0)), workers: each(RosterEntrySchema, "worker") }),
   // Events are decoded one by one (decodeEvent), so one of an unknown type doesn't drop its neighbours.
@@ -229,6 +245,15 @@ export const ServerFeedFrames = {
   board: BoardFrameSchema,
   // ADR-0016: every connected account's usage, whole, after every hello and whenever a report changed it.
   usage: UsageFrameSchema,
+  // Fleet-clients §9.1: where this device's messages to the manager stand in the fleet's delivery queue, every one of the
+  // last day after each hello, then each change. An app from before ignores it, as any frame type it doesn't know.
+  deliveries: z.object({ t: z.literal("deliveries"), items: each(QueuedCommandSchema, "delivery") }),
+  // The manager is always on the list: whether a message to it waits in the fleet's queue while it has no window (a
+  // restart), after every hello. An app from before ignores it; a hub from before never sends it.
+  manager: z.object({ t: z.literal("manager"), queue: z.boolean() }),
+  // The fleet's alerts in the app (the owner, 2026-10-12: without kira, the app is where they show): the latest 100,
+  // newest first, after every hello and on each new one. An app from before ignores it; a hub without a fleet never sends.
+  alerts: z.object({ t: z.literal("alerts"), items: each(AlertWireSchema, "alert") }),
   // Background jobs (design §7): the fleet mirror's list and the counts beside each node, after every hello and on change.
   jobs: JobsFrameSchema,
   // ADR-0011: the chat list (H1, H2); what each unmuted conversation brought since he left, for the digest (H5); and
@@ -239,6 +264,8 @@ export const ServerFeedFrames = {
 };
 
 // App → hub.
+export type AlertWire = z.infer<typeof AlertWireSchema>;
+
 export const ClientFeedFrames = {
   hello: z.object({ t: z.literal("hello"), epoch: z.exactOptional(str(100)), cursor: z.exactOptional(z.int().check(z.gte(0))), layout: z.exactOptional(str(16)) }),
   details: z.object({ t: z.literal("details"), worker: workerIdText }),
@@ -264,8 +291,10 @@ export const ClientFeedFrames = {
 
 export type ServerFeedFrame = { [K in keyof typeof ServerFeedFrames]: z.output<(typeof ServerFeedFrames)[K]> }[keyof typeof ServerFeedFrames];
 export type ClientFeedFrame = { [K in keyof typeof ClientFeedFrames]: z.output<(typeof ClientFeedFrames)[K]> }[keyof typeof ClientFeedFrames];
-export type InboxWait = { status: string; reason: string | null };
-export type DecisionItem = Escalation & { answerable: AnswerRefusal | null; version: string; inbox: InboxWait | null; notice?: string | null; brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null };
+export type DecisionItem = Escalation & {
+  answerable: AnswerRefusal | null; version: string; notice?: string | null; waiting?: string;
+  brief: DecisionBrief | null; briefVersion: number; draftedBy: string | null;
+};
 export type LedgerState = z.output<typeof LedgerStateSchema>;
 export type SessionInfoWire = z.output<typeof SessionInfoSchema>;
 export type CatchUpConversationWire = z.output<typeof CatchUpConversationSchema>;

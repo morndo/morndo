@@ -14,7 +14,7 @@ import { LaneRegistry } from "../src/application/lane-registry.ts";
 import { ODD_NAMES } from "./helpers/odd-names.ts";
 import { tempDir } from "./helpers/temp.ts";
 
-const pane = (node: string, n: number, window: string): Pane => ({ workerId: `${node}.3fa2c1d0.${n}`, window, cwd: `/work/${n}` });
+const pane = (node: string, n: number, window: string): Pane => ({ workerId: `${node}.3fa2c1d0.${n}`, window, cwd: `/work/${n}`, status: null, pid: null });
 
 function setup(db: Database.Database = openFleetDb(join(tempDir(), "fleet.db")), active = ["pc", "mac"]) {
   const events = new EventHub();
@@ -74,7 +74,7 @@ describe("the lane registry", () => {
   it("a node's worker ID for a name follows its inventory (a restarted tmux server stamps new IDs)", () => {
     const { lanes } = setup();
     lanes.inventory("pc", [pane("pc", 1, "api")]);
-    lanes.inventory("pc", [{ workerId: "pc.0badcafe.0", window: "api", cwd: "/work" }]);
+    lanes.inventory("pc", [{ workerId: "pc.0badcafe.0", window: "api", cwd: "/work", status: null, pid: null }]);
     expect(lanes.resolve("api")).toEqual({ kind: "ok", node: "pc", workerId: "pc.0badcafe.0" });
   });
 

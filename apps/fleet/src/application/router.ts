@@ -14,7 +14,7 @@
 // can take: a row fleet.db refuses (busy past its timeout, or full) is logged with what it would have said, and never
 // takes the outcome's place (B6 V21; OWASP Logging Cheat Sheet: "Ensure failures in the logging processes/systems do
 // not prevent the application from otherwise running", read 2026-10-07).
-import { KEYED_OPS, NODE_NAME, OP_ARGS, parseBody, parseWorkerId, type OpName } from "@morndo/protocol";
+import { KEYED_OPS, LIMITS, NODE_NAME, OP_ARGS, parseBody, parseWorkerId, type OpName } from "@morndo/protocol";
 import type { Audit } from "../adapters/audit.ts";
 import type { Logger } from "../adapters/log.ts";
 import type { Connections } from "./connections.ts";
@@ -29,7 +29,10 @@ export const DEFAULT_TIMEOUT_MS = 15_000;
 export const MAX_TIMEOUT_MS = 120_000;
 // How long a name stays reserved after its lane.start was answered, for the node's next inventory to report it.
 export const RESERVE_AFTER_START_MS = 10_000;
-const PANE_OPS: ReadonlySet<OpName> = new Set<OpName>(["pane.frame", "pane.keys", "pane.send"]);
+const PANE_OPS: ReadonlySet<OpName> = new Set<OpName>(["pane.frame", "pane.keys", "pane.send", "pane.capture"]);
+// lane.stop's "exit" waits up to LIMITS.laneStopWaitMs for the window to close (fleet clients spec §5): its default
+// deadline leaves it that long plus the usual 15 s.
+const DEFAULT_TIMEOUT_OF: { readonly [O in OpName]?: number } = { "lane.stop": LIMITS.laneStopWaitMs + DEFAULT_TIMEOUT_MS };
 const EXPECT_OPS: ReadonlySet<OpName> = new Set<OpName>(["pane.keys", "pane.send"]);
 
 export class Router {
@@ -101,7 +104,7 @@ export class Router {
     // doesn't know never reaches the node.
     const checked = parseBody(OP_ARGS[op], a) as Record<string, unknown> | null;
     if (checked === null) return refuse(failed("bad_args", `arguments that don't fit ${op}`), node);
-    const timeoutMs = Math.min(o.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
+    const timeoutMs = Math.min(o.timeoutMs ?? DEFAULT_TIMEOUT_OF[op] ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
     const send = () => this.#connections.request(node, op, checked, { timeoutMs, ...(o.key === undefined ? {} : { key: o.key }) });
     if (op !== "lane.start" || typeof checked.name !== "string") return { node, outcome: send() };
     // Lane names are fleet-wide (spec 4): only the fleet sees every node's names, so it refuses a taken one here, and

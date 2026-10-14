@@ -47,8 +47,8 @@ export function stableJson(v: unknown): string {
 // timeout or the request id.
 export const EFFECT_FIELDS: { readonly [O in OpName]?: readonly string[] } = {
   "pane.send": ["workerId", "text"],
-  "lane.start": ["name", "cwd", "account", "resume"],
-  "lane.stop": ["name"],
+  "lane.start": ["name", "cwd", "account", "resume", "prompt"],
+  "lane.stop": ["name", "mode"],
   "worktree.add": ["repo", "name", "base"],
   "file.put": ["upload", "offset"],
   "job.notice": ["id", "lane", "text"],

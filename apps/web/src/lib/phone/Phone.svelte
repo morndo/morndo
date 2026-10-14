@@ -36,6 +36,7 @@
   import ChatList from "./chat/ChatList.svelte";
   import Conversation from "./chat/Conversation.svelte";
   import Status from "./chat/Status.svelte";
+  import { SEEN_MARK, unseen } from "../alerts.ts";
   import Digest from "./chat/Digest.svelte";
   import SettingsSheet from "./chat/SettingsSheet.svelte";
   import { Away } from "./chat/away.svelte.ts";
@@ -84,6 +85,8 @@
   });
   void device$.ready.then(o => { outbox = o; });
   $effect(() => { if (feed.status === "live") outbox?.connected(); });
+  // Messages to the manager in the fleet's queue move on as the hub says (fleet-clients §9.1).
+  $effect(() => { const items = feed.deliveries; if (items.length) void device$.ready.then(o => o.deliveries(items)); });
 
   // Where he is. A push's click opens the app with ?view=decisions (the decision cards) or ?view=activity (the chats,
   // where a lane that needs him says so). The address is cleaned either way.
@@ -105,6 +108,7 @@
     if (linked) { deciding = true; want = { decision: linked }; linkedBrief = linked; }
     else if (v === "decisions") { deciding = true; want = { decisions: true }; }
     else if (v === "activity") tab = "chats";
+    else if (v === "alerts") tab = "status";                                    // the fleet's alerts are on Status
     if (linked || v) history.replaceState(history.state, "", location.pathname);
   }
   $effect(() => {
@@ -271,8 +275,11 @@
     chat = restoredChat(entry);
     chatScreen = chat !== null && restoredScreen(entry);
   };
+  // The manager's chat follows it across a restart, by name: to its not-running row and back to its new window.
+  let chatName: string | null = null;
+  $effect(() => { if (chatWorker) chatName = chatWorker.name; });
   $effect(() => {
-    const next = keptChat(chat, feed.workers, feed.primed);
+    const next = keptChat(chat, feed.roster, feed.primed, chatName);
     if (next === chat) return;
     chat = next;
     chatScreen = false;
@@ -282,7 +289,9 @@
 
   // The chat list (H1, H2): asked for when the feed is current, and again (at most every 2 s) when a lane spoke, a mark
   // moved or the roster changed; each row's status from the roster and the board.
-  const rows = $derived(chatRows({ workers: feed.workers, chats: feed.chats, decisions: feed.decisions, muted: feed.muted, now }));
+  const rows = $derived(chatRows({ workers: feed.roster, chats: feed.chats, decisions: feed.decisions, muted: feed.muted, now, managerQueue: feed.managerQueue }));
+  // The fleet's alerts he hasn't seen yet: a badge on Status, where they are.
+  const newAlerts = $derived(unseen(feed.alerts, feed.reads[SEEN_MARK]));
   const unreadChats = $derived(feed.primed ? rows.filter(r => r.unread > 0).length : 0);
   let askedChats = "";
   let askedChatsAt = 0;
@@ -303,7 +312,7 @@
     for (const l of lines) if (l.lastAt !== null) feed.markRead(l.name, l.lastAt);
     away.close();
   }
-  const echoes = (worker: string, e: { id: string; at: number; text: string }[]) => void outbox?.echoes(worker, e);
+  const echoes = (worker: string, e: { id: string; at: number; text: string }[], name?: string) => void outbox?.echoes(worker, e, name);
   const queue = async (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string; files?: SentFile[] }) => {
     const o = outbox ?? await device$.ready;
     const { files, ...command } = c;
@@ -316,7 +325,7 @@
     if (!verifiedFresh && navigator.onLine !== false && !(await verify())) return;
     await (how === "retry" ? outbox?.retry(id) : outbox?.again(id));
   }
-  const chatWorker = $derived(chat ? feed.workers.find(w => w.id === chat) ?? null : null);
+  const chatWorker = $derived(chat ? feed.roster.find(w => w.id === chat) ?? null : null);
   const blockedTasks = $derived(feed.board.filter(t => t.status === "blocked").length);
   let openTask = $state<string | null>(null);
   async function boardCall(path: string, body: Record<string, unknown>): Promise<string | null> {
@@ -331,7 +340,7 @@
   const boardAct = (key: string, body: Record<string, unknown>) => boardCall(`/api/board/tasks/${encodeURIComponent(key)}`, body);
   const boardCreate = (body: Record<string, unknown>) => boardCall("/api/board/tasks", body);
   function openLane(name: string) {
-    const w = feed.workers.find(x => x.name === name);
+    const w = feed.roster.find(x => x.name === name);
     if (w) openChat(w.id);
   }
 
@@ -364,8 +373,8 @@
 <div class="phone" class:full={deciding || chat !== null || away.open || briefId !== null}>
   {#if deciding}
     <CatchUp {feed} {session} {quick} {outgoing} {verifiedFresh} {verify} onBack={stopDeciding} onDay={() => { session.finish(); stopDeciding(); }}
-      onQueue={queue} onRetry={id => void outbox?.retry(id)} onDiscard={id => void outbox?.discard(id)}
-      onEchoes={(worker, e) => void outbox?.echoes(worker, e)}
+      onQueue={queue} onRetry={id => void outbox?.retry(id)} onDiscard={id => void outbox?.discard(id)} onCancel={id => void outbox?.cancel(id)}
+      onEchoes={(worker, e) => void outbox?.echoes(worker, e, feed.workers.find(w => w.id === worker)?.name)}
       onScreen={id => { stopDeciding(); openChat(id, true); }} onOpenBrief={openBrief} />
   {:else if tab === "chats"}
     <ChatList {rows} status={feed.status} {now} decisions={feed.primed ? session.count : 0} digestWaiting={!!away.pending && !away.open}
@@ -373,7 +382,8 @@
   {:else if tab === "today"}
     <Today {feed} {session} {quick} {verifiedFresh} {verify} onCatchUp={() => decide()} onDecide={id => decide({ decision: id })} onReadBrief={openBrief} />
   {:else if tab === "status"}
-    <Status {rows} status={feed.status} primed={feed.primed} onOpen={openChat} />
+    <Status {rows} status={feed.status} primed={feed.primed} onOpen={openChat}
+      alerts={feed.alerts} seenAt={feed.reads[SEEN_MARK] ?? 0} onSeen={at => feed.markRead(SEEN_MARK, at)} />
   {:else if tab === "board"}
     <div class="phone-wide">
       <BoardView tasks={feed.board} lanes={feed.boardLanes} live={feed.boardAt !== null} {now} open={openTask} onOpen={k => (openTask = k)}
@@ -384,13 +394,13 @@
       <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane} />
     </div>
   {/if}
-  {#if !deciding}<TabBar {tab} chats={unreadChats} decisions={feed.primed ? session.count : 0} blocked={blockedTasks} onTab={go} />{/if}
+  {#if !deciding}<TabBar {tab} chats={unreadChats} decisions={feed.primed ? session.count : 0} blocked={blockedTasks} alerts={newAlerts} onTab={go} />{/if}
   <!-- Not under the digest: an open chat there would mark itself read while he reads the digest (review, 2026-10-05). -->
   {#if chatWorker && !deciding && !away.open}
     {#key chatWorker.id}
       <Conversation {feed} worker={chatWorker} {outgoing} {pendingFiles} {now} {verifiedFresh} {verify} screen={chatScreen} onBack={closeChat} onDecide={id => decide({ decision: id })}
         onQueue={queue} onRetry={id => void again(id, "retry")} onDiscard={id => void outbox?.discard(id)}
-        onAgain={id => void again(id, "again")} onCheck={id => void outbox?.check(id)} onEchoes={echoes} />
+        onAgain={id => void again(id, "again")} onCancel={id => void outbox?.cancel(id)} onEchoes={echoes} />
     {/key}
   {/if}
   {#if away.open && away.pending}

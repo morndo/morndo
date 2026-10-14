@@ -174,15 +174,17 @@ describe("bubbles", () => {
   });
 });
 
-describe("delivery (S4–S8, ADR-0010)", () => {
+describe("delivery (S4–S8; the manager's queue, fleet-clients §9.1)", () => {
   const r = (o: Partial<OutboxRecord>): OutboxRecord => ({ id: "1", worker: "%1", workerName: "builder", text: "hi", uploads: [], createdAt: 1, budgetFrom: 1, state: "queued", error: null, attempts: 0, seen: "none", sentAt: null, typedAt: null, hubAt: null, ...o });
-  it("sending, queued (offline or in the manager's inbox), delivered, not sent", () => {
+  it("sending, queued (offline or in the manager's queue, with why it waits), delivered, not sent", () => {
     expect(deliveryOf(r({ state: "sending" }), 2)).toBe("sending");
-    expect(deliveryOf(r({ state: "sent", queued: true }), 2)).toBe("queued");
+    expect(deliveryOf(r({ state: "sent", delivery: { state: "queued", waiting: null, why: null } }), 2)).toBe("queued");
     expect(deliveryOf(r({ state: "sent" }), 2)).toBe("delivered");
     expect(deliveryOf(r({ state: "failed", error: "timeout" }), 2)).toBe("failed");
     expect(deliveryLabel(r({}), [], false, 2)).toBe("Queued · sends when you're back online");
-    expect(deliveryLabel(r({ state: "sent", queued: true }), [], true, 2)).toMatch(/^Queued for the manager/);
+    expect(deliveryLabel(r({ state: "sent", delivery: { state: "queued", waiting: null, why: null } }), [], true, 2)).toBe("Queued, it will be delivered");
+    expect(deliveryLabel(r({ state: "sent", delivery: { state: "queued", waiting: "menu_open", why: null } }), [], true, 2))
+      .toBe("Queued, it will be delivered: a menu is open in the manager's terminal; it goes in once that's answered");
     expect(deliveryLabel(r({ state: "sent" }), [], true, 2)).toBe("Delivered");
   });
 });
@@ -241,11 +243,11 @@ describe("review findings 1-3 (2026-10-05)", () => {
     expect(deliveryOf(r({}), NOW + 11 * MIN)).toBe("unseen");
     expect(deliveryLabel(r({}), [], true, NOW + 11 * MIN)).toBe("Typed in, but not seen in its conversation after 10 min: check its Screen");
   });
-  it("3: a message the manager's inbox hasn't delivered in 60 minutes says so (amended by review #2: late, not Not sent)", () => {
-    const q = r({ queued: true });
+  it("3: a message the manager's queue still holds says why it waits, however long (it waits up to a day: ruling 83)", () => {
+    const q = r({ delivery: { state: "queued", waiting: "busy", why: null } });
     expect(deliveryOf(q, NOW + 59 * MIN)).toBe("queued");
-    expect(deliveryOf(q, NOW + 61 * MIN)).toBe("late");
-    expect(deliveryLabel(q, [], true, NOW + 61 * MIN)).toBe("Not delivered after 60 min");
+    expect(deliveryOf(q, NOW + 61 * MIN)).toBe("queued");
+    expect(deliveryLabel(q, [], true, NOW + 61 * MIN)).toBe("Queued, it will be delivered: something else is typing into the manager right now; it goes in right after");
   });
 });
 
@@ -261,41 +263,44 @@ describe("review item 4 (2026-10-05)", () => {
 });
 
 describe("review #2 (2026-10-05, the team's call A): the bubble tells where it stands, never a resend it didn't make", () => {
-  const r = (o: Partial<OutboxRecord>): OutboxRecord => ({ id: "1", worker: "%0", workerName: "manager", text: "hi", uploads: [], createdAt: NOW, budgetFrom: NOW, state: "sent", error: null, attempts: 1, seen: "none", sentAt: NOW, typedAt: NOW, hubAt: NOW, queued: true, ...o });
-  it("after 60 minutes, with nothing known of the inbox: late, not 'Not sent'", () => {
-    expect(deliveryOf(r({}), NOW + 61 * MIN)).toBe("late");
-    expect(deliveryLabel(r({}), [], true, NOW + 61 * MIN)).toBe("Not delivered after 60 min");
+  const r = (o: Partial<OutboxRecord>): OutboxRecord => ({ id: "1", worker: "%0", workerName: "manager", text: "hi", uploads: [], createdAt: NOW, budgetFrom: NOW, state: "sent", error: null, attempts: 1, seen: "none", sentAt: NOW, typedAt: NOW, hubAt: NOW, delivery: { state: "queued", waiting: null, why: null }, ...o });
+  it("however long it waits, the clock never makes it Not sent: only the queue's given-up does", () => {
+    expect(deliveryOf(r({}), NOW + 3 * 60 * MIN)).toBe("queued");
   });
-  it("the inbox still holds it: still waiting, with its reason", () => {
-    const held = r({ inbox: { status: "held", reason: "foreign_text" } });
-    expect(deliveryOf(held, NOW + 61 * MIN)).toBe("late");
-    expect(deliveryLabel(held, [], true, NOW + 61 * MIN)).toBe("Still waiting in the manager's inbox: someone else's text is in its box");
+  it("the queue still holds it: still waiting, with its reason", () => {
+    const held = r({ delivery: { state: "queued", waiting: "draft_present", why: null } });
+    expect(deliveryLabel(held, [], true, NOW + 61 * MIN)).toBe("Queued, it will be delivered: the manager's input box has text that isn't from Morndo; it goes in once that's sent or cleared");
   });
-  it("the inbox gave it up: Not sent, and only then Send again", () => {
-    expect(deliveryOf(r({ inbox: { status: "cancelled", reason: null } }), NOW + 5 * MIN)).toBe("lost");
-    expect(lostReason()).toBe("Not sent: the manager's inbox gave it up. Send again queues it once more.");
+  it("the queue gave it up: Not delivered, with why, and only then Send again", () => {
+    const lost = r({ delivery: { state: "given_up", waiting: null, why: "cancelled" } });
+    expect(deliveryOf(lost, NOW + 5 * MIN)).toBe("lost");
+    expect(deliveryLabel(lost, [], true, NOW + 5 * MIN)).toBe("Not delivered");
+    expect(lostReason(lost)).toBe("Not delivered: it was withdrawn before it was typed. Send again queues it once more.");
   });
 });
 
-describe("medium verify (2026-10-05), issue 1: Not sent never promises a resend the hub can't make", () => {
-  const r = (o: Partial<OutboxRecord>): OutboxRecord => ({ id: "1", worker: "%0", workerName: "manager", text: "hi", uploads: [], createdAt: NOW, budgetFrom: NOW, state: "sent", error: null, attempts: 1, seen: "none", sentAt: NOW, typedAt: NOW, hubAt: NOW, queued: true, ...o });
-  it("given up and not queued again by a Send again: a final state that says what he can do", () => {
-    const dead = r({ inbox: { status: "cancelled", reason: null }, resendFailed: true });
+describe("medium verify (2026-10-05), issue 1: Not delivered never promises a resend the hub can't make", () => {
+  const r = (o: Partial<OutboxRecord>): OutboxRecord => ({ id: "1", worker: "%0", workerName: "manager", text: "hi", uploads: [], createdAt: NOW, budgetFrom: NOW, state: "sent", error: null, attempts: 1, seen: "none", sentAt: NOW, typedAt: NOW, hubAt: NOW, ...o });
+  const givenUp = { state: "given_up" as const, waiting: null, why: "expired" };
+  it("given up and not queued again by a Send again, or a second copy given up too: a final state that says what he can do", () => {
+    const dead = r({ delivery: givenUp, resendFailed: true });
     expect(deliveryOf(dead, NOW + MIN)).toBe("dead");
-    expect(deliveryLabel(dead, [], true, NOW + MIN)).toBe("Not sent");
-    expect(deadReason()).toBe("Not sent: the manager's inbox gave it up, and it can't be queued again. Write it again as a new message, or discard it.");
-    expect(deliveryOf(r({ inbox: { status: "cancelled", reason: null } }), NOW + MIN)).toBe("lost");   // a Send again may still work
+    expect(deliveryOf(r({ delivery: givenUp, resent: true }), NOW + MIN)).toBe("dead");
+    expect(deliveryLabel(dead, [], true, NOW + MIN)).toBe("Not delivered");
+    expect(deadReason(dead)).toBe("Not delivered: it waited a whole day and was never typed, and it can't be queued again. Write it again as a new message, or discard it.");
+    expect(deliveryOf(r({ delivery: givenUp }), NOW + MIN)).toBe("lost");   // a Send again may still work
   });
 });
 
-describe("medium verify (2026-10-05), issue 2: delivered by the inbox but no echo here is final", () => {
-  const r = (o: Partial<OutboxRecord>): OutboxRecord => ({ id: "1", worker: "%0", workerName: "manager", text: "hi", uploads: [], createdAt: NOW, budgetFrom: NOW, state: "sent", error: null, attempts: 1, seen: "none", sentAt: NOW, typedAt: NOW, hubAt: NOW, queued: true, ...o });
-  it("delivered or accepted after a check: delivered, not shown in the chat, and it stays so (never late again)", () => {
-    for (const status of ["delivered", "accepted"]) {
-      const got = r({ inbox: { status, reason: null } });
-      expect(deliveryOf(got, NOW + MIN)).toBe("arrived");
-      expect(deliveryOf(got, NOW + 3 * 60 * MIN)).toBe("arrived");
-      expect(deliveryLabel(got, [], true, NOW + 3 * 60 * MIN)).toBe("Delivered to the manager, not shown in this chat");
-    }
+describe("medium verify (2026-10-05), issue 2: delivered by the queue but no echo here is final", () => {
+  const r = (o: Partial<OutboxRecord>): OutboxRecord => ({ id: "1", worker: "%0", workerName: "manager", text: "hi", uploads: [], createdAt: NOW, budgetFrom: NOW, state: "sent", error: null, attempts: 1, seen: "none", sentAt: NOW, typedAt: NOW, hubAt: NOW, ...o });
+  it("delivered: delivered, not shown in the chat, and it stays so; typed and never seen taken: may have been", () => {
+    const got = r({ delivery: { state: "delivered", waiting: null, why: null } });
+    expect(deliveryOf(got, NOW + MIN)).toBe("arrived");
+    expect(deliveryOf(got, NOW + 3 * 60 * MIN)).toBe("arrived");
+    expect(deliveryLabel(got, [], true, NOW + 3 * 60 * MIN)).toBe("Delivered to the manager, not shown in this chat");
+    const maybe = r({ delivery: { state: "uncertain", waiting: null, why: null } });
+    expect(deliveryOf(maybe, NOW + MIN)).toBe("maybe");
+    expect(deliveryLabel(maybe, [], true, NOW + MIN)).toBe("May have been delivered");
   });
 });

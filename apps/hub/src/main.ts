@@ -23,15 +23,17 @@ import { AccessService } from "./application/access-service.ts";
 import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
-import { managerInbox } from "./adapters/manager-inbox.ts";
 import { EscalationService, managerOf } from "./application/escalation-service.ts";
 import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
+import { ManagerQueue } from "./application/manager-queue.ts";
+import { fleetDeliveries } from "./adapters/fleet-deliveries.ts";
 import { fileStore } from "./adapters/files.ts";
+import { processIo, runLanes } from "./console/lanes.ts";
 import { noteMissingFfmpeg, uploadInbox } from "./adapters/uploads.ts";
 import { desktopTarget, legacyPorts } from "./adapters/local-ports.ts";
 import { engineLanesFor } from "./adapters/engine-registry.ts";
-import { FleetClient, checkFleet } from "./adapters/fleet-client.ts";
+import { FleetClient, checkFleet } from "@morndo/fleet-client";
 import { fleetPorts, type FleetPorts, type LocalFileStore } from "./adapters/fleet-adapters.ts";
 import { connectionsCli, connectionsEnv } from "./adapters/connections-cli.ts";
 import { enginesCli } from "./adapters/engines-cli.ts";
@@ -41,6 +43,7 @@ import { BoardService } from "./application/board-service.ts";
 import { AgentAccess } from "./application/agent-access.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
+import { AlertsService, SEEN_MARK } from "./application/alerts-service.ts";
 import { locateTranscriber } from "./adapters/transcriber-path.ts";
 import { processTranscriber } from "./adapters/transcriber-process.ts";
 import { guardNow, loadTranscriptionSettings, openMachineGuard } from "./adapters/transcription-config.ts";
@@ -56,6 +59,8 @@ const HELP = `morndo: your agents, on your phone.
   morndo devices          list paired devices
   morndo revoke <id>      revoke a device; its sessions end at once
   morndo audit            the latest device and session events
+  morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
+                          events (morndo lanes --help)
   morndo agent-token new <name> --role manager|worker
                           a token for the manager's lane, or one the worker lanes share (shown once)
   morndo agent-token list
@@ -64,13 +69,13 @@ const HELP = `morndo: your agents, on your phone.
 Settings (environment): MORNDO_ORIGIN (the URL your browser opens), MORNDO_HOME, MORNDO_PORT,
 MORNDO_REQUIRE_PROXY_IDENTITY=1, MORNDO_PRINCIPAL_LOGIN, MORNDO_TMUX_SOCKET, MORNDO_TMUX_SESSION,
 MORNDO_CLAUDE_DIR, MORNDO_MANAGER_WINDOW (default "manager"), MORNDO_LEDGER (the manager's needs-you list),
-MORNDO_PANE_LOCK (the lock file other typists into the manager's pane take), MORNDO_MANAGER_INBOX (the manager's
-inbox directory: its answers and messages queue there instead of being typed), MORNDO_VNC (host:port of the desktop's
+MORNDO_PANE_LOCK (the lock file other typists into the manager's pane take), MORNDO_VNC (host:port of the desktop's
 VNC server), MORNDO_VNC_PASSWORD_FILE, MORNDO_FLEET_SOCKET (the fleet service's client socket; unset, this
 machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane registry directory; off unless set),
-MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet) and MORNDO_ENGINES (the engine layer's
-CLI, engine-layer bin/engines: the Engines page). MORNDO_TRANSCRIBER (absolute path of a protocol-1 plugin;
-otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcribe).`;
+MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet), MORNDO_ENGINES (the engine layer's
+CLI, engine-layer bin/engines: the Engines page) and MORNDO_MANAGER_QUEUE (with a fleet, the manager's answers and
+messages go through the fleet's delivery queue; "off" types them directly). MORNDO_TRANSCRIBER (absolute path of a
+protocol-1 plugin; otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcribe).`;
 
 if (argvWantsVersion(process.argv)) {
   process.stdout.write(`${productVersion()}\n`);
@@ -78,6 +83,9 @@ if (argvWantsVersion(process.argv)) {
 }
 
 exitOnCrash(log);
+// `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
+// on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
+if (process.argv[2] === "lanes") process.exit(await runLanes(process.argv.slice(3), processIo()));
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
 const EXIT_DATABASE_FROM_FUTURE = EXIT_CONFIG;          // see openStore below
 const config = loadConfig();
@@ -125,8 +133,11 @@ switch (cmd) {
     // MORNDO_FLEET_SOCKET set: every port goes through the fleet service; unset: this machine's tmux and Claude Code, as
     // before (spec §10). Nothing below this line knows which.
     const jobs = new JobsService();
-    const fleet = config.fleetSocket ? await openFleet(config.fleetSocket, files, jobs) : null;
-    const ports: HubPorts = fleet ?? legacyPorts(config, { files });
+    // The fleet's alerts in the app; an urgent new one is a push (counts only), told once the notifications exist below.
+    let alertPush: (urgent: boolean) => void = () => {};
+    const alerts = config.fleetSocket ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
+    const fleet = config.fleetSocket ? await openFleet(config.fleetSocket, files, jobs, alerts) : null;
+    const ports: HubPorts = fleet?.ports ?? legacyPorts(config, { files });
     // Engine lanes on this machine, only when MORNDO_ENGINE_SESSIONS names their registry. Off otherwise: nothing is read.
     const engineLanes = engineLanesFor(config);
     if (engineLanes.notice) log.info(engineLanes.notice);
@@ -150,14 +161,16 @@ switch (cmd) {
       },
     };
     const inbox = uploadInbox({ dir: config.inboxDir, registry: store });
+    // The manager's answers and messages through the fleet's delivery queue (fleet-clients §9.1), the only queue for them
+    // (ruling 81): with a fleet, on unless MORNDO_MANAGER_QUEUE is off. Off, what is still queued is cancelled at start and
+    // the rest followed to its end.
+    const queue = fleet ? new ManagerQueue({ store, deliveries: fleetDeliveries(fleet.client), lane: config.managerWindow, on: config.managerQueue === true }) : null;
     void noteMissingFfmpeg(line => log.warn(line));
     // A Command is judged on arrival against what the worker waits for now (S6). With a fleet, a repeat of a send in
     // doubt asks the worker's node (op.status, spec §3.1).
-    // The manager's inbox (ADR-0010): the manager's answers and messages queue there; one deliverer types each once.
-    const queue = config.managerInbox ? managerInbox(config.managerInbox) : null;
     const steering = new SteeringService(store, typist, Date.now, () => access.policy(), inbox, id => observation.waitingOn(id),
-      id => observation.nameOf(id), ports.uploads, ports.sendStatus,
-      queue ? { isManager: id => id === managerPane(), inbox: queue } : null);
+      id => observation.nameOf(id), ports.uploads, ports.sendStatus, queue ? { queue, isManager: id => id === managerPane() } : null,
+      () => managerPane() ?? null, config.managerWindow);
     const filed: { briefs: BriefService | null } = { briefs: null };
     const escalations = new EscalationService({
       watch: {
@@ -170,11 +183,19 @@ switch (cmd) {
       store, managerName: config.managerWindow, send: (pane, text, key) => typist.send(pane, text, key), policy: () => access.policy(),
       // An answer in doubt is settled as a send is, with its node (op.status; final review C1).
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
-      inbox: queue,
+      queue,
       briefs: () => filed.briefs?.sightings() ?? [],
     });
     const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
     filed.briefs = briefs;
+    if (queue) {
+      // Off: what is still queued is cancelled here, before any answer (the hub types directly once it serves). On:
+      // nothing has to come first; the sticky check and the first round run while the hub serves (review #8).
+      const first = queue.start();
+      if (queue.on) void first.catch((e: unknown) => log.error("manager queue: its first round failed; each poll tries again", e));
+      else await first;
+      log.info(`manager queue: ${queue.on ? "on" : "off (MORNDO_MANAGER_QUEUE)"}`);   // once, at start (reconciliation ruling 39)
+    }
     const remote = new RemoteService({
       store, terminal: ports.terminal, policy: () => access.policy(),
       panes: () => observation.snapshot().workers.map(w => w.id as string),
@@ -192,7 +213,9 @@ switch (cmd) {
     const notifications = new NotificationService({
       store, send: pushSender(vapid), extraOrigins: config.pushExtraOrigins ?? [],
       muted: id => { const name = nameOf(id); return name !== undefined && reading.state().muted.includes(name); },
+      alerts: () => alerts?.urgentSince(reading.state().reads[SEEN_MARK] ?? 0) ?? 0,
     });
+    alertPush = urgent => notifications.alert(urgent);
     // ADR-0013: the Engines page, through the engine layer's CLI when MORNDO_ENGINES names it.
     const engines = config.enginesBin ? new EnginesService({ cli: enginesCli(config.enginesBin), store, policy: () => access.policy() }) : null;
     // The connections program, named like the engines CLI. A private home only, and never the engines program.
@@ -238,7 +261,7 @@ switch (cmd) {
     void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
-      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs,
+      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
       transcription, briefs, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
     });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
@@ -274,14 +297,9 @@ switch (cmd) {
     access.onLinked(() => notifications.linked());
     observation.start(config.pollMs);
     escalations.start(Math.max(config.pollMs, 1000));
-    // A retried command has no deadline of the deliverer's. Withdraw one still untyped after its two minutes.
-    const withdrawCommands = setInterval(() => {
-      try { steering.withdrawOverdue(); }
-      catch (e) { log.warn("a queued command's deadline could not be checked", e); }
-    }, Math.max(config.pollMs, 1000));
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
+    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); fleet?.ports.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     break;
@@ -352,17 +370,17 @@ switch (cmd) {
 //   (openStore above);
 // - a fleet that doesn't answer yet is only said: the observation loop keeps asking, and the hub serves meanwhile
 //   (spec §7, "Fleet service down or restarting").
-async function openFleet(socket: string, files: LocalFileStore, jobs: JobsService): Promise<FleetPorts> {
-  const client = new FleetClient(socket);
+async function openFleet(socket: string, files: LocalFileStore, jobs: JobsService, alerts: AlertsService | null): Promise<{ ports: FleetPorts; client: FleetClient }> {
+  const client = new FleetClient(socket, { log });
   const check = await checkFleet(client);
   if (check === "unsupported") {
     log.error(`the fleet service at ${socket} doesn't offer client API version ${CLIENT_API}; update morndo-fleet or this hub`);
     process.exit(EXIT_CONFIG);
   }
   if (check === "unreachable") log.warn(`the fleet service at ${socket} doesn't answer yet; the hub keeps asking`);
-  const ports = fleetPorts(client, { files, jobs, stagingDir: mkdtempSync(join(tmpdir(), "morndo-fleet-files-")) });
+  const ports = fleetPorts(client, { files, jobs, ...(alerts ? { alerts } : {}), stagingDir: mkdtempSync(join(tmpdir(), "morndo-fleet-files-")) });
   await ports.start();
-  return ports;
+  return { ports, client };
 }
 
 function openConnections(policy: () => AccessPolicy): ConnectionsPageService | null {

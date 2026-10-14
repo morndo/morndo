@@ -36,11 +36,13 @@ export const SendBody = z.object({
   // When the principal wrote it, on the device's clock (S7). The hub's notAfter counts from this, not from arrival.
   // Absent from an older app: the hub uses its own arrival time.
   createdAt: z.exactOptional(z.number().check(z.gte(0), z.lte(Number.MAX_SAFE_INTEGER))),
-  // Set only by the owner's Retry. A plain repeat of the same request id must not revive an expired command.
-  retry: z.exactOptional(z.boolean()),
-  // Set only by Send again. A plain repeat, including the phone's status check, is a read and must not queue another copy.
+  // Set only by the phone's Send again (ADR-0011) of a message to the manager the queue gave up: queued once more, as a
+  // new attempt. A plain repeat, the phone's status check included, is a read and never queues another copy.
   again: z.exactOptional(z.boolean()),
 });
+// The principal's cancel of one of his messages to the manager still waiting in the fleet's delivery queue (ruling 83).
+export const CancelBody = z.object({ requestId });
+export type CancelBody = z.output<typeof CancelBody>;
 // `seen`: the version of the ask the answer was given for (askVersion; review of PR #7, finding 5). Optional: the
 // desktop answers at once.
 const seen = z.exactOptional(text(64));

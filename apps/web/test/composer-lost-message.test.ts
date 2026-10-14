@@ -33,7 +33,7 @@ const page = (): Plugin => ({
 // The page's globals as the fake hub and the checks use them: this file is type-checked without the DOM lib.
 type Socket = new (url: string | URL, protocols?: string | string[]) => unknown;
 type Win = {
-  __calls: { url: string; body: string | null }[]; __passkeyAsked: boolean; __fail: () => void;
+  __calls: { url: string; body: string | null }[]; __passkeyAsked: boolean; __fail: () => void; __release: () => void;
   fetch: typeof fetch; WebSocket: Socket; location: { hostname: string };
   navigator: { credentials: { get: () => Promise<unknown> } };
   DOMException: new (message: string, name: string) => Error;
@@ -41,7 +41,9 @@ type Win = {
 
 // Runs in the page before the app: a fake hub with three workers. How the passkey check fails, once `__fail()` is
 // called: "refused", the hub turns the passkey's answer down; "cancelled", the principal cancels the passkey prompt.
-function fakeHub(how: "refused" | "cancelled") {
+// "passes": the check passes once `__release()` is called (the same moment).
+type How = "refused" | "cancelled" | "passes";
+function fakeHub(how: How) {
   const w = globalThis as unknown as Win;
   const calls: Win["__calls"] = [];
   w.__calls = calls;
@@ -49,6 +51,7 @@ function fakeHub(how: "refused" | "cancelled") {
   let fail = () => {};
   const failed = new Promise<void>(r => (fail = r));
   w.__fail = () => fail();
+  w.__release = () => fail();
   const realFetch = w.fetch.bind(w);
   const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { "content-type": "application/json" } });
   w.fetch = async (input: string | URL | Request, init: RequestInit = {}) => {
@@ -56,7 +59,7 @@ function fakeHub(how: "refused" | "cancelled") {
     if (!url.startsWith("/api/")) return realFetch(input, init);
     calls.push({ url, body: typeof init.body === "string" ? init.body : null });
     if (url === "/api/stepup/options") return json({ flowId: "flow-1", options: { challenge: "AAAA", rpId: w.location.hostname, allowCredentials: [], userVerification: "required", timeout: 60_000 } });
-    if (url === "/api/stepup/verify") { await failed; return json({ error: "not_verified" }, 400); }
+    if (url === "/api/stepup/verify") { await failed; return how === "passes" ? json({ ok: true }) : json({ error: "not_verified" }, 400); }
     if (/^\/api\/workers\/[^/]+\/send$/.test(url)) return json({ ok: true });
     return json({ error: "not_found" }, 404);
   };
@@ -116,7 +119,7 @@ afterAll(async () => {
   rmSync(cacheDir, { recursive: true, force: true });
 });
 
-const load = async (how: "refused" | "cancelled", clock = false) => {
+const load = async (how: How, clock = false) => {
   if (clock) await tab.clock.install();                          // time still flows; the test may jump it forward
   await tab.addInitScript(fakeHub, how);
   await tab.goto(server.resolvedUrls?.local[0] ?? "");
@@ -185,5 +188,35 @@ describe("a send whose passkey check fails after a conversation switch", () => {
     expect(r.beta).toEqual({ draft: "", shown: 0 });
     expect(r.sends).toEqual([]);
     expect(r.alpha).toMatchObject({ kept: true });
+  }, 30_000);
+});
+
+// Staging QA, 2026-10-12: Enter, then, while the passkey check was still open, a second message typed in the box and
+// Enter again (ignored while the check is open). When the check passed, the first message went and the box was
+// emptied: the second one was gone, never sent and never shown.
+describe("a send whose passkey check is still open", () => {
+  const typeDuringCheck = async (then: (box: ReturnType<Page["getByRole"]>) => Promise<void>) => {
+    await load("passes");
+    await openConversation("alpha");
+    const box = tab.getByRole("textbox", { name: "Message alpha" });
+    await box.fill(TEXT);
+    await box.press("Enter");
+    await tab.waitForFunction(() => (globalThis as unknown as Win).__calls.some(c => c.url === "/api/stepup/verify"));
+    await then(box);
+    await box.press("Enter");                                    // ignored: the check is still open
+    await tab.evaluate(() => (globalThis as unknown as Win).__release());
+    await expect.poll(sends, { timeout: 10_000 }).toHaveLength(1);
+    return box;
+  };
+  it("keeps a new message typed meanwhile in the box, and sends the first one once", async () => {
+    const box = await typeDuringCheck(b => b.fill("and a second thought"));
+    await tab.waitForTimeout(300);
+    expect(await box.inputValue()).toBe("and a second thought");
+    expect(await sends()).toHaveLength(1);
+  }, 30_000);
+  it("keeps what was added to it meanwhile, without what went", async () => {
+    const box = await typeDuringCheck(async b => { await b.press("End"); await b.pressSequentially(" plus tests"); });
+    await tab.waitForTimeout(300);
+    expect(await box.inputValue()).toBe("plus tests");
   }, 30_000);
 });

@@ -43,7 +43,7 @@ Every path below derives from `HOME`. A test or QA agent with a temporary `HOME`
 | `~/.config/morndo-node/config.json` | Who this node is and which fleet it trusts (below). `join` writes it, mode 0600; `relayPort` may be edited before `run`. |
 | `~/.config/morndo-node/policy.json` | What the fleet may do here (below). `join` writes the defaults when there is none; the owner edits it. A field that doesn't fit stops `run` with an error naming the file and the field. |
 | `~/.config/morndo-node/node-key.pem` | This node's Ed25519 private key (PKCS#8), mode 0600. A device credential, not an isolation boundary: lanes run as the same user and can read it (see the security model). |
-| `~/.local/state/morndo-node/agent.db` | Done keys and the hook stream (the spool). It and its `-wal` and `-shm` are mode 0600, set explicitly. SQLite in WAL mode with `synchronous=NORMAL` (design §16.4): no hook waits for the disk, and a crash of the agent loses nothing. The one commit synced is a done key's `started`, before its side effect (`FULL` for that transaction): a retry may go to another pane than the first attempt, so it must survive a power loss or a failing disk; if the sync fails, nothing is typed. It must be on this machine's own disk: on a network file system the agent refuses to start (exit 78). Numbered migrations; a database from a newer agent is refused. Its stream id names this node's **store**: every answer carries it. A new database is a new store; so is a copied or restored one. The database records its file's identity (device and inode) with its stream id, and a file opened under another identity (a copy with `cp`, a backup put back as a new file, a move to another file system) starts a new stream, so a new store, before the first hello, and says so in the log: a send in doubt then reads `unknown` from another store and stays uncertain. Not detected that way: a block-level clone of a VM or disk image, a copy written over the same file in place (`cp` onto the existing `agent.db` keeps its inode), and a restore that gets the freed inode number back (ext4 may reuse one). Those keep the store, and the **store sequence** tells instead: the database counts the keyed ops it has started (`store_seq`, one more in the transaction that commits each `started`, never lowered), every answer carries it (`storeSeq`), the fleet keeps the highest it has seen per store and sends it in the welcome (`storeSeqSeen`): a database holding less starts a new store before the connection goes online, says so in the log, and runs nothing under the old one. The hub also keeps it with a send or an answer in doubt; `op.status` answering `unknown` from the same store at a lower sequence leaves that one uncertain. The agent itself also notices, once the stream has had traffic, when the fleet has acknowledged more of its stream than the database holds, and then starts a new stream (once per process; never under the `fixedStreamId` test hook). Events a copy still holds are sent again under the new stream (at least once). What remains open is listed below the table. |
+| `~/.local/state/morndo-node/agent.db` | Done keys and the hook stream (the spool). It and its `-wal` and `-shm` are mode 0600, set explicitly. SQLite in WAL mode with `synchronous=NORMAL` (design §16.4): no hook waits for the disk, and a crash of the agent loses nothing. Two commits are synced (`FULL` for that transaction). The first is a done key's `started`, before its side effect: a retry may go to another pane than the first attempt, so it must survive a power loss or a failing disk, and if the sync fails, nothing is typed. The second is storing a delivery, before its sender is told it is queued: if that sync fails, the delivery is refused, never silently lost. The database also holds the delivery queue (migration 3): each delivery's text, target, state, and the session it is bound to or was typed into. Final ones are pruned after 7 days, with the done keys. It must be on this machine's own disk: on a network file system the agent refuses to start (exit 78). Numbered migrations; a database from a newer agent is refused. Its stream id names this node's **store**: every answer carries it. A new database is a new store; so is a copied or restored one. The database records its file's identity (device and inode) with its stream id, and a file opened under another identity (a copy with `cp`, a backup put back as a new file, a move to another file system) starts a new stream, so a new store, before the first hello, and says so in the log: a send in doubt then reads `unknown` from another store and stays uncertain. Not detected that way: a block-level clone of a VM or disk image, a copy written over the same file in place (`cp` onto the existing `agent.db` keeps its inode), and a restore that gets the freed inode number back (ext4 may reuse one). Those keep the store, and the **store sequence** tells instead: the database counts the keyed ops it has started (`store_seq`, one more in the transaction that commits each `started`, never lowered), every answer carries it (`storeSeq`), the fleet keeps the highest it has seen per store and sends it in the welcome (`storeSeqSeen`): a database holding less starts a new store before the connection goes online, says so in the log, and runs nothing under the old one. The hub also keeps it with a send or an answer in doubt; `op.status` answering `unknown` from the same store at a lower sequence leaves that one uncertain. The agent itself also notices, once the stream has had traffic, when the fleet has acknowledged more of its stream than the database holds, and then starts a new stream (once per process; never under the `fixedStreamId` test hook). Events a copy still holds are sent again under the new stream (at least once). What remains open is listed below the table. |
 | `~/.local/state/morndo-node/relay-files/` | Copies of the files hooks sent to `/file`, deleted 24 h after the fleet acknowledged them. The spool, these copies and the inbox share one disk budget of 256 MiB; a `/file` that doesn't fit is answered 503 (so the hook script's fallback runs). |
 | `~/.local/state/morndo-node/inbox/` | Images the hub put here for a lane (`file.put`); a partial upload (under `.partial/`) is deleted after 10 minutes, a finished one after 7 days. A chunk that doesn't fit the shared budget is refused `too_large`, nothing written. |
 | `~/.local/state/morndo-node/status.json` | What the running agent reports, for `morndo-node status`. |
@@ -80,6 +80,8 @@ Not open any more: a restored database catching up (running keyed ops until its 
 | `fileRoots` | today's rules only | If set, `file.*` is also limited to these directories. |
 | `lockedPanes` | none | Window name → a lock file that the box's other typists take (`flock`); a send into that window waits for it. On the control plane: `{ "manager": "/home/owner/.local/share/kira/manager-pane.lock" }`. |
 | `tmuxSocket` | `null` (the default server) | `tmux -L <name>`. A test or QA agent always names its own. |
+| `launch` | `{ "command": ["claude"], "via": "shell" }` | How `lane.start` runs Claude Code. `{account}` in `command` is the op's `account`: a command without it refuses an op that names one, and a command with it refuses an op that names none. `resume` adds `--resume <session>`; an op adds nothing else. `via: "shell"` starts the user's shell and pastes the command once its prompt shows, so the window outlives Claude Code and `claude-pool` can still move the lane. `direct` runs the command as the window's own. The owner's PC: `{ "command": ["claude-as", "{account}"], "via": "shell" }`. |
+| `protected` | `["manager"]` | Lane names `lane.stop` refuses (`denied`). |
 
 ## Operations
 
@@ -98,6 +100,44 @@ The full table is in the design, section 5.3. What a caller relies on:
 - **tmux.** Every call passes `-u`; a session is named `=name`; every argument tmux reads as a format and that carries outside data (a window name, a lane's directory) has its `#` doubled (`tmuxLiteral`), so a directory named `#{session_name}` or `#(…)` is taken as it is; panes and windows are targeted by their IDs, never by name.
 - **Limits.** Messages are at most 512 KiB; bulk data moves in chunks of at most 256 KiB; files are at most 25 MiB; sends at most 8000 characters; keys at most 4096; `captureMany` at most 64 panes, each capped at 6 KiB with `truncated: true`.
 
+## Deliveries (`lane.deliver`, `delivery.cancel`)
+
+The node's delivery queue (design: [fleet clients](../../docs/design/fleet-clients/README.md) §4). Clients use the fleet's `/v1/deliveries` ([`docs/fleet-api.md`](../../docs/fleet-api.md) §6), never these ops directly.
+- **Storing.** `lane.deliver { id, target, text, ttlMs? }` stores the delivery in `agent.db`, synced, then answers `queued`. `notAfter` is set on this node's clock. The same id with the same target and text answers its current state; with other content, `id_conflict`.
+- **Only lanes with a live Claude Code session** take deliveries, whatever its `status` (`shell` means a shell command is running under it). A pane with no live session (no session file, or its process gone) makes a delivery wait (`no_session`) when its lane is sticky or the pane's process started in the last 2 minutes, and refuses it otherwise.
+- **Typing:**
+  - one at a time per lane, in the order queued;
+  - tried at once, on each change of the session's status, of a hook of its session, or of the inventory, and at least every 5 s;
+  - a delivery typed or held and still waiting for its receipt holds the next one back (`earlier`) for at most 60 s;
+  - each try is a `pane.send` under the delivery's id as its done key, with all of its checks (menu, draft, input box, the pane lock). A refusal leaves the delivery `queued`, with that reason;
+  - a line still in the box after Enter gets Enter again while the box shows exactly that line, at most twice more;
+  - a `started` key found after a restart moves the delivery to `typed`, never typed again.
+- **Confirming,** from the transcript of the session it was typed into, by the receipt rules in `packages/node-ops` (`receipt.ts`):
+  - a prompt that holds the text, or a queued line taken into a turn: `delivered`;
+  - an `enqueue`: `held`;
+  - a `dequeue`: no verdict;
+  - a line Claude Code dropped on an interrupt (`cleared_on_cancel`): typed once more under `<id>#2` if the box is clear and the session idle, else `uncertain`;
+  - a slash command that starts a new session (`/clear`, `/new`): the pane's session changing to a new id after the typing.
+
+  Each receipt confirms one delivery.
+- **Expiring.** Past `notAfter`, a `queued` delivery is given up (`expired`). A `typed` or `held` one is `uncertain`, and never typed again.
+- **Cancelling.** `delivery.cancel { id }` gives up a `queued` delivery. Past that it answers `already_typed`.
+- **Events.** `ev.delivery` on every change. After each (re)connect it also sends the state of each delivery not final, and the final ones of the last hour.
+
+## Lanes, keys, captures and session state
+
+- **`lane.start { name, cwd, account?, resume?, prompt? }`** runs the policy's `launch`.
+  - It answers `{ workerId, waiting: "trust" }` when Claude Code asks whether to trust the folder. Accepting stays the client's decision.
+  - `prompt` becomes a delivery to the new pane, with id `<client>:prompt:<the first 16 hex digits of the SHA-256 of the start's key>`. It waits for Claude Code to start, then is typed once.
+- **`lane.stop { name, mode? }`.**
+  - `exit`, the default, types `/exit` as a delivery is typed, answers Claude Code's exit prompt, then answers once the window has closed or is back at its shell, or `uncertain` after 30 s.
+  - `kill` closes the window.
+  - Names in `protected` are refused with `denied`.
+- **`pane.capture { workerId, lines (at most 2000), attributes?, join? }`** returns up to 256 KiB (as JSON) of the screen's last lines, with tmux's attribute escapes when asked, and wrapped lines joined unless `join` is false. `pane.captureMany` keeps its 6 KiB per pane.
+- **`pane.keys`** takes `names`, tmux key names from an allow-list (`Enter`, `Escape`, `Tab`, `BSpace`, the arrows, `Home`, `End`, `PageUp`, `PageDown`, `C-c`, `C-d`, `C-u`, `Space`, digits, letters), or `data`, literal text. Never both.
+- **Session state.** The inventory gives each pane, from its live session, the `status` as Claude Code writes it in `~/.claude/sessions/<pid>.json` (`busy`, `idle`, `waiting`, or `shell`: a shell command running under it), `pid` (Claude Code's process), and `topic` and `lastPrompt` (the session's latest `ai-title` and `last-prompt` entries, from a tail scan of its transcript, cached per session). `status` and `pid` are null without a live session; `topic` and `lastPrompt` are absent when unknown.
+- **Lane state events.** When a session's status turns `waiting`, the node reads the menu's question from the screen and sends a `needs_input` lane state event. When it leaves `waiting`, it sends `answered`. Both go through the hook stream as `/lane`, kept and replayed like hooks.
+
 ## Hook relay (`127.0.0.1:8787`)
 
 It answers after the event is in the durable stream, and before any network I/O.
@@ -111,7 +151,7 @@ It answers after the event is in the durable stream, and before any network I/O.
 
 Anything but POST on the four kept paths is 405 and an unknown path 404. A request with an `Origin` header comes from a web page, not a hook: the kept paths answer it 403, progress paths drop it (204). A body over 448 KiB is 413 (dropped, for progress). A write the spool refuses changes nothing and counts one drop.
 
-Each event gets this node's name and the window it finds through `TMUX_PANE` or `session_id`, then flows in order to the fleet (`streamId`, `seq`) and is replayed after a reconnect, before anything new. A spool write that fails while the fleet acknowledges events (a full disk) is logged; it never takes the agent down. Hook entries in `settings.json` get `"timeout": 5` (sub-project 3): an HTTP hook failure doesn't block Claude Code, but a slow hook stalls the session.
+Each event gets this node's name and the window it finds through `TMUX_PANE` or `session_id`, else the body's own `window` (a `notify` sent from outside any pane), then flows in order to the fleet (`streamId`, `seq`) and is replayed after a reconnect, before anything new. A spool write that fails while the fleet acknowledges events (a full disk) is logged; it never takes the agent down. Hook entries in `settings.json` get `"timeout": 5` (sub-project 3): an HTTP hook failure doesn't block Claude Code, but a slow hook stalls the session.
 
 ## Security model
 
@@ -133,11 +173,15 @@ What it doesn't protect:
 | Hook | Effect |
 |---|---|
 | `dropAfterStarted: "<substring>"` | For a keyed op whose key contains it: right after `started` is committed, the socket is terminated and that op's result discarded; the op runs on. Once per key. |
-| `noDoneKeys: true` | Keys are neither recorded nor consulted (negative control) |
+| `noDoneKeys: true` | Keys are neither recorded nor consulted, the delivery queue's included (negative control) |
 | `noExpect: true` | Worker IDs resolve by pane number alone; expectations are not checked (negative control) |
 | `clockOffsetMs: <n>` | Every wall-clock time this agent reports is shifted by n ms |
 | `spoolFail: true` | Every spool write fails, the deletion of acknowledged events included |
 | `fixedStreamId: "<uuid>"` | This stream id instead of the database's own, and so this store in every answer; kept even where a restored database would start a new stream (negative control) |
+| `killAfterEffect: "<substring>"` | For a keyed op whose key contains it: right after its side effect returns, before `done` is committed, the agent kills itself (SIGKILL). Once per process. |
+| `noSessionBinding: true` | A delivery to a lane name that isn't sticky follows the name as a sticky one does (negative control) |
+| `retypeUnderFirstKey: true` | The one retype after `cleared_on_cancel` runs under the delivery's own id instead of `<id>#2` (negative control) |
+| `deliveryStartGraceMs: <n>` | A new pane with no session makes a delivery wait n ms instead of 2 minutes |
 
 ## Checks
 

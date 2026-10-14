@@ -1,7 +1,8 @@
 // The outbox's pure rules (ADR-0008 phase C; S7, S8): forward-only send states, the retry schedule and budget, and
 // echo matching.
 import { describe, expect, it } from "vitest";
-import { BUDGET_MS, HUB_KEEPS_MS, RETRY_WINDOW_MS, advance, canRetry, matchEchoes, retryDelay, withinBudget, type OutboxRecord } from "../src/lib/outbox/state.ts";
+import { LIMITS } from "@morndo/protocol";
+import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, HUB_KEEPS_MS, RETRY_WINDOW_MS, advance, canEdit, canRetry, matchEchoes, retryDelay, withinBudget, type OutboxRecord } from "../src/lib/outbox/state.ts";
 
 const rec = (id: string, createdAt: number, text: string, state: OutboxRecord["state"] = "sent"): OutboxRecord =>
   ({ id, worker: "%1", workerName: "alpha", text, uploads: [], createdAt, budgetFrom: createdAt, state, error: null, attempts: 1, seen: "none", sentAt: createdAt, typedAt: null });
@@ -53,6 +54,12 @@ describe("retry schedule and budget (S7)", () => {
     expect(canRetry(rec("a", 0, "x", "uncertain"), RETRY_WINDOW_MS)).toBe(false);
     expect(canRetry(rec("a", 0, "x", "sent"), 1)).toBe(false);
   });
+  // A message to the manager waits in the hub while the fleet waits for the node
+  // (LIMITS.deliveryOpTimeoutMs) and the hub's client 2 s more. An attempt given up sooner is sent again while the first
+  // is still out, and the two overlap in the hub's queue.
+  it("gives one POST longer than the hub may wait on the fleet for a message to the manager", () => {
+    expect(ATTEMPT_TIMEOUT_MS).toBeGreaterThan(LIMITS.deliveryOpTimeoutMs + 2_000);
+  });
 });
 
 describe("echo matching (S8)", () => {
@@ -79,6 +86,11 @@ describe("echo matching (S8)", () => {
   it("compares the text trimmed", () => {
     expect(matchEchoes([rec("a", 1000, "  ship it\n")], [{ id: "m1", at: 1500, text: "ship it" }]).size).toBe(1);
   });
+  it("a Sent record whose delivery was given up does not consume a later echo of the same text", () => {
+    const givenUp = { ...rec("old", 1000, "status of the release?"), delivery: { state: "given_up" as const, waiting: null, why: "cancelled" } };
+    const again = rec("new", 2000, "status of the release?");
+    expect(matchEchoes([givenUp, again], [{ id: "m1", at: 2500, text: "status of the release?" }])).toEqual(new Map([["new", "m1"]]));
+  });
 });
 
 describe("echo matching on the clock of the machine that typed it (fleet core §3.1)", () => {
@@ -91,5 +103,15 @@ describe("echo matching on the clock of the machine that typed it (fleet core §
   });
   it("a record kept from before typedAt (hubAt only) is still matched by it", () => {
     expect(matchEchoes([{ ...rec("a", 100_000, "ship it"), hubAt: 90_000 }], [{ id: "m1", at: 90_200, text: "ship it" }]).get("a")).toBe("m1");
+  });
+});
+
+describe("Retry or Edit (the rage QA: a Retry that could only fail again)", () => {
+  const failed = (error: string) => ({ state: "failed", error, createdAt: 0 }) as unknown as Parameters<typeof canRetry>[0];
+  it("too_long and empty are Edit, never Retry; any other refusal keeps Retry; stale is Edit", () => {
+    for (const e of ["too_long", "empty"]) { expect(canRetry(failed(e), 1), e).toBe(false); expect(canEdit(failed(e)), e).toBe(true); }
+    expect(canRetry(failed("node_offline"), 1)).toBe(true);
+    expect(canEdit(failed("node_offline"))).toBe(false);
+    expect(canEdit(failed("stale"))).toBe(true);
   });
 });

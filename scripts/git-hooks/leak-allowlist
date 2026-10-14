@@ -6,12 +6,15 @@ apps/fleet/test/log.test.ts	-----BEGIN PRIVATE KEY-----
 apps/fleet/test/log.test.ts	/home/owner/
 apps/fleet/test/startup-files.test.ts	-----BEGIN PRIVATE KEY-----
 apps/hub/test/config-fleet.test.ts	/home/o/
+apps/hub/test/config-manager-queue.test.ts	/home/o/
 apps/hub/test/local-node.test.ts	/home/me/
 apps/hub/test/log.test.ts	/home/someone/
 apps/hub/test/log.test.ts	/home/someoneelse/
+apps/hub/test/no-manager-inbox.test.ts	/home/x/
 apps/node-agent/README.md	/home/owner/
 apps/node-agent/test/transcript-file-ops.test.ts	-----BEGIN PRIVATE KEY-----
 docs/design/fleet-clients/plan/04-hub-web.md	/home/o/
+docs/design/fleet-clients/plan/04-hub-web.md	/home/x/
 docs/design/fleet-clients/plan/05-tests-docs.md	/home/user/
 docs/design/fleet-core/plan/01-foundation.md	/home/.claude/
 docs/design/fleet-core/plan/01-foundation.md	/home/.local/
@@ -26,6 +29,7 @@ docs/design/fleet-core/plan/07-tests-docs-qa.md	/home/<user>/
 docs/design/fleet-core/plan/07-tests-docs-qa.md	/home/owner/
 docs/design/fleet-core/qa.md	/home/<user>/
 docs/design/fleet-core/qa.md	/home/owner/
+docs/fleet-api.md	/home/user/
 packages/domain/test/jobs.test.ts	-----BEGIN PRIVATE KEY-----
 packages/domain/test/jobs.test.ts	-----BEGIN RSA PRIVATE KEY-----
 packages/domain/test/jobs.test.ts	/home/someone/

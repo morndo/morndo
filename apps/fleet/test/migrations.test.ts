@@ -1,5 +1,6 @@
 // fleet.db's numbered migrations (Global Constraints: in the style of the hub's): a fresh database gets every table,
-// WAL and synchronous=FULL; a database from a newer fleet service is refused and left untouched.
+// WAL, synchronous=NORMAL and fullfsync (fleet clients spec §6: only the intake, joins, revocations and epochs are
+// synced, db-sync.test.ts); a database from a newer fleet service is refused and left untouched.
 import Database from "better-sqlite3";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,10 +14,13 @@ const tables = (db: Database.Database) =>
 const columns = (db: Database.Database, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name);
 
 describe("fleet.db migrations", () => {
-  it("a fresh database gets every table, WAL, synchronous=FULL and foreign keys", () => {
+  it("a fresh database gets every table, WAL, synchronous=NORMAL, fullfsync and foreign keys", () => {
     const db = openFleetDb(join(tempDir(), "data", "fleet.db"));
     expect(db.pragma("user_version", { simple: true })).toBe(LATEST);
-    expect(tables(db)).toEqual(["_morndo_schema", "audit", "dead_letters", "deliveries", "hook_unrouted", "job_alert_since", "job_alerts", "job_routes", "job_unnoticed", "jobs", "join_codes", "lanes", "nodes", "outbox", "store_seqs", "stream_hwm"]);
+    expect(tables(db)).toEqual([
+      "_morndo_schema", "audit", "dead_letters", "deliveries", "hook_unrouted", "job_alert_since", "job_alerts", "job_routes", "job_unnoticed", "jobs",
+      "join_codes", "lane_deliveries", "lane_events", "lanes", "nodes", "outbox", "sticky_lanes", "store_seqs", "stream_hwm",
+    ]);
     expect(db.prepare("SELECT floor FROM _morndo_schema WHERE id = 1").get()).toEqual({ floor: 7 });   // migration 7 is the newest breaking one (§11.1)
     expect(columns(db, "job_unnoticed")).toEqual(["node", "id"]);
     expect(columns(db, "job_alerts")).toEqual(["node", "id"]);
@@ -33,8 +37,12 @@ describe("fleet.db migrations", () => {
     expect(columns(db, "audit")).toEqual(["seq", "at", "actor", "action", "node", "detail"]);
     expect(columns(db, "hook_unrouted")).toEqual(["path", "count", "latest_at"]);
     expect(columns(db, "store_seqs")).toEqual(["node", "store", "seq", "at"]);
+    expect(columns(db, "lane_deliveries")).toEqual(["id", "node", "target", "state", "body", "updated_at", "alerted"]);
+    expect(columns(db, "sticky_lanes")).toEqual(["name", "node", "at"]);
+    expect(columns(db, "lane_events")).toEqual(["seq", "node", "window", "lane", "session_id", "event", "at", "body", "to_manager", "delivery_id"]);
     expect(db.pragma("journal_mode", { simple: true })).toBe("wal");
-    expect(db.pragma("synchronous", { simple: true })).toBe(2);                      // 2 = FULL
+    expect(db.pragma("synchronous", { simple: true })).toBe(1);                      // 1 = NORMAL: a commit isn't synced unless synced()
+    expect(db.pragma("fullfsync", { simple: true })).toBe(1);                        // macOS's full flush for what is synced
     expect(db.pragma("foreign_keys", { simple: true })).toBe(1);
     expect(migrate(db)).toEqual({ from: LATEST, to: LATEST });
     db.close();
@@ -64,6 +72,28 @@ describe("fleet.db migrations", () => {
     expect(db.prepare("SELECT path, count FROM hook_unrouted").all()).toEqual([{ path: "/notify", count: 2 }]);
     expect(tables(db)).toContain("store_seqs");
     expect(() => MIGRATIONS[2]?.up(db)).not.toThrow();                               // guarded: the table is there already
+    db.close();
+  });
+
+  it("a version 14 database (the jobs' tables, before the fleet clients') is migrated to the latest, keeping its rows; migration 15 run again changes nothing", () => {
+    const path = join(tempDir(), "fleet.db");
+    const old = new Database(path);
+    migrate(old, MIGRATIONS.slice(0, 14));
+    old.prepare("INSERT INTO lanes (name, node, worker_id, registered_at, conflict) VALUES ('manager', 'pc', 'pc.3fa2c1d0.1', 1, 0)").run();
+    old.close();
+    const db = openFleetDb(path);
+    expect(db.pragma("user_version", { simple: true })).toBe(LATEST);
+    expect(db.prepare("SELECT name, node FROM lanes").all()).toEqual([{ name: "manager", node: "pc" }]);
+    expect(tables(db)).toEqual(expect.arrayContaining(["lane_deliveries", "lane_events", "sticky_lanes"]));
+    expect(() => MIGRATIONS[14]?.up(db)).not.toThrow();                              // guarded: IF NOT EXISTS
+    db.close();
+  });
+
+  it("lane_events takes to_manager 0, 1 or NULL, and nothing else", () => {
+    const db = openFleetDb(join(tempDir(), "fleet.db"));
+    const insert = db.prepare("INSERT INTO lane_events (node, window, lane, event, at, body, to_manager) VALUES ('pc', 'api', 'api', 'finished', 1, '{}', ?)");
+    for (const v of [0, 1, null]) expect(() => insert.run(v)).not.toThrow();
+    expect(() => insert.run(2)).toThrow(/CHECK constraint failed/);
     db.close();
   });
 

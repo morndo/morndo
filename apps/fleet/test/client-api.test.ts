@@ -38,10 +38,10 @@ function serveFiles(a: FakeAgent, files: Map<string, Buffer>) {
 }
 
 describe("the client API", () => {
-  it("speaks /v1/ and lists its versions; another version or route is a 404", async () => {
-    const fleet = await startTestFleet();
+  it("speaks /v1/ and lists its versions and sticky lane names; another version or route is a 404", async () => {
+    const fleet = await startTestFleet({ config: { stickyLanes: ["manager", "ops lead"] } });
     const api = client(fleet.config.socketPath);
-    expect(await api.get("/v1/caps")).toEqual({ status: 200, body: { api: [1] } });
+    expect(await api.get("/v1/caps")).toEqual({ status: 200, body: { api: [1], stickyLanes: ["manager", "ops lead"] } });
     expect(await api.get("/v9/caps")).toEqual({ status: 404, body: { error: "unsupported_api", api: [1] } });
     expect(await api.get("/caps")).toMatchObject({ status: 404 });
     expect(await api.get("/v1/nothing-here")).toEqual({ status: 404, body: { error: "no such route" } });
@@ -207,7 +207,7 @@ describe("the client API", () => {
     const ev = await client(fleet.config.socketPath).events();
     await vi.waitFor(() => expect(ev.received.map(e => `${e.t}:${e.node}`)).toEqual(["status:gone", "status:pc", "inventory:pc", "health:pc"]));
     expect(ev.received.slice(0, 3).map(e => e.body)).toEqual([
-      { status: "offline" }, { status: "online" }, { panes: [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w" }], invVersion: 2 },
+      { status: "offline" }, { status: "online" }, { panes: [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w", status: null, pid: null }], invVersion: 2 },
     ]);
     const b = await fleet.online("mac");
     b.inventory([{ workerId: "mac.3fa2c1d0.1", window: "api", cwd: "/w" }]);

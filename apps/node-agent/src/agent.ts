@@ -20,9 +20,13 @@
 //   under the old store: a send in doubt then reads `unknown` from another store and stays uncertain, however many keyed
 //   ops the restored database would have run since.
 // - The disk budget, LIMITS.spoolMaxBytes, is the spool's, the relay's copies' and the upload inbox's together.
+// - Deliveries (fleet clients spec §4): the deliverer runs from start to stop, kicked by hooks and inventory reads; each
+//   change goes out as ev.delivery, and after every welcome the open ones and every final still kept (7 days, §4.4).
+// - Lane state events (fleet clients spec §7): each inventory read is observed for sessions that turn `waiting` or leave
+//   it; the events go into the spool on "/lane" and to the fleet with the hooks (lane-state.ts).
 import { randomUUID } from "node:crypto";
 import { fleetRecord } from "@morndo/domain";
-import { ERROR_EXECUTED, LIMITS, type AgentMessage, type OpError } from "@morndo/protocol";
+import { ERROR_EXECUTED, LIMITS, type AgentMessage, type Delivery, type OpError } from "@morndo/protocol";
 import { healthProbe, tmuxAdapter } from "@morndo/node-ops";
 import { Flight, HoldWatch, holdFile, productVersion } from "@morndo/service-kit";
 import { ConfigError, isOpName, jobLimits, jobsConfigProblem, jobTimeouts, type AgentConfig } from "./config.ts";
@@ -31,7 +35,9 @@ import type { RetryOptions } from "./conn/retry.ts";
 import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
 import { openAgentDb, rotateStreamId } from "./db/open.ts";
+import type { Deliverer } from "./deliveries/deliverer.ts";
 import { EventLoops } from "./events.ts";
+import { LaneStates } from "./lane-state.ts";
 import { fleetPublicKey, loadNodeKey } from "./identity.ts";
 import type { Logger } from "./log.ts";
 import type { Inventory } from "./ops/inventory.ts";
@@ -47,9 +53,12 @@ import { StreamSender } from "./relay/stream-sender.ts";
 import { cachedFor, windowResolver } from "./relay/window-of.ts";
 import { dropOnce, type TestHooks } from "./test-hooks.ts";
 
-// Results that carry transcript or file bytes go on the bulk queue (spec §5.2 "Frames").
-const BULK_OPS = new Set(["transcript.read", "file.get"]);
+// Results that carry transcript or file bytes, or a capture of up to 256 KiB, go on the bulk queue (spec §5.2 "Frames").
+const BULK_OPS = new Set(["transcript.read", "file.get", "pane.capture"]);
 const HOUSEKEEPING_MS = 3_600_000;
+// After every welcome: the deliveries not final, and every final the node still keeps (LIMITS.deliveryKeepMs). An outage
+// longer than an hour must still correct a mirror row the fleet is alerting on.
+const DELIVERY_REPLAY_MS = LIMITS.deliveryKeepMs;
 
 export type AgentOptions = {
   config: AgentConfig;
@@ -70,6 +79,7 @@ export type RunningAgent = {
   readonly streamId: string;                               // the store id too; rotated for a restored database
   relayPort: number;
   inventory: Inventory;
+  deliverer: Deliverer;                                    // the delivery queue's deliverer (tests watch what kicks it)
   spool: Spool;
   status(): AgentStatus;
   stop(): Promise<void>;
@@ -106,6 +116,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   let draining = false;
   const ops = createOpsRuntime({
     config, db: adb.db, log, hooks, room: () => room(), held: () => watch.held || draining, flight,
+    emitDelivery: d => { sendDelivery(d); },
     ...(hooks.dropAfterStarted !== undefined ? { afterStarted: dropOnce(hooks.dropAfterStarted, () => conn?.drop()) } : {}),
   });
   const spool: Spool = new Spool(adb.db, streamId, { failWrites: hooks.spoolFail === true, maxBytes: budget, held: cachedFor(1000, held) });
@@ -114,9 +125,23 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   const sessions = cachedFor(2000, () => ops.registry.byPane());
 
   const send = (m: AgentMessage, lane: Lane = "control") => conn?.send(m, lane) ?? false;
+  const sendDelivery = (d: Delivery) => send({ v: 1, t: "ev.delivery", delivery: d });
+  // After every welcome: each delivery not final, and every final still kept. Latest wins at the fleet. A final the
+  // mirror still shows as typed is in there, so a long outage does not leave it pending. A change made while offline is
+  // in there, so none is lost by a dropped send.
+  const replayDeliveries = () => {
+    try {
+      for (const d of [...ops.deliveries.open(), ...ops.deliveries.recentFinal(ops.now() - DELIVERY_REPLAY_MS)]) sendDelivery(d);
+    } catch (e) { log.warn("could not read the deliveries to send after a welcome", e); }
+  };
   const sender = new StreamSender({ spool, node: config.node, send: m => send(m), log });
+  const states = new LaneStates({
+    spool, appended: () => sender.kick(), screen: pane => ops.tmux.capture(pane, { lines: 50, attributes: false }),
+    now: ops.now, changed: () => ops.deliverer.kick("status"), log,
+  });
   const events = new EventLoops({
     inventory: ops.inventory, send: m => send(m), log,
+    onInventory: async s => { ops.deliverer.kick("inventory"); await states.observe(s.lanes); },
     health: async () => ({
       ...(await healthProbe(config.home, { tmuxSocket: config.policy.tmuxSocket })), wallClock: ops.now(), spoolDepth: spool.depth(), drops: spool.drops,
       ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
@@ -151,7 +176,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   let relay: Relay;
   try {
     relay = await startRelay({
-      port: config.relayPort, spool, files, log, onAppended: () => sender.kick(), now: ops.now,
+      port: config.relayPort, spool, files, log, onAppended: () => { sender.kick(); ops.deliverer.kick("hook"); }, now: ops.now,
       windowOf: windowResolver({ windowOfPane: p => ops.inventory.windowOfPane(p), sessions }),
     });
   } catch (e) {
@@ -213,6 +238,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     onWelcome: w => {
       sender.online(w);
       events.online();
+      replayDeliveries();
       // A reconnect resends jobs still inside 7 days, at the time they were observed, not at reconnect.
       for (const job of jobs.store.list()) {
         const at = jobs.store.replayAt(job);
@@ -273,25 +299,28 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   }
 
   const housekeeping = () => {
-    try { ops.doneKeys.prune(); files.sweep(); ops.inbox.sweep(); }
+    try { ops.doneKeys.prune(); ops.deliveries.prune(); files.sweep(); ops.inbox.sweep(); }
     catch (e) { log.warn("housekeeping failed", e); }
   };
   housekeeping();
   const timers = [setInterval(housekeeping, HOUSEKEEPING_MS), setInterval(saveStatus, o.statusMs ?? LIMITS.healthMs)];
   events.start();
+  ops.deliverer.start();
   conn.start();
 
   return {
-    instanceId, get streamId() { return streamId; }, relayPort: relay.port, inventory: ops.inventory, spool, status,
+    instanceId, get streamId() { return streamId; }, relayPort: relay.port, inventory: ops.inventory, deliverer: ops.deliverer, spool, status,
     stop: async () => {
       draining = true;
       await flight.idle(o.stopWaitMs ?? 10_000);
       watch.stop();
       for (const t of timers) clearInterval(t);
       events.stop();
+      ops.deliverer.stop();
       jobs.close();
       await conn?.stop();
       await relay.close();
+      await ops.deliverer.drain();                         // a round in flight ends before its database closes
       saveStatus();
       adb.close();
     },

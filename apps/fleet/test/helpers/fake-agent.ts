@@ -9,7 +9,7 @@ import { createPublicKey, generateKeyPairSync, randomBytes, randomUUID, sign, ve
 import { WebSocket, type RawData } from "ws";
 import {
   FLEET_PROTO, FleetFrames, decodeValue, fleetSigPayload, nodeSigPayload,
-  type FleetMessage, type Health, type HookEvent, type OpError, type OpResult, type Pane,
+  type Delivery, type FleetMessage, type Health, type HookEvent, type OpError, type OpResult, type Pane,
 } from "@morndo/protocol";
 import { whenTrue } from "./when-true.ts";
 
@@ -38,7 +38,11 @@ export const validResult = (op: string, node: string): unknown => {
     "transcript.size": { size: null }, "transcript.read": { bytes: "", eof: true }, "transcript.locate": { offset: null },
     "file.stat": { size: 0, mtime: 0 }, "file.get": { bytes: "", size: 0, eof: true }, "file.put": { path: null },
     "lane.start": { workerId: `${node || "node"}.3fa2c1d0.0` }, "lane.stop": { ok: true }, "worktree.list": { worktrees: [] },
-    "worktree.add": { path: "/work" }, "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
+    "worktree.add": { path: "/work" },
+    "pane.capture": { text: null, truncated: false },
+    "lane.deliver": { delivery: { id: "hub:fake", node: node || "node", target: { lane: "fake" }, state: "queued", queuedAt: 1, notAfter: 2 } },
+    "delivery.cancel": { delivery: { id: "hub:fake", node: node || "node", target: { lane: "fake" }, state: "given_up", queuedAt: 1, notAfter: 2, why: "cancelled" } },
+    "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
     "connections.priority": { ok: true }, "connections.role": { ok: true }, "connections.revoke": { ok: true }, "connections.narrow": { ok: true },
   };
   return Object.hasOwn(results, op) ? results[op as keyof OpResult] : {};
@@ -177,7 +181,10 @@ export class FakeAgent {
     return { ok: true, welcome };
   }
 
-  inventory(panes: Pane[]): void { this.send({ v: 1, t: "ev.inventory", panes, invVersion: ++this.invVersion }); }
+  // A pane may leave out status and pid, as an agent from before session state does (fleet clients §5).
+  inventory(panes: (Omit<Pane, "status" | "pid"> & Partial<Pick<Pane, "status" | "pid">>)[]): void { this.send({ v: 1, t: "ev.inventory", panes, invVersion: ++this.invVersion }); }
+  // A delivery's latest state, as the node's queue reports it (fleet clients spec §4.4).
+  delivery(d: Delivery): void { this.send({ v: 1, t: "ev.delivery", delivery: d }); }
   health(h: Health = health()): void { this.send({ v: 1, t: "ev.health", health: h }); }
 
   hook(seq: number, path: HookEvent["path"] = "/hook/stop", body: unknown = { n: seq }, over: Partial<HookEvent> = {}): void {

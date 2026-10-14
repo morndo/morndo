@@ -317,7 +317,7 @@ describe("terminal, sessions and transcripts", () => {
   it("sessions come from the inventory; a transcript is read from the node whose pane runs it, a chunk at a time", async () => {
     const { ports, fleet } = await start();
     await ports.tmux.listWorkers();
-    expect([...(await ports.sessions.byPane())]).toEqual([[PC1, { sessionId: "s-alpha", name: null, pane: PC1, cwd: "/w/alpha", version: null, pid: 0 }]]);
+    expect([...(await ports.sessions.byPane())]).toEqual([[PC1, { sessionId: "s-alpha", name: null, pane: PC1, cwd: "/w/alpha", version: null, pid: 0, status: "idle" }]]);   // the fake fleet's session default (Step 12.21)
     expect(await ports.transcripts.size("s-alpha")).toBe(TRANSCRIPT.length);
     const first = await ports.transcripts.read("s-alpha", 0, 1 << 20);
     expect(first?.bytes.length).toBe(262_144);

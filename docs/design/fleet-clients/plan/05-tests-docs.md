@@ -55,7 +55,7 @@ The doc names the node's relay by its default port 8787, but the doc test sends 
 - Create: `test/fleet/drills-lanes.test.ts` (the manager's restart, a session that changed, `lane.start` through the shell)
 - Create: `test/fleet/drills-lane-events.test.ts` (batches to the manager, a fleet restart, a subscriber that refuses)
 - Create: `test/fleet/drills-lanes-cli.test.ts` (`morndo lanes` against a real fleet and agent: list, peek, keys, send, status, start, stop, events, the exits 5 and 69; ruling 57)
-- Create: `test/fleet/drills-manager-queue.test.ts` (the hub's manager queue through a real fleet: an answer and a message delivered, an answer in flight across a hub kill, the switch off; ruling 66)
+- Create: `test/fleet/drills-manager-queue.test.ts` (the hub's manager queue through a real fleet: an answer and a message delivered, an answer typed and never seen taken, a message cancelled, an answer in flight across a hub kill, the switch off; rulings 66, 82 and 83)
 - Test: the seven files above, and the whole `fleet` project (the box still serves the fleet core's drills)
 
 **Interfaces:**
@@ -71,13 +71,15 @@ The doc names the node's relay by its default port 8787, but the doc test sends 
   - `lane.start { prompt }`, which answers `{ workerId, prompt }`. The prompt's delivery id is `<client>:prompt:<first 16 hex of SHA-256 of the start's key>` (ruling 7, Task 6).
   - The deliverer's rulings 11 (any live session takes deliveries), 16 (a delivery without its receipt holds the next for at most 60 s) and 17 (a `/clear` is confirmed by the session changing), Task 5.
   - The `subscriber_lagging` alert with detail `{ subscriber, oldestAgeMs, streams }` (Task 10, ruling 25).
-  - The hub's manager queue (Task 12, part 04; ruling 66):
-    - `startHub(fleet, { managerQueue })` (Step 12.49);
-    - the answer key `hub:answer:<escalation>:<ask>:<choice>` and the message key `hub:<endpoint>:<request>`, which are also the delivery ids;
-    - the Decision's `delivery.state` on `GET /api/escalations`, behind the card's "Delivered";
-    - a message's `delivery` on its send's answer and on its repeat's `duplicate`;
-    - `EscalationAnswered` in `morndo audit`;
-    - the start line `manager queue: on|off`;
+  - The hub's manager queue (Task 12, part 04; rulings 66, 81, 82 and 83):
+    - `startHub(fleet, { managerQueue })` (Step 12.54): `false` sets `MORNDO_MANAGER_QUEUE=off`; `true` or absent is the hub as it ships, on with a fleet;
+    - the answer key `hub:answer:<escalation>:<ask>:<choice>` (`option:<key>` or `words:<digest>`, with `~2` after a give-up) and the message key `hub:<endpoint>:<request>`, which are also the delivery ids; a message goes to the lane `MORNDO_MANAGER_WINDOW`;
+    - `POST /api/escalations/<id>/answer`: 200 `{ ok: true, item }`; a refusal is 409 `{ error, item }`, among them `already_answered`, `not_delivered`, `uncertain` and `answer_in_doubt`;
+    - on `GET /api/escalations`, each item's Decision's `delivery.state` (`queued`, `delivered` or `uncertain`), its `waiting` and its `notice`, behind the card's "Queued, it will be delivered", "Delivered", "May have been delivered" and "Not delivered";
+    - `POST /api/workers/<id>/send` with `createdAt`: 200 `{ ok: true, at, delivery: { requestId, state, waiting, why } }`; its repeat is 200 `{ ok: true, error: "duplicate", at, delivery }`;
+    - `POST /api/manager/cancel { requestId }` (ruling 83): 200 `{ ok: true, delivery }`, 409 `{ error }` (`already_typed`), or 404 `{ error: "unknown" }`;
+    - `EscalationAnswered` in `morndo audit`, recorded once, at the delivery's `deliveredAt`;
+    - the start line `manager queue: on`, or `manager queue: off (MORNDO_MANAGER_QUEUE)`;
     - at a start with the switch off, what is still queued is cancelled.
   - `morndo lanes` (Task 14, `apps/hub/src/console/lanes.ts`, run as `node apps/hub/src/main.ts lanes …`): its commands and output lines (`<id>: <state>`, `x sent to w1`, `stopped w2`, `<time> w1@n1 finished done …`, `--json` rows and results), and its exits as plan.md's Contracts give them (ruling 49): 0, 2, 4, **5 in doubt** and 69.
 - Produces:
@@ -816,7 +818,7 @@ Make eight edits.
 
    The fleet core's drills take nothing else from these functions: they read `key`, `event` and `got`, which keep their meaning.
 
-7. **`waitOnline` waits until the node answers** (ruling 37). A restored agent is welcomed, turns the welcome down (it starts a new store) and redials (`connection.ts`, `admit`). The old `waitOnline` could pass on that first connection's "online", and the next op then landed in the gap. `drills-retry`'s (b‴) failed that way under load (part 03, "How this part was checked"), and three times in a row on PR #25's CI. **PR #27 puts this exact method on `main`.** If `agentAt`'s `waitOnline` already reads as below, skip this edit. If it is still the one-line `async waitOnline(ms = 15_000) { await until(`${node} online`, async () => (await status()) === "online", ms); },`, replace it with:
+7. **`waitOnline` waits until the node answers** (ruling 37). A restored agent is welcomed, turns the welcome down (it starts a new store) and redials (`connection.ts`, `admit`). The old `waitOnline` could pass on that first connection's "online", and the next op then landed in the gap. `drills-retry`'s (b‴) failed that way under load (part 03, "How this part was checked"), and three times in a row on PR #25's CI. **PR #27 put this method on `main`, so on the branch (e56fa70, main 53d7a22) skip this edit:** its body is the one below, and its comment has one more sentence (a restored agent redials). Only if `agentAt`'s `waitOnline` is still the one-line `async waitOnline(ms = 15_000) { await until(`${node} online`, async () => (await status()) === "online", ms); },`, replace it with:
 
    ```ts
        // Online, and answering: a read through the fleet (op.status starts nothing, and moves no store sequence) answers
@@ -841,7 +843,7 @@ Make eight edits.
    - with the queue switched off (step 2's rollback, spec §13);
    - with its database put back from a copy (step 1's rollback restores the databases).
 
-   `startHub` makes a new hub with a HOME of its own each time, so `Hub` gains `restart`, `get` and `log`. These edits leave alone the lines Task 12 changed in Step 12.49: the signature with `managerQueue`, and the `MORNDO_MANAGER_QUEUE` line.
+   `startHub` makes a new hub with a HOME of its own each time, so `Hub` gains `restart`, `get` and `log`. These edits leave alone the lines Task 12 changed in Step 12.54: the signature with `managerQueue`, and the `MORNDO_MANAGER_QUEUE` line.
 
    In the `Hub` type, replace `  feed(): Promise<FeedWatch>; audit(): string; pairUrl(): string; stop(): Promise<void>;` with:
 
@@ -1649,9 +1651,23 @@ describe("morndo lanes against a real fleet and agent", () => {
 });
 ```
 
-- [ ] **Step 13: Write `test/fleet/drills-manager-queue.test.ts`: the hub's manager queue through a real fleet (ruling 66)**
+- [ ] **Step 13: Write `test/fleet/drills-manager-queue.test.ts`: the hub's manager queue through a real fleet (rulings 66, 82, 83)**
 
-Task 12 turns the queue on by default wherever the hub has a fleet. So this drill runs the hub as it ships (`startHub(fleet, { managerQueue: true })`, explicit whatever the harness's default), with a real fleet and agent and the manager as the box with a live session. The fleet core's `drills-retry` and `duplicate-names` drill the direct path, with the queue off (part 04, Step 12.49).
+Task 12 makes the fleet's delivery queue the only queue for the manager's answers and messages (ruling 81), on by default wherever the hub has a fleet. So this drill runs the hub as it ships (`startHub(fleet, { managerQueue: true })`, explicit whatever the harness's default), with a real fleet and agent and the manager as the box with a live session. The fleet core's `drills-retry` and `duplicate-names` drill the direct path, with the queue off (part 04, Step 12.54).
+
+It drives the hub through Task 12's routes:
+- `POST /api/escalations/<id>/answer`. It answers 200 `{ ok: true, item }`, and the item's `decision.delivery.state` is `queued`, `delivered` or `uncertain`, with `waiting` and `notice`. A refusal is 409 `{ error, item }`: `already_answered`, `not_delivered`, `uncertain` or `answer_in_doubt`.
+- `POST /api/workers/<id>/send` with `createdAt`. It answers 200 `{ ok: true, at, delivery: { requestId, state, waiting, why } }`, and a repeat answers 200 `{ ok: true, error: "duplicate", at, delivery }`.
+- `POST /api/manager/cancel { requestId }`. It answers 200 `{ ok: true, delivery }`, 409 `{ error: "already_typed" }` once the message is typed, or 404 `{ error: "unknown" }`.
+- `GET /api/escalations` (the board).
+- `EscalationAnswered` in `morndo audit`, recorded once, at the delivery's `deliveredAt`.
+- The start line, `manager queue: on` or `manager queue: off (MORNDO_MANAGER_QUEUE)`.
+
+Ruling 82 decides what happens to an answer that may not have reached the manager. Two cases cover its two outcomes:
+- An answer typed and never seen taken is `uncertain`. Its card says "May have been delivered", and it is never asked or typed again.
+- An answer never typed (cancelled at a start with the switch off) is "Not delivered", and its ask opens again.
+
+One case withdraws a message with ruling 83's cancel.
 
 Two of its cases restart the same hub (edit 8):
 - killed between queuing an answer and recording it (drill (f) of the fleet core's durability work, on the queue);
@@ -1660,17 +1676,22 @@ Two of its cases restart the same hub (edit 8):
 The second is the one place where the hub types directly an answer the queue already typed. The node's done key, which the queue's typing and the direct send share, is then what keeps it to once (§9.1); its "(negative control)" takes that key away (`noDoneKeys`).
 
 ```ts
-// The hub's manager queue through a real fleet (plan/RECONCILIATION.md ruling 66; fleet clients spec §9.1, §13 steps 1 and
-// 2): the hub with MORNDO_MANAGER_QUEUE on, a real fleet and node agent (test/fleet-harness.ts: random ports, temporary
-// HOMEs, an isolated tmux server), and the manager as the fake input box with a live session
+// The hub's manager queue through a real fleet (plan/RECONCILIATION.md rulings 66, 81, 82 and 83; fleet clients spec §9.1,
+// §13 steps 1 and 2): the hub with MORNDO_MANAGER_QUEUE on, a real fleet and node agent (test/fleet-harness.ts: random
+// ports, temporary HOMEs, an isolated tmux server), and the manager as the fake input box with a live session
 // (test/fixtures/fake-claude-pane.ts), so a delivery is typed and confirmed from its transcript. The ask is the
 // manager's needs-you list's ny-1, as in drills-retry.
 // - An answer and a message to the manager are each queued under the hub's key, typed once and confirmed; the answer's
 //   card ends "Delivered" (its Decision's delivery state), and its EscalationAnswered is recorded once.
+// - An answer typed and never seen taken (dropped on an interrupt, its line back in the box) is uncertain: its card says
+//   "May have been delivered", it stays answered, it is never typed again, and it is not recorded (ruling 82).
+// - A message waiting behind the owner's draft is cancelled by the principal and never typed; once a message is typed,
+//   its cancel is too late (ruling 83).
 // - Answer in flight (drill (f) of the fleet core's durability work, on the queue): the hub is killed after it queued an
 //   answer and before it recorded it; restarted, it records it once, and nothing is delivered or typed a second time.
 // - Switched off (step 2's rollback):
-//   - an answer still queued is cancelled at start, its ask opens again, and its direct answer types it once;
+//   - an answer still queued is cancelled at start: never typed, its card says "Not delivered", its ask opens again
+//     (ruling 82), and its direct answer types it once;
 //   - a direct retry of an answer already typed finds its key on the node and is not typed again (§9.1: "nothing is typed
 //     twice"). The hub only types such an answer again when it no longer knows it: here its database is put back from a
 //     copy taken before the answer, as step 1's rollback does. The manager's box writes no transcript line for that answer
@@ -1713,9 +1734,9 @@ type Office = Awaited<ReturnType<typeof office>>;
 
 const statusIs = (o: Office, s: string) =>
   until(`the manager ${s} in n1's inventory`, async () => (await paneOf(o.fleet.client, "n1", "manager")).status === s, 15_000);
-// The hub's view of ny-1 (GET /api/escalations): open or not, and its Decision's delivery state, which its card shows
-// ("Queued, it will be delivered", "Delivered", "May have been delivered").
-type Item = { id: string; status: string; decision: { delivery?: { state: string } } | null };
+// The hub's view of ny-1 (GET /api/escalations): open or answered, its Decision's delivery state, which its card shows
+// ("Queued, it will be delivered", "Delivered", "May have been delivered"), why it waits, and its notice ("Not delivered: …").
+type Item = { id: string; status: string; waiting?: string; notice?: string | null; decision: { delivery?: { state: string } } | null };
 const ask = async (hub: Hub) => ((await hub.get("/api/escalations")).body.items as Item[] | undefined)?.find(i => i.id === "ny-1") ?? null;
 // The fleet's deliveries whose id is the hub's answer key for ny-1, hub:answer:ny-1:<ask>:<choice> (§9.1).
 const answers = async (fleet: Fleet) => (await fleet.client.deliveries({ lane: "manager" })).filter(d => d.id.startsWith("hub:answer:ny-1:"));
@@ -1723,11 +1744,19 @@ const recorded = (hub: Hub) => hub.audit().split("\n").filter(l => l.includes("E
 async function theAnswer(o: Office, state: string) {
   return until(`ny-1's delivery ${state}`, async () => (await answers(o.fleet)).find(d => d.state === state) ?? null, 30_000, 250);
 }
+// A message to the manager as the app sends it: with the time he wrote it (createdAt), from which it waits up to 24 hours
+// (ruling 83). `seen: "none"`: written for a manager that waits on no question.
+const message = (o: Office, text: string, requestId: string, createdAt = Date.now()) =>
+  o.hub.post(`/api/workers/${encodeURIComponent(o.managerId)}/send`, { text, requestId, seen: "none", createdAt });
+const cancel = (o: Office, requestId: string) => o.hub.post("/api/manager/cancel", { requestId });
+// The fleet's delivery of a message: its id is the hub's key, hub:<endpoint>:<request> (§9.1).
+const messageDelivery = async (fleet: Fleet, requestId: string) =>
+  (await fleet.client.deliveries({ lane: "manager" })).find(d => d.id.endsWith(`:${requestId}`)) ?? null;
 
 describe("an answer and a message to the manager, through the queue", () => {
   it("an answer: queued under the hub's key, typed once, confirmed; its card ends Delivered; recorded once", async () => {
     const o = await office();
-    expect(await o.hub.answer("ny-1", "ship")).toMatchObject({ status: 200, body: { ok: true } });
+    expect(await o.hub.answer("ny-1", "ship")).toMatchObject({ status: 200, body: { ok: true, item: { id: "ny-1", status: "answered" } } });
     const d = await theAnswer(o, "delivered");
     expect(d.id).toMatch(/^hub:answer:ny-1:[^:]+:option:ship$/);   // the key a direct send types under (§9.1)
     await until("its card Delivered", async () => (await ask(o.hub))?.decision?.delivery?.state === "delivered", 15_000);
@@ -1741,17 +1770,65 @@ describe("an answer and a message to the manager, through the queue", () => {
   it("a message: queued as hub:<endpoint>:<request>, typed once, confirmed; its repeat says delivered and types nothing", async () => {
     const o = await office();
     const rid = randomUUID();
-    expect(await o.hub.send(o.managerId, "status, please", rid)).toMatchObject({ status: 200, body: { ok: true, delivery: { requestId: rid } } });
-    const id = await until("the message's delivery", async () => (await o.fleet.client.deliveries({ lane: "manager" })).find(d => d.id.endsWith(`:${rid}`))?.id ?? null);
+    const written = Date.now();
+    expect(await message(o, "status, please", rid, written)).toMatchObject({ status: 200, body: { ok: true, at: expect.any(Number), delivery: { requestId: rid } } });
+    const id = await until("the message's delivery", async () => (await messageDelivery(o.fleet, rid))?.id ?? null);
     expect(id).toMatch(new RegExp(`^hub:fleet-test-[0-9a-f]{8}:${rid}$`));   // the hub's key: hub:<endpoint>:<request>
     await until("the message delivered", async () => (await o.fleet.client.delivery(id))?.state === "delivered", 30_000);
     const again = await until("the hub's own state: delivered", async () => {
-      const r = await o.hub.send(o.managerId, "status, please", rid);
+      const r = await message(o, "status, please", rid, written);
       return (r.body.delivery as { state?: string } | undefined)?.state === "delivered" ? r : null;
     }, 15_000, 500);
-    expect(again).toMatchObject({ status: 200, body: { ok: true, error: "duplicate" } });
+    expect(again).toMatchObject({ status: 200, body: { ok: true, error: "duplicate", delivery: { requestId: rid, state: "delivered", why: null } } });
     await sleep(PAST_A_TRY);
     expect(times(o.manager.submitted(), "status, please")).toBe(1);
+  });
+});
+
+describe("an answer that may not have reached the manager (ruling 82)", () => {
+  it("typed and never seen taken: uncertain, May have been delivered; never asked again, never typed again, not recorded", async () => {
+    const o = await office();
+    await o.manager.control({ status: "busy" });                   // a turn runs: the answer is typed into the manager's own queue
+    await statusIs(o, "busy");
+    const rid = randomUUID();
+    expect((await o.hub.answer("ny-1", "ship", rid)).status).toBe(200);
+    await theAnswer(o, "held");
+    await o.manager.control({ interrupt: { restore: true } });     // an interrupt drops it, and its line comes back to the box
+    await theAnswer(o, "uncertain");                               // the box isn't clear, so it is not typed again (FL16)
+    await until("its card: May have been delivered", async () => (await ask(o.hub))?.decision?.delivery?.state === "uncertain", 15_000);
+    expect(await o.hub.answer("ny-1", "hold")).toMatchObject({ status: 409, body: { error: "already_answered", item: { status: "answered" } } });
+    expect(await o.hub.answer("ny-1", "ship", rid))                // the same request again: what became of it, nothing more
+      .toMatchObject({ status: 200, body: { ok: true, item: { status: "answered", decision: { delivery: { state: "uncertain" } } } } });
+    await sleep(PAST_A_TRY);
+    expect((await ask(o.hub))?.status).toBe("answered");          // never asked again
+    expect(recorded(o.hub)).toBe(0);                               // it may not have reached the manager (E13)
+    expect(times(o.manager.submitted(), TAP)).toBe(1);
+    expect(await answers(o.fleet)).toHaveLength(1);                // never queued again (no ~2)
+  });
+});
+
+describe("a message cancelled (ruling 83)", () => {
+  it("waiting behind the owner's draft: cancelled, and never typed; once a message is typed, its cancel is too late", async () => {
+    const o = await office();
+    o.manager.draft("the owner's half thought");                   // his own text in the box: a message waits (draft_present)
+    await until("the draft in the manager's box", () => o.manager.screen().includes("the owner's half thought"));
+    const rid = randomUUID();
+    expect(await message(o, "never mind that", rid)).toMatchObject({ status: 200, body: { ok: true, delivery: { requestId: rid, state: "queued" } } });
+    const waiting = await until("the message waiting for the draft", async () => {
+      const d = await messageDelivery(o.fleet, rid);
+      return d?.state === "queued" && d.waiting?.reason === "draft_present" ? d : null;
+    }, 30_000, 250);
+    expect(await cancel(o, rid)).toMatchObject({ status: 200, body: { ok: true, delivery: { requestId: rid, state: "given_up", why: "cancelled" } } });
+    expect(await o.fleet.client.delivery(waiting.id)).toMatchObject({ state: "given_up", why: "cancelled" });
+    expect(await cancel(o, rid)).toMatchObject({ status: 200, body: { delivery: { state: "given_up" } } });   // again: what it came to
+    await o.manager.control({ clear: true });                      // the draft gone: the manager could take it now
+    const later = randomUUID();
+    expect((await message(o, "this one stays", later)).status).toBe(200);
+    await until("the second message delivered", async () => (await messageDelivery(o.fleet, later))?.state === "delivered", 30_000);
+    expect(await cancel(o, later)).toMatchObject({ status: 409, body: { error: "already_typed" } });
+    await sleep(PAST_A_TRY);
+    expect(times(o.manager.submitted(), "never mind that")).toBe(0);
+    expect(times(o.manager.submitted(), "this one stays")).toBe(1);
   });
 });
 
@@ -1801,18 +1878,22 @@ async function typedThenForgotten(o: Office): Promise<void> {
 }
 
 describe("switched off (MORNDO_MANAGER_QUEUE=off, step 2's rollback)", () => {
-  it("an answer still queued is cancelled at start, its ask opens again, and a direct answer types it once", async () => {
+  it("an answer still queued is cancelled at start: Not delivered, its ask opens again, and a direct answer types it once", async () => {
     const o = await office();
     await o.manager.control({ status: "waiting" });                // a menu: the answer waits in the queue (menu_open)
     await statusIs(o, "waiting");
-    expect((await o.hub.answer("ny-1", "ship")).status).toBe(200);
+    const rid = randomUUID();
+    expect((await o.hub.answer("ny-1", "ship", rid)).status).toBe(200);
     const queued = await until("ny-1's delivery waiting for the menu", async () =>
       (await answers(o.fleet)).find(d => d.state === "queued" && d.waiting?.reason === "menu_open") ?? null, 30_000, 250);
+    await until("its card: queued, and why it waits", async () => (await ask(o.hub))?.waiting === "menu_open", 15_000);
     await o.hub.restart({ managerQueue: false });
     await until("the start line: manager queue off", () => /manager queue: off \(MORNDO_MANAGER_QUEUE\)/.test(o.hub.log()), 15_000);
     await until("cancelled at start", async () => (await o.fleet.client.delivery(queued.id))?.why === "cancelled", 15_000);
     expect(await o.fleet.client.delivery(queued.id)).toMatchObject({ state: "given_up", why: "cancelled" });
     await until("ny-1 open again", async () => (await ask(o.hub))?.status === "open", 15_000);
+    expect((await ask(o.hub))?.notice).toMatch(/^Not delivered/);  // never typed: it reached no one (ruling 82)
+    expect(await o.hub.answer("ny-1", "ship", rid)).toMatchObject({ status: 409, body: { error: "not_delivered" } });   // answering again is a new request
     await o.manager.control({ status: "idle" });
     await statusIs(o, "idle");
     expect(await o.hub.answer("ny-1", "ship")).toMatchObject({ status: 200, body: { ok: true } });
@@ -1844,13 +1925,13 @@ describe("switched off (MORNDO_MANAGER_QUEUE=off, step 2's rollback)", () => {
 
 Run: `npx vitest run --project fleet test/fleet/drills-deliveries.test.ts test/fleet/drills-receipts.test.ts test/fleet/drills-lanes.test.ts test/fleet/drills-lane-events.test.ts test/fleet/drills-lanes-cli.test.ts test/fleet/drills-manager-queue.test.ts`
 
-Expected: PASS, `Test Files  6 passed (6)` and `Tests  36 passed (36)`:
+Expected: PASS, `Test Files  6 passed (6)` and `Tests  38 passed (38)`:
 - drills-deliveries: 8 (4 waiting and Enter cases, the kill and its control, a lane in `shell`, the 60 s hold);
 - drills-receipts: 9 (4 receipt cases, 3 retype cases and the control, `/clear`);
 - drills-lanes: 4;
 - drills-lane-events: 3;
 - drills-lanes-cli: 6 (list, peek and keys; send, status and stdin; start and stop; events; in doubt; not reached);
-- drills-manager-queue: 6 (an answer; a message; an answer in flight; the switch off: a queued answer cancelled, a typed answer's direct retry, and its control).
+- drills-manager-queue: 8 (an answer; a message; an answer typed and never seen taken; a message cancelled; an answer in flight; the switch off: a queued answer cancelled, a typed answer's direct retry, and its control).
 
 Each "(negative control)" case passes by showing the failure its guard prevents. Expect about 5 minutes; the subscriber drill and the 60 s hold take about 2 minutes each, in two files that run side by side.
 
@@ -4323,7 +4404,7 @@ Expected: `0`, then `1`. The one Delivery today is the Escalation context's.
 
 - [ ] **Step 9: Add Delivery, Sticky lane, Receipt and Lane event to the Fleet context of `docs/domain.md`**
 
-The domain model names no vendor outside its adapter table, so these say "the agent CLI". E13, the Escalation context's rule for a Decision delivered, comes with Task 12 and its code (ruling 26); this task doesn't add it again. Make seven edits.
+The domain model names no vendor outside its adapter table, so these say "the agent CLI". This task leaves the Escalation and Steering rules alone. #29 put E13 (a Decision for the manager, recorded once delivered) and S5 (a request typed at most once) on `main`, written for the manager's inbox and ADR-0010. Task 12 removes that inbox, and rewrites E13, S5 and the lines that cite them (the paragraph under E13, the `Send state` row) to the fleet's delivery queue, with its code (part 04, Step 12.8; rulings 26, 81, 87). ADR-0014 supersedes ADR-0010; its domain rules stay. Make seven edits.
 
 1. In the Fleet terms table, after the row that starts `| Hook bus |`, add:
 
@@ -4376,7 +4457,8 @@ Expected:
 Then:
 - read the Fleet section once, top to bottom;
 - check every FL number from FL1 to FL21 appears exactly once: `grep -o '^| FL[0-9]* |' docs/domain.md | sort | uniq -d` prints nothing;
-- check that the section's terms agree with `docs/fleet-api.md`.
+- check that the section's terms agree with `docs/fleet-api.md`;
+- check that no line still names the manager's inbox: `grep -n -i 'inbox' docs/domain.md || echo "no inbox"` prints `no inbox`. On `main` (53d7a22) it prints four lines: E13, the paragraph under it, `Send state` and S5. Task 12 rewrote them to the queue (Step 12.8; ruling 81). If one prints here, Task 12 missed it: rewrite it to the fleet's delivery queue, as Task 12's E13 does, and say so in this task's commit message.
 
 - [ ] **Step 11: Commit**
 
@@ -4390,6 +4472,10 @@ git commit -m "docs(domain): Delivery, Sticky lane, Receipt and Lane event in th
 Run: `grep -c 'stickyLanes\|subscriber_lagging' apps/fleet/README.md; grep -c 'lane.deliver\|killAfterEffect' apps/node-agent/README.md; grep -c 'MORNDO_MANAGER_QUEUE\|morndo lanes' apps/hub/README.md`
 
 Expected: `0`, `0`, `0`. If Task 12 or 14 already added a row or a section that Step 15 adds, replace theirs with Step 15's text, and keep anything they wrote that Step 15 doesn't cover.
+
+Run: `grep -rn 'MORNDO_MANAGER_INBOX' apps/hub/src apps/hub/README.md || echo "no inbox switch"`
+
+Expected: `no inbox switch`. On `main` (53d7a22) it prints four lines: `config.ts` reads it, `main.ts`'s usage text names it, and `escalation-service.ts`'s inbox branch cites it. Task 12 removes them all (ruling 81), so `MORNDO_MANAGER_QUEUE` in Step 15 is the only switch. A line printed here means Task 12 isn't done: finish it first.
 
 - [ ] **Step 13: `apps/fleet/README.md`**
 
@@ -4576,7 +4662,7 @@ Make three edits.
 1. In the Settings table, before the `MORNDO_OFFICE_NAME` row, add:
 
    ```markdown
-   | `MORNDO_MANAGER_QUEUE` | on when `MORNDO_FLEET_SOCKET` is set | The manager's answers and commands go through the fleet's delivery queue. An answer counts as given once queued, and its card says "Queued, it will be delivered", then "Delivered", or "May have been delivered" when it was typed and never seen taken (it is never typed again, and the ask doesn't open again). An answer given up (expired, cancelled, or its lane gone) reached no one: its card says "Not delivered", and the ask opens again. `off` or `0` types to the manager directly, as before: a delivery still queued is cancelled first, and since a delivery's id is the key a direct send uses, nothing is typed twice. Without a fleet the hub always types directly. Commands to other lanes are typed directly either way. |
+   | `MORNDO_MANAGER_QUEUE` | on when `MORNDO_FLEET_SOCKET` is set | The only switch for the manager's answers and commands. On, they go through the fleet's delivery queue, the one queue for them. The manager's inbox on disk and its switch `MORNDO_MANAGER_INBOX` are gone, and the hub no longer reads that setting. [ADR-0014](../../docs/adr/0014-fleet-clients-delivery-queue-and-lane-events.md) supersedes ADR-0010 and keeps its rules. An answer counts as given once queued. Its card says "Queued, it will be delivered", then "Delivered", or "May have been delivered" when it was typed and never seen taken (it is never typed again, and the ask doesn't open again). An answer given up (expired, cancelled, or its lane gone) reached no one: its card says "Not delivered", and the ask opens again. A command to a busy manager waits up to 24 hours, its card saying why it waits, and can be cancelled. `off` or `0` types to the manager directly (`pane.send`). A delivery still queued is cancelled first, and a delivery's id is the key a direct send uses, so nothing is typed twice. Without a fleet the hub always types directly. Commands to other lanes are typed directly either way. |
    ```
 
 2. Before `## Checks`, add:
@@ -4711,8 +4797,8 @@ Run:
 node -e '
 const { execFileSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
-const base = execFileSync("git", ["merge-base", "main", "HEAD"], { encoding: "utf8" }).trim();
-const diff = execFileSync("git", ["diff", "--unified=0", "--diff-filter=AM", base, "HEAD", "--", "*.ts"], { encoding: "utf8" });
+const base = execFileSync("git", ["merge-base", "main", "HEAD"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim();
+const diff = execFileSync("git", ["diff", "--unified=0", "--diff-filter=AM", base, "HEAD", "--", "*.ts"], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });   // the diff is over 1 MiB, execFileSync's default
 let file = "", line = 0, seen = 0, bad = 0;
 for (const l of diff.split("\n")) {
   if (l.startsWith("+++ ")) { file = l.slice(6); continue; }
@@ -4743,7 +4829,7 @@ Run: `npx vitest run --project fleet`
 Expected: PASS, every file under `test/fleet`: the fleet core's, and this lane's nine (`fake-box`, the six drill files, `api-doc`, `api-doc-matcher`).
 
 Run: `npx vitest run --project='!fleet'`
-Expected: PASS, the unit and Chromium projects, `scripts/bench-gate.test.ts` among them, but, on macOS, process-start.test.ts's 2 (they read /proc). At 12c2811 on 2026-10-09: 300 files, 2178 tests (1 skipped).
+Expected: PASS on Linux, the unit and Chromium projects, `scripts/bench-gate.test.ts` among them. On macOS, 4 fail: process-start.test.ts's 2 (they read /proc) and pane-lock.test.ts's 2 (they run flock(1), which is Linux-only, from util-linux). For scale, measured on e56fa70 (main 53d7a22, so before this plan's tasks), on this Mac on 2026-10-09: 282 files, 2051 tests (2 skipped). Those 4 failed, and so did one more: timers.test.ts's SQLITE_BUSY sweep, which waits a fixed 200 ms and passed when run alone. Each task's new test files add to these counts, and Tasks 12–13 remove #29's inbox tests (ruling 81).
 
 Run: `npm run check`
 Expected: exit 0.
