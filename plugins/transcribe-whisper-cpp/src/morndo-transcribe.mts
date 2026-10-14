@@ -34,7 +34,10 @@ function dropScratch(dir: string): void {
   } catch (error) {
     // The dir stays in the set, as a failed sweep leaves its dir: a stop's sweep retries it. A clip
     // that cannot be removed must not replace the run's own exit code with a crash, but a leaked clip
-    // must not be silent either: the hub and the operator get the path and the error code.
+    // must not be silent either. The path and the error code go to this process's stderr, for whoever
+    // runs the transcriber: the hub keeps a run's stderr only as a failed run's detail, so a leak
+    // beside a successful run reaches no one through the hub, and this line never joins a fail()
+    // detail — a failure's reason stays the reason, without a filesystem path in it.
     const code = (error as NodeJS.ErrnoException).code ?? String(error);
     process.stderr.write(`scratch dir not removed: ${dir} (${code})\n`);
   }
