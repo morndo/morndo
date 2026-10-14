@@ -357,7 +357,10 @@ EOF
     await expectStopped("SIGTERM");
   });
 
-  live("SIGTERM exits even when the clip directory cannot be removed", async () => {
+  live("SIGTERM exits even when the clip directory cannot be removed", async (ctx) => {
+    // chmod 0o555 stops the removal only for a non-root runner: root removes through it, so the
+    // stuck dir and the leak notice this test asserts cannot be produced at all.
+    if (process.getuid?.() === 0) ctx.skip("running as root: chmod 0o555 does not stop the removal");
     stage(true);
     const armed = join(ROOT, "stuck-armed");
     rmSync(armed, { force: true });
@@ -375,8 +378,11 @@ EOF
       if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
       const ended = await endWithin(done);
       // As the stop tests: the stop's own 143, or the engine failure's 1 when the child's close
-      // settled first. A removal that fails must turn neither into a crash or a hang.
+      // settled first. A removal that fails must turn neither into a crash or a hang. The leak
+      // notice belongs to the 1 alone: the stop's own sweep is silent, the dir staying for a later
+      // stop to retry, while the run's finally is what met the stuck dir and named it.
       expect([143, 1]).toContain(ended?.code);
+      if (ended?.code === 1) expect(ended.stderr).toContain("scratch dir not removed");
     } finally {
       chmodSync(watch, 0o755);
       if (child.pid !== undefined) {
