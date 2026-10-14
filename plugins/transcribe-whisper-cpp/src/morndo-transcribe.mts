@@ -47,10 +47,12 @@ function clearScratch(): void {
   sweepScratch(scratches, (dir) => rmSync(dir, { recursive: true, force: true }));
 }
 
-// The hub's cancel and a Ctrl-C signal the whole group, so the engine child dies with this process and
-// its close can settle before this handler runs; the run then reports the engine's own failure exit,
-// and the hub settles a cancelled run as aborted whatever that code was (transcriber-process.ts).
-// This handler is what makes a stop end at all: kill the children, take the scratch, exit 128+N.
+// The hub's cancel and a Ctrl-C signal the whole group, so a child dies with this process and its
+// close can settle before this handler runs; whatever close settles first becomes the run's result —
+// the engine's failure exit 1, the converter's "not audio" 3, or a finished transcript's 0 when the
+// engine crossed the line as the signal landed. The hub still settles a cancelled run as aborted,
+// because it reads its own run.aborted before the code (transcriber-process.ts). This handler is what
+// makes a stop end at all: kill the children, take the scratch, exit 128+N.
 function onStop(signal: NodeJS.Signals): void {
   for (const child of children) {
     try { child.kill("SIGTERM"); } catch { /* already gone */ }
