@@ -1,6 +1,6 @@
 // The executable, with a stand-in whisper-cli. ffmpeg is the system's. A machine without ffmpeg skips these
 // and says so; the plugin workflow installs it.
-import { chmodSync, closeSync, copyFileSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -400,14 +400,26 @@ EOF
 
   live("a group signal still stops the run when the converter traps it into an ffmpeg-style exit 255", async () => {
     stage(true);
-    writeFileSync(join(BIN, "ffmpeg"), "#!/bin/sh\ntrap 'exit 255' TERM\nsleep 30\n");
-    chmodSync(join(BIN, "ffmpeg"), 0o755);
+    // The trapping stub lives in a BIN of its own, not the shared one: a later test that puts BIN on
+    // PATH must not resolve ffmpeg to a converter that sleeps and turns stop signals into exit 255.
+    const trapBin = mkdtempSync(join(tmpdir(), "morndo-trapbin-"));
+    const armed = join(ROOT, "trap-armed");
+    rmSync(armed, { force: true });
+    writeFileSync(join(trapBin, "ffmpeg"), `#!/bin/sh
+trap 'exit 255' TERM
+touch ${JSON.stringify(armed)}
+while :; do sleep 0.1; done
+`);
+    chmodSync(join(trapBin, "ffmpeg"), 0o755);
     const watch = mkdtempSync(join(tmpdir(), "morndo-trap-"));
     const note = join(ROOT, "trap.wav");
     writeFileSync(note, pcmWav(1));
-    const { child } = spawnDetachedRun(note, watch, `${BIN}:${pathEnv}`);
+    const { child } = spawnDetachedRun(note, watch, `${trapBin}:${pathEnv}`);
     try {
-      expect(await until(() => hasScratchDir(watch), 5000)).toBe(true);
+      // The scratch dir says mkdtemp ran, not that the converter did: the signal can land between
+      // the two. The stub marks itself once its trap is armed, so the stop is sent only once the
+      // exit-255 path can actually run.
+      expect(await until(() => existsSync(armed), 5000)).toBe(true);
       if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
       const code = await Promise.race([
         new Promise<number | null>(resolve => { child.on("close", resolve); }),
@@ -424,6 +436,7 @@ EOF
         try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
       }
       rmSync(watch, { recursive: true, force: true });
+      rmSync(trapBin, { recursive: true, force: true });
     }
   });
 
@@ -448,7 +461,10 @@ EOF
     }
   });
 
-  live("a clip directory that cannot be removed is named on stderr, and the run's own exit code stands", async () => {
+  live("a clip directory that cannot be removed is named on stderr, and the run's own exit code stands", async (ctx) => {
+    // chmod 0o555 stops the removal only for a non-root runner: root removes through it, so the
+    // leaked dir and the EACCES this test asserts cannot be produced at all.
+    if (process.getuid?.() === 0) ctx.skip("running as root: chmod 0o555 does not stop the removal");
     stage(true);
     const go = join(ROOT, "go-leak");
     rmSync(go, { force: true });
@@ -540,14 +556,6 @@ function writeSparseWav(path: string, seconds: number): void {
 function hasClip(dir: string): boolean {
   try {
     return readdirSync(dir, { recursive: true }).some(name => String(name).endsWith("in.wav"));
-  } catch {
-    return false;
-  }
-}
-
-function hasScratchDir(dir: string): boolean {
-  try {
-    return readdirSync(dir).length > 0;
   } catch {
     return false;
   }
