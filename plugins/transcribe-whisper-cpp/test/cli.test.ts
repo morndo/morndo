@@ -1,6 +1,6 @@
 // The executable, with a stand-in whisper-cli. ffmpeg is the system's. A machine without ffmpeg skips these
 // and says so; the plugin workflow installs it.
-import { chmodSync, closeSync, copyFileSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, ftruncateSync, mkdtempSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
@@ -357,32 +357,32 @@ EOF
     await expectStopped("SIGTERM");
   });
 
-  live("SIGTERM exits even when the clip directory cannot be removed", async () => {
+  live("SIGTERM exits even when the clip directory cannot be removed", async (ctx) => {
+    // chmod 0o555 stops the removal only for a non-root runner: root removes through it, so the
+    // stuck dir and the leak notice this test asserts cannot be produced at all.
+    if (process.getuid?.() === 0) ctx.skip("running as root: chmod 0o555 does not stop the removal");
     stage(true);
-    writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nsleep 30\n");
+    const armed = join(ROOT, "stuck-armed");
+    rmSync(armed, { force: true });
+    writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh\ntouch ${JSON.stringify(armed)}\nsleep 30\n`);
     chmodSync(join(BIN, "whisper-cli"), 0o755);
     const watch = mkdtempSync(join(tmpdir(), "morndo-stuck-"));
     const note = join(ROOT, "stuck.wav");
     writeFileSync(note, pcmWav(1));
-    const child: ChildProcess = spawn(process.execPath, [
-      join(BIN, "morndo-transcribe"), "run",
-      "--input", note, "--language", "auto", "--threads", "1", "--max-seconds", "600", "--json",
-    ], {
-      detached: true,
-      env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: watch },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    child.stdout?.resume();
-    child.stderr?.resume();
+    const { child, done } = spawnDetachedRun(note, watch, pathEnv);
     try {
-      expect(await until(() => hasClip(watch), 5000)).toBe(true);
+      // As the stop tests: the stub marks itself once it runs, so the signal never lands on a
+      // converting ffmpeg, whose exit 255 would settle the run as "not audio" 3 instead.
+      expect(await until(() => existsSync(armed), 5000)).toBe(true);
       chmodSync(watch, 0o555);
       if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
-      const code = await Promise.race([
-        new Promise<number | null>(resolve => { child.on("close", resolve); }),
-        new Promise<number>(resolve => { setTimeout(() => resolve(-1), 3000); }),
-      ]);
-      expect(code).toBe(143);
+      const ended = await endWithin(done);
+      // As the stop tests: the stop's own 143, or the engine failure's 1 when the child's close
+      // settled first. A removal that fails must turn neither into a crash or a hang. The leak
+      // notice belongs to the 1 alone: the stop's own sweep is silent, the dir staying for a later
+      // stop to retry, while the run's finally is what met the stuck dir and named it.
+      expect([143, 1]).toContain(ended.code);
+      if (ended.code === 1) expect(ended.stderr).toContain("scratch dir not removed");
     } finally {
       chmodSync(watch, 0o755);
       if (child.pid !== undefined) {
@@ -394,6 +394,103 @@ EOF
 
   live("SIGINT removes the converted clip before the process exits", async () => {
     await expectStopped("SIGINT");
+  });
+
+  live("a group signal still stops the run when the converter traps it into an ffmpeg-style exit 255", async () => {
+    stage(true);
+    // The trapping stub lives in a BIN of its own, not the shared one: a later test that puts BIN on
+    // PATH must not resolve ffmpeg to a converter that sleeps and turns stop signals into exit 255.
+    const trapBin = mkdtempSync(join(tmpdir(), "morndo-trapbin-"));
+    const armed = join(ROOT, "trap-armed");
+    rmSync(armed, { force: true });
+    writeFileSync(join(trapBin, "ffmpeg"), `#!/bin/sh
+trap 'exit 255' TERM
+touch ${JSON.stringify(armed)}
+while :; do sleep 0.1; done
+`);
+    chmodSync(join(trapBin, "ffmpeg"), 0o755);
+    const watch = mkdtempSync(join(tmpdir(), "morndo-trap-"));
+    const note = join(ROOT, "trap.wav");
+    writeFileSync(note, pcmWav(1));
+    const { child, done } = spawnDetachedRun(note, watch, `${trapBin}:${pathEnv}`);
+    try {
+      // The scratch dir says mkdtemp ran, not that the converter did: the signal can land between
+      // the two. The stub marks itself once its trap is armed, so the stop is sent only once the
+      // exit-255 path can actually run.
+      expect(await until(() => existsSync(armed), 5000)).toBe(true);
+      if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
+      const ended = await endWithin(done);
+      // The stop's own 143, or the converter failure's 3 when the trapping stub's exit-255 close
+      // settled before this process's own signal handler ran and the run reported the converter's
+      // death instead: the hub settles a cancelled run as aborted either way, so a prompt end and an
+      // empty scratch are what must hold.
+      expect([143, 3]).toContain(ended.code);
+      expect(readdirSync(watch)).toEqual([]);
+    } finally {
+      if (child.pid !== undefined) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      rmSync(watch, { recursive: true, force: true });
+      rmSync(trapBin, { recursive: true, force: true });
+    }
+  });
+
+  live("a whisper-cli killed by a signal nobody else got is an engine failure, not a stop", async () => {
+    stage(true);
+    writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nkill -TERM $$\n");
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const watch = mkdtempSync(join(tmpdir(), "morndo-lone-"));
+    const note = join(ROOT, "lone.wav");
+    writeFileSync(note, pcmWav(1));
+    const { child, done } = spawnDetachedRun(note, watch, pathEnv);
+    try {
+      const ended = await done;
+      expect(ended.code).toBe(1);
+      expect(ended.stderr).toContain("whisper-cli failed");
+      expect(readdirSync(watch)).toEqual([]);
+    } finally {
+      if (child.pid !== undefined) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      rmSync(watch, { recursive: true, force: true });
+    }
+  });
+
+  live("a clip directory that cannot be removed is named on stderr, and the run's own exit code stands", async (ctx) => {
+    // chmod 0o555 stops the removal only for a non-root runner: root removes through it, so the
+    // leaked dir and the EACCES this test asserts cannot be produced at all.
+    if (process.getuid?.() === 0) ctx.skip("running as root: chmod 0o555 does not stop the removal");
+    stage(true);
+    const go = join(ROOT, "go-leak");
+    rmSync(go, { force: true });
+    writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh
+while [ ! -f ${JSON.stringify(go)} ]; do sleep 0.02; done
+exit 4
+`);
+    chmodSync(join(BIN, "whisper-cli"), 0o755);
+    const watch = mkdtempSync(join(tmpdir(), "morndo-leak-"));
+    const note = join(ROOT, "leak.wav");
+    writeFileSync(note, pcmWav(1));
+    const { child, done } = spawnDetachedRun(note, watch, pathEnv);
+    try {
+      expect(await until(() => hasClip(watch), 5000)).toBe(true);
+      chmodSync(watch, 0o555);
+      writeFileSync(go, "");
+      const ended = await done;
+      expect(ended.code).toBe(1);
+      expect(ended.stderr).toContain("whisper-cli failed");
+      const leaked = readdirSync(watch).map(String);
+      expect(leaked.length).toBe(1);
+      expect(ended.stderr).toContain(join(watch, leaked[0] ?? ""));
+      expect(ended.stderr).toContain("EACCES");
+    } finally {
+      chmodSync(watch, 0o755);
+      if (child.pid !== undefined) {
+        try { process.kill(-child.pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+      rmSync(watch, { recursive: true, force: true });
+      rmSync(go, { force: true });
+    }
   });
 
   live("an abort leaves the host's temp dir empty", async () => {
@@ -459,6 +556,36 @@ function hasClip(dir: string): boolean {
   }
 }
 
+// A run of the executable in a process group of its own, as the hub starts it, with stderr kept: the
+// stop paths speak through the exit code, and the leak path through stderr.
+function spawnDetachedRun(note: string, watch: string, pathEnv: string): {
+  child: ChildProcess;
+  done: Promise<{ code: number | null; stderr: string }>;
+} {
+  const child: ChildProcess = spawn(process.execPath, [
+    join(BIN, "morndo-transcribe"), "run",
+    "--input", note, "--language", "auto", "--threads", "1", "--max-seconds", "600", "--json",
+  ], {
+    detached: true,
+    env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: watch },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stderr = "";
+  child.stderr?.setEncoding("utf8");
+  child.stderr?.on("data", (chunk: string) => { stderr += chunk; });
+  child.stdout?.resume();
+  return { child, done: new Promise(resolve => { child.on("close", code => resolve({ code, stderr })); }) };
+}
+
+// A stop must end the run at once: a leader still alive 3 s later is a hang, and fails the test as
+// one here — before any exit code is judged, where a null would read as a wrong code instead.
+function endWithin(done: Promise<{ code: number | null; stderr: string }>): Promise<{ code: number | null; stderr: string }> {
+  return Promise.race([
+    done,
+    new Promise<never>((_, reject) => { setTimeout(() => reject(new Error("the run still lives 3 s after the stop signal")), 3000); }),
+  ]);
+}
+
 function until(ready: () => boolean, ms: number): Promise<boolean> {
   const start = Date.now();
   return new Promise(resolve => {
@@ -473,26 +600,28 @@ function until(ready: () => boolean, ms: number): Promise<boolean> {
 
 async function expectStopped(signal: NodeJS.Signals): Promise<void> {
   stage(true);
-  writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nsleep 30\n");
+  const armed = join(ROOT, `stop-${signal}-armed`);
+  rmSync(armed, { force: true });
+  writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh\ntouch ${JSON.stringify(armed)}\nsleep 30\n`);
   chmodSync(join(BIN, "whisper-cli"), 0o755);
   const watch = mkdtempSync(join(tmpdir(), "morndo-stop-"));
   const note = join(ROOT, `stop-${signal}.wav`);
   writeFileSync(note, pcmWav(1));
-  const child: ChildProcess = spawn(process.execPath, [
-    join(BIN, "morndo-transcribe"), "run",
-    "--input", note, "--language", "auto", "--threads", "1", "--max-seconds", "600", "--json",
-  ], {
-    detached: true,
-    env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: watch },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout?.resume();
-  child.stderr?.resume();
+  const { child, done } = spawnDetachedRun(note, watch, pathEnv);
   try {
-    expect(await until(() => hasClip(watch), 5000)).toBe(true);
+    // The clip only says the converter opened its output: a stop while ffmpeg is still converting is
+    // answered by its exit 255, which the run settles as "not audio" 3. The stub marks itself once it
+    // runs — after the converter — so the signal leaves only the engine child to be killed, and a
+    // raced close can report only the engine's failure.
+    expect(await until(() => existsSync(armed), 5000)).toBe(true);
     if (child.pid !== undefined) process.kill(-child.pid, signal);
-    const code = await new Promise<number | null>(resolve => child.on("close", resolve));
-    expect(code).toBe(signal === "SIGINT" ? 130 : 143);
+    const ended = await endWithin(done);
+    // What the hub settles is its own record of the cancel (transcriber-process.ts answers run.aborted
+    // before the code), so what must hold here is what the user can see: the process is gone within
+    // seconds, the scratch is gone, and the code is the stop's own 128+N — or the engine failure's 1,
+    // when the engine child's close settled before this process's own signal handler ran and the run
+    // reported the engine's death instead. Either is a clean stop; a hang or a leak is not.
+    expect([signal === "SIGINT" ? 130 : 143, 1]).toContain(ended.code);
     expect(readdirSync(watch)).toEqual([]);
   } finally {
     if (child.pid !== undefined) {
