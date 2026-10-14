@@ -359,14 +359,18 @@ EOF
 
   live("SIGTERM exits even when the clip directory cannot be removed", async () => {
     stage(true);
-    writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nsleep 30\n");
+    const armed = join(ROOT, "stuck-armed");
+    rmSync(armed, { force: true });
+    writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh\ntouch ${JSON.stringify(armed)}\nsleep 30\n`);
     chmodSync(join(BIN, "whisper-cli"), 0o755);
     const watch = mkdtempSync(join(tmpdir(), "morndo-stuck-"));
     const note = join(ROOT, "stuck.wav");
     writeFileSync(note, pcmWav(1));
     const { child, done } = spawnDetachedRun(note, watch, pathEnv);
     try {
-      expect(await until(() => hasClip(watch), 5000)).toBe(true);
+      // As the stop tests: the stub marks itself once it runs, so the signal never lands on a
+      // converting ffmpeg, whose exit 255 would settle the run as "not audio" 3 instead.
+      expect(await until(() => existsSync(armed), 5000)).toBe(true);
       chmodSync(watch, 0o555);
       if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
       const ended = await endWithin(done);
@@ -589,14 +593,20 @@ function until(ready: () => boolean, ms: number): Promise<boolean> {
 
 async function expectStopped(signal: NodeJS.Signals): Promise<void> {
   stage(true);
-  writeFileSync(join(BIN, "whisper-cli"), "#!/bin/sh\nsleep 30\n");
+  const armed = join(ROOT, `stop-${signal}-armed`);
+  rmSync(armed, { force: true });
+  writeFileSync(join(BIN, "whisper-cli"), `#!/bin/sh\ntouch ${JSON.stringify(armed)}\nsleep 30\n`);
   chmodSync(join(BIN, "whisper-cli"), 0o755);
   const watch = mkdtempSync(join(tmpdir(), "morndo-stop-"));
   const note = join(ROOT, `stop-${signal}.wav`);
   writeFileSync(note, pcmWav(1));
   const { child, done } = spawnDetachedRun(note, watch, pathEnv);
   try {
-    expect(await until(() => hasClip(watch), 5000)).toBe(true);
+    // The clip only says the converter opened its output: a stop while ffmpeg is still converting is
+    // answered by its exit 255, which the run settles as "not audio" 3. The stub marks itself once it
+    // runs — after the converter — so the signal leaves only the engine child to be killed, and a
+    // raced close can report only the engine's failure.
+    expect(await until(() => existsSync(armed), 5000)).toBe(true);
     if (child.pid !== undefined) process.kill(-child.pid, signal);
     const ended = await endWithin(done);
     // What the hub settles is its own record of the cancel (transcriber-process.ts answers run.aborted
