@@ -267,17 +267,18 @@ describe("the sheet and cards report what happened to an answer", () => {
     await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
     const dialog = tab.locator("dialog.sheet");
     await dialog.waitFor();
+    // The due line's clock is frozen before it is read: the harness starts it at the fixture's time and moves it to
+    // the real one on its next tick, so a line read before the freeze can be a day off the one after (on a day other
+    // than the fixture's). The countdown keeps its own, real clock.
+    await tab.evaluate(() => {
+      const g = globalThis as unknown as { __freezeClock?: boolean; __setClock: (t: number) => void };
+      g.__freezeClock = true;
+      g.__setClock(Date.now());
+    });
     const due = await dialog.locator(".meta").innerText();
     await tab.evaluate(() => {
-      const g = globalThis as unknown as {
-        __freezeClock?: boolean;
-        __setClock: (t: number) => void;
-        __setAnswering: (a: { label: string; sending: boolean; commitAt: number }) => void;
-      };
-      const t = Date.now();
-      g.__freezeClock = true;
-      g.__setClock(t);
-      g.__setAnswering({ label: "Extend the triage script", sending: false, commitAt: t + 5_000 });
+      const g = globalThis as unknown as { __setAnswering: (a: { label: string; sending: boolean; commitAt: number }) => void };
+      g.__setAnswering({ label: "Extend the triage script", sending: false, commitAt: Date.now() + 5_000 });
     });
     await dialog.getByText("Goes in 5 s.").waitFor({ timeout: 3_000 });
     await tab.waitForTimeout(1_300);
