@@ -94,6 +94,9 @@ describe("a decision item's brief on the wire (§4.5)", () => {
       at: 1, via: "here", endpointId: null, sessionId: null,
     };
     const answered = { ...item, status: "answered", decision };
+    // "here" and "elsewhere" pass through untouched: the feed's per-client via is the whole truth the app shows.
+    expect(read(answered).decision?.via).toBe("here");
+    expect(read({ ...answered, decision: { ...decision, via: "elsewhere" } }).decision?.via).toBe("elsewhere");
     const api = read({ ...answered, decision: { ...decision, via: "api" } });
     expect(api.id).toBe("d-1");
     expect(api.decision?.via).toBeUndefined();

@@ -36,16 +36,29 @@ export type AgentToken = { id: string; name: string; role: "manager" | "worker";
 type Row = Record<string, unknown>;
 
 // A sends row, its state first (as Store.send returned it before `workerId` and `key` were added, so a failed assertion on
-// one still prints its state).
+// one still prints its state). `request`: "<endpoint>:<request id>" for an escalation answer, naming the endpoint whose
+// request it was; `requestSession`: the session under it (who sent it, A1; null on rows from before it was kept);
+// `label`: the option's label as the ask showed it when the answer was written (null for words, and on older rows).
 export type SendRow = {
   state: "started" | "done"; at: number; outcome: string | null; typedAt: number | null; store: string | null; storeSeq: number | null; workerId: string | null; key: string;
+  request: string | null; requestSession: string | null; label: string | null;
 };
 type SendRowSql = {
   key: string; state: "started" | "done"; at: number; outcome: string | null; typed_at: number | null; node_store: string | null; node_store_seq: number | null; worker_id: string | null;
+  request: string | null; request_session: string | null; label: string | null;
 };
 const sendRow = (r: SendRowSql): SendRow =>
-  ({ state: r.state, at: r.at, outcome: r.outcome, typedAt: r.typed_at, store: r.node_store, storeSeq: r.node_store_seq, workerId: r.worker_id, key: r.key });
-const SEND_COLUMNS = "key, state, at, outcome, typed_at, node_store, node_store_seq, worker_id";
+  ({ state: r.state, at: r.at, outcome: r.outcome, typedAt: r.typed_at, store: r.node_store, storeSeq: r.node_store_seq, workerId: r.worker_id, key: r.key, request: r.request, requestSession: r.request_session, label: r.label });
+const SEND_COLUMNS = "key, state, at, outcome, typed_at, node_store, node_store_seq, worker_id, request, request_session, label";
+// The first key past every key that starts with `prefix`, an ask's prefix (escalation-service.ts askPrefix), which ends
+// in ":": the same with that ":" made ";", the next character. SQLite compares TEXT bytewise by default (BINARY), so
+// the keys from `prefix` up to this one are exactly those that start with it
+// (https://www.sqlite.org/datatype3.html#collation). Any other prefix is refused: the next code point after its last
+// character may not exist, or not survive as UTF-8 (round 4.4 of the PR #55 review).
+const keysPast = (prefix: string) => {
+  if (!prefix.endsWith(":")) throw new Error(`an answer key prefix ends in ":", not ${JSON.stringify(prefix.slice(-1))}`);
+  return `${prefix.slice(0, -1)};`;
+};
 
 export const READ_MARKS_KEPT = 500;
 
@@ -149,25 +162,32 @@ export class Store {
   }
   // An escalation answer, written "started" before it is typed, as a send is (fleet core §3.1; final review C1 and its
   // follow-up): under its answer key, with the worker it goes to and the request that sends it ("<endpoint>:<request
-  // id>"); its store and store sequence once its node answers (setSendStore). A repeat by either finds it and asks that
+  // id>") and the session under it, so a row settled later is recorded with its own sender's provenance (A1), and the
+  // option's label as the ask showed it, so an answer found typed for an earlier version keeps that version's label
+  // (E9); its store and store sequence once its node answers (setSendStore). A repeat by either finds it and asks that
   // node (SteeringService's settle) instead of typing it again, after a hub that stopped while typing it too. False if a
   // row for the key is there already.
-  startAnswer(key: string, at: number, o: { workerId: string | null; request: string }): boolean {
-    return this.db.prepare("INSERT OR IGNORE INTO sends (key, state, at, worker_id, request) VALUES (?, 'started', ?, ?, ?)")
-      .run(key, at, o.workerId, o.request).changes === 1;
+  startAnswer(key: string, at: number, o: { workerId: string | null; request: string; session?: string | null; label?: string | null }): boolean {
+    return this.db.prepare("INSERT OR IGNORE INTO sends (key, state, at, worker_id, request, request_session, label) VALUES (?, 'started', ?, ?, ?, ?, ?)")
+      .run(key, at, o.workerId, o.request, o.session ?? null, o.label ?? null).changes === 1;
   }
-  // The answer a request sent, if any (its row, under its answer key).
+  // The answer a request sent, if any (its row, under its answer key). A request can hold rows for two versions of an
+  // ask (asked again in between, its first never started): the one it wrote last, by insertion, never by the hub's
+  // clock, which may step back between the two (rounds 3.6 and 4.9 of the PR #55 review). A new row's rowid is one past
+  // the largest in the table (https://www.sqlite.org/autoinc.html, read 2026-10-13), so it is above every row still
+  // there; the hub runs no VACUUM, the one command that may renumber them (https://www.sqlite.org/lang_vacuum.html).
   sendOfRequest(request: string): SendRow | null {
-    const r = this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE request = ?`).get(request) as SendRowSql | undefined;
+    const r = this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE request = ? ORDER BY rowid DESC LIMIT 1`).get(request) as SendRowSql | undefined;
     return r ? sendRow(r) : null;
   }
   // Every answer to one ask kept here (24 hours), whatever its choice: the rows whose answer key starts with `prefix`
-  // (escalation-service.ts askPrefix), oldest first. SQLite's substr counts characters, so the prefix is counted in
-  // code points, not UTF-16 units.
+  // (escalation-service.ts askPrefix), in the order they were written, by insertion as sendOfRequest's, never by the
+  // hub's clock (round 5.4): what an answer settles before it is typed (E8), the first written first. A range of the
+  // primary key, never a scan of every send (round 3.7 of the PR #55 review): the keys from the prefix up to the prefix
+  // with its last character one higher (keysPast).
   answersOfAsk(prefix: string): SendRow[] {
-    return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE substr(key, 1, ?) = ? ORDER BY at, key`)
-      // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: SQLite's substr counts them (above)
-      .all([...prefix].length, prefix) as SendRowSql[]).map(sendRow);
+    return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE key >= ? AND key < ? ORDER BY rowid`)
+      .all(prefix, keysPast(prefix)) as SendRowSql[]).map(sendRow);
   }
   // The store of the node a send went to (fleet core §3.1), kept with its row: only that store can say it never started.
   // With it, the store sequence its answer gave (null when unknown): a lower one from that store later means its

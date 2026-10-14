@@ -130,7 +130,7 @@ describe("desktop brief review", () => {
     await tab.getByRole("dialog").getByRole("button", { name: "Check again" }).waitFor();
   }, 60_000);
 
-  it("a send from this modal stays this device's answer when via is elsewhere or missing", async () => {
+  it("an answer's standing is the feed's word: here keeps the send, elsewhere names the other device", async () => {
     await ready();
     const card = tab.locator('[data-decision="d-1"]');
     await card.getByRole("button", { name: "Approve option B: extend the in-house triage script" }).click();
@@ -138,27 +138,30 @@ describe("desktop brief review", () => {
     await dialog.getByRole("button", { name: /B · Extend the triage script/ }).click();
     await dialog.getByRole("button", { name: "Send answer" }).click();
     await dialog.locator("p.stand").getByText("Sent. The manager gets it as your decision and acts on it.").waitFor();
-    const sent = structuredClone(ITEMS[0]) as unknown as { status: string; decision: { choice: { kind: string; key: string; label: string }; at: number; via?: string; endpointId: null; sessionId: null } };
-    sent.status = "answered";
-    sent.decision = { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW, via: "elsewhere", endpointId: null, sessionId: null };
-    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [sent, ITEMS[1], ITEMS[2]]);
+    // The hub derives via per client, so the feed alone carries it: the device whose request accepted the answer
+    // reads "here" — the same wording after a reload or on a second tab, where no memory of this page's send exists.
+    const mine = structuredClone(ITEMS[0]) as unknown as { status: string; decision: { choice: { kind: string; key: string; label: string }; at: number; via?: string; endpointId: null; sessionId: null } };
+    mine.status = "answered";
+    mine.decision = { choice: { kind: "option", key: "b", label: "Extend the triage script" }, at: NOW, via: "here", endpointId: null, sessionId: null };
+    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [mine, ITEMS[1], ITEMS[2]]);
     const stand = dialog.locator("p.stand");
     await stand.getByText("Sent. You chose Extend the triage script.").waitFor();
     expect(await stand.getByText("Answered on another device").count()).toBe(0);
     const row = tab.locator('[data-decision="d-1"]');
     expect(await row.getByText("Answered on another device").count()).toBe(0);
     await row.getByText("You chose").waitFor();
-    const again = structuredClone(sent) as unknown as { version: string; decision: { choice: { label: string }; via?: string } };
-    again.version = "v2";
-    again.decision.via = "elsewhere";
-    again.decision.choice.label = "Buy a hosted add-on";
-    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [again, ITEMS[1], ITEMS[2]]);
+    // Another device's answer wins the wording, whatever this page sent: the feed says elsewhere.
+    const other = structuredClone(mine) as unknown as { decision: { choice: { label: string }; via?: string } };
+    other.decision.via = "elsewhere";
+    other.decision.choice.label = "Buy a hosted add-on";
+    await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [other, ITEMS[1], ITEMS[2]]);
     await stand.getByText("Answered on another device: “Buy a hosted add-on”.").waitFor();
     await row.getByText("Answered on another device").waitFor();
-    const missing = structuredClone(sent);
-    delete missing.decision.via;
+    // A record that names no endpoint keeps no via on the wire: neutral, it claims neither.
+    const missing = structuredClone(mine);
+    delete (missing as unknown as { decision: { via?: string } }).decision.via;
     await tab.evaluate(items => (globalThis as unknown as { __setItems: (n: unknown) => void }).__setItems(items), [missing, ITEMS[1], ITEMS[2]]);
-    await stand.getByText("Sent. You chose Extend the triage script.").waitFor();
+    await stand.getByText("Answered: Extend the triage script.").waitFor();
     expect(await stand.getByText("Answered on another device").count()).toBe(0);
   }, 60_000);
 

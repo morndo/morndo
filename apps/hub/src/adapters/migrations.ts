@@ -216,6 +216,20 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS transcriptions_id ON transcriptions (id);
     `),
   },
+  {
+    // PR #50 (transcriptions) merged first, so 20 is that line's table, already running live; this column is 21.
+    // A database at 20 runs only 21.
+    version: 21,
+    name: "sends.request_session: the session an escalation answer was sent under, so a row in doubt settled later is recorded with its own sender's provenance (A1; review of PR #55)",
+    compat: "additive",
+    up: db => { if (!hasColumn(db, "sends", "request_session")) db.exec("ALTER TABLE sends ADD COLUMN request_session TEXT"); },
+  },
+  {
+    version: 22,
+    name: "sends.label: the option label an escalation answer was typed with, so an answer found typed for an earlier version of its ask keeps that version's label (E9; review of PR #55)",
+    compat: "additive",
+    up: db => { if (!hasColumn(db, "sends", "label")) db.exec("ALTER TABLE sends ADD COLUMN label TEXT"); },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
