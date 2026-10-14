@@ -381,8 +381,8 @@ EOF
       // settled first. A removal that fails must turn neither into a crash or a hang. The leak
       // notice belongs to the 1 alone: the stop's own sweep is silent, the dir staying for a later
       // stop to retry, while the run's finally is what met the stuck dir and named it.
-      expect([143, 1]).toContain(ended?.code);
-      if (ended?.code === 1) expect(ended.stderr).toContain("scratch dir not removed");
+      expect([143, 1]).toContain(ended.code);
+      if (ended.code === 1) expect(ended.stderr).toContain("scratch dir not removed");
     } finally {
       chmodSync(watch, 0o755);
       if (child.pid !== undefined) {
@@ -424,7 +424,7 @@ while :; do sleep 0.1; done
       // settled before this process's own signal handler ran and the run reported the converter's
       // death instead: the hub settles a cancelled run as aborted either way, so a prompt end and an
       // empty scratch are what must hold.
-      expect([143, 3]).toContain(ended?.code);
+      expect([143, 3]).toContain(ended.code);
       expect(readdirSync(watch)).toEqual([]);
     } finally {
       if (child.pid !== undefined) {
@@ -577,11 +577,12 @@ function spawnDetachedRun(note: string, watch: string, pathEnv: string): {
   return { child, done: new Promise(resolve => { child.on("close", code => resolve({ code, stderr })); }) };
 }
 
-// A stop must end the run at once: this resolves null when the leader is still alive 3 s later.
-function endWithin(done: Promise<{ code: number | null; stderr: string }>): Promise<{ code: number | null; stderr: string } | null> {
+// A stop must end the run at once: a leader still alive 3 s later is a hang, and fails the test as
+// one here — before any exit code is judged, where a null would read as a wrong code instead.
+function endWithin(done: Promise<{ code: number | null; stderr: string }>): Promise<{ code: number | null; stderr: string }> {
   return Promise.race([
     done,
-    new Promise<null>(resolve => { setTimeout(() => resolve(null), 3000); }),
+    new Promise<never>((_, reject) => { setTimeout(() => reject(new Error("the run still lives 3 s after the stop signal")), 3000); }),
   ]);
 }
 
@@ -620,7 +621,7 @@ async function expectStopped(signal: NodeJS.Signals): Promise<void> {
     // seconds, the scratch is gone, and the code is the stop's own 128+N — or the engine failure's 1,
     // when the engine child's close settled before this process's own signal handler ran and the run
     // reported the engine's death instead. Either is a clean stop; a hang or a leak is not.
-    expect([signal === "SIGINT" ? 130 : 143, 1]).toContain(ended?.code);
+    expect([signal === "SIGINT" ? 130 : 143, 1]).toContain(ended.code);
     expect(readdirSync(watch)).toEqual([]);
   } finally {
     if (child.pid !== undefined) {
