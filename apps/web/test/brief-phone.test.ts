@@ -268,17 +268,19 @@ describe("the sheet and cards report what happened to an answer", () => {
     await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
     const dialog = tab.locator("dialog.sheet");
     await dialog.waitFor();
+    // Pin the due line's clock before reading it. dueLine counts calendar days (decisions.ts), so a line read at the
+    // sheet's mount time and re-read at the real now differs once midnight has passed between the two: CI saw "in 49
+    // days" become "in 48 days" after midnight UTC on 2026-10-14 (02:40 and 03:30). Pinned, the countdown still ticks
+    // on the session clock, as it does in the app.
+    await tab.evaluate(n => {
+      const g = globalThis as unknown as { __freezeClock?: boolean; __setClock: (t: number) => void };
+      g.__freezeClock = true;
+      g.__setClock(n);
+    }, NOW);
     const due = await dialog.locator(".meta").innerText();
     await tab.evaluate(() => {
-      const g = globalThis as unknown as {
-        __freezeClock?: boolean;
-        __setClock: (t: number) => void;
-        __setAnswering: (a: { label: string; sending: boolean; commitAt: number }) => void;
-      };
-      const t = Date.now();
-      g.__freezeClock = true;
-      g.__setClock(t);
-      g.__setAnswering({ label: "Extend the triage script", sending: false, commitAt: t + 5_000 });
+      const g = globalThis as unknown as { __setAnswering: (a: { label: string; sending: boolean; commitAt: number }) => void };
+      g.__setAnswering({ label: "Extend the triage script", sending: false, commitAt: Date.now() + 5_000 });
     });
     await dialog.getByText("Goes in 5 s.").waitFor({ timeout: 3_000 });
     await tab.waitForTimeout(1_300);
