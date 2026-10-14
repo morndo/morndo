@@ -16,7 +16,6 @@
   import { renderMarkdown } from "../markdown.ts";
   import { REFUSALS, ago, deliveryLine, standingLine, type DecisionItem } from "../desktop/decisions.ts";
   import { DELIVERED, MAY_HAVE_BEEN, QUEUED } from "../queue-words.ts";
-  import { viaOf } from "../sent-here.ts";
   import { byLabel } from "./horizon.ts";
   import { actions, brief, due } from "./brief.ts";
   import type { Body } from "../catchup/run.ts";
@@ -62,7 +61,7 @@
   // What closed it, in words, when it isn't open any more.
   // Not on the board: gone, if the board is current; otherwise nothing can be said yet (review of PR #7, finding 8).
   const closed = $derived(!item ? (primed ? "This decision isn't on the hub's list anymore." : null)
-    : item.status === "answered" ? (viaOf(item) === "elsewhere" ? standingLine(item, "") : answeredHere(item))
+    : item.status === "answered" ? (item.decision?.via === "elsewhere" ? standingLine(item, "") : answeredHere(item))
     : item.status === "settled" ? `Settled${item.resolution ? `: ${item.resolution}` : "."}`
     : item.status === "expired" ? "Expired: nobody answered within a day." : null);
   // The words stay until the answer has started (offline, a cancelled passkey check, or a refusal keep them; Undo
@@ -120,7 +119,7 @@
     <p class="note" role="status">Waiting for the hub to say where this decision stands…</p>
   {:else if closed}
     {#if refusal && !MAY_HAVE_GONE.has(refusal.code)}<p class="err" role="alert">{refusal.text}</p>{/if}
-    <div class="state" role="status"><p>{closed}</p>{#if item && viaOf(item) !== "here"}<p class="note">Nothing was answered from here.</p>{/if}</div>
+    <div class="state" role="status"><p>{closed}</p>{#if item && item.decision?.via === "elsewhere"}<p class="note">Nothing was answered from here.</p>{/if}</div>
     <button class="pbtn primary block" onclick={onNext}>Next card</button>
   {:else if item}
     {#if refusal}

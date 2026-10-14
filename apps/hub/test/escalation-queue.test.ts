@@ -8,12 +8,12 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { endpointId, sessionId, type Message } from "@morndo/domain";
 import { Store } from "../src/adapters/store.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
 import { fleetDeliveries } from "../src/adapters/fleet-deliveries.ts";
-import { EscalationService, type Watch } from "../src/application/escalation-service.ts";
+import { EscalationService, type SettleInDoubt, type Watch } from "../src/application/escalation-service.ts";
 import { ManagerQueue } from "../src/application/manager-queue.ts";
 import type { Authenticated } from "../src/application/access-service.ts";
 import type { Deliveries } from "../src/application/ports.ts";
@@ -65,11 +65,11 @@ afterEach(async () => {
 });
 
 // A hub start, as main.ts builds one with a fleet: the queue (on, unless the switch is off), then the escalations on it.
-async function start(o: { on?: boolean; deliveries?: Deliveries } = {}) {
+async function start(o: { on?: boolean; deliveries?: Deliveries; settle?: SettleInDoubt } = {}) {
   const queue = new ManagerQueue({ store, deliveries: o.deliveries ?? fleetDeliveries(rig.client), lane: "manager", on: o.on ?? true, now: () => clock, pollMs: 60_000 });
   const svc = new EscalationService({
     watch, ledger: ledgerReader(ledgerPath, () => clock), store, managerName: "manager", now: () => clock,
-    send: (pane, text, key) => rig.ports.tmux.send(pane, text, key), queue,
+    send: (pane, text, key) => rig.ports.tmux.send(pane, text, key), queue, ...(o.settle ? { settle: o.settle } : {}),
   });
   await queue.start();
   svc.poll();
@@ -422,6 +422,33 @@ describe("#29's review cases, on the queue", () => {
   it("B9: words that are empty once control characters go are refused, and nothing is queued", async () => {
     const svc = await start();
     expect(await svc.answer(auth, "ny-7", { kind: "words", text: " \u001b\u0007\u0000\r\n " }, "r1")).toMatchObject({ ok: false, problem: "empty" });
+    expect(rig.fleet.deliveryCalls).toEqual([]);
+  });
+});
+
+// PR #55's review on the queue: the ask's earlier answers are settled once per answer, before it is queued, as main
+// settles them before its inbox and its typed path (round 5.6).
+describe("#55's earlier answers, on the queue", () => {
+  it("another choice's answer typed directly and never started at its node: settled once, then this answer is queued", async () => {
+    const other = "answer:ny-7:m1:option:hold";
+    store.startAnswer(other, T0 - 1000, { workerId: MANAGER, request: "desk:r0", label: "Hold for a day" });
+    store.setSendStore(other, "st-0");
+    const svc = await start({ settle: async key => { store.dropSend(key); return null; } });   // never started there
+    const ofAsk = vi.spyOn(store, "answersOfAsk");
+    expect(await ship(svc)).toMatchObject({ ok: true, item: { status: "answered", decision: { delivery: { state: "queued" } } } });
+    expect(store.send(other)).toBeNull();
+    expect(ofAsk).toHaveBeenCalledTimes(1);
+    expect(rig.fleet.deliveryCalls).toEqual([{ id: ID, lane: "manager", workerId: null, text: "[tap ny-7] ship (Ship it)" }]);
+    expect(backend.typed).toEqual([]);
+  });
+
+  it("another choice's answer that its node did type: recorded as the answer, and nothing is queued (E8)", async () => {
+    const other = "answer:ny-7:m1:option:hold";
+    store.startAnswer(other, T0 - 1000, { workerId: MANAGER, request: "desk:r0", label: "Hold for a day" });
+    store.setSendStore(other, "st-0");
+    const svc = await start({ settle: async () => ({ ok: false, problem: "duplicate", at: T0 - 500 }) });
+    expect(await ship(svc)).toMatchObject({ ok: false, problem: "already_answered" });
+    expect(item(svc)).toMatchObject({ status: "answered", decision: { choice: { key: "hold" } } });
     expect(rig.fleet.deliveryCalls).toEqual([]);
   });
 });
