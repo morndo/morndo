@@ -364,27 +364,15 @@ EOF
     const watch = mkdtempSync(join(tmpdir(), "morndo-stuck-"));
     const note = join(ROOT, "stuck.wav");
     writeFileSync(note, pcmWav(1));
-    const child: ChildProcess = spawn(process.execPath, [
-      join(BIN, "morndo-transcribe"), "run",
-      "--input", note, "--language", "auto", "--threads", "1", "--max-seconds", "600", "--json",
-    ], {
-      detached: true,
-      env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: watch },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    child.stdout?.resume();
-    child.stderr?.resume();
+    const { child, done } = spawnDetachedRun(note, watch, pathEnv);
     try {
       expect(await until(() => hasClip(watch), 5000)).toBe(true);
       chmodSync(watch, 0o555);
       if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
-      const code = await Promise.race([
-        new Promise<number | null>(resolve => { child.on("close", resolve); }),
-        new Promise<number>(resolve => { setTimeout(() => resolve(-1), 3000); }),
-      ]);
+      const ended = await endWithin(done);
       // As the stop tests: the stop's own 143, or the engine failure's 1 when the child's close
       // settled first. A removal that fails must turn neither into a crash or a hang.
-      expect([143, 1]).toContain(code);
+      expect([143, 1]).toContain(ended?.code);
     } finally {
       chmodSync(watch, 0o755);
       if (child.pid !== undefined) {
@@ -414,22 +402,19 @@ while :; do sleep 0.1; done
     const watch = mkdtempSync(join(tmpdir(), "morndo-trap-"));
     const note = join(ROOT, "trap.wav");
     writeFileSync(note, pcmWav(1));
-    const { child } = spawnDetachedRun(note, watch, `${trapBin}:${pathEnv}`);
+    const { child, done } = spawnDetachedRun(note, watch, `${trapBin}:${pathEnv}`);
     try {
       // The scratch dir says mkdtemp ran, not that the converter did: the signal can land between
       // the two. The stub marks itself once its trap is armed, so the stop is sent only once the
       // exit-255 path can actually run.
       expect(await until(() => existsSync(armed), 5000)).toBe(true);
       if (child.pid !== undefined) process.kill(-child.pid, "SIGTERM");
-      const code = await Promise.race([
-        new Promise<number | null>(resolve => { child.on("close", resolve); }),
-        new Promise<number>(resolve => { setTimeout(() => resolve(-1), 3000); }),
-      ]);
+      const ended = await endWithin(done);
       // The stop's own 143, or the converter failure's 3 when the trapping stub's exit-255 close
       // settled before this process's own signal handler ran and the run reported the converter's
       // death instead: the hub settles a cancelled run as aborted either way, so a prompt end and an
       // empty scratch are what must hold.
-      expect([143, 3]).toContain(code);
+      expect([143, 3]).toContain(ended?.code);
       expect(readdirSync(watch)).toEqual([]);
     } finally {
       if (child.pid !== undefined) {
@@ -582,6 +567,14 @@ function spawnDetachedRun(note: string, watch: string, pathEnv: string): {
   return { child, done: new Promise(resolve => { child.on("close", code => resolve({ code, stderr })); }) };
 }
 
+// A stop must end the run at once: this resolves null when the leader is still alive 3 s later.
+function endWithin(done: Promise<{ code: number | null; stderr: string }>): Promise<{ code: number | null; stderr: string } | null> {
+  return Promise.race([
+    done,
+    new Promise<null>(resolve => { setTimeout(() => resolve(null), 3000); }),
+  ]);
+}
+
 function until(ready: () => boolean, ms: number): Promise<boolean> {
   const start = Date.now();
   return new Promise(resolve => {
@@ -601,29 +594,17 @@ async function expectStopped(signal: NodeJS.Signals): Promise<void> {
   const watch = mkdtempSync(join(tmpdir(), "morndo-stop-"));
   const note = join(ROOT, `stop-${signal}.wav`);
   writeFileSync(note, pcmWav(1));
-  const child: ChildProcess = spawn(process.execPath, [
-    join(BIN, "morndo-transcribe"), "run",
-    "--input", note, "--language", "auto", "--threads", "1", "--max-seconds", "600", "--json",
-  ], {
-    detached: true,
-    env: { PATH: pathEnv, HOME: "/tmp", LANG: "C", TMPDIR: watch },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  child.stdout?.resume();
-  child.stderr?.resume();
+  const { child, done } = spawnDetachedRun(note, watch, pathEnv);
   try {
     expect(await until(() => hasClip(watch), 5000)).toBe(true);
     if (child.pid !== undefined) process.kill(-child.pid, signal);
-    const code = await Promise.race([
-      new Promise<number | null>(resolve => { child.on("close", resolve); }),
-      new Promise<number>(resolve => { setTimeout(() => resolve(-1), 3000); }),
-    ]);
+    const ended = await endWithin(done);
     // What the hub settles is its own record of the cancel (transcriber-process.ts answers run.aborted
     // before the code), so what must hold here is what the user can see: the process is gone within
     // seconds, the scratch is gone, and the code is the stop's own 128+N — or the engine failure's 1,
     // when the engine child's close settled before this process's own signal handler ran and the run
-    // reported the engine's death instead. Either is a clean stop; a hang (-1) or a leak is not.
-    expect([signal === "SIGINT" ? 130 : 143, 1]).toContain(code);
+    // reported the engine's death instead. Either is a clean stop; a hang or a leak is not.
+    expect([signal === "SIGINT" ? 130 : 143, 1]).toContain(ended?.code);
     expect(readdirSync(watch)).toEqual([]);
   } finally {
     if (child.pid !== undefined) {
