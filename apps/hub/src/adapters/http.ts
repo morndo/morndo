@@ -635,7 +635,7 @@ export function startHttp(p: {
           : json(res, 404, { error: "unknown" });
       }
     }
-    if (path === "/api/escalations" && method === "GET") return json(res, 200, escalations.board());
+    if (path === "/api/escalations" && method === "GET") return json(res, 200, escalations.seenBy(a.endpoint.id));
     const answer = /^\/api\/escalations\/([A-Za-z0-9_-]{1,80})\/answer$/.exec(path);
     if (answer && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
@@ -815,7 +815,9 @@ export function startHttp(p: {
         fleet: status => send({ t: "fleet", available: status === "ok" }),
         watching: () => conn.watching,
       });
-      const unsubscribeBoard = escalations.subscribe(board => send({ t: "decisions", ...board }));
+      // Each connection hears where every Decision stands for its own endpoint: "here" only for the device whose
+      // request accepted it (seenBy), never the hub-level record.
+      const unsubscribeBoard = escalations.subscribe(board => send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id, board) }));
       const unsubscribeTasks = p.board?.service.subscribe(b => send({ t: "board", ...b })) ?? (() => false);
       const unsubscribeUsage = p.usage?.subscribe(v => send({ t: "usage", ...v })) ?? (() => false);
       // Where this device's messages to the manager stand in the fleet's queue (fleet-clients §9.1): each change, by
@@ -860,7 +862,7 @@ export function startHttp(p: {
             if (r.kind === "events") send({ t: "events", events: r.events, caughtUp: true });
             else send({ t: "snapshot", ...observation.snapshot() });
             send({ t: "fleet", available: observation.fleet() === "ok" });   // a resumed feed may have missed a change
-            send({ t: "decisions", ...escalations.board() });
+            send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id) });
             if (p.board) send({ t: "board", ...p.board.service.view() });   // ADR-0015: whole, after every hello
             if (p.usage) send({ t: "usage", ...p.usage.view() });           // ADR-0016: every account, after every hello
             if (p.queue) send({ t: "deliveries", items: p.queue.commandsOf(conn.auth.endpoint.id) });   // all of the last day

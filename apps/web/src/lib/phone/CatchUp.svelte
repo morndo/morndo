@@ -11,7 +11,6 @@
   import type { LiveFeed } from "../feed.svelte.ts";
   import { MAY_HAVE_GONE, type CatchUpSession } from "../catchup/session.svelte.ts";
   import { OFFLINE_DECISION, PASSKEY_UNFINISHED, STILL_OFFLINE } from "../desktop/decisions.ts";
-  import { viaOf } from "../sent-here.ts";
   import { counts, segments, type Body, type Mark } from "../catchup/run.ts";
   import { hold, swipe, type Swiped } from "../catchup/swipe.ts";
   import type { NewCommand } from "../outbox/outbox.ts";
@@ -135,7 +134,7 @@
   }
   // An unknown outcome that did reach the hub: the board shows it answered here, and it counts as his answer.
   $effect(() => {
-    if (top?.kind === "decision" && session.refusal?.key === top.key && MAY_HAVE_GONE.has(session.refusal.code) && item?.status === "answered" && viaOf(item) === "here") session.confirmAnswered(top.key);
+    if (top?.kind === "decision" && session.refusal?.key === top.key && MAY_HAVE_GONE.has(session.refusal.code) && item?.status === "answered" && item.decision?.via === "here") session.confirmAnswered(top.key);
   });
   async function verifyAgain() {
     const key = top?.key ?? null;

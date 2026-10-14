@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  askVersion,
+  askIdentity, askVersion,
   Escalations, LEDGER_GRACE_MS, TAP_TTL_MS, endpointId, escalationId, sessionId,
   type Ask, type Sighting, type SourceState,
 } from "../src/index.ts";
@@ -83,6 +83,14 @@ describe("E9: a Decision names one of the ask's own options, or carries words", 
     expect(x.record("ny-1", { kind: "option", key: "deploy" }, by, T0)).toEqual({ ok: false, error: "bad_option" });
     const r = x.record("ny-1", { kind: "option", key: "hold" }, by, T0);
     expect(r.ok && r.value.choice).toEqual({ kind: "option", key: "hold", label: "Hold" });
+  });
+  it("takes the label the ask showed when the answer was typed, when given, and still refuses a key the ask no longer has", () => {
+    const x = new Escalations();
+    x.reconcile([seen(ask("ny-1", { options: [{ key: "ship", label: "Ship now", detail: null }] }))], T0, true);   // renamed since
+    expect(x.record("ny-1", { kind: "option", key: "hold" }, by, T0, [{ key: "hold", label: "Hold" }])).toEqual({ ok: false, error: "bad_option" });
+    const r = x.record("ny-1", { kind: "option", key: "ship" }, by, T0, [{ key: "ship", label: "Ship it" }]);
+    expect(r.ok && r.value.choice).toEqual({ kind: "option", key: "ship", label: "Ship it" });
+    expect(x.get("ny-1")?.decision?.choice).toEqual({ kind: "option", key: "ship", label: "Ship it" });
   });
   it("words need text, and an ask without options can't take an option", () => {
     const x = new Escalations();
@@ -199,5 +207,34 @@ describe("E8: a Decision found typed at the asker after the fact (recordTyped)",
     expect(x.get("ny-1")?.status).toBe("answered");
     expect(x.recordTyped("ny-1", { kind: "option", key: "hold", label: "Hold" }, by, T0 + 2 * MIN)).toEqual({ ok: false, error: "already_answered" });
     expect(x.record("ny-1", { kind: "option", key: "hold" }, by, T0 + 2 * MIN)).toEqual({ ok: false, error: "already_answered" });
+  });
+});
+
+// Round 4.6 of the PR #55 review: an answer found typed for an earlier version of the ask (asked again since, or gone
+// from the board) is recorded through the aggregate like every other answered event. It never becomes the Decision of
+// the ask as it stands (E11, E12), and an answer for the version the aggregate holds is no earlier one: that is the
+// ask's own Decision, taken under E8 by record or recordTyped.
+describe("E11: an earlier version's answer, found typed (recordEarlier)", () => {
+  it("records it with its provenance and leaves the ask as it stands open", () => {
+    const x = new Escalations();
+    const v1 = ask("ny-1");
+    x.reconcile([seen(v1)], T0, true);
+    x.reconcile([seen(ask("ny-1", { askedAt: T0 + MIN, messageId: "m-ny-1-again" }))], T0 + MIN, true);
+    expect(x.recordEarlier("ny-1", askIdentity(v1), { kind: "option", key: "ship", label: "Ship it" }, by, T0 + 2 * MIN))
+      .toEqual({ type: "EscalationAnswered", escalationId: "ny-1", choice: { kind: "option", key: "ship", label: "Ship it" }, endpointId: "e1", sessionId: "s1", at: T0 + 2 * MIN });
+    expect(x.get("ny-1")).toMatchObject({ status: "open", decision: null });
+  });
+  it("records it for an ask no longer held", () => {
+    const x = new Escalations();
+    expect(x.recordEarlier("ny-9", "m-ny-9", { kind: "words" }, by, T0)).toMatchObject({ type: "EscalationAnswered", escalationId: "ny-9", choice: { kind: "words" } });
+    expect(x.get("ny-9")).toBeUndefined();
+  });
+  it("refuses an answer for the version it holds: that is the ask's own Decision", () => {
+    const x = new Escalations();
+    const v1 = ask("ny-1");
+    x.reconcile([seen(v1)], T0, true);
+    expect(x.recordEarlier("ny-1", askIdentity(v1), { kind: "option", key: "ship", label: "Ship it" }, by, T0 + MIN)).toBeNull();
+    expect(x.get("ny-1")).toMatchObject({ status: "open", decision: null });
+    expect(askIdentity({ messageId: null, askedAt: T0 })).toBe(`t${T0}`);
   });
 });
