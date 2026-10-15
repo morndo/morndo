@@ -18,7 +18,7 @@ import { selfHolder } from "./adapters/processes.ts";
 import { childEnv, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { usageReport, type CodexLimits } from "./adapters/usage-codex.ts";
-import { NO_FREE_SEAT, type PoolRefusal, type TurnBegun, type TurnEnd } from "./application/pool-service.ts";
+import { type PoolRefusal, type TurnBegun, type TurnEnd } from "./application/pool-service.ts";
 
 const DEFAULT_RUNTIME = "codex";
 const DEFAULT_WAIT_MS = 1_800_000;
