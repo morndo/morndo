@@ -112,7 +112,7 @@ describe("codex usage: the app server", () => {
     const reading = await readCodexLimits({ bin: s.bin, env: env(), version: "1", timeoutMs: 5_000 });
     expect(reading).toEqual({ ok: true, limits: limitsFromResult(PLUS) });
     const replies = (s.seen() as Seen & { replies: { id: number; error: { code: number } | null }[] }).replies;
-    expect(replies.map(r => r.id).sort()).toEqual([0, 1]);
+    expect(replies.map(r => r.id).sort((a, b) => a - b)).toEqual([0, 1]);
     expect(replies.every(r => r.error?.code === -32601)).toBe(true);
   });
 
