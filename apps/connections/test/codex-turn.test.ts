@@ -1,7 +1,7 @@
 // A pool turn's stream (ADR-0029, §6.8): what a failure was, when the account comes back, and the arguments of the turn that
 // goes on elsewhere. Messages are codex-cli 0.161.0's (codex-rs/protocol/src/error.rs at rust-v0.161.0).
 import { describe, expect, it } from "vitest";
-import { classifyFailure, continuationArgs, handoffArgs, promptOf, retryAt, sessionOf } from "../src/adapters/codex-turn.ts";
+import { classifyFailure, continuationArgs, handoffArgs, promptOf, resumesLast, retryAt, sessionOf } from "../src/adapters/codex-turn.ts";
 
 const LIMIT = "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:05 PM.";
 const NOON = Date.UTC(2026, 9, 15, 12);
@@ -33,5 +33,29 @@ describe("codex turn: the arguments of the turn that goes on", () => {
     expect(continuationArgs(first, "t-1", "GO ON")).toEqual(["exec", "resume", "t-1", "--json", "-m", "model-x", "-c", 'model_reasoning_effort="high"', "-c", 'sandbox_mode="danger-full-access"', "GO ON"]);
     expect(continuationArgs(again, "t-1", "GO ON")).toEqual([...again.slice(0, -1), "GO ON"]);
     expect(handoffArgs(again, "HAND OFF")).toEqual(["exec", "--json", "-m", "model-x", "-c", 'sandbox_mode="danger-full-access"', "HAND OFF"]);
+  });
+});
+
+describe("codex turn: reading `exec resume` as the CLI does", () => {
+  it("finds the session id after options, and never takes a flag or its value for it", () => {
+    expect(sessionOf(["exec", "resume", "--json", "-m", "model-x", "t-1", "go on"])).toBe("t-1");
+    expect(sessionOf(["exec", "resume", "-c", 'sandbox_mode="x"', "--skip-git-repo-check", "t-2", "go on"])).toBe("t-2");
+    expect(sessionOf(["exec", "resume", "--model=model-x", "t-3", "go on"])).toBe("t-3");
+    expect(sessionOf(["exec", "--json", "go on"])).toBeNull();
+  });
+
+  it("knows --last and --all, which name no session, and takes the prompt as the last word either way", () => {
+    expect([resumesLast(["exec", "resume", "--last", "continue"]), resumesLast(["exec", "resume", "t-1", "continue"]), resumesLast(["exec", "--json", "x"])]).toEqual([true, false, false]);
+    expect(sessionOf(["exec", "resume", "--last", "continue"])).toBeNull();
+    expect(sessionOf(["exec", "resume", "--json", "--last", "continue"])).toBeNull();
+    expect(promptOf(["exec", "resume", "--last", "continue"])).toBe("continue");
+  });
+
+  it("has no prompt when the only word after the options is the session id", () => {
+    expect(promptOf(["exec", "resume", "--json", "t-1"])).toBeNull();
+  });
+
+  it("drops the session id for a handoff wherever it stands", () => {
+    expect(handoffArgs(["exec", "resume", "--json", "-m", "model-x", "t-1", "go on"], "HAND")).toEqual(["exec", "--json", "-m", "model-x", "HAND"]);
   });
 });

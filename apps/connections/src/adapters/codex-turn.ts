@@ -56,14 +56,46 @@ export function retryAt(message: string, now: number, timeZone: string): number 
   return at > now ? at : null;
 }
 
-export function sessionOf(args: readonly string[]): string | null {
-  return args[0] === "exec" && args[1] === "resume" ? (args[2] ?? null) : null;
+// `exec resume [OPTIONS] [SESSION_ID] [PROMPT]` (codex exec resume --help, codex-cli 0.161.0). These options take a value; any
+// other word that starts with "-" stands alone, and `--opt=value` is one word. --last and --all take the place of the id.
+const RESUME_VALUE_OPTIONS = new Set(["-c", "--config", "-m", "--model", "-i", "--image", "--enable", "--disable", "--thread-source", "--cyber-access-program", "-o", "--output-last-message", "--output-schema"]);
+
+type Resume = { last: boolean; session: string | null; sessionAt: number; positionals: number };
+
+// null when the arguments are not a resume.
+function readResume(args: readonly string[]): Resume | null {
+  if (args[0] !== "exec" || args[1] !== "resume") return null;
+  let last = false;
+  const words: number[] = [];
+  for (let i = 2; i < args.length; i++) {
+    const word = args[i] ?? "";
+    if (word === "--last" || word === "--all") { last = true; continue; }
+    if (word === "-") { words.push(i); continue; }
+    if (word.startsWith("-")) { if (RESUME_VALUE_OPTIONS.has(word)) i++; continue; }
+    words.push(i);
+  }
+  // With --last the first word is the prompt; otherwise the first is the id and a second one is the prompt.
+  const sessionAt = last || words.length === 0 ? -1 : (words[0] ?? -1);
+  return { last, session: sessionAt < 0 ? null : (args[sessionAt] ?? null), sessionAt, positionals: words.length };
 }
 
-// The prompt is the last argument; "-" (stdin) and a flag are not a prompt.
+// The session a resume names, or null: a first turn, and `--last`, which names none.
+export function sessionOf(args: readonly string[]): string | null {
+  return readResume(args)?.session ?? null;
+}
+
+// `exec resume --last` (or --all) continues whichever session is newest in the store: it can't be placed on an account.
+export function resumesLast(args: readonly string[]): boolean {
+  return readResume(args)?.last ?? false;
+}
+
+// The prompt is the last argument. "-" (stdin) and a flag are not a prompt, and neither is a resume's session id.
 export function promptOf(args: readonly string[]): string | null {
-  const last = args[args.length - 1];
-  return last === undefined || last === "-" || last.startsWith("-") ? null : last;
+  const at = args.length - 1;
+  const last = args[at];
+  if (last === undefined || last === "-" || last.startsWith("-")) return null;
+  const resume = readResume(args);
+  return resume !== null && resume.sessionAt === at ? null : last;
 }
 
 const RESUME_DROPS = new Set(["--add-dir", "-p", "--profile"]);
@@ -86,7 +118,9 @@ export function continuationArgs(args: readonly string[], session: string, promp
 
 // The same turn as a new session: `resume <session>` dropped, the prompt replaced.
 export function handoffArgs(args: readonly string[], prompt: string): string[] {
-  return args[1] === "resume" ? ["exec", ...args.slice(3, -1), prompt] : [...args.slice(0, -1), prompt];
+  const resume = readResume(args);
+  if (resume === null) return [...args.slice(0, -1), prompt];
+  return ["exec", ...args.slice(2, -1).filter((_, i) => i + 2 !== resume.sessionAt), prompt];
 }
 
 export function continuePrompt(request: string): string {
