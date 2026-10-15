@@ -280,10 +280,11 @@ function spend(home: Opened, name: string, io: Io): number {
 }
 
 // A Codex subscription's usage windows, one line of the status-line JSON the hub's Usage route takes (ADR-0028 decision 5).
-// Nothing on stdout when they can't be read, so a pipe into a post posts nothing. The child gets childEnv: no key variable,
+// Nothing on stdout and exit 1 when they can't be read, so a caller that posts only on exit 0 sends nothing (a bare pipe would
+// still send an empty body). The child gets childEnv: no key variable,
 // and the Connection's own CODEX_HOME.
 async function usage(home: Opened, parsed: Parsed, io: Io): Promise<number> {
-  const name = need(parsed.get("connection"));
+  const name = need(parsed.get("connection") ?? parsed.positionals[0]);
   const connection = findConnection(home.store.load().directory, name);
   if (!connection || connection.status === "revoked") return fail(io, "missing");
   if (connection.custody !== "morndo" || connection.kind !== "subscription" || connection.runtime !== "codex") {
