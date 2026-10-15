@@ -104,7 +104,7 @@ function list(home: Opened, runtime: string, parsed: Parsed, io: Io): number {
 function limitsOf(reading: Omit<Reading, "member" | "at">): CodexLimits {
   const [first, second] = [...reading.windows].sort((a, b) => (a.minutes ?? Infinity) - (b.minutes ?? Infinity));
   const win = (w: typeof first) => (w ? { usedPercent: w.usedPercent, windowDurationMins: w.minutes, resetsAt: w.resetsAt === null ? null : Math.floor(w.resetsAt / 1000) } : null);
-  return { primary: win(first), secondary: win(second), planType: reading.plan };
+  return { primary: win(first), secondary: win(second), planType: reading.plan, others: [] };
 }
 
 function codexEnv(home: Opened, configDir: string | null): NodeJS.ProcessEnv {

@@ -77,6 +77,24 @@ describe("morndo-keys usage", () => {
     expect([out.code, out.stdout, out.stderr]).toEqual([1, "", "codex app-server: not signed in with ChatGPT\n"]);
   });
 
+  it("takes the connection as a positional argument too, as check and spend do", async () => {
+    const env = home();
+    expect((await cli(["add", "codex-a", "--vendor", "codex", "--runtime", "codex", "--subscription", "true", "--config-dir", scratch("morndo-usage-login-")], env)).code).toBe(0);
+    const out = await cli(["usage", "codex-a"], { ...env, MORNDO_CODEX_BIN: fakeCodex().bin });
+    expect(out.code, out.stderr).toBe(0);
+    expect(JSON.parse(out.stdout)).toMatchObject({ session_id: "codex-a-limits" });
+  });
+
+  it("reads stdin by the command word only: a key added under the name 'usage' is still read", async () => {
+    const env = home();
+    const child = spawn(process.execPath, ["--no-warnings", MAIN, "add", "usage", "--vendor", "openai", "--runtime", "codex", "--billing", "metered", "--budget", "unlimited"], { env, stdio: ["pipe", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString("utf8"); });
+    child.stdin.end("sk-synthetic-usage-0009\n");
+    const code = await new Promise<number | null>(resolve => child.on("close", resolve));
+    expect([code, stderr]).toEqual([0, ""]);
+  }, 20_000);
+
   it("doesn't wait for input that never comes", async () => {
     const child = spawn(process.execPath, ["--no-warnings", MAIN, "usage", "--connection", "nope"], { env: home(), stdio: ["pipe", "pipe", "pipe"] });
     const killer = setTimeout(() => child.kill("SIGKILL"), 10_000);

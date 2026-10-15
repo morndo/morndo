@@ -15,7 +15,10 @@ const FIVE_HOURS = 300;
 const SEVEN_DAYS = 10_080;
 
 export type CodexWindow = { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null };
-export type CodexLimits = { primary: CodexWindow | null; secondary: CodexWindow | null; planType: string | null };
+// `others`: the account's other limits, from rateLimitsByLimitId (v2/GetAccountRateLimitsResponse.json, a map of limit id to
+// snapshot; the default limit usually appears there under its own id too, and is not repeated).
+export type CodexOther = { limitId: string; name: string | null; primary: CodexWindow | null; secondary: CodexWindow | null };
+export type CodexLimits = { primary: CodexWindow | null; secondary: CodexWindow | null; planType: string | null; others: CodexOther[] };
 export type CodexReading = { ok: true; limits: CodexLimits } | { ok: false; problem: string };
 type Row = { used_percentage: number; resets_at: number | null };
 export type CodexUsageBody = {
@@ -48,7 +51,21 @@ export function limitsFromResult(result: unknown): CodexLimits | null {
   const secondary = windowOf(r.secondary);
   if (primary === undefined || secondary === undefined) return null;
   const planType = typeof r.planType === "string" && /^[a-z0-9_]{1,40}$/.test(r.planType) ? r.planType : null;
-  return { primary, secondary, planType };
+  const others: CodexOther[] = [];
+  const byId = result.rateLimitsByLimitId;
+  if (byId !== null && byId !== undefined) {
+    if (!isObject(byId)) return null;
+    for (const [limitId, snapshot] of Object.entries(byId)) {
+      if (limitId === r.limitId) continue;
+      if (!isObject(snapshot)) return null;
+      const p = windowOf(snapshot.primary);
+      const q = windowOf(snapshot.secondary);
+      if (p === undefined || q === undefined) return null;
+      const name = typeof snapshot.limitName === "string" && snapshot.limitName.trim() !== "" ? snapshot.limitName.trim() : null;
+      if (p || q) others.push({ limitId, name, primary: p, secondary: q });
+    }
+  }
+  return { primary, secondary, planType, others };
 }
 
 export function windowLabel(mins: number | null): string {
@@ -68,6 +85,11 @@ export function usageReport(limits: CodexLimits, sessionId: string): CodexUsageB
   const five = windows.filter(w => w.windowDurationMins === FIVE_HOURS);
   const week = windows.filter(w => w.windowDurationMins === SEVEN_DAYS);
   const model = { display_name: limits.planType ? `Codex (${limits.planType})` : "Codex" };
+  if (limits.others.length > 0) {
+    // Another limit may be the one that binds: every window goes out by name, the others under their limit's name.
+    const named = limits.others.flatMap(o => [o.primary, o.secondary].filter((w): w is CodexWindow => w !== null).map(w => ({ label: `${o.name ?? o.limitId}: ${windowLabel(w.windowDurationMins)}`, ...row(w) })));
+    return { session_id: sessionId, model, limits: [...windows.map(w => ({ label: windowLabel(w.windowDurationMins), ...row(w) })), ...named] };
+  }
   if (five.length <= 1 && week.length <= 1 && five.length + week.length === windows.length) {
     const [f] = five;
     const [w] = week;
@@ -86,6 +108,6 @@ export async function readCodexLimits(input: { bin: string; env: NodeJS.ProcessE
   if (!asked.ok) return asked;
   const limits = limitsFromResult(asked.results[0]);
   if (!limits) return { ok: false, problem: "codex app-server answered in a shape this reader does not know" };
-  if (!limits.primary && !limits.secondary) return { ok: false, problem: "Codex reported no usage window" };
+  if (!limits.primary && !limits.secondary && limits.others.length === 0) return { ok: false, problem: "Codex reported no usage window" };
   return { ok: true, limits };
 }

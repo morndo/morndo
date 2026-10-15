@@ -47,13 +47,16 @@ Start one: `morndo lanes start codex-a --cwd <repo> --engine codex:gpt-6-astra@h
 - A 5-hour and a weekly window become Home's two windows. Any other windows are shown by name.
 - When the windows can't be read (signed out, an API-key login, an app server that doesn't answer in 15 s), it prints nothing and says why on stderr.
 
-Post it every 15 minutes under a worker token, from a timer on the node:
+Post it every 5 minutes under a worker token, from a timer on the node. A session counts as reporting for 10 minutes after its last report (U3), so a shorter interval keeps the account's card from flickering to "No session reporting right now". The recipe posts only when the read worked, so a signed-out account sends nothing, and `curl -f` makes a refused post a failure the timer can show:
 
 ```sh
-morndo-keys usage --connection codex | curl -sS -m 10 -o /dev/null -X POST "$MORNDO_HUB/api/agent/usage" \
+report=$(morndo-keys usage --connection codex) || exit 1
+printf '%s' "$report" | curl -fsS -m 10 -o /dev/null -X POST "$MORNDO_HUB/api/agent/usage" \
   -H "Authorization: Bearer $MORNDO_AGENT_TOKEN" -H "X-Morndo-Lane: usage-collector" \
   -H "X-Morndo-Account: codex" -H 'Content-Type: application/json' --data-binary @-
 ```
+
+`morndo-keys usage` says why on stderr when the read failed, and `exit 1` makes the timer unit show as failed, so a signed-out account is noticed rather than hidden.
 
 ## 5. Add another Codex account
 

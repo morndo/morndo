@@ -1,6 +1,7 @@
 // Cursor CLI sign-in. `agent status` reports whether the CLI is authenticated.
 // A browser login is the subscription. An API key is CURSOR_API_KEY or --api-key, which a subscription run never uses.
 // https://cursor.com/docs/cli/reference/authentication (read 2026-10-10).
+import { binCommand } from "./spawn-bin.ts";
 import type { Isolation } from "@morndo/domain";
 import { LOGIN_KEY_REFUSAL } from "../login-refusal.ts";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
@@ -31,10 +32,10 @@ export class CursorRuntime implements Runtime {
 
   async execute(plan: RunPlan, extra: readonly string[], hooks?: ChildHooks): Promise<ChildResult> {
     if (!plan.subscription) throw new StatusRefused(LOGIN_KEY_REFUSAL);
-    const script = this.#bin.endsWith(".mjs") || this.#bin.endsWith(".js");
     const env = childEnv(this.#parent, loginEnv("cursor", plan.configDir));
     if (plan.subscription) await assertSubscription(this.#bin, ["status"], env, "cursor");
-    return runChild(script ? process.execPath : this.#bin, script ? [this.#bin, ...extra] : [...extra], {
+    const started = binCommand(this.#bin, extra);
+    return runChild(started.command, started.argv, {
       env,
       cwd: plan.workspace,
       ...(hooks ? { hooks } : {}),

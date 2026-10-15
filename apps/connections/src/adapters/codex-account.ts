@@ -8,9 +8,12 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
 import type { Reading } from "@morndo/domain";
+import { binCommand, notStartedProblem, stopGroup } from "./spawn-bin.ts";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const UNPAID = new Set(["free", "go", "unknown"]);
+// JSON-RPC's own "method not found" (-32601): a request the server sends to the client is answered with it, never left waiting.
+const METHOD_NOT_FOUND = -32601;
 
 export type AppServerInput = { bin: string; env: NodeJS.ProcessEnv; version: string; timeoutMs?: number; stopAfter?: (results: readonly unknown[]) => boolean };
 export type Asked = { ok: true; results: unknown[] } | { ok: false; problem: string };
@@ -26,10 +29,9 @@ export function problemOf(error: unknown): string {
 
 // `stopAfter` ends the ask early, once the answers so far are enough (a signed-out account has no limits to read).
 export function askAppServer(input: AppServerInput, calls: readonly Call[]): Promise<Asked> {
-  const script = input.bin.endsWith(".mjs") || input.bin.endsWith(".js");
-  const argv = [...(script ? [input.bin] : []), "app-server", "--listen", "stdio://"];
+  const { command, argv } = binCommand(input.bin, ["app-server", "--listen", "stdio://"]);
   return new Promise(resolve => {
-    const child = spawn(script ? process.execPath : input.bin, argv, { env: input.env, stdio: ["pipe", "pipe", "ignore"], detached: true });
+    const child = spawn(command, argv, { env: input.env, stdio: ["pipe", "pipe", "ignore"], detached: true });
     const lines = createInterface({ input: child.stdout });
     const results: unknown[] = [];
     let settled = false;
@@ -39,24 +41,23 @@ export function askAppServer(input: AppServerInput, calls: readonly Call[]): Pro
       clearTimeout(timer);
       lines.close();
       child.stdin.end();
-      if (child.pid !== undefined) {
-        try { process.kill(-child.pid, "SIGTERM"); } catch { /* already gone */ }
-      }
-      resolve(answer);
+      void stopGroup(child.pid).then(() => { resolve(answer); });
     };
     const timer = setTimeout(() => finish({ ok: false, problem: "codex app-server did not answer in time" }), input.timeoutMs ?? DEFAULT_TIMEOUT_MS);
     const send = (message: object): void => { if (!settled) child.stdin.write(`${JSON.stringify(message)}\n`); };
     const sendCall = (): void => { const call = calls[results.length]; if (call) send({ method: call.method, id: results.length + 1, params: call.params }); };
     child.stdin.on("error", () => { /* the child went early; close says so */ });
-    child.on("error", error => finish({
-      ok: false,
-      problem: (error as NodeJS.ErrnoException).code === "ENOENT" ? `${input.bin} is not on PATH` : "codex app-server could not start",
-    }));
+    child.on("error", error => finish({ ok: false, problem: notStartedProblem(error, input.bin) }));
     child.on("close", () => finish({ ok: false, problem: "codex app-server exited before it answered" }));
     lines.on("line", line => {
       let message: unknown;
       try { message = JSON.parse(line); } catch { return; }
       if (!isObject(message)) return;
+      // A message with a method is the server's: a request (it has an id) or a notification. Ours are answered by id alone.
+      if (typeof message.method === "string") {
+        if (message.id !== undefined && message.id !== null) send({ id: message.id, error: { code: METHOD_NOT_FOUND, message: `${message.method} is not supported by this client` } });
+        return;
+      }
       if (message.id === 0) {
         if ("error" in message) { finish({ ok: false, problem: problemOf(message.error) }); return; }
         send({ method: "initialized", params: {} });

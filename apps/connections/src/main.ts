@@ -7,7 +7,9 @@ if (argvWantsVersion(process.argv)) {
   process.exit(0);
 }
 
-const readStdin = process.stdin.isTTY || process.argv.includes("helper") || process.argv.includes("run") || process.argv.includes("usage") || process.argv.includes("pool");
+// Commands that take no input on stdin, by the command word (argv[2]) only: `add usage …` is an add, and reads its key.
+const NO_STDIN = new Set(["helper", "run", "usage", "pool"]);
+const readStdin = process.stdin.isTTY || NO_STDIN.has(process.argv[2] ?? "");
 const stdin = readStdin ? Promise.resolve("") : new Promise<string>(resolve => {
   const chunks: Buffer[] = [];
   process.stdin.on("data", chunk => chunks.push(chunk as Buffer));

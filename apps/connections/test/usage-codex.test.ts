@@ -32,11 +32,35 @@ const env = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({ PATH: proce
 
 describe("codex usage: the answer's shape", () => {
   it("reads the 0.161.0 answer and refuses a shape it doesn't know", () => {
-    expect(limitsFromResult(PLUS)).toEqual({ primary: win(42, 300, 1_893_456_000), secondary: win(17, 10_080, 1_893_888_000), planType: "plus" });
+    expect(limitsFromResult(PLUS)).toEqual({ primary: win(42, 300, 1_893_456_000), secondary: win(17, 10_080, 1_893_888_000), planType: "plus", others: [] });
     expect(limitsFromResult({ rateLimits: { primary: { usedPercent: "42" } } })).toBeNull();
     expect(limitsFromResult({ limits: [] })).toBeNull();
     expect(limitsFromResult({ rateLimits: { primary: null, secondary: null, planType: "Plus Plan!" } }))
-      .toEqual({ primary: null, secondary: null, planType: null });
+      .toEqual({ primary: null, secondary: null, planType: null, others: [] });
+  });
+});
+
+describe("codex usage: every limit the account has", () => {
+  const BUCKETS: unknown = JSON.parse(readFileSync(join(FIXTURES, "codex", "rate-limits-buckets.json"), "utf8"));
+
+  it("reads the other limits too, each with its name, and reports them as named windows the hub accepts", () => {
+    const limits = limitsFromResult(BUCKETS);
+    expect(limits?.others).toEqual([{ limitId: "codex-big", name: "Big model", primary: win(100, 300, 1_893_459_600), secondary: null }]);
+    if (!limits) throw new Error("fixture unread");
+    const body = usageReport(limits, "s");
+    expect(body.rate_limits).toBeUndefined();
+    expect(body.limits).toEqual([
+      { label: "5-hour window", used_percentage: 42, resets_at: 1_893_456_000 },
+      { label: "7-day window", used_percentage: 17, resets_at: 1_893_888_000 },
+      { label: "Big model: 5-hour window", used_percentage: 100, resets_at: 1_893_459_600 },
+    ]);
+    expect(UsageReportBody.safeParse(body).success).toBe(true);
+  });
+
+  it("does not repeat the default limit that the map holds under its own id, and refuses a bucket in another shape", () => {
+    const same = { rateLimits: (PLUS as { rateLimits: unknown }).rateLimits, rateLimitsByLimitId: { codex: (PLUS as { rateLimits: unknown }).rateLimits } };
+    expect(limitsFromResult(same)?.others).toEqual([]);
+    expect(limitsFromResult({ ...same, rateLimitsByLimitId: { x: { primary: { usedPercent: "no" } } } })).toBeNull();
   });
 });
 
@@ -54,12 +78,12 @@ describe("codex usage: the status-line report", () => {
   });
 
   it("reports only the weekly window for a plan with no 5-hour limit", () => {
-    expect(usageReport({ primary: win(9, 10_080), secondary: null, planType: "pro" }, "s").rate_limits)
+    expect(usageReport({ primary: win(9, 10_080), secondary: null, planType: "pro", others: [] }, "s").rate_limits)
       .toEqual({ seven_day: { used_percentage: 9, resets_at: 1_893_456_000 } });
   });
 
   it("names every window when one isn't 5 hours or 7 days", () => {
-    const body = usageReport({ primary: win(30, 300), secondary: win(50, 1440, null), planType: null }, "s");
+    const body = usageReport({ primary: win(30, 300), secondary: win(50, 1440, null), planType: null, others: [] }, "s");
     expect(body.rate_limits).toBeUndefined();
     expect(body.limits).toEqual([
       { label: "5-hour window", used_percentage: 30, resets_at: 1_893_456_000 },
@@ -83,6 +107,22 @@ describe("codex usage: the app server", () => {
     await expect.poll(() => alive(seen.pid)).toBe(false);
   });
 
+  it("answers a request the server sends in the middle of a read, whatever its id, and still gets the limits", async () => {
+    const s = server("request");
+    const reading = await readCodexLimits({ bin: s.bin, env: env(), version: "1", timeoutMs: 5_000 });
+    expect(reading).toEqual({ ok: true, limits: limitsFromResult(PLUS) });
+    const replies = (s.seen() as Seen & { replies: { id: number; error: { code: number } | null }[] }).replies;
+    expect(replies.map(r => r.id).sort((a, b) => a - b)).toEqual([0, 1]);
+    expect(replies.every(r => r.error?.code === -32601)).toBe(true);
+  });
+
+  it("stops an app server that ignores SIGTERM before it returns", async () => {
+    const s = server("deaf");
+    expect(await readCodexLimits({ bin: s.bin, env: env(), version: "1", timeoutMs: 500 }))
+      .toEqual({ ok: false, problem: "codex app-server did not answer in time" });
+    expect(alive(s.seen().pid)).toBe(false);
+  }, 15_000);
+
   it("says why when the read is refused", async () => {
     expect(await readCodexLimits({ bin: server("error").bin, env: env(), version: "1" }))
       .toEqual({ ok: false, problem: "codex app-server: not signed in with ChatGPT" });
@@ -101,6 +141,8 @@ describe("codex usage: the app server", () => {
     expect(await readCodexLimits({ bin: server("ok", { rateLimits: { primary: null, secondary: null } }).bin, env: env(), version: "1" }))
       .toEqual({ ok: false, problem: "Codex reported no usage window" });
     expect(await readCodexLimits({ bin: "/nonexistent/codex", env: env(), version: "1" }))
-      .toEqual({ ok: false, problem: "/nonexistent/codex is not on PATH" });
+      .toEqual({ ok: false, problem: "/nonexistent/codex could not be started: it is missing, or its interpreter is not on PATH" });
+    expect(await readCodexLimits({ bin: "codex-not-installed-anywhere", env: env(), version: "1" }))
+      .toEqual({ ok: false, problem: "codex-not-installed-anywhere is not on PATH" });
   });
 });
