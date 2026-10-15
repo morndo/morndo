@@ -470,3 +470,8 @@ export function resetAdvice(p: Pool, waiting: number, now: number): Advice | nul
     .sort((a, b) => a.c.expiresAt - b.c.expiresAt)[0];
   return lapsing ? { member: lapsing.s.member, reason: "credit-expiring", backAt: null, creditExpiresAt: lapsing.c.expiresAt, longLeft: lapsing.s.longLeft } : null;
 }
+
+// PL10: spending a credit is the principal's command; this only records who gave it and what the vendor answered.
+export function noteResetSpent(p: Pool, member: string, by: string, outcome: string, now: number): Pool {
+  return noted(p, { type: "ResetSpent", member, by, outcome, at: now });
+}
