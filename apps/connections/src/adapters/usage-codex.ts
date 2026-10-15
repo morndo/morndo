@@ -9,6 +9,7 @@
 // is "unavailable", never a guess. Its stderr is never read, and the caller hands it childEnv (no key variable).
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { binCommand, notStartedProblem, stopGroup } from "./spawn-bin.ts";
 import { CONNECTION_WORDS } from "@morndo/protocol";
 
 export const CODEX_USAGE_TIMEOUT_MS = 15_000;
@@ -18,7 +19,10 @@ const FIVE_HOURS = 300;
 const SEVEN_DAYS = 10_080;
 
 export type CodexWindow = { usedPercent: number; windowDurationMins: number | null; resetsAt: number | null };
-export type CodexLimits = { primary: CodexWindow | null; secondary: CodexWindow | null; planType: string | null };
+// `others`: the account's other limits, from rateLimitsByLimitId (v2/GetAccountRateLimitsResponse.json, a map of limit id to
+// snapshot; the default limit usually appears there under its own id too, and is not repeated).
+export type CodexOther = { limitId: string; name: string | null; primary: CodexWindow | null; secondary: CodexWindow | null };
+export type CodexLimits = { primary: CodexWindow | null; secondary: CodexWindow | null; planType: string | null; others: CodexOther[] };
 export type CodexReading = { ok: true; limits: CodexLimits } | { ok: false; problem: string };
 type Row = { used_percentage: number; resets_at: number | null };
 export type CodexUsageBody = {
@@ -51,7 +55,21 @@ export function limitsFromResult(result: unknown): CodexLimits | null {
   const secondary = windowOf(r.secondary);
   if (primary === undefined || secondary === undefined) return null;
   const planType = typeof r.planType === "string" && /^[a-z0-9_]{1,40}$/.test(r.planType) ? r.planType : null;
-  return { primary, secondary, planType };
+  const others: CodexOther[] = [];
+  const byId = result.rateLimitsByLimitId;
+  if (byId !== null && byId !== undefined) {
+    if (!isObject(byId)) return null;
+    for (const [limitId, snapshot] of Object.entries(byId)) {
+      if (limitId === r.limitId) continue;
+      if (!isObject(snapshot)) return null;
+      const p = windowOf(snapshot.primary);
+      const q = windowOf(snapshot.secondary);
+      if (p === undefined || q === undefined) return null;
+      const name = typeof snapshot.limitName === "string" && snapshot.limitName.trim() !== "" ? snapshot.limitName.trim() : null;
+      if (p || q) others.push({ limitId, name, primary: p, secondary: q });
+    }
+  }
+  return { primary, secondary, planType, others };
 }
 
 export function windowLabel(mins: number | null): string {
@@ -71,6 +89,11 @@ export function usageReport(limits: CodexLimits, sessionId: string): CodexUsageB
   const five = windows.filter(w => w.windowDurationMins === FIVE_HOURS);
   const week = windows.filter(w => w.windowDurationMins === SEVEN_DAYS);
   const model = { display_name: limits.planType ? `Codex (${limits.planType})` : "Codex" };
+  if (limits.others.length > 0) {
+    // Another limit may be the one that binds: every window goes out by name, the others under their limit's name.
+    const named = limits.others.flatMap(o => [o.primary, o.secondary].filter((w): w is CodexWindow => w !== null).map(w => ({ label: `${o.name ?? o.limitId}: ${windowLabel(w.windowDurationMins)}`, ...row(w) })));
+    return { session_id: sessionId, model, limits: [...windows.map(w => ({ label: windowLabel(w.windowDurationMins), ...row(w) })), ...named] };
+  }
   if (five.length <= 1 && week.length <= 1 && five.length + week.length === windows.length) {
     const [f] = five;
     const [w] = week;
@@ -84,12 +107,14 @@ function problemOf(error: unknown): string {
   return text === "" ? "codex app-server refused the read" : `codex app-server: ${text}`;
 }
 
-// Starts the app server in its own process group, reads once, and stops the group whatever happened.
+// JSON-RPC's own "method not found" (-32601). A request the server sends to the client is answered with it, never left waiting.
+const METHOD_NOT_FOUND = -32601;
+
+// Starts the app server in its own process group, reads once, and stops the group (SIGTERM, then SIGKILL) before it returns.
 export function readCodexLimits(input: { bin: string; env: NodeJS.ProcessEnv; version: string; timeoutMs?: number }): Promise<CodexReading> {
-  const script = input.bin.endsWith(".mjs") || input.bin.endsWith(".js");
-  const argv = [...(script ? [input.bin] : []), "app-server", "--listen", "stdio://"];
+  const { command, argv } = binCommand(input.bin, ["app-server", "--listen", "stdio://"]);
   return new Promise(resolve => {
-    const child = spawn(script ? process.execPath : input.bin, argv, { env: input.env, stdio: ["pipe", "pipe", "ignore"], detached: true });
+    const child = spawn(command, argv, { env: input.env, stdio: ["pipe", "pipe", "ignore"], detached: true });
     const lines = createInterface({ input: child.stdout });
     let settled = false;
     const finish = (reading: CodexReading): void => {
@@ -98,34 +123,33 @@ export function readCodexLimits(input: { bin: string; env: NodeJS.ProcessEnv; ve
       clearTimeout(timer);
       lines.close();
       child.stdin.end();
-      if (child.pid !== undefined) {
-        try { process.kill(-child.pid, "SIGTERM"); } catch { /* already gone */ }
-      }
-      resolve(reading);
+      void stopGroup(child.pid).then(() => { resolve(reading); });
     };
     const timer = setTimeout(() => finish({ ok: false, problem: "codex app-server did not answer in time" }), input.timeoutMs ?? CODEX_USAGE_TIMEOUT_MS);
     const send = (message: object): void => { if (!settled) child.stdin.write(`${JSON.stringify(message)}\n`); };
     child.stdin.on("error", () => { /* the child went early; close says so */ });
-    child.on("error", error => finish({
-      ok: false,
-      problem: (error as NodeJS.ErrnoException).code === "ENOENT" ? `${input.bin} is not on PATH` : "codex app-server could not start",
-    }));
+    child.on("error", error => finish({ ok: false, problem: notStartedProblem(error, input.bin) }));
     child.on("close", () => finish({ ok: false, problem: "codex app-server exited before it answered" }));
     lines.on("line", line => {
       let message: unknown;
       try { message = JSON.parse(line); } catch { return; }
       if (!isObject(message)) return;
+      // A message with a method is the server's: a request (it has an id) or a notification. Ours are answered by id alone.
+      if (typeof message.method === "string") {
+        if (message.id !== undefined && message.id !== null) send({ id: message.id, error: { code: METHOD_NOT_FOUND, message: `${message.method} is not supported by this client` } });
+        return;
+      }
       if (message.id === INITIALIZE_ID) {
         if ("error" in message) { finish({ ok: false, problem: problemOf(message.error) }); return; }
         send({ method: "initialized", params: {} });
         send({ method: "account/rateLimits/read", id: READ_ID, params: { excludeResetCreditDetails: true } });
         return;
       }
-      if (message.id !== READ_ID) return;   // notifications, and anything else the server says
+      if (message.id !== READ_ID) return;
       if ("error" in message) { finish({ ok: false, problem: problemOf(message.error) }); return; }
       const limits = limitsFromResult(message.result);
       if (!limits) { finish({ ok: false, problem: "codex app-server answered in a shape this reader does not know" }); return; }
-      if (!limits.primary && !limits.secondary) { finish({ ok: false, problem: "Codex reported no usage window" }); return; }
+      if (!limits.primary && !limits.secondary && limits.others.length === 0) { finish({ ok: false, problem: "Codex reported no usage window" }); return; }
       finish({ ok: true, limits });
     });
     send({ method: "initialize", id: INITIALIZE_ID, params: { clientInfo: { name: "morndo", title: "Morndo", version: input.version } } });
