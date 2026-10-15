@@ -14,6 +14,7 @@ import { dirname, join } from "node:path";
 import type { Isolation } from "@morndo/domain";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
 import { assertSubscription, childEnv, loginEnv, runChild, StatusRefused, statusOf, type ChildHooks, type ChildResult } from "./runtime-claude.ts";
+import { poolRunHome } from "./codex-pool-home.ts";
 import { CODEX_AUTH_TIMEOUT_MS, HELPER_TTL_MS } from "./runtime-limits.ts";
 
 function quoted(value: string): string {
@@ -172,7 +173,8 @@ export class CodexRuntime implements Runtime {
     return { id: plan.lease };
   }
 
-  async execute(plan: RunPlan, extra: readonly string[], hooks?: ChildHooks): Promise<ChildResult> {
+  // `shared` is a pool turn: its home links the conversation store every account shares (ADR-0029), and its child leads a group of its own.
+  async execute(plan: RunPlan, extra: readonly string[], hooks?: ChildHooks, shared?: string): Promise<ChildResult> {
     const prefix = this.#bin.endsWith(".mjs") || this.#bin.endsWith(".js") ? [process.execPath, this.#bin] : [this.#bin];
     if (plan.subscription) {
       const env = childEnv(this.#parent, loginEnv("codex", plan.configDir));
@@ -181,12 +183,13 @@ export class CodexRuntime implements Runtime {
       if (keyringLogin(loginConfig(login))) {
         throw new StatusRefused("a keyring login stays in its own directory; this run uses another home and cannot find it");
       }
-      const runHome = subscriptionRunHome(login, this.#profileText(), plan.deny);
+      const runHome = shared === undefined ? subscriptionRunHome(login, this.#profileText(), plan.deny) : poolRunHome(login, shared, this.#profileText(), plan.deny);
       try {
         return await runChild(prefix[0] ?? this.#bin, [...prefix.slice(1), ...extra], {
           env: childEnv(this.#parent, loginEnv("codex", runHome)),
           cwd: plan.workspace,
           ...(hooks ? { hooks } : {}),
+          ...(shared === undefined ? {} : { detached: true }),
         });
       } finally {
         rmSync(runHome, { recursive: true, force: true });

@@ -1976,6 +1976,14 @@ export const CONTROLS: Control[] = [
     find: "if (writer) return err({ problem: \"session-busy\", holder: writer.holder });",
     replace: "if (writer && false) return err({ problem: \"session-busy\", holder: writer.holder });",
     run: ["packages/domain/test/pool-claims.test.ts"], expect: "session-busy" },
+  { id: "pool-hide-failed", task: "account-pool P7", file: "apps/connections/src/pool-cli.ts",
+    find: "if (ended.kind === \"usage-limit\") noteEvent(io, `[pool] ${current.member} reached its usage limit; this turn goes on as the same session on ${next.member}`);",
+    replace: "if (ended.kind === \"usage-limit\" && turn.held !== null) io.stdout(`${turn.held}\\n`);",
+    run: ["apps/connections/test/pool-cli.test.ts"], expect: "turn.failed" },
+  { id: "pool-env-keys", task: "account-pool P7", file: "apps/connections/src/adapters/runtime-codex.ts",
+    find: "env: childEnv(this.#parent, loginEnv(\"codex\", runHome)),",
+    replace: "env: { ...this.#parent, ...loginEnv(\"codex\", runHome) },",
+    run: ["apps/connections/test/pool-cli.test.ts"], expect: "KEY" },
 ];
 
 // ---- the runner

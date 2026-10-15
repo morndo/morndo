@@ -7,7 +7,7 @@ if (argvWantsVersion(process.argv)) {
   process.exit(0);
 }
 
-const readStdin = process.stdin.isTTY || process.argv.includes("helper") || process.argv.includes("run") || process.argv.includes("usage");
+const readStdin = process.stdin.isTTY || process.argv.includes("helper") || process.argv.includes("run") || process.argv.includes("usage") || process.argv.includes("pool");
 const stdin = readStdin ? Promise.resolve("") : new Promise<string>(resolve => {
   const chunks: Buffer[] = [];
   process.stdin.on("data", chunk => chunks.push(chunk as Buffer));

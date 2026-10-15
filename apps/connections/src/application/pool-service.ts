@@ -30,7 +30,7 @@ const HOUR = 3_600_000;
 const SAME_REFUSAL_MS = 300_000;
 const ADVICE_REPEAT_MS = 24 * HOUR;
 const NO_DEFAULT = "no default member: set one with morndo-keys pool set defaultMember <name>";
-const NO_FREE_SEAT = "no pool account is free";
+export const NO_FREE_SEAT = "no pool account is free";
 
 const refused = (problem: string, exit: 1 | 75 = 1, extra: Partial<PoolRefusal> = {}): Result<never, PoolRefusal> => err({ problem, exit, ...extra });
 const stateWords: Record<SeatState, string> = { "logged-out": "signed out", retired: "retired", out: "out", low: "low", ok: "ok" };
@@ -189,8 +189,26 @@ export class PoolService {
     return { settings: pool.settings, seats: seats(pool, this.#deps.clock.now()), placements: pool.placements };
   }
 
+  // The members that can run a turn now: their Connection passes the gate, they are not retired, and their last reading says
+  // signed in. The engine layer's probe asks this.
+  usable(runtime: string): string[] {
+    const { pool } = this.#deps.store.load(runtime);
+    const { directory } = this.#deps.connections.load();
+    const gate = this.#gate(pool, directory);
+    return pool.members.filter(m => m.retired === null && !gate.has(m.name) && pool.readings[m.name]?.signedIn === true).map(m => m.name);
+  }
+
+  // Advice only the first time in a day for a member and reason, for a notice that should not repeat.
+  adviceOnce(runtime: string): Advice | null {
+    return this.#advise(runtime, true);
+  }
+
   // Waiting work is the distinct sessions refused in the last hour. A piece of advice is recorded once per member and reason a day.
   advice(runtime: string): Advice | null {
+    return this.#advise(runtime, false);
+  }
+
+  #advise(runtime: string, onlyNew: boolean): Advice | null {
     const out = this.#change<Advice | null>(runtime, (pool, now) => {
       const recent = pool.events.filter(e => e.type === "TurnRefused" && now - e.at <= HOUR);
       const waiting = new Set(recent.map(e => (e.type === "TurnRefused" ? (e.session ?? "") : ""))).size;
@@ -198,7 +216,7 @@ export class PoolService {
       if (!advised) return { pool, result: ok(null) };
       const again = pool.events.some(e => e.type === "ResetAdvised" && e.member === advised.member && e.reason === advised.reason && now - e.at < ADVICE_REPEAT_MS);
       const next = again ? pool : { ...pool, events: [...pool.events, { type: "ResetAdvised" as const, member: advised.member, reason: advised.reason, at: now }].slice(-500) };
-      return { pool: next, result: ok(advised) };
+      return { pool: next, result: ok(onlyNew && again ? null : advised) };
     });
     return out.ok ? out.value : null;
   }

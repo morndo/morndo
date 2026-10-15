@@ -1,0 +1,289 @@
+// `morndo-keys pool` and a turn that goes on elsewhere (ADR-0029, §6.8). A scratch node: temporary homes, a fake CLI that
+// plays a turn from a `mode` file in each account's home, and a synthetic API key in the parent environment that no child may
+// ever see. Nothing here touches ~/.codex, a real sign-in or a port of the running system.
+import { spawn } from "node:child_process";
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
+import Database from "better-sqlite3";
+import { afterEach, describe, expect, it } from "vitest";
+import { UsageReportBody } from "@morndo/protocol";
+import { run } from "../src/cli.ts";
+
+const ROOT = join(import.meta.dirname, "../../..");
+const catalog = join(ROOT, "packages/protocol/catalog/vendors.json");
+const FIXTURES = join(import.meta.dirname, "fixtures");
+const MAIN = join(import.meta.dirname, "../src/main.ts");
+const dirs: string[] = [];
+const servers: Server[] = [];
+afterEach(() => {
+  for (const server of servers.splice(0)) server.close();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function scratch(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  dirs.push(dir);
+  return dir;
+}
+
+type Out = { code: number; stdout: string; stderr: string };
+type Run = { argv: string[]; member: string; sessionsDir: string; locksDir: string; names: string[] };
+type Event = { type: string; thread_id?: string; message?: string; error?: { message?: string } };
+const events = (text: string): Event[] => text.trim().split("\n").filter(l => l !== "").map(l => JSON.parse(l) as Event);
+
+type Node = {
+  env: NodeJS.ProcessEnv;
+  dir: string;
+  cli(args: string[], extra?: NodeJS.ProcessEnv): Promise<Out>;
+  runs(member: string): Run[];
+  setMode(member: string, mode: string): void;
+  home(member: string): string;
+};
+
+// A node whose pool has the given members, each signed in to a home of its own (`mode` says how its fake turn goes).
+async function poolNode(opts: { mode?: "pinned" | "rotate"; members: Record<string, string>; ack?: boolean; account?: unknown; defaultMember?: string }): Promise<Node> {
+  const dir = scratch("morndo-pool-cli-");
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  copyFileSync(join(FIXTURES, "fake-codex-exec.mjs"), join(bin, "exec.mjs"));
+  copyFileSync(join(FIXTURES, "fake-codex-app-server.mjs"), join(bin, "fake-codex-app-server.mjs"));
+  writeFileSync(join(bin, "codex"), `#!/bin/sh\nexec "${process.execPath}" "${join(bin, "exec.mjs")}" "$@"\n`);
+  chmodSync(join(bin, "codex"), 0o755);
+  const workspace = join(dir, "work");
+  mkdirSync(workspace);
+  const env: NodeJS.ProcessEnv = {
+    ...process.env, MORNDO_CONNECTIONS_HOME: join(dir, "home"), MORNDO_VAULT: "file", MORNDO_CATALOG: catalog, MORNDO_POOL_DATA: join(dir, "pool"),
+    MORNDO_CODEX_BIN: join(bin, "codex"), TZ: "UTC", PWD: workspace, HOME: dir,
+    CODEX_API_KEY: "sk-synthetic-pool-0001", CODEX_ACCESS_TOKEN: "synthetic-pool-0002", OPENAI_API_KEY: "sk-synthetic-pool-0003",
+  };
+  const cli = async (args: string[], extra: NodeJS.ProcessEnv = {}): Promise<Out> => {
+    let stdout = "";
+    let stderr = "";
+    const code = await run(args, { ...env, ...extra }, { stdin: "", stdout: t => { stdout += t; }, stderr: t => { stderr += t; } });
+    return { code, stdout, stderr };
+  };
+  const home = (member: string): string => join(dir, "accounts", member);
+  for (const [member, mode] of Object.entries(opts.members)) {
+    mkdirSync(home(member), { recursive: true, mode: 0o700 });
+    writeFileSync(join(home(member), "auth.json"), "{}", { mode: 0o600 });
+    writeFileSync(join(home(member), "config.toml"), 'cli_auth_credentials_store = "file"\n');
+    writeFileSync(join(home(member), "mode"), mode);
+    const limits = JSON.parse(readFileSync(join(FIXTURES, "codex", "rate-limits-pool.json"), "utf8")) as Record<string, unknown>;
+    writeFileSync(join(home(member), "limits.json"), JSON.stringify({ ...limits, accountId: `acct-synthetic-${member}` }));
+    writeFileSync(join(home(member), "account.json"), JSON.stringify(opts.account ?? JSON.parse(readFileSync(join(FIXTURES, "codex", "account-plus.json"), "utf8"))));
+    expect((await cli(["add", member, "--vendor", "codex", "--runtime", "codex", "--subscription", "true", "--config-dir", home(member)])).code).toBe(0);
+    if (opts.ack !== false) expect((await cli(["ack", member, "--by", "test"])).code).toBe(0);
+    expect((await cli(["pool", "add", member])).code, member).toBe(0);
+  }
+  if (opts.defaultMember) expect((await cli(["pool", "set", "defaultMember", opts.defaultMember])).code).toBe(0);
+  if (opts.mode === "rotate") expect((await cli(["pool", "mode", "rotate", "--runtime", "codex", "--by", "principal@example.com"])).code).toBe(0);
+  const runs = (member: string): Run[] => {
+    const file = join(home(member), "runs.jsonl");
+    return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(l => l !== "").map(l => JSON.parse(l) as Run) : [];
+  };
+  return { env, dir, cli, runs, home, setMode: (member, mode) => writeFileSync(join(home(member), "mode"), mode) };
+}
+
+const turn = (extra: string[] = []): string[] => ["pool", "exec", "--runtime", "codex", ...extra, "--", "exec", "--json", "-m", "model-x", "-s", "danger-full-access", "Make hello.txt"];
+const until = async (ok: () => boolean, ms = 10_000): Promise<void> => {
+  const end = Date.now() + ms;
+  while (!ok()) {
+    if (Date.now() > end) throw new Error("timed out");
+    await new Promise(r => setTimeout(r, 50));
+  }
+};
+
+describe("morndo-keys pool exec", () => {
+  it("moves a turn cut off by the usage limit to the other account, as the same session, and hides the failed line", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "limit", "codex-b": "ok" } });
+    const out = await t.cli(["pool", "exec", "--runtime", "codex", "--", "exec", "--json", "-m", "model-x", "-s", "danger-full-access", "Make hello.txt"]);
+    expect(out.code, out.stderr).toBe(0);
+    const seen = events(out.stdout);
+    expect(seen.filter(e => e.type === "turn.failed")).toEqual([]);
+    const threads = [...new Set(seen.filter(e => e.type === "thread.started").map(e => e.thread_id))];
+    expect(threads).toHaveLength(1);
+    expect(seen.some(e => e.type === "error" && /codex-a reached its usage limit; this turn goes on as the same session on codex-b/.test(e.message ?? ""))).toBe(true);
+    expect(seen.at(-1)?.type).toBe("turn.completed");
+    const [b] = t.runs("codex-b");
+    expect(b?.argv.slice(0, 3)).toEqual(["exec", "resume", threads[0]]);
+    expect(b?.argv).toContain('sandbox_mode="danger-full-access"');
+    expect(b?.argv).not.toContain("-s");
+    expect(b?.argv.at(-1)).toMatch(/^\[pool\] The turn before this one stopped[\s\S]*Its request was:\nMake hello\.txt$/);
+    expect(b?.sessionsDir).toBe(t.runs("codex-a")[0]?.sessionsDir);
+    expect(b?.locksDir).toBe(t.runs("codex-a")[0]?.locksDir);
+    expect(b?.names.filter(n => /KEY|TOKEN/.test(n))).toEqual([]);
+    expect(t.runs("codex-a")[0]?.names.filter(n => /KEY|TOKEN/.test(n))).toEqual([]);
+    const list = JSON.parse((await t.cli(["pool", "list", "--runtime", "codex", "--json"])).stdout) as { seats: { member: string; state: string }[] };
+    expect(list.seats.find(s => s.member === "codex-a")?.state).toBe("out");
+  });
+
+  it("pinned: needs a default or a pin, runs on it, and never moves at the limit", async () => {
+    const none = await poolNode({ mode: "pinned", members: { "codex-a": "ok", "codex-b": "ok" } });
+    const bare = await none.cli(turn());
+    expect([bare.code, bare.stderr]).toEqual([1, "no default member: set one with morndo-keys pool set defaultMember <name>\n"]);
+    const pinned = await none.cli(turn(["--account", "codex-a"]));
+    expect(pinned.code, pinned.stderr).toBe(0);
+    const list = JSON.parse((await none.cli(["pool", "list", "--runtime", "codex", "--json"])).stdout) as { placements: { member: string; pinned: boolean }[] };
+    expect(list.placements).toMatchObject([{ member: "codex-a", pinned: true }]);
+
+    const limited = await poolNode({ mode: "pinned", members: { "codex-a": "limit", "codex-b": "ok" } });
+    const out = await limited.cli(turn(["--account", "codex-a"]));
+    expect(out.code).toBe(1);
+    expect(events(out.stdout).filter(e => e.type === "turn.failed")).toHaveLength(1);
+    expect(limited.runs("codex-b")).toEqual([]);
+    const seats = JSON.parse((await limited.cli(["pool", "list", "--runtime", "codex", "--json"])).stdout) as { seats: { member: string; state: string }[] };
+    expect(seats.seats.find(s => s.member === "codex-a")?.state).toBe("out");
+  });
+
+  it("never lets two writers on one session", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "ok" }, defaultMember: "codex-a" });
+    const first = await t.cli(turn());
+    expect(first.code, first.stderr).toBe(0);
+    const thread = events(first.stdout).find(e => e.type === "thread.started")?.thread_id ?? "";
+    t.setMode("codex-a", "slow");
+    const child = spawn(process.execPath, ["--no-warnings", MAIN, "pool", "exec", "--runtime", "codex", "--", "exec", "resume", thread, "--json", "next brief"], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+    const closed = new Promise<number | null>(resolve => child.on("close", resolve));
+    try {
+      await until(() => t.runs("codex-a").length === 2);
+      const second = await t.cli(["pool", "exec", "--runtime", "codex", "--", "exec", "resume", thread, "--json", "again"]);
+      expect(second.code).toBe(1);
+      expect(second.stderr).toMatch(new RegExp(`^session ${thread} is being written by pid \\d+\\n$`));
+      expect(t.runs("codex-a")).toHaveLength(2);
+    } finally { child.kill("SIGKILL"); await closed; }
+  }, 30_000);
+
+  it("runs one turn at a time per account", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow" }, defaultMember: "codex-a" });
+    const first = t.cli(turn(["--lane", "lane-1"]));
+    await until(() => t.runs("codex-a").length === 1);
+    const second = await t.cli(turn(["--lane", "lane-2"]), { MORNDO_POOL_WAIT_MS: "500" });
+    expect(events(second.stdout).filter(e => /\[pool\] waiting: a turn runs on codex-a/.test(e.message ?? ""))).toHaveLength(1);
+    expect([second.code, second.stderr]).toEqual([1, "codex-a is busy\n"]);
+    expect((await first).code).toBe(0);
+    expect(t.runs("codex-a")).toHaveLength(1);
+  }, 30_000);
+
+  it("says when an account is back when every account is out, and then refuses without starting the CLI", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "limit", "codex-b": "limit" } });
+    const one = await t.cli(turn());
+    expect(one.code).toBe(1);
+    const last = events(one.stdout).at(-1);
+    expect(last?.type).toBe("turn.failed");
+    expect(last?.error?.message).toContain("every pool account");
+    expect([t.runs("codex-a").length, t.runs("codex-b").length]).toEqual([1, 1]);
+    const two = await t.cli(turn());
+    expect(two.code).toBe(1);
+    expect(events(two.stdout).at(-1)?.error?.message).toContain("every pool account");
+    expect([t.runs("codex-a").length, t.runs("codex-b").length]).toEqual([1, 1]);
+  });
+
+  it("hands off to a new session when the conversation can't be read under the other account", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "limit", "codex-b": "encrypted" } });
+    const out = await t.cli(turn());
+    expect(out.code, out.stderr).toBe(0);
+    const thread = events(out.stdout).find(e => e.type === "thread.started")?.thread_id ?? "";
+    const runs = t.runs("codex-b");
+    expect(runs).toHaveLength(2);
+    expect(runs[0]?.argv.slice(0, 2)).toEqual(["exec", "resume"]);
+    expect(runs[1]?.argv[0]).toBe("exec");
+    expect(runs[1]?.argv[1]).not.toBe("resume");
+    expect(runs[1]?.argv.at(-1)).toContain(thread);
+    expect(runs[1]?.argv.at(-1)).toContain("git status");
+    const list = JSON.parse((await t.cli(["pool", "list", "--runtime", "codex", "--json"])).stdout) as { settings: { moveBy: string } };
+    expect(list.settings.moveBy).toBe("handoff");
+    const db = new Database(join(t.dir, "home", "connections.db"), { readonly: true });
+    try {
+      const body = JSON.parse(db.prepare("SELECT body FROM pool WHERE runtime = 'codex'").pluck().get() as string) as { events: { type: string }[] };
+      expect(body.events.some(e => e.type === "MoveByChanged")).toBe(true);
+    } finally { db.close(); }
+  });
+});
+
+describe("morndo-keys pool read, check, advice and reset", () => {
+  it("reports a member's windows for Home, and skips the read while a turn holds the account", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow" }, defaultMember: "codex-a" });
+    const out = await t.cli(["pool", "read", "--runtime", "codex", "--member", "codex-a", "--report"]);
+    expect(out.code, out.stderr).toBe(0);
+    const body = JSON.parse(out.stdout) as { session_id: string; rate_limits: Record<string, { used_percentage: number }> };
+    expect(UsageReportBody.safeParse(body).success).toBe(true);
+    expect(body.session_id).toBe("codex-a-limits");
+    expect([body.rate_limits.five_hour?.used_percentage, body.rate_limits.seven_day?.used_percentage]).toEqual([42, 17]);
+
+    const turnRun = t.cli(turn());
+    await until(() => t.runs("codex-a").length === 1);
+    rmSync(join(t.home("codex-a"), "seen.json"), { force: true });
+    const busy = await t.cli(["pool", "read", "--runtime", "codex", "--member", "codex-a", "--report"]);
+    expect([busy.code, busy.stdout, busy.stderr]).toEqual([0, "", "codex-a: busy, read skipped\n"]);
+    expect(existsSync(join(t.home("codex-a"), "seen.json"))).toBe(false);
+    const usage = await t.cli(["usage", "--connection", "codex-a"]);
+    expect([usage.code, usage.stdout, usage.stderr]).toEqual([1, "", "busy\n"]);
+    await turnRun;
+  }, 30_000);
+
+  it("spends a reset credit only on the principal's command, and only one module names how", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "ok" } });
+    expect((await t.cli(["pool", "reset", "--runtime", "codex", "--member", "codex-a"])).code).toBe(1);
+    expect((await t.cli(["pool", "reset", "--runtime", "codex", "--member", "codex-a", "--by", "principal@example.com"])).code).toBe(1);
+    const spent = await t.cli(["pool", "reset", "--runtime", "codex", "--member", "codex-a", "--by", "principal@example.com", "--yes"]);
+    expect([spent.code, spent.stdout]).toEqual([0, "reset\n"]);
+    const db = new Database(join(t.dir, "home", "connections.db"), { readonly: true });
+    try {
+      const body = JSON.parse(db.prepare("SELECT body FROM pool WHERE runtime = 'codex'").pluck().get() as string) as { events: { type: string; by?: string }[] };
+      expect(body.events.filter(e => e.type === "ResetSpent")).toMatchObject([{ by: "principal@example.com" }]);
+    } finally { db.close(); }
+
+    const sources: string[] = [];
+    const walk = (dir: string): void => {
+      for (const name of readdirSync(dir)) {
+        if (name === "node_modules") continue;
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) walk(path);
+        else if (path.endsWith(".ts") || path.endsWith(".svelte")) sources.push(path);
+      }
+    };
+    for (const base of ["apps/connections/src", "apps/hub/src", "apps/node-agent/src"]) walk(join(ROOT, base));
+    for (const pkg of readdirSync(join(ROOT, "packages"))) if (existsSync(join(ROOT, "packages", pkg, "src"))) walk(join(ROOT, "packages", pkg, "src"));
+    const names = (needle: string): string[] => sources.filter(f => readFileSync(f, "utf8").includes(needle)).map(f => relative(ROOT, f));
+    expect(names("rateLimitResetCredit/consume")).toEqual(["apps/connections/src/adapters/codex-reset.ts"]);
+    expect(names("codex-reset.ts")).toEqual(["apps/connections/src/pool-cli.ts"]);
+  });
+
+  it("answers the engine layer's probe", async () => {
+    const ok = await poolNode({ mode: "pinned", members: { "codex-a": "ok" } });
+    expect((await ok.cli(["pool", "check", "--runtime", "codex"])).code).toBe(1);
+    expect((await ok.cli(["pool", "read", "--runtime", "codex", "--all"])).code).toBe(0);
+    expect((await ok.cli(["pool", "check", "--runtime", "codex"])).code).toBe(0);
+
+    const unacked = await poolNode({ mode: "pinned", members: { "codex-a": "ok" }, ack: false });
+    expect((await unacked.cli(["pool", "read", "--runtime", "codex", "--all"])).code).toBe(0);
+    expect((await unacked.cli(["pool", "check", "--runtime", "codex"])).code).toBe(1);
+
+    const out = await poolNode({ mode: "pinned", members: { "codex-a": "ok" }, account: { account: null, requiresOpenaiAuth: true } });
+    expect((await out.cli(["pool", "read", "--runtime", "codex", "--all"])).code).toBe(0);
+    expect((await out.cli(["pool", "check", "--runtime", "codex"])).code).toBe(1);
+  });
+
+  it("prints the advice once a day when asked to notify", async () => {
+    const posts: string[] = [];
+    const server = createServer((req, res) => {
+      let body = "";
+      req.on("data", c => { body += String(c); });
+      req.on("end", () => { posts.push(body); res.end("ok"); });
+    });
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const url = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}/notify`;
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "limit", "codex-b": "limit" } });
+    expect((await t.cli(["pool", "read", "--runtime", "codex", "--all"])).code).toBe(0);
+    await t.cli(turn());
+    await t.cli(turn());
+    const first = await t.cli(["pool", "advice", "--runtime", "codex", "--notify"], { MORNDO_POOL_NOTIFY_URL: url });
+    expect(first.stdout).toContain("Reset credit:");
+    const second = await t.cli(["pool", "advice", "--runtime", "codex", "--notify"], { MORNDO_POOL_NOTIFY_URL: url });
+    expect(second.stdout).toBe("");
+    expect(posts).toHaveLength(1);
+  }, 30_000);
+});

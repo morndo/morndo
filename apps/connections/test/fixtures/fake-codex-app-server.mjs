@@ -8,8 +8,10 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-const here = import.meta.dirname;
-const mode = existsSync(join(here, "mode")) ? readFileSync(join(here, "mode"), "utf8").trim() : "ok";
+// A host script may set globalThis.__FAKE_CODEX = { dir, modeFile } to run this as a member of a pool (fake-codex-exec.mjs).
+const here = globalThis.__FAKE_CODEX?.dir ?? import.meta.dirname;
+const modeFile = globalThis.__FAKE_CODEX?.modeFile ?? "mode";
+const mode = existsSync(join(here, modeFile)) ? readFileSync(join(here, modeFile), "utf8").trim() : "ok";
 const seen = { argv: process.argv.slice(2), names: Object.keys(process.env).sort(), codexHome: process.env.CODEX_HOME ?? null, pid: process.pid, init: null, calls: [] };
 const record = () => writeFileSync(join(here, "seen.json"), JSON.stringify(seen));
 record();
