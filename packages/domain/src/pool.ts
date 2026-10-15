@@ -246,7 +246,13 @@ function urgencyOf(longLeft: number | null, longResets: number | null, expires: 
   return Math.max(longLeft ?? 100, 0.5) / hours;
 }
 
-// PL3: logged out, retired, out, low, ok, checked in that order. Counts (active, busy) are the placement and claim rules' (P3, P4).
+// Sessions placed on the account with a turn in the last `activeMinutes` (PL4's weight).
+function activeOf(p: Pool, group: readonly string[], now: number): number {
+  const since = now - p.settings.activeMinutes * MINUTE;
+  return p.placements.filter(x => group.includes(x.member) && x.lastTurnAt >= since).length;
+}
+
+// PL3: logged out, retired, out, low, ok, checked in that order.
 export function seats(p: Pool, now: number, model: string | null = null): Seat[] {
   const groups = groupsOf(p);
   return p.members.map(m => {
@@ -276,8 +282,104 @@ export function seats(p: Pool, now: number, model: string | null = null): Seat[]
     return {
       member: m.name, state, sameAs: seatName === m.name ? null : seatName,
       shortLeft: s.left, shortResets: s.resets, longLeft: l.left, longResets: l.resets,
-      urgency: urgencyOf(l.left, l.resets, m.settings.expires, now), active: 0, busy: 0,
+      urgency: urgencyOf(l.left, l.resets, m.settings.expires, now), active: activeOf(p, group, now), busy: 0,
       credits: reading?.credits?.available ?? 0, backAt,
     };
   });
+}
+
+// ---- placement
+
+const placementOf = (p: Pool, session: string): Placement | undefined => p.placements.find(x => x.session === session);
+
+// A directory equal to an entry, or under it after a "/".
+const under = (dir: string, entry: string): boolean => dir === entry || dir.startsWith(entry.endsWith("/") ? entry : `${entry}/`);
+
+const leftOf = (s: Seat): number => Math.min(s.shortLeft ?? 100, s.longLeft ?? 100);
+
+// PL4: the ok seats a new or moved session may take, best first.
+function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: ReadonlySet<string>): Seat[] {
+  const settingsOf = (name: string): MemberSettings => p.members.find(m => m.name === name)?.settings ?? { keep: false, expires: null, onlyFor: [] };
+  const matches = (s: Seat): boolean => {
+    const only = settingsOf(s.member).onlyFor;
+    return only.length > 0 && ask.dir !== null && only.some(entry => under(ask.dir ?? "", entry));
+  };
+  const candidates = all.filter(s => {
+    if (s.state !== "ok" || s.sameAs !== null || leaveOut.has(s.member)) return false;
+    const settings = settingsOf(s.member);
+    if (settings.onlyFor.length > 0 && !matches(s)) return false;
+    return !(settings.keep && ask.night && (s.longLeft ?? 100) < p.settings.nightReserveLong);
+  });
+  const roomy = (s: Seat): boolean => (s.shortLeft ?? 100) >= p.settings.pickMarginShort && (s.longLeft ?? 100) >= p.settings.pickMarginLong;
+  const ends = (s: Seat): number => Math.min(...[s.longResets, settingsOf(s.member).expires].filter((t): t is number => t !== null), Infinity);
+  const flag = (b: boolean): number => (b ? 0 : 1);
+  const compare = (a: Seat, b: Seat): number => {
+    const keys: [number, number][] = [
+      [flag(matches(a)), flag(matches(b))],
+      [flag(roomy(a)), flag(roomy(b))],
+      ...(p.settings.order === "weighted" ? [[(a.active + 1) / a.urgency, (b.active + 1) / b.urgency] as [number, number]] : []),
+      [ends(a), ends(b)],
+      [a.shortResets ?? Infinity, b.shortResets ?? Infinity],
+      [a.active, b.active],
+    ];
+    for (const [x, y] of keys) if (x !== y) return x < y ? -1 : 1;
+    return a.member < b.member ? -1 : a.member > b.member ? 1 : 0;
+  };
+  return [...candidates].sort(compare);
+}
+
+// With no candidate: the least bad seat and when the first one comes back.
+function noSeat(all: readonly Seat[]): PlaceAnswer {
+  const real = all.filter(s => s.sameAs === null && s.state !== "retired" && s.state !== "logged-out");
+  const bad = [...real].sort((a, b) => {
+    const marked = Number(a.state === "out") - Number(b.state === "out");
+    if (marked !== 0) return marked;
+    if (leftOf(a) !== leftOf(b)) return leftOf(b) - leftOf(a);
+    return a.member < b.member ? -1 : a.member > b.member ? 1 : 0;
+  })[0];
+  const times = real.map(s => s.backAt).filter((t): t is number => t !== null);
+  return { ok: false, problem: "no-seat", leastBad: bad?.member ?? null, backAt: times.length > 0 ? Math.min(...times) : null };
+}
+
+// PL4, PL6, PL11: pinned unless the principal turned rotation on. A placed session stays while its seat is ok; a pinned
+// one, and every one in pinned mode, is refused with the seat's state and when it comes back instead of moving.
+export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
+  const all = seats(p, now, ask.model);
+  const seat = (name: string): Seat | undefined => all.find(s => s.member === name);
+  const unavailable = (s: Seat, member: string): PlaceAnswer => ({ ok: false, problem: "member-unavailable", member, state: s.state, backAt: s.backAt });
+  const placed = ask.session !== null ? placementOf(p, ask.session) : undefined;
+  if (placed) {
+    const current = seat(placed.member);
+    if (!current) return { ok: false, problem: "unknown-member" };
+    if (current.state === "ok") return { ok: true, member: placed.member, moved: null };
+    if (p.settings.mode === "pinned" || placed.pinned) return unavailable(current, placed.member);
+    const same = groupsOf(p);
+    const leaveOut = new Set(same.members[same.seatOf[placed.member] ?? placed.member] ?? [placed.member]);
+    const best = choose(p, all, ask, leaveOut)[0];
+    return best ? { ok: true, member: best.member, moved: { from: placed.member, why: current.state } } : noSeat(all);
+  }
+  const pin = ask.pin ?? (p.settings.mode === "pinned" ? p.settings.defaultMember : null);
+  if (pin !== null) {
+    const s = seat(pin);
+    if (!s) return { ok: false, problem: "unknown-member" };
+    const groups = groupsOf(p);
+    const target = seat(groups.seatOf[pin] ?? pin) ?? s;
+    return target.state === "ok" ? { ok: true, member: target.member, moved: null } : unavailable(target, target.member);
+  }
+  if (p.settings.mode === "pinned") return { ok: false, problem: "no-default" };
+  const best = choose(p, all, ask, new Set())[0];
+  return best ? { ok: true, member: best.member, moved: null } : noSeat(all);
+}
+
+// A session's placement: added (SessionPlaced) or moved (SessionMoved). The same member and pin again changes nothing.
+export function placeSession(p: Pool, session: string, member: string, pinned: boolean, now: number): Pool {
+  const held = placementOf(p, session);
+  if (!held) {
+    const row: Placement = { session, member, pinned, at: now, lastTurnAt: now };
+    return noted({ ...p, placements: [...p.placements, row] }, { type: "SessionPlaced", session, member, pinned, at: now });
+  }
+  if (held.member === member && held.pinned === pinned) return p;
+  const placements = p.placements.map(x => (x.session === session ? { ...x, member, pinned, at: now } : x));
+  const next = { ...p, placements };
+  return held.member === member ? next : noted(next, { type: "SessionMoved", session, from: held.member, to: member, why: "moved", at: now });
 }
