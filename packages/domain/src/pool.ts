@@ -1,5 +1,5 @@
 // Pool (ADR-0029; PL1–PL14): which member account a session's next turn runs on, and the rules around it. One Pool per
-// runtime. The domain holds no vendor name, no file, no process and no clock of its own: callers pass `now` (ms since
+// runtime. The domain holds no vendor name, no file, no child and no clock of its own: callers pass `now` (ms since
 // epoch), and whether a holder is still alive arrives as a function. Readings arrive from adapters already translated.
 import type { Holder } from "./connections.ts";
 import { err, ok, type Result } from "./shared.ts";
@@ -246,13 +246,15 @@ function urgencyOf(longLeft: number | null, longResets: number | null, expires: 
   return Math.max(longLeft ?? 100, 0.5) / hours;
 }
 
-// Sessions placed on the account with a turn in the last `activeMinutes` (PL4's weight).
+// Sessions placed on the account with a turn in the last `activeMinutes`, and claims whose session has no placement yet (PL4's weight).
 function activeOf(p: Pool, group: readonly string[], now: number): number {
   const since = now - p.settings.activeMinutes * MINUTE;
-  return p.placements.filter(x => group.includes(x.member) && x.lastTurnAt >= since).length;
+  const placed = p.placements.filter(x => group.includes(x.member) && x.lastTurnAt >= since).length;
+  const first = p.claims.filter(c => group.includes(c.member) && (c.session === null || placementOf(p, c.session) === undefined)).length;
+  return placed + first;
 }
 
-// PL3: logged out, retired, out, low, ok, checked in that order.
+// PL3: logged out, retired, out, low, ok, checked in that order. `busy` counts the account's live claims (PL13).
 export function seats(p: Pool, now: number, model: string | null = null): Seat[] {
   const groups = groupsOf(p);
   return p.members.map(m => {
@@ -282,7 +284,7 @@ export function seats(p: Pool, now: number, model: string | null = null): Seat[]
     return {
       member: m.name, state, sameAs: seatName === m.name ? null : seatName,
       shortLeft: s.left, shortResets: s.resets, longLeft: l.left, longResets: l.resets,
-      urgency: urgencyOf(l.left, l.resets, m.settings.expires, now), active: activeOf(p, group, now), busy: 0,
+      urgency: urgencyOf(l.left, l.resets, m.settings.expires, now), active: activeOf(p, group, now), busy: p.claims.filter(c => group.includes(c.member)).length,
       credits: reading?.credits?.available ?? 0, backAt,
     };
   });
@@ -382,4 +384,89 @@ export function placeSession(p: Pool, session: string, member: string, pinned: b
   const placements = p.placements.map(x => (x.session === session ? { ...x, member, pinned, at: now } : x));
   const next = { ...p, placements };
   return held.member === member ? next : noted(next, { type: "SessionMoved", session, from: held.member, to: member, why: "moved", at: now });
+}
+
+// ---- claims
+
+type Alive = (h: Holder) => boolean;
+
+// PL7: drop every claim whose holder is gone (ClaimLost each).
+function withoutDead(p: Pool, alive: Alive, now: number): Pool {
+  const dead = p.claims.filter(c => !alive(c.holder));
+  if (dead.length === 0) return p;
+  return noted({ ...p, claims: p.claims.filter(c => alive(c.holder)) },
+    ...dead.map((c): PoolEvent => ({ type: "ClaimLost", claim: c.id, member: c.member, session: c.session, at: now })));
+}
+
+// PL7, PL13: at most one live holder per session across every account, and at most `turnsPerMember` live claims on one
+// account (members of one identity count together).
+export function claim(p: Pool, ask: ClaimAsk, alive: Alive, now: number): Result<Pool, ClaimRefusal> {
+  const live = withoutDead(p, alive, now);
+  const writer = ask.session === null ? undefined : live.claims.find(c => c.session === ask.session && c.id !== ask.id);
+  if (writer) return err({ problem: "session-busy", holder: writer.holder });
+  const groups = groupsOf(live);
+  const seatName = groups.seatOf[ask.member] ?? ask.member;
+  const group = groups.members[seatName] ?? [ask.member];
+  const running = live.claims.filter(c => group.includes(c.member) && c.id !== ask.id).length;
+  if (running >= live.settings.turnsPerMember) return err({ problem: "member-busy", member: seatName });
+  const row: PoolClaim = { id: ask.id, session: ask.session, member: ask.member, pinned: ask.pinned ?? false, holder: ask.holder, at: now };
+  return ok(noted({ ...live, claims: [...live.claims, row] }, { type: "ClaimGranted", claim: ask.id, member: ask.member, session: ask.session, at: now }));
+}
+
+// A claim made before the session is known binds to it once the runtime names it, and places the session on the claim's
+// member, pinned as the claim is, so a first turn's pin holds. A claim that is gone binds nothing.
+export function bindSession(p: Pool, claimId: string, session: string, alive: Alive, now: number): Result<Pool, ClaimRefusal> {
+  const live = withoutDead(p, alive, now);
+  const mine = live.claims.find(c => c.id === claimId);
+  if (!mine) return ok(live);
+  const other = live.claims.find(c => c.session === session && c.id !== claimId);
+  if (other) return err({ problem: "session-busy", holder: other.holder });
+  const bound = { ...live, claims: live.claims.map(c => (c.id === claimId ? { ...c, session } : c)) };
+  return ok(placeSession(bound, session, mine.member, mine.pinned, now));
+}
+
+// The turn ended: the claim goes (ClaimReleased) and its session's placement notes the time of its last turn.
+export function release(p: Pool, claimId: string, now: number): Pool {
+  const held = p.claims.find(c => c.id === claimId);
+  if (!held) return p;
+  const placements = held.session === null ? p.placements : p.placements.map(x => (x.session === held.session ? { ...x, lastTurnAt: now } : x));
+  return noted({ ...p, claims: p.claims.filter(c => c.id !== claimId), placements },
+    { type: "ClaimReleased", claim: claimId, member: held.member, session: held.session, at: now });
+}
+
+// A turn that was refused, or made to wait (the reset advice counts the sessions that waited).
+export function refuse(p: Pool, session: string | null, problem: string, now: number): Pool {
+  return noted(p, { type: "TurnRefused", session, problem, at: now });
+}
+
+// PL14: a conversation that can't be read under another account makes a move a handoff, until the principal says otherwise.
+export function noteMoveBy(p: Pool, moveBy: MoveBy, by: string, reason: string, now: number): Pool {
+  return noted({ ...p, settings: { ...p.settings, moveBy } }, { type: "MoveByChanged", moveBy, by, reason, at: now });
+}
+
+// ---- reset advice
+
+// PL10: the pool never spends a reset credit; it says when one would pay off. First: every seat is out or low, work waits,
+// the first seat comes back a long time from now, and a blocked seat holds a credit: the one whose long window resets
+// last gains the most. Second: a credit would lapse soon.
+export function resetAdvice(p: Pool, waiting: number, now: number): Advice | null {
+  const groups = groupsOf(p);
+  const all = seats(p, now).filter(s => s.sameAs === null && s.state !== "retired" && s.state !== "logged-out");
+  const creditsOf = (seat: Seat): Reading["credits"] =>
+    (groups.members[seat.member] ?? [seat.member]).map(name => p.readings[name]).filter((r): r is Reading => r !== undefined)
+      .sort((a, b) => b.at - a.at)[0]?.credits ?? null;
+  if (waiting >= 1 && all.length > 0 && all.every(s => s.state === "out" || s.state === "low")) {
+    const times = all.map(s => s.backAt).filter((t): t is number => t !== null);
+    const first = times.length > 0 ? Math.min(...times) : null;
+    if (first !== null && first - now >= p.settings.resetAdviceWaitHours * HOUR) {
+      const holders = all.filter(s => (creditsOf(s)?.available ?? 0) > 0);
+      const best = [...holders].sort((a, b) => (b.longResets ?? -Infinity) - (a.longResets ?? -Infinity))[0];
+      if (best) return { member: best.member, reason: "all-blocked", backAt: first, creditExpiresAt: creditsOf(best)?.expiresAt ?? null, longLeft: best.longLeft };
+    }
+  }
+  const lapsing = all.map(s => ({ s, c: creditsOf(s) }))
+    .filter((x): x is { s: Seat; c: { available: number; expiresAt: number } } =>
+      x.c !== null && x.c.available > 0 && x.c.expiresAt !== null && x.c.expiresAt > now && x.c.expiresAt - now <= p.settings.creditAdviceHours * HOUR)
+    .sort((a, b) => a.c.expiresAt - b.c.expiresAt)[0];
+  return lapsing ? { member: lapsing.s.member, reason: "credit-expiring", backAt: null, creditExpiresAt: lapsing.c.expiresAt, longLeft: lapsing.s.longLeft } : null;
 }

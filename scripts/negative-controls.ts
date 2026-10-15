@@ -1972,6 +1972,10 @@ export const CONTROLS: Control[] = [
     find: "const env = childEnv(home.env, loginEnv(\"codex\", connection.configDir));",
     replace: "const env = { ...home.env, ...loginEnv(\"codex\", connection.configDir) };",
     run: ["apps/connections/test/usage-cli.test.ts"], expect: "CODEX_API_KEY" },
+  { id: "pool-one-writer", task: "account-pool P4", file: "packages/domain/src/pool.ts",
+    find: "if (writer) return err({ problem: \"session-busy\", holder: writer.holder });",
+    replace: "if (writer && false) return err({ problem: \"session-busy\", holder: writer.holder });",
+    run: ["packages/domain/test/pool-claims.test.ts"], expect: "session-busy" },
 ];
 
 // ---- the runner
