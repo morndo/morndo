@@ -115,7 +115,7 @@ The pool is a list of Codex accounts that lanes on this node share (ADR-0029). I
 ### Pinned (the default) or rotate
 
 - **Pinned:** a session runs on the account it was pinned to, or on `pool set defaultMember`, and never changes account because of a limit. At the limit, the turn fails as a usage limit; the lane waits, or the engine layer takes the next provider in the role's chain.
-- **Rotate:** new sessions go to the account whose quota expires first, and a turn cut off by a limit goes on as the same session on the next account. It is off until you turn it on:
+- **Rotate:** new sessions go to the account whose quota expires first, and a turn cut off by a limit goes on as the same session on the next account. A busy account is waited for (200 ms, doubling to 5 s) or skipped for a free one; a member kept for the day (`pool add --keep`) holds back its night reserve between 22:00 and 07:00 local time, which `MORNDO_POOL_NIGHT=<from>-<to>` changes. It is off until you turn it on:
 
   ```sh
   morndo-keys pool mode rotate --runtime codex --by you@example.com

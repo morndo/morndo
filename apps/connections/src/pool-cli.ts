@@ -13,7 +13,7 @@ import { ask, fail, need, type Io, type Parsed } from "./cli.ts";
 import { readCodexAccount } from "./adapters/codex-account.ts";
 import { poolStore } from "./adapters/codex-pool-home.ts";
 import { spendResetCredit } from "./adapters/codex-reset.ts";
-import { classifyFailure, continuationArgs, continuePrompt, handoffArgs, handoffPrompt, promptOf, retryAt, sessionOf } from "./adapters/codex-turn.ts";
+import { classifyFailure, continuationArgs, continuePrompt, handoffArgs, handoffPrompt, promptOf, resumesLast, retryAt, sessionOf } from "./adapters/codex-turn.ts";
 import { selfHolder } from "./adapters/processes.ts";
 import { childEnv, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
@@ -22,11 +22,49 @@ import { NO_FREE_SEAT, type PoolRefusal, type TurnBegun, type TurnEnd } from "./
 
 const DEFAULT_RUNTIME = "codex";
 const DEFAULT_WAIT_MS = 1_800_000;
-const POLL_MS = 200;
+const WAIT_FIRST_MS = 200;
+const WAIT_CAP_MS = 5_000;
+const DEFAULT_NIGHT = "22-7";
 const TERMS_LINE = "Rotation moves a lane to another account when one reaches its limit. OpenAI's terms forbid \"circumventing any rate limits or restrictions\" (EU Terms of Use, \"What you cannot do\"); whether rotation across your own paid accounts is allowed is for you to judge. Turn it on only if you accept that.";
 
 const runtimeOf = (parsed: Parsed): string => parsed.get("runtime") ?? DEFAULT_RUNTIME;
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+
+// How long a turn waits for a busy account: 200 ms, doubling to 5 s. A wait that is not a number of milliseconds is the default.
+export function waitDelay(attempt: number): number {
+  return Math.min(WAIT_FIRST_MS * 2 ** attempt, WAIT_CAP_MS);
+}
+
+export function waitLimit(text: string | undefined): number {
+  const n = Number(text);
+  return text !== undefined && text.trim() !== "" && Number.isFinite(n) && n >= 0 ? n : DEFAULT_WAIT_MS;
+}
+
+type Seated<T> = { ok: true; value: T } | { ok: false; error: PoolRefusal };
+
+// Tries until it is not told that the member is busy, or the wait is up. The clock and the sleep are the caller's.
+export async function awaitSeat<T>(o: {
+  attempt(): Seated<T>; waitMs: number; now(): number; sleep(ms: number): Promise<void>; onWait(member: string): void; stopped?(): boolean;
+}): Promise<Seated<T>> {
+  const deadline = o.now() + o.waitMs;
+  let said = false;
+  for (let n = 0; ; n++) {
+    const got = o.attempt();
+    if (got.ok || got.error.kind !== "busy" || o.now() >= deadline || o.stopped?.() === true) return got;
+    if (!said) { o.onWait(got.error.member); said = true; }
+    await o.sleep(Math.min(waitDelay(n), deadline - o.now()));
+  }
+}
+
+// Whether `at` falls in the night hours "from-to" (local, wrapping past midnight) of a time zone: when a kept member's reserve holds.
+export function isNight(at: number, zone: string, hours: string): boolean {
+  const m = /^(\d{1,2})-(\d{1,2})$/.exec(hours);
+  if (!m) return false;
+  const from = Number(m[1]);
+  const to = Number(m[2]);
+  const hour = Number(new Intl.DateTimeFormat("en-US", { timeZone: zone, hourCycle: "h23", hour: "numeric" }).format(new Date(at)));
+  return from === to ? false : from < to ? hour >= from && hour < to : hour >= from || hour < to;
+}
 const when = (at: number | null | undefined): string => (at == null ? "unknown time" : new Date(at).toISOString());
 
 export async function poolCommand(home: Opened, parsed: Parsed, io: Io): Promise<number> {
@@ -203,21 +241,22 @@ function modelOf(args: readonly string[]): string | null {
   return at >= 0 ? (args[at + 1] ?? null) : null;
 }
 
-// What a refused start says. A usage limit is told as the CLI would tell it, so the engine layer classifies it as one.
+// What a refused start says, by the kind of refusal. A usage limit is told as the CLI would tell it, so the engine layer
+// classifies it as one; a busy member is only busy, and says so on stderr.
 function refusedStart(home: Opened, runtime: string, error: PoolRefusal, session: string | null, io: Io): number {
-  if (error.holder) return fail(io, `session ${session ?? ""} is being written by pid ${error.holder.pid}`, error.exit);
-  const one = /^member (\S+) is (out|low)$/.exec(error.problem);
-  const names = home.pool.list(runtime).seats.filter(s => s.state === "out" || s.state === "low").map(s => s.member);
-  if (error.problem === NO_FREE_SEAT) {
-    failedEvent(io, `You’ve hit your usage limit on every pool account (${names.join(", ")}). The first is back at ${when(error.backAt)}.`);
-    return 1;
+  const names = (): string[] => home.pool.list(runtime).seats.filter(s => s.state === "out" || s.state === "low").map(s => s.member);
+  switch (error.kind) {
+    case "session-busy": return fail(io, `session ${session ?? ""} is being written by pid ${error.holder.pid}`, error.exit);
+    case "no-seat":
+      failedEvent(io, `You’ve hit your usage limit on every pool account (${names().join(", ")}). The first is back at ${when(error.backAt)}.`);
+      return 1;
+    case "unavailable":
+      if (error.state === "logged-out") failedEvent(io, `${error.member} is not signed in: sign it in again`);
+      else if (error.state === "retired") failedEvent(io, `${error.member} is retired from the pool`);
+      else failedEvent(io, `You’ve hit your usage limit on ${error.member}. It is back at ${when(error.backAt)}.`);
+      return 1;
+    case "busy": case "no-default": case "gate": case "input": return fail(io, error.problem, error.exit);
   }
-  if (one) { failedEvent(io, `You’ve hit your usage limit on ${one[1]}. It is back at ${when(error.backAt)}.`); return 1; }
-  const out = /^member (\S+) is signed out$/.exec(error.problem);
-  if (out) { failedEvent(io, `${out[1]} is not signed in: sign it in again`); return 1; }
-  const retired = /^member (\S+) is retired$/.exec(error.problem);
-  if (retired) { failedEvent(io, `${retired[1]} is retired from the pool`); return 1; }
-  return fail(io, error.problem, error.exit);
 }
 
 type Turn = { status: number; held: string | null; messages: string[]; thread: string | null };
@@ -226,14 +265,16 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
   const args = parsed.rest;
   const prompt = promptOf(args);
   if (args[0] !== "exec" || prompt === null) return fail(io, "pool exec runs `exec … <prompt>`; the prompt must be the last argument, and - (stdin) is not accepted");
+  if (resumesLast(args)) return fail(io, "pool exec can't place `exec resume --last`: it continues whichever session is newest, on no account in particular. Give the session id.");
   const session = sessionOf(args);
   const lane = parsed.get("lane") ?? null;
   const holder = selfHolder(lane);
   if (!holder) return fail(io, "holder");
   const dir = parsed.get("workspace") ?? home.env.PWD ?? process.cwd();
-  const waitMs = Number(home.env.MORNDO_POOL_WAIT_MS ?? DEFAULT_WAIT_MS);
+  const waitMs = waitLimit(home.env.MORNDO_POOL_WAIT_MS);
   const model = modelOf(args);
   const zone = home.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const night = (): boolean => isNight(home.now(), zone, home.env.MORNDO_POOL_NIGHT ?? DEFAULT_NIGHT);
   const store = poolStore(home.env.MORNDO_POOL_DATA ?? join(home.env.HOME ?? homedir(), ".local/share/morndo/pool"), runtime);
   const keys = keysProgram(home.env.HOME ?? "", home.env.MORNDO_KEYS, existsSync, { command: process.execPath, args: ["--experimental-strip-types", join(import.meta.dirname, "main.ts")] });
 
@@ -249,16 +290,12 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
   process.on("SIGINT", int);
 
   const claimId = randomUUID();
-  const begin = async (): Promise<ReturnType<Opened["pool"]["begin"]>> => {
-    const deadline = Date.now() + waitMs;
-    let said = false;
-    for (;;) {
-      const begun = home.pool.begin({ runtime, claimId, session, pin: parsed.get("account") ?? null, dir, night: false, model, holder });
-      if (begun.ok || !begun.error.problem.endsWith(" is busy") || Date.now() >= deadline || stopped !== null) return begun;
-      if (!said) { noteEvent(io, `[pool] waiting: a turn runs on ${begun.error.problem.replace(/ is busy$/, "")}`); said = true; }
-      await sleep(POLL_MS);
-    }
-  };
+  // Starts a turn on a session, waiting while the member is busy (backing off), saying so once.
+  const begin = (on: string | null): Promise<Seated<TurnBegun>> => awaitSeat({
+    attempt: () => home.pool.begin({ runtime, claimId, session: on, pin: parsed.get("account") ?? null, dir, night: night(), model, holder }),
+    waitMs, now: () => Date.now(), sleep, stopped: () => stopped !== null,
+    onWait: member => { noteEvent(io, `[pool] waiting: a turn runs on ${member}`); },
+  });
 
   const runOnce = async (current: TurnBegun, argv: readonly string[]): Promise<Turn> => {
     const row = findConnection(home.store.load().directory, current.member);
@@ -274,6 +311,7 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
       lease: granted.id, connection: current.member, ref: null, configDir: current.configDir, model: entry === "default" ? "" : entry, effort: "",
       workspace: dir, deny: [home.vaultDir, home.db, home.identity, ...(row?.repo?.deny ?? [])], reservation: leaseRow?.reservation ?? 0, probe: false, subscription: true,
     };
+    home.pool.started(runtime, current.claimId);
     const turn: Turn = { status: 1, held: null, messages: [], thread: session };
     let buffer = "";
     const take = (text: string): void => {
@@ -331,11 +369,16 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
   };
 
   try {
-    const first = await begin();
+    const first = await begin(session);
     if (!first.ok) return refusedStart(home, runtime, first.error, session, io);
     let current = first.value;
     const tried = new Set<string>();
     let argv: readonly string[] = args;
+    if (current.moved) {
+      const handoff = current.continueBy === "handoff" && session !== null;
+      noteEvent(io, `[pool] ${current.moved.from} can't take this turn (${current.moved.why}); it goes on ${handoff ? "as a new session" : "as the same session"} on ${current.member}`);
+      if (handoff && session !== null) argv = handoffArgs(args, handoffPrompt(session, prompt));
+    }
     for (;;) {
       tried.add(current.member);
       let turn: Turn;
@@ -348,10 +391,16 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
       if (stopped !== null) { home.pool.end(runtime, current.claimId, { kind: "other" }); return stopped; }
       if (turn.status === 0) { home.pool.end(runtime, current.claimId, { kind: "done" }); return 0; }
       const ended = endOf(turn);
-      const out = home.pool.end(runtime, current.claimId, ended);
-      const next = out.next;
-      if (next && (ended.kind === "unreadable" || !tried.has(next.member))) {
-        const known = turn.thread ?? session;
+      const out = home.pool.end(runtime, current.claimId, ended, { dir, night: night(), tried: [...tried] });
+      const known = turn.thread ?? session;
+      let next = out.next;
+      let refusal = out.refusal;
+      if (next === null && ended.kind === "usage-limit" && refusal?.kind === "busy") {
+        // The failed member is out, and every free one is busy: wait for one, as a start of the same session.
+        const again = await begin(known);
+        if (again.ok) { next = again.value; refusal = null; } else refusal = again.error;
+      }
+      if (next) {
         if (ended.kind === "usage-limit") noteEvent(io, `[pool] ${current.member} reached its usage limit; this turn goes on as the same session on ${next.member}`);
         argv = next.continueBy === "handoff" || ended.kind === "unreadable"
           ? handoffArgs(args, handoffPrompt(known ?? "unknown", prompt))
@@ -359,10 +408,11 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
         current = next;
         continue;
       }
-      if (next) home.pool.release(runtime, next.claimId);
-      if (out.refusal && ended.kind === "usage-limit" && !/^member /.test(out.refusal.problem)) {
+      if (ended.kind === "usage-limit" && refusal?.kind === "no-seat") {
         const names = home.pool.list(runtime).seats.filter(s => s.state === "out" || s.state === "low").map(s => s.member);
-        failedEvent(io, `You’ve hit your usage limit on every pool account (${names.join(", ")}). The first is back at ${when(out.refusal.backAt)}.`);
+        failedEvent(io, `You’ve hit your usage limit on every pool account (${names.join(", ")}). The first is back at ${when(refusal.backAt)}.`);
+      } else if (ended.kind === "usage-limit" && refusal?.kind === "busy") {
+        return fail(io, refusal.problem, refusal.exit);
       } else if (turn.held !== null) io.stdout(`${turn.held}\n`);
       return turn.status === 0 ? 1 : turn.status;
     }

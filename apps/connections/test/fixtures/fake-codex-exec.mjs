@@ -22,7 +22,16 @@ if (argv[0] === "app-server") {
 } else if (argv[0] === "exec") {
   const memberHome = dirname(realpathSync(join(codexHome, "auth.json")));
   const mode = existsSync(join(memberHome, "mode")) ? readFileSync(join(memberHome, "mode"), "utf8").trim() : "ok";
-  const resumed = argv[1] === "resume" ? argv[2] : null;
+  // `exec resume [OPTIONS] [SESSION_ID] [PROMPT]`: the id is the first word that is not an option or an option's value.
+  const VALUE_OPTIONS = new Set(["-c", "--config", "-m", "--model", "-i", "--image", "--enable", "--disable", "--thread-source", "--cyber-access-program", "-o", "--output-last-message", "--output-schema"]);
+  let resumed = null;
+  if (argv[1] === "resume") {
+    for (let i = 2; i < argv.length; i++) {
+      if (argv[i].startsWith("-")) { if (VALUE_OPTIONS.has(argv[i])) i++; continue; }
+      resumed = argv[i];
+      break;
+    }
+  }
   appendFileSync(join(memberHome, "runs.jsonl"), `${JSON.stringify({
     argv, member: basename(memberHome), sessionsDir: realpathSync(join(codexHome, "sessions")),
     locksDir: realpathSync(join(codexHome, "thread-writer-locks")), names: Object.keys(process.env),

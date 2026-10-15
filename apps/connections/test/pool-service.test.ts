@@ -102,19 +102,20 @@ describe("pool service: one writer per session, one turn per account", () => {
     const a = one.begin(start({ claimId: "c1", session: "s1", pin: "codex-a", holder: holder(101) }));
     const b = two.begin(start({ claimId: "c2", session: "s1", pin: "codex-a", holder: holder(202) }));
     expect(a).toMatchObject({ ok: true, value: { member: "codex-a" } });
-    expect(b).toEqual({ ok: false, error: { problem: "session-busy", exit: 1, holder: holder(101) } });
+    expect(b).toEqual({ ok: false, error: { kind: "session-busy", problem: "session-busy", exit: 1, holder: holder(101) } });
   });
 
   it("holds an account for a read without placing anything, and refuses while a turn runs", () => {
     const w = pooled();
     w.pool.retire("codex", "codex-a", "out for the test");
     expect(w.pool.hold("codex", "codex-a", "r1", holder(301)).ok).toBe(true);
-    expect(w.pool.hold("codex", "codex-a", "r2", holder(302))).toEqual({ ok: false, error: { problem: "codex-a is busy", exit: 1 } });
+    expect(w.pool.hold("codex", "codex-a", "r2", holder(302))).toEqual({ ok: false, error: { kind: "busy", member: "codex-a", problem: "codex-a is busy", exit: 1 } });
     w.pool.release("codex", "r1");
     expect(w.pool.hold("codex", "codex-a", "r3", holder(303)).ok).toBe(true);
     w.pool.release("codex", "r3");
     expect(w.pool.begin(start({ claimId: "t1", session: "s9", pin: "codex-b" })).ok).toBe(true);
-    expect(w.pool.hold("codex", "codex-b", "r4", holder(304))).toEqual({ ok: false, error: { problem: "codex-b is busy", exit: 1 } });
+    w.pool.started("codex", "t1");
+    expect(w.pool.hold("codex", "codex-b", "r4", holder(304))).toEqual({ ok: false, error: { kind: "busy", member: "codex-b", problem: "codex-b is busy", exit: 1 } });
     expect(w.pool.list("codex").placements.map(x => x.session)).toEqual(["s9"]);
   });
 });
@@ -126,16 +127,16 @@ describe("pool service: the Connection gate", () => {
     w.add("codex-a", { ack: false });
     expect(pool.add("codex", "codex-a", NONE).ok).toBe(true);
     pool.record("codex", reading("codex-a"));
-    expect(pool.begin(start({ pin: "codex-a" }))).toEqual({ ok: false, error: { problem: "member codex-a has no terms acknowledgement", exit: 75 } });
+    expect(pool.begin(start({ pin: "codex-a" }))).toEqual({ ok: false, error: { kind: "gate", member: "codex-a", problem: "member codex-a has no terms acknowledgement", exit: 75 } });
     expect(w.home.connections.acknowledge("codex-a", "test", who).ok).toBe(true);
     expect(pool.begin(start({ pin: "codex-a" })).ok).toBe(true);
     pool.release("codex", "c1");
     expect(w.home.connections.turnOff("codex-a").ok).toBe(true);
-    expect(pool.begin(start({ claimId: "c2", pin: "codex-a" }))).toEqual({ ok: false, error: { problem: "member codex-a is off", exit: 75 } });
+    expect(pool.begin(start({ claimId: "c2", pin: "codex-a" }))).toEqual({ ok: false, error: { kind: "gate", member: "codex-a", problem: "member codex-a is off", exit: 75 } });
 
     expect(w.home.connections.addSubscription({ name: "no-home", vendor: "codex", runtime: "codex", configDir: null }, who).ok).toBe(true);
-    expect(pool.add("codex", "no-home", NONE)).toEqual({ ok: false, error: { problem: "a pool member needs its own --config-dir", exit: 1 } });
-    expect(pool.add("codex", "missing-one", NONE)).toEqual({ ok: false, error: { problem: "no such connection: missing-one", exit: 1 } });
+    expect(pool.add("codex", "no-home", NONE)).toEqual({ ok: false, error: { kind: "input", problem: "a pool member needs its own --config-dir", exit: 1 } });
+    expect(pool.add("codex", "missing-one", NONE)).toEqual({ ok: false, error: { kind: "input", problem: "no such connection: missing-one", exit: 1 } });
   });
 
   it("refuses a key as a member", async () => {
@@ -143,7 +144,7 @@ describe("pool service: the Connection gate", () => {
     await w.home.seal("ref-key", "sk-synthetic-pool-0001");
     const added = await w.home.connections.addKey({ name: "key-a", vendor: "openai", runtime: "codex", ref: "ref-key", billing: "metered", budget: { kind: "unlimited" }, expiry: null }, who);
     expect(added.ok).toBe(true);
-    expect(w.service().add("codex", "key-a", NONE)).toEqual({ ok: false, error: { problem: "a pool member is a subscription of its runtime", exit: 1 } });
+    expect(w.service().add("codex", "key-a", NONE)).toEqual({ ok: false, error: { kind: "input", problem: "a pool member is a subscription of its runtime", exit: 1 } });
   });
 });
 
@@ -156,13 +157,15 @@ describe("pool service: a turn that ends on a usage limit", () => {
     expect(out.refusal).toBeNull();
     expect(out.next).toMatchObject({ member: "codex-b", claimId: "c1>codex-b", continueBy: "resume" });
     expect(rotate.pool.list("codex").seats.find(s => s.member === "codex-a")).toMatchObject({ state: "out", backAt: T0 + 3 * H });
+    expect(rotate.pool.list("codex").placements).toEqual([]);          // nothing is placed until a turn starts
+    rotate.pool.started("codex", out.next?.claimId ?? "");
     expect(rotate.pool.list("codex").placements).toMatchObject([{ session: "s1", member: "codex-b" }]);
 
     const pinned = pooled("pinned");
     expect(pinned.pool.begin(start({ claimId: "c1", session: "s1", pin: "codex-a" })).ok).toBe(true);
     const stuck = pinned.pool.end("codex", "c1", { kind: "usage-limit", resetAt: T0 + 3 * H, model: null });
     expect(stuck.next).toBeNull();
-    expect(stuck.refusal).toMatchObject({ problem: "member codex-a is out", exit: 1, backAt: T0 + 3 * H });
+    expect(stuck.refusal).toMatchObject({ kind: "unavailable", member: "codex-a", state: "out", problem: "member codex-a is out", exit: 1, backAt: T0 + 3 * H });
   });
 
   it("goes on with the same member as a handoff when a conversation can't be read, in either mode", () => {
@@ -200,5 +203,143 @@ describe("pool service: no email is kept", () => {
     const body = raw.prepare("SELECT body FROM pool WHERE runtime = 'codex'").pluck().get() as string;
     expect(body).not.toContain("@");
     expect(readFileSync(w.home.db).includes("someone@example.com")).toBe(false);
+  });
+});
+
+describe("pool service: typed refusals", () => {
+  it("tells a busy member from an unavailable one, a missing seat, a missing default and a taken session by kind", () => {
+    const w = pooled("pinned");
+    expect(w.pool.begin(start({ claimId: "c1", session: "s1", pin: "codex-a" })).ok).toBe(true);
+    expect(w.pool.begin(start({ claimId: "c2", session: "s2", pin: "codex-a" }))).toMatchObject({ ok: false, error: { kind: "busy", member: "codex-a" } });
+    expect(w.pool.begin(start({ claimId: "c3", session: "s1", pin: "codex-b" }))).toMatchObject({ ok: false, error: { kind: "session-busy", holder: holder(101) } });
+    expect(w.pool.begin(start({ claimId: "c4" }))).toMatchObject({ ok: false, error: { kind: "no-default" } });
+    w.pool.retire("codex", "codex-b", "by hand");
+    expect(w.pool.begin(start({ claimId: "c5", pin: "codex-b" }))).toMatchObject({ ok: false, error: { kind: "unavailable", member: "codex-b", state: "retired" } });
+    const rot = pooled("rotate");
+    rot.pool.retire("codex", "codex-a", "by hand");
+    rot.pool.retire("codex", "codex-b", "by hand");
+    expect(rot.pool.begin(start())).toMatchObject({ ok: false, error: { kind: "no-seat" } });
+  });
+});
+
+describe("pool service: rotate with a busy member", () => {
+  it("takes the next free member when the chosen one is busy, and says busy only when every free one is", () => {
+    const w = pooled("rotate");
+    expect(w.pool.hold("codex", "codex-a", "r1", holder(301)).ok).toBe(true);
+    expect(w.pool.begin(start({ claimId: "t1", session: "s1" }))).toMatchObject({ ok: true, value: { member: "codex-b" } });
+    expect(w.pool.begin(start({ claimId: "t2", session: "s2" }))).toMatchObject({ ok: false, error: { kind: "busy" } });
+  });
+
+  it("makes a placed session wait for its own member instead of moving it", () => {
+    const w = pooled("rotate");
+    expect(w.pool.begin(start({ claimId: "t1", session: "s1" })).ok).toBe(true);
+    w.pool.started("codex", "t1");
+    w.pool.release("codex", "t1");
+    expect(w.pool.hold("codex", "codex-a", "r1", holder(301)).ok).toBe(true);
+    expect(w.pool.begin(start({ claimId: "t2", session: "s1" }))).toMatchObject({ ok: false, error: { kind: "busy", member: "codex-a" } });
+  });
+});
+
+describe("pool service: a placement moves when the turn starts, not when it is chosen", () => {
+  it("leaves the session where it was until started, and a claim released unstarted moves nothing", () => {
+    const w = pooled("rotate");
+    expect(w.pool.begin(start({ claimId: "t1", session: "s1" })).ok).toBe(true);
+    w.pool.started("codex", "t1");
+    w.pool.release("codex", "t1");
+    w.pool.retire("codex", "codex-a", "out for the test");
+    const moved = w.pool.begin(start({ claimId: "t2", session: "s1" }));
+    expect(moved).toMatchObject({ ok: true, value: { member: "codex-b", moved: { from: "codex-a", why: "retired" } } });
+    expect(w.pool.list("codex").placements).toMatchObject([{ session: "s1", member: "codex-a" }]);
+    w.pool.release("codex", "t2");
+    expect(w.pool.list("codex").placements).toMatchObject([{ session: "s1", member: "codex-a" }]);
+    expect(w.pool.begin(start({ claimId: "t3", session: "s1" })).ok).toBe(true);
+    w.pool.started("codex", "t3");
+    expect(w.pool.list("codex").placements).toMatchObject([{ session: "s1", member: "codex-b" }]);
+  });
+
+  it("does not choose a member that already ran this turn, so no placement points at one that never did", () => {
+    const w = pooled("rotate");
+    expect(w.pool.begin(start({ claimId: "t1", session: "s1" })).ok).toBe(true);
+    w.pool.started("codex", "t1");
+    const one = w.pool.end("codex", "t1", { kind: "usage-limit", resetAt: T0 + 3 * H, model: null }, { tried: ["codex-a"] });
+    expect(one.next?.member).toBe("codex-b");
+    w.pool.started("codex", one.next?.claimId ?? "");
+    w.clock.t = T0 + 4 * H;                                          // a's mark has lapsed
+    const two = w.pool.end("codex", one.next?.claimId ?? "", { kind: "usage-limit", resetAt: T0 + 9 * H, model: null }, { tried: ["codex-a", "codex-b"] });
+    expect(two.next).toBeNull();
+    expect(two.refusal).toMatchObject({ kind: "no-seat" });
+    expect(w.pool.list("codex").placements).toMatchObject([{ session: "s1", member: "codex-b" }]);
+  });
+});
+
+describe("pool service: a move between turns follows moveBy", () => {
+  it("says resume by default and handoff once the pool has learned that conversations can't cross", () => {
+    const w = pooled("rotate");
+    expect(w.pool.begin(start({ claimId: "t1", session: "s1" })).ok).toBe(true);
+    w.pool.started("codex", "t1");
+    w.pool.release("codex", "t1");
+    w.pool.retire("codex", "codex-a", "out for the test");
+    expect(w.pool.begin(start({ claimId: "t2", session: "s1" }))).toMatchObject({ ok: true, value: { moved: { from: "codex-a" }, continueBy: "resume" } });
+    w.pool.release("codex", "t2");
+    expect(w.pool.setSettings("codex", { moveBy: "handoff" }, null).ok).toBe(true);
+    expect(w.pool.begin(start({ claimId: "t3", session: "s1" }))).toMatchObject({ ok: true, value: { moved: { from: "codex-a" }, continueBy: "handoff" } });
+    w.pool.release("codex", "t3");
+    expect(w.pool.begin(start({ claimId: "t4", session: "new" }))).toMatchObject({ ok: true, value: { moved: null, continueBy: null } });
+  });
+});
+
+describe("pool service: a turn that goes on elsewhere keeps its directory and the night reserve", () => {
+  it("serves a member kept to the session's directory, and leaves a kept member's night reserve alone", () => {
+    const only = world();
+    const pool = only.service();
+    for (const r of [reading("codex-a"), reading("codex-c", { long: 10 })]) {
+      only.add(r.member);
+      expect(pool.add("codex", r.member, r.member === "codex-c" ? { keep: false, expires: null, onlyFor: ["/work"] } : NONE).ok).toBe(true);
+      pool.record("codex", r);
+    }
+    expect(pool.setMode("codex", "rotate", "principal@example.com").ok).toBe(true);
+    expect(pool.begin(start({ claimId: "t1", session: "s1", dir: "/elsewhere" })).ok).toBe(true);
+    pool.started("codex", "t1");
+    const out = pool.end("codex", "t1", { kind: "usage-limit", resetAt: T0 + 3 * H, model: null }, { dir: "/work/x", tried: ["codex-a"] });
+    expect(out.next?.member).toBe("codex-c");
+
+    const kept = world();
+    const kp = kept.service();
+    kept.add("codex-a"); kept.add("codex-b");
+    expect(kp.add("codex", "codex-a", NONE).ok).toBe(true);
+    expect(kp.add("codex", "codex-b", { keep: true, expires: null, onlyFor: [] }).ok).toBe(true);
+    kp.record("codex", reading("codex-a")); kp.record("codex", reading("codex-b", { long: 90 }));
+    expect(kp.setMode("codex", "rotate", "principal@example.com").ok).toBe(true);
+    expect(kp.begin(start({ claimId: "k1", session: "k" })).ok).toBe(true);
+    kp.started("codex", "k1");
+    const next = kp.end("codex", "k1", { kind: "usage-limit", resetAt: T0 + 3 * H, model: null }, { night: true, tried: ["codex-a"] });
+    expect(next.next).toBeNull();
+    expect(next.refusal).toMatchObject({ kind: "no-seat" });
+  });
+});
+
+describe("pool service: advice that only looks", () => {
+  const blocked = (): World & { pool: PoolService } => {
+    const credits = { available: 1, expiresAt: null };
+    const w = pooled("rotate", [
+      reading("codex-a", { long: 99, credits, windows: [{ usedPercent: 20, minutes: 300, resetsAt: T0 + 2 * H }, { usedPercent: 99, minutes: 10_080, resetsAt: T0 + 120 * H }] }),
+      reading("codex-b", { long: 99, credits, windows: [{ usedPercent: 20, minutes: 300, resetsAt: T0 + 2 * H }, { usedPercent: 99, minutes: 10_080, resetsAt: T0 + 30 * H }] }),
+    ]);
+    w.pool.begin(start({ claimId: "c1", session: "s1" }));
+    return w;
+  };
+  it("records nothing for a look, so the notice that follows still goes out", () => {
+    const w = blocked();
+    const count = (): number => {
+      const raw = new Database(w.home.db, { readonly: true });
+      try { return (JSON.parse(raw.prepare("SELECT body FROM pool WHERE runtime = 'codex'").pluck().get() as string) as { events: { type: string }[] }).events.filter(e => e.type === "ResetAdvised").length; }
+      finally { raw.close(); }
+    };
+    expect(w.pool.advice("codex")?.reason).toBe("all-blocked");
+    expect(count()).toBe(0);
+    expect(w.pool.adviceOnce("codex")?.reason).toBe("all-blocked");
+    expect(count()).toBe(1);
+    expect(w.pool.adviceOnce("codex")).toBeNull();
+    expect(w.pool.advice("codex")?.reason).toBe("all-blocked");
   });
 });

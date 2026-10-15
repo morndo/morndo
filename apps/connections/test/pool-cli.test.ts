@@ -10,6 +10,7 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { UsageReportBody } from "@morndo/protocol";
 import { run } from "../src/cli.ts";
+import { awaitSeat, isNight, waitDelay, waitLimit } from "../src/pool-cli.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const catalog = join(ROOT, "packages/protocol/catalog/vendors.json");
@@ -198,6 +199,104 @@ describe("morndo-keys pool exec", () => {
       const body = JSON.parse(db.prepare("SELECT body FROM pool WHERE runtime = 'codex'").pluck().get() as string) as { events: { type: string }[] };
       expect(body.events.some(e => e.type === "MoveByChanged")).toBe(true);
     } finally { db.close(); }
+  });
+});
+
+describe("morndo-keys pool exec: what a turn does when it can't simply run", () => {
+  it("refuses `exec resume --last`, which names no session, before any claim or run", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "ok" }, defaultMember: "codex-a" });
+    const out = await t.cli(["pool", "exec", "--runtime", "codex", "--", "exec", "resume", "--last", "continue"]);
+    expect(out.code).toBe(1);
+    expect(out.stderr).toContain("--last");
+    expect(t.runs("codex-a")).toEqual([]);
+    const list = JSON.parse((await t.cli(["pool", "list", "--runtime", "codex", "--json"])).stdout) as { placements: unknown[] };
+    expect(list.placements).toEqual([]);
+  });
+
+  it("finds the session after options and keys the claim by it", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "ok" }, defaultMember: "codex-a" });
+    const first = await t.cli(turn());
+    const thread = events(first.stdout).find(e => e.type === "thread.started")?.thread_id ?? "";
+    const again = await t.cli(["pool", "exec", "--runtime", "codex", "--", "exec", "resume", "--json", "-m", "model-x", thread, "more"]);
+    expect(again.code, again.stderr).toBe(0);
+    expect(t.runs("codex-a").at(-1)?.argv.slice(0, 2)).toEqual(["exec", "resume"]);
+    const list = JSON.parse((await t.cli(["pool", "list", "--runtime", "codex", "--json"])).stdout) as { placements: { session: string }[] };
+    expect(list.placements.map(p => p.session)).toEqual([thread]);
+  });
+
+  it("tells a busy next account as busy, never as every account out, and waits for it", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "limit", "codex-b": "slow" } });
+    const holder = t.cli(turn(["--lane", "lane-1", "--account", "codex-b"]));
+    await until(() => t.runs("codex-b").length === 1);
+    const impatient = await t.cli(turn(["--lane", "lane-2"]), { MORNDO_POOL_WAIT_MS: "300" });
+    expect(impatient.code).toBe(1);
+    expect(impatient.stdout).not.toContain("every pool account");
+    expect(events(impatient.stdout).filter(e => e.type === "turn.failed")).toEqual([]);
+    expect(impatient.stderr).toBe("codex-b is busy\n");
+    expect(t.runs("codex-a")).toHaveLength(1);
+    await holder;
+  }, 30_000);
+
+  it("goes on with the busy account once it is free", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "limit", "codex-b": "slow" } });
+    const holder = t.cli(turn(["--lane", "lane-1", "--account", "codex-b"]));
+    await until(() => t.runs("codex-b").length === 1);
+    const patient = await t.cli(turn(["--lane", "lane-2"]), { MORNDO_POOL_WAIT_MS: "20000" });
+    expect(patient.code, patient.stderr).toBe(0);
+    expect(events(patient.stdout).at(-1)?.type).toBe("turn.completed");
+    expect(t.runs("codex-b")).toHaveLength(2);
+    await holder;
+  }, 40_000);
+
+  it("hands a session off when it moves between turns after the pool learned that conversations can't cross", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "ok", "codex-b": "ok" } });
+    const first = await t.cli(turn());
+    const thread = events(first.stdout).find(e => e.type === "thread.started")?.thread_id ?? "";
+    expect((await t.cli(["pool", "set", "moveBy", "handoff"])).code).toBe(0);
+    expect((await t.cli(["pool", "retire", "codex-a"])).code).toBe(0);
+    const moved = await t.cli(["pool", "exec", "--runtime", "codex", "--", "exec", "resume", thread, "--json", "next brief"]);
+    expect(moved.code, moved.stderr).toBe(0);
+    expect(events(moved.stdout).some(e => e.type === "error" && /codex-a can't take this turn \(retired\); it goes on as a new session on codex-b/.test(e.message ?? ""))).toBe(true);
+    const [run] = t.runs("codex-b");
+    expect(run?.argv[0]).toBe("exec");
+    expect(run?.argv[1]).not.toBe("resume");
+    expect(run?.argv.at(-1)).toContain(thread);
+  });
+});
+
+describe("morndo-keys pool exec: waiting and the night", () => {
+  it("backs off 200 ms, doubling to 5 s, until the wait is up, on a clock of its own", async () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map(waitDelay)).toEqual([200, 400, 800, 1600, 3200, 5000, 5000]);
+    let t = 0;
+    const slept: number[] = [];
+    const waited: string[] = [];
+    const busy = { ok: false as const, error: { kind: "busy" as const, member: "codex-a", problem: "codex-a is busy", exit: 1 as const } };
+    const got = await awaitSeat({ attempt: () => busy, waitMs: 12_000, now: () => t, sleep: async ms => { slept.push(ms); t += ms; }, onWait: m => waited.push(m) });
+    expect(got).toEqual(busy);
+    expect(slept).toEqual([200, 400, 800, 1600, 3200, 5000, 800]);
+    expect(waited).toEqual(["codex-a"]);
+    expect(t).toBe(12_000);
+  });
+
+  it("stops at once for a refusal that is not busy, and succeeds as soon as the member is free", async () => {
+    let calls = 0;
+    const sleeps: number[] = [];
+    const free = await awaitSeat({
+      attempt: () => (++calls < 3 ? { ok: false as const, error: { kind: "busy" as const, member: "m", problem: "m is busy", exit: 1 as const } } : { ok: true as const, value: "seat" }),
+      waitMs: 60_000, now: () => 0, sleep: async ms => { sleeps.push(ms); }, onWait: () => {},
+    });
+    expect(free).toEqual({ ok: true, value: "seat" });
+    expect(sleeps).toEqual([200, 400]);
+    const stop = await awaitSeat({ attempt: () => ({ ok: false as const, error: { kind: "no-default" as const, problem: "x", exit: 1 as const } }), waitMs: 60_000, now: () => 0, sleep: async () => { throw new Error("slept"); }, onWait: () => {} });
+    expect(stop.ok).toBe(false);
+  });
+
+  it("takes a wait that is not a number of milliseconds as the default, and finds the night in a time zone", () => {
+    expect([waitLimit(undefined), waitLimit("abc"), waitLimit(""), waitLimit("500")]).toEqual([1_800_000, 1_800_000, 1_800_000, 500]);
+    const at = (h: number): number => Date.UTC(2026, 9, 15, h);
+    expect([isNight(at(23), "UTC", "22-7"), isNight(at(3), "UTC", "22-7"), isNight(at(12), "UTC", "22-7")]).toEqual([true, true, false]);
+    expect([isNight(at(21), "UTC", "22-7"), isNight(at(21), "Europe/Berlin", "22-7")]).toEqual([false, true]);          // 23:00 in Berlin
+    expect(isNight(at(12), "UTC", "bad")).toBe(false);
   });
 });
 
