@@ -1,7 +1,7 @@
 // The Pool's members and seats (ADR-0029: PL2, PL3, PL8, PL9, PL11, PL13, PL14): states in order, one account behind two
 // members, how marks start and end, and what only the principal turns on.
 import { describe, expect, it } from "vitest";
-import { markOut, recordReading, seats, setMode, setSettings, type Pool } from "../src/index.ts";
+import { markOut, place, recordReading, refuse, retireMember, seats, setMode, setSettings, noteResetAdvised, type Pool } from "../src/index.ts";
 import { H, NOW, must, poolOf, reading } from "./pool-fixtures.ts";
 
 const seat = (p: Pool, m: string, model: string | null = null) => seats(p, NOW, model).find(s => s.member === m);
@@ -71,5 +71,30 @@ describe("pool: what only the principal turns on (PL11, PL13, PL14)", () => {
     expect(setSettings(p, { turnsPerMember: 2 }, null, NOW)).toEqual({ ok: false, error: "needs-principal" });
     expect(must(setSettings(p, { turnsPerMember: 2 }, "principal@example.com", NOW)).settings.turnsPerMember).toBe(2);
     expect(setSettings(p, { defaultMember: "nobody" }, null, NOW)).toEqual({ ok: false, error: "unknown-member" });
+  });
+});
+
+describe("pool: the seat of an account is its first member that can run (PL2)", () => {
+  it("passes the seat to a sibling when the first member by name is retired, and pinning the sibling works", () => {
+    const p = must(retireMember(poolOf([reading("a1", { identity: "same" }), reading("a2", { identity: "same" })], "pinned"), "a1", "turned off", NOW));
+    expect(seat(p, "a1")).toMatchObject({ state: "retired", sameAs: "a2" });
+    expect(seat(p, "a2")).toMatchObject({ state: "ok", sameAs: null });
+    expect(place(p, { session: null, pin: "a2", dir: null, night: false, model: null }, NOW)).toEqual({ ok: true, member: "a2", moved: null });
+    expect(place(p, { session: null, pin: "a1", dir: null, night: false, model: null }, NOW)).toEqual({ ok: true, member: "a2", moved: null });
+  });
+
+  it("passes the seat on when the first member's end has come", () => {
+    const p = poolOf([reading("a1", { identity: "same" }), reading("a2", { identity: "same" })], "pinned", { a1: { keep: false, expires: NOW - 1, onlyFor: [] }, a2: { keep: false, expires: null, onlyFor: [] } });
+    expect(seat(p, "a2")?.sameAs).toBeNull();
+  });
+});
+
+describe("pool: a notice of advice goes through the aggregate (PL10)", () => {
+  it("adds one ResetAdvised event, and the event list stays at its one cap", () => {
+    let p = poolOf([reading("a")]);
+    for (let i = 0; i < 600; i++) p = refuse(p, null, "x", NOW + i);
+    p = noteResetAdvised(p, { member: "a", reason: "all-blocked", backAt: null, creditExpiresAt: null, longLeft: null }, NOW + 700);
+    expect(p.events.at(-1)).toMatchObject({ type: "ResetAdvised", member: "a", reason: "all-blocked" });
+    expect(p.events).toHaveLength(500);
   });
 });

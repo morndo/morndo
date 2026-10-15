@@ -56,7 +56,8 @@ export type Seat = {
   shortLeft: number | null; shortResets: number | null; longLeft: number | null; longResets: number | null;
   urgency: number; active: number; busy: number; credits: number; backAt: number | null;
 };
-export type PlaceAsk = { session: string | null; pin: string | null; dir: string | null; night: boolean; model: string | null };
+// `skip`: members this choice must not return (ones whose claim was refused, or that already ran this turn).
+export type PlaceAsk = { session: string | null; pin: string | null; dir: string | null; night: boolean; model: string | null; skip?: readonly string[] };
 export type PlaceAnswer =
   | { ok: true; member: string; moved: { from: string; why: SeatState } | null }
   | { ok: false; problem: "no-seat"; leastBad: string | null; backAt: number | null }
@@ -221,20 +222,25 @@ function splitWindows(windows: readonly QuotaWindow[]): { short: QuotaWindow | u
   return { short: sorted.length > 1 ? sorted[0] : undefined, long: sorted[sorted.length - 1] };
 }
 
-// Members with one identity are one account (PL2): the first by name is the seat and the others copy it.
+// Members with one identity are one account (PL2). Its seat is the first member by name that can run (not retired, not past its
+// end); when none can, the first by name. The others copy it.
 export type Groups = { seatOf: Readonly<Record<string, string>>; members: Readonly<Record<string, readonly string[]>> };
 
-export function groupsOf(p: Pool): Groups {
-  const byIdentity = new Map<string, string[]>();
-  const seatOf: Record<string, string> = {};
-  const members: Record<string, string[]> = {};
+export function groupsOf(p: Pool, now: number): Groups {
+  const byIdentity = new Map<string, Member[]>();
+  const alone: Member[][] = [];
   for (const m of p.members) {
     const id = p.readings[m.name]?.identity ?? null;
-    const first = id === null ? undefined : byIdentity.get(id)?.[0];
-    if (id !== null) byIdentity.set(id, [...(byIdentity.get(id) ?? []), m.name]);
-    const seat = first ?? m.name;
-    seatOf[m.name] = seat;
-    members[seat] = [...(members[seat] ?? []), m.name];
+    if (id === null) alone.push([m]);
+    else byIdentity.set(id, [...(byIdentity.get(id) ?? []), m]);
+  }
+  const eligible = (m: Member): boolean => m.retired === null && !(m.settings.expires !== null && m.settings.expires <= now);
+  const seatOf: Record<string, string> = {};
+  const members: Record<string, string[]> = {};
+  for (const group of [...byIdentity.values(), ...alone]) {
+    const seat = (group.find(eligible) ?? group[0])?.name ?? "";
+    members[seat] = group.map(m => m.name);
+    for (const m of group) seatOf[m.name] = seat;
   }
   return { seatOf, members };
 }
@@ -256,7 +262,7 @@ function activeOf(p: Pool, group: readonly string[], now: number): number {
 
 // PL3: logged out, retired, out, low, ok, checked in that order. `busy` counts the account's live claims (PL13).
 export function seats(p: Pool, now: number, model: string | null = null): Seat[] {
-  const groups = groupsOf(p);
+  const groups = groupsOf(p, now);
   return p.members.map(m => {
     const seatName = groups.seatOf[m.name] ?? m.name;
     const group = groups.members[seatName] ?? [m.name];
@@ -307,7 +313,7 @@ function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: Readonly
     return only.length > 0 && ask.dir !== null && only.some(entry => under(ask.dir ?? "", entry));
   };
   const candidates = all.filter(s => {
-    if (s.state !== "ok" || s.sameAs !== null || leaveOut.has(s.member)) return false;
+    if (s.state !== "ok" || s.sameAs !== null || leaveOut.has(s.member) || (ask.skip ?? []).includes(s.member)) return false;
     const settings = settingsOf(s.member);
     if (settings.onlyFor.length > 0 && !matches(s)) return false;
     return !(settings.keep && ask.night && (s.longLeft ?? 100) < p.settings.nightReserveLong);
@@ -355,7 +361,7 @@ export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
     if (!current) return { ok: false, problem: "unknown-member" };
     if (current.state === "ok") return { ok: true, member: placed.member, moved: null };
     if (p.settings.mode === "pinned" || placed.pinned) return unavailable(current, placed.member);
-    const same = groupsOf(p);
+    const same = groupsOf(p, now);
     const leaveOut = new Set(same.members[same.seatOf[placed.member] ?? placed.member] ?? [placed.member]);
     const best = choose(p, all, ask, leaveOut)[0];
     return best ? { ok: true, member: best.member, moved: { from: placed.member, why: current.state } } : noSeat(all);
@@ -364,7 +370,7 @@ export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
   if (pin !== null) {
     const s = seat(pin);
     if (!s) return { ok: false, problem: "unknown-member" };
-    const groups = groupsOf(p);
+    const groups = groupsOf(p, now);
     const target = seat(groups.seatOf[pin] ?? pin) ?? s;
     return target.state === "ok" ? { ok: true, member: target.member, moved: null } : unavailable(target, target.member);
   }
@@ -404,7 +410,7 @@ export function claim(p: Pool, ask: ClaimAsk, alive: Alive, now: number): Result
   const live = withoutDead(p, alive, now);
   const writer = ask.session === null ? undefined : live.claims.find(c => c.session === ask.session && c.id !== ask.id);
   if (writer) return err({ problem: "session-busy", holder: writer.holder });
-  const groups = groupsOf(live);
+  const groups = groupsOf(live, now);
   const seatName = groups.seatOf[ask.member] ?? ask.member;
   const group = groups.members[seatName] ?? [ask.member];
   const running = live.claims.filter(c => group.includes(c.member) && c.id !== ask.id).length;
@@ -450,7 +456,7 @@ export function noteMoveBy(p: Pool, moveBy: MoveBy, by: string, reason: string, 
 // the first seat comes back a long time from now, and a blocked seat holds a credit: the one whose long window resets
 // last gains the most. Second: a credit would lapse soon.
 export function resetAdvice(p: Pool, waiting: number, now: number): Advice | null {
-  const groups = groupsOf(p);
+  const groups = groupsOf(p, now);
   const all = seats(p, now).filter(s => s.sameAs === null && s.state !== "retired" && s.state !== "logged-out");
   const creditsOf = (seat: Seat): Reading["credits"] =>
     (groups.members[seat.member] ?? [seat.member]).map(name => p.readings[name]).filter((r): r is Reading => r !== undefined)
@@ -474,4 +480,9 @@ export function resetAdvice(p: Pool, waiting: number, now: number): Advice | nul
 // PL10: spending a credit is the principal's command; this only records who gave it and what the vendor answered.
 export function noteResetSpent(p: Pool, member: string, by: string, outcome: string, now: number): Pool {
   return noted(p, { type: "ResetSpent", member, by, outcome, at: now });
+}
+
+// PL10: the pool said that spending a credit would pay off. The notice's own record lives in the aggregate, like every event.
+export function noteResetAdvised(p: Pool, advice: Advice, now: number): Pool {
+  return noted(p, { type: "ResetAdvised", member: advice.member, reason: advice.reason, at: now });
 }

@@ -62,6 +62,14 @@ describe("pool: rotate placement (PL4, PL5)", () => {
   });
 });
 
+describe("pool: members left out of a choice", () => {
+  it("never chooses a member the caller names to skip, and says there is no seat when all are skipped", () => {
+    const p = poolOf([reading("a", { long: 50, longIn: 24 }), reading("b", { long: 10, longIn: 144 })]);
+    expect(pick(p, { skip: ["a"] })).toMatchObject({ ok: true, member: "b" });
+    expect(pick(p, { skip: ["a", "b"] })).toMatchObject({ ok: false, problem: "no-seat" });
+  });
+});
+
 describe("pool: a placed session stays (PL6)", () => {
   it("stays while its member is ok, and moves at the next turn when it is low or out", () => {
     const p = placeSession(poolOf([reading("a", { long: 10, longIn: 144 }), reading("b", { long: 50, longIn: 24 })]), "s1", "a", false, NOW - 5 * 60_000);
