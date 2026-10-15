@@ -10,7 +10,9 @@ import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { baseUrlProblem, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram } from "./adapters/runtime-claude.ts";
+import { baseUrlProblem, childEnv, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
+import { readCodexLimits, usageReport } from "./adapters/usage-codex.ts";
+import { productVersion } from "@morndo/service-kit";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
@@ -69,6 +71,7 @@ async function dispatch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     case "check": return check(home, need(parsed.get("connection") ?? name), parsed, io);
     case "run": return launch(home, parsed, io);
     case "spend": return spend(home, need(name), io);
+    case "usage": return usage(home, parsed, io);
     case "log": return log(home, name, io);
     case "revoke": return done(home.connections.revoke(need(name), ACTOR), io);
     case "rotate": return rotate(home, need(name), io);
@@ -273,6 +276,23 @@ function spend(home: Opened, name: string, io: Io): number {
   const connection = findConnection(home.store.load().directory, name);
   if (!connection || connection.kind !== "api-key" || connection.custody !== "morndo") return fail(io, "missing");
   io.stdout(`${JSON.stringify({ name, spent: spentOf(connection.spend) })}\n`);
+  return 0;
+}
+
+// A Codex subscription's usage windows, one line of the status-line JSON the hub's Usage route takes (ADR-0028 decision 5).
+// Nothing on stdout when they can't be read, so a pipe into a post posts nothing. The child gets childEnv: no key variable,
+// and the Connection's own CODEX_HOME.
+async function usage(home: Opened, parsed: Parsed, io: Io): Promise<number> {
+  const name = need(parsed.get("connection"));
+  const connection = findConnection(home.store.load().directory, name);
+  if (!connection || connection.status === "revoked") return fail(io, "missing");
+  if (connection.custody !== "morndo" || connection.kind !== "subscription" || connection.runtime !== "codex") {
+    return fail(io, "usage reads a Codex subscription only");
+  }
+  const env = childEnv(home.env, loginEnv("codex", connection.configDir));
+  const reading = await readCodexLimits({ bin: home.env.MORNDO_CODEX_BIN ?? "codex", env, version: productVersion() });
+  if (!reading.ok) return fail(io, reading.problem);
+  io.stdout(`${JSON.stringify(usageReport(reading.limits, `${name}-limits`))}\n`);
   return 0;
 }
 
