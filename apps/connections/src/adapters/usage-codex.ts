@@ -7,13 +7,10 @@
 // generate-json-schema` writes for codex-cli 0.161.0 (v2/GetAccountRateLimitsResponse.json, 2026-10-15).
 // The app server is experimental, "aren't supported for production workloads" (same page): an answer in any other shape
 // is "unavailable", never a guess. Its stderr is never read, and the caller hands it childEnv (no key variable).
-import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
 import { CONNECTION_WORDS } from "@morndo/protocol";
+import { askAppServer } from "./codex-account.ts";
 
 export const CODEX_USAGE_TIMEOUT_MS = 15_000;
-const INITIALIZE_ID = 0;
-const READ_ID = 1;
 const FIVE_HOURS = 300;
 const SEVEN_DAYS = 10_080;
 
@@ -79,55 +76,16 @@ export function usageReport(limits: CodexLimits, sessionId: string): CodexUsageB
   return { session_id: sessionId, model, limits: windows.map(w => ({ label: windowLabel(w.windowDurationMins), ...row(w) })) };
 }
 
-function problemOf(error: unknown): string {
-  const text = isObject(error) && typeof error.message === "string" ? error.message.replace(/\s+/g, " ").trim().slice(0, 200) : "";
-  return text === "" ? "codex app-server refused the read" : `codex app-server: ${text}`;
-}
-
-// Starts the app server in its own process group, reads once, and stops the group whatever happened.
-export function readCodexLimits(input: { bin: string; env: NodeJS.ProcessEnv; version: string; timeoutMs?: number }): Promise<CodexReading> {
-  const script = input.bin.endsWith(".mjs") || input.bin.endsWith(".js");
-  const argv = [...(script ? [input.bin] : []), "app-server", "--listen", "stdio://"];
-  return new Promise(resolve => {
-    const child = spawn(script ? process.execPath : input.bin, argv, { env: input.env, stdio: ["pipe", "pipe", "ignore"], detached: true });
-    const lines = createInterface({ input: child.stdout });
-    let settled = false;
-    const finish = (reading: CodexReading): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      lines.close();
-      child.stdin.end();
-      if (child.pid !== undefined) {
-        try { process.kill(-child.pid, "SIGTERM"); } catch { /* already gone */ }
-      }
-      resolve(reading);
-    };
-    const timer = setTimeout(() => finish({ ok: false, problem: "codex app-server did not answer in time" }), input.timeoutMs ?? CODEX_USAGE_TIMEOUT_MS);
-    const send = (message: object): void => { if (!settled) child.stdin.write(`${JSON.stringify(message)}\n`); };
-    child.stdin.on("error", () => { /* the child went early; close says so */ });
-    child.on("error", error => finish({
-      ok: false,
-      problem: (error as NodeJS.ErrnoException).code === "ENOENT" ? `${input.bin} is not on PATH` : "codex app-server could not start",
-    }));
-    child.on("close", () => finish({ ok: false, problem: "codex app-server exited before it answered" }));
-    lines.on("line", line => {
-      let message: unknown;
-      try { message = JSON.parse(line); } catch { return; }
-      if (!isObject(message)) return;
-      if (message.id === INITIALIZE_ID) {
-        if ("error" in message) { finish({ ok: false, problem: problemOf(message.error) }); return; }
-        send({ method: "initialized", params: {} });
-        send({ method: "account/rateLimits/read", id: READ_ID, params: { excludeResetCreditDetails: true } });
-        return;
-      }
-      if (message.id !== READ_ID) return;   // notifications, and anything else the server says
-      if ("error" in message) { finish({ ok: false, problem: problemOf(message.error) }); return; }
-      const limits = limitsFromResult(message.result);
-      if (!limits) { finish({ ok: false, problem: "codex app-server answered in a shape this reader does not know" }); return; }
-      if (!limits.primary && !limits.secondary) { finish({ ok: false, problem: "Codex reported no usage window" }); return; }
-      finish({ ok: true, limits });
-    });
-    send({ method: "initialize", id: INITIALIZE_ID, params: { clientInfo: { name: "morndo", title: "Morndo", version: input.version } } });
-  });
+// Reads once through the shared app-server client: it stops the process group whatever happened.
+export async function readCodexLimits(input: { bin: string; env: NodeJS.ProcessEnv; version: string; timeoutMs?: number }): Promise<CodexReading> {
+  // `excludeResetCreditDetails` is in GetAccountRateLimitsParams of 0.161.0's schema ("Skip the separate reset-credit detail
+  // lookup for background usage polls"), so a usage poll leaves the credit details out.
+  const asked = await askAppServer({ ...input, timeoutMs: input.timeoutMs ?? CODEX_USAGE_TIMEOUT_MS }, [
+    { method: "account/rateLimits/read", params: { excludeResetCreditDetails: true } },
+  ]);
+  if (!asked.ok) return asked;
+  const limits = limitsFromResult(asked.results[0]);
+  if (!limits) return { ok: false, problem: "codex app-server answered in a shape this reader does not know" };
+  if (!limits.primary && !limits.secondary) return { ok: false, problem: "Codex reported no usage window" };
+  return { ok: true, limits };
 }
