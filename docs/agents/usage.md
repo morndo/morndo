@@ -31,6 +31,8 @@ window, and a report without a window never clears one reported before (U2).
 
 Codex has no status line. Its windows come from `morndo-keys usage --connection <name>`, posted the same way; see [`codex.md`](codex.md).
 
+With a pool, each member posts its own windows: see [`codex.md`](codex.md) §5.
+
 ## What Home shows
 
 - **At a glance:** how many accounts and sessions report, and the account nearest its 5-hour and its weekly limit.

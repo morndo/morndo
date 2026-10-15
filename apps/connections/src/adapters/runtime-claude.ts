@@ -38,13 +38,14 @@ const DENIED_NAMES = [
 ] as const;
 
 export type ChildResult = { status: number; stdout: string; stderr: string };
-export type ChildHooks = { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void };
+export type ChildHooks = { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onStart?: (pid: number) => void };
 
 export function runChild(command: string, args: readonly string[], options: {
-  env: NodeJS.ProcessEnv; cwd: string; hooks?: ChildHooks;
+  env: NodeJS.ProcessEnv; cwd: string; hooks?: ChildHooks; detached?: boolean;
 }): Promise<ChildResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { env: options.env, cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { env: options.env, cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"], ...(options.detached ? { detached: true } : {}) });
+    if (child.pid !== undefined) options.hooks?.onStart?.(child.pid);
     const decodeOut = new StringDecoder("utf8");
     const decodeErr = new StringDecoder("utf8");
     const out: string[] = [];

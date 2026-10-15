@@ -9,3 +9,4 @@ export * from "./availability-service.ts";
 export * from "./routing-service.ts";
 export * from "./page.ts";
 export * from "./commands.ts";
+export * from "./pool-service.ts";
