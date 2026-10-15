@@ -86,6 +86,7 @@ describe("the LLM connections page", () => {
       await page.getByLabel("Name").fill("sub-a");
       expect(await page.getByLabel(CONNECTION_WORDS.fields.vendor).inputValue()).toBe("openai");
       expect(await page.locator(".dialog code").first().innerText()).toBe(CONNECTION_WORDS.signIn.codex);
+      expect(await page.locator(".dialog").getByText(CONNECTION_WORDS.signInNotes.codex).count()).toBe(1);
       expect(await page.locator(".dialog code").nth(1).innerText()).toContain("--vendor openai");
       expect(await page.locator(".dialog").getByRole("button", { name: CONNECTION_WORDS.check }).count()).toBe(1);
       await page.getByRole("button", { name: CONNECTION_WORDS.kinds["api-key"] }).click();

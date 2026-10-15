@@ -44,9 +44,12 @@ export const CONNECTION_WORDS = {
   budget: { steady: "Within budget", half: "Half the budget used", high: "Near the budget", full: "At the budget" },
   spend: { estimate: "Estimate", provider: "Provider", manual: "Manual", balance: "Balance" },
   // The machine runs these. Claude Code: `claude auth login` (https://code.claude.com/docs/en/authentication, read 2026-10-10).
-  // Codex: `codex login` (https://developers.openai.com/codex/auth/, read 2026-10-10).
+  // Codex: `codex login --device-auth` signs in a machine without a browser (a node). Device code sign-in is a beta that is
+  // first turned on in ChatGPT's security settings, or by a workspace admin (https://learn.chatgpt.com/docs/auth, read
+  // 2026-10-15; developers.openai.com/codex/auth redirects there). `codex login` still works where a browser opens.
   // Cursor: `agent login` (https://cursor.com/docs/cli/reference/authentication, read 2026-10-10).
-  signIn: { claude: "claude auth login", codex: "codex login", cursor: "agent login" },
+  signIn: { claude: "claude auth login", codex: "codex login --device-auth", cursor: "agent login" },
+  signInNotes: { codex: "Turn on device code sign-in in ChatGPT's security settings first. On a machine with a browser, codex login works too." },
   addLine: "morndo-keys add",
   runtimes: { claude: "Claude Code", codex: "Codex", cursor: "Cursor agent" },
 } as const;

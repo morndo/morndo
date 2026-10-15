@@ -87,9 +87,12 @@ const named = (w: NamedWindow): NamedWindow | null => {
   return { label, usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
 };
 // An empty list is not named mode: every row dropped, or every window reset, falls back to the 5-hour and weekly rows.
-const keepNamed = (ws: NamedWindow[] | null | undefined, now: number): NamedWindow[] | null => {
+// A window that names no reset is kept for a day after the report that set it, not forever: nothing else would ever end it, and
+// it would hide the 5-hour and weekly rows that later reports carry.
+const NAMED_NO_RESET_MS = 24 * 3_600_000;
+const keepNamed = (ws: NamedWindow[] | null | undefined, now: number, reportedAt: number): NamedWindow[] | null => {
   if (ws == null) return null;
-  const kept = ws.filter(w => w.resetsAt === null || w.resetsAt > now);
+  const kept = ws.filter(w => (w.resetsAt === null ? now - reportedAt < NAMED_NO_RESET_MS : w.resetsAt > now));
   return kept.length ? kept : null;
 };
 // Drop a blank or non-numeric row, then keep at most NAMED_CAP. The hub does not apply a second cap or label rule.
@@ -118,7 +121,7 @@ export function applyReport(current: AccountUsage | null, r: UsageReport, now: n
   if (!newer) return { ...base, sessions: pruneSessions(sessions, now) };
   // A report that names its windows replaces them. An empty list is not that report: the previous windows stay until each reset.
   const namedNow = r.limits == null ? null : takeNamed(r.limits);
-  const limits = namedNow ?? keepNamed(base.limits, now);
+  const limits = namedNow ?? keepNamed(base.limits, now, base.reportedAt);
   return {
     account: base.account,
     reportedAt: r.at,
@@ -137,7 +140,7 @@ export const pruneSessions = (sessions: readonly SessionUsage[], now: number): S
 
 // What the dashboard shows of an account now: its windows as kept, with past resets dropped, and only fresh sessions.
 export function accountNow(a: AccountUsage, now: number): AccountUsage {
-  const limits = keepNamed(a.limits, now);
+  const limits = keepNamed(a.limits, now, a.reportedAt);
   return {
     ...a, fiveHour: keep(a.fiveHour, now), sevenDay: keep(a.sevenDay, now), spend: keep(a.spend, now),
     limits, onDemand: limits === null ? null : (a.onDemand ?? null), sessions: pruneSessions(a.sessions, now),

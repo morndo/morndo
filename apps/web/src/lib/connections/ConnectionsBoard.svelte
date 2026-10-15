@@ -5,7 +5,7 @@
   import { CONNECTION_WORDS, commandNeedsStepUp, type ConnectionsPage } from "@morndo/protocol";
   import { api, ApiError, explain } from "$lib/api.ts";
   import { withStepUp } from "$lib/stepup.ts";
-  import { EXPIRY_PLACEHOLDER, expiryMillis, expiryText, isolationLine, keyAddLine, signInLine, subscriptionAddLine } from "./line.ts";
+  import { EXPIRY_PLACEHOLDER, expiryMillis, expiryText, isolationLine, keyAddLine, signInLine, signInNote, subscriptionAddLine } from "./line.ts";
   import { moveTo, ownSaveOrder, swap } from "./order.ts";
 
   let view = $state<ConnectionsPage | null>(null);
@@ -29,6 +29,7 @@
     ? subscriptionAddLine({ name: connectionName, vendor: vendor.id, runtime })
     : keyAddLine({ name: connectionName, vendor: vendor.id, runtime, budget: unlimited ? "unlimited" : budget, expires: expiryMillis(expires) }));
   const signingIn = $derived(kind === "subscription" ? signInLine(runtime) : null);
+  const signInFirst = $derived(kind === "subscription" ? signInNote(runtime) : null);
 
   function take(next: ConnectionsPage) {
     view = next;
@@ -158,6 +159,7 @@
           </select>
         </label>
       {:else if signingIn}
+        {#if signInFirst}<p>{signInFirst}</p>{/if}
         <p><code>{signingIn}</code></p>
       {/if}
       {#if line}<p><code>{line}</code></p>{/if}

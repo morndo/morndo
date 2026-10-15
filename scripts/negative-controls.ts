@@ -1968,6 +1968,10 @@ export const CONTROLS: Control[] = [
   { id: "t110-uptime-clock-after", task: "T-110", file: "packages/node-ops/src/pid.ts",
     find: "startFromUptime(stat, uptime, hz, before, after)", replace: "startFromUptime(stat, uptime, hz, after, after)",
     run: ["apps/node-agent/test/job-identity.test.ts"], expect: "widens the start instead of moving it" },
+  { id: "cx-usage-env-keys", task: "codex-runtime M3", file: "apps/connections/src/cli.ts",
+    find: "const env = childEnv(home.env, loginEnv(\"codex\", connection.configDir));",
+    replace: "const env = { ...home.env, ...loginEnv(\"codex\", connection.configDir) };",
+    run: ["apps/connections/test/usage-cli.test.ts"], expect: "CODEX_API_KEY" },
 ];
 
 // ---- the runner
