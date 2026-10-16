@@ -3134,6 +3134,7 @@ Use §4's shell variables (`NODE24`, `ENG`, `NODE_WT`, `DAY`), set the same way.
 **Risks (accepted, with what catches them):**
 - **Cross-account resume is unverified until S6.** PL14 catches a refusal at the first move and switches to handoffs. P7's handoff test checks that path.
 - **One thread index for all accounts** (`sqlite_home`) is exercised only by S6 and the live QA. If it misbehaves, remove the `sqlite_home` line in `poolRunHome`: resume falls back to scanning `sessions/`.
+  - **Seen live, 2026-10-16 (S6):** the shared index kept the first turn's rollout path inside its removed run home, and the resume failed with "no rollout found". The `sqlite_home` line is removed; each run keeps its own index and resume scans the linked `sessions/`.
 - **The engine layer marks the whole `codex` provider** for an hour after a usage limit (`set_mark` replaces, `lane.py`). A pinned account's limit therefore makes role starts skip Codex for that hour, even when the other account has room. Lanes started with `--account` still run.
   - Follow-up, filed as a proposal: marks per account in the engine layer, or no provider mark when the pool says other accounts have room.
 - **A refresh race** if Q6 is ever raised: the member gets "sign in again" (an auth failure, PL8's sibling), the pool marks it logged out, and the owner is told.
