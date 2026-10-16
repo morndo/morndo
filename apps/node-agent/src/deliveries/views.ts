@@ -137,10 +137,16 @@ export function agentTranscripts(transcriptPath: (sessionId: string) => string |
       const buf = Buffer.concat(parts);
       const end = buf.lastIndexOf(0x0a);
       if (end === -1) return { lines: [], next: buf.length >= READ_MAX ? start + buf.length : start };
-      const rows = buf.subarray(0, end).toString("utf8").split("\n");
-      let at = start;
-      const starts = rows.map(row => { const s = at; at += Buffer.byteLength(row) + 1; return s; });
-      return { lines: rows.filter(l => l.length > 0), starts: starts.filter((_, i) => rows[i]!.length > 0), next: start + end + 1 };
+      // Offsets come from the raw bytes: a read can begin inside a multi-byte character (after a skipped line) and a row can be
+      // invalid UTF-8, and neither decodes back to the number of bytes it took.
+      const lines: string[] = [];
+      const starts: number[] = [];
+      for (let at = 0; at < end;) {
+        const nl = buf.indexOf(0x0a, at);                       // there is one: `end` is the last
+        if (nl > at) { lines.push(buf.toString("utf8", at, nl)); starts.push(start + at); }
+        at = nl + 1;
+      }
+      return { lines, starts, next: start + end + 1 };
     },
   };
 }
