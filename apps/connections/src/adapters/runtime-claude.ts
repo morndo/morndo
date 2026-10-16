@@ -99,7 +99,9 @@ export type AuthReading =
 
 // A cold `codex login status` took 14.6 s with the disk busy (2026-10-16). The sign-in check, which a person waits on, allows 60 s.
 // The check before each subscription turn stays at 15 s, so a wedged status command (a keyring prompt, say) fails the turn
-// quickly; a box that is often that busy sets MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS (whole milliseconds, 1 to 300000).
+// quickly; a box that is often that busy sets MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS (whole milliseconds, 1 to 300000). A check
+// that times out is tried once more (a cold status command is slow once and fast after: 14.6 s, then 0.07 s), so a turn waits at
+// most twice the timeout; an answer of any kind, a refusal included, is not asked for again.
 export const TURN_CHECK_TIMEOUT_MS = 15_000;
 export const SIGN_IN_CHECK_TIMEOUT_MS = 60_000;
 const TURN_CHECK_MAX_MS = 300_000;
@@ -193,7 +195,8 @@ function signedOutLine(method: string | null): boolean {
 export async function assertSubscription(
   bin: string, args: readonly string[], env: NodeJS.ProcessEnv, runtime: "claude" | "codex" | "cursor", timeoutMs = turnCheckTimeoutMs(),
 ): Promise<void> {
-  const reading = await readAuth(bin, args, env, timeoutMs);
+  let reading = await readAuth(bin, args, env, timeoutMs);
+  if (reading === "timeout") reading = await readAuth(bin, args, env, timeoutMs);
   if (reading === "unknown") throw new Error(`${bin} is not on PATH`);
   if (reading === "denied") throw new StatusRefused(`${bin} is denied`);
   if (reading === "timeout") throw new StatusRefused(`${bin} timed out`);

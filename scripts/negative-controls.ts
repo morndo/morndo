@@ -2893,6 +2893,9 @@ export const CONTROLS: Control[] = [
   { id: "t231-sign-in-own-timeout", task: "T-231", file: "apps/connections/src/adapters/runtime-claude.ts",
     find: "timeoutMs = SIGN_IN_CHECK_TIMEOUT_MS", replace: "timeoutMs = turnCheckTimeoutMs()",
     run: ["apps/connections/test/runtime-login.test.ts"], expect: "the sign-in check waits for a slow status" },
+  { id: "t231-turn-check-retry", task: "T-231", file: "apps/connections/src/adapters/runtime-claude.ts",
+    find: 'if (reading === "timeout") reading = await readAuth(bin, args, env, timeoutMs);', replace: "",
+    run: ["apps/connections/test/runtime-login.test.ts"], expect: "tries a status that timed out once more" },
 ];
 
 // ---- the runner
