@@ -58,6 +58,7 @@ function rig(o: { panes?: PaneState[]; hooks?: DelivererDeps["hooks"] } = {}) {
   const panes: PaneState[] = o.panes ?? [pane("manager", W1, "%1", S1)];
   const drafts = new Map<string, string>();
   const transcripts = new Map<string, string>();
+  const fileIds = new Map<string, string>();                         // session → the transcript file's identity (its inode)
   const fail = { refresh: false };                                   // the node's panes can't be read (tmux didn't answer)
   const typed = (problem: "not_submitted" | null = null) => (r: Request): Reply =>
     reply(r, { ok: true, result: r.op === "pane.keys" ? { ok: true } : { problem, typedAt: clock.now } });
@@ -72,9 +73,11 @@ function rig(o: { panes?: PaneState[]; hooks?: DelivererDeps["hooks"] } = {}) {
     },
     transcripts: {
       size: async s => { const t = transcripts.get(s); return t === undefined ? null : Buffer.byteLength(t); },
+      identity: async s => (transcripts.has(s) ? (fileIds.get(s) ?? "file-1") : null),
       lines: async (s, from) => {
         const t = transcripts.get(s);
         if (t === undefined) return null;
+        if (from > Buffer.byteLength(t)) from = 0;                   // a file shorter than before is read again (views.ts)
         const rest = Buffer.from(t).subarray(from);
         const end = rest.lastIndexOf(0x0a);
         if (end === -1) return { lines: [], next: from };
@@ -92,6 +95,11 @@ function rig(o: { panes?: PaneState[]; hooks?: DelivererDeps["hooks"] } = {}) {
     answer: (f: Answer) => { answer = f; },
     say: (session: string, ...entries: object[]) => {
       transcripts.set(session, (transcripts.get(session) ?? "") + entries.map(e => `${JSON.stringify(e)}\n`).join(""));
+    },
+    // The transcript is replaced by another file (or cut short) at the same path.
+    replace: (session: string, id: string | null, ...entries: object[]) => {
+      transcripts.set(session, entries.map(e => `${JSON.stringify(e)}\n`).join(""));
+      if (id !== null) fileIds.set(session, id);
     },
     round: async () => { deliverer.kick("timer"); await deliverer.drain(); },
     sends: () => calls.filter(c => c.op === "pane.send"),
@@ -117,6 +125,44 @@ describe("a receipt must be written after the typing began", () => {
     await r.round();
     expect(state(r, "lanes:c1")).toBe("delivered");
   });
+  // The offset was the file's size when the text was typed. A file that is cut short, or replaced by another at the same path,
+  // has other offsets: nothing there is "after the typing" by position, so only a line that is later by its time and has the text counts.
+  const fill = (n: number) => Array.from({ length: n }, (_, i) => ({ type: "user", timestamp: "2026-10-08T04:00:00Z", message: { role: "user", content: `earlier ${i}` } }));
+  it("a transcript cut short after the typing: a same-second line of the same text is not the receipt; one from a later second is", async () => {
+    const r = rig();
+    r.say(S1, ...fill(40));
+    r.deliverer.enqueue({ id: "lanes:s1", target: MANAGER, text: "continue" });
+    await r.deliverer.drain();
+    expect(state(r, "lanes:s1")).toBe("typed");
+    r.replace(S1, null, whole("continue", T0));                       // smaller than the offset: a new file in effect
+    await r.round();
+    expect(state(r, "lanes:s1")).toBe("typed");                       // not "every line is new"
+    r.say(S1, whole("continue", T0 + 1500));
+    await r.round();
+    expect(state(r, "lanes:s1")).toBe("delivered");
+  });
+  it("a transcript replaced by a bigger file: its old lines are no receipt either (negative control)", async () => {
+    const r = rig();
+    r.say(S1, ...fill(2));
+    r.deliverer.enqueue({ id: "lanes:s2", target: MANAGER, text: "continue" });
+    await r.deliverer.drain();
+    r.replace(S1, "file-2", ...fill(60), whole("continue", T0));      // longer than the offset, but another file
+    await r.round();
+    expect(state(r, "lanes:s2")).toBe("typed");
+    r.say(S1, whole("continue", T0 + 1500));
+    await r.round();
+    expect(state(r, "lanes:s2")).toBe("delivered");
+  });
+  it("a transcript that only grows keeps its offset: a line past it counts in the second the text was typed in", async () => {
+    const r = rig();
+    r.say(S1, ...fill(3));
+    r.deliverer.enqueue({ id: "lanes:s3", target: MANAGER, text: "continue" });
+    await r.deliverer.drain();
+    r.say(S1, whole("continue", T0 + 100));
+    await r.round();
+    expect(state(r, "lanes:s3")).toBe("delivered");
+  });
+
   it("a first brief to a lane whose transcript does not exist yet is delivered by the line that creates it", async () => {
     const r = rig();
     r.deliverer.enqueue({ id: "lanes:c2", target: MANAGER, text: "first brief" });

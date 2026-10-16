@@ -4,7 +4,7 @@
 // - the input box's own text, read from the pane's screen with its colours (Claude Code's dim suggestion is no draft);
 // - a session's transcript, read as whole JSONL lines from a byte offset, at most 1 MiB a call.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { draftOnScreen, localTranscriptBytes, type Tmux } from "@morndo/node-ops";
 import { LIMITS } from "@morndo/protocol";
 import type { Inventory, Snapshot } from "../ops/inventory.ts";
@@ -113,6 +113,11 @@ const READ_MAX = 1 << 20;
 
 export function agentTranscripts(transcriptPath: (sessionId: string) => string | null): TranscriptView {
   return {
+    async identity(sessionId) {
+      const path = transcriptPath(sessionId);
+      if (path === null) return null;
+      try { const s = statSync(path); return `${s.dev}:${s.ino}`; } catch { return null; }
+    },
     async size(sessionId) {
       const path = transcriptPath(sessionId);
       return path === null ? null : await localTranscriptBytes(path).size();

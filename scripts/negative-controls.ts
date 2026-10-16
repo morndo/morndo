@@ -2896,6 +2896,15 @@ export const CONTROLS: Control[] = [
   { id: "t231-turn-check-retry", task: "T-231", file: "apps/connections/src/adapters/runtime-claude.ts",
     find: 'if (reading === "timeout") reading = await readAuth(bin, args, env, timeoutMs);', replace: "",
     run: ["apps/connections/test/runtime-login.test.ts"], expect: "tries a status that timed out once more" },
+  { id: "t231-offset-shrink", task: "T-231", file: "apps/node-agent/src/deliveries/deliverer.ts",
+    find: "size < a.offset || ", replace: "",
+    run: ["apps/node-agent/test/deliverer.test.ts"], expect: "a transcript cut short after the typing" },
+  { id: "t231-offset-replaced", task: "T-231", file: "apps/node-agent/src/deliveries/deliverer.ts",
+    find: "(a.file !== null && file !== null && file !== a.file)", replace: "false",
+    run: ["apps/node-agent/test/deliverer.test.ts"], expect: "replaced by a bigger file" },
+  { id: "t231-raw-byte-offsets", task: "T-231", file: "apps/node-agent/src/deliveries/views.ts",
+    find: "at = nl + 1;", replace: 'at += Buffer.byteLength(buf.toString("utf8", at, nl)) + 1;',
+    run: ["apps/node-agent/test/transcript-view-starts.test.ts"], expect: "not valid UTF-8" },
 ];
 
 // ---- the runner

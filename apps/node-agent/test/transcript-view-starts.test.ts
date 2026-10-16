@@ -1,5 +1,5 @@
 // The deliverer's transcript view says where each whole line starts, so a receipt can be required to come after the typing.
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { agentTranscripts } from "../src/deliveries/views.ts";
@@ -64,5 +64,25 @@ describe("agentTranscripts.lines offsets from raw bytes", () => {
     expect(tails.map(s => s.start)).toEqual(expected.slice(1));
     for (const s of tails) expect(whole[s.start]).toBe(0x7b);                    // every offset starts a row: `{`
     expect(seen[0]).toEqual({ line: '{"a":1}', start: 0 });
+  });
+});
+
+describe("agentTranscripts.identity", () => {
+  it("is the same for the same file, another for a file put at its path, and null without one", async () => {
+    const home = tempHome();
+    homes.push(home);
+    const path = join(home.home, "t.jsonl");
+    const view = agentTranscripts(s => (s === "none" ? null : path));
+    expect(await view.identity?.("s")).toBeNull();                       // no file yet
+    writeFileSync(path, "a\n");
+    const first = await view.identity?.("s");
+    expect(first).toMatch(/^\d+:\d+$/);
+    appendFileSync(path, "b\n");
+    expect(await view.identity?.("s")).toBe(first);
+    rmSync(path);
+    writeFileSync(join(home.home, "other"), "x");
+    renameSync(join(home.home, "other"), path);
+    expect(await view.identity?.("s")).not.toBe(first);
+    expect(await view.identity?.("none")).toBeNull();
   });
 });
