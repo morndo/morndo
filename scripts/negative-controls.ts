@@ -2908,6 +2908,12 @@ export const CONTROLS: Control[] = [
   { id: "t231-engine-rescan-per-id", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
     find: "if (last === undefined || now() - last >= RESCAN_MS) {", replace: "if (false) {",
     run: ["packages/node-ops/test/engine-sessions.test.ts"], expect: "appeared a moment after the last scan" },
+  { id: "t231-alias-one-miss", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
+    find: "if (!alive(a.pid) || ++a.misses >= 2) aliases.delete(id);", replace: "aliases.delete(id);",
+    run: ["packages/node-ops/test/engine-sessions.test.ts"], expect: "over one scan that fails to find it" },
+  { id: "t231-alias-dead-pid", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
+    find: "if (!alive(a.pid) || ++a.misses >= 2) aliases.delete(id);", replace: "if (++a.misses >= 2) aliases.delete(id);",
+    run: ["packages/node-ops/test/engine-sessions.test.ts"], expect: "or at once when its process is dead" },
 ];
 
 // ---- the runner

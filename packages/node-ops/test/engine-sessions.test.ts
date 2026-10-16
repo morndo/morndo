@@ -55,6 +55,27 @@ describe("engine session registry", () => {
     expect(new Set(got.at(-1)?.aliases)).toEqual(new Set(["0b1c2d3e-0000-4000-8000-000000000001", "9f8e7d6c-0000-4000-8000-000000000002"]));
   });
 
+  describe("aliases", () => {
+    const A = "0b1c2d3e-0000-4000-8000-00000000000a", B = "9f8e7d6c-0000-4000-8000-00000000000b";
+    // scan n sees the lane as `states[n]`: "ok" (found), "unreadable" (a /proc read fails: no identity), "dead" (the process is gone).
+    function scans(states: ("ok" | "unreadable" | "dead")[], ids: string[]) {
+      let n = 0;
+      const reg = engineSessionRegistry(dir, {
+        ...io(), alive: () => states[n] !== "dead", identity: pid => (states[n] === "unreadable" || pid !== 4242 ? null : { ticks: 5500, bootId: BOOT }),
+      });
+      return states.map((_, i) => { n = i; put("4242.json", { sessionId: ids[i] }); return reg.byPane(PANES).get("%3")?.aliases; });
+    }
+    it("keeps the ids a lane's file has had over one scan that fails to find it", () => {
+      const got = scans(["ok", "unreadable", "ok"], [A, A, B]);
+      expect(got[1]).toBeUndefined();
+      expect(new Set(got[2])).toEqual(new Set([A, B]));
+    });
+    it("lets them go after the lane is missing from two scans in a row, or at once when its process is dead (negative control)", () => {
+      expect(new Set(scans(["ok", "unreadable", "unreadable", "ok"], [A, A, A, B])[3])).toEqual(new Set([B]));
+      expect(new Set(scans(["ok", "dead", "ok"], [A, A, B])[2])).toEqual(new Set([B]));
+    });
+  });
+
   it("is no engine lane in the pane once the shell has the foreground: stopped with Ctrl-Z, or started with & (negative control)", () => {
     put("4242.json");
     expect(engineSessionRegistry(dir, io()).byPane(PANES).has("%3")).toBe(true);

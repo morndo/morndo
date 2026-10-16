@@ -47,7 +47,9 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
   const groups = io.groups ?? ((pid: number) => procGroups(pid));
   const now = io.now ?? (() => performance.now());
   let candidates = new Map<string, string>();                          // lane id → the transcript path its file names
-  const aliases = new Map<string, Set<string>>();                      // lane id → every sessionId its file has had
+  // lane id → every sessionId its file has had, and in how many scans in a row it was not found. It is forgotten when its process is
+  // dead, or when two scans in a row miss it: one failed read (a /proc entry that can't be read, say) must not lose its earlier ids.
+  const aliases = new Map<string, { pid: number; ids: Set<string>; misses: number }>();
   const asked = new Map<string, number>();                             // unknown lane id → when the registry was last read for it
 
   function lanes(): Lane[] {
@@ -69,8 +71,9 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
       if (live === null || live.ticks !== ticks || live.bootId !== boot) continue;  // unreadable, or another process holds the pid now
       const sessionId = `engine-${pid}-${ticks}`;
       if (typeof d.transcript === "string" && d.transcript) found.set(sessionId, d.transcript);
-      const seen = aliases.get(sessionId) ?? new Set<string>();
-      if (typeof d.sessionId === "string") seen.add(d.sessionId);
+      const seen = aliases.get(sessionId) ?? { pid, ids: new Set<string>(), misses: 0 };
+      if (typeof d.sessionId === "string") seen.ids.add(d.sessionId);
+      seen.misses = 0;
       aliases.set(sessionId, seen);
       out.push({
         updatedAt: Number(d.updatedAt ?? 0),
@@ -78,12 +81,16 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
           sessionId, name: typeof d.name === "string" ? d.name : null, cwd: text(d.cwd), version: null, pid,
           status: typeof d.status === "string" && STATUSES.has(d.status) ? d.status as SessionStatus : null,
           ...(typeof d.engine === "string" && d.engine ? { engine: d.engine } : {}),
-          aliases: [...seen],
+          aliases: [...seen.ids],
         },
       });
     }
     candidates = found;
-    for (const id of aliases.keys()) if (!found.has(id) && !out.some(l => l.info.sessionId === id)) aliases.delete(id);
+    const present = new Set(out.map(l => l.info.sessionId));
+    for (const [id, a] of aliases) {
+      if (present.has(id)) continue;
+      if (!alive(a.pid) || ++a.misses >= 2) aliases.delete(id);
+    }
     return out;
   }
 
