@@ -4,7 +4,9 @@
 //   (codex-rs/rollout/src/list.rs#L1456-1463, tag rust-v0.161.0);
 // - `thread-writer-locks` is Codex's own per-thread writer lock, "Coordinates writer ownership within one Codex home"
 //   (codex-rs/rollout/src/writer_lock.rs), so one directory makes it cover every account's runs;
-// - `sqlite_home` in the run's config.toml (codex-rs/config/src/config_toml.rs#L371) puts the thread index there too.
+// - the thread index (SQLite) is not shared: it records each thread's rollout under this run home's own path, and the run
+//   home is removed after the turn, so a shared index sent the next turn's resume to a missing file ("no rollout found",
+//   0.161.0, live 2026-10-16). Each run keeps its own index, and resume finds the thread by scanning the linked `sessions`.
 // Not shared: auth.json, models_cache.json (its key must change with the account) and secrets/.
 // https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/rollout/src/list.rs
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
@@ -14,7 +16,7 @@ import { StatusRefused } from "./runtime-claude.ts";
 import { codexConfig, keyringLogin } from "./runtime-codex.ts";
 
 export const SHARED_LINKS: readonly string[] = ["sessions", "archived_sessions", "history.jsonl", "thread-writer-locks", "AGENTS.md"];
-const DIRECTORIES = ["sessions", "archived_sessions", "thread-writer-locks", "sqlite"];
+const DIRECTORIES = ["sessions", "archived_sessions", "thread-writer-locks"];
 
 // <data>/<runtime>, mode 0700, with its directories made.
 export function poolStore(dataDir: string, runtime: string): string {
@@ -40,7 +42,6 @@ export function poolRunHome(login: string, shared: string, profile: string, deny
     if (!existsSync(target) && DIRECTORIES.includes(name)) mkdirSync(target, { recursive: true, mode: 0o700 });
     symlinkSync(target, join(dir, name));
   }
-  // sqlite_home goes first: a TOML key after a table header would belong to that table.
-  writeFileSync(join(dir, "config.toml"), `sqlite_home = ${JSON.stringify(join(shared, "sqlite"))}\n${codexConfig(profile, deny, "")}`, { mode: 0o600 });
+  writeFileSync(join(dir, "config.toml"), codexConfig(profile, deny, ""), { mode: 0o600 });
   return dir;
 }

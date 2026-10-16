@@ -1700,7 +1700,7 @@ So the Pool is its own context. It decides one thing, which member account the n
   - `thread-writer-locks/`, so Codex's own per-thread lock ("Coordinates writer ownership within one Codex home", `rollout/src/writer_lock.rs`) covers every account's runs.
   - `AGENTS.md`, when present: one global instructions file for all pool turns (6.9).
 
-  In addition, the run's `config.toml` sets `sqlite_home` to `sqlite/` in the store (`config/src/config_toml.rs#L371`), so all accounts share one thread index and one paginated history. The JSONL rollout stays the source of truth. Resume finds a thread through the database first, then by scanning `sessions/` (`thread-store/src/local/thread_rollout_resolver.rs#L67-147`).
+  The thread index is not shared (changed 2026-10-16, see §6.12): each run keeps its own SQLite index, because a shared one (`sqlite_home`, `config/src/config_toml.rs#L371`) records rollout paths inside the run home that is removed after the turn. The JSONL rollout stays the source of truth. Resume finds a thread through the database first, then by scanning `sessions/` (`thread-store/src/local/thread_rollout_resolver.rs#L67-147`).
 
   Not shared: `auth.json`, `models_cache.json` (its key "Must change when account, email, plan … change", `models-manager/src/manager.rs#L45`) and `secrets/`.
 - **What follows a session from one account to another:**
@@ -2728,7 +2728,7 @@ describe("codex turn: the arguments of the turn that goes on", () => {
 1. **"links the account's login and the shared store, and points the thread index at the shared directory":**
    - `readlinkSync(join(home, "auth.json"))` is the member's `auth.json`;
    - each of `sessions`, `archived_sessions`, `history.jsonl`, `thread-writer-locks` and `AGENTS.md` links to the store;
-   - `config.toml` starts with `sqlite_home = "<store>/sqlite"`, before any table;
+   - `config.toml` has no `sqlite_home` line (changed 2026-10-16, see §6.12);
    - `models_cache.json` doesn't exist.
 2. **"leaves AGENTS.md out when the store has none".**
 3. **"refuses a login kept in a keyring"**, as `CodexRuntime` does.
@@ -2752,7 +2752,7 @@ Expected: FAIL, 3 files. None of the modules exists yet.
 - **`codex-account.ts`:** `askAppServer` is M2's process handling with a list of calls; M2's `readCodexLimits` becomes one call through it. `readingFromAnswers` maps the two answers as §6.6 says. Return null for an unknown shape, as M2 does. `readCodexAccount` asks `account/rateLimits/read` with `{excludeResetCreditDetails: false}`, so the credits' `expiresAt` arrive (the schema: true "Skip[s] the separate reset-credit detail lookup"); M2's usage read keeps `true`.
 - **`codex-pool-home.ts`:**
   - `poolStore` makes `<data>/<runtime>/{sessions,archived_sessions,thread-writer-locks,sqlite}` with mode 0700.
-  - `poolRunHome` is `subscriptionRunHome` with the links from the store instead of the login, and a `sqlite_home` line put **first** in `config.toml`. TOML keys after a table header would belong to that table.
+  - `poolRunHome` is `subscriptionRunHome` with the links from the store instead of the login, and no `sqlite_home` line in `config.toml` (changed 2026-10-16, see §6.12).
   - Cite `rollout/src/list.rs#L1456-1463`, `rollout/src/writer_lock.rs` and `config/src/config_toml.rs#L371`.
 - **`codex-reset.ts`:** one `askAppServer` call, `account/rateLimitResetCredit/consume` with `{idempotencyKey: key}`. The answer's `outcome` must be one of the four values.
 
@@ -3134,13 +3134,14 @@ Use §4's shell variables (`NODE24`, `ENG`, `NODE_WT`, `DAY`), set the same way.
 **Risks (accepted, with what catches them):**
 - **Cross-account resume is unverified until S6.** PL14 catches a refusal at the first move and switches to handoffs. P7's handoff test checks that path.
 - **One thread index for all accounts** (`sqlite_home`) is exercised only by S6 and the live QA. If it misbehaves, remove the `sqlite_home` line in `poolRunHome`: resume falls back to scanning `sessions/`.
+  - **Seen live, 2026-10-16 (S6):** the shared index kept the first turn's rollout path inside its removed run home, and the resume failed with "no rollout found". The `sqlite_home` line is removed; each run keeps its own index and resume scans the linked `sessions/`.
 - **The engine layer marks the whole `codex` provider** for an hour after a usage limit (`set_mark` replaces, `lane.py`). A pinned account's limit therefore makes role starts skip Codex for that hour, even when the other account has room. Lanes started with `--account` still run.
   - Follow-up, filed as a proposal: marks per account in the engine layer, or no provider mark when the pool says other accounts have room.
 - **A refresh race** if Q6 is ever raised: the member gets "sign in again" (an auth failure, PL8's sibling), the pool marks it logged out, and the owner is told.
 - **A sign-in revokes the old token** in that home. Sign in again only into a retired member (`pool retire` → sign in → `pool activate`).
 - **Readings skipped during long turns** leave numbers stale for up to a turn. Marks from failures still apply, and each limit triggers a read.
 - **The app server is experimental.** The reader refuses unknown shapes. Pinned turns don't depend on readings, which only rank rotate placements and feed the advice.
-- **Wording and layout from 0.161.0** that the pool depends on: the limit's message, the `thread-writer-locks` directory name, `sqlite_home`, the rollout location, and resume's missing `-s`.
+- **Wording and layout from 0.161.0** that the pool depends on: the limit's message, the `thread-writer-locks` directory name, the rollout location and resume's scan of `sessions/`, and resume's missing `-s`.
   - Add them to §5's upgrade gate. Before any Codex upgrade, re-run `codex-turn.test.ts` against the new `error.rs` text, and re-check those four in its source.
 - **The terms can change** (30 days' notice for adverse changes, EU Terms). Re-read them at each Codex upgrade.
 - **The owner's own `codex` in `~/.codex`** doesn't see pool sessions; that is by design. To look at one, read its JSONL under `~/.local/share/morndo/pool/codex/sessions/`. Opening a pool session in the TUI is not part of this addendum.
