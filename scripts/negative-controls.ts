@@ -1034,7 +1034,7 @@ export const CONTROLS: Control[] = [
     replace: '    if (o.reason === "cleared_on_cancel") return { verdict: "dropped", text: o.content, at, by };\n    return { verdict: "delivered", text: o.content, at, by };',
     run: ["packages/node-ops/test/receipt.test.ts"], expect: "a remove reason not known here" },
   { id: "fc2-receipt-dequeue", task: "fc2", file: "packages/node-ops/src/receipt.ts",
-    find: 'if (o.operation !== "remove") return null;', replace: 'if (o.operation !== "remove") return { verdict: "delivered", text: o.content, at };',
+    find: 'if (o.operation !== "remove") return null;', replace: 'if (o.operation !== "remove") return { verdict: "delivered", text: o.content, at, by };',
     run: ["packages/node-ops/test/receipt.test.ts"], expect: "a dequeue gives no verdict" },
   { id: "fc2-receipt-not-prompts", task: "fc2", file: "packages/node-ops/src/receipt.ts",
     find: "if (o.isMeta === true || o.isCompactSummary === true || !isRecord(o.message)) return null;", replace: "if (!isRecord(o.message)) return null;",
