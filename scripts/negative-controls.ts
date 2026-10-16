@@ -2890,6 +2890,9 @@ export const CONTROLS: Control[] = [
     find: "engineLaneBoxOnScreen(shown) && performance.now() - askedAt >= 1000) {\n        askedAt = performance.now();\n        if (await engineLaneIn(pane)) return false;",
     replace: "engineLaneBoxOnScreen(shown)) {\n        if ((await d.inventory.refresh()).lanes.some(l => l.pane === pane && l.engine !== undefined)) return false;",
     run: ["apps/node-agent/test/launcher.test.ts"], expect: "does not read the whole inventory" },
+  { id: "t231-sign-in-own-timeout", task: "T-231", file: "apps/connections/src/adapters/runtime-claude.ts",
+    find: "timeoutMs = SIGN_IN_CHECK_TIMEOUT_MS", replace: "timeoutMs = turnCheckTimeoutMs()",
+    run: ["apps/connections/test/runtime-login.test.ts"], expect: "the sign-in check waits for a slow status" },
 ];
 
 // ---- the runner

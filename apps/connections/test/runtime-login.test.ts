@@ -1,9 +1,9 @@
 import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunPlan } from "../src/application/ports.ts";
-import { acceptsSubscription, assertSubscription, isStatusRefusal, readAuth, STATUS_TIMEOUT_MS, StatusRefused, ClaudeRuntime } from "../src/adapters/runtime-claude.ts";
+import { acceptsSubscription, assertSubscription, isStatusRefusal, readAuth, statusOf, StatusRefused, ClaudeRuntime, turnCheckTimeoutMs } from "../src/adapters/runtime-claude.ts";
 import { CodexRuntime } from "../src/adapters/runtime-codex.ts";
 import { CursorRuntime } from "../src/adapters/runtime-cursor.ts";
 
@@ -147,9 +147,37 @@ describe("subscription login", () => {
     await expect(assertSubscription(join(dir, "missing-bin"), ["status"], {}, "cursor")).rejects.toThrow("is not on PATH");
   });
 
-  it("waits for a status check longer than the 14.6 s a cold one took with the disk busy", () => {
-    expect(STATUS_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
-  });
+  // A status command that answers "signed in with the subscription" after a delay, as a cold one does with the disk busy.
+  function slowStatus(ms: number): string {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-login-"));
+    dirs.push(dir);
+    const bin = join(dir, "slow.mjs");
+    writeFileSync(bin, `setTimeout(() => process.stdout.write('{"authMethod":"claude.ai"}\\n'), ${ms});\n`);
+    return bin;
+  }
+
+  it("the sign-in check waits for a slow status that a turn's own check, set short, gives up on", async () => {
+    vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", "100");
+    try {
+      const bin = slowStatus(400);
+      expect(await statusOf(bin, ["status"], {})).toBe("ok");
+      await expect(assertSubscription(bin, ["status"], {}, "claude")).rejects.toThrow("timed out");
+    } finally { vi.unstubAllEnvs(); }
+  }, 10_000);
+
+  it("a turn's check gives a slow status the time it takes when the setting is longer, and the default when the setting is not a duration", async () => {
+    vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", "5000");
+    try {
+      await expect(assertSubscription(slowStatus(300), ["status"], {}, "claude")).resolves.toBeUndefined();
+    } finally { vi.unstubAllEnvs(); }
+    for (const bad of ["", "0", "-5", "abc", "1.5", "99999999"]) {
+      vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", bad);
+      expect(turnCheckTimeoutMs(), bad).toBe(15_000);
+    }
+    vi.unstubAllEnvs();
+    expect(turnCheckTimeoutMs({})).toBe(15_000);
+    expect(turnCheckTimeoutMs({ MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS: "45000" })).toBe(45_000);
+  }, 10_000);
 
   it("reports a timed-out status check without blocking the caller", async () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-login-"));
