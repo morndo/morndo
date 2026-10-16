@@ -2883,6 +2883,9 @@ export const CONTROLS: Control[] = [
   { id: "t231-receipt-whole-second-later", task: "T-231", file: "packages/node-ops/src/receipt.ts",
     find: "Math.floor(q.typedAt / 1000) * 1000 + 1000", replace: "0",
     run: ["packages/node-ops/test/receipt.test.ts"], expect: "only a line from a later second" },
+  { id: "t231-hook-alias", task: "T-231", file: "apps/node-agent/src/relay/window-of.ts",
+    find: "s.sessionId === id || s.aliases?.includes(id)", replace: "s.sessionId === id",
+    run: ["apps/node-agent/test/window-of.test.ts"], expect: "any id the lane's file has had" },
 ];
 
 // ---- the runner
