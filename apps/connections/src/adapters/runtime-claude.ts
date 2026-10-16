@@ -97,7 +97,8 @@ export type AuthReading =
   | "timeout"
   | { killed: NodeJS.Signals };
 
-const STATUS_TIMEOUT_MS = 15_000;
+// A cold `codex login status` took 14.6 s with the disk busy (2026-10-16), and 15 s failed every turn then as "timed out".
+export const STATUS_TIMEOUT_MS = 60_000;
 
 export function readAuth(bin: string, args: readonly string[], env: NodeJS.ProcessEnv, timeoutMs = STATUS_TIMEOUT_MS): Promise<AuthReading> {
   const script = bin.endsWith(".mjs") || bin.endsWith(".js");

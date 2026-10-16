@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RunPlan } from "../src/application/ports.ts";
-import { acceptsSubscription, assertSubscription, isStatusRefusal, readAuth, StatusRefused, ClaudeRuntime } from "../src/adapters/runtime-claude.ts";
+import { acceptsSubscription, assertSubscription, isStatusRefusal, readAuth, STATUS_TIMEOUT_MS, StatusRefused, ClaudeRuntime } from "../src/adapters/runtime-claude.ts";
 import { CodexRuntime } from "../src/adapters/runtime-codex.ts";
 import { CursorRuntime } from "../src/adapters/runtime-cursor.ts";
 
@@ -145,6 +145,10 @@ describe("subscription login", () => {
     writeFileSync(killed, `process.kill(process.pid, "SIGKILL");\n`);
     await expect(assertSubscription(killed, ["status"], {}, "cursor")).rejects.toThrow("was killed by SIGKILL");
     await expect(assertSubscription(join(dir, "missing-bin"), ["status"], {}, "cursor")).rejects.toThrow("is not on PATH");
+  });
+
+  it("waits for a status check longer than the 14.6 s a cold one took with the disk busy", () => {
+    expect(STATUS_TIMEOUT_MS).toBeGreaterThanOrEqual(30_000);
   });
 
   it("reports a timed-out status check without blocking the caller", async () => {
