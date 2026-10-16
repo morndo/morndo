@@ -2886,6 +2886,10 @@ export const CONTROLS: Control[] = [
   { id: "t231-hook-alias", task: "T-231", file: "apps/node-agent/src/relay/window-of.ts",
     find: "s.sessionId === id || s.aliases?.includes(id)", replace: "s.sessionId === id",
     run: ["apps/node-agent/test/window-of.test.ts"], expect: "any id the lane's file has had" },
+  { id: "t231-trust-look-no-inventory", task: "T-231", file: "apps/node-agent/src/ops/lane-ops.ts",
+    find: "engineLaneBoxOnScreen(shown) && performance.now() - askedAt >= 1000) {\n        askedAt = performance.now();\n        if (await engineLaneIn(pane)) return false;",
+    replace: "engineLaneBoxOnScreen(shown)) {\n        if ((await d.inventory.refresh()).lanes.some(l => l.pane === pane && l.engine !== undefined)) return false;",
+    run: ["apps/node-agent/test/launcher.test.ts"], expect: "does not read the whole inventory" },
 ];
 
 // ---- the runner

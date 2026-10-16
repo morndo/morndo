@@ -76,7 +76,7 @@ export function buildOps(d: OpsDeps): OpTable {
     }),
     ...laneOps({
       node: config.node, policy, inventory: d.inventory, home: config.home, stateDir: paths.stateDir, stamp: stampServer,
-      tmux: d.tmux, send: d.send, deliver: a => d.deliverer().enqueue(a),
+      tmux: d.tmux, send: d.send, deliver: a => d.deliverer().enqueue(a), sessions: panes => d.registry.byPane(panes),
       ...(d.laneWaits ? { waits: d.laneWaits } : {}),
     }),
     ...worktreeOps({ repoRoots: policy.repoRoots, home: config.home, stateDir: paths.stateDir }),
