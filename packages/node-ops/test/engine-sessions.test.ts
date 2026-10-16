@@ -110,14 +110,16 @@ describe("engine session registry", () => {
   });
 
   it("serves no file outside that directory: a path to a file that does not exist, a .. path, a link out, a file that is not a transcript (negative control)", () => {
-    const key = join(outside, "secret");
+    const key = join(outside, "secret.jsonl");                       // named like a transcript, so only where it is can refuse it
     writeFileSync(key, "outside");
+    writeFileSync(join(outside, "secret"), "outside");
     writeFileSync(transcript("ok.jsonl"), "");
     symlinkSync(key, transcript("linked.jsonl"));
     const cases: [string, string][] = [
       ["a path elsewhere", key],
       ["a file that does not exist", join(dir, "..", "nobody", "hidden", "secret")],
-      ["a .. path", join(tr, "..", "elsewhere", "secret")],
+      ["a .. path", join(tr, "..", "elsewhere", "secret.jsonl")],
+      ["a file with no transcript name", join(outside, "secret")],
       ["a link inside the directory that points out", transcript("linked.jsonl")],
       ["a sibling directory with the same prefix", `${tr}-other/x.jsonl`],
       ["a file that is not a transcript", join(tr, "notes.txt")],
@@ -135,7 +137,7 @@ describe("engine session registry", () => {
   });
 
   it("serves no transcript once the link is swapped for one that points out after the lane was read", () => {
-    const key = join(outside, "secret");
+    const key = join(outside, "secret.jsonl");
     writeFileSync(key, "outside");
     writeFileSync(transcript(), "");
     put("4242.json");

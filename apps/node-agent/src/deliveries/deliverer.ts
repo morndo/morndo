@@ -56,7 +56,8 @@ export type PaneView = {
 };
 export type TranscriptView = {
   size(sessionId: string): Promise<number | null>;          // null: no transcript of that session on this node (yet)
-  lines(sessionId: string, from: number): Promise<{ lines: string[]; next: number } | null>;   // whole lines from a byte offset
+  // whole lines from a byte offset, with the byte offset each starts at (a receipt must come after the typing, receipt.ts cameAfter)
+  lines(sessionId: string, from: number): Promise<{ lines: string[]; starts?: number[]; next: number } | null>;
 };
 export type KickReason = "status" | "hook" | "inventory" | "timer";
 export type DelivererDeps = {
@@ -100,6 +101,7 @@ export class Deliverer {
   #grace: number;
   #unbound: boolean;
   #cursors = new Map<string, number>();                    // session → the transcript's byte offset read up to
+  #after = new Map<string, number>();                      // delivery → the transcript's size just before it was typed (not kept over a restart)
   #trying = new Set<string>();                             // deliveries whose pane.send is in flight
   #current: Promise<void> | null = null;
   #again = false;
@@ -243,6 +245,8 @@ export class Deliverer {
       if (p !== null && p.sessionId !== null && p.sessionId !== d.sessionId) this.#change(d, { state: "delivered", deliveredAt: this.#d.now() });
     }
     const waiting = new Map<string, Delivery[]>();
+    const open = new Set(store.open().map(d => d.id));
+    for (const id of this.#after.keys()) if (!open.has(id)) this.#after.delete(id);
     for (const d of store.open()) {
       if ((d.state === "typed" || d.state === "held") && d.sessionId !== undefined) waiting.set(d.sessionId, [...(waiting.get(d.sessionId) ?? []), d]);
     }
@@ -259,9 +263,10 @@ export class Deliverer {
       this.#cursors.set(session, got.next);
       const pending: PendingText[] = ds.flatMap(d => {
         const text = store.textOf(d.id);
-        return text === null ? [] : [{ id: d.id, text, typedAt: d.typedAt ?? d.queuedAt }];
+        const after = this.#after.get(d.id);
+        return text === null ? [] : [{ id: d.id, text, typedAt: d.typedAt ?? d.queuedAt, ...(after !== undefined ? { after } : {}) }];
       });
-      for (const r of readReceipts(got.lines, pending)) await this.#receipt(r.id, r.verdict, r.at, panes);
+      for (const r of readReceipts(got.lines, pending, got.starts)) await this.#receipt(r.id, r.verdict, r.at, panes);
     }
   }
 
@@ -368,6 +373,7 @@ export class Deliverer {
     if (reply.ok) {
       const r = reply.result as OpResult["pane.send"];
       if (!this.#cursors.has(at.session)) this.#cursors.set(at.session, before ?? 0);
+      this.#after.set(d.id, before ?? 0);                    // no transcript yet: whatever it holds later is new
       this.#change(d, { state: "typed", typedAt: r.typedAt, sessionId: at.session, ...retyped });
       if (r.problem === "not_submitted" && r.typedAt >= tryAt) await this.#enterAgain(at, expect, text);
       return;

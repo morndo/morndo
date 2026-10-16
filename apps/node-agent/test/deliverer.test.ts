@@ -77,7 +77,11 @@ function rig(o: { panes?: PaneState[]; hooks?: DelivererDeps["hooks"] } = {}) {
         if (t === undefined) return null;
         const rest = Buffer.from(t).subarray(from);
         const end = rest.lastIndexOf(0x0a);
-        return end === -1 ? { lines: [], next: from } : { lines: rest.subarray(0, end).toString("utf8").split("\n").filter(l => l.length > 0), next: from + end + 1 };
+        if (end === -1) return { lines: [], next: from };
+        const rows = rest.subarray(0, end).toString("utf8").split("\n");
+        let at = from;
+        const starts = rows.map(row => { const s = at; at += Buffer.byteLength(row) + 1; return s; });
+        return { lines: rows.filter(l => l.length > 0), starts: starts.filter((_, i) => rows[i]!.length > 0), next: from + end + 1 };
       },
     },
     ...(o.hooks ? { hooks: o.hooks } : {}),
@@ -96,6 +100,33 @@ function rig(o: { panes?: PaneState[]; hooks?: DelivererDeps["hooks"] } = {}) {
 }
 type Rig = ReturnType<typeof rig>;
 const state = (r: Rig, id: string) => r.store.get(id)?.state;
+
+describe("a receipt must be written after the typing began", () => {
+  // A transcript that times its lines in whole seconds (the engine layer's lane): a line from the second the text was typed in
+  // can't be told from an earlier one by its time, so the transcript's size before the typing is the line to cross.
+  const whole = (text: string, at: number) => ({ type: "user", timestamp: `${new Date(at).toISOString().slice(0, 19)}Z`, message: { role: "user", content: text } });
+  it("two identical short briefs: an earlier line with the same text in the same second is not the receipt; the lane's own new line is", async () => {
+    const r = rig();
+    r.say(S1, whole("continue", T0));                                   // a person typed it just before, in the same second
+    r.deliverer.enqueue({ id: "lanes:c1", target: MANAGER, text: "continue" });
+    await r.deliverer.drain();
+    expect(state(r, "lanes:c1")).toBe("typed");
+    await r.round();
+    expect(state(r, "lanes:c1")).toBe("typed");                         // the old line is not its receipt
+    r.say(S1, whole("continue", T0 + 300));
+    await r.round();
+    expect(state(r, "lanes:c1")).toBe("delivered");
+  });
+  it("a first brief to a lane whose transcript does not exist yet is delivered by the line that creates it", async () => {
+    const r = rig();
+    r.deliverer.enqueue({ id: "lanes:c2", target: MANAGER, text: "first brief" });
+    await r.deliverer.drain();
+    expect(state(r, "lanes:c2")).toBe("typed");
+    r.say(S1, whole("first brief", T0 + 200));
+    await r.round();
+    expect(state(r, "lanes:c2")).toBe("delivered");
+  });
+});
 
 describe("trying and confirming (spec §4.3)", () => {
   it("types the head once into its pane, under its id as the done key, and confirms it from a prompt in the session it was typed into", async () => {

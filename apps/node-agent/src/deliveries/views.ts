@@ -137,7 +137,10 @@ export function agentTranscripts(transcriptPath: (sessionId: string) => string |
       const buf = Buffer.concat(parts);
       const end = buf.lastIndexOf(0x0a);
       if (end === -1) return { lines: [], next: buf.length >= READ_MAX ? start + buf.length : start };
-      return { lines: buf.subarray(0, end).toString("utf8").split("\n").filter(l => l.length > 0), next: start + end + 1 };
+      const rows = buf.subarray(0, end).toString("utf8").split("\n");
+      let at = start;
+      const starts = rows.map(row => { const s = at; at += Buffer.byteLength(row) + 1; return s; });
+      return { lines: rows.filter(l => l.length > 0), starts: starts.filter((_, i) => rows[i]!.length > 0), next: start + end + 1 };
     },
   };
 }
