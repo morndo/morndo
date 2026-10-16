@@ -2914,6 +2914,12 @@ export const CONTROLS: Control[] = [
   { id: "t231-alias-dead-pid", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
     find: "if (!alive(a.pid) || ++a.misses >= 2) aliases.delete(id);", replace: "if (++a.misses >= 2) aliases.delete(id);",
     run: ["packages/node-ops/test/engine-sessions.test.ts"], expect: "or at once when its process is dead" },
+  { id: "t231-hook-refresh-per-id", task: "T-231", file: "apps/node-agent/src/relay/window-of.ts",
+    find: "(last !== undefined && now() - last < ID_REFRESH_MS)", replace: "false",
+    run: ["apps/node-agent/test/window-of.test.ts"], expect: "not one every 250 ms" },
+  { id: "t231-fresh-not-staler", task: "T-231", file: "apps/node-agent/src/relay/window-of.ts",
+    find: "readIfOlderThan(Math.min(REFRESH_MS, ms))", replace: "readIfOlderThan(REFRESH_MS)",
+    run: ["apps/node-agent/test/window-of.test.ts"], expect: "never staler than the plain cache" },
 ];
 
 // ---- the runner
