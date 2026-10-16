@@ -207,3 +207,27 @@ export async function processStart(pid: number, io: ProcessStartIo = {}): Promis
   const line = await (io.ps ?? psLstart)(pid);
   return line === null ? null : startFromLstart(line);
 }
+
+// A process's parent: field 4 of /proc/<pid>/stat (the fields after the last `)` start at field 3, so the parent is their
+// second), else `ps -o ppid=`. null when the process is gone or the answer is no pid.
+// https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html, https://man7.org/linux/man-pages/man1/ps.1.html (read 2026-10-16).
+export function parentPid(pid: number, io: { read?: (path: string) => string | null; ps?: (pid: number) => string | null } = {}): number | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const stat = (io.read ?? readText)(`/proc/${pid}/stat`);
+  let raw: string | null = null;
+  if (stat !== null) {
+    const close = stat.lastIndexOf(")");
+    raw = close < 0 ? null : (stat.slice(close + 1).trim().split(/\s+/)[1] ?? null);
+  } else {
+    raw = (io.ps ?? psParent)(pid);
+  }
+  const parent = Number(raw);
+  return raw !== null && Number.isInteger(parent) && parent > 0 ? parent : null;
+}
+
+function psParent(pid: number): string | null {
+  try {
+    const out = execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim();
+    return out === "" ? null : out;
+  } catch { return null; }
+}
