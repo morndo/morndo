@@ -6,7 +6,7 @@ import type { SessionInfo } from "@morndo/node-ops";
 
 // A session is named by its id, or by an alias: an engine lane's hooks name it as its file does (SessionInfo.aliases), which changes
 // when the engine names a session. A session_id the read doesn't know asks `refresh` for a read that is at most REFRESH_MS old.
-export function windowResolver(o: { windowOfPane(pane: string): string | null; sessions(): Map<string, SessionInfo>; refresh?(): Map<string, SessionInfo> }): (body: unknown) => string | null {
+export function windowResolver(o: { windowOfPane(pane: string): string | null; sessions(): Map<string, SessionInfo>; refresh?: () => Map<string, SessionInfo> }): (body: unknown) => string | null {
   const find = (sessions: Map<string, SessionInfo>, id: string) => {
     for (const [pane, s] of sessions) if (s.sessionId === id || s.aliases?.includes(id)) return pane;
     return null;
@@ -27,7 +27,7 @@ export const REFRESH_MS = 250;
 
 // The registry read at most once per `ms`: /sl arrives often, and each read lists ~/.claude/sessions. `fresh()` reads it again
 // unless the last read is less than REFRESH_MS old.
-export function cachedFor<T>(ms: number, read: () => T, now: () => number = () => performance.now()): (() => T) & { fresh(): T } {
+export function cachedFor<T>(ms: number, read: () => T, now: () => number = () => performance.now()): (() => T) & { fresh: () => T } {
   let at = -Infinity;
   let value: T | undefined;
   const get = () => {
