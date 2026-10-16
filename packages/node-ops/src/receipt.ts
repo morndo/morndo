@@ -17,6 +17,8 @@
 //   as delivered; 2.1.293 wrote a reason on every one of 2,736 in two days, and the attachment that follows a real
 //   delivery still confirms it, so no verdict is the safe side.)
 // - {"type":"attachment","attachment":{"type":"queued_command","prompt":…}}: handed to the model: delivered.
+// - An engine lane's transcript (engine layer, ADR-0030): {"type":"user","message":{"content":…}} written when the lane takes a message,
+//   timed in whole seconds: written by the end of that second.
 // Anything else, a line that isn't JSON, and an entry without a time give no verdict.
 // A command that starts a new session (/clear and its aliases) is written only into the new session's transcript, so its
 // receipt is the pane's session changing (newSessionReceipt, below), never an entry of the session it was typed into.
@@ -24,9 +26,12 @@
 export type ReceiptVerdict = "delivered" | "held" | "dropped" | "none";
 export type PendingText = { id: string; text: string; typedAt: number };
 
-type Said = { verdict: Exclude<ReceiptVerdict, "none">; text: string; at: number };
+// `by`: the latest the entry can have been written. Its time `at`, but an engine lane's (lane.py) is in whole seconds:
+// written in that second, so by its end.
+type Said = { verdict: Exclude<ReceiptVerdict, "none">; text: string; at: number; by: number };
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const WHOLE_SECONDS = /T\d{2}:\d{2}:\d{2}(?![.\d])/;
 const DELIVERED_REASONS = new Set(["absorbed_mid_turn", "delivered_to_agent"]);
 
 // One JSONL line: what it says of a text, or null.
@@ -36,23 +41,24 @@ function said(line: string): Said | null {
   if (!isRecord(o) || o.isSidechain === true) return null;
   const at = typeof o.timestamp === "string" ? Date.parse(o.timestamp) : Number.NaN;
   if (!Number.isFinite(at)) return null;                              // without a time, "after it was typed" can't be told
+  const by = at + (WHOLE_SECONDS.test(o.timestamp as string) ? 999 : 0);
   if (o.type === "user") {
     if (o.isMeta === true || o.isCompactSummary === true || !isRecord(o.message)) return null;
     const c = o.message.content;
-    if (typeof c === "string") return { verdict: "delivered", text: c, at };
+    if (typeof c === "string") return { verdict: "delivered", text: c, at, by };
     if (!Array.isArray(c) || c.some(b => isRecord(b) && b.type === "tool_result")) return null;
     const text = c.filter((b): b is { type: "text"; text: string } => isRecord(b) && b.type === "text" && typeof b.text === "string").map(b => b.text).join("\n");
-    return text ? { verdict: "delivered", text, at } : null;
+    return text ? { verdict: "delivered", text, at, by } : null;
   }
   if (o.type === "queue-operation" && typeof o.content === "string") {
-    if (o.operation === "enqueue") return { verdict: "held", text: o.content, at };
+    if (o.operation === "enqueue") return { verdict: "held", text: o.content, at, by };
     if (o.operation !== "remove") return null;                        // "dequeue": no verdict, even should it carry a text
-    if (typeof o.reason === "string" && DELIVERED_REASONS.has(o.reason)) return { verdict: "delivered", text: o.content, at };
-    if (o.reason === "cleared_on_cancel") return { verdict: "dropped", text: o.content, at };
+    if (typeof o.reason === "string" && DELIVERED_REASONS.has(o.reason)) return { verdict: "delivered", text: o.content, at, by };
+    if (o.reason === "cleared_on_cancel") return { verdict: "dropped", text: o.content, at, by };
     return null;
   }
   if (o.type === "attachment" && isRecord(o.attachment) && o.attachment.type === "queued_command" && typeof o.attachment.prompt === "string") {
-    return { verdict: "delivered", text: o.attachment.prompt, at };
+    return { verdict: "delivered", text: o.attachment.prompt, at, by };
   }
   return null;
 }
@@ -68,7 +74,7 @@ export function readReceipts(lines: string[], pending: PendingText[]): { id: str
   for (const line of lines) {
     const e = said(line);
     if (!e) continue;
-    const p = order.find(q => !decided.has(q.id) && !(e.verdict === "held" && held.has(q.id)) && e.at >= q.typedAt && promptMatches(q.text, e.text));
+    const p = order.find(q => !decided.has(q.id) && !(e.verdict === "held" && held.has(q.id)) && e.by >= q.typedAt && promptMatches(q.text, e.text));
     if (!p) continue;
     if (e.verdict === "held") held.add(p.id); else decided.add(p.id);
     out.push({ id: p.id, verdict: e.verdict, at: e.at });

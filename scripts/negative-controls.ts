@@ -2854,6 +2854,26 @@ export const CONTROLS: Control[] = [
   { id: "t110-uptime-clock-after", task: "T-110", file: "packages/node-ops/src/pid.ts",
     find: "startFromUptime(stat, uptime, hz, before, after)", replace: "startFromUptime(stat, uptime, hz, after, after)",
     run: ["apps/node-agent/test/job-identity.test.ts"], expect: "widens the start instead of moving it" },
+  // ---- Engine lanes take briefs (board T-231, ADR-0030): each guard removed once.
+  { id: "t231-engine-stable-id", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
+    find: "const sessionId = `engine-${pid}-${start}`;", replace: "const sessionId = text(d.sessionId, `engine-${pid}-${start}`);",
+    run: ["packages/node-ops/test/engine-sessions.test.ts", "apps/node-agent/test/engine-lane-delivery.test.ts"], expect: "engine-4242-5500" },
+  { id: "t231-engine-pid-identity", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
+    find: "if (now !== null && (now.ticks !== ticks || now.bootId !== boot)) continue;", replace: "",
+    run: ["packages/node-ops/test/engine-sessions.test.ts"], expect: "another process" },
+  { id: "t231-engine-in-pane-ancestry", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
+    find: "pid = pane === undefined ? parentOf(pid) : pid;", replace: "pid = null;",
+    run: ["packages/node-ops/test/engine-sessions.test.ts", "apps/node-agent/test/engine-lane-delivery.test.ts"], expect: "engine-4242-5500" },
+  { id: "t231-engine-send-flag", task: "T-231", file: "apps/node-agent/src/ops/pane-ops.ts",
+    find: "...(session?.engine !== undefined ? { engineLane: true } : {})", replace: "",
+    run: ["apps/node-agent/test/engine-lane-delivery.test.ts"] },
+  { id: "t231-engine-box-needs-flag", task: "T-231", file: "packages/node-ops/src/tmux.ts",
+    find: "if (!(engine ? engineLaneBoxOnScreen(before) : inputBoxOnScreen(before))) return \"no_input_box\";",
+    replace: "if (!(engineLaneBoxOnScreen(before) || inputBoxOnScreen(before))) return \"no_input_box\";",
+    run: ["packages/node-ops/test/tmux-engine-lane.test.ts"], expect: "shell prompt" },
+  { id: "t231-whole-second-receipt", task: "T-231", file: "packages/node-ops/src/receipt.ts",
+    find: "(WHOLE_SECONDS.test(o.timestamp as string) ? 999 : 0)", replace: "0",
+    run: ["packages/node-ops/test/receipt.test.ts", "apps/node-agent/test/engine-lane-delivery.test.ts"], expect: "no fraction" },
 ];
 
 // ---- the runner

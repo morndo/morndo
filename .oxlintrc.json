@@ -37,7 +37,8 @@
         "apps/hub/test/steering.test.ts",
         "apps/hub/test/tmux-*.ts",
         "test/fixtures/*.ts",
-        "apps/node-agent/test/fake-claude.fixture.ts"
+        "apps/node-agent/test/fake-claude.fixture.ts",
+        "apps/node-agent/test/fake-engine-lane.fixture.ts"
       ],
       "rules": {
         "no-control-regex": "off"

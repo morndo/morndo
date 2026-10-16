@@ -10,7 +10,7 @@
 // RECONCILIATION.md ruling 13: each pane also carries its session's `topic` and `lastPrompt`, its transcript's latest
 // ai-title and last-prompt entries (`titles`: transcript-titles.ts); each is absent when unknown (ruling 46).
 import { formatWorkerId, type Pane, type SessionStatus } from "@morndo/protocol";
-import type { SessionInfo } from "@morndo/node-ops";
+import type { PanePids, SessionInfo } from "@morndo/node-ops";
 import type { Titles } from "./transcript-titles.ts";
 import { listPanes, type PaneRow } from "./tmux-panes.ts";
 
@@ -18,11 +18,12 @@ export type InventoryDeps = {
   node: string;
   session: string;
   socket: string | null;
-  sessions: () => Map<string, SessionInfo>;
+  sessions: (panes: PanePids) => Map<string, SessionInfo>;   // the panes' process ids too: an engine lane is found inside its pane
   stamp: (socket: string | null) => Promise<string | null>;
   titles?: (sessionId: string) => Promise<Titles>;        // topic and lastPrompt (ruling 13); without it, both null
 };
-export type Lane = { workerId: string; pane: string; windowId: string; window: string; sessionId: string | null; status: SessionStatus | null; pid: number | null };
+export type Lane = { workerId: string; pane: string; windowId: string; window: string; sessionId: string | null; status: SessionStatus | null; pid: number | null;
+  engine?: string };   // set when the pane runs a lane of the engine layer, not Claude Code: the engine's name (engine-sessions.ts)
 export type Snapshot = { invVersion: number; stamp: string | null; panes: Pane[]; lanes: Lane[]; rows: PaneRow[] };
 
 export class Inventory {
@@ -61,7 +62,7 @@ export class Inventory {
       rows = await listPanes(d.socket, d.session);
     }
     const stamp = rows[0]?.stamp || null;
-    const sessions = d.sessions();
+    const sessions = d.sessions(new Map(rows.flatMap(r => (r.panePid === null ? [] : [[r.pane, r.panePid] as const]))));
     const lanes: Lane[] = [];
     const panes: Pane[] = [];
     for (const r of rows) {
@@ -70,7 +71,7 @@ export class Inventory {
       const workerId = formatWorkerId({ node: d.node, server: r.stamp, pane: r.paneNum });
       const state = { status: s?.status ?? null, pid: s?.pid ?? null };
       const titles = s && d.titles ? await d.titles(s.sessionId) : { topic: null, lastPrompt: null };
-      lanes.push({ workerId, pane: r.pane, windowId: r.windowId, window: r.window, sessionId: s?.sessionId ?? null, ...state });
+      lanes.push({ workerId, pane: r.pane, windowId: r.windowId, window: r.window, sessionId: s?.sessionId ?? null, ...state, ...(s?.engine !== undefined ? { engine: s.engine } : {}) });
       panes.push({
         workerId, window: r.window, cwd: r.cwd,
         ...(s ? { sessionId: s.sessionId } : {}),

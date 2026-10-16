@@ -39,7 +39,7 @@ import { createHash } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LIMITS, formatWorkerId, parseWorkerId, type OpArgs, type OpError, type OpResult } from "@morndo/protocol";
-import { deniedBy, denyConfigFromEnv, denyRoots, exactSession, hostTmuxServer, inputBoxOnScreen, menuOnScreen, resolvedRoots, tmuxLiteral, type Tmux } from "@morndo/node-ops";
+import { deniedBy, denyConfigFromEnv, denyRoots, engineLaneBoxOnScreen, exactSession, hostTmuxServer, inputBoxOnScreen, menuOnScreen, resolvedRoots, tmuxLiteral, type Tmux } from "@morndo/node-ops";
 import type { Policy } from "../config.ts";
 import { engineLayer, laneLaunch, type EngineLayer } from "./lane-engine.ts";
 import { effect, fail, ok, type EffectContext, type OpTable, type Outcome, type Reply, type Request } from "./executor.ts";
@@ -141,6 +141,8 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
       const shown = await screen(pane);
       if (shown !== null && trustDialogOnScreen(shown)) return true;
       if (shown === null || inputBoxOnScreen(shown)) return false;
+      // An engine lane has no trust dialog: its input line (the engine layer's, with its session in the registry) ends the look.
+      if (engineLaneBoxOnScreen(shown) && (await d.inventory.refresh()).lanes.some(l => l.pane === pane && l.engine !== undefined)) return false;
       if (performance.now() >= end) return false;
       await sleep(w.pollMs);
     }

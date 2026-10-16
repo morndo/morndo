@@ -100,7 +100,7 @@ Read on 2026-10-08, read-only, on the owner's PC (WSL2) and in this repo at `849
   A name that two windows claim is refused `lane_conflict`.
 - **`text`** is at most 8000 characters, as for `pane.send`.
 - **`ttlMs`** defaults to 24 hours. The node turns it into `notAfter` on its own clock when it stores the delivery: no client sends a clock time, so clocks that differ between machines (the PC ran 1.1 s behind the control plane) don't matter.
-- **Only a lane running Claude Code takes deliveries:** one with a live session (its session file, and its process alive), whatever its `status` (§5). A pane without one waits (`no_session`) when it is a sticky lane (a manager mid-restart) or was started in the last 2 minutes (Claude Code still starting; measured from the pane process's own start time, so an agent restart doesn't reset it). Any other such pane (a shell, an engine lane) refuses the delivery `no_session` (not executed), and clients type into those directly (`pane.send`, `pane.keys`).
+- **Only a lane with a live session takes deliveries:** Claude Code's (its session file, and its process alive) or a lane of the engine layer's (its file in the engine registry, its process alive and inside the pane; [ADR-0030](../../adr/0030-engine-lane-sessions.md)), whatever its `status` (§5). A pane without one waits (`no_session`) when it is a sticky lane (a manager mid-restart) or was started in the last 2 minutes (Claude Code still starting; measured from the pane process's own start time, so an agent restart doesn't reset it). Any other such pane (a shell) refuses the delivery `no_session` (not executed), and clients type into those directly (`pane.send`, `pane.keys`).
 
 ### 4.2 States
 

@@ -170,3 +170,22 @@ describe("a command that starts a new session (/clear, /reset, /new)", () => {
     expect(newSessionReceipt("/compact", "s-old", "s-new")).toBe(false);
   });
 });
+
+// The engine layer's lane (test/fixtures/engine-lane/transcript.jsonl, lane.py `_log`): a `user` line when the lane takes a
+// message, timestamped in whole seconds, so a text typed at 05:00:03.800 is recorded as 05:00:03.
+describe("the engine layer's lane transcript", () => {
+  const fixture = readFileSync(join(import.meta.dirname, "../../../test/fixtures/engine-lane/transcript.jsonl"), "utf8").split("\n").filter(Boolean);
+  const typedAt = (hms: string) => Date.parse(`2026-10-16T${hms}Z`);
+  it("delivers a text the lane took in the second it was typed in, though the line's time has no fraction", () => {
+    expect(verdicts(fixture, [pending("d1", "Build the demo", typedAt("05:00:03.800"))])).toEqual(["d1:delivered"]);
+    expect(verdicts(fixture, [pending("d1", "Build the demo", typedAt("05:00:03.000"))])).toEqual(["d1:delivered"]);
+  });
+  it("still needs the line to come at or after the typing (negative control)", () => {
+    expect(verdicts(fixture, [pending("d1", "Build the demo", typedAt("05:00:04.000"))])).toEqual([]);
+    const withFraction = fixture.map(l => l.replace('"2026-10-16T05:00:03Z"', '"2026-10-16T05:00:03.100Z"'));
+    expect(verdicts(withFraction, [pending("d1", "Build the demo", typedAt("05:00:03.800"))])).toEqual([]);   // a time with a fraction is exact
+  });
+  it("gives no verdict for the lane's other lines", () => {
+    expect(verdicts(fixture, [pending("d1", "working", typedAt("05:00:00.000")), pending("d2", "STATUS: DONE", typedAt("05:00:00.000"))])).toEqual([]);
+  });
+});
