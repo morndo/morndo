@@ -32,6 +32,7 @@ function startBareLane(name: string): string {
 
 beforeEach(async () => {
   vi.stubEnv("ENGINES_SESSIONS", "");
+  vi.stubEnv("ENGINES_TRANSCRIPTS", "");
   home = tempHome();
   t = isolatedTmux();
   box = join(home.home, "box");
@@ -48,6 +49,9 @@ describe("an engine lane takes briefs", () => {
     const lane = laneOf("codex-a");
     expect(lane).toMatchObject({ sessionId: expect.stringMatching(/^engine-\d+-\d+$/), status: "idle" });
     expect(h.inventory.last().panes.find(p => p.window === "codex-a")).toMatchObject({ sessionId: lane?.sessionId, sessionName: "codex-a", status: "idle" });
+    expect(h.registry.transcriptPath(lane!.sessionId!)).toBeNull();            // the lane writes it with its first message
+    expect(h.deliverer.enqueue({ id: "lanes:t1", target: { lane: "codex-a", sticky: false }, text: "ping" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await kickUntil(() => h.deliveries.get("lanes:t1")?.state === "delivered")).toBe(true);
     expect(h.registry.transcriptPath(lane!.sessionId!)).toMatch(/codex-a-[0-9a-f-]+\.jsonl$/);
   });
 
@@ -89,6 +93,23 @@ describe("an engine lane takes briefs", () => {
       hs.deliverer.stop();
       await hs.deliverer.drain();
     } finally { hs.close(); }
+  }, 30_000);
+
+  it("is no engine lane while its shell has the terminal (Ctrl-Z): nothing is typed into the shell (negative control)", async () => {
+    t.tmux("new-window", "-d", "-t", "=main:", "-n", "codex-z", "bash", "--norc", "--noprofile", "-i");
+    const target = "=main:codex-z";
+    expect(await until(() => t.tmux("capture-pane", "-p", "-t", target).includes("$"))).toBe(true);
+    t.tmux("send-keys", "-t", target, "-l", `${process.execPath} ${FIXTURE} ${home.home} ${box}`);
+    t.tmux("send-keys", "-t", target, "Enter");
+    expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-z")?.sessionId != null; })).toBe(true);
+    t.tmux("send-keys", "-t", target, "C-z");
+    expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-z")?.sessionId == null; })).toBe(true);
+    // The lane's process and its file are still there; the shell prompt is the last line on screen.
+    expect(h.deliverer.enqueue({ id: "lanes:z1", target: { lane: "codex-z", sticky: false }, text: "echo MARK$((40+2))" })).toMatchObject({ delivery: { state: "queued" } });
+    for (let i = 0; i < 4; i++) { await h.inventory.refresh(); h.deliverer.kick("hook"); await h.deliverer.drain(); }
+    expect(h.deliveries.get("lanes:z1")).toMatchObject({ state: "queued", waiting: { reason: "no_session" } });
+    expect(t.tmux("capture-pane", "-p", "-t", target)).not.toContain("MARK42");
+    expect(submitted()).toEqual([]);
   }, 30_000);
 
   it("stops with /exit, no kill needed", async () => {

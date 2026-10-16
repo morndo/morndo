@@ -27,7 +27,8 @@ import { Inventory } from "./inventory.ts";
 import type { LaneWaits } from "./lane-ops.ts";
 import type { GuardInput } from "./pane-ops.ts";
 import { jobOps, type JobControl } from "./job-ops.ts";
-import { buildOps, claudeDir, enginesSessionsDir } from "./table.ts";
+import { buildOps, claudeDir, enginesSessionsDir, enginesTranscriptsDir } from "./table.ts";
+import { panePidsOf } from "./tmux-panes.ts";
 import { TranscriptTitles } from "./transcript-titles.ts";
 import { UploadInbox } from "./upload-inbox.ts";
 
@@ -69,8 +70,9 @@ export function createOpsRuntime(o: RuntimeOptions): OpsRuntime {
   const paths = agentPaths(config.home);
   // Claude Code's sessions, and the engine layer's lanes in the panes Claude Code holds none of (ADR-0030). An engine lane is
   // found inside its pane, so the registry reads the panes' process ids as the inventory last listed them.
-  const panePids = (): PanePids => new Map(inventory.last().rows.flatMap(r => (r.panePid === null ? [] : [[r.pane, r.panePid] as const])));
-  const registry = combineSessions(sessionRegistry(claudeDir(config.home)), engineSessionRegistry(enginesSessionsDir(config.home)), panePids);
+  const panePids = (): PanePids => panePidsOf(inventory.last().rows);
+  const engines = engineSessionRegistry(enginesSessionsDir(config.home), { transcripts: enginesTranscriptsDir(config.home) });
+  const registry = combineSessions(sessionRegistry(claudeDir(config.home)), engines, panePids);
   // topic and lastPrompt (RECONCILIATION.md ruling 13): each session's transcript, found through the same registry.
   const titles = new TranscriptTitles(sessionId => registry.transcriptPath(sessionId));
   const inventory = new Inventory({

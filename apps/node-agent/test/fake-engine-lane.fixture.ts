@@ -87,6 +87,7 @@ function submit(text: string) {
 }
 
 process.stdin.setRawMode(true);
+execFileSync("stty", ["isig"], { stdio: ["inherit", "ignore", "ignore"] });   // lane.py uses cbreak: Ctrl-C and Ctrl-Z still signal it
 process.stdout.write("\u001b[?2004h");
 save();
 say(`engine-lane codex ready in ${process.cwd()}`);

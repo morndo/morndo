@@ -208,26 +208,19 @@ export async function processStart(pid: number, io: ProcessStartIo = {}): Promis
   return line === null ? null : startFromLstart(line);
 }
 
-// A process's parent: field 4 of /proc/<pid>/stat (the fields after the last `)` start at field 3, so the parent is their
-// second), else `ps -o ppid=`. null when the process is gone or the answer is no pid.
-// https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html, https://man7.org/linux/man-pages/man1/ps.1.html (read 2026-10-16).
-export function parentPid(pid: number, io: { read?: (path: string) => string | null; ps?: (pid: number) => string | null } = {}): number | null {
+// A process's group and the foreground group of its terminal: fields 5 (pgrp) and 8 (tpgid) of /proc/<pid>/stat, counted from the
+// fields after the last `)`. tpgid is -1 without a terminal. A process is its terminal's foreground job when its group is the
+// terminal's tpgid (a shell that stopped it with Ctrl-Z, or started it with &, is not). Linux only: a missing /proc entry is a
+// process that is gone, and nothing is spawned to ask again.
+// https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html (read 2026-10-16).
+export function procGroups(pid: number, io: { read?: (path: string) => string | null } = {}): { pgrp: number; tpgid: number } | null {
   if (!Number.isInteger(pid) || pid <= 0) return null;
   const stat = (io.read ?? readText)(`/proc/${pid}/stat`);
-  let raw: string | null = null;
-  if (stat !== null) {
-    const close = stat.lastIndexOf(")");
-    raw = close < 0 ? null : (stat.slice(close + 1).trim().split(/\s+/)[1] ?? null);
-  } else {
-    raw = (io.ps ?? psParent)(pid);
-  }
-  const parent = Number(raw);
-  return raw !== null && Number.isInteger(parent) && parent > 0 ? parent : null;
-}
-
-function psParent(pid: number): string | null {
-  try {
-    const out = execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8", timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).trim();
-    return out === "" ? null : out;
-  } catch { return null; }
+  if (stat === null) return null;
+  const close = stat.lastIndexOf(")");
+  if (close < 0) return null;
+  const f = stat.slice(close + 1).trim().split(/\s+/);
+  const pgrp = Number(f[2]);                                            // field 5
+  const tpgid = Number(f[5]);                                           // field 8
+  return Number.isInteger(pgrp) && pgrp > 0 && Number.isInteger(tpgid) ? { pgrp, tpgid } : null;
 }

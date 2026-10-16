@@ -12,7 +12,7 @@
 import { formatWorkerId, type Pane, type SessionStatus } from "@morndo/protocol";
 import type { PanePids, SessionInfo } from "@morndo/node-ops";
 import type { Titles } from "./transcript-titles.ts";
-import { listPanes, type PaneRow } from "./tmux-panes.ts";
+import { listPanes, panePidsOf, type PaneRow } from "./tmux-panes.ts";
 
 export type InventoryDeps = {
   node: string;
@@ -62,7 +62,7 @@ export class Inventory {
       rows = await listPanes(d.socket, d.session);
     }
     const stamp = rows[0]?.stamp || null;
-    const sessions = d.sessions(new Map(rows.flatMap(r => (r.panePid === null ? [] : [[r.pane, r.panePid] as const]))));
+    const sessions = d.sessions(panePidsOf(rows));
     const lanes: Lane[] = [];
     const panes: Pane[] = [];
     for (const r of rows) {

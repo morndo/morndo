@@ -20,6 +20,10 @@ const run = promisify(execFile);
 
 // panePid: the pane's own process (#{pane_pid}): its shell, or the command a lane was started with.
 // currentCommand: #{pane_current_command}, the foreground process's name (bash, zsh, fish, node, sleep).
+// Pane ID → the pid of the pane's process, for the panes whose pid was read: what an engine lane is looked for in (node-ops engine-sessions.ts).
+export const panePidsOf = (rows: readonly PaneRow[]): Map<string, number> =>
+  new Map(rows.flatMap(r => (r.panePid === null ? [] : [[r.pane, r.panePid] as const])));
+
 export type PaneRow = { pane: string; paneNum: number; windowId: string; windowPanes: number; window: string; cwd: string; title: string | null; stamp: string;
   panePid: number | null; currentCommand: string };
 export type PaneFacts = { session: string; windowPanes: number; window: string; stamp: string };

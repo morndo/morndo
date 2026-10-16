@@ -46,6 +46,10 @@ export function claudeDir(home: string): string { return join(home, ".claude"); 
 export function enginesSessionsDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
   return env.ENGINES_SESSIONS || join(home, ".local", "share", "engines", "sessions");
 }
+// And their transcripts (lane.py ENGINES_TRANSCRIPTS): the only place a lane's transcript is served from.
+export function enginesTranscriptsDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  return env.ENGINES_TRANSCRIPTS || join(home, ".local", "share", "engines", "transcripts");
+}
 
 export function buildOps(d: OpsDeps): OpTable {
   const { config, paths } = d;

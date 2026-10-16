@@ -2,47 +2,59 @@
 // engine (Codex, Cursor, ...) runs `engine-lane` in its tmux window and records itself in
 // $ENGINES_SESSIONS/<pid>.json (default ~/.local/share/engines/sessions), written by the engine layer's lane.py
 // `_save_registry`, checked against its commit 683a7c9 (2026-10-16). The shape is the engine layer's own, so the contract
-// tests use a synthetic file of it (test/fixtures/engine-lane/session-file.json). Unlike Claude Code's file it names no tmux
-// pane, so a lane is found by its process being inside a pane's: the pane process is the lane or an ancestor of it.
+// tests use a synthetic file of it (test/fixtures/engine-lane/session-file.json).
+// - Any process of the user can write a file there, so a file counts only for a live engine-lane: its `pidStartTicks` and
+//   `bootId` must be there and match the process now (a file without them, or a pid another process took, is no lane).
+// - It names no tmux pane, so a lane is found by being the foreground job of a pane's terminal: its process group is the
+//   foreground group (tpgid) of the pane's process. A lane stopped with Ctrl-Z, or started with `&`, is not: the pane is the
+//   shell's then, and text must never be typed into a shell as if it were the lane. Linux's /proc only; where it has no entry
+//   for a process, the process is gone (nothing is spawned to ask again).
 // - `sessionId` in the file is the lane's own id until the engine names a session, then the engine's, and the lane's again
 //   after /clear. The fleet binds a delivery to the session it was queued for and gives it up when another takes the lane's
 //   name, so a lane that renamed its session would lose every delivery waiting while a turn ran. The id reported here is the
-//   lane's process (pid and start): the same for the life of the `engine-lane`, another for a lane started in its place.
-// - `pidStartTicks` and `bootId` tell the process the file is about from one that took its pid later (a file left by a
-//   killed lane); a file without them is taken on the process being alive.
-// - `status` is busy or idle; `transcript` is the lane's own transcript, one JSON line per record.
-import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+//   lane's process (pid and start): the same for the life of the `engine-lane`, another for a lane started in its place. The
+//   file's ids are kept as `aliases`, which is what the lane's hooks name (relay/window-of.ts).
+// - `transcript` is a path in a file anyone can write. It is served only when its real path (links followed) is a `.jsonl`
+//   file inside the engine layer's transcript directory.
+// - `status` is busy or idle.
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import { SESSION_STATUSES, type SessionStatus } from "@morndo/protocol";
-import { parentPid, processAlive, processIdentity, type ProcessIdentity } from "./pid.ts";
+import { procGroups, processAlive, processIdentity, type ProcessIdentity } from "./pid.ts";
 import type { SessionInfo } from "./sessions.ts";
 
-const MAX_DEPTH = 32;                                                  // process ancestors looked at, from the lane up
 const STATUSES = new Set<string>(SESSION_STATUSES);
 const text = (v: unknown, otherwise = "") => (typeof v === "string" ? v : otherwise);
+const RESCAN_MS = 1000;                                                // an unknown lane id rescans the registry at most this often
 
 export type EngineSessionIo = {
-  parentOf?: (pid: number) => number | null;
+  transcripts: string;                                                 // the engine layer's transcript directory
   alive?: (pid: number) => boolean;
   identity?: (pid: number) => ProcessIdentity | null;
+  groups?: (pid: number) => { pgrp: number; tpgid: number } | null;
+  now?: () => number;
 };
 
 // Pane ID ("%3") → the pid of the process the pane runs.
 export type PanePids = ReadonlyMap<string, number>;
 
-type Lane = { info: Omit<SessionInfo, "pane">; transcript: string; updatedAt: number };
+type Lane = { info: Omit<SessionInfo, "pane">; updatedAt: number };
 
-export function engineSessionRegistry(dir: string, io: EngineSessionIo = {}) {
-  const parentOf = io.parentOf ?? ((pid: number) => parentPid(pid));
+export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
   const alive = io.alive ?? processAlive;
   const identity = io.identity ?? ((pid: number) => processIdentity(pid));
-  const transcripts = new Map<string, string>();
+  const groups = io.groups ?? ((pid: number) => procGroups(pid));
+  const now = io.now ?? (() => performance.now());
+  let candidates = new Map<string, string>();                          // lane id → the transcript path its file names
+  const aliases = new Map<string, Set<string>>();                      // lane id → every sessionId its file has had
+  let scannedAt = Number.NEGATIVE_INFINITY;
 
   function lanes(): Lane[] {
-    if (!existsSync(dir)) return [];
-    let files: string[];
-    try { files = readdirSync(dir); } catch { return []; }
+    scannedAt = now();
+    const found = new Map<string, string>();
     const out: Lane[] = [];
+    let files: string[] = [];
+    if (existsSync(dir)) { try { files = readdirSync(dir); } catch { files = []; } }
     for (const f of files) {
       if (!f.endsWith(".json")) continue;
       let d: Record<string, unknown>;
@@ -50,51 +62,62 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo = {}) {
       if (d === null || typeof d !== "object") continue;
       const pid = Number(d.pid);
       if (!alive(pid)) continue;
-      const ticks = typeof d.pidStartTicks === "number" ? d.pidStartTicks : null;
-      const boot = typeof d.bootId === "string" ? d.bootId : null;
-      const now = ticks !== null && boot !== null ? identity(pid) : null;
-      if (now !== null && (now.ticks !== ticks || now.bootId !== boot)) continue;      // another process holds the pid now
-      const start = ticks ?? (typeof d.pidStartedAt === "number" ? d.pidStartedAt : typeof d.startedAt === "number" ? d.startedAt : 0);
-      const sessionId = `engine-${pid}-${start}`;
-      const transcript = text(d.transcript);
-      if (transcript) transcripts.set(sessionId, transcript);
+      const ticks = d.pidStartTicks;
+      const boot = d.bootId;
+      if (typeof ticks !== "number" || typeof boot !== "string") continue;       // not written by a lane: no identity to check
+      const live = identity(pid);
+      if (live === null || live.ticks !== ticks || live.bootId !== boot) continue;  // unreadable, or another process holds the pid now
+      const sessionId = `engine-${pid}-${ticks}`;
+      if (typeof d.transcript === "string" && d.transcript) found.set(sessionId, d.transcript);
+      const seen = aliases.get(sessionId) ?? new Set<string>();
+      if (typeof d.sessionId === "string") seen.add(d.sessionId);
+      aliases.set(sessionId, seen);
       out.push({
         updatedAt: Number(d.updatedAt ?? 0),
-        transcript,
         info: {
           sessionId, name: typeof d.name === "string" ? d.name : null, cwd: text(d.cwd), version: null, pid,
           status: typeof d.status === "string" && STATUSES.has(d.status) ? d.status as SessionStatus : null,
           ...(typeof d.engine === "string" && d.engine ? { engine: d.engine } : {}),
+          aliases: [...seen],
         },
       });
     }
+    candidates = found;
+    for (const id of aliases.keys()) if (!found.has(id) && !out.some(l => l.info.sessionId === id)) aliases.delete(id);
     return out;
   }
 
   return {
-    // pane ID → the live lane in it; the lane written last wins a pane two lanes share
+    // pane ID → the live lane that is the foreground job of its terminal; the lane written last wins a pane two lanes share
     byPane(panes: PanePids): Map<string, SessionInfo> {
-      const paneOf = new Map<number, string>();
-      for (const [pane, pid] of panes) paneOf.set(pid, pane);
+      const foreground = new Map<number, string>();                    // a terminal's foreground group → its pane
+      for (const [pane, pid] of panes) {
+        const g = groups(pid);
+        if (g !== null && g.tpgid > 0) foreground.set(g.tpgid, pane);
+      }
       const out = new Map<string, SessionInfo>();
       const at = new Map<string, number>();
       for (const lane of lanes()) {
-        let pid: number | null = lane.info.pid;
-        let pane: string | undefined;
-        for (let i = 0; i < MAX_DEPTH && pid !== null && pid > 1 && pane === undefined; i++) {
-          pane = paneOf.get(pid);
-          pid = pane === undefined ? parentOf(pid) : pid;
-        }
+        const g = groups(lane.info.pid);
+        const pane = g === null ? undefined : foreground.get(g.pgrp);
         if (pane === undefined || lane.updatedAt < (at.get(pane) ?? Number.NEGATIVE_INFINITY)) continue;
         at.set(pane, lane.updatedAt);
         out.set(pane, { ...lane.info, pane });
       }
       return out;
     },
+    // The lane's transcript, only when it is a transcript of the engine layer (its real path is a .jsonl file inside the
+    // transcript directory); looked up again every time, so a link swapped after the lane was read is not followed.
     transcriptPath(sessionId: string): string | null {
       if (!sessionId.startsWith("engine-")) return null;
-      if (!transcripts.has(sessionId)) lanes();
-      return transcripts.get(sessionId) ?? null;
+      if (!candidates.has(sessionId) && now() - scannedAt >= RESCAN_MS) lanes();
+      const path = candidates.get(sessionId);
+      if (path === undefined) return null;
+      try {
+        const root = realpathSync(io.transcripts);
+        const real = realpathSync(path);
+        return real.startsWith(root + sep) && real.endsWith(".jsonl") && statSync(real).isFile() ? real : null;
+      } catch { return null; }
     },
   };
 }
