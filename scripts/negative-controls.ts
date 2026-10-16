@@ -2894,7 +2894,7 @@ export const CONTROLS: Control[] = [
     find: "timeoutMs = SIGN_IN_CHECK_TIMEOUT_MS", replace: "timeoutMs = turnCheckTimeoutMs()",
     run: ["apps/connections/test/runtime-login.test.ts"], expect: "the sign-in check waits for a slow status" },
   { id: "t231-turn-check-retry", task: "T-231", file: "apps/connections/src/adapters/runtime-claude.ts",
-    find: 'if (reading === "timeout") reading = await readAuth(bin, args, env, timeoutMs);', replace: "",
+    find: 'if (reading === "timeout") reading = await readAuth(bin, args, env, Math.max(1, timeoutMs - half));', replace: "",
     run: ["apps/connections/test/runtime-login.test.ts"], expect: "tries a status that timed out once more" },
   { id: "t231-offset-shrink", task: "T-231", file: "apps/node-agent/src/deliveries/deliverer.ts",
     find: "size < a.offset || ", replace: "",
@@ -2920,6 +2920,9 @@ export const CONTROLS: Control[] = [
   { id: "t231-fresh-not-staler", task: "T-231", file: "apps/node-agent/src/relay/window-of.ts",
     find: "readIfOlderThan(Math.min(REFRESH_MS, ms))", replace: "readIfOlderThan(REFRESH_MS)",
     run: ["apps/node-agent/test/window-of.test.ts"], expect: "never staler than the plain cache" },
+  { id: "t231-turn-check-halves", task: "T-231", file: "apps/connections/src/adapters/runtime-claude.ts",
+    find: "let reading = await readAuth(bin, args, env, half);", replace: "let reading = await readAuth(bin, args, env, timeoutMs);",
+    run: ["apps/connections/test/runtime-login.test.ts"], expect: "two halves" },
 ];
 
 // ---- the runner

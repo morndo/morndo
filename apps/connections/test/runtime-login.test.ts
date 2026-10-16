@@ -179,8 +179,8 @@ else { writeFileSync(${JSON.stringify(marker)}, "1"); setInterval(() => {}, 1_00
     return bin;
   }
 
-  it("a turn's check tries a status that timed out once more, and fails only when the second try times out too (negative control)", async () => {
-    vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", "300");
+  it("a turn's check tries a status that timed out once more, within the one timeout in all: two halves (negative control)", async () => {
+    vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", "1000");
     try {
       await expect(assertSubscription(coldThenWarm(), ["status"], {}, "claude")).resolves.toBeUndefined();
       const dir = mkdtempSync(join(tmpdir(), "morndo-login-"));
@@ -189,7 +189,9 @@ else { writeFileSync(${JSON.stringify(marker)}, "1"); setInterval(() => {}, 1_00
       writeFileSync(hang, `setInterval(() => {}, 1_000);\n`);
       const started = performance.now();
       await expect(assertSubscription(hang, ["status"], {}, "claude")).rejects.toThrow("timed out");
-      expect(performance.now() - started).toBeGreaterThanOrEqual(550);           // two tries of 300 ms
+      const took = performance.now() - started;
+      expect(took).toBeGreaterThanOrEqual(950);                                   // both halves were used
+      expect(took).toBeLessThan(1300);                                            // and the wedged command held the turn for the timeout, not 1.5 times it or twice
     } finally { vi.unstubAllEnvs(); }
   }, 10_000);
 
