@@ -2,7 +2,8 @@
 // flags or a shell line from the op. A lane is a tmux window in the policy's session, and its name is unique on this node.
 // - The launcher is the node owner's setting (policy.launch). `{account}` in its words is the op's account, and `resume`
 //   adds `--resume <session>`; an op can add nothing else (spec §11). A command without `{account}` refuses an op that
-//   names one (bad_args); a command with it refuses an op that names none.
+//   names one (bad_args); a command with it refuses an op that names none. A start by role or engine runs the policy's
+//   launch command for that engine's provider instead (lane-engine.ts, reliable lanes §3.3).
 // - via "direct": tmux runs the command's words as the pane's program, without `sh -c` (tmux(1) new-window: "shell-command
 //   given as multiple arguments and executed directly", read 2026-10-06).
 // - via "shell": the window starts with no command, so tmux starts the user's shell (tmux(1) default-command: "The default
@@ -38,11 +39,12 @@ import { createHash } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LIMITS, formatWorkerId, parseWorkerId, type OpArgs, type OpError, type OpResult } from "@morndo/protocol";
-import { deniedBy, denyConfigFromEnv, denyRoots, exactSession, hostTmuxServer, inputBoxOnScreen, menuOnScreen, resolvedRoots, tmuxLiteral, type Tmux } from "@morndo/node-ops";
-import type { Launch, Policy } from "../config.ts";
+import { deniedBy, denyConfigFromEnv, denyRoots, engineLaneBoxOnScreen, exactSession, hostTmuxServer, inputBoxOnScreen, menuOnScreen, resolvedRoots, tmuxLiteral, type PanePids, type SessionInfo, type Tmux } from "@morndo/node-ops";
+import type { Policy } from "../config.ts";
+import { engineLayer, laneLaunch, type EngineLayer } from "./lane-engine.ts";
 import { effect, fail, ok, type EffectContext, type OpTable, type Outcome, type Reply, type Request } from "./executor.ts";
 import type { Inventory, Lane } from "./inventory.ts";
-import { tmuxRun } from "./tmux-panes.ts";
+import { listPanes, panePidsOf, tmuxRun } from "./tmux-panes.ts";
 
 // How long lane.start and lane.stop wait, each also bounded by the op's own deadline. Tests shorten them.
 export type LaneWaits = { pollMs: number; shellMs: number; trustMs: number; stopMs: number };
@@ -60,7 +62,11 @@ export type LaneDeps = {
   deliver: (a: OpArgs["lane.deliver"]) => OpResult["lane.deliver"] | OpError;    // the deliverer's enqueue
   waits?: Partial<LaneWaits>;
   host?: (opts: { socket: string | null }) => Promise<unknown>;                   // starts the tmux server outside this service
+  engines?: EngineLayer;                                                          // the engine layer's CLI (lane-engine.ts)
+  sessions: (panes: PanePids) => Map<string, SessionInfo>;                        // the sessions in the panes (an engine lane is looked for in them)
 };
+
+export { launchCommand } from "./lane-engine.ts";
 
 const TRUST = /Yes, I trust this folder|Do you trust the files in this folder/;
 export const trustDialogOnScreen = (screen: string): boolean => TRUST.test(screen);
@@ -69,15 +75,6 @@ const SAFE_WORD = /^[A-Za-z0-9_./:@+=,-]+$/;
 // #{pane_current_command} when the pane is sitting at a prompt. A login shell is sometimes "-bash".
 const SHELL_COMMANDS = new Set(["ash", "bash", "csh", "dash", "elvish", "fish", "ksh", "mksh", "nu", "powershell", "pwsh", "sh", "tcsh", "xonsh", "zsh"]);
 const shellInForeground = (command: string): boolean => SHELL_COMMANDS.has(command.split("/").at(-1)?.replace(/^-/, "") ?? "");
-
-export function launchCommand(launch: Launch, a: { account?: string; resume?: string }): string[] | { refused: string } {
-  const templated = launch.command.some(w => w.includes("{account}"));
-  if (a.account !== undefined && !templated) return { refused: "this node's launcher takes no account (its command has no {account})" };
-  if (a.account === undefined && templated) return { refused: "this node's launcher needs an account (its command has {account})" };
-  const account = a.account;
-  const words = account === undefined ? [...launch.command] : launch.command.map(w => w.replaceAll("{account}", account));
-  return a.resume === undefined ? words : [...words, "--resume", a.resume];
-}
 
 // The command as one line for a POSIX shell: a plainly safe word as it is, any other single-quoted.
 export function shellLine(words: readonly string[]): string {
@@ -107,6 +104,7 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
   const socket = d.policy.tmuxSocket;
   const session = d.policy.session;
   const host = d.host ?? hostTmuxServer;
+  const layer = d.engines ?? engineLayer();
   const w: LaneWaits = { ...LANE_WAITS, ...d.waits };
   // The cwd is judged resolved (realDir), so the deny roots are too, at each start: under a HOME that is a symbolic
   // link, "~/.ssh" as given never prefixes the real path of a directory in it (final review M10).
@@ -136,14 +134,27 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
     return false;
   }
 
+  // Whether the pane runs a lane of the engine layer: one tmux list-panes and the session registry, not an inventory read.
+  async function engineLaneIn(pane: string): Promise<boolean> {
+    try { return d.sessions(panePidsOf(await listPanes(socket, session))).get(pane)?.engine !== undefined; }
+    catch { return false; }
+  }
+
   // The trust dialog on the new pane, looked for until Claude Code shows its box, or the time is up. A session file proves
   // nothing here: Claude Code may write one while its dialog still shows.
   async function sawTrust(pane: string, ms: number): Promise<boolean> {
     const end = performance.now() + ms;
+    let askedAt = Number.NEGATIVE_INFINITY;
     for (;;) {
       const shown = await screen(pane);
       if (shown !== null && trustDialogOnScreen(shown)) return true;
       if (shown === null || inputBoxOnScreen(shown)) return false;
+      // An engine lane has no trust dialog: its input line, with the lane in the engine registry, ends the look. A shell prompt
+      // drawn as ❯ looks the same, so that is asked at most once a second, with one tmux list-panes and not an inventory read.
+      if (engineLaneBoxOnScreen(shown) && performance.now() - askedAt >= 1000) {
+        askedAt = performance.now();
+        if (await engineLaneIn(pane)) return false;
+      }
       if (performance.now() >= end) return false;
       await sleep(w.pollMs);
     }
@@ -192,12 +203,14 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
       const cwd = realDir(a.cwd);
       if (!cwd) return fail("bad_args", "cwd is not a directory on this node");
       if (deniedBy(cwd, deny())) return fail("denied", "lanes may not start in that directory");
-      const command = launchCommand(d.policy.launch, a);
-      if (!Array.isArray(command)) return fail("bad_args", command.refused);
       const firstPrompt = ctx.key === undefined ? undefined : promptId(ctx.key);
       if (a.prompt !== undefined && firstPrompt === undefined) return fail("bad_args", "lane.start needs its key to queue a first prompt");
       const snap = await d.inventory.refresh();
       if (snap.rows.some(r => r.window === a.name)) return fail("name_taken", "a window of that name already exists on this node");
+      // What it runs (lane-engine.ts): the node's launch, or an engine by role or by name. A refusal started nothing.
+      const picked = await laneLaunch(d.policy, a, layer);
+      if ("refused" in picked) return { ok: false, error: picked.refused };
+      const { command } = picked;
       const exists = await sessionExists();
       // Host before the deadline check. A failure here started nothing, so the key is released.
       if (!exists) {
@@ -206,7 +219,7 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
       }
       const late = ctx.ready();
       if (late) return { ok: false, error: late };
-      const shell = d.policy.launch.via === "shell";
+      const shell = picked.via === "shell";
       const where = exists ? ["new-window", "-d", "-t", `${exactSession(session)}:`] : ["new-session", "-d", "-s", tmuxLiteral(session)];
       const out = await tmuxRun(socket, [...where, "-n", tmuxLiteral(a.name), "-c", tmuxLiteral(cwd), "-P", "-F", "#{pane_id}", ...(shell ? [] : command)]);
       const m = /^%(\d{1,9})$/.exec(out.trim());
@@ -228,7 +241,9 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
         prompt = r.delivery.id;
       }
       const trust = await sawTrust(pane, within(ctx, w.trustMs, 1000));
-      return ok<"lane.start">({ workerId, ...(trust ? { waiting: "trust" as const } : {}), ...(prompt !== undefined ? { prompt } : {}) });
+      return ok<"lane.start">({
+        workerId, ...(trust ? { waiting: "trust" as const } : {}), ...(prompt !== undefined ? { prompt } : {}), ...(picked.engine ? { engine: picked.engine } : {}),
+      });
     }),
 
     "lane.stop": effect(a => `lane:${a.name}`, async (a, ctx) => {

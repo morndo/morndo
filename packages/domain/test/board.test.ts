@@ -88,12 +88,25 @@ describe("moving a task (B3, B4)", () => {
   });
   it("the manager and the principal accept (Done), reopen, or move anything, but nobody moves a task to where it is", () => {
     const offered = { ...make(1, { assignee: "builder" }), status: "review" as const };
-    const done = value(apply(offered, { action: "move", to: "done" }, manager)).task;
+    const accepted = value(apply(offered, { action: "move", to: "done", reason: "npm test at 4f2c1e0: 14 passed" }, manager));
+    const done = accepted.task;
     expect(done.doneAt).toBe(NOW + 1);
+    expect(done.blockedReason).toBeNull();
+    expect(accepted.event.change).toEqual({ kind: "moved", from: "review", to: "done", reason: "npm test at 4f2c1e0: 14 passed" });
     const back = value(apply(done, { action: "move", to: "todo" }, principal)).task;
     expect(back.doneAt).toBeNull();
     expect(problem(apply(back, { action: "move", to: "todo" }, manager))).toBe("same");
     expect(mayMove(principal, "backlog", "done")).toBe(true);
+  });
+  it("the manager's Done names its evidence; the principal's may (B9)", () => {
+    const offered = { ...make(1, { assignee: "builder" }), status: "review" as const };
+    expect(problem(apply(offered, { action: "move", to: "done" }, manager))).toBe("reason_needed");
+    expect(problem(apply(offered, { action: "move", to: "done", reason: "  " }, manager))).toBe("reason_needed");
+    const byPrincipal = value(apply(offered, { action: "move", to: "done" }, principal));
+    expect(byPrincipal.event.change).toEqual({ kind: "moved", from: "review", to: "done", reason: null });
+    expect(value(apply(offered, { action: "move", to: "done", reason: "looked at it" }, principal)).event.change).toMatchObject({ reason: "looked at it" });
+    // Other moves keep no reason, as before.
+    expect(value(apply(offered, { action: "move", to: "doing", reason: "again" }, manager)).event.change).toMatchObject({ reason: null });
   });
   it("nobody works on an unassigned task", () => {
     expect(problem(apply(make(1), { action: "move", to: "doing" }, manager))).toBe("needs_assignee");

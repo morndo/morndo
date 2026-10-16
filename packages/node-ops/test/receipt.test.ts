@@ -170,3 +170,38 @@ describe("a command that starts a new session (/clear, /reset, /new)", () => {
     expect(newSessionReceipt("/compact", "s-old", "s-new")).toBe(false);
   });
 });
+
+// The engine layer's lane (test/fixtures/engine-lane/transcript.jsonl, lane.py `_log`): a `user` line when the lane takes a
+// message, timestamped in whole seconds. Its time can't say a line came after a text was typed in the same second, so the
+// deliverer gives each text the transcript's byte offset from before the typing: only lines from there on can be its receipt.
+describe("the engine layer's lane transcript", () => {
+  const fixture = readFileSync(join(import.meta.dirname, "../../../test/fixtures/engine-lane/transcript.jsonl"), "utf8").split("\n").filter(Boolean);
+  const typedAt = (hms: string) => Date.parse(`2026-10-16T${hms}Z`);
+  const starts = (rows: string[]) => { let at = 0; return rows.map(r => { const s = at; at += Buffer.byteLength(r) + 1; return s; }); };
+  const user = (text: string, hms: string) => JSON.stringify({ type: "user", message: { role: "user", content: text }, timestamp: `2026-10-16T${hms}Z` });
+  const withOffsets = (rows: string[], p: PendingText[]) => readReceipts(rows, p, starts(rows)).map(r => `${r.id}:${r.verdict}`);
+
+  it("delivers a text the lane took after the offset it was typed at, in the second it was typed in", () => {
+    expect(withOffsets(fixture, [{ ...pending("d1", "Build the demo", typedAt("05:00:03.800")), after: 0 }])).toEqual(["d1:delivered"]);
+  });
+  it("does not take a line from before that offset for the receipt: two identical short briefs a moment apart (negative control)", () => {
+    const rows = [user("continue", "05:00:03"), user("something else", "05:00:03")];
+    const second = { ...pending("d2", "continue", typedAt("05:00:03.900")), after: starts(rows)[1]! };
+    expect(withOffsets(rows, [second])).toEqual([]);
+    const next = [...rows, user("continue", "05:00:03")];
+    expect(withOffsets(next, [second])).toEqual(["d2:delivered"]);
+    expect(withOffsets(next, [{ ...second, id: "d1", after: 0 }, second])).toEqual(["d1:delivered", "d2:delivered"]);   // each line decides one text
+  });
+  it("without an offset (after a restart) only a line from a later second counts: same-second order can't be told", () => {
+    expect(verdicts(fixture, [pending("d1", "Build the demo", typedAt("05:00:03.800"))])).toEqual([]);
+    expect(verdicts(fixture, [pending("d1", "Build the demo", typedAt("05:00:02.800"))])).toEqual(["d1:delivered"]);
+  });
+  it("keeps a time with a fraction exact, and an offset does not excuse a line before the typing", () => {
+    const row = JSON.stringify({ type: "user", message: { content: "hi" }, timestamp: "2026-10-16T05:00:03.100Z" });
+    expect(readReceipts([row], [{ ...pending("d1", "hi", typedAt("05:00:03.800")), after: 0 }], [0])).toEqual([]);
+    expect(readReceipts([row], [{ ...pending("d1", "hi", typedAt("05:00:03.000")), after: 0 }], [0]).map(r => r.verdict)).toEqual(["delivered"]);
+  });
+  it("gives no verdict for the lane's other lines", () => {
+    expect(verdicts(fixture, [pending("d1", "working", typedAt("05:00:00.000")), pending("d2", "STATUS: DONE", typedAt("05:00:00.000"))])).toEqual([]);
+  });
+});

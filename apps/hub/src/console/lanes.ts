@@ -7,9 +7,11 @@
 // - peek: the screen's last lines (pane.capture);
 // - send: a delivery (§4), waited for with --wait; --direct types at once (pane.send), for a lane without Claude Code;
 // - keys: pane.keys by key name (the protocol's allow-list);
-// - start, stop: lane.start (with a first prompt typed once the lane can take it), lane.stop (graceful, or --kill; an
-//   exit not seen within its 30 s is "uncertain", exit 3, and --kill may follow);
-// - status: one delivery's state; events: lane events as they happen, until interrupted.
+// - start, stop: lane.start (with a first prompt typed once the lane can take it; on a Role's engine with --role, or a
+//   named one with --engine and --reason: reliable lanes §3.3), lane.stop (graceful, or --kill; an exit not seen within
+//   its 30 s is "uncertain", exit 3, and --kill may follow);
+// - status: one delivery's state; events: lane events as they happen, until interrupted;
+// - brief: what an orchestrator must know after a restart or a compaction (brief.ts, reliable lanes §3.5).
 // Exit codes (§9.2; reconciliation rulings 29 and 49): 0 accepted (with --wait: delivered; stop: stopped), 3 not
 // delivered in time (stop: not seen to stop in time), 4 given up or a definite refusal, 5 in doubt (the fleet was reached
 // and never answered, or answered that the delivery may have been stored: run it again with the same --id, which never
@@ -23,6 +25,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { FleetClient, FleetMismatch, FleetOpFailed, FleetUnavailable } from "@morndo/fleet-client";
 import { FINAL_DELIVERY_STATES, KEY_NAMES, LIMITS, parseWorkerId, type Delivery, type KeyName, type LaneEvent, type OpError } from "@morndo/protocol";
+import { briefLines } from "./brief.ts";
 
 export const EXIT = { ok: 0, usage: 2, late: 3, notDelivered: 4, inDoubt: 5, unavailable: 69 } as const;
 
@@ -56,10 +59,12 @@ export const USAGE = `usage: morndo lanes [--json]
        morndo lanes peek <lane | worker id> [--lines N] [--json]
        morndo lanes send <lane | worker id> <text | -> [--id ID] [--wait SECONDS] [--direct] [--json]
        morndo lanes keys <lane | worker id> <key>...
-       morndo lanes start <name> --cwd DIR [--node NODE] [--account A] [--resume SESSION] [--prompt TEXT] [--json]
+       morndo lanes start <name> --cwd DIR [--node NODE] [--role ROLE | --engine PROVIDER:MODEL[@EFFORT] --reason TEXT]
+                          [--account A] [--resume SESSION] [--prompt TEXT] [--json]
        morndo lanes stop <lane | worker id> [--kill]
        morndo lanes status <delivery id> [--json]
        morndo lanes events [--json]
+       morndo lanes brief [--json]
 send - reads the text from stdin. Keys are tmux key names: ${KEY_NAMES.join(" ")}.
 Exit codes: 0 accepted (with --wait: delivered; stop: stopped), 3 not delivered in time (stop: not seen to stop),
 4 given up, refused or uncertain, 5 in doubt (the fleet was reached and never answered: run it again with the same
@@ -69,12 +74,12 @@ Exit codes: 0 accepted (with --wait: delivered; stop: stopped), 3 not delivered 
 const OPTIONS = {
   json: { type: "boolean" }, lines: { type: "string" }, id: { type: "string" }, wait: { type: "string" }, direct: { type: "boolean" },
   kill: { type: "boolean" }, prompt: { type: "string" }, cwd: { type: "string" }, account: { type: "string" }, resume: { type: "string" },
-  node: { type: "string" }, help: { type: "boolean", short: "h" },
+  node: { type: "string" }, role: { type: "string" }, engine: { type: "string" }, reason: { type: "string" }, help: { type: "boolean", short: "h" },
 } as const;
 // The options each command takes; any other is a usage error.
 const ALLOWED: Record<string, readonly string[]> = {
   list: ["json"], peek: ["lines", "json"], send: ["id", "wait", "direct", "json"], keys: [], status: ["json"], events: ["json"],
-  start: ["cwd", "node", "account", "resume", "prompt", "json"], stop: ["kill"],
+  start: ["cwd", "node", "role", "engine", "reason", "account", "resume", "prompt", "json"], stop: ["kill"], brief: ["json"],
 };
 const DEFAULT_LINES = 40;
 const WAIT_STEP_MS = 250;
@@ -115,6 +120,7 @@ export async function runLanes(argv: string[], io: LanesIo): Promise<number> {
       case "start": return await start(client, io, rest, values);
       case "stop": return await stop(client, io, rest, values);
       case "status": return await status(client, io, rest, values);
+      case "brief": return await brief(client, io, rest, values);
       default: return await events(client, io, rest, values);
     }
   } catch (e) {
@@ -307,8 +313,10 @@ async function start(client: FleetClient, io: LanesIo, rest: string[], v: Values
     if (online.length !== 1) throw new Usage(`name the node with --node (${online.length ? `online: ${online.map(n => n.name).join(", ")}` : "none is online"})`);
     node = online[0]?.name ?? "";
   }
+  if (v.role !== undefined && v.engine !== undefined) throw new Usage("start takes --role or --engine, not both");
   const args = { name, cwd: v.cwd, ...(v.account !== undefined ? { account: v.account } : {}), ...(v.resume !== undefined ? { resume: v.resume } : {}),
-    ...(v.prompt !== undefined ? { prompt: v.prompt } : {}) };
+    ...(v.prompt !== undefined ? { prompt: v.prompt } : {}), ...(v.role !== undefined ? { role: v.role } : {}),
+    ...(v.engine !== undefined ? { engine: v.engine } : {}), ...(v.reason !== undefined ? { reason: v.reason } : {}) };
   let r;
   try { r = await client.op({ node }, "lane.start", args, { key: `lanes:start:${randomUUID()}`, timeoutMs: 60_000 }); }
   catch (e) {
@@ -319,6 +327,9 @@ async function start(client: FleetClient, io: LanesIo, rest: string[], v: Values
   if (!r.ok) throw new FleetOpFailed("lane.start", r.error);
   if (v.json) { await io.out(JSON.stringify({ node, ...r.result })); return EXIT.ok; }
   const lines = [`started ${name} on ${node}: ${r.result.workerId}`];
+  const engine = r.result.engine;
+  if (engine) lines.push(`it runs ${engine.entry}${engine.role ? ` (role ${engine.role})` : ""}`);
+  if (engine?.skipped?.length) lines.push(`passed over first: ${engine.skipped.map(s => `${s.entry} (${s.reason})`).join("; ")}`);
   if (r.result.waiting === "trust") lines.push("it waits at Claude Code's folder-trust dialog: accept it with morndo lanes keys");
   if (r.result.prompt) lines.push(`its first prompt: ${r.result.prompt} (morndo lanes status ${r.result.prompt})`);
   await io.out(lines.join("\n"));
@@ -354,8 +365,18 @@ async function status(client: FleetClient, io: LanesIo, rest: string[], v: Value
   return codeOf(d, false);
 }
 
+async function brief(client: FleetClient, io: LanesIo, rest: string[], v: Values): Promise<number> {
+  none(rest, "brief");
+  const [lanes, watch, deliveries, alerts] = await Promise.all([client.lanes(), client.laneWatch(), client.deliveries(), client.alerts()]);
+  const now = Date.now();
+  if (v.json) { await io.out(JSON.stringify({ at: now, lanes, watch, deliveries, alerts: alerts.filter(a => now - a.at < 86_400_000) })); return EXIT.ok; }
+  await io.out(briefLines({ lanes, watch, deliveries, alerts }, now).join("\n"));
+  return EXIT.ok;
+}
+
 const eventLine = (e: LaneEvent) => [new Date(e.at).toISOString(), `${e.lane ?? e.window ?? "?"}@${e.node}`, e.event,
-  ...(e.status ? [e.status] : []), ...(e.question ? [`"${e.question}"`] : []), ...(e.firstLine ? [e.firstLine] : []), ...(e.error ? [e.error] : [])].join(" ");
+  ...(e.status ? [e.status] : []), ...(e.question ? [`"${e.question}"`] : []), ...(e.firstLine ? [e.firstLine] : []), ...(e.error ? [e.error] : []),
+  ...(e.event === "stale" ? [`${e.reason ?? ""}${e.stalls ? ` x${e.stalls}` : ""}`] : []), ...(e.waitingOn ? [`on ${e.waitingOn}`] : [])].join(" ");
 
 async function events(client: FleetClient, io: LanesIo, rest: string[], v: Values): Promise<number> {
   none(rest, "events");

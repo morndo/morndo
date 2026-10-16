@@ -22,7 +22,9 @@ const VERSION = /^[\x21-\x7e]{1,64}$/;
 // `pid`: the process the file is named for, Claude Code's own. `status`: the session's state as Claude Code writes it
 // (fleet clients §5; seen on 2.1.289 to 2.1.294: busy, idle, waiting, shell, the last while Claude Code runs a shell
 // command); null for a value the protocol doesn't know. A file whose process is gone is no session at all (byPane).
-export type SessionInfo = { sessionId: string; name: string | null; pane: string; cwd: string; version: string | null; pid: number; status: SessionStatus | null };
+// `engine`: set only for a lane of the engine layer (engine-sessions.ts), the name of the engine that runs it; `aliases`: the
+// other ids the lane's own hooks name it by.
+export type SessionInfo = { sessionId: string; name: string | null; pane: string; cwd: string; version: string | null; pid: number; status: SessionStatus | null; engine?: string; aliases?: string[] };
 const STATUSES = new Set<string>(SESSION_STATUSES);
 
 export function sessionRegistry(configDir: string) {

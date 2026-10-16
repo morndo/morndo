@@ -10,6 +10,7 @@ export * from "./http.ts";
 export * from "./push.ts";
 export * from "./worker-id.ts";
 export * from "./fleet.ts";
+export * from "./lane-status.ts";
 export * from "./redact.ts";
 export * from "./engines.ts";
 export * from "./board.ts";

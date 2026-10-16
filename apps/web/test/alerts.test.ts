@@ -15,6 +15,11 @@ describe("alert words", () => {
       expect(w.title.length, k).toBeGreaterThan(5);
     }
   });
+  it("an engine fallback names the lane, what ran and what it passed over", () => {
+    expect(alertWords(a("engine_fallback", { lane: "api", role: "implement", entry: "beta:mid-3", skipped: [{ entry: "acme:large-2", reason: "out of quota" }] }))).toEqual({
+      title: "api started on a fallback: beta:mid-3", detail: "Its role implement passed over acme:large-2 on pc.", urgent: false,
+    });
+  });
   it("a kind a newer fleet added still shows, in general words", () => {
     expect(alertWords(a("moon_phase"))).toEqual({ title: "pc: moon phase", detail: "A newer fleet raised this alert.", urgent: false });
   });

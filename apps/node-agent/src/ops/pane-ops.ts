@@ -55,20 +55,20 @@ export function paneOps(d: PaneDeps): Pick<OpTable, "pane.captureMany" | "pane.c
 
   // The lock the policy names for the expected window (the manager's pane, say), then the expectation check, then the
   // deadline's last word, then `act`.
-  async function guarded<R>(workerId: string, exp: Expect, ctx: EffectContext, act: (pane: string) => Promise<{ ok: true; result: R } | Failure>): Promise<{ ok: true; result: R } | Failure> {
+  async function guarded<R>(workerId: string, exp: Expect, ctx: EffectContext, act: (pane: string, session: SessionInfo | null) => Promise<{ ok: true; result: R } | Failure>): Promise<{ ok: true; result: R } | Failure> {
     const ref = parseWorkerId(workerId);
     if (!ref) return fail("no_pane", "not a worker ID");
     const pane = `%${ref.pane}`;
     const inner = async (): Promise<{ ok: true; result: R } | Failure> => {
       const facts = await paneFacts(socket, pane);
       if (facts === "unavailable") return fail("timeout", "tmux did not answer: nothing was done");
-      const sessionId = d.sessions().get(pane)?.sessionId ?? null;
-      if (!guard({ node: d.node, session: d.policy.session, ref, expect: exp, facts, sessionId })) {
+      const session = d.sessions().get(pane) ?? null;
+      if (!guard({ node: d.node, session: d.policy.session, ref, expect: exp, facts, sessionId: session?.sessionId ?? null })) {
         return fail("no_pane", "the pane is not the one expected (server, window or session differ)");
       }
       const late = ctx.ready();
       if (late) return { ok: false, error: late };
-      return act(pane);
+      return act(pane, session);
     };
     // Own keys only: a window named "constructor" or "__proto__" would otherwise find Object.prototype's.
     const lockPath = Object.hasOwn(d.policy.lockedPanes, exp.window) ? d.policy.lockedPanes[exp.window] : undefined;
@@ -118,11 +118,11 @@ export function paneOps(d: PaneDeps): Pick<OpTable, "pane.captureMany" | "pane.c
       }))),
 
     "pane.send": effect(a => `pane:${paneOf(a.workerId)}`, (a, ctx) =>
-      guarded(a.workerId, a.expect, ctx, async pane => {
+      guarded(a.workerId, a.expect, ctx, async (pane, session) => {
         const typedAt = d.now();                          // the node's clock, just before the paste (spec §3.1, echo matching)
         const signal = AbortSignal.timeout(Math.max(1, Math.floor(ctx.remainingMs())));   // Node wants whole milliseconds
         let problem: Awaited<ReturnType<Tmux["send"]>>;
-        try { problem = await d.tmux.send(pane, a.text, { signal }); }
+        try { problem = await d.tmux.send(pane, a.text, { signal, ...(session?.engine !== undefined ? { engineLane: true } : {}) }); }
         catch (e) {
           // Only the abort that throwIfAborted raised before the paste spawn is "not executed" (ADR-0012 decision 7: only a
           // refusal before any side effect releases the key). A paste that started and then failed or was killed (its 5 s

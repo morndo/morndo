@@ -6,11 +6,12 @@
 // pane's session state (§5) and lane events (§7).
 // What a node is asked to do (op arguments) is strict, with limits: the agent acts on it. What a node reports (results,
 // events) is checked for shape; each message is bounded by maxMessageBytes anyway.
-import { JOB_ID, NOTICE_MAX } from "@morndo/domain";
+import { JOB_ID, NOTICE_MAX, parseEngine } from "@morndo/domain";
 import { EvJob } from "./jobs.ts";
 import * as z from "./z.ts";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "./connections.ts";
 import { NODE_NAME, WORKER_ID } from "./worker-id.ts";
+import type { TurnStatus } from "./lane-status.ts";
 
 export const FLEET_PROTO = 1;            // the agent channel; accepted: [FLEET_PROTO - 1, FLEET_PROTO] ∩ ≥ 1
 export const CLIENT_API = 1;             // the client API's routes: /v1/
@@ -127,6 +128,10 @@ export type OpName = "inventory.get" | "pane.captureMany" | "pane.frame" | "pane
   | "lane.start" | "lane.stop" | "worktree.list" | "worktree.add" | "pane.capture" | "lane.deliver" | "delivery.cancel"
   | "job.cancel" | "job.notice" | "job.noticeResult"
   | "connections.priority" | "connections.role" | "connections.revoke" | "connections.narrow";
+// What a lane runs on, as lane.start answers it (reliable lanes §3.3): the engine layer's entry (provider:model[@effort]),
+// the Role it was picked for, and the entries the resolver passed over first, each with its reason (none: the first choice).
+export type LaneEngine = { entry: string; role?: string; skipped?: { entry: string; reason: string }[] };
+export const ROLE_NAME = /^[a-z][a-z0-9-]{0,63}$/;
 export type OpArgs = {
   "inventory.get": Record<string, never>;
   "pane.captureMany": { workerIds: string[] };
@@ -140,7 +145,9 @@ export type OpArgs = {
   "file.stat": { path?: string; ref?: string };
   "file.get": { path?: string; ref?: string; offset: number; max: number };
   "file.put": { upload: string; offset: number; bytes: string /* base64 */; final: boolean; name: string };
-  "lane.start": { name: string; cwd: string; account?: string; resume?: string; prompt?: string };
+  // role or engine, at most one (reliable lanes §3.3): what the lane runs on; reason: why an engine was named instead of the
+  // node's default role, for the audit.
+  "lane.start": { name: string; cwd: string; account?: string; resume?: string; prompt?: string; role?: string; engine?: string; reason?: string };
   "lane.stop": { name: string; mode?: "exit" | "kill" };
   "worktree.list": { repo: string };
   "worktree.add": { repo: string; name: string; base: string };
@@ -171,7 +178,7 @@ export type OpResult = {
   "file.stat": { size: number; mtime: number };
   "file.get": { bytes: string; size: number; eof: boolean };
   "file.put": { path: string | null };
-  "lane.start": { workerId: string; waiting?: "trust"; prompt?: string /* the first prompt's delivery id */ };
+  "lane.start": { workerId: string; waiting?: "trust"; prompt?: string /* the first prompt's delivery id */; engine?: LaneEngine };
   "lane.stop": { ok: true };
   "worktree.list": { worktrees: { path: string; branch: string | null }[] };
   "worktree.add": { path: string };
@@ -207,17 +214,29 @@ export type HookEvent = { streamId: string; seq: number; at: number;
 
 // A lane event (fleet clients §7), built by the fleet per node and window from the hooks and each node's session state.
 // `seq` is the fleet's own (lane_events), so a client reads on with GET /v1/lane-events?since=<seq>.
-export type LaneEventName = "finished" | "needs_input" | "answered" | "stop_failure";
+// Reliable lanes (design §3.1, §3.2): a `finished` whose status line says WAITING carries `waitingOn` and `until` (ms, the
+// lease's end); `stale` is the fleet's own, made when a lane's last turn passed its deadline with nothing since: `reason`
+// says which deadline (`waiting`: a wait or background work; `no_status`: no status line), `since` is that turn's end
+// and `stalls` how many stale events the lane had since it last ended DONE, BLOCKED or NEEDS DECISION.
+// A lane's last turn as the fleet's lane watch holds it (GET /v1/lane-watch, reliable lanes §3.2): when it ended, its
+// status, its deadline (null: none, the orchestrator's to act on), why it has one, what it waits on, whether a stale event
+// was made for it, and the stale events since the lane last settled.
+export type LaneWatchEntry = {
+  node: string; window: string; at: number; status: TurnStatus | null; deadline: number | null; reason?: "waiting" | "no_status";
+  waitingOn?: string; stale: boolean; stalls: number;
+};
+export type LaneEventName = "finished" | "needs_input" | "answered" | "stop_failure" | "stale";
 export type LaneEvent = { v: 1; t: "lane"; seq: number; event: LaneEventName; node: string;
   window: string | null; lane: string | null; sessionId?: string; at: number;
-  status?: "done" | "blocked" | "needs_decision" | null; firstLine?: string; bg?: number; crons?: number; question?: string; error?: string };
+  status?: "done" | "blocked" | "needs_decision" | "waiting" | null; firstLine?: string; bg?: number; crons?: number; question?: string; error?: string;
+  waitingOn?: string; until?: number; reason?: "waiting" | "no_status"; since?: number; stalls?: number };
 
 // What the fleet service raises for the owner (spec §5.2, §5.4, §5.6, §7, §8): kept as audit rows, served oldest first by
 // the client API's GET /v1/alerts and sent as the "alert" event. `detail` is per kind (plan Contracts, "Alerts").
 // delivery_waiting: a delivery still queued, typed or held after 2, 15 and 60 minutes (fleet clients §4.5);
 // subscriber_lagging: a subscriber's oldest undelivered event is older than 60 s (§6).
 export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter", "backlog_full", "unrouted_hook",
-  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging"] as const;
+  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type Alert = { id: number; at: number; node: string | null; kind: AlertKind; detail: Record<string, unknown> };
 // The alerts the app pushes (the owner, 2026-10-12): a node's key may be stolen (a new source, a second instance), events
@@ -248,6 +267,14 @@ const token = () => z.string().check(z.regex(/^[A-Za-z0-9_-]{1,64}$/));
 // "-", so no value can pass as a flag (--dangerously-skip-permissions, --fork-session). An account is a short name of
 // lower-case letters, digits and "-"; a resume id is a Claude Code session ID, a UUID.
 const account = () => z.string().check(z.regex(/^[a-z0-9][a-z0-9-]{0,31}$/));
+// A Role (ADR-0013) is a word of the engine layer's settings; an engine is its entry text, provider:model[@effort]. The node
+// passes them to the engine layer's CLI as single arguments (execFile, no shell), and neither may start with "-".
+const roleName = () => z.string().check(z.regex(ROLE_NAME));
+const engineEntry = () => z.string().check(z.maxLength(200), z.refine(e => !e.startsWith("-") && parseEngine(e) !== null, "provider:model[@effort]"));
+const reason = () => z.string().check(z.regex(/^[^\p{Cc}]{1,200}$/u));
+const LaneEngineSchema = z.object({
+  entry: label(), role: z.exactOptional(label()), skipped: z.exactOptional(z.array(z.object({ entry: label(), reason: label() })).check(z.maxLength(32))),
+});
 // A lane is a tmux window: its name may hold spaces, unicode, dots and slashes, never a control character.
 const windowName = () => z.string().check(z.regex(/^[^\p{Cc}]{1,200}$/u));
 const offset = () => z.int().check(z.gte(0), z.lte(Number.MAX_SAFE_INTEGER));
@@ -318,7 +345,8 @@ export const OP_ARGS = {
     name: z.string().check(z.minLength(1), z.maxLength(255), z.refine(n => !n.includes("/") && !n.includes("\0"), "a file name")),
   }),
   "lane.start": z.object({ name: windowName(), cwd: absolutePath(), account: z.exactOptional(account()), resume: z.exactOptional(z.uuid()),
-    prompt: z.exactOptional(sendText()) }),
+    prompt: z.exactOptional(sendText()), role: z.exactOptional(roleName()), engine: z.exactOptional(engineEntry()), reason: z.exactOptional(reason()),
+  }).check(z.refine(a => a.role === undefined || a.engine === undefined, "role or engine, not both")),
   "lane.stop": z.object({ name: windowName(), mode: z.exactOptional(z.enum(["exit", "kill"])) }),
   "worktree.list": z.object({ repo: absolutePath() }),
   "worktree.add": z.object({ repo: absolutePath(), name: refName(), base: refName() }),
@@ -384,7 +412,7 @@ export const OP_RESULTS = {
   "file.stat": z.object({ size: count(), mtime: z.number() }),
   "file.get": z.object({ bytes: base64Chunk(), size: count(), eof: z.boolean() }),
   "file.put": z.object({ path: z.nullable(text()) }),
-  "lane.start": z.object({ workerId: workerId(), waiting: z.exactOptional(z.literal("trust")), prompt: z.exactOptional(label()) }),
+  "lane.start": z.object({ workerId: workerId(), waiting: z.exactOptional(z.literal("trust")), prompt: z.exactOptional(label()), engine: z.exactOptional(LaneEngineSchema) }),
   "lane.stop": z.object({ ok: z.literal(true) }),
   "worktree.list": z.object({ worktrees: z.array(z.object({ path: text(), branch: z.nullable(text()) })) }),
   "worktree.add": z.object({ path: text() }),
@@ -430,10 +458,12 @@ export const LaneStateBodySchema = z.object({
 });
 // A lane event as the fleet publishes and serves it (§7, §8).
 export const LaneEventSchema = z.object({
-  v, t: z.literal("lane"), seq: z.int().check(z.gte(1)), event: z.enum(["finished", "needs_input", "answered", "stop_failure"]),
+  v, t: z.literal("lane"), seq: z.int().check(z.gte(1)), event: z.enum(["finished", "needs_input", "answered", "stop_failure", "stale"]),
   node: nodeName(), window: z.nullable(text()), lane: z.nullable(text()), sessionId: z.exactOptional(text()), at: z.number(),
-  status: z.exactOptional(z.nullable(z.enum(["done", "blocked", "needs_decision"]))), firstLine: z.exactOptional(text()),
+  status: z.exactOptional(z.nullable(z.enum(["done", "blocked", "needs_decision", "waiting"]))), firstLine: z.exactOptional(text()),
   bg: z.exactOptional(count()), crons: z.exactOptional(count()), question: z.exactOptional(text()), error: z.exactOptional(text()),
+  waitingOn: z.exactOptional(text()), until: z.exactOptional(z.number()), reason: z.exactOptional(z.enum(["waiting", "no_status"])),
+  since: z.exactOptional(z.number()), stalls: z.exactOptional(count()),
 });
 
 // ---- messages, agent → fleet

@@ -58,6 +58,10 @@ export function alertWords(a: AlertWire): AlertWords {
     case "job_failed": return {
       title: `A background job failed: ${str(d.name, str(d.id, "a job"))}`,
       detail: `${str(d.outcome, "It didn't end well")}${a.node ? ` on ${a.node}` : ""}.`, urgent: urgentAlert(a) };
+    case "engine_fallback": return {
+      title: `${str(d.lane, "A lane")} started on a fallback: ${str(d.entry, "another engine")}`,
+      detail: `Its role ${str(d.role, "")} passed over ${Array.isArray(d.skipped) ? d.skipped.map(s => str((s as { entry?: unknown }).entry, "?")).join(", ") : "its first choice"}${a.node ? ` on ${a.node}` : ""}.`,
+      urgent: urgentAlert(a) };
     case "job_unnoticed": return {
       title: `A job's notice didn't reach its lane: ${str(d.name, str(d.id, "a job"))}`,
       detail: "The job ended, but its lane never took the notice.", urgent: urgentAlert(a) };
