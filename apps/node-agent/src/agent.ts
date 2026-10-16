@@ -178,7 +178,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   try {
     relay = await startRelay({
       port: config.relayPort, spool, files, log, onAppended: () => { sender.kick(); ops.deliverer.kick("hook"); }, now: ops.now,
-      windowOf: windowResolver({ windowOfPane: p => ops.inventory.windowOfPane(p), sessions }),
+      windowOf: windowResolver({ windowOfPane: p => ops.inventory.windowOfPane(p), sessions, refresh: sessions.fresh }),
       ask: (body, window) => statusAsk(body, window, config.policy.statusContract),
     });
   } catch (e) {

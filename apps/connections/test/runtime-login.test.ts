@@ -1,9 +1,9 @@
-import { chmodSync, existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RunPlan } from "../src/application/ports.ts";
-import { acceptsSubscription, assertSubscription, isStatusRefusal, readAuth, StatusRefused, ClaudeRuntime } from "../src/adapters/runtime-claude.ts";
+import { acceptsSubscription, assertSubscription, isStatusRefusal, readAuth, statusOf, StatusRefused, ClaudeRuntime, turnCheckTimeoutMs } from "../src/adapters/runtime-claude.ts";
 import { CodexRuntime } from "../src/adapters/runtime-codex.ts";
 import { CursorRuntime } from "../src/adapters/runtime-cursor.ts";
 
@@ -146,6 +146,81 @@ describe("subscription login", () => {
     await expect(assertSubscription(killed, ["status"], {}, "cursor")).rejects.toThrow("was killed by SIGKILL");
     await expect(assertSubscription(join(dir, "missing-bin"), ["status"], {}, "cursor")).rejects.toThrow("is not on PATH");
   });
+
+  // A status command that answers "signed in with the subscription" after a delay, as a cold one does with the disk busy.
+  function slowStatus(ms: number): string {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-login-"));
+    dirs.push(dir);
+    const bin = join(dir, "slow.mjs");
+    writeFileSync(bin, `setTimeout(() => process.stdout.write('{"authMethod":"claude.ai"}\\n'), ${ms});\n`);
+    return bin;
+  }
+
+  it("the sign-in check waits for a slow status that a turn's own check, set short, gives up on", async () => {
+    vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", "100");
+    try {
+      const bin = slowStatus(400);
+      expect(await statusOf(bin, ["status"], {})).toBe("ok");
+      await expect(assertSubscription(bin, ["status"], {}, "claude")).rejects.toThrow("timed out");
+    } finally { vi.unstubAllEnvs(); }
+  }, 10_000);
+
+  // A status command that hangs the first time it runs and answers at once the second, as a cold one does after the disk
+  // has served it once (14.6 s cold, 0.07 s warm, 2026-10-16). A marker file tells the runs apart.
+  function coldThenWarm(): string {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-login-"));
+    dirs.push(dir);
+    const bin = join(dir, "cold.mjs");
+    const marker = join(dir, "ran");
+    writeFileSync(bin, `import { existsSync, writeFileSync } from "node:fs";
+if (existsSync(${JSON.stringify(marker)})) process.stdout.write('{"authMethod":"claude.ai"}\\n');
+else { writeFileSync(${JSON.stringify(marker)}, "1"); setInterval(() => {}, 1_000); }
+`);
+    return bin;
+  }
+
+  it("a turn's check tries a status that timed out once more, within the one timeout in all: two halves (negative control)", async () => {
+    vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", "1000");
+    try {
+      await expect(assertSubscription(coldThenWarm(), ["status"], {}, "claude")).resolves.toBeUndefined();
+      const dir = mkdtempSync(join(tmpdir(), "morndo-login-"));
+      dirs.push(dir);
+      const hang = join(dir, "hang.mjs");
+      writeFileSync(hang, `setInterval(() => {}, 1_000);\n`);
+      const started = performance.now();
+      await expect(assertSubscription(hang, ["status"], {}, "claude")).rejects.toThrow("timed out");
+      const took = performance.now() - started;
+      expect(took).toBeGreaterThanOrEqual(950);                                   // both halves were used
+      expect(took).toBeLessThan(1300);                                            // and the wedged command held the turn for the timeout, not 1.5 times it or twice
+    } finally { vi.unstubAllEnvs(); }
+  }, 10_000);
+
+  it("a turn's check does not try again for an answer: signed out, wrong account, or not on PATH", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-login-"));
+    dirs.push(dir);
+    const out = join(dir, "out.mjs");
+    const count = join(dir, "count");
+    writeFileSync(out, `import { appendFileSync } from "node:fs";
+appendFileSync(${JSON.stringify(count)}, "x");
+process.stdout.write('{"authMethod":"api_key"}\\n');
+`);
+    await expect(assertSubscription(out, ["status"], {}, "claude")).rejects.toThrow("not the subscription");
+    expect(readFileSync(count, "utf8")).toBe("x");
+  }, 10_000);
+
+  it("a turn's check gives a slow status the time it takes when the setting is longer, and the default when the setting is not a duration", async () => {
+    vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", "5000");
+    try {
+      await expect(assertSubscription(slowStatus(300), ["status"], {}, "claude")).resolves.toBeUndefined();
+    } finally { vi.unstubAllEnvs(); }
+    for (const bad of ["", "0", "-5", "abc", "1.5", "99999999"]) {
+      vi.stubEnv("MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS", bad);
+      expect(turnCheckTimeoutMs(), bad).toBe(15_000);
+    }
+    vi.unstubAllEnvs();
+    expect(turnCheckTimeoutMs({})).toBe(15_000);
+    expect(turnCheckTimeoutMs({ MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS: "45000" })).toBe(45_000);
+  }, 10_000);
 
   it("reports a timed-out status check without blocking the caller", async () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-login-"));

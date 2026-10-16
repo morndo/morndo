@@ -39,12 +39,12 @@ import { createHash } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LIMITS, formatWorkerId, parseWorkerId, type OpArgs, type OpError, type OpResult } from "@morndo/protocol";
-import { deniedBy, denyConfigFromEnv, denyRoots, exactSession, hostTmuxServer, inputBoxOnScreen, menuOnScreen, resolvedRoots, tmuxLiteral, type Tmux } from "@morndo/node-ops";
+import { deniedBy, denyConfigFromEnv, denyRoots, engineLaneBoxOnScreen, exactSession, hostTmuxServer, inputBoxOnScreen, menuOnScreen, resolvedRoots, tmuxLiteral, type PanePids, type SessionInfo, type Tmux } from "@morndo/node-ops";
 import type { Policy } from "../config.ts";
 import { engineLayer, laneLaunch, type EngineLayer } from "./lane-engine.ts";
 import { effect, fail, ok, type EffectContext, type OpTable, type Outcome, type Reply, type Request } from "./executor.ts";
 import type { Inventory, Lane } from "./inventory.ts";
-import { tmuxRun } from "./tmux-panes.ts";
+import { listPanes, panePidsOf, tmuxRun } from "./tmux-panes.ts";
 
 // How long lane.start and lane.stop wait, each also bounded by the op's own deadline. Tests shorten them.
 export type LaneWaits = { pollMs: number; shellMs: number; trustMs: number; stopMs: number };
@@ -63,6 +63,7 @@ export type LaneDeps = {
   waits?: Partial<LaneWaits>;
   host?: (opts: { socket: string | null }) => Promise<unknown>;                   // starts the tmux server outside this service
   engines?: EngineLayer;                                                          // the engine layer's CLI (lane-engine.ts)
+  sessions: (panes: PanePids) => Map<string, SessionInfo>;                        // the sessions in the panes (an engine lane is looked for in them)
 };
 
 export { launchCommand } from "./lane-engine.ts";
@@ -133,14 +134,27 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
     return false;
   }
 
+  // Whether the pane runs a lane of the engine layer: one tmux list-panes and the session registry, not an inventory read.
+  async function engineLaneIn(pane: string): Promise<boolean> {
+    try { return d.sessions(panePidsOf(await listPanes(socket, session))).get(pane)?.engine !== undefined; }
+    catch { return false; }
+  }
+
   // The trust dialog on the new pane, looked for until Claude Code shows its box, or the time is up. A session file proves
   // nothing here: Claude Code may write one while its dialog still shows.
   async function sawTrust(pane: string, ms: number): Promise<boolean> {
     const end = performance.now() + ms;
+    let askedAt = Number.NEGATIVE_INFINITY;
     for (;;) {
       const shown = await screen(pane);
       if (shown !== null && trustDialogOnScreen(shown)) return true;
       if (shown === null || inputBoxOnScreen(shown)) return false;
+      // An engine lane has no trust dialog: its input line, with the lane in the engine registry, ends the look. A shell prompt
+      // drawn as ❯ looks the same, so that is asked at most once a second, with one tmux list-panes and not an inventory read.
+      if (engineLaneBoxOnScreen(shown) && performance.now() - askedAt >= 1000) {
+        askedAt = performance.now();
+        if (await engineLaneIn(pane)) return false;
+      }
       if (performance.now() >= end) return false;
       await sleep(w.pollMs);
     }

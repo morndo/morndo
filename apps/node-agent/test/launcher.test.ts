@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Launch, Policy } from "../src/config.ts";
 import { launchCommand, promptId, shellLine, trustDialogOnScreen, type LaneWaits } from "../src/ops/lane-ops.ts";
 import { claudeSession } from "./claude-session.ts";
@@ -138,6 +138,25 @@ describe("lane.start (spec §5)", () => {
     expect(await start(untrusted, { name: "untrusted" }, "lanes:t1")).toMatchObject({ waiting: "trust" });
     const trusted = harness({ command: [process.execPath, FIXTURE, boxIn("trusted")], via: "direct" }, { trustMs: 5000 });
     expect(await start(trusted, { name: "trusted" }, "lanes:t2")).not.toHaveProperty("waiting");
+  });
+
+  it("does not read the whole inventory on every look for the trust dialog under a shell prompt that is drawn as ❯ (negative control)", async () => {
+    const h = harness({ command: ["sh", "-c", "printf '❯ '; exec sleep 600"], via: "direct" }, { trustMs: 1200 });
+    const refresh = vi.spyOn(h.inventory, "refresh");
+    expect(await start(h, { name: "prompt-shell" }, "lanes:q1")).not.toHaveProperty("waiting");
+    expect(refresh.mock.calls.length).toBeLessThanOrEqual(4);          // the start's own reads, not one per 100 ms look
+  });
+
+  it("does not wait out the trust dialog's time for an engine lane: its input line and its registered lane end the look", async () => {
+    vi.stubEnv("ENGINES_SESSIONS", "");
+    vi.stubEnv("ENGINES_TRANSCRIPTS", "");
+    try {
+      const dir = boxIn("engine");
+      const h = harness({ command: [process.execPath, join(import.meta.dirname, "fake-engine-lane.fixture.ts"), home.home, dir], via: "direct" }, { trustMs: 8000 });
+      const began = performance.now();
+      expect(await start(h, { name: "eng" }, "lanes:q2")).not.toHaveProperty("waiting");
+      expect(performance.now() - began).toBeLessThan(5000);
+    } finally { vi.unstubAllEnvs(); }
   });
 
   it("queues a first prompt as a delivery to the new pane: it waits for Claude Code, and is typed once the lane can take it", async () => {

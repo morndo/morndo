@@ -97,9 +97,23 @@ export type AuthReading =
   | "timeout"
   | { killed: NodeJS.Signals };
 
-const STATUS_TIMEOUT_MS = 15_000;
+// A cold `codex login status` took 14.6 s with the disk busy (2026-10-16). The sign-in check, which a person waits on, allows 60 s.
+// The check before each subscription turn stays at 15 s, so a wedged status command (a keyring prompt, say) fails the turn
+// quickly; a box that is often that busy sets MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS (whole milliseconds, 1 to 300000). A check
+// that times out is tried once more (a cold status command is slow once and fast after: 14.6 s, then 0.07 s), and the two tries
+// share the one timeout, half each, so a wedged command holds the turn for the timeout and no longer. An answer of any kind, a
+// refusal included, is not asked for again.
+export const TURN_CHECK_TIMEOUT_MS = 15_000;
+export const SIGN_IN_CHECK_TIMEOUT_MS = 60_000;
+const TURN_CHECK_MAX_MS = 300_000;
 
-export function readAuth(bin: string, args: readonly string[], env: NodeJS.ProcessEnv, timeoutMs = STATUS_TIMEOUT_MS): Promise<AuthReading> {
+export function turnCheckTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MORNDO_SUBSCRIPTION_CHECK_TIMEOUT_MS;
+  const ms = raw !== undefined && /^\d{1,9}$/.test(raw) ? Number(raw) : Number.NaN;
+  return Number.isInteger(ms) && ms >= 1 && ms <= TURN_CHECK_MAX_MS ? ms : TURN_CHECK_TIMEOUT_MS;
+}
+
+export function readAuth(bin: string, args: readonly string[], env: NodeJS.ProcessEnv, timeoutMs = TURN_CHECK_TIMEOUT_MS): Promise<AuthReading> {
   const script = bin.endsWith(".mjs") || bin.endsWith(".js");
   const command = script ? process.execPath : bin;
   const argv = [...(script ? [bin] : []), ...args];
@@ -180,9 +194,11 @@ function signedOutLine(method: string | null): boolean {
 }
 
 export async function assertSubscription(
-  bin: string, args: readonly string[], env: NodeJS.ProcessEnv, runtime: "claude" | "codex" | "cursor", timeoutMs = STATUS_TIMEOUT_MS,
+  bin: string, args: readonly string[], env: NodeJS.ProcessEnv, runtime: "claude" | "codex" | "cursor", timeoutMs = turnCheckTimeoutMs(),
 ): Promise<void> {
-  const reading = await readAuth(bin, args, env, timeoutMs);
+  const half = Math.max(1, Math.floor(timeoutMs / 2));
+  let reading = await readAuth(bin, args, env, half);
+  if (reading === "timeout") reading = await readAuth(bin, args, env, Math.max(1, timeoutMs - half));
   if (reading === "unknown") throw new Error(`${bin} is not on PATH`);
   if (reading === "denied") throw new StatusRefused(`${bin} is denied`);
   if (reading === "timeout") throw new StatusRefused(`${bin} timed out`);
@@ -197,8 +213,8 @@ export function loginEnv(runtime: "claude" | "codex" | "cursor", configDir: stri
   return { CURSOR_CONFIG_DIR: configDir };
 }
 
-export async function statusOf(bin: string, args: readonly string[], env: NodeJS.ProcessEnv): Promise<"ok" | "missing" | "unknown"> {
-  const reading = await readAuth(bin, args, env);
+export async function statusOf(bin: string, args: readonly string[], env: NodeJS.ProcessEnv, timeoutMs = SIGN_IN_CHECK_TIMEOUT_MS): Promise<"ok" | "missing" | "unknown"> {
+  const reading = await readAuth(bin, args, env, timeoutMs);
   if (typeof reading !== "object" || !("signedIn" in reading)) return "unknown";
   return reading.signedIn ? "ok" : "missing";
 }
