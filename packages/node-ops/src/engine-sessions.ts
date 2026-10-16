@@ -26,6 +26,7 @@ import type { SessionInfo } from "./sessions.ts";
 const STATUSES = new Set<string>(SESSION_STATUSES);
 const text = (v: unknown, otherwise = "") => (typeof v === "string" ? v : otherwise);
 const RESCAN_MS = 1000;                                                // an unknown lane id is looked for again at most this often, per id
+const ROOT_KEEP_MS = 30_000;
 const ASKED_MAX = 256;                                                 // ids remembered as asked for; more than this and the list starts over
 
 export type EngineSessionIo = {
@@ -50,6 +51,7 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
   // lane id → every sessionId its file has had, and in how many scans in a row it was not found. It is forgotten when its process is
   // dead, or when two scans in a row miss it: one failed read (a /proc entry that can't be read, say) must not lose its earlier ids.
   const aliases = new Map<string, { pid: number; ids: Set<string>; misses: number }>();
+  let root: { real: string; at: number } | null = null;                // the transcript directory's real path, kept for ROOT_KEEP_MS
   const asked = new Map<string, number>();                             // unknown lane id → when the registry was last read for it
 
   function lanes(): Lane[] {
@@ -128,9 +130,9 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
       const path = candidates.get(sessionId);
       if (path === undefined) return null;
       try {
-        const root = realpathSync(io.transcripts);
+        if (root === null || now() - root.at >= ROOT_KEEP_MS) root = { real: realpathSync(io.transcripts), at: now() };
         const real = realpathSync(path);
-        return real.startsWith(root + sep) && real.endsWith(".jsonl") && statSync(real).isFile() ? real : null;
+        return real.startsWith(root.real + sep) && real.endsWith(".jsonl") && statSync(real).isFile() ? real : null;
       } catch { return null; }
     },
   };

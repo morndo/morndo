@@ -134,13 +134,14 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
     return false;
   }
 
-  // The trust dialog on the new pane, looked for until Claude Code shows its box, or the time is up. A session file proves
-  // nothing here: Claude Code may write one while its dialog still shows.
+  // Whether the pane runs a lane of the engine layer: one tmux list-panes and the session registry, not an inventory read.
   async function engineLaneIn(pane: string): Promise<boolean> {
     try { return d.sessions(panePidsOf(await listPanes(socket, session))).get(pane)?.engine !== undefined; }
     catch { return false; }
   }
 
+  // The trust dialog on the new pane, looked for until Claude Code shows its box, or the time is up. A session file proves
+  // nothing here: Claude Code may write one while its dialog still shows.
   async function sawTrust(pane: string, ms: number): Promise<boolean> {
     const end = performance.now() + ms;
     let askedAt = Number.NEGATIVE_INFINITY;

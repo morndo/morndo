@@ -2865,7 +2865,7 @@ export const CONTROLS: Control[] = [
     find: "foreground.get(g.pgrp)", replace: "foreground.get(g.tpgid)",
     run: ["packages/node-ops/test/engine-sessions.test.ts", "apps/node-agent/test/engine-lane-delivery.test.ts"], expect: "Ctrl-Z" },
   { id: "t231-engine-transcript-inside", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
-    find: "real.startsWith(root + sep) && ", replace: "",
+    find: "real.startsWith(root.real + sep) && ", replace: "",
     run: ["packages/node-ops/test/engine-sessions.test.ts"], expect: "serves no file outside that directory" },
   { id: "t231-engine-transcript-real-path", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
     find: "const real = realpathSync(path);", replace: "const real = path;",

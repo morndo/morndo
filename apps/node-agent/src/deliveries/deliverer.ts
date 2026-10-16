@@ -238,8 +238,9 @@ export class Deliverer {
   // Receipts from each session something was typed into, read on from where the last round stopped.
   async #confirm(panes: PaneState[]): Promise<void> {
     const store = this.#d.store;
+    const opened = store.open();
     // A command that starts a new session: its receipt is its pane showing another session than the one it was typed into.
-    for (const d of store.open()) {
+    for (const d of opened) {
       if ((d.state !== "typed" && d.state !== "held") || d.sessionId === undefined) continue;
       const t = store.detail(d.id);
       const text = store.textOf(d.id);
@@ -248,9 +249,9 @@ export class Deliverer {
       if (p !== null && p.sessionId !== null && p.sessionId !== d.sessionId) this.#change(d, { state: "delivered", deliveredAt: this.#d.now() });
     }
     const waiting = new Map<string, Delivery[]>();
-    const open = new Set(store.open().map(d => d.id));
+    const open = new Set(opened.map(d => d.id));
     for (const id of this.#after.keys()) if (!open.has(id)) this.#after.delete(id);
-    for (const d of store.open()) {
+    for (const d of opened) {
       if ((d.state === "typed" || d.state === "held") && d.sessionId !== undefined) waiting.set(d.sessionId, [...(waiting.get(d.sessionId) ?? []), d]);
     }
     for (const session of [...this.#cursors.keys()]) if (!waiting.has(session)) this.#cursors.delete(session);
