@@ -2905,6 +2905,9 @@ export const CONTROLS: Control[] = [
   { id: "t231-raw-byte-offsets", task: "T-231", file: "apps/node-agent/src/deliveries/views.ts",
     find: "at = nl + 1;", replace: 'at += Buffer.byteLength(buf.toString("utf8", at, nl)) + 1;',
     run: ["apps/node-agent/test/transcript-view-starts.test.ts"], expect: "not valid UTF-8" },
+  { id: "t231-engine-rescan-per-id", task: "T-231", file: "packages/node-ops/src/engine-sessions.ts",
+    find: "if (last === undefined || now() - last >= RESCAN_MS) {", replace: "if (false) {",
+    run: ["packages/node-ops/test/engine-sessions.test.ts"], expect: "appeared a moment after the last scan" },
 ];
 
 // ---- the runner

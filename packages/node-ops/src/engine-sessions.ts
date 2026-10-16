@@ -25,7 +25,8 @@ import type { SessionInfo } from "./sessions.ts";
 
 const STATUSES = new Set<string>(SESSION_STATUSES);
 const text = (v: unknown, otherwise = "") => (typeof v === "string" ? v : otherwise);
-const RESCAN_MS = 1000;                                                // an unknown lane id rescans the registry at most this often
+const RESCAN_MS = 1000;                                                // an unknown lane id is looked for again at most this often, per id
+const ASKED_MAX = 256;                                                 // ids remembered as asked for; more than this and the list starts over
 
 export type EngineSessionIo = {
   transcripts: string;                                                 // the engine layer's transcript directory
@@ -47,10 +48,9 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
   const now = io.now ?? (() => performance.now());
   let candidates = new Map<string, string>();                          // lane id → the transcript path its file names
   const aliases = new Map<string, Set<string>>();                      // lane id → every sessionId its file has had
-  let scannedAt = Number.NEGATIVE_INFINITY;
+  const asked = new Map<string, number>();                             // unknown lane id → when the registry was last read for it
 
   function lanes(): Lane[] {
-    scannedAt = now();
     const found = new Map<string, string>();
     const out: Lane[] = [];
     let files: string[] = [];
@@ -110,7 +110,14 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
     // transcript directory); looked up again every time, so a link swapped after the lane was read is not followed.
     transcriptPath(sessionId: string): string | null {
       if (!sessionId.startsWith("engine-")) return null;
-      if (!candidates.has(sessionId) && now() - scannedAt >= RESCAN_MS) lanes();
+      if (!candidates.has(sessionId)) {
+        const last = asked.get(sessionId);
+        if (last === undefined || now() - last >= RESCAN_MS) {
+          if (asked.size >= ASKED_MAX) asked.clear();
+          asked.set(sessionId, now());
+          lanes();
+        }
+      }
       const path = candidates.get(sessionId);
       if (path === undefined) return null;
       try {

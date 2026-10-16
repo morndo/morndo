@@ -148,6 +148,36 @@ describe("engine session registry", () => {
     expect(reg.transcriptPath("engine-4242-5500")).toBeNull();
   });
 
+  it("finds the transcript of a lane that appeared a moment after the last scan, by reading the registry again for that id", () => {
+    put("4242.json");
+    writeFileSync(transcript(), "");
+    let clock = 0;
+    const reg = engineSessionRegistry(dir, { ...io(), identity: pid => ({ ticks: pid === 4242 ? 5500 : 6000, bootId: BOOT }), now: () => clock });
+    reg.byPane(PANES);                                                        // a scan at t = 0 sees one lane
+    const second = join(tr, "second-aaaaaaaa-0000-4000-8000-000000000002.jsonl");
+    writeFileSync(second, "");
+    writeFileSync(join(dir, "4300.json"), JSON.stringify({ ...recorded, pid: 4300, pidStartTicks: 6000, transcript: second }));
+    clock = 100;                                                              // 100 ms after that scan
+    expect(reg.transcriptPath("engine-4300-6000")).toBe(second);
+  });
+
+  it("reads the registry again for an unknown id at most once a second per id, and keeps no more ids than it can bound", () => {
+    put("4242.json");
+    let reads = 0;
+    let clock = 0;
+    const reg = engineSessionRegistry(dir, { ...io(), alive: () => { reads++; return true; }, now: () => clock });
+    for (let i = 0; i < 5; i++) reg.transcriptPath("engine-9-9");
+    expect(reads).toBe(1);                                                    // one scan of one file
+    reg.transcriptPath("engine-8-8");
+    expect(reads).toBe(2);                                                    // another id is its own ask
+    clock = 1500;
+    reg.transcriptPath("engine-9-9");
+    expect(reads).toBe(3);
+    for (let i = 0; i < 1000; i++) reg.transcriptPath(`engine-${i}-1`);
+    expect(reads).toBeLessThan(1010);
+    expect(() => reg.transcriptPath("engine-5-5")).not.toThrow();
+  });
+
   it("has nothing for a directory that is missing", () => {
     const reg = engineSessionRegistry(join(dir, "absent"), io());
     expect(reg.byPane(PANES).size).toBe(0);
