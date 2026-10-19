@@ -1,0 +1,8 @@
+{
+  "account": {
+    "type": "chatgpt",
+    "email": "someone@example.com",
+    "planType": "plus"
+  },
+  "requiresOpenaiAuth": true
+}

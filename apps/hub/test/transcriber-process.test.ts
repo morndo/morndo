@@ -46,16 +46,30 @@ describe("process host", () => {
     expect(await until(() => host.group().length > 0, 2000)).toBe(true);
     const pid = host.group()[0];
     if (pid === undefined) throw new Error("the run started without a pid");
-    const environ = () => {
-      try { return readFileSync(`/proc/${pid}/environ`).toString("utf8").split("\0").filter(row => row !== ""); }
-      catch { return []; }
+    // The pid is visible before the child has exec'd, and while the exec lands /proc/<pid>/environ reads back
+    // empty: until the new image's argument pages are in place, env_start equals env_end (proc(5), read
+    // 2026-10-13). Both states pass a "has a TMPDIR row" gate — the runner's own environment has one — so the
+    // gate can pass on one state and the read below land on another, under load. What only the exec'd child
+    // shows is the final shape: no key besides the four, and a TMPDIR pointing at the run's own morndo-tx
+    // directory (the runner's TMPDIR, the one before the exec, is a morndo-test scratch path). That state is
+    // final — the environment never changes again — so the rows the wait ends on are the rows to assert against.
+    const allowed = new Set(["PATH", "HOME", "LANG", "TMPDIR"]);
+    let raw: string[] = [];
+    let seen = "(no read yet)";
+    const settled = () => {
+      try {
+        const rows = readFileSync(`/proc/${pid}/environ`).toString("utf8").split("\0").filter(row => row !== "");
+        seen = rows.join(" ") || "(empty)";
+        const tmp = rows.find(row => row.startsWith("TMPDIR=") && row.includes("morndo-tx-"));
+        if (tmp !== undefined && rows.every(row => allowed.has(row.split("=")[0] ?? ""))) raw = rows;
+      } catch { seen = `unreadable: /proc/${pid}/environ`; }
+      return raw.length > 0;
     };
-    expect(await until(() => environ().some(row => row.startsWith("TMPDIR=")), 2000)).toBe(true);
+    if (!(await until(settled, 2000))) throw new Error(`the child's environment never settled; last seen: ${seen}`);
     expect(alive(pid)).toBe(true);
     // Node 24 os.constants.priority.PRIORITY_BELOW_NORMAL is nice 10 on Linux (docs fetched 2026-10-13).
     expect(constants.priority.PRIORITY_BELOW_NORMAL).toBe(10);
     expect(getPriority(pid)).toBe(10);
-    const raw = environ();
     const keys = raw.map(row => row.split("=")[0] ?? "");
     const order = (a: string, b: string) => a < b ? -1 : a > b ? 1 : 0;
     const expected = ["HOME", "LANG", "PATH", "TMPDIR"].filter(key => key === "TMPDIR" || process.env[key]);

@@ -12,6 +12,7 @@ import {
 } from "@morndo/domain";
 import type { SecretsState, VaultRefRow, WorkspaceRow } from "../src/application/ports.ts";
 import { FileRefused } from "../src/adapters/file-mode.ts";
+import { MIGRATIONS } from "../src/adapters/store-migrations.ts";
 import { SqliteSecrets } from "../src/adapters/secrets-sqlite.ts";
 import { SqliteStore } from "../src/adapters/store-sqlite.ts";
 
@@ -150,7 +151,7 @@ describe("secrets-sqlite", () => {
     expect(unique("secrets")).toContainEqual(["reference"]);
     expect(unique("secret_versions")).toEqual(expect.arrayContaining([["reference", "keyed_fingerprint"], ["reference", "version"]]));
     expect(unique("secret_workspaces")).toEqual(expect.arrayContaining([["name"], ["root"]]));
-    expect(db.pragma("user_version", { simple: true })).toBe(2);
+    expect(db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
   });
 
   it("criterion 10: SQLite itself refuses a second row for a Reference, and for a Reference's keyed fingerprint or version", () => {

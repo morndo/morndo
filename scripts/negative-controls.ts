@@ -2923,6 +2923,22 @@ export const CONTROLS: Control[] = [
   { id: "t231-turn-check-halves", task: "T-231", file: "apps/connections/src/adapters/runtime-claude.ts",
     find: "let reading = await readAuth(bin, args, env, half);", replace: "let reading = await readAuth(bin, args, env, timeoutMs);",
     run: ["apps/connections/test/runtime-login.test.ts"], expect: "two halves" },
+  { id: "cx-usage-env-keys", task: "codex-runtime M3", file: "apps/connections/src/cli.ts",
+    find: "const env = childEnv(home.env, loginEnv(\"codex\", connection.configDir));",
+    replace: "const env = { ...home.env, ...loginEnv(\"codex\", connection.configDir) };",
+    run: ["apps/connections/test/usage-cli.test.ts"], expect: "CODEX_API_KEY" },
+  { id: "pool-one-writer", task: "account-pool P4", file: "packages/domain/src/pool.ts",
+    find: "if (writer) return err({ problem: \"session-busy\", holder: writer.holder });",
+    replace: "if (writer && false) return err({ problem: \"session-busy\", holder: writer.holder });",
+    run: ["packages/domain/test/pool-claims.test.ts"], expect: "session-busy" },
+  { id: "pool-hide-failed", task: "account-pool P7", file: "apps/connections/src/pool-cli.ts",
+    find: "if (ended.kind === \"usage-limit\") noteEvent(io, `[pool] ${current.member} reached its usage limit; this turn goes on as the same session on ${next.member}`);",
+    replace: "if (ended.kind === \"usage-limit\" && turn.held !== null) io.stdout(`${turn.held}\\n`);",
+    run: ["apps/connections/test/pool-cli.test.ts"], expect: "turn.failed" },
+  { id: "pool-env-keys", task: "account-pool P7", file: "apps/connections/src/adapters/runtime-codex.ts",
+    find: "env: childEnv(this.#parent, loginEnv(\"codex\", runHome)),",
+    replace: "env: { ...this.#parent, ...loginEnv(\"codex\", runHome) },",
+    run: ["apps/connections/test/pool-cli.test.ts"], expect: "KEY" },
 ];
 
 // ---- the runner

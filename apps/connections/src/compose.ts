@@ -6,6 +6,7 @@ import type { EngineSettings, Runtime } from "./application/ports.ts";
 import { bindCommands, type BoundCommands } from "./application/commands.ts";
 import { ConnectionsService } from "./application/connections-service.ts";
 import { LeaseService } from "./application/lease-service.ts";
+import { PoolService } from "./application/pool-service.ts";
 import { RoutingService } from "./application/routing-service.ts";
 import { FileAlerts } from "./adapters/alerts-file.ts";
 import { FileCatalog } from "./adapters/catalog-file.ts";
@@ -15,6 +16,7 @@ import { FileModels } from "./adapters/models.ts";
 import { ProcProcesses } from "./adapters/processes.ts";
 import { GitRepos } from "./adapters/repos.ts";
 import { RunSpend } from "./adapters/spend.ts";
+import { SqlitePoolStore } from "./adapters/pool-store-sqlite.ts";
 import { SqliteStore } from "./adapters/store-sqlite.ts";
 import { AgeVault } from "./adapters/vault-age.ts";
 import { readUsage } from "./adapters/usage-file.ts";
@@ -53,6 +55,7 @@ export type Opened = {
   routing: RoutingService;
   commands: BoundCommands;
   leases: LeaseService;
+  pool: PoolService;
   catalog: FileCatalog;
   engines: EngineSettings;
   models: FileModels;
@@ -76,6 +79,7 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
   const identity = join(dir, "identity");
   const catalog = new FileCatalog(catalogPath(env));
   const store = new SqliteStore(db);
+  const poolStore = new SqlitePoolStore(db);
   // The Connections commands hold no Secrets records, so they use the node keys there are and never make one.
   const keys = new NodeKeys(dir, ONLY_EXISTING_KEYS);
   const vault = env.MORNDO_VAULT === "file" ? new FileVault(vaultDir, keys) : new AgeVault(vaultDir, identity, keys);
@@ -94,8 +98,9 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
     routing: new RoutingService(deps),
     commands: bindCommands(deps, () => readUsage(join(dir, "usage.json"))),
     leases: new LeaseService(deps),
+    pool: new PoolService({ clock, store: poolStore, connections: store, catalog, processes }),
     now: () => clock.now(),
-    close: () => store.close(),
+    close: () => { store.close(); poolStore.close(); },
     seal: async (ref, text) => { await vault.seal(ref, new SecretMaterial(new TextEncoder().encode(text))); },
     open: async ref => new TextDecoder().decode((await vault.open(ref)).bytes()),
   };
