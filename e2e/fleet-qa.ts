@@ -16,7 +16,7 @@
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { FleetClient } from "../apps/hub/src/adapters/fleet-client.ts";
+import { FleetClient } from "../packages/fleet-client/src/index.ts";
 
 const [cmd = "", ...a] = process.argv.slice(2);
 const say = (line: string) => process.stdout.write(`${line}\n`);

@@ -14,20 +14,22 @@
   import { present, type ConversationPrefs } from "./present.ts";
   import type { DecisionItem } from "./decisions.ts";
   import { unreachable } from "@morndo/domain";
-  import { canRetry, type OutboxRecord } from "../outbox/state.ts";
+  import { canCancel, canEdit, canRetry, type OutboxRecord } from "../outbox/state.ts";
   import { fileSize, fileType, type SentFile } from "../attach.ts";
-  import { sendLabel, sendReason } from "../outbox/words.ts";
+  import { deliveryNote, sendLabel, sendReason } from "../outbox/words.ts";
+  import { ABSENT_MANAGER } from "../manager.ts";
   import { dividerBefore, scrollAnchor, showJump, type Anchor, type TimelineChange } from "./timeline.ts";
   import ArrowDown from "@lucide/svelte/icons/arrow-down";
 
   // A Command of the outbox (ADR-0008 phase C), with its images' thumbnails for this page's life.
   export type Outgoing = OutboxRecord & { images: string[]; files: SentFile[] };
-  let { worker, messages, loading, outgoing, displayName, prefs, decisionOf, card, focus, onRetry, onDiscard, onVerify, onEdit,
+  let { worker, messages, loading, outgoing, displayName, prefs, decisionOf, card, focus, onRetry, onDiscard, onVerify, onEdit, onCancel = () => {},
     dividerMark = undefined, onAtBottom = () => {}, older = { loading: false, done: false, failed: false }, olderPages = 0, onOlder = () => {},
     detached = false, newWhileDetached = 0, onLatest = () => {} }: {
     worker: RosterEntry; messages: Message[]; loading: boolean; outgoing: Outgoing[]; displayName: string; prefs: ConversationPrefs;
     decisionOf: (messageId: string) => DecisionItem | undefined; card: Snippet<[DecisionItem]>; focus: { id: string; n: number } | null;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onVerify: (id: string) => void; onEdit: (id: string) => void;
+    onCancel?: (id: string) => void;                    // a message the manager's queue still holds (ruling 83)
     // Phase D: the read mark when the conversation was opened (for "New messages"), whether the list is at the bottom
     // (to mark it read), older pages (and how many were put above), and the latest messages pushed out by them.
     // undefined: not known yet for this opening (the divider waits for it); null: nothing was ever read.
@@ -183,8 +185,12 @@
   <div class="intro">
     <div class="big">{#if worker.name === "manager"}<Avatar name="Manager" kind="peer" size={72} />{:else}<Avatar name={worker.name} size={72} />{/if}</div>
     <h2>{displayName}</h2>
-    <p>{worker.title ?? "An agent working on this machine."}</p>
-    <p class="meta">Working in <strong>{worker.location}</strong>. You see its answers here; the raw terminal is under Screen.</p>
+    {#if worker.id === ABSENT_MANAGER}
+      <p>Not running right now.</p>
+    {:else}
+      <p>{worker.title ?? "An agent working on this machine."}</p>
+      <p class="meta">Working in <strong>{worker.location}</strong>. You see its answers here; the raw terminal is under Screen.</p>
+    {/if}
   </div>
 
   <div class="older-top" bind:this={top}></div>
@@ -260,11 +266,13 @@
           <div class="sent-files">{#each p.files as f (`${f.name}:${f.size}`)}<span class="filechip"><span class="fn">{f.name}</span><small>{fileType(f.name, f.kind)} · {fileSize(f.size)}</small></span>{/each}</div>
         {:else if !p.images.length && p.uploads.length}<p class="meta-line">{p.uploads.length === 1 ? "1 file" : `${p.uploads.length} files`}</p>{/if}
         {#if stuck}<p class="err">{reason(p)}</p>{/if}
+        {#if deliveryNote(p)}<p class="meta-line" data-delivery={p.delivery?.state}>{deliveryNote(p)}</p>{/if}
         {#if stuck || p.state === "queued" || p.state === "sending" || (p.state === "sent" && label(p) !== "Sent")}
           <div class="outbox-actions">
             {#if p.state === "failed" && p.error === "step_up"}<button onclick={() => onVerify(p.id)}>Verify and send</button>
-            {:else if p.state === "failed" && p.error === "stale"}<button onclick={() => onEdit(p.id)}>Edit</button>
-            {:else if canRetry(p, clockNow)}<button onclick={() => onRetry(p.id)}>{p.state === "uncertain" ? "Check again" : "Retry"}</button>{/if}
+            {:else if canEdit(p)}<button onclick={() => onEdit(p.id)}>Edit</button>
+            {:else if canRetry(p, clockNow)}<button onclick={() => onRetry(p.id)}>{p.state === "uncertain" ? "Check again" : "Retry"}</button>
+            {:else if canCancel(p)}<button onclick={() => onCancel(p.id)}>Cancel</button>{/if}
             <button onclick={() => onDiscard(p.id)}>{p.state === "sent" ? "Dismiss" : "Discard"}</button>
           </div>
         {/if}

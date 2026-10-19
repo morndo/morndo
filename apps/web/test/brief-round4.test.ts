@@ -22,7 +22,7 @@ function tap(id: string, version: string, label: string, over: Item = {}): Item 
     answerBy: "tap", recommendation: null, ifNoAnswer: null, deadline: DUE, blocking: false, project: null,
     askedAt: NOW - 3_600_000, messageId: null, tracking: "hub", status: "open", source: "open",
     decision: null, resolution: null, settledAt: null, askedAgain: false, answerable: null,
-    version, inbox: null, brief: null, briefVersion: 0, draftedBy: null, notice: null,
+    version, brief: null, briefVersion: 0, draftedBy: null, notice: null,
     ...over,
   };
 }

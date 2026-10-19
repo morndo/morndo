@@ -14,15 +14,20 @@
   import { beginAttachments, fileSize, fileType, settleAttachment, type AttachmentRow, type SentFile } from "../attach.ts";
   import { explain, uploadFile } from "../api.ts";
   import { stepUp as verify } from "../stepup.ts";
-  import { deviceDrafts } from "../drafts.ts";
+  import { deviceDrafts, leftAfterSend } from "../drafts.ts";
+  import { MAX_TEXT } from "../outbox/state.ts";
 
-  let { target, targetName, conversation = target, working, waitingOn, verifiedAt, stepUpMs, onQueue, onVerified, onSecurity, edit = null, onEdited = () => {}, inputEl = $bindable(null) }: {
+  let { target, targetName, conversation = target, working, waitingOn, verifiedAt, stepUpMs, onQueue, onVerified, onSecurity, edit = null, onEdited = () => {}, inputEl = $bindable(null),
+    closed = false, noFiles = false, scope = null }: {
     target: string; targetName: string; working: boolean; waitingOn: string | null; verifiedAt: number | null; stepUpMs: number | null; onSecurity: () => void;
     conversation?: string;                                       // the worker's name: its draft comes back only with it
     edit?: { text: string; n: number } | null;                   // "Edit" on a send whose question changed: its text comes back here
     onEdited?: () => void;
     onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; files: SentFile[]; seen: string; held?: string }) => Promise<void>;
     onVerified: (at: number) => void; inputEl?: HTMLTextAreaElement | null;
+    closed?: boolean;                                            // nothing can hold a message now: the manager not running, no queue
+    noFiles?: boolean;                                           // files go onto the worker's machine, and there is none now
+    scope?: string | null;                                       // where it goes, when the default line doesn't say it
   } = $props();
 
   // The draft of this conversation, on this device (phase D): back when it opens, saved 300 ms after the last keystroke,
@@ -40,9 +45,12 @@
   let fileInput = $state<HTMLInputElement | null>(null);
   const uploading = $derived(shots.some(s => s.status === "uploading"));
   const readyIds = $derived(shots.filter(s => s.status === "ready" && s.id).map(s => s.id as string));
-  const canSend = $derived((text.trim().length > 0 || readyIds.length > 0) && !uploading && !shots.some(s => s.status === "error"));
+  // Longer than a lane takes: said while typing, and not sent (the hub would refuse it too_long).
+  const over = $derived(text.length > MAX_TEXT);
+  const canSend = $derived(!closed && !over && (text.trim().length > 0 || readyIds.length > 0) && !uploading && !shots.some(s => s.status === "error"));
 
   function addFiles(files: File[]) {
+    if (noFiles) { note = "Files can't go to the manager while it isn't running."; return; }
     const started = beginAttachments(shots.length, files);
     note = started.note;
     for (const { file, row } of started.taken) {
@@ -111,6 +119,7 @@
   async function send() {
     const body = text.trim();
     if (!canSend || verifying) return;
+    const typed = text, sentShots = shots;                             // what goes: anything added during the check stays
     // The worker's own name (its conversation), not the one shown ("Manager"): the hub checks it against the pane (M2).
     const to = target, toName = conversation, written = seen ?? waitingOn ?? "none";
     const uploads = readyIds;
@@ -129,16 +138,21 @@
       }
       verifying = false;
     }
-    // The box is free at once (a second Enter must not send the same text twice); if the message couldn't be written
-    // down on this device, it comes back into the box, never lost (review M6).
-    const sentShots = shots;
+    // The box is free at once (a second Enter must not send the same text twice), but for what was written in it while
+    // the check was open; if the message couldn't be written down on this device, it comes back into the box, never lost
+    // (review M6).
     drafts.sent(target);                                               // a save still pending can't bring it back
-    if (!destroyed) { text = ""; shots = []; inputEl?.focus(); }
+    if (!destroyed) {
+      text = leftAfterSend(text, typed);
+      shots = shots.filter(s => !sentShots.includes(s));
+      if (text.trim()) drafts.typed(target, conversation, text, seen);
+      inputEl?.focus();
+    }
     try { await onQueue({ target: to, targetName: toName, text: body, uploads, images, files, seen: written, ...(held ? { held } : {}) }); }
     catch (e) {
       if (destroyed) return;
       text = text.trim() ? `${body}\n\n${text}` : body;
-      if (!shots.length) shots = sentShots;
+      shots = [...sentShots, ...shots];
       note = `Couldn't keep the message on this device: ${explain(e)} It is back in the box.`;
     }
   }
@@ -160,10 +174,10 @@
     ondragover={e => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragging = true; } }}
     ondragleave={() => (dragging = false)} ondrop={onDrop}>
     <div class="bar">
-      {#each QUICK as q}
+      {#each closed ? [] : QUICK as q}
         <button class="chip" onclick={() => { text = text ? `${text} ${q}` : q; inputEl?.focus(); }}>{q}</button>
       {/each}
-      <span class="scope">{targetName === "Manager" ? "Goes to the manager" : `Goes straight to ${targetName}; the manager won't see it`}</span>
+      <span class="scope">{scope ?? (targetName === "Manager" ? "Goes to the manager" : `Goes straight to ${targetName}; the manager won't see it`)}</span>
     </div>
     {#if shots.length}
       <div class="shots" aria-label="Files to send">
@@ -195,9 +209,11 @@
       onkeydown={onKey}
       onpaste={onPaste}
       aria-label="Message {targetName}"
+      disabled={closed}
     ></textarea>
+    {#if over}<p class="shot-err" data-over>Too long for one message: {text.length} of {MAX_TEXT} characters.</p>{/if}
     <div class="tools">
-      <button class="attach" onclick={() => fileInput?.click()} aria-label="Attach a file" title="Attach a file (or paste or drop one)"><Paperclip size={16} /></button>
+      {#if !noFiles}<button class="attach" onclick={() => fileInput?.click()} aria-label="Attach a file" title="Attach a file (or paste or drop one)"><Paperclip size={16} /></button>{/if}
       <input bind:this={fileInput} type="file" accept={UPLOAD_ACCEPT} multiple hidden
         onchange={e => { addFiles([...((e.currentTarget as HTMLInputElement).files ?? [])]); (e.currentTarget as HTMLInputElement).value = ""; }} />
       <button class="verify" class:fresh onclick={onSecurity} title="Change how often sending asks for your passkey">

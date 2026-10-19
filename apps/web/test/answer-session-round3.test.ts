@@ -12,7 +12,7 @@ function item(version: string, over: Partial<DecisionItem> = {}): DecisionItem {
     options: [{ key: "b", label: "Extend the triage script", detail: null }],
     answerBy: "tap", recommendation: null, ifNoAnswer: null, deadline: null, blocking: false, project: null,
     askedAt: 0, messageId: null, tracking: "hub", status: "open", source: "open", decision: null, resolution: null,
-    settledAt: null, askedAgain: false, answerable: null, version, inbox: null, brief: null, briefVersion: 1, draftedBy: null,
+    settledAt: null, askedAgain: false, answerable: null, version, brief: null, briefVersion: 1, draftedBy: null,
     ...over,
   };
 }
@@ -42,7 +42,7 @@ describe("stale and seen", () => {
     const { AnswerSession } = await import("../src/lib/desktop/answer-session.svelte.ts");
     const first = item("v1");
     const s = new AnswerSession(first);
-    const next = item("v1", { inbox: { status: "queued", reason: "offline" }, askedAgain: true });
+    const next = item("v1", { waiting: "offline", askedAgain: true });
     s.bind(next, false);
     expect(s.live).toBe(next);
     expect(s.shown).toBe(next);

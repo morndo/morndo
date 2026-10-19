@@ -1,7 +1,9 @@
 // The fleet's agent channel (docs/design/fleet-core/README.md §5, ADR-0012): one WebSocket per node between its agent
 // and the fleet service, JSON messages `{ v: 1, t, … }`, both directions, validated with zod/mini on both sides. Here:
 // the protocol versions, every limit the spec sets (LIMITS, the one place they live), the typed operations with their
-// arguments and results, the events, the handshake's signing payloads and the join string.
+// arguments and results, the events, the handshake's signing payloads and the join string. Fleet clients (sub-project
+// 2, docs/design/fleet-clients/README.md) add the delivery queue (§4), keys by name and the larger capture (§5), each
+// pane's session state (§5) and lane events (§7).
 // What a node is asked to do (op arguments) is strict, with limits: the agent acts on it. What a node reports (results,
 // events) is checked for shape; each message is bounded by maxMessageBytes anyway.
 import { JOB_ID, NOTICE_MAX } from "@morndo/domain";
@@ -33,6 +35,19 @@ export const LIMITS = {
   // rows, alerts included, 90 days
   joinCodeTtlMs: 600_000, doneKeyTtlMs: 604_800_000, outboxKeepMs: 86_400_000, deadLetterAttempts: 20,
   subscriberBacklog: 50_000, spoolMaxEvents: 100_000, spoolMaxBytes: 268_435_456, relayFileKeepMs: 86_400_000, auditKeepMs: 7_776_000_000,
+  // the delivery queue (fleet clients §4): an id's length, how long a delivery may wait by default (a client sends a
+  // duration, ttlMs, which the node turns into notAfter on its own clock: Review Focus 3), how often the head of a
+  // lane is tried at least, the waiting alerts (once each), how long final deliveries are kept, how long a pane that
+  // has just started may have no Claude Code session yet before a delivery to it is refused, how long a typed or
+  // held delivery waiting for its receipt holds the next one to its lane back (§4.3), and how long the fleet waits
+  // for a node's answer to lane.deliver before it gives up. It mirrors the delivery only when that answer comes.
+  maxDeliveryId: 200, deliveryTtlMs: 86_400_000, deliveryTryMs: 5000, deliveryAlertMs: [120_000, 900_000, 3_600_000],
+  deliveryKeepMs: 604_800_000, deliveryStartGraceMs: 120_000, deliveryReceiptHoldMs: 60_000, deliveryOpTimeoutMs: 15_000,
+  // pane.capture (§5): lines asked for, and the text it answers with (one bulk chunk), counted as its JSON-escaped size
+  captureMaxLines: 2000, captureMaxBytes: 262_144,
+  // lane events (§7) and the fleet's commits (§6): the manager's batch window, how long lane events are kept, the
+  // intake window that shares one synced commit, when a subscriber counts as lagging, and how long lane.stop waits
+  laneEventBatchMs: 3000, laneEventKeepMs: 604_800_000, intakeWindowMs: 25, subscriberLagMs: 60_000, laneStopWaitMs: 30_000,
 } as const;
 
 // Close codes on the agent channel (§5.2).
@@ -48,9 +63,12 @@ export function fleetUrlOk(url: string): boolean {
 }
 
 export type Expect = { server: string; window: string; sessionId?: string };
+// id_conflict: a delivery id already used with another target or text; no_session: a delivery to a pane with no live
+// Claude Code session, that is no session file or its process gone (fleet clients §4.1); already_typed:
+// delivery.cancel of a delivery past `queued` (§4.3).
 export type ErrorCode = "bad_args" | "unknown_op" | "denied" | "no_pane" | "menu_open" | "no_input_box"
   | "draft_present" | "busy" | "name_taken" | "lane_conflict" | "too_large" | "timeout" | "node_offline" | "uncertain" | "internal"
-  | "updating" | "not_allowed";
+  | "updating" | "not_allowed" | "id_conflict" | "no_session" | "already_typed";
 export type Executed = "no" | "maybe";
 // Whether the side effect may have happened (§5.3): "no" is safe to retry. Only an answer that may have come after the
 // side effect started is "maybe".
@@ -58,21 +76,62 @@ export const ERROR_EXECUTED: Record<ErrorCode, Executed> = {
   bad_args: "no", unknown_op: "no", denied: "no", no_pane: "no", menu_open: "no", no_input_box: "no", draft_present: "no",
   busy: "no", name_taken: "no", lane_conflict: "no", too_large: "no", timeout: "no", node_offline: "no", uncertain: "maybe", internal: "maybe",
   updating: "no", not_allowed: "no",
+  id_conflict: "no", no_session: "no", already_typed: "no",
 };
 export type OpError = { code: ErrorCode; executed: Executed; message: string };
 
+// A Claude Code session's state, as its session file (~/.claude/sessions/<pid>.json) says it: Claude Code's own value,
+// undocumented (seen on 2.1.293 and 2.1.294: busy, idle, waiting, shell). "shell": Claude Code is alive and running a
+// shell command (seen at its prompt with a background shell), not exited. A live session takes deliveries whatever its
+// status (§4.1).
+export const SESSION_STATUSES = ["busy", "idle", "waiting", "shell"] as const;
+export type SessionStatus = (typeof SESSION_STATUSES)[number];
 // `title`: the pane's terminal title (tmux pane_title); `sessionName`: the name Claude Code's session registry gives the
-// session running there (what legacy shows as the session's name).
-export type Pane = { workerId: string; window: string; cwd: string; sessionId?: string; sessionName?: string; title?: string; claudeVersion?: string };
+// session running there (what legacy shows as the session's name). `status`: that session's state (null without a
+// session); `pid`: the process its session file names, Claude Code's own, as `lanes --json` reports it and claude-pool
+// reads it (null without a session). `topic` and `lastPrompt`: the session's latest `ai-title` and `last-prompt`
+// transcript entries (Claude Code cuts the prompt to about 200 characters), which the agent keeps from its transcript
+// reads; kira shows `title || lastPrompt` and the title (fleet clients §5).
+export type Pane = { workerId: string; window: string; cwd: string; sessionId?: string; sessionName?: string; title?: string;
+  claudeVersion?: string; status: SessionStatus | null; pid: number | null; topic?: string; lastPrompt?: string };
+
+// Keys a client may press by name (pane.keys `names`, §5): tmux key names (tmux(1), "KEY BINDINGS"), an allow-list.
+// None starts with "-" or ends in ";", so none reads as a flag or a command separator on tmux's command line.
+export const KEY_NAMES = ["Enter", "Escape", "Tab", "BSpace", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown",
+  "C-c", "C-d", "C-u", "Space", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+  "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"] as const;
+export type KeyName = (typeof KEY_NAMES)[number];
+
+// The delivery queue (fleet clients §4). A delivery's `target` as the node keeps it: a lane name (sticky or bound to
+// the session it had when queued) or a worker ID. Times are the node's clock.
+export type DeliveryState = "queued" | "typed" | "held" | "delivered" | "uncertain" | "given_up";
+// The states that end a delivery (§4.3): it is never moved again, and nothing more of it is typed. The one definition
+// the fleet, the node and every client read (review #13).
+export const FINAL_DELIVERY_STATES: ReadonlySet<DeliveryState> = new Set<DeliveryState>(["delivered", "uncertain", "given_up"]);
+// unavailable: the node couldn't read or type the pane just now (tmux didn't answer, a capture failed); it tries again.
+export type WaitingReason = "menu_open" | "draft_present" | "no_input_box" | "busy" | "no_pane" | "no_session" | "earlier" | "unavailable";
+export type GiveUpReason = "expired" | "cancelled" | "gone" | "refused";
+// What the fleet asks a node to queue: a lane name with whether it is sticky (the fleet's stickyLanes), or a worker ID.
+export type DeliveryTarget = { lane: string; sticky: boolean } | { workerId: string };
+export type Delivery = {
+  id: string; node: string; target: { lane: string } | { workerId: string };
+  state: DeliveryState; queuedAt: number; notAfter: number;
+  waiting?: { reason: WaitingReason; since: number };
+  sessionId?: string;                                                  // bound (a non-sticky name) or typed into
+  typedAt?: number; deliveredAt?: number;
+  why?: GiveUpReason; note?: string;                                   // note: e.g. "typed, never seen taken"
+};
+
 export type OpName = "inventory.get" | "pane.captureMany" | "pane.frame" | "pane.keys" | "pane.send" | "op.status"
   | "transcript.size" | "transcript.read" | "transcript.locate" | "file.stat" | "file.get" | "file.put"
-  | "lane.start" | "lane.stop" | "worktree.list" | "worktree.add" | "job.cancel" | "job.notice" | "job.noticeResult"
+  | "lane.start" | "lane.stop" | "worktree.list" | "worktree.add" | "pane.capture" | "lane.deliver" | "delivery.cancel"
+  | "job.cancel" | "job.notice" | "job.noticeResult"
   | "connections.priority" | "connections.role" | "connections.revoke" | "connections.narrow";
 export type OpArgs = {
   "inventory.get": Record<string, never>;
   "pane.captureMany": { workerIds: string[] };
   "pane.frame": { workerId: string };
-  "pane.keys": { workerId: string; data: string; expect: Expect };
+  "pane.keys": { workerId: string; data?: string; names?: KeyName[]; expect: Expect };   // exactly one of data and names
   "pane.send": { workerId: string; text: string; expect: Expect };
   "op.status": { key: string };
   "transcript.size": { sessionId: string };
@@ -81,10 +140,13 @@ export type OpArgs = {
   "file.stat": { path?: string; ref?: string };
   "file.get": { path?: string; ref?: string; offset: number; max: number };
   "file.put": { upload: string; offset: number; bytes: string /* base64 */; final: boolean; name: string };
-  "lane.start": { name: string; cwd: string; account?: string; resume?: string };
-  "lane.stop": { name: string };
+  "lane.start": { name: string; cwd: string; account?: string; resume?: string; prompt?: string };
+  "lane.stop": { name: string; mode?: "exit" | "kill" };
   "worktree.list": { repo: string };
   "worktree.add": { repo: string; name: string; base: string };
+  "pane.capture": { workerId: string; lines: number; attributes?: boolean; join?: boolean };   // join: tmux -J, default true
+  "lane.deliver": { id: string; target: DeliveryTarget; text: string; ttlMs?: number };
+  "delivery.cancel": { id: string };
   // The id, and the token whose lane owns it. No command.
   "job.cancel": { id: string; token: string };
   // One notice id, the lane that types it, and the text that lane stores. No command.
@@ -109,10 +171,13 @@ export type OpResult = {
   "file.stat": { size: number; mtime: number };
   "file.get": { bytes: string; size: number; eof: boolean };
   "file.put": { path: string | null };
-  "lane.start": { workerId: string };
+  "lane.start": { workerId: string; waiting?: "trust"; prompt?: string /* the first prompt's delivery id */ };
   "lane.stop": { ok: true };
   "worktree.list": { worktrees: { path: string; branch: string | null }[] };
   "worktree.add": { path: string };
+  "pane.capture": { text: string | null; truncated: boolean };
+  "lane.deliver": { delivery: Delivery };
+  "delivery.cancel": { delivery: Delivery };
   "job.cancel": { ok: true };
   "job.notice": { ok: true };
   "job.noticeResult": { ok: true };
@@ -122,6 +187,8 @@ export type OpResult = {
   "connections.narrow": { ok: true };
 };
 // Ops with a side effect, which carry a caller's idempotency key (§5.3). Keystrokes carry none: they are never retried.
+// Nor do lane.deliver and delivery.cancel: a delivery's id is its idempotency (fleet clients §4.1), and its typing runs
+// inside the agent under the id as a done key (§4.3), a retype under `${id}#2`.
 export const KEYED_OPS: ReadonlySet<OpName> = new Set<OpName>([
   "pane.send", "file.put", "lane.start", "lane.stop", "worktree.add", "job.notice",
   "connections.priority", "connections.role", "connections.revoke", "connections.narrow",
@@ -132,15 +199,37 @@ export const STEP_UP_OPS: ReadonlySet<OpName> = new Set<OpName>(["connections.pr
 export type Health = { memTotal: number; memAvailable: number; psiSome10: number | null; psiFull10: number | null;
   diskFreeHome: number; load1: number; tmuxOk: boolean; wallClock: number; spoolDepth: number; drops: number;
   jobs?: string };
-export type HookEvent = { streamId: string; seq: number; at: number; path: "/cc" | "/sl" | "/hook/stop" | "/hook/failure" | "/notify" | "/file";
+// "/lane": a lane state event the node made from its session state (fleet clients §7), carried and replayed like a hook.
+// Its body: { event: "needs_input" | "answered"; sessionId: string | null; question?: string }.
+export type HookEvent = { streamId: string; seq: number; at: number;
+  path: "/cc" | "/sl" | "/hook/stop" | "/hook/failure" | "/notify" | "/file" | "/lane";
   node: string; window: string | null; late?: true; body: unknown };
+
+// A lane event (fleet clients §7), built by the fleet per node and window from the hooks and each node's session state.
+// `seq` is the fleet's own (lane_events), so a client reads on with GET /v1/lane-events?since=<seq>.
+export type LaneEventName = "finished" | "needs_input" | "answered" | "stop_failure";
+export type LaneEvent = { v: 1; t: "lane"; seq: number; event: LaneEventName; node: string;
+  window: string | null; lane: string | null; sessionId?: string; at: number;
+  status?: "done" | "blocked" | "needs_decision" | null; firstLine?: string; bg?: number; crons?: number; question?: string; error?: string };
 
 // What the fleet service raises for the owner (spec §5.2, §5.4, §5.6, §7, §8): kept as audit rows, served oldest first by
 // the client API's GET /v1/alerts and sent as the "alert" event. `detail` is per kind (plan Contracts, "Alerts").
+// delivery_waiting: a delivery still queued, typed or held after 2, 15 and 60 minutes (fleet clients §4.5);
+// subscriber_lagging: a subscriber's oldest undelivered event is older than 60 s (§6).
 export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter", "backlog_full", "unrouted_hook",
-  "job_failed", "job_unnoticed", "connection"] as const;
+  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type Alert = { id: number; at: number; node: string | null; kind: AlertKind; detail: Record<string, unknown> };
+// The alerts the app pushes (the owner, 2026-10-12): a node's key may be stolen (a new source, a second instance), events
+// are lost or piling up for a subscriber, or a message has waited a quarter of an hour (2 minutes is in-app only). The
+// hub's push and the app's marking both read this one rule.
+export function urgentAlert(a: { kind: string; detail: Record<string, unknown> }): boolean {
+  switch (a.kind) {
+    case "source_changed": case "instance_conflict": case "dead_letter": case "backlog_full": return true;
+    case "delivery_waiting": return typeof a.detail.minutes === "number" && a.detail.minutes >= 15;
+    default: return false;
+  }
+}
 
 // ---- the pieces messages are made of
 
@@ -187,11 +276,22 @@ const oneFile = (a: { path?: string; ref?: string }) => (a.path === undefined) !
 // component ending in ".lock"; not ending in "/" or "."; not "HEAD"; at most 200 characters. The agent asks git itself
 // as well (`git check-ref-format --branch`).
 const refName = () => z.string().check(z.regex(/^(?![-/.]|HEAD$)(?!.*(?:\.\.|\/\/|\/\.|@\{|\.lock(?:\/|$)))(?!.*[/.]$)[A-Za-z0-9._/-]{1,200}$/));
+// Text typed into a lane: a delivery's, a first prompt's (as pane.send's).
+const sendText = () => z.string().check(z.minLength(1), z.maxLength(LIMITS.maxSendText));
+// A delivery's id (fleet clients §4.1), chosen by its client and namespaced like a key ("hub:…", "kira:…"; the client a-z,
+// at most 16 letters, §8), at most 200 characters, no control character. It is also the done key its typing runs under,
+// and `${id}#2` the one retype's (§4.3), so an id never ends in "#" and digits: "hub:x#2" would meet the retype of "hub:x".
+const deliveryId = () => z.string().check(z.regex(/^[a-z]{1,16}:[^\p{Cc}]+$/u), z.maxLength(LIMITS.maxDeliveryId),
+  z.refine(id => !/#\d+$/.test(id), "an id that is not a retype's key"));
+// Exactly one kind of target: one naming both a lane and a worker ID fits neither branch (strict objects), so it is
+// refused, never read as one of the two.
+const DeliveryTargetSchema = z.union([z.strictObject({ lane: windowName(), sticky: z.boolean() }), z.strictObject({ workerId: workerId() })]);
 
 export const OP_NAMES = [
   "inventory.get", "pane.captureMany", "pane.frame", "pane.keys", "pane.send", "op.status",
   "transcript.size", "transcript.read", "transcript.locate", "file.stat", "file.get", "file.put",
-  "lane.start", "lane.stop", "worktree.list", "worktree.add", "job.cancel", "job.notice", "job.noticeResult",
+  "lane.start", "lane.stop", "worktree.list", "worktree.add", "pane.capture", "lane.deliver", "delivery.cancel",
+  "job.cancel", "job.notice", "job.noticeResult",
   "connections.priority", "connections.role", "connections.revoke", "connections.narrow",
 ] as const satisfies readonly OpName[];
 
@@ -200,7 +300,11 @@ export const OP_ARGS = {
   "inventory.get": z.record(z.string(), z.never()),
   "pane.captureMany": z.object({ workerIds: z.array(workerId()).check(z.maxLength(LIMITS.captureManyMax)) }),
   "pane.frame": z.object({ workerId: workerId() }),
-  "pane.keys": z.object({ workerId: workerId(), data: z.string().check(z.minLength(1), z.maxLength(LIMITS.maxKeys)), expect: ExpectSchema }),
+  // Literal text (data) or tmux key names (names), exactly one (fleet clients §5).
+  "pane.keys": z.object({
+    workerId: workerId(), data: z.exactOptional(z.string().check(z.minLength(1), z.maxLength(LIMITS.maxKeys))),
+    names: z.exactOptional(z.array(z.enum(KEY_NAMES)).check(z.minLength(1), z.maxLength(LIMITS.maxKeys))), expect: ExpectSchema,
+  }).check(z.refine(a => (a.data === undefined) !== (a.names === undefined), "data or names, exactly one")),
   "pane.send": z.object({ workerId: workerId(), text: z.string().check(z.minLength(1), z.maxLength(LIMITS.maxSendText)), expect: ExpectSchema }),
   "op.status": z.object({ key: opKey() }),
   "transcript.size": z.object({ sessionId: sessionId() }),
@@ -213,10 +317,20 @@ export const OP_ARGS = {
     upload: token(), offset: z.int().check(z.gte(0), z.lte(LIMITS.maxFileBytes)), bytes: base64Chunk(), final: z.boolean(),
     name: z.string().check(z.minLength(1), z.maxLength(255), z.refine(n => !n.includes("/") && !n.includes("\0"), "a file name")),
   }),
-  "lane.start": z.object({ name: windowName(), cwd: absolutePath(), account: z.exactOptional(account()), resume: z.exactOptional(z.uuid()) }),
-  "lane.stop": z.object({ name: windowName() }),
+  "lane.start": z.object({ name: windowName(), cwd: absolutePath(), account: z.exactOptional(account()), resume: z.exactOptional(z.uuid()),
+    prompt: z.exactOptional(sendText()) }),
+  "lane.stop": z.object({ name: windowName(), mode: z.exactOptional(z.enum(["exit", "kill"])) }),
   "worktree.list": z.object({ repo: absolutePath() }),
   "worktree.add": z.object({ repo: absolutePath(), name: refName(), base: refName() }),
+  "pane.capture": z.object({
+    workerId: workerId(), lines: z.int().check(z.gte(1), z.lte(LIMITS.captureMaxLines)), attributes: z.exactOptional(z.boolean()), join: z.exactOptional(z.boolean()),
+  }),
+  // ttlMs, never a clock time: the node turns it into notAfter on its own clock (Review Focus 3). At most the 7 days a
+  // final delivery is kept.
+  "lane.deliver": z.object({
+    id: deliveryId(), target: DeliveryTargetSchema, text: sendText(), ttlMs: z.exactOptional(z.int().check(z.gte(1), z.lte(LIMITS.deliveryKeepMs))),
+  }),
+  "delivery.cancel": z.object({ id: deliveryId() }),
   "job.cancel": z.object({ id: z.string().check(z.regex(JOB_ID)), token: z.string().check(z.minLength(1), z.maxLength(512)) }),
   "job.notice": z.object({
     id: z.string().check(z.minLength(1), z.maxLength(240), z.regex(/^[A-Za-z0-9:_-]+$/)),
@@ -232,8 +346,27 @@ export const OP_ARGS = {
 const PaneSchema = z.object({
   workerId: workerId(), window: text(), cwd: text(),
   sessionId: z.exactOptional(text()), sessionName: z.exactOptional(text()), title: z.exactOptional(text()), claudeVersion: z.exactOptional(text()),
+  topic: z.exactOptional(text()), lastPrompt: z.exactOptional(text()),
+  // An agent from before session state sends neither, and Claude Code may one day write a status this protocol doesn't
+  // know: either reads as null, never as a malformed inventory. A default "short-circuit[s] the parsing process. If the
+  // input is undefined, the default value is eagerly returned"; any other value goes through the transform (zod 4.6.5,
+  // https://zod.dev/api#defaults and #transforms, read 2026-10-08).
+  status: z._default(z.pipe(z.unknown(), z.transform((s): SessionStatus | null => ((SESSION_STATUSES as readonly unknown[]).includes(s) ? s as SessionStatus : null))), null),
+  pid: z._default(z.pipe(z.unknown(), z.transform((p): number | null => (typeof p === "number" && Number.isSafeInteger(p) && p >= 1 ? p : null))), null),
 });
 export const SEND_PROBLEMS = ["menu_open", "draft_present", "no_input_box", "not_submitted", "no_pane", "busy"] as const;
+
+const DELIVERY_STATES = ["queued", "typed", "held", "delivered", "uncertain", "given_up"] as const satisfies readonly DeliveryState[];
+const WAITING_REASONS = ["menu_open", "draft_present", "no_input_box", "busy", "no_pane", "no_session", "earlier", "unavailable"] as const satisfies readonly WaitingReason[];
+const GIVE_UP_REASONS = ["expired", "cancelled", "gone", "refused"] as const satisfies readonly GiveUpReason[];
+// A delivery as its node reports it (agent → fleet: shape), and as the fleet passes it on to clients (§4.4, §8).
+export const DeliverySchema = z.object({
+  id: label(), node: nodeName(), target: z.union([z.object({ lane: text() }), z.object({ workerId: workerId() })]),
+  state: z.enum(DELIVERY_STATES), queuedAt: z.number(), notAfter: z.number(),
+  waiting: z.exactOptional(z.object({ reason: z.enum(WAITING_REASONS), since: z.number() })),
+  sessionId: z.exactOptional(text()), typedAt: z.exactOptional(z.number()), deliveredAt: z.exactOptional(z.number()),
+  why: z.exactOptional(z.enum(GIVE_UP_REASONS)), note: z.exactOptional(label()),
+});
 
 // Each op's result, as the fleet accepts it (agent → fleet: shape).
 export const OP_RESULTS = {
@@ -251,10 +384,13 @@ export const OP_RESULTS = {
   "file.stat": z.object({ size: count(), mtime: z.number() }),
   "file.get": z.object({ bytes: base64Chunk(), size: count(), eof: z.boolean() }),
   "file.put": z.object({ path: z.nullable(text()) }),
-  "lane.start": z.object({ workerId: workerId() }),
+  "lane.start": z.object({ workerId: workerId(), waiting: z.exactOptional(z.literal("trust")), prompt: z.exactOptional(label()) }),
   "lane.stop": z.object({ ok: z.literal(true) }),
   "worktree.list": z.object({ worktrees: z.array(z.object({ path: text(), branch: z.nullable(text()) })) }),
   "worktree.add": z.object({ path: text() }),
+  "pane.capture": z.object({ text: z.nullable(text()), truncated: z.boolean() }),
+  "lane.deliver": z.object({ delivery: DeliverySchema }),
+  "delivery.cancel": z.object({ delivery: DeliverySchema }),
   "job.cancel": z.object({ ok: z.literal(true) }),
   "job.notice": z.object({ ok: z.literal(true) }),
   "job.noticeResult": z.object({ ok: z.literal(true) }),
@@ -283,8 +419,21 @@ const HealthSchema = z.object({
 });
 const HookEventSchema = z.object({
   streamId: z.uuid(), seq: z.int().check(z.gte(1)), at: z.number(),
-  path: z.enum(["/cc", "/sl", "/hook/stop", "/hook/failure", "/notify", "/file"]),
+  path: z.enum(["/cc", "/sl", "/hook/stop", "/hook/failure", "/notify", "/file", "/lane"]),
   node: nodeName(), window: z.nullable(text()), late: z.exactOptional(z.literal(true)), body: z.unknown(),
+});
+
+// The body of a "/lane" hook event: a lane state event the node made from its session's status (fleet clients §7).
+export type LaneStateBody = { event: "needs_input" | "answered"; sessionId: string | null; question?: string };
+export const LaneStateBodySchema = z.object({
+  event: z.enum(["needs_input", "answered"]), sessionId: z.nullable(text()), question: z.exactOptional(label()),
+});
+// A lane event as the fleet publishes and serves it (§7, §8).
+export const LaneEventSchema = z.object({
+  v, t: z.literal("lane"), seq: z.int().check(z.gte(1)), event: z.enum(["finished", "needs_input", "answered", "stop_failure"]),
+  node: nodeName(), window: z.nullable(text()), lane: z.nullable(text()), sessionId: z.exactOptional(text()), at: z.number(),
+  status: z.exactOptional(z.nullable(z.enum(["done", "blocked", "needs_decision"]))), firstLine: z.exactOptional(text()),
+  bg: z.exactOptional(count()), crons: z.exactOptional(count()), question: z.exactOptional(text()), error: z.exactOptional(text()),
 });
 
 // ---- messages, agent → fleet
@@ -313,6 +462,9 @@ export const Res = z.discriminatedUnion("ok", [
 export const EvHook = z.object({ v, t: z.literal("ev.hook"), event: HookEventSchema });
 export const EvInventory = z.object({ v, t: z.literal("ev.inventory"), panes: z.array(PaneSchema), invVersion: count() });
 export const EvHealth = z.object({ v, t: z.literal("ev.health"), health: HealthSchema });
+// The latest state of one delivery (fleet clients §4.4): on every change, and after every (re)connect for each one not
+// final and the final ones of the last hour. Latest wins, as the inventory.
+export const EvDelivery = z.object({ v, t: z.literal("ev.delivery"), delivery: DeliverySchema });
 
 // ---- messages, fleet → agent
 
@@ -332,13 +484,16 @@ export const Req = z.object({
 // Hook events up to `seq` of `streamId` are stored (cumulative).
 export const Ack = z.object({ v, t: z.literal("ack"), streamId: z.uuid(), seq: count() });
 
-export const AgentMessage = z.discriminatedUnion("t", [Join, Hello, Proof, Res, EvHook, EvInventory, EvHealth, EvJob]);
+export const AgentMessage = z.discriminatedUnion("t", [Join, Hello, Proof, Res, EvHook, EvInventory, EvHealth, EvDelivery, EvJob]);
 export const FleetMessage = z.discriminatedUnion("t", [Challenge, Welcome, Req, Ack]);
 export type AgentMessage = z.output<typeof AgentMessage>;
 export type FleetMessage = z.output<typeof FleetMessage>;
 // The same messages by `t`, for decode() (decode.ts): a `t` nobody knows is told apart from a malformed message, so
 // it is answered with an error (§5), never ignored.
-export const AgentFrames = { join: Join, hello: Hello, proof: Proof, res: Res, "ev.hook": EvHook, "ev.inventory": EvInventory, "ev.health": EvHealth, job: EvJob };
+export const AgentFrames = {
+  join: Join, hello: Hello, proof: Proof, res: Res, "ev.hook": EvHook, "ev.inventory": EvInventory, "ev.health": EvHealth, "ev.delivery": EvDelivery,
+  job: EvJob,
+};
 export const FleetFrames = { challenge: Challenge, welcome: Welcome, req: Req, ack: Ack };
 
 // ---- the handshake (§5.2): what each side signs. The prefix keeps one side's signature from passing as the other's.
@@ -420,3 +575,8 @@ check<Same<z.output<typeof OpErrorSchema>, OpError>>(true);
 check<Same<z.output<typeof HealthSchema>, Health>>(true);
 check<Same<z.output<typeof HookEventSchema>, HookEvent>>(true);
 check<Same<z.output<typeof JoinStringSchema>, JoinString>>(true);
+check<Same<z.output<typeof DeliverySchema>, Delivery>>(true);
+check<Same<z.output<typeof DeliveryTargetSchema>, DeliveryTarget>>(true);
+check<Same<z.output<typeof LaneEventSchema>, LaneEvent>>(true);
+check<Same<z.output<typeof LaneStateBodySchema>, LaneStateBody>>(true);
+check<Same<(typeof SESSION_STATUSES)[number], SessionStatus>>(true);

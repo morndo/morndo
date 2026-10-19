@@ -16,16 +16,18 @@ import type { Config } from "../config.ts";
 import type { HubIdentity } from "./identity.ts";
 import type { AccessService, Authenticated } from "../application/access-service.ts";
 import type { ObservationService, OlderResult } from "../application/observation-service.ts";
-import type { SteeringService } from "../application/steering-service.ts";
+import type { SendResult, SteeringService } from "../application/steering-service.ts";
 import type { EscalationService } from "../application/escalation-service.ts";
 import type { RemoteService, Viewer } from "../application/remote-service.ts";
 import type { ReadingService } from "../application/reading-service.ts";
 import type { NotificationService } from "../application/notification-service.ts";
+import { queuedCommand, type ManagerQueue } from "../application/manager-queue.ts";
 import type { EnginesService } from "../application/engines-service.ts";
 import type { ConnectionsPageService } from "../application/connections-page.ts";
 import type { BoardService } from "../application/board-service.ts";
 import type { AgentAccess } from "../application/agent-access.ts";
 import type { JobsService } from "../application/jobs-service.ts";
+import type { AlertsService } from "../application/alerts-service.ts";
 import type { UsageService } from "../application/usage-service.ts";
 import type { TranscriptionService } from "../application/transcription-service.ts";
 import type { BriefService } from "../application/brief-service.ts";
@@ -35,7 +37,9 @@ import { servingHeaders, type Files } from "./files.ts";
 import type { Inbox } from "./uploads.ts";
 import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
-  AnswerBody, BoardActionBody, BoardCreateBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, UsageReportBody, IdentityProveBody, LinkDecisionBody, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PushSubscriptionBody, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER,
+  AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
+  LinkDecisionBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UsageReportBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -207,7 +211,9 @@ export function startHttp(p: {
   connections?: ConnectionsPageService | null;                              // ADR-0018: LLM connections; null: no home set
   board?: { service: BoardService; agents: AgentAccess } | null;            // ADR-0015: the board; null: off
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
+  queue?: ManagerQueue | null;                                              // the manager's delivery queue (fleet-clients §9.1); null without a fleet
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
+  alerts?: AlertsService | null;                                            // the fleet's alerts in the app; null: no fleet
   transcription?: TranscriptionService | null;                              // ADR-0021; null: the plugin is not wired
   briefs?: BriefService | null;                                             // ADR-0023: decision briefs; null: off
 }) {
@@ -288,6 +294,13 @@ export function startHttp(p: {
   const setCookie = (secret: string) =>
     `${COOKIE}=${secret}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(LONGEST_SESSION_MS / 1000)}`;   // the hub enforces the policy's real limits
   const clearCookie = `${COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`;
+  // A send's answer, to a worker or to the manager by its role: a repeat of one already typed or queued is 200 with where
+  // it stands; a refusal is 403 (a fresh passkey first), 404 (no such window) or 409.
+  const sent = (res: ServerResponse, r: SendResult) => {
+    if (r.ok) return json(res, 200, r);
+    if (r.problem === "duplicate") return json(res, 200, { error: "duplicate", ok: true, at: r.at, ...(r.delivery ? { delivery: r.delivery } : {}) });
+    return json(res, r.problem === "step_up" ? 403 : r.problem === "no_pane" ? 404 : 409, { error: r.problem });
+  };
 
   const deviceView = (a: Authenticated | null) => (e: ReturnType<AccessService["devices"]>[number]) => ({
     id: e.id, name: e.name, pairedAt: e.pairedAt, lastSeenAt: e.lastSeenAt, revokedAt: e.revokedAt, current: a?.endpoint.id === e.id,
@@ -541,11 +554,25 @@ export function startHttp(p: {
     if (sendTo !== null && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody);
-      const r = await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.retry === true, body.again === true);
+      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true));
+    }
+    // The manager by its role: its window, or, while it has none, the fleet's queue for its sticky lane (steering).
+    if (path === "/api/manager/send" && method === "POST") {
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, SendBody);
+      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true));
+    }
+    // The principal's cancel of one of his messages to the manager still waiting in the fleet's queue (ruling 83; spec
+    // §9.1): 200 with where it stands now (given up, cancelled), 409 only when it is too late (already typed), 404 for
+    // no such message of his. A refusal that is not too late (the node offline, a timeout, busy) is 503: the app keeps
+    // Cancel, and a later try can still withdraw it.
+    if (path === "/api/manager/cancel" && method === "POST") {
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, CancelBody);
+      const r = await steering.cancel(a, body.requestId);
       if (r.ok) return json(res, 200, r);
-      if (r.problem === "unavailable") return json(res, 503, { error: r.problem });
-      if (r.problem === "duplicate") return json(res, 200, { error: "duplicate", ok: true, at: r.at, ...(r.queued ? { queued: true } : {}), ...(r.inbox !== undefined ? { inbox: r.inbox, reason: r.reason ?? null } : {}) });
-      return json(res, r.problem === "step_up" ? 403 : r.problem === "no_pane" ? 404 : 409, { error: r.problem });
+      const status = r.problem === "unknown" ? 404 : r.problem === "already_typed" ? 409 : 503;
+      return json(res, status, { error: r.problem });
     }
     // A file an agent sent or the principal attached: the hub's copy, by id only (files.ts), never as a page of this origin.
     const file = /^\/api\/files\/([0-9a-f]{32})$/.exec(path);
@@ -793,7 +820,13 @@ export function startHttp(p: {
       const unsubscribeBoard = escalations.subscribe(board => send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id, board) }));
       const unsubscribeTasks = p.board?.service.subscribe(b => send({ t: "board", ...b })) ?? (() => false);
       const unsubscribeUsage = p.usage?.subscribe(v => send({ t: "usage", ...v })) ?? (() => false);
+      // Where this device's messages to the manager stand in the fleet's queue (fleet-clients §9.1): each change, by
+      // request id; never another device's.
+      const unsubscribeQueue = p.queue?.subscribe(c => {
+        if (c.row.kind === "command" && c.row.endpointId === conn.auth.endpoint.id) send({ t: "deliveries", items: [queuedCommand(c.row, c.view)] });
+      }) ?? (() => false);
       const unsubscribeJobs = p.jobs?.subscribe(v => send({ t: "jobs", ...v })) ?? (() => false);
+      const unsubscribeAlerts = p.alerts?.subscribe(items => send({ t: "alerts", items })) ?? (() => false);
       // Older pages, one at a time per connection (fleet core §3.1): each waits for the one before it.
       let olderDone: Promise<void> = Promise.resolve();
       // Read marks and mute (phase D): every change, from any device, to every feed.
@@ -802,7 +835,7 @@ export function startHttp(p: {
       // without a listener that emit would end the hub. Logged without the payload.
       ws.on("error", e => log.warn(`feed socket: ${e.message}`));
       ws.on("pong", () => { conn.alive = true; });
-      ws.on("close", () => { conns.delete(conn); unsubscribe(); unsubscribeBoard(); unsubscribeTasks(); unsubscribeUsage(); unsubscribeJobs(); unsubscribeReading(); p.push?.notifications.left(conn.id); p.presence?.left(conn.id); });
+      ws.on("close", () => { conns.delete(conn); unsubscribe(); unsubscribeBoard(); unsubscribeTasks(); unsubscribeUsage(); unsubscribeJobs(); unsubscribeAlerts(); unsubscribeQueue(); unsubscribeReading(); p.push?.notifications.left(conn.id); p.presence?.left(conn.id); });
       // Every frame is decoded (ADR-0008, A2): malformed closes with 1003, a type this hub doesn't know is ignored.
       ws.on("message", raw => {
         if (!buckets.feedFrames.take(conn.id).ok) return ws.close(1008, "too many messages");
@@ -832,6 +865,9 @@ export function startHttp(p: {
             send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id) });
             if (p.board) send({ t: "board", ...p.board.service.view() });   // ADR-0015: whole, after every hello
             if (p.usage) send({ t: "usage", ...p.usage.view() });           // ADR-0016: every account, after every hello
+            if (p.queue) send({ t: "deliveries", items: p.queue.commandsOf(conn.auth.endpoint.id) });   // all of the last day
+            send({ t: "manager", queue: steering.managerQueue });           // whether a message waits for it while it has no window
+            if (p.alerts) send({ t: "alerts", ...p.alerts.view() });        // the fleet's latest alerts, after every hello
             if (p.jobs) send({ t: "jobs", ...p.jobs.view() });               // the fleet mirror, after every hello
             if (p.reading) send(p.reading.state());           // all marks and mutes: they may have moved while away
             if (p.reading) send({ t: "caught_up", at: p.reading.caughtUpAt() });   // ADR-0009, C7

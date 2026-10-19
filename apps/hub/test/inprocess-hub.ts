@@ -15,6 +15,7 @@ import { uploadInbox } from "../src/adapters/uploads.ts";
 import { AccessService } from "../src/application/access-service.ts";
 import { ObservationService } from "../src/application/observation-service.ts";
 import { SteeringService } from "../src/application/steering-service.ts";
+import type { AlertsService } from "../src/application/alerts-service.ts";
 import { EscalationService, type Watch } from "../src/application/escalation-service.ts";
 import { BriefService } from "../src/application/brief-service.ts";
 import { RemoteService } from "../src/application/remote-service.ts";
@@ -30,10 +31,9 @@ import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
 import { fileOnDisk, TranscriptionService } from "../src/application/transcription-service.ts";
 import type { LedgerRead } from "../src/adapters/ledger.ts";
-import type { ManagerInbox } from "../src/adapters/manager-inbox.ts";
-import { managerInbox } from "../src/adapters/manager-inbox.ts";
 import type { SendOutcome } from "../src/application/ports.ts";
 import type { Config } from "../src/config.ts";
+import type { ManagerQueue } from "../src/application/manager-queue.ts";
 
 export const ORIGIN = "https://hub.example.test";
 
@@ -56,13 +56,15 @@ export type InProcessHub = {
 // `now`: the hub's clock for access and rate limits (a test moves it to expire tokens, requests and verifications).
 // `observation`: the service the feed reads from, when a test needs its own (default: one over an empty tmux).
 // `engines`: the engine layer's CLI to run (a test's fake) and its environment; absent, the Engines page is off.
+// `queue`: the manager's delivery queue, made on the hub's own store (fleet-clients §9.1; default none). This hub has no
+// manager pane: a test puts deliveries on the queue itself, and the feed and the cancel route follow them.
+// `watch`, `ledger`, `send`: what the escalation service sees and how it types an answer (a test's own; default none).
 export async function startInProcessHub(o: {
   limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService;
   engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
   locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
-  watch?: Watch; ledger?: (() => LedgerRead) | null; inbox?: ManagerInbox | null;
-  /** A manager inbox with a live deliverer, in the temp dir, on the same clock. */
-  withInbox?: boolean;
+  queue?: (store: Store) => ManagerQueue; manager?: string; typed?: string[]; alerts?: AlertsService;
+  watch?: Watch; ledger?: (() => LedgerRead) | null;
   send?: (pane: string, text: string, key: string) => Promise<SendOutcome>;
 } = {}): Promise<InProcessHub> {
   const dir = mkdtempSync(join(tmpdir(), "morndo-inproc-"));
@@ -74,7 +76,7 @@ export async function startInProcessHub(o: {
   const config: Config = {
     dataDir: dir, port: 0, origin: ORIGIN, rpId: "hub.example.test", rpName: "Morndo",
     requireProxyIdentity: false, principalLogin: null, tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: web, officeName: null, pollMs: 1000, quietAfterMs: 1000,
-    managerWindow: "manager", ledgerPath: null, paneLock: null, managerInbox: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
+    managerWindow: "manager", ledgerPath: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
   };
   let n = 0;
   const passkeys: Passkeys = {
@@ -84,21 +86,14 @@ export async function startInProcessHub(o: {
     verifyAuthentication: async () => ({ userVerified: true, newCounter: ++n }),
   };
   const access = new AccessService(store, passkeys, o.now);
-  const tmux = { listWorkers: async () => [], capture: async () => null, captureMany: async () => new Map<string, string | null>(), send: async () => ({ problem: null, typedAt: Date.now() }) };
+  // `manager`: the manager's window, if it has one; `typed`: each pane a send typed into, in order.
+  const tmux = { listWorkers: async () => [], capture: async () => null, captureMany: async () => new Map<string, string | null>(), send: async (pane: string) => { o.typed?.push(pane); return { problem: null, typedAt: Date.now() }; } };
   const watch: Watch = o.watch ?? { workers: () => [], history: () => [], openQuestions: () => [], screen: () => undefined };
-  let managerQueue: ManagerInbox | null = o.inbox ?? null;
-  if (o.withInbox) {
-    const inboxDir = join(dir, "manager-inbox");
-    mkdirSync(inboxDir, { recursive: true });
-    writeFileSync(join(inboxDir, "deliverer.json"), JSON.stringify({ pid: 1, at: (o.now ?? Date.now)() }));
-    managerQueue = managerInbox(inboxDir, o.now ?? Date.now);
-  }
   const filed: { briefs: BriefService | null } = { briefs: null };
   const escalations = new EscalationService({
     watch, ledger: o.ledger === undefined ? null : o.ledger, store, managerName: "manager",
     send: o.send ?? (async () => ({ problem: null, typedAt: 0 })),
     ...(o.now ? { now: o.now } : {}),
-    inbox: managerQueue,
     briefs: () => filed.briefs?.sightings() ?? [],
   });
   const briefs = new BriefService({
@@ -124,6 +119,7 @@ export async function startInProcessHub(o: {
   const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name) });
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}) });
+  const queue = o.queue ? o.queue(store) : null;
   const jobs = new JobsService({ store, board, ...(o.now ? { now: o.now } : {}) });
   // Wired as production main.ts wires it: the service is always constructed, with the plugin's answer when there is
   // none (the routes must answer for that shape, not only for a null port).
@@ -142,7 +138,9 @@ export async function startInProcessHub(o: {
   await transcription.start();
   const http = startHttp({
     config, identity: loadOrCreateIdentity(dir), access, observation: o.observation ?? new ObservationService(tmux, 1000),
-    steering: new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox), escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now),
+    steering: new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox, undefined, undefined, undefined, null,
+      queue ? { queue, isManager: id => id === o.manager } : null, () => o.manager ?? null),
+    escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now), queue, ...(o.alerts ? { alerts: o.alerts } : {}),
     push: { publicKey: vapid.publicKey, notifications },
     board: { service: board, agents }, usage, jobs, briefs,
     engines: o.engines ? new EnginesService({ cli: enginesCli(o.engines.bin, o.engines.env), store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}) }) : null,

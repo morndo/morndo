@@ -41,7 +41,8 @@ describe("two windows of one name on one node", () => {
       return l?.conflict ? l : null;
     }, 15_000);
     expect(lane).toMatchObject({ node: "n1", workerId: null, conflict: true });
-    const hub = await startHub(fleet);
+    // The direct path, which the hub still types with the switch off (step 2's rollback) and for every other lane.
+    const hub = await startHub(fleet, { managerQueue: false });
     const feed = await hub.feed();
     const both = await until("both claude windows on the hub", () => {
       const ws = feed.workers().filter(w => w.name === "claude");
@@ -72,7 +73,8 @@ describe("a manager window on each of two nodes", () => {
     await Promise.all([n1.run(), n2.run()]);
     await Promise.all([n1.waitOnline(), n2.waitOnline()]);
     await until("manager in conflict", async () => (await fleet.client.lanes()).find(l => l.name === "manager")?.conflict === true, 15_000);
-    const hub = await startHub(fleet, { ledger: ledger() });
+    // The direct path, which the hub still types with the switch off (step 2's rollback) and for every other lane.
+    const hub = await startHub(fleet, { managerQueue: false, ledger: ledger() });
     const feed = await hub.feed();
     await until("both managers on the hub", () => feed.workers().filter(w => w.name === "manager").length === 2, 15_000);
     expect(await hub.answer("ny-1", "ship")).toMatchObject({ status: 409, body: { error: "lane_conflict" } });

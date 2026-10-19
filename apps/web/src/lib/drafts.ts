@@ -66,6 +66,10 @@ export class Drafts {
   }
 }
 
+// What stays in the box once a message went: what was typed while the passkey check before it was open (staging QA,
+// 2026-10-12: a second message typed then was wiped). Its text, if the box still starts with it, goes; the rest stays.
+export const leftAfterSend = (now: string, sent: string): string => (now.startsWith(sent) ? now.slice(sent.length).trimStart() : now);
+
 // This device's drafts, shared by every composer of the page.
 let shared: Drafts | null = null;
 export function deviceDrafts(): Drafts {

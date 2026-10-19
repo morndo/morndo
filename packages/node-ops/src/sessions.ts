@@ -7,6 +7,7 @@
 // stays in the hub.
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { SESSION_STATUSES, type SessionStatus } from "@morndo/protocol";
 import { processAlive } from "./pid.ts";
 
 // A field of a vendor file that should be text: itself, else the default (an object never becomes "[object Object]").
@@ -18,7 +19,11 @@ export const CHECKED_VERSION = "2.1.286";
 // a short printable token, else unknown. The file is Claude Code's, not ours, and one bad value must not keep a node offline.
 const VERSION = /^[\x21-\x7e]{1,64}$/;
 
-export type SessionInfo = { sessionId: string; name: string | null; pane: string; cwd: string; version: string | null; pid: number };
+// `pid`: the process the file is named for, Claude Code's own. `status`: the session's state as Claude Code writes it
+// (fleet clients §5; seen on 2.1.289 to 2.1.294: busy, idle, waiting, shell, the last while Claude Code runs a shell
+// command); null for a value the protocol doesn't know. A file whose process is gone is no session at all (byPane).
+export type SessionInfo = { sessionId: string; name: string | null; pane: string; cwd: string; version: string | null; pid: number; status: SessionStatus | null };
+const STATUSES = new Set<string>(SESSION_STATUSES);
 
 export function sessionRegistry(configDir: string) {
   const dir = join(configDir, "sessions");
@@ -42,6 +47,7 @@ export function sessionRegistry(configDir: string) {
         const info: SessionInfo = {
           sessionId: d.sessionId, name: typeof d.name === "string" ? d.name : null, pane, pid,
           cwd: text(d.cwd), version: typeof d.version === "string" && VERSION.test(d.version) ? d.version : null,
+          status: typeof d.status === "string" && STATUSES.has(d.status) ? d.status as SessionStatus : null,
         };
         if (!prev || Number(d.updatedAt ?? 0) > 0) out.set(pane, info);
       }

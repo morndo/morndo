@@ -1,6 +1,7 @@
 // How decisions are shown (ADR-0006 addendum "Decisions"): urgency, due labels, groups, and what each refusal means
 // in plain words. The rules themselves live in the domain and the hub; this only presents their results.
 import type { DecisionItem, LedgerState } from "@morndo/protocol";
+import { WAITING } from "../queue-words.ts";
 
 export type { DecisionItem, LedgerState };
 export type Board = { items: DecisionItem[]; ledger: LedgerState };
@@ -59,25 +60,15 @@ export function ago(t: number, now: number): string {
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
-// ADR-0010: a Decision for the manager waits in the manager's inbox until it reached the manager. Why it waits, in
-// words (the inbox's reasons; one this app doesn't know says nothing more than "queued").
-const INBOX_WAITS: Record<string, string> = {
-  menu: "a menu is open in the manager's terminal; it goes in once that's answered",
-  foreign_text: "the manager's input box has text that isn't from Morndo; it goes in once that's sent or cleared",
-  no_manager: "the manager isn't running right now; it goes in once it's back",
-  busy: "the manager is busy; it takes it when it gets to it",
-  lock: "another message is being typed into the manager right now",
-  unseen: "the manager's screen can't be read right now",
-  unconfirmed: "it was typed, but the manager hasn't shown it yet; the box owner has been told",
-  lost_in_queue: "it fell out of the manager's own queue; the box owner has been told",
-};
-export type DeliveryLine = { state: "queued"; why: string | null } | { state: "delivered"; at: number | null };
+// An answer for the manager in the fleet's delivery queue (E13; fleet-clients §9.1): queued (with why it waits, in words),
+// delivered (and when), or may have been delivered. Null for an answer that went straight in.
+export type DeliveryLine = { state: "queued"; why: string | null } | { state: "delivered"; at: number | null } | { state: "uncertain" };
 export function deliveryLine(d: DecisionItem): DeliveryLine | null {
   const del = d.decision?.delivery;
   if (!del) return null;
   if (del.state === "delivered") return { state: "delivered", at: del.at };
-  const reason = d.inbox?.reason ?? null;
-  return { state: "queued", why: reason ? INBOX_WAITS[reason] ?? null : null };
+  if (del.state === "uncertain") return { state: "uncertain" };
+  return { state: "queued", why: d.waiting ? WAITING[d.waiting] ?? null : null };
 }
 
 // A decision refused before it starts, in the words catch-up, Today and the phone sheet share (§6.3).

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeFileSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
-import { FleetClient } from "../../apps/hub/src/adapters/fleet-client.ts";
+import { FleetClient } from "../../packages/fleet-client/src/index.ts";
 import { fleetPorts } from "../../apps/hub/src/adapters/fleet-adapters.ts";
 import { LIMITS } from "../../packages/protocol/src/fleet.ts";
 import { fakeLane, joinAgent, paneOf, startFleet, stopAll, tmuxServer } from "../fleet-harness.ts";

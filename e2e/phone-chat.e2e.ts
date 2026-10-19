@@ -1,33 +1,24 @@
 // End-to-end checks of ADR-0011 (the phone as a chat app) at 390 px on a synthetic office with its own hub, in
 // Playwright's Chromium, both themes: the digest after a long absence and not after a short one (or a day on another
-// device), the chat list, the status view, a message to the manager (Queued, then Delivered, with a fake inbox), a
-// message to a lane (Delivered by the steering service), the offline queue, and the composer above the keyboard and the
-// home indicator. The inbox's deliverer is played by writing its state files, as e2e/inbox.e2e.ts does.
+// device), the chat list, the status view, a message to the manager and to a lane (typed by the steering service, then
+// Delivered), the offline queue, and the composer above the keyboard and the home indicator. This office has no fleet, so
+// no delivery queue: the manager's message is typed into its pane like any lane's. The queue's states in the chat
+// (Queued with why it waits, Cancel, Send again) are the unit tests' (apps/web/test/phone-chat.test.ts, outbox.test.ts).
 // Run: npm run build && node e2e/phone-chat.e2e.ts
-import { appendFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Page } from "playwright";
 import { assert, checks, outDir, pairedPage, startOffice } from "./harness.ts";
 import { contrastProblems } from "./contrast.ts";
 
 const OUT = outDir("phone-chat");
-const INBOX = join(OUT, "manager-inbox");
-const office = await startOffice("phonechat", { MORNDO_MANAGER_INBOX: INBOX, MORNDO_POLL_MS: "500" });
-mkdirSync(INBOX, { recursive: true });
-const beat = () => writeFileSync(join(INBOX, "deliverer.json"), JSON.stringify({ pid: 1, at: Date.now() }));
-beat();
-const beating = setInterval(beat, 10_000);
+const office = await startOffice("phonechat", { MORNDO_POLL_MS: "500" });
 const { tmux, panes, claudeDir, line } = office.office;
 const { check, watch, finish } = checks(OUT);
 const browser = await chromium.launch();
 let code = 1;
 const H = 3_600_000;
 
-const inbox = () => { try { return readdirSync(join(INBOX, "msg")).map(f => JSON.parse(readFileSync(join(INBOX, "msg", f), "utf8"))); } catch { return []; } };
-const deliverer = (key: string, state: Record<string, unknown>) => {
-  mkdirSync(join(INBOX, "state"), { recursive: true });
-  writeFileSync(join(INBOX, "state", `${key}.json`), JSON.stringify({ v: 1, key, attempts: 1, updatedAt: Date.now(), ...state }));
-};
 const echo = (who: string, id: string, text: string) =>
   appendFileSync(join(claudeDir, "projects", "-qa", `s-${who}.jsonl`), line({ type: "user", uuid: id, timestamp: new Date().toISOString(), origin: { kind: "human" }, message: { role: "user", content: text } }) + "\n");
 const screen = (w: string) => tmux("capture-pane", "-p", "-J", "-t", panes[w] ?? "", "-S", "-50");
@@ -128,7 +119,7 @@ try {
     await tapTab(page, "Chats");
   });
 
-  await check("a message to the manager: Queued in its inbox, then Delivered once it reached the manager", async () => {
+  await check("a message to the manager: typed into its pane (no fleet here), Delivered, and its echo ends it", async () => {
     await page.locator('[data-chat="manager"]').click();
     const convo = page.getByRole("region", { name: "Conversation with Manager" });
     await convo.locator(".day").first().waitFor();
@@ -136,14 +127,11 @@ try {
     await convo.getByRole("textbox", { name: "Message Manager" }).fill("Hold the release until the reviewer is done");
     await convo.getByRole("button", { name: "Send" }).click();
     const pending = convo.locator("[data-outbox]");
-    await until(async () => (await pending.getAttribute("data-delivery")) === "queued" && /Queued for the manager/.test(await pending.innerText()), 10_000, "queued for the manager");
-    const m = inbox().find(x => x.kind === "owner");
-    assert(m?.text === "Hold the release until the reviewer is done", `inbox: ${JSON.stringify(inbox())}`);
-    assert(!screen("manager").includes("Hold the release"), "the hub typed into the manager's pane");
-    await shot(page, "2-manager-chat-queued");
-    echo("manager", "phone-echo-1", `Hold the release until the reviewer is done ⟨m:${String(m.key).slice(0, 6)}⟩`);
-    deliverer(m.key, { status: "delivered", deliveredAt: Date.now() });
-    await until(async () => (await pending.count()) === 0, 10_000, "the queued entry ends with its echo");
+    await until(() => screen("manager").includes("Hold the release until the reviewer is done"), 10_000, "typed into the manager's pane");
+    await until(async () => (await pending.getAttribute("data-delivery")) === "delivered", 10_000, "delivered");
+    await shot(page, "2-manager-chat-typed");
+    echo("manager", "phone-echo-1", "Hold the release until the reviewer is done");
+    await until(async () => (await pending.count()) === 0, 10_000, "the entry ends with its echo");
     const last = convo.locator(".b.mine").last();
     assert(/Hold the release until the reviewer is done/.test(await last.innerText()) && !(await last.innerText()).includes("⟨m:"), "the delivered message");
     assert(await last.getByLabel("Delivered").count() === 1, "no Delivered mark on his message");
@@ -261,7 +249,7 @@ try {
     await sheet.getByRole("button", { name: "Done" }).click();
   });
 
-  await check("never good forever without its echo: a lane message not seen after 10 min warns; a manager message the inbox hasn't delivered in 60 min says so, never Not sent while the inbox holds it; Check never doubles it; a draft survives leaving the chat", async () => {
+  await check("never good forever without its echo: a lane message not seen after 10 min warns; a draft survives leaving the chat", async () => {
     // A second phone on a fake clock (Playwright's clock): the page's time jumps, the hub's doesn't.
     const ph = await pairedPage(browser, office, { width: 390, height: 844, phone: true, ready: "nav.tabbar" });
     try {
@@ -282,36 +270,6 @@ try {
       await ph.page.getByRole("button", { name: "Back to chats" }).click();
       await ph.page.locator('[data-chat="manager"]').click();
       const mgr = ph.page.getByRole("region", { name: "Conversation with Manager" });
-      await mgr.getByRole("textbox", { name: "Message Manager" }).fill("Lost in the inbox");
-      await mgr.getByRole("button", { name: "Send" }).click();
-      const queued = mgr.locator("[data-outbox]", { hasText: "Lost in the inbox" });
-      await until(async () => (await queued.getAttribute("data-delivery")) === "queued", 10_000, "queued for the manager");
-      await ph.page.clock.fastForward("01:01:00");
-      await until(async () => (await queued.getAttribute("data-delivery")) === "late", 20_000, "late after 60 minutes");
-      // With no inbox word yet the bubble says "Not delivered after 60 min". The spool poll asks again after two
-      // minutes, so a jump of an hour usually already has the inbox's word: still waiting, never Not sent (review #2).
-      const bubble = await queued.innerText();
-      assert((/Not delivered after 60 min/.test(bubble) || /Still waiting in the manager's inbox/.test(bubble)) && !/Not sent/.test(bubble), `manager bubble: ${bubble.replace(/\s+/g, " ")}`);
-      await ph.page.screenshot({ path: join(OUT, "8-late-light.png") });
-      const lost = () => inbox().filter(x => x.text === "Lost in the inbox");
-      // Check while the first may still arrive (the inbox still holds it): the same request id, nothing new queued, and the
-      // bubble says it is still in the inbox (review #2, the team's call A).
-      await queued.getByRole("button", { name: "Check" }).click();
-      await until(async () => /inbox/.test(await queued.innerText()), 15_000, "the check reports where it stands");
-      assert(lost().length === 1, `a second message was queued while the first can still arrive: ${JSON.stringify(lost())}`);
-      assert((await queued.getAttribute("data-delivery")) === "late", "a status check must not send the message again");
-      // The inbox gives the first up. Check only reads that; Send again queues it once more, and only once.
-      deliverer(lost()[0].key, { status: "expired" });
-      await queued.getByRole("button", { name: "Check" }).click();
-      await until(async () => (await queued.getAttribute("data-delivery")) === "lost", 15_000, "lost once the inbox gave it up");
-      assert(lost().length === 1, `Check queued a second copy: ${JSON.stringify(lost())}`);
-      await queued.getByRole("button", { name: "Send again" }).click();
-      await until(() => lost().length === 2, 10_000, "queued once more after the first was given up");
-      assert(lost().some(x => String(x.id).endsWith(":again")), `ids: ${JSON.stringify(lost().map(x => x.id))}`);
-      await until(async () => (await queued.getAttribute("data-delivery")) === "queued", 10_000, "queued after Send again");
-      // Its echo ends it, as any other.
-      echo("manager", "phone-echo-again", "Lost in the inbox");
-      await queued.waitFor({ state: "detached", timeout: 10_000 });
       // A draft survives leaving the chat.
       await mgr.getByRole("textbox", { name: "Message Manager" }).fill("A thought for later");
       await ph.page.waitForTimeout(600);
@@ -331,7 +289,6 @@ try {
 } catch (e) {
   console.log(`FAIL  setup: ${(e as Error).message}`);
 } finally {
-  clearInterval(beating);
   await browser.close();
   office.stop();
   process.exit(code);

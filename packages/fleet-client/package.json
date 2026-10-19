@@ -1,0 +1,17 @@
+{
+  "name": "@morndo/fleet-client",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The TypeScript client of the fleet's client API: HTTP and events over the fleet's Unix socket, deliveries and lane events included. Used by the hub and `morndo lanes`; any client may import it.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@morndo/protocol": "0.0.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
+  }
+}

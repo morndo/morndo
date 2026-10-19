@@ -16,7 +16,7 @@ describe("the socket directory", () => {
     const fleet = await startTestFleet();
     expect(statSync(join(fleet.dir, "s")).mode & 0o777).toBe(0o700);
     expect(statSync(fleet.config.socketPath).mode & 0o777).toBe(0o600);
-    expect(await client(fleet.config.socketPath).get("/v1/caps")).toEqual({ status: 200, body: { api: [1] } });
+    expect(await client(fleet.config.socketPath).get("/v1/caps")).toEqual({ status: 200, body: { api: [1], stickyLanes: ["manager"] } });
   });
 
   it("a directory others can enter stops the service before it opens anything", async () => {

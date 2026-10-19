@@ -1,7 +1,7 @@
 // The tmux adapter against a private tmux server with synthetic panes (never the principal's real sessions).
 import { execFileSync } from "node:child_process";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { tmuxAdapter } from "../src/tmux.ts";
+import { notSubmitted, tmuxAdapter } from "../src/tmux.ts";
 
 const SOCKET = `morndo-test-${process.pid}`;
 const tmux = (...a: string[]) => execFileSync("tmux", ["-L", SOCKET, ...a], { encoding: "utf8" });
@@ -12,6 +12,15 @@ beforeAll(() => {
   tmux("send-keys", "-t", "qa:0", "PS1='$ '; clear; echo synthetic-line-1", "Enter");
 });
 afterAll(() => { try { tmux("kill-server"); } catch { /* gone */ } });
+
+describe("a paste that did not submit", () => {
+  it("a collapsed multi-line paste left as Claude's placeholder is not submitted", () => {
+    expect(notSubmitted("one\ntwo\nthree\nfour", "[Pasted text #1 +3 lines]")).toBe(true);
+    expect(notSubmitted("one line", "[Pasted text #1 +3 lines]")).toBe(false);
+    expect(notSubmitted("hello world this is a long draft", "hello world this is a long draft")).toBe(true);
+    expect(notSubmitted("hello world this is a long draft", "hello world this is")).toBe(false);   // one cell short: not this paste
+  });
+});
 
 describe("tmux adapter", () => {
   it("lists panes with names that contain separators and spaces", async () => {

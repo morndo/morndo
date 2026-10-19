@@ -129,10 +129,6 @@ jobs:
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/gallery" }
         run: node e2e/gallery.e2e.ts
-      - name: e2e inbox
-        if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.tools.outcome == 'success' }}
-        env: { E2E_OUT: "${{ runner.temp }}/e2e/inbox" }
-        run: node e2e/inbox.e2e.ts
       # ADR-0013: the Engines page; on the engine CLI's stand-in here, as the engine layer isn't on GitHub.
       - name: e2e engines
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}

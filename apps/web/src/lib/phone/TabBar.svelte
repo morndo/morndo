@@ -10,7 +10,7 @@
   import SquareKanban from "@lucide/svelte/icons/square-kanban";
   import Sunrise from "@lucide/svelte/icons/sunrise";
 
-  let { tab, chats, decisions, blocked = 0, onTab }: { tab: Tab; chats: number; decisions: number; blocked?: number; onTab: (t: Tab) => void } = $props();
+  let { tab, chats, decisions, blocked = 0, alerts = 0, onTab }: { tab: Tab; chats: number; decisions: number; blocked?: number; alerts?: number; onTab: (t: Tab) => void } = $props();
 </script>
 
 <nav class="tabbar" aria-label="Morndo">
@@ -22,7 +22,10 @@
     aria-label={decisions ? `Today, ${decisions} to decide` : "Today"}>
     <Sunrise size={20} />Today{#if decisions}<span class="badge" aria-hidden="true">{decisions}</span>{/if}
   </button>
-  <button class:on={tab === "status"} aria-current={tab === "status" ? "page" : undefined} onclick={() => onTab("status")}><Activity size={20} />Status</button>
+  <button class:on={tab === "status"} aria-current={tab === "status" ? "page" : undefined} onclick={() => onTab("status")}
+    aria-label={alerts ? `Status, ${alerts} new ${alerts === 1 ? "alert" : "alerts"}` : "Status"}>
+    <Activity size={20} />Status{#if alerts}<span class="badge" aria-hidden="true">{alerts}</span>{/if}
+  </button>
   <button class:on={tab === "board"} aria-current={tab === "board" ? "page" : undefined} onclick={() => onTab("board")}
     aria-label={blocked ? `Board, ${blocked} blocked` : "Board"}>
     <SquareKanban size={20} />Board{#if blocked}<span class="badge" aria-hidden="true">{blocked}</span>{/if}

@@ -1,3 +1,4 @@
+import { MANAGER } from "../../manager.ts";
 // A chat is one history entry. Opening the chat that is already the current entry does not push another,
 // so Back closes it instead of opening it again. After a reload the entry is still there: the chat comes back from it.
 export function chatEntry(stateChat: string | null | undefined, worker: string): "push" | "stay" {
@@ -27,7 +28,9 @@ export function restoredScreen(state: ChatHistoryState): boolean {
 }
 
 // A chat restored before the roster arrives stays until the roster says that lane is gone.
-export function keptChat(id: string | null, workers: readonly { id: string }[], primed: boolean): string | null {
+export function keptChat(id: string | null, workers: readonly { id: string; name?: string }[], primed: boolean, name: string | null = null): string | null {
   if (id === null || !primed) return id;
-  return workers.some(w => w.id === id) ? id : null;
+  if (workers.some(w => w.id === id)) return id;
+  // The manager's chat follows it across a restart (its window gone, or back): the one worker listed by its name.
+  return name === MANAGER ? workers.find(w => w.name === MANAGER)?.id ?? null : null;
 }

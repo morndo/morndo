@@ -11,6 +11,7 @@
 // own heading at the end, never waiting, never the headline.
 import { clause, type RosterEntry } from "@morndo/domain";
 import { deliveryLine, type DecisionItem } from "../desktop/decisions.ts";
+import { MAY_HAVE_BEEN, QUEUED } from "../queue-words.ts";
 
 export type Row = {
   key: string;
@@ -69,8 +70,10 @@ export function horizon(p: {
         : dec.choice.kind === "option" ? `You said “${dec.choice.label}” at ${hm(dec.at)}.`
         : here?.label === "your own words" ? `You answered in your own words at ${hm(dec.at)}.`
         : here ? `You said “${here.label}” at ${hm(dec.at)}.` : `You answered in words at ${hm(dec.at)}.`;
-      const queued = deliveryLine(d)?.state === "queued";      // ADR-0010: still in the manager's inbox
-      rows.push({ key: `d:${d.id}`, needsYou: false, at: d.deadline, title: short(d), detail: queued ? `${said} Queued, it will be delivered.` : `${said} ${asker(d)} takes it from here.`, decisionId: null, item: d });
+      // In the manager's queue (fleet-clients §9.1): not there yet, or may have been.
+      const dl = deliveryLine(d);
+      const then = dl?.state === "queued" ? `${QUEUED}.` : dl?.state === "uncertain" ? `${MAY_HAVE_BEEN}.` : `${asker(d)} takes it from here.`;
+      rows.push({ key: `d:${d.id}`, needsYou: false, at: d.deadline, title: short(d), detail: `${said} ${then}`, decisionId: null, item: d });
     }
   }
   for (const w of p.workers) {

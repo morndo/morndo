@@ -15,6 +15,7 @@
   import { cardOf } from "@morndo/domain";
   import { renderMarkdown } from "../markdown.ts";
   import { REFUSALS, ago, deliveryLine, standingLine, type DecisionItem } from "../desktop/decisions.ts";
+  import { DELIVERED, MAY_HAVE_BEEN, QUEUED } from "../queue-words.ts";
   import { byLabel } from "./horizon.ts";
   import { actions, brief, due } from "./brief.ts";
   import type { Body } from "../catchup/run.ts";
@@ -49,11 +50,12 @@
   const hasMore = $derived(!compact && !!b && (!!b.more.text || !!b.more.link || !!item?.context || (marked && !!b.more.recommendation)));
   const sentenceCase = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
   const left = $derived(answering ? Math.max(0, Math.ceil((answering.commitAt - now) / 1000)) : 0);
-  // ADR-0010: an answer for the manager waits in its inbox until it reached the manager.
+  // An answer for the manager in the fleet's queue (fleet-clients §9.1, E13): where it stands until it is in the conversation.
   function answeredHere(d: DecisionItem): string {
     const dl = deliveryLine(d);
-    if (dl?.state === "queued") return `Answered. Queued, it will be delivered${dl.why ? `: ${dl.why}` : ""}.`;
-    if (dl?.state === "delivered") return "Answered. Delivered to the manager.";
+    if (dl?.state === "queued") return `Answered. ${QUEUED}${dl.why ? `: ${dl.why}` : ""}.`;
+    if (dl?.state === "delivered") return `Answered. ${DELIVERED} to the manager.`;
+    if (dl?.state === "uncertain") return `Answered. ${MAY_HAVE_BEEN}: look at the manager's screen to be sure.`;
     return "Answered.";
   }
   // What closed it, in words, when it isn't open any more.

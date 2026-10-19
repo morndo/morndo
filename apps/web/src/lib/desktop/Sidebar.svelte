@@ -14,6 +14,7 @@
   import Unplug from "@lucide/svelte/icons/unplug";
   import type { RosterEntry } from "@morndo/domain";
   import Avatar from "./Avatar.svelte";
+  import { ABSENT_MANAGER } from "../manager.ts";
   import type { ConversationPrefs } from "./present.ts";
 
   let { office, workers, manager, selected, view, unread, needsYouCount, decisions, decisionsOpen, prefsOf, engines = false, onMenu, onSelect, onActivity, onDecisions, onCompose }: {
@@ -74,7 +75,7 @@
           onclick={() => onSelect(manager.id)} oncontextmenu={ctx(manager)}>
           <span class="ic face"><Avatar name="Manager" kind="peer" size={20} /><i class="presence" class:on={manager.state === "active"}></i></span>
           <span class="nm">Manager</span>
-          {#if manager.offline}<span class="off">offline</span>{/if}
+          {#if manager.id === ABSENT_MANAGER}<span class="off">not running</span>{:else if manager.offline}<span class="off">offline</span>{/if}
           {#if manager.needsYou}<span class="badge">!</span>{/if}
         </button>
       {/if}

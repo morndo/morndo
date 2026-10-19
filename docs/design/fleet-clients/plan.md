@@ -211,6 +211,8 @@ export class FleetClient {
 | `/v1/events` | adds `{ t: "delivery", node, body }` and `{ t: "lane", node, body }` |
 | `POST /v1/op` | refuses `lane.deliver` and `delivery.cancel` with `bad_args` (ruling 4) |
 
+The hub's own route for the owner's cancel (Task 12, ruling 88): `POST /api/manager/cancel { requestId }` answers 200 `{ ok, delivery }`, 409 `{ error }` (e.g. `already_typed`), or 404 `{ error: "unknown" }`.
+
 `morndo lanes` exits (Task 14's `EXIT`, README §9.2, ruling 49): 0 accepted; 2 bad arguments; 3 late (`--wait` ran out; a stop not seen in time); 4 not delivered (given up, uncertain, or refused); **5 in doubt** (the fleet was reached and didn't answer: run it again with the same `--id`, which is safe; the line names the id); 69 the fleet wasn't reached (nothing queued).
 
 ### Config
@@ -234,7 +236,7 @@ protected: string[];                                      // ["manager"]
 |---|---|---|---|
 | `agent.db` | 3 (Task 4) | `deliveries` (id PK, target_lane, target_worker, sticky, bound_session, text, state, waiting_reason, waiting_since, queued_at, not_after, typed_at, typed_session, delivered_at, why, note, retyped, updated_at) | storing a delivery (`synced()`); a `started` key as before |
 | `fleet.db` | 5 (Task 7) | `lane_deliveries` (id PK, node, target, state, body JSON, alerted, updated_at; never the text; `deliveries` is the hook bus's table already); `sticky_lanes` (name PK, node, at); `lane_events` (seq PK autoincrement, node, window, lane, session_id, event, at, body JSON, to_manager: 0 waiting, 1 sent, NULL not for the manager, delivery_id) | the intake (hooks and lane events), joins, revocations, keys and connection epochs; nothing else (§6, ruling 62) |
-| hub `morndo.db` | 13 (Task 12) | `manager_deliveries` (delivery_id PK, kind "answer" or "command", escalation_id, ask, choice, endpoint_id, session_id, request_id, queued_at, state, updated_at) | as the hub's other tables (`NORMAL`) |
+| hub `morndo.db` | 16 (Task 12; 13–15 are the board, Home's usage and #29's `pending_answers`) | `manager_deliveries` (delivery_id PK, kind "answer" or "command", escalation_id, ask, choice, endpoint_id, session_id, request_id, queued_at, state, updated_at) | as the hub's other tables (`NORMAL`) |
 
 ### Agent internals shared by Tasks 4 to 6
 

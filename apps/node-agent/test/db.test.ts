@@ -26,7 +26,7 @@ describe("agent database", () => {
     expect(a.db.pragma("fullfsync", { simple: true })).toBe(1);               // macOS's full flush for what is synced
     expect(a.db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
     const tables = (a.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map(r => r.name);
-    expect(tables).toEqual(["_morndo_schema", "done_keys", "job_deliveries", "jobs", "meta", "relay_files", "store_seq", "stream", "token_cache"]);
+    expect(tables).toEqual(["_morndo_schema", "deliveries", "done_keys", "job_deliveries", "jobs", "meta", "relay_files", "store_seq", "stream", "token_cache"]);
     expect(a.db.prepare("SELECT floor FROM _morndo_schema WHERE id = 1").get()).toEqual({ floor: 0 });   // no breaking migration yet (§11.1)
     expect(a.db.prepare("SELECT one, seq FROM store_seq").all()).toEqual([{ one: 1, seq: 0 }]);
     expect(a.streamId).toMatch(UUID);
@@ -67,6 +67,26 @@ describe("agent database", () => {
     expect(a.db.prepare("SELECT id, state FROM jobs").all()).toEqual([{ id: "job-1", state: "queued" }]);
     expect(() => a.db.exec(`INSERT INTO jobs (id, lane, name, job_class, notify, command_hash, cwd_hash, accepted_at, state, notice)
       VALUES ('job-2', 'builder', 'pack', 'default', '{}', 'aaaaaaaaaaaaaaaa', 'aaaaaaaaaaaaaaaa', 1, 'nope', 'none')`)).toThrow(/CHECK/);
+    a.close();
+  });
+  it("migrates a database made at version 6 (the jobs' tables) to the deliveries table (fleet clients, migration 7), with its checks", () => {
+    const path = dbPath();
+    mkdirSync(dirname(path), { recursive: true });
+    const raw = new Database(path);
+    migrate(raw, MIGRATIONS.slice(0, 6));
+    raw.prepare("INSERT INTO done_keys (key, hash, state, at) VALUES ('hub:a', 'h', 'started', 1)").run();
+    raw.close();
+    const a = openAgentDb(path);
+    expect(a.db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
+    expect(a.db.prepare("SELECT key FROM done_keys").all()).toEqual([{ key: "hub:a" }]);
+    const ins = (o: Record<string, unknown>) => a.db.prepare(`INSERT INTO deliveries (id, target_lane, target_worker, sticky, text, state, queued_at, not_after, updated_at)
+      VALUES (@id, @lane, @worker, @sticky, 'x', @state, 1, 2, 1)`).run({ id: "hub:x", lane: "manager", worker: null, sticky: 1, state: "queued", ...o });
+    expect(() => ins({ id: "hub:both", worker: "pc.0a1b2c3d.1" })).toThrow(/CHECK/);       // exactly one target
+    expect(() => ins({ id: "hub:none", lane: null })).toThrow(/CHECK/);
+    expect(() => ins({ id: "hub:state", state: "sent" })).toThrow(/CHECK/);
+    expect(() => ins({ id: "hub:sticky", sticky: 2 })).toThrow(/CHECK/);
+    ins({ id: "hub:ok" });
+    expect(a.db.prepare("SELECT id, state, retyped, waiting_reason FROM deliveries").all()).toEqual([{ id: "hub:ok", state: "queued", retyped: 0, waiting_reason: null }]);
     a.close();
   });
   it("keeps its streamId across restarts, and a reset database gets a new one", () => {

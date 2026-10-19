@@ -7,11 +7,19 @@
 // so it is never dropped silently (ADR-0012 decision 8): the store counts it per path (`morndo-fleet status`), and the
 // first one of each script path in this process raises an unrouted_hook alert. Progress paths (/cc, /sl) are counted
 // only. The service also logs, at startup, each script path no subscriber takes (serve.ts, unsubscribedScriptPaths).
-import { LIMITS, type HookEvent } from "@morndo/protocol";
+// `store` runs inside the caller's transaction (the intake window's synced commit) and hands back what to do once that
+// commit is on the disk: the alerts and the delivery worker's kick, so nothing is announced that a failed commit took
+// back. `accept` is store and commit in one, for a caller with a single batch. With `lanes`, each event above its stream's
+// mark also makes its lane event in the same transaction (fleet clients spec §7), published once the commit is on disk.
+import { LIMITS, type HookEvent, type LaneEvent } from "@morndo/protocol";
 import type { HookPath, Subscriber } from "../config.ts";
 import type { Audit } from "../adapters/audit.ts";
 import type { OutboxStore } from "../adapters/outbox-store.ts";
-import type { HookSink } from "./hook-sink.ts";
+import type { Transactions } from "./hook-sink.ts";
+import type { LaneEvents } from "./lane-events.ts";
+
+// One connection's batch, stored in the caller's transaction: the stream's mark, and what to do once it committed.
+export type Stored = { seq: number; after: () => void };
 
 // The paths a hook script waits on (spec 5.5: kept events, and a 503 lets the script's own fallback run), whose loss
 // the owner must hear of. /cc and /sl are progress: the latest per session, superseded seconds later.
@@ -20,44 +28,67 @@ export const SCRIPT_PATHS: readonly HookPath[] = ["/hook/stop", "/hook/failure",
 export const unsubscribedScriptPaths = (subscribers: Subscriber[]): HookPath[] =>
   SCRIPT_PATHS.filter(p => !subscribers.some(s => s.paths.includes(p)));
 
-export class HookIntake implements HookSink {
+export class HookIntake {
   #store: OutboxStore;
   #subscribers: Subscriber[];
   #audit: Audit;
   #now: () => number;
   #cap: number;
   #onStored: () => void;
+  #tx: Transactions | null;
+  #lanes: Pick<LaneEvents, "take" | "committed"> | null;
   #overflowing = new Set<string>();
   #unroutedAlerted = new Set<string>();                 // script paths alerted in this process
 
-  constructor(p: { store: OutboxStore; subscribers: Subscriber[]; audit: Audit; now?: () => number; cap?: number; onStored?: () => void }) {
+  constructor(p: {
+    store: OutboxStore; subscribers: Subscriber[]; audit: Audit; now?: () => number; cap?: number; onStored?: () => void; tx?: Transactions;
+    lanes?: Pick<LaneEvents, "take" | "committed">;
+  }) {
     this.#store = p.store;
     this.#subscribers = p.subscribers;
     this.#audit = p.audit;
     this.#now = p.now ?? Date.now;
     this.#cap = p.cap ?? LIMITS.subscriberBacklog;
     this.#onStored = p.onStored ?? (() => {});
+    this.#tx = p.tx ?? null;
+    this.#lanes = p.lanes ?? null;
   }
 
   known(node: string, streamId: string): { seq: number; known: boolean } {
     return this.#store.hwm(node, streamId);
   }
 
-  accept(node: string, streamId: string, events: HookEvent[]): number {
+  // Stores one connection's batch in the caller's transaction (OutboxStore.accept: a savepoint inside it).
+  store(node: string, streamId: string, events: HookEvent[]): Stored {
     const route = (e: HookEvent) => this.#subscribers.filter(s => s.paths.includes(e.path)).map(s => s.name);
-    const r = this.#store.accept(node, streamId, events, route, { now: this.#now(), cap: this.#cap });
-    for (const name of this.#overflowing) if (this.#store.pendingCount(name) < this.#cap) this.#overflowing.delete(name);
-    for (const [name, over] of r.overflow) {
-      if (over.deadLettered === 0 || this.#overflowing.has(name)) continue;
-      this.#overflowing.add(name);
-      this.#audit.alert("backlog_full", node, { subscriber: name, cap: this.#cap, droppedProgress: over.dropped, deadLettered: over.deadLettered });
-    }
-    for (const [path, events] of r.unrouted) {
-      if (!(SCRIPT_PATHS as readonly string[]).includes(path) || this.#unroutedAlerted.has(path)) continue;
-      this.#audit.alert("unrouted_hook", node, { path, events });
-      this.#unroutedAlerted.add(path);
-    }
-    if (r.stored > 0) this.#onStored();
+    const fresh: LaneEvent[] = [];
+    const lanes = this.#lanes;
+    const taken = lanes ? (e: HookEvent) => { const t = lanes.take(e); if (t.event) fresh.push(t.event); return t.own; } : undefined;
+    const r = this.#store.accept(node, streamId, events, route, { now: this.#now(), cap: this.#cap, ...(taken ? { taken } : {}) });
+    return {
+      seq: r.seq,
+      after: () => {
+        for (const name of this.#overflowing) if (this.#store.pendingCount(name) < this.#cap) this.#overflowing.delete(name);
+        for (const [name, over] of r.overflow) {
+          if (over.deadLettered === 0 || this.#overflowing.has(name)) continue;
+          this.#overflowing.add(name);
+          this.#audit.alert("backlog_full", node, { subscriber: name, cap: this.#cap, droppedProgress: over.dropped, deadLettered: over.deadLettered });
+        }
+        for (const [path, n] of r.unrouted) {
+          if (!(SCRIPT_PATHS as readonly string[]).includes(path) || this.#unroutedAlerted.has(path)) continue;
+          this.#audit.alert("unrouted_hook", node, { path, events: n });
+          this.#unroutedAlerted.add(path);
+        }
+        if (r.stored > 0) this.#onStored();
+        if (fresh.length > 0) lanes?.committed(fresh);
+      },
+    };
+  }
+
+  // One batch stored and committed on its own (synced, when the intake has fleet.db's transactions), then announced.
+  accept(node: string, streamId: string, events: HookEvent[]): number {
+    const r = this.#tx ? this.#tx.synced(() => this.store(node, streamId, events)) : this.store(node, streamId, events);
+    r.after();
     return r.seq;
   }
 }

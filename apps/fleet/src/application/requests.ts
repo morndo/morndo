@@ -37,10 +37,14 @@ export const opError = (code: ErrorCode, message: string): OpError => ({ code, e
 export const failed = (code: ErrorCode, message: string, store: string | null = null, storeSeq: number | null = null): Outcome =>
   ({ ok: false, error: opError(code, message), store, storeSeq });
 
-// Keyed ops, and pane.keys: keystrokes have no key (they are never retried) but are a side effect all the same.
-export const SIDE_EFFECT_OPS: ReadonlySet<OpName> = new Set<OpName>([...KEYED_OPS, "pane.keys", "job.cancel", "job.noticeResult"]);
-// The ops that move bulk data (up to LIMITS.chunkBytes each): one at a time per connection (spec 5.2).
-export const BULK_OPS: ReadonlySet<OpName> = new Set<OpName>(["transcript.read", "file.get", "file.put"]);
+// Keyed ops, and pane.keys: keystrokes have no key (they are never retried) but are a side effect all the same. So are
+// lane.deliver and delivery.cancel (fleet clients spec §4): a delivery's id is its idempotency, and an answer lost after
+// sending may come after the node stored or cancelled it, so it is uncertain, never node_offline. And job.cancel and
+// job.noticeResult.
+export const SIDE_EFFECT_OPS: ReadonlySet<OpName> = new Set<OpName>([...KEYED_OPS, "pane.keys", "lane.deliver", "delivery.cancel", "job.cancel", "job.noticeResult"]);
+// The ops that move bulk data (up to LIMITS.chunkBytes each): one at a time per connection (spec 5.2). pane.capture
+// answers up to LIMITS.captureMaxBytes (256 KiB, one chunk; fleet clients spec §5).
+export const BULK_OPS: ReadonlySet<OpName> = new Set<OpName>(["transcript.read", "file.get", "file.put", "pane.capture"]);
 
 // How long past its own deadline the fleet still waits for the agent's answer (network and queueing slack).
 export const RESULT_SLACK_MS = 1000;

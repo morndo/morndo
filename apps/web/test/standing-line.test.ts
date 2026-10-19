@@ -11,7 +11,7 @@ const item = (over: Partial<DecisionItem>): DecisionItem => ({
   minutes: 4, link: null, details: null, context: null, contextKind: "markdown", options: [],
   answerBy: "tap", recommendation: null, ifNoAnswer: null, deadline: null, blocking: false, project: null,
   askedAt: 0, messageId: null, tracking: "hub", status: "answered", source: "open", decision: null,
-  resolution: null, settledAt: null, askedAgain: false, answerable: null, version: "v1", inbox: null,
+  resolution: null, settledAt: null, askedAgain: false, answerable: null, version: "v1",
   brief: null, briefVersion: 0, draftedBy: null,
   ...over,
 });

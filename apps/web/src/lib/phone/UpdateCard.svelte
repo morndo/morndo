@@ -10,15 +10,16 @@
   import type { CatchUpConversationWire } from "@morndo/protocol";
   import { renderMarkdown } from "../markdown.ts";
   import { present, withoutFileNotes } from "../desktop/present.ts";
-  import { canRetry, type OutboxRecord } from "../outbox/state.ts";
-  import { sendLabel, sendReason } from "../outbox/words.ts";
+  import { canCancel, canRetry, type OutboxRecord } from "../outbox/state.ts";
+  import { deliveryNote, sendLabel, sendReason } from "../outbox/words.ts";
   import { headline, sinceLabel, spanLabel } from "./words.ts";
 
-  let { worker, name, view, mark, now, outgoing, loading, note, onReply, onOpen, onRetry, onDiscard, onVerify }: {
+  let { worker, name, view, mark, now, outgoing, loading, note, onReply, onOpen, onRetry, onDiscard, onVerify, onCancel = () => {} }: {
     worker: RosterEntry | null; name: string; view: CatchUpConversationWire | null; mark: number | null; now: number;
     outgoing: OutboxRecord[]; loading: boolean; note: string | null;
     onReply: (text: string, seen: string) => Promise<boolean>; onOpen: (messageId: string) => void; onRetry: (id: string) => void; onDiscard: (id: string) => void;
     onVerify: (id: string) => void;                     // "Not sent: verify": the passkey check, then the same request again
+    onCancel?: (id: string) => void;                    // a message the manager's queue still holds (ruling 83)
   } = $props();
 
   let text = $state("");
@@ -105,11 +106,13 @@
             <p class="text">{o.text}</p>
             <!-- The desktop's words and actions (outbox/words.ts; review of PR #7, finding 12). -->
             {#if stuck}<p class="err">{sendReason(o, name, "its screen in Agents")}</p>{/if}
+            {#if deliveryNote(o)}<p class="note" data-delivery={o.delivery?.state}>{deliveryNote(o)}</p>{/if}
             {#if stuck || o.state === "queued" || o.state === "sending" || (o.state === "sent" && label !== "Sent")}
               <div class="row">
                 {#if o.state === "failed" && o.error === "step_up"}<button class="pbtn small" onclick={() => onVerify(o.id)}>Confirm with passkey</button>
                 {:else if o.state === "failed" && o.error === "stale"}<button class="pbtn small" onclick={() => { text = text.trim() ? `${text}\n\n${o.text}` : o.text; onDiscard(o.id); }}>Edit</button>
-                {:else if canRetry(o, now)}<button class="pbtn small" onclick={() => onRetry(o.id)}>{o.state === "uncertain" ? "Check again" : "Retry"}</button>{/if}
+                {:else if canRetry(o, now)}<button class="pbtn small" onclick={() => onRetry(o.id)}>{o.state === "uncertain" ? "Check again" : "Retry"}</button>
+                {:else if canCancel(o)}<button class="pbtn small" onclick={() => onCancel(o.id)}>Cancel</button>{/if}
                 <button class="pbtn small" onclick={() => onDiscard(o.id)}>{o.state === "sent" ? "Dismiss" : "Discard"}</button>
               </div>
             {/if}

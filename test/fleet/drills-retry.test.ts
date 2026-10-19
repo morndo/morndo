@@ -43,7 +43,8 @@ async function office(hooks: TestHooks = {}) {
   await agent.run(hooks);
   await agent.waitOnline();
   const tomorrow = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-  const hub = await startHub(fleet, { ledger: { needsYou: [{ id: "ny-1", kind: "tap", question: "Ship the drill build?",
+  // The direct path, which the hub still types with the switch off (step 2's rollback) and for every other lane.
+  const hub = await startHub(fleet, { managerQueue: false, ledger: { needsYou: [{ id: "ny-1", kind: "tap", question: "Ship the drill build?",
     options: [{ key: "ship", label: "Ship it" }, { key: "hold", label: "Hold" }], deadline: tomorrow, ts: new Date().toISOString() }] } });
   const feed = await hub.feed();
   await until("box and manager on the hub", () => feed.names.has("box") && feed.names.has("manager"), 15_000);

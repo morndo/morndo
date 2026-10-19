@@ -4,7 +4,7 @@
 // box (review H2: names aren't unique). A send counter keeps a save still pending at send time from bringing the sent
 // text back (Signal-Desktop's composer does the same). Each save changes only its own entry (review L5: tabs).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DRAFT_DEBOUNCE_MS, Drafts } from "../src/lib/drafts.ts";
+import { DRAFT_DEBOUNCE_MS, Drafts, leftAfterSend } from "../src/lib/drafts.ts";
 
 let backing: Map<string, string>;
 const storage = () => ({ getItem: (k: string) => backing.get(k) ?? null, setItem: (k: string, v: string) => { backing.set(k, v); }, removeItem: (k: string) => { backing.delete(k); } });
@@ -75,4 +75,13 @@ describe("drafts", () => {
     backing.set("morndo.drafts", JSON.stringify({ alpha: "an old text-only draft", "%1": { name: "alpha", text: 5 } }));
     expect(new Drafts(storage()).get("%1", "alpha")).toBeNull();
   });
+});
+
+// What stays in the box once a message went, when the passkey check before it was open a while (staging QA,
+// 2026-10-12: a second message typed then was wiped when the first one went).
+describe("leftAfterSend", () => {
+  it("is empty when the box still holds what went", () => { expect(leftAfterSend("ship it", "ship it")).toBe(""); });
+  it("keeps a new message typed over it", () => { expect(leftAfterSend("and a second thought", "ship it")).toBe("and a second thought"); });
+  it("keeps what was added after it, without what went", () => { expect(leftAfterSend("ship it\n\nand tests", "ship it")).toBe("and tests"); });
+  it("keeps the whole box when what went was changed in it", () => { expect(leftAfterSend("ship it now", "ship it!")).toBe("ship it now"); });
 });

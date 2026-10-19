@@ -7,6 +7,10 @@
 // never receives text meant for another lane. Refusals of the input-box checks (menu_open, no_input_box,
 // draft_present) come from node-ops' tmux send before its paste and are answered as errors, not executed; the result's
 // `problem` is null or not_submitted (typed, but no submit seen).
+// pane.capture (fleet clients spec §5, "Reading") is a read: one pane's last lines, at most 2000 (args.ts), with tmux's
+// attribute escapes when asked and wrapped lines joined unless `join` is false (RECONCILIATION.md ruling 10), in an
+// answer of at most 256 KiB measured as it travels (LIMITS.captureMaxBytes, one bulk chunk; agent.ts sends it on the bulk
+// lane). pane.captureMany keeps its 6 KiB a pane.
 import { LIMITS, parseWorkerId, type Expect, type WorkerRef } from "@morndo/protocol";
 import type { PaneLock, SessionInfo, Terminal, Tmux } from "@morndo/node-ops";
 import type { Policy } from "../config.ts";
@@ -45,7 +49,7 @@ export type PaneDeps = {
 const paneOf = (workerId: string) => `%${parseWorkerId(workerId)?.pane ?? -1}`;
 const SEND_REFUSALS = { menu_open: "a menu is open in the pane", no_input_box: "the pane shows no input box", draft_present: "the pane's input box holds a draft", no_pane: "the pane went away", busy: "the pane is busy" } as const;
 
-export function paneOps(d: PaneDeps): Pick<OpTable, "pane.captureMany" | "pane.frame" | "pane.keys" | "pane.send"> {
+export function paneOps(d: PaneDeps): Pick<OpTable, "pane.captureMany" | "pane.capture" | "pane.frame" | "pane.keys" | "pane.send"> {
   const guard = d.guard ?? expectationHolds;
   const socket = d.policy.tmuxSocket;
 
@@ -88,6 +92,15 @@ export function paneOps(d: PaneDeps): Pick<OpTable, "pane.captureMany" | "pane.f
       return ok<"pane.captureMany">({ captures });
     }),
 
+    "pane.capture": read(async a => {
+      let snap = await d.inventory.current(LIMITS.inventoryPollMs);
+      if (!snap.lanes.some(l => l.workerId === a.workerId)) snap = await d.inventory.refresh();
+      const lane = snap.lanes.find(l => l.workerId === a.workerId);
+      const text = lane ? await d.tmux.capture(lane.pane, { lines: a.lines, attributes: a.attributes === true, join: a.join !== false }) : null;
+      if (text === null) return ok<"pane.capture">({ text: null, truncated: false });
+      return ok<"pane.capture">(capCapture(text, LIMITS.captureMaxBytes));
+    }),
+
     "pane.frame": read(async a => {
       const ref = parseWorkerId(a.workerId);
       const pane = `%${ref?.pane ?? -1}`;
@@ -97,8 +110,12 @@ export function paneOps(d: PaneDeps): Pick<OpTable, "pane.captureMany" | "pane.f
       return ok<"pane.frame">({ frame });
     }),
 
+    // Literal text as typed (terminal.keys), or tmux key names from the allow-list (Task 2's sendKeyNames); args.ts let
+    // exactly one of them through.
     "pane.keys": effect(a => `pane:${paneOf(a.workerId)}`, (a, ctx) =>
-      guarded(a.workerId, a.expect, ctx, async pane => ok<"pane.keys">({ ok: await d.terminal.keys(pane, a.data) }))),
+      guarded(a.workerId, a.expect, ctx, async pane => ok<"pane.keys">({
+        ok: a.names !== undefined ? await d.tmux.sendKeyNames(pane, a.names) : await d.terminal.keys(pane, a.data ?? ""),
+      }))),
 
     "pane.send": effect(a => `pane:${paneOf(a.workerId)}`, (a, ctx) =>
       guarded(a.workerId, a.expect, ctx, async pane => {
