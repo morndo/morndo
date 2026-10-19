@@ -127,6 +127,7 @@ Any other value matches only itself. An answer may hold no field that its exampl
 | `GET /v1/files/<node>/<ref or path>` | a file's bytes (§12) |
 | `POST /v1/deliveries`, `GET /v1/deliveries/<id>`, `GET /v1/deliveries?lane=&state=` (the newest 1000 of the last 7 days), `POST /v1/deliveries/<id>/cancel` | deliveries (§6) |
 | `GET /v1/lane-events?since=<seq>` | lane events (§7) |
+| `GET /v1/lane-watch` | each lane's last turn and its deadline (§7.1) |
 | `WS /v1/events` | the fleet's events (§9) |
 
 ### 5.1 Nodes
@@ -591,21 +592,24 @@ GET /v1/deliveries/kira:doc:nothing
 
 ## 7. Lane events
 
-The fleet builds four lane events from two sources: the hooks of each lane, and the session state each node reports.
+The fleet builds five lane events from three sources: the hooks of each lane, the session state each node reports, and its own lane watch (§7.1).
 
 | `event` | When | Fields |
 |---|---|---|
-| `finished` | a turn ended (the Stop hook, §11) | `status`, `firstLine`, `bg`, `crons` |
+| `finished` | a turn ended (the Stop hook, §11) | `status`, `firstLine`, `bg`, `crons`; for a wait, `waitingOn` and `until` |
 | `needs_input` | the session's status turned `waiting`: a menu (a question, a permission prompt, a usage-limit dialog) | `question` |
 | `answered` | the session's status left `waiting` | none |
 | `stop_failure` | a turn ended on an API error (the StopFailure hook) | `error` |
+| `stale` | a lane's last turn passed its deadline with nothing from the lane since (§7.1) | `reason`, `waitingOn`, `since`, `stalls` |
 
 **The fields:**
-- `status` is `done`, `blocked`, `needs_decision` or null. It comes from the turn text's first line, matched by `/^[\W_]*STATUS[\W_]*:?[\W_]*(DONE|BLOCKED|NEEDS DECISION)\b/i`.
+- `status` is `done`, `blocked`, `needs_decision`, `waiting` or null. It comes from the turn text's first line, its status line: `STATUS: DONE`, `STATUS: BLOCKED`, `STATUS: NEEDS DECISION` or `STATUS: WAITING <on what> [for <N> min|h]`, matched by `/^[\W_]*STATUS[\W_]*:?[\W_]*(DONE|BLOCKED|NEEDS DECISION|WAITING)\b/i`, so decoration around it is allowed (`**STATUS: DONE**`).
+- `waitingOn` is what a wait names (at most 120 characters); `until` is when it ends: its `for` (at most 24 h), else `laneWatch.waitingMin` after the turn.
 - `firstLine` is that first line.
 - `bg` and `crons` count the background tasks and the scheduled wake-ups.
 - `question` is the menu's question as the screen shows it: the last line ending in "?", else the line above the options, at most 200 characters.
 - `error` is the error's type.
+- `reason` is `waiting` (the turn said WAITING, or ended with background work or a wake-up) or `no_status`; `since` is the end of the turn that went stale; `stalls` counts the stale events since the lane last ended DONE, BLOCKED or NEEDS DECISION.
 
 **The shape:** `{ v: 1, t: "lane", seq, event, node, window, lane, sessionId?, at, … }`.
 - `seq` is the fleet's own counter, growing by one.
@@ -616,7 +620,7 @@ The fleet builds four lane events from two sources: the hooks of each lane, and 
 - **Every client:** `/v1/events` (§9) and `GET /v1/lane-events?since=<seq>`. That route answers at most 1000 events, oldest first, from the last 7 days.
 - **The manager:** delivered in batches, by the fleet's `laneEvents` config:
   - every `batchMs` (3000), one delivery to the lane `deliverTo` (default `manager`; `null` turns this off), split at 8000 characters;
-  - its text is the `header` line, then one JSON line per event: `{ ts, lane, sessionId, event, status, firstLine, bg, crons }`;
+  - its text is the `header` line, then one JSON line per event: `{ ts, lane, sessionId, event, status, firstLine, bg, crons }`, with `waitingOn` and `until` for a wait, and `{ ts, lane, sessionId, event, reason, waitingOn, since, stalls }` for `stale`;
   - its delivery id is `fleet:lane-events:<node>:<the first event's time, in ms>`. A batch split over 8000 characters gets `-1`, `-2` … after it, and a batch queued again after its delivery was given up gets `.2`, `.3` … after any of those.
 - **Not sent:**
   - `answered` is published but not delivered;
@@ -723,6 +727,41 @@ GET /v1/lane-events?since={{number:le4}}
 ] }
 ```
 
+### 7.1 The lane watch
+
+The fleet keeps each lane's last turn end and watches for anything after it: a hook from that lane (a tool call or prompt on `/cc`, a new turn, a session state change, a failed turn) is activity. It goes by the hook's own time on its node, so a hook that reaches the fleet in the same batch as the Stop before it, or after an outage, still counts. Two kinds of hook are not activity. The status line's `/sl`: Claude Code re-runs it on a timer when `refreshInterval` is set, idle or not. And Claude Code's `idle_prompt` notification, which it sends about a minute after a turn ends if nothing has happened since. Each kind of turn end has a deadline:
+
+| Last turn | Deadline |
+|---|---|
+| `STATUS: WAITING` | its `until` |
+| no status, background work running or a wake-up scheduled | the turn's end + `laneWatch.waitingMin` (30 min) |
+| no status, nothing running | the turn's end + `laneWatch.noStatusMin` (15 min) |
+| `DONE`, `BLOCKED`, `NEEDS DECISION` | none: it is the manager's to act on |
+
+- **A Stop the relay asked for its status line** (§11.1) makes no lane event, but counts as a turn without a status until the lane's next Stop: a lane that never acts on the ask still goes stale.
+- **Past the deadline with no activity,** the fleet makes one `stale` lane event for that turn. It goes where the other lane events go. One that fleet.db can't store now is tried again at the next sweep.
+- **The nudge.** With `laneWatch.nudge` (on by default), a lane that runs Claude Code (a session in the node's inventory) gets one delivery, sent to that session's pane by its worker ID, so a window of the same name on another node doesn't get in the way. Its id is `fleet:nudge:<worker ID>:<the turn's end, in ms>`. It says when the turn ended, what the lane was waiting on, and the status line to start its answer with. A nudge the fleet refuses is logged. From the third stale event since the lane last settled, it isn't nudged again: that lane is for the manager to re-plan.
+- **Not watched:** the manager's own lane, lanes matching `laneEvents.ignore`, and a lane whose window is gone. A lane whose node isn't online waits until the node is back: the node's status already says why it is quiet.
+- **Restarts.** The watch lives in the fleet's memory and is rebuilt from the last day's lane events at start, including the session state changes and failed turns after each turn end. A restart counts as activity, so each deadline runs again from it, and no lane is called stale for time the fleet didn't see. A hook a node sends on from the outage counts by its own time.
+
+`GET /v1/lane-watch` answers what the watch holds, oldest first: `{ lanes: { node, window, at, status, deadline, reason?, waitingOn?, stale, stalls }[] }`. `deadline` is null for a settled turn; `reason` is there with a deadline.
+
+```example lane-watch
+GET /v1/lane-watch
+---
+200
+
+{ "lanes": [
+  { "node": "n1", "window": "w1", "at": "{{time}}", "status": "blocked", "deadline": null, "stale": false, "stalls": 0 }
+] }
+```
+
+A `stale` event, as `/v1/lane-events` and `/v1/events` carry it:
+
+```json
+{ "v": 1, "t": "lane", "seq": 9, "event": "stale", "node": "n1", "window": "w1", "lane": "w1", "sessionId": "…", "at": 1791850022000, "reason": "waiting", "waitingOn": "CI", "since": 1791849122000, "stalls": 1 }
+```
+
 ## 8. Ops (`POST /v1/op`)
 
 **The body:** `{ node | workerId | lane, op, args, key?, timeoutMs? }`. Exactly one target is named.
@@ -752,7 +791,7 @@ GET /v1/lane-events?since={{number:le4}}
 | `file.stat` | `{ path \| ref }` | `{ size, mtime }` | none |
 | `file.get` | `{ path \| ref, offset, max }` | `{ bytes (base64), size, eof }` | none |
 | `file.put` | `{ upload, offset, bytes (base64), final, name }` | `{ path \| null }`: the file's place once final | yes |
-| `lane.start` | `{ name, cwd, account?, resume?, prompt? }` | `{ workerId, waiting?: "trust", prompt? }` (below) | yes |
+| `lane.start` | `{ name, cwd, account?, resume?, prompt?, role?, engine?, reason? }` | `{ workerId, waiting?: "trust", prompt?, engine? }` (below) | yes |
 | `lane.stop` | `{ name, mode?: "exit" \| "kill" }` | `{ ok: true }` (below) | yes |
 | `worktree.list` | `{ repo }` | `{ worktrees: { path, branch \| null }[] }` | none |
 | `worktree.add` | `{ repo, name, base }` | `{ path }`: beside the repository, `<repo>-worktrees/<name>` | yes |
@@ -763,6 +802,13 @@ GET /v1/lane-events?since={{number:le4}}
 - With `via: "shell"`, the window starts the user's shell, and the launcher is pasted once the shell's prompt shows. The window then outlives Claude Code.
 - `prompt` becomes a delivery to the new pane, whose id the answer carries as `prompt`: `<client>:prompt:<the first 16 hex digits of the SHA-256 of the start's key>`, always within 200 characters. It waits for Claude Code to start, so it never races the startup.
 - `waiting: "trust"`: Claude Code is asking whether to trust the folder. Accepting stays the client's decision: send the keys.
+
+**On an engine.** A node whose policy has `engines` (the node agent's README) can start a lane on an engine of the engine layer, `provider:model[@effort]`, with that provider's launch command:
+- `role` asks the node's engine layer what runs that Role now, and starts it. `engine` names one; on a node with a default role it needs a `reason`. Both at once are refused (`bad_args`).
+- A start that names neither runs the node's `engines.defaultRole` when it has one, except a `resume` and a protected lane.
+- `account` goes to the launch command when it takes one. For a role, whose pick the client can't know, a command without one ignores it; a named engine whose command takes none refuses it (`bad_args`).
+- It never falls back to `launch` quietly. A node without engines, a role nothing can fill now, a provider with no launch command there, or the engine layer switched off: `denied`, nothing started. An unknown role: `bad_args`.
+- The answer's `engine` says what ran: `{ entry, role?, skipped? }`. `skipped` lists what the resolver passed over first, each with its reason; when it isn't empty, the fleet raises `engine_fallback` (§14). The audit row of the start keeps the `role` or `engine`, the `reason` and the entry that ran (`ran`).
 
 **`lane.stop`.** The default, `exit`, types `/exit` the way a delivery is typed and answers Claude Code's exit prompt. It then answers once the window has closed or is back at its shell, or with `uncertain` after 30 s. `kill` closes the window. Names in the policy's `protected` list (default `["manager"]`) are refused with `denied`.
 
@@ -1298,12 +1344,40 @@ Each node runs a hook relay on `127.0.0.1:8787` (the agent's `relayPort`). Claud
 |---|---|---|---|
 | `/cc` | tool-call progress (`PreToolUse` and the like) | 204, empty, always: a slow answer would stall the session | the latest per session |
 | `/sl` | the status line's data | 204, empty, always | the latest per session |
-| `/hook/stop` | a turn's end (`Stop`) | 200 `{"ok":true,"queued":true}` | every one |
+| `/hook/stop` | a turn's end (`Stop`) | 200 `{"ok":true,"queued":true}`, or the status ask (below) | every one |
 | `/hook/failure` | a turn ended on an API error (`StopFailure`) | 202 | every one |
 | `/notify` | a message for the owner | 202 | every one |
 | `/file` | a file for the owner: `{ path, … }` | 202 (413 over 25 MiB, 400 for a path that isn't absolute, 403 where files are never shared, 404 when missing) | a copy, by the node's file rules |
 
 When the stream can't be written (a full disk), the script paths answer 503 so the calling script's own fallback runs, while `/cc` and `/sl` still answer 204 and count the event as dropped. Claude Code treats an HTTP hook's non-2xx answer, or no answer, as a non-blocking error (§15).
+
+**The status ask.** A lane's answer starts with a status line (§7). When Claude Code's own Stop body comes from a lane whose answer has none, the relay asks for it once: it answers 200 `{"decision":"block","reason":…}`, Claude Code goes on with the reason as its instruction, and the next Stop is the turn's end. The asked Stop is kept with `"statusAsked": true` added to its body, so subscribers still get the answer it carried; the fleet makes no lane event of it. It asks only when all of these hold:
+- the body is Claude Code's `Stop` (`hook_event_name`), from a window the relay placed (§11.2);
+- the Stop wasn't itself caused by a Stop hook (`stop_hook_active` false): so once per turn, far below Claude Code's limit of eight in a row;
+- no background task is running and no wake-up is scheduled (`background_tasks`, `session_crons` empty);
+- the policy's `statusContract.mode` is `ask` (the default) and the lane isn't in `statusContract.exempt` (default `["manager"]`).
+
+```example hook-stop-asked
+POST http://127.0.0.1:8787/hook/stop
+content-type: application/json
+
+{
+  "session_id": "{{uuid:w1-session}}",
+  "transcript_path": "/home/user/.claude/projects/-home-user-docs/w1.jsonl",
+  "cwd": "/home/user/docs",
+  "permission_mode": "default",
+  "hook_event_name": "Stop",
+  "stop_hook_active": false,
+  "last_assistant_message": "I pushed the branch.",
+  "background_tasks": [],
+  "session_crons": []
+}
+---
+200
+content-type: application/json
+
+{"decision":"block","reason":"Start a short answer with one line saying where this lane stands, then stop: STATUS: DONE, STATUS: BLOCKED, STATUS: NEEDS DECISION, or STATUS: WAITING <on what> for <N> min. Don't redo the work."}
+```
 
 ### 11.2 Identity
 
@@ -1501,11 +1575,13 @@ An alert is something for the owner to look at that changes no state. Each one i
 | `subscriber_lagging` | a subscriber's oldest undelivered event is older than 60 s | `{ subscriber, oldestAgeMs, streams }`: `streams`, the streams it holds up |
 | `job_failed` | a background job exited non-zero, timed out or was lost; once per job (node, id) | `{ id, name, class, outcome }` |
 | `job_unnoticed` | a job's notice was given up before its lane took it; once per job | `{ id, name, class, outcome }` |
+| `engine_fallback` | a lane started on an engine its role reached only after passing over others (§8, `lane.start`) | `{ lane, role?, entry, skipped }`: `skipped`, `{ entry, reason }[]` |
 | `connection` | kept for a node's Connections service (`docs/design/secret-store/README.md`, `AlertSink`); nothing raises it yet | |
 
 ## 15. Sources
 
 - Claude Code hooks: the common input fields; the `Stop`, `StopFailure` and `PreToolUse` inputs; an HTTP hook's non-2xx answer or connection failure is a non-blocking error. https://code.claude.com/docs/en/hooks, read 2026-10-08.
+- Claude Code hooks: an HTTP hook's 2xx JSON answer is read as a command hook's output; a Stop hook's `decision: "block"` with a `reason` keeps the turn going; `stop_hook_active`; the cap of eight continuations in a row. https://code.claude.com/docs/en/hooks, read 2026-10-13.
 - Claude Code status line: the JSON a status line command receives. https://code.claude.com/docs/en/statusline, read 2026-10-08.
 - The transcript and session-file shapes the delivery receipt reads are Claude Code internals, undocumented. Each is pinned by a recorded example in `test/fixtures/claude-code/`, from Claude Code 2.1.293, so a change shows as a failing test.
 - Node.js `http` over a Unix socket (`socketPath`): https://nodejs.org/docs/latest-v24.x/api/http.html#httprequestoptions-callback, read 2026-10-06.

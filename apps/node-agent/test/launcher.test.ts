@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Launch, Policy } from "../src/config.ts";
 import { launchCommand, promptId, shellLine, trustDialogOnScreen, type LaneWaits } from "../src/ops/lane-ops.ts";
 import { claudeSession } from "./claude-session.ts";
@@ -140,6 +140,25 @@ describe("lane.start (spec §5)", () => {
     expect(await start(trusted, { name: "trusted" }, "lanes:t2")).not.toHaveProperty("waiting");
   });
 
+  it("does not read the whole inventory on every look for the trust dialog under a shell prompt that is drawn as ❯ (negative control)", async () => {
+    const h = harness({ command: ["sh", "-c", "printf '❯ '; exec sleep 600"], via: "direct" }, { trustMs: 1200 });
+    const refresh = vi.spyOn(h.inventory, "refresh");
+    expect(await start(h, { name: "prompt-shell" }, "lanes:q1")).not.toHaveProperty("waiting");
+    expect(refresh.mock.calls.length).toBeLessThanOrEqual(4);          // the start's own reads, not one per 100 ms look
+  });
+
+  it("does not wait out the trust dialog's time for an engine lane: its input line and its registered lane end the look", async () => {
+    vi.stubEnv("ENGINES_SESSIONS", "");
+    vi.stubEnv("ENGINES_TRANSCRIPTS", "");
+    try {
+      const dir = boxIn("engine");
+      const h = harness({ command: [process.execPath, join(import.meta.dirname, "fake-engine-lane.fixture.ts"), home.home, dir], via: "direct" }, { trustMs: 8000 });
+      const began = performance.now();
+      expect(await start(h, { name: "eng" }, "lanes:q2")).not.toHaveProperty("waiting");
+      expect(performance.now() - began).toBeLessThan(5000);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("queues a first prompt as a delivery to the new pane: it waits for Claude Code, and is typed once the lane can take it", async () => {
     const dir = boxIn("prompted");
     const h = harness({ command: [process.execPath, FIXTURE, dir], via: "direct" });
@@ -243,5 +262,32 @@ describe("lane.stop (spec §5)", () => {
     expect(await h.call("lane.stop", { name: "bare" }, { key: "lanes:b1" })).toMatchObject({ ok: true, result: { ok: true } });
     expect(windows()).toContain("bare");
     expect(t.tmux("capture-pane", "-p", "-t", pane)).not.toContain("/exit");
+  });
+});
+
+describe("lane.start on an engine (reliable lanes §3.3)", () => {
+  // The engine layer's CLI as a stand-in: on, and every role resolves to acme:large-2 after passing over beta.
+  const enginesCli = () => {
+    const path = join(bin, "engines");
+    writeFileSync(path, `#!/bin/sh\n[ "$1" = option ] && { echo true; exit 0; }\necho '{"picked":{"entry":"acme:large-2"},"skipped":[{"entry":"beta:x@high","reason":"beta: not installed"}]}'\n`);
+    chmodSync(path, 0o755);
+    return path;
+  };
+  const acme: Launch = { command: ["claude-as", "--model", "{model}", "--effort", "{effort}", "--window", "{lane}"], via: "direct" };
+
+  it("a start that names nothing runs the default role's pick with the provider's launch, and says what ran", async () => {
+    const h = harness({ command: ["claude-quick"], via: "direct" }, {}, { engines: { cli: enginesCli(), launch: { acme }, defaultRole: "implement" } });
+    const r = await h.call("lane.start", { cwd: work, name: "eng" }, { key: "lanes:e1", timeoutMs: 30_000 });
+    expect(r).toMatchObject({ ok: true, result: { engine: { entry: "acme:large-2", role: "implement", skipped: [{ entry: "beta:x@high", reason: "beta: not installed" }] } } });
+    await until(() => argv("claude-as") !== null);
+    expect(argv("claude-as")).toEqual(["claude-as", "--model", "large-2", "--window", "eng"]);
+    expect(argv("claude-quick")).toBeNull();                                             // negative control: the node's own launch
+  });
+
+  it("a role whose provider has no launch command here is refused, and nothing starts", async () => {
+    const h = harness({ command: ["claude-quick"], via: "direct" }, {}, { engines: { cli: enginesCli(), launch: {} } });
+    const r = await h.call("lane.start", { cwd: work, name: "eng", role: "implement" }, { key: "lanes:e2", timeoutMs: 30_000 });
+    expect(r).toMatchObject({ ok: false, error: { code: "denied", executed: "no" } });
+    expect(windows()).not.toContain("eng");
   });
 });

@@ -82,6 +82,8 @@ Not open any more: a restored database catching up (running keyed ops until its 
 | `tmuxSocket` | `null` (the default server) | `tmux -L <name>`. A test or QA agent always names its own. |
 | `launch` | `{ "command": ["claude"], "via": "shell" }` | How `lane.start` runs Claude Code. `{account}` in `command` is the op's `account`: a command without it refuses an op that names one, and a command with it refuses an op that names none. `resume` adds `--resume <session>`; an op adds nothing else. `via: "shell"` starts the user's shell and pastes the command once its prompt shows, so the window outlives Claude Code and `claude-pool` can still move the lane. `direct` runs the command as the window's own. The owner's PC: `{ "command": ["claude-as", "{account}"], "via": "shell" }`. |
 | `protected` | `["manager"]` | Lane names `lane.stop` refuses (`denied`). |
+| `statusContract` | `{ "mode": "ask", "exempt": ["manager"] }` | Whether the relay asks a lane for the status line its answer lacks, once per turn (Hook relay, below). `"off"` never asks; `exempt` names lanes never asked (the orchestrator). |
+| `engines` | none | Lanes on an engine of the engine layer (ADR-0013, ADR-0027). `cli`: the absolute path of its CLI (`engines`), which `lane.start` asks `resolve <role> --json` and `option enabled`. `launch`: a launch command per provider, `{ command, via }` as `launch` above, where `{model}`, `{effort}`, `{account}` and `{lane}` are filled from the pick and the op; a word that is only a placeholder with no value is left out, with the option just before it. A start by role gives its `account` only to a command that takes one (the caller can't know the pick); a named engine refuses an account its command can't take. `defaultRole`: the role of a start that names neither a role nor an engine (not a resume, not a protected lane); needs `cli`. Example: `{ "cli": "/opt/engines/bin/engines", "defaultRole": "implement", "launch": { "acme": { "command": ["acme-lane", "--model", "{model}", "--effort", "{effort}", "--window", "{lane}"] }, "claude": { "command": ["claude", "--model", "{model}"] } } }`. The resolver runs with this service's environment: a provider whose program isn't on its `PATH` is skipped as not installed, and the start says so. |
 
 ## Operations
 
@@ -126,7 +128,10 @@ The node's delivery queue (design: [fleet clients](../../docs/design/fleet-clien
 
 ## Lanes, keys, captures and session state
 
-- **`lane.start { name, cwd, account?, resume?, prompt? }`** runs the policy's `launch`.
+- **`lane.start { name, cwd, account?, resume?, prompt?, role?, engine?, reason? }`** runs the policy's `launch`, or an engine (ADR-0027):
+  - `role` asks the engine layer what runs it now; `engine` (`provider:model[@effort]`) names one, and needs a `reason` where `engines.defaultRole` is set; a start with neither runs `engines.defaultRole` when there is one.
+  - Fail closed: no `engines`, no `cli` for a role, nothing in the role's chain available, a provider without a launch command, or the engine layer switched off is `denied`; an unknown role is `bad_args`. Nothing starts, and `launch` is never used instead.
+  - The answer's `engine` (`{ entry, role?, skipped? }`) says what ran and what the resolver passed over first.
   - It answers `{ workerId, waiting: "trust" }` when Claude Code asks whether to trust the folder. Accepting stays the client's decision.
   - `prompt` becomes a delivery to the new pane, with id `<client>:prompt:<the first 16 hex digits of the SHA-256 of the start's key>`. It waits for Claude Code to start, then is typed once.
 - **`lane.stop { name, mode? }`.**
@@ -145,9 +150,11 @@ It answers after the event is in the durable stream, and before any network I/O.
 | Path | Answer | Kept | When the spool can't be written |
 |---|---|---|---|
 | `/cc`, `/sl` | 204, empty | the latest per session | still 204 (a session never stalls); counted in `health.drops` |
-| `/hook/stop` | 200 `{ ok: true, queued: true }` | every event | 503, so the hook script's fallback runs |
+| `/hook/stop` | 200 `{ ok: true, queued: true }`, or the status ask: 200 `{ decision: "block", reason }` | every event (an asked one marked `statusAsked`) | 503, so the hook script's fallback runs |
 | `/hook/failure`, `/notify` | 202 | every event | 503 |
 | `/file` | 202 (413 over 25 MiB; 400 for a path that isn't absolute; 403 where files are never shared; 404 when missing) | a copy under `relay-files/`, by today's file rules | 503 |
+
+**The status ask** (reliable lanes §3.1). A lane's answer starts with one status line: `STATUS: DONE`, `STATUS: BLOCKED`, `STATUS: NEEDS DECISION` or `STATUS: WAITING <on what> [for <N> min|h]`. When Claude Code's own `Stop` body comes from a placed window whose answer has none, with `stop_hook_active` false and no background task or wake-up pending, the relay answers `{ "decision": "block", "reason": … }` and keeps the Stop with `statusAsked: true` in its body (subscribers get its answer; the fleet makes no lane event of it): Claude Code writes the line and stops again, and that Stop (now `stop_hook_active`) is the turn's end. So it asks at most once per turn. Off with `statusContract.mode: "off"`; never for `statusContract.exempt`.
 
 Anything but POST on the four kept paths is 405 and an unknown path 404. A request with an `Origin` header comes from a web page, not a hook: the kept paths answer it 403, progress paths drop it (204). A body over 448 KiB is 413 (dropped, for progress). A write the spool refuses changes nothing and counts one drop.
 

@@ -4,7 +4,8 @@
 // the principal assigns (B2), a lane moves only its own tasks and never to Done (B3), the moves are a fixed graph (B4),
 // a lane has one task in progress at a time (B5), every change is recorded with who made it and the task's revision
 // grows by one (B6), keys are never reused (B7), and the board grants nothing (B8): a status is never a Mandate, a
-// Decision, Evidence or a Verdict. Done is the manager's (or the principal's) acceptance of a lane's word, not proof.
+// Decision, Evidence or a Verdict. Done is the manager's (or the principal's) acceptance of a lane's word, not proof; the
+// manager's says what it checked (B9).
 import { err, ok, type EndpointId, type Result, type SessionId } from "./shared.ts";
 
 export type TaskKey = string & { readonly __brand: "TaskKey" };
@@ -61,7 +62,7 @@ export type BoardProblem =
   | "not_yours"         // a worker moved a task that isn't assigned to it (B3)
   | "bad_transition"    // not an edge of the graph for this actor (B4)
   | "needs_assignee"    // nobody works on an unassigned task (B4)
-  | "reason_needed"     // blocked says why (B4)
+  | "reason_needed"     // blocked says why (B4); the manager's done names its evidence (B9)
   | "one_doing"         // the assignee already has a task in progress (B5); `other` names it
   | "changed"           // the task moved since the rev the change named (B6)
   | "same"              // the change changes nothing
@@ -164,8 +165,10 @@ export function applyAction(task: Task, action: TaskAction, actor: BoardActor, n
       if (action.to === task.status) return refuse("same");
       if (!mayMove(actor, task.status, action.to)) return refuse("bad_transition", undefined, task.status);
       if (action.to === "doing" && !task.assignee) return refuse("needs_assignee");
+      // B4: blocked says why. B9: the manager's done says what was checked; the principal's may say, and need not.
       let reason: string | null = null;
-      if (action.to === "blocked") {
+      const given = (action.reason ?? "").trim() !== "";
+      if (action.to === "blocked" || (action.to === "done" && (actor.kind === "manager" || given))) {
         const r = line(action.reason ?? "", REASON_MAX);
         if (!r.ok) return r.error.problem === "empty" ? refuse("reason_needed") : r;
         reason = r.value;
@@ -174,7 +177,7 @@ export function applyAction(task: Task, action: TaskAction, actor: BoardActor, n
         const other = workingOn(board.filter(t => t.key !== task.key), task.assignee);
         if (other) return refuse("one_doing", other.key);
       }
-      const moved: Task = { ...task, status: action.to, blockedReason: reason, doneAt: action.to === "done" ? now : null };
+      const moved: Task = { ...task, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null };
       return next(moved, { kind: "moved", from: task.status, to: action.to, reason });
     }
     case "assign": {

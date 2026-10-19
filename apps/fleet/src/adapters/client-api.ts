@@ -25,6 +25,8 @@
 //   POST /v1/deliveries/<id>/cancel    { ok: true, delivery } or { ok: false, error }; 404 { error: "no_such_delivery" } for
 //                                      an id the fleet doesn't know
 //   GET  /v1/lane-events?since=<seq>   { events: LaneEvent[] }: after seq (0 when absent), oldest first, at most 1000
+//   GET  /v1/lane-watch                { lanes: LaneWatchEntry[] }: each
+//                                      lane's last turn as the lane watch holds it (reliable lanes §3.2, the brief)
 //   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job", node, body }; a
 //                                      client more than eventsBufferBytes behind is closed with 1013 (it reconnects
 //                                      and gets the current state first)
@@ -40,6 +42,7 @@ import { Flight, productVersion } from "@morndo/service-kit";
 import type { Connections } from "../application/connections.ts";
 import type { Deliveries } from "../application/deliveries.ts";
 import type { LaneEvents } from "../application/lane-events.ts";
+import type { LaneWatch } from "../application/lane-watch.ts";
 import type { EventHub, FleetEvent } from "../application/events.ts";
 import type { JobMirror } from "../application/job-mirror.ts";
 import type { LaneRegistry } from "../application/lane-registry.ts";
@@ -66,7 +69,7 @@ class HttpError extends Error {
 
 export type ClientApiDeps = {
   router: Router; connections: Connections; lanes: LaneRegistry; nodes: NodesStore; audit: Audit; events: EventHub; jobs: JobMirror; log: Logger;
-  deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">;
+  deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">; laneWatch?: Pick<LaneWatch, "view">;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
 };
@@ -254,6 +257,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       if (!/^\d{1,15}$/.test(since)) throw new HttpError(400, "since must be a lane event's seq (a whole number, 0 for the oldest kept)");
       return json(res, 200, { events: d.laneEvents.since(Number(since)) });
     }
+    if (method === "GET" && s.length === 1 && first === "lane-watch") return json(res, 200, { lanes: d.laneWatch?.view() ?? [] });
     if (method === "POST" && s.length === 1 && first === "deliveries") {
       let body: unknown;
       try { body = await readJson(req); }

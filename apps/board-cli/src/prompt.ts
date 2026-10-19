@@ -15,7 +15,7 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - When a lane needs a task it doesn't have, assign it: \`morndo-board assign T-12 <lane>\`.
 - A lane has one task in progress at a time. If a lane must switch, move its current task first (\`todo\` or \`block\`).
 - A lane moves its own task to \`review\` when it says it is done. That is the lane's word, not proof. Check it
-  (run the check, read the diff, ask another lane), then \`morndo-board done T-12\`, or send it back with
+  (run the check, read the diff, ask another lane), then \`morndo-board done T-12 --why "<what you checked>"\`, or send it back with
   \`morndo-board move T-12 doing --why "<what is missing>"\` and a comment saying what you found.
 - Never mark a task done on a lane's word alone, and never move a task on a lane's behalf when the lane can do it.
 - Blocked tasks are yours to unblock. Read \`morndo-board list --status blocked\` and act, or ask the principal.

@@ -207,3 +207,20 @@ export async function processStart(pid: number, io: ProcessStartIo = {}): Promis
   const line = await (io.ps ?? psLstart)(pid);
   return line === null ? null : startFromLstart(line);
 }
+
+// A process's group and the foreground group of its terminal: fields 5 (pgrp) and 8 (tpgid) of /proc/<pid>/stat, counted from the
+// fields after the last `)`. tpgid is -1 without a terminal. A process is its terminal's foreground job when its group is the
+// terminal's tpgid (a shell that stopped it with Ctrl-Z, or started it with &, is not). Linux only: a missing /proc entry is a
+// process that is gone, and nothing is spawned to ask again.
+// https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html (read 2026-10-16).
+export function procGroups(pid: number, io: { read?: (path: string) => string | null } = {}): { pgrp: number; tpgid: number } | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  const stat = (io.read ?? readText)(`/proc/${pid}/stat`);
+  if (stat === null) return null;
+  const close = stat.lastIndexOf(")");
+  if (close < 0) return null;
+  const f = stat.slice(close + 1).trim().split(/\s+/);
+  const pgrp = Number(f[2]);                                            // field 5
+  const tpgid = Number(f[5]);                                           // field 8
+  return Number.isInteger(pgrp) && pgrp > 0 && Number.isInteger(tpgid) ? { pgrp, tpgid } : null;
+}

@@ -44,7 +44,10 @@ describe("the manager's day", () => {
     expect(list.out).toBe("To do (2)\n  T-1    builder        Build the login page  (high)\n  T-2    reviewer       Found later");
     expect((await asBuilder("start", "T-1")).code).toBe(0);
     expect((await asBuilder("review", "T-1", "--note", "npm test: 14 passed")).code).toBe(0);
-    const done = await asManager("done", "T-1");
+    const unchecked = await asManager("done", "T-1");
+    expect(unchecked.code).toBe(1);
+    expect(unchecked.err).toContain("what you checked");
+    const done = await asManager("done", "T-1", "--why", "ran npm test at the lane's commit: 14 passed");
     expect(done.code).toBe(0);
     expect(done.out).toContain("Done this week");
     expect(done.out).toContain("  manager review → done");

@@ -39,7 +39,7 @@ function start(host: (opts: { socket: string | null }) => Promise<unknown>) {
   const ops = laneOps({
     node: "pc", policy: { ...DEFAULT_POLICY, tmuxSocket: tmux.socket }, inventory: emptyInventory,
     home: home.home, stateDir: join(home.home, "state"), stamp: async () => "3fa2c1d0", host,
-    tmux: { capture: unused, pasteLiteral: unused, sendKeyNames: unused }, send: unused, deliver: unused,
+    tmux: { capture: unused, pasteLiteral: unused, sendKeyNames: unused }, send: unused, deliver: unused, sessions: () => new Map(),
   }) as OpTable;
   const ex = new OpExecutor({ ops, allowed: new Set<OpName>(["lane.start"]), doneKeys, invVersion: () => 1, log: captureLog().log });
   const call = (key: string) => ex.handle({

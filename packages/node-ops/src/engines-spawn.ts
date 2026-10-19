@@ -66,3 +66,13 @@ export function enginesText(run: EnginesRun, okCodes: readonly number[] = [0]): 
   const usage = /^usage:/m.test(run.stderr);
   throw new EnginesError(run.code === 2 && !usage ? "refused" : "unavailable", why);
 }
+
+// The kill switch as `option enabled` prints it (JSON): on only for `true`. Any other value is off, so an answer this
+// reader doesn't know never turns roles on ("a failure will follow the same execution path as disallowing the
+// operation", OWASP, Fail securely, read 2026-10-13); output that isn't JSON is an unavailable CLI. The hub's Engines
+// page and the node's lane.start both read it here, so they never disagree.
+export function enginesEnabledOf(text: string): boolean {
+  let v: unknown;
+  try { v = JSON.parse(text); } catch { throw new EnginesError("unavailable", "engines option didn't answer in JSON"); }
+  return v === true;
+}

@@ -24,7 +24,10 @@ export type Tmux = {
   // last `o.lines` lines (1 to LIMITS.captureMaxLines), with tmux's attribute escapes when `o.attributes`, and wrapped
   // lines joined unless `o.join` is false. null: no such pane, or a count out of range.
   capture(id: string, o?: { lines: number; attributes?: boolean; join?: boolean }): Promise<string | null>;
-  send(id: string, text: string, call?: { signal?: AbortSignal }): Promise<SendProblem | null>;
+  // `engineLane`: the pane runs a lane of the engine layer (engine-sessions.ts), whose input line is the last line on screen
+  // (engineLaneBoxOnScreen) and which has no menus. Only a caller that knows that from the lane's own registry says so: a
+  // shell prompt can be drawn the same way.
+  send(id: string, text: string, call?: { signal?: AbortSignal; engineLane?: boolean }): Promise<SendProblem | null>;
   // Keys by name (pane.keys `names`): true once tmux took them; false for a name off KEY_NAMES, no names or too many, a
   // pane that isn't one, or a tmux that failed.
   sendKeyNames(paneId: string, names: KeyName[]): Promise<boolean>;
@@ -71,6 +74,15 @@ function inputBoxAt(lines: string[]): number {
   return -1;
 }
 export const inputBoxOnScreen = (screen: string) => inputBoxAt(screen.replace(SGR, "").split("\n")) !== -1;
+
+// The engine layer's lane (lane.py): its input is "❯ " and the text, always the last line on screen, with no rule above it
+// and nothing under it (`say` prints above the line and draws it again). Not a menu choice ("❯ 1. Yes").
+export function engineLaneBoxOnScreen(screen: string): boolean {
+  const lines = screen.replace(SGR, "").split("\n");
+  let end = lines.length;
+  while (end > 0 && !lines[end - 1]?.trim()) end--;
+  return end > 0 && PROMPT.test(lines[end - 1] ?? "");
+}
 
 // A menu replaces the input box, so with a box on screen only what is below it can be a menu: menu words in the agent's
 // own prose above the box are not one. With no box, the menu words anywhere in the last 25 lines.
@@ -236,8 +248,9 @@ export function tmuxAdapter(opts: { socket: string | null; session: string | nul
       if (!/^%\d+$/.test(id)) return "no_pane";
       const before = await styled(id);
       if (before === null) return "no_pane";
-      if (menuOnScreen(before)) return "menu_open";
-      if (!inputBoxOnScreen(before)) return "no_input_box";
+      const engine = call?.engineLane === true;
+      if (!engine && menuOnScreen(before)) return "menu_open";          // an engine lane draws no menu; its prose may hold the words
+      if (!(engine ? engineLaneBoxOnScreen(before) : inputBoxOnScreen(before))) return "no_input_box";
       if (draftOnScreen(before)) return "draft_present";
       // Control characters other than newline and tab are dropped: tmux pastes the bytes as they are, so an ESC[201~ in
       // the text would end the bracketed paste early and the rest would arrive as key presses.

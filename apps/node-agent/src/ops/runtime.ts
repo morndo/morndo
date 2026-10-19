@@ -11,7 +11,7 @@
 // through the executor. So the table reaches both late, through closures over the two made just below it, by the time an
 // op runs.
 import type Database from "better-sqlite3";
-import { sessionRegistry, stampServer, tmuxAdapter, type PaneLock, type Tmux } from "@morndo/node-ops";
+import { combineSessions, engineSessionRegistry, sessionRegistry, stampServer, tmuxAdapter, type PaneLock, type PanePids, type SessionSource, type Tmux } from "@morndo/node-ops";
 import type { Delivery } from "@morndo/protocol";
 import type { Flight } from "@morndo/service-kit";
 import type { AgentConfig } from "../config.ts";
@@ -27,7 +27,8 @@ import { Inventory } from "./inventory.ts";
 import type { LaneWaits } from "./lane-ops.ts";
 import type { GuardInput } from "./pane-ops.ts";
 import { jobOps, type JobControl } from "./job-ops.ts";
-import { buildOps, claudeDir } from "./table.ts";
+import { buildOps, claudeDir, enginesSessionsDir, enginesTranscriptsDir } from "./table.ts";
+import { panePidsOf } from "./tmux-panes.ts";
 import { TranscriptTitles } from "./transcript-titles.ts";
 import { UploadInbox } from "./upload-inbox.ts";
 
@@ -35,7 +36,7 @@ export type OpsRuntime = {
   inventory: Inventory;
   doneKeys: DoneKeys;
   inbox: UploadInbox;
-  registry: ReturnType<typeof sessionRegistry>;
+  registry: SessionSource;
   executor: OpExecutor;
   now: () => number;                                      // the wall clock the node reports (clockOffsetMs included)
   tmux: Tmux;                                             // the policy's tmux server
@@ -67,12 +68,16 @@ export function createOpsRuntime(o: RuntimeOptions): OpsRuntime {
   const hooks = o.hooks ?? {};
   const now = wallClock(hooks);
   const paths = agentPaths(config.home);
-  const registry = sessionRegistry(claudeDir(config.home));
+  // Claude Code's sessions, and the engine layer's lanes in the panes Claude Code holds none of (ADR-0030). An engine lane is
+  // found inside its pane, so the registry reads the panes' process ids as the inventory last listed them.
+  const panePids = (): PanePids => panePidsOf(inventory.last().rows);
+  const engines = engineSessionRegistry(enginesSessionsDir(config.home), { transcripts: enginesTranscriptsDir(config.home) });
+  const registry = combineSessions(sessionRegistry(claudeDir(config.home)), engines, panePids);
   // topic and lastPrompt (RECONCILIATION.md ruling 13): each session's transcript, found through the same registry.
   const titles = new TranscriptTitles(sessionId => registry.transcriptPath(sessionId));
   const inventory = new Inventory({
     node: config.node, session: config.policy.session, socket: config.policy.tmuxSocket,
-    sessions: () => registry.byPane(), stamp: stampServer, titles: sessionId => titles.read(sessionId),
+    sessions: panes => registry.byPane(panes), stamp: stampServer, titles: sessionId => titles.read(sessionId),
   });
   const doneKeys = new DoneKeys(o.db, Date.now, { disabled: hooks.noDoneKeys === true });
   const inbox = new UploadInbox({ dir: paths.inboxDir, ...(o.room ? { room: o.room } : {}) });

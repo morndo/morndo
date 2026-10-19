@@ -99,7 +99,9 @@ describe("the work, as a real org runs it (B2–B5)", () => {
     // The lane can't mark it done (B3); the manager can.
     expect((await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "done" })).status).toBe(400);
     expect(await json(await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "done" }))).toEqual({ error: "bad_transition", from: "review" });
-    const done = await json(await agent(managerToken).post("/api/agent/board/tasks/T-1", { action: "move", to: "done" }));
+    // The manager's Done names its evidence (B9).
+    expect(await json(await agent(managerToken).post("/api/agent/board/tasks/T-1", { action: "move", to: "done" }))).toEqual({ error: "reason_needed" });
+    const done = await json(await agent(managerToken).post("/api/agent/board/tasks/T-1", { action: "move", to: "done", reason: "npm test: 14 passed" }));
     expect(done.task).toMatchObject({ status: "done", doneAt: now });
     const record = await json(await agent(managerToken).get("/api/agent/board/tasks/T-1"));
     expect((record.events as Body[]).map(e => (e.change as Body).kind)).toEqual(["created", "moved", "moved", "moved"]);

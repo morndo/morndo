@@ -7,7 +7,7 @@
 // The deliverer and the executor are made from this table, so it reaches them late (runtime.ts), by the time an op runs.
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import { paneLock, sessionRegistry, stampServer, terminalAdapter, type PaneLock, type Tmux } from "@morndo/node-ops";
+import { paneLock, stampServer, terminalAdapter, type PaneLock, type SessionSource, type Tmux } from "@morndo/node-ops";
 import type { AgentConfig } from "../config.ts";
 import type { Deliverer, PaneView } from "../deliveries/deliverer.ts";
 import type { AgentPaths } from "../paths.ts";
@@ -30,7 +30,7 @@ export type OpsDeps = {
   doneKeys: DoneKeys;
   inventory: Inventory;
   inbox: UploadInbox;
-  registry: ReturnType<typeof sessionRegistry>;
+  registry: SessionSource;
   now: () => number;
   guard?: (g: GuardInput) => boolean;
   lock?: (path: string, waitS: number) => PaneLock;
@@ -42,6 +42,14 @@ export type OpsDeps = {
 };
 
 export function claudeDir(home: string): string { return join(home, ".claude"); }
+// Where the engine layer's lanes record themselves: its own variable (lane.py ENGINES_SESSIONS), else its default.
+export function enginesSessionsDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  return env.ENGINES_SESSIONS || join(home, ".local", "share", "engines", "sessions");
+}
+// And their transcripts (lane.py ENGINES_TRANSCRIPTS): the only place a lane's transcript is served from.
+export function enginesTranscriptsDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  return env.ENGINES_TRANSCRIPTS || join(home, ".local", "share", "engines", "transcripts");
+}
 
 export function buildOps(d: OpsDeps): OpTable {
   const { config, paths } = d;
@@ -68,7 +76,7 @@ export function buildOps(d: OpsDeps): OpTable {
     }),
     ...laneOps({
       node: config.node, policy, inventory: d.inventory, home: config.home, stateDir: paths.stateDir, stamp: stampServer,
-      tmux: d.tmux, send: d.send, deliver: a => d.deliverer().enqueue(a),
+      tmux: d.tmux, send: d.send, deliver: a => d.deliverer().enqueue(a), sessions: panes => d.registry.byPane(panes),
       ...(d.laneWaits ? { waits: d.laneWaits } : {}),
     }),
     ...worktreeOps({ repoRoots: policy.repoRoots, home: config.home, stateDir: paths.stateDir }),

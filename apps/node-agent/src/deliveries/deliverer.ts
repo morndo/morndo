@@ -56,7 +56,9 @@ export type PaneView = {
 };
 export type TranscriptView = {
   size(sessionId: string): Promise<number | null>;          // null: no transcript of that session on this node (yet)
-  lines(sessionId: string, from: number): Promise<{ lines: string[]; next: number } | null>;   // whole lines from a byte offset
+  identity?(sessionId: string): Promise<string | null>;     // which file it is (device and inode): another file at the same path is another identity
+  // whole lines from a byte offset, with the byte offset each starts at (a receipt must come after the typing, receipt.ts cameAfter)
+  lines(sessionId: string, from: number): Promise<{ lines: string[]; starts?: number[]; next: number } | null>;
 };
 export type KickReason = "status" | "hook" | "inventory" | "timer";
 export type DelivererDeps = {
@@ -100,6 +102,9 @@ export class Deliverer {
   #grace: number;
   #unbound: boolean;
   #cursors = new Map<string, number>();                    // session → the transcript's byte offset read up to
+  // delivery → the transcript's size just before it was typed, and which file that was (null: there was none yet). Not kept over a
+  // restart. It means nothing once the file is shorter than that or is another file.
+  #after = new Map<string, { offset: number; file: string | null }>();
   #trying = new Set<string>();                             // deliveries whose pane.send is in flight
   #current: Promise<void> | null = null;
   #again = false;
@@ -233,8 +238,9 @@ export class Deliverer {
   // Receipts from each session something was typed into, read on from where the last round stopped.
   async #confirm(panes: PaneState[]): Promise<void> {
     const store = this.#d.store;
+    const opened = store.open();
     // A command that starts a new session: its receipt is its pane showing another session than the one it was typed into.
-    for (const d of store.open()) {
+    for (const d of opened) {
       if ((d.state !== "typed" && d.state !== "held") || d.sessionId === undefined) continue;
       const t = store.detail(d.id);
       const text = store.textOf(d.id);
@@ -243,11 +249,14 @@ export class Deliverer {
       if (p !== null && p.sessionId !== null && p.sessionId !== d.sessionId) this.#change(d, { state: "delivered", deliveredAt: this.#d.now() });
     }
     const waiting = new Map<string, Delivery[]>();
-    for (const d of store.open()) {
+    const open = new Set(opened.map(d => d.id));
+    for (const id of this.#after.keys()) if (!open.has(id)) this.#after.delete(id);
+    for (const d of opened) {
       if ((d.state === "typed" || d.state === "held") && d.sessionId !== undefined) waiting.set(d.sessionId, [...(waiting.get(d.sessionId) ?? []), d]);
     }
     for (const session of [...this.#cursors.keys()]) if (!waiting.has(session)) this.#cursors.delete(session);
     for (const [session, ds] of waiting) {
+      await this.#checkOffsets(session, ds);
       let from = this.#cursors.get(session);
       if (from === undefined) {
         const size = await this.#d.transcripts.size(session);
@@ -259,10 +268,26 @@ export class Deliverer {
       this.#cursors.set(session, got.next);
       const pending: PendingText[] = ds.flatMap(d => {
         const text = store.textOf(d.id);
-        return text === null ? [] : [{ id: d.id, text, typedAt: d.typedAt ?? d.queuedAt }];
+        const after = this.#after.get(d.id);
+        return text === null ? [] : [{ id: d.id, text, typedAt: d.typedAt ?? d.queuedAt, ...(after !== undefined ? { after: after.offset } : {}) }];
       });
-      for (const r of readReceipts(got.lines, pending)) await this.#receipt(r.id, r.verdict, r.at, panes);
+      for (const r of readReceipts(got.lines, pending, got.starts)) await this.#receipt(r.id, r.verdict, r.at, panes);
     }
+  }
+
+  // An offset from before a typing holds only while the transcript is the file it was taken in and has not been cut short. Otherwise
+  // the offsets of the deliveries waiting on it are dropped, and so is the read position: those deliveries are read again from the
+  // file as it is now, by time and order (receipt.ts cameAfter, without an offset).
+  async #checkOffsets(session: string, ds: Delivery[]): Promise<void> {
+    const kept = ds.flatMap(d => { const a = this.#after.get(d.id); return a === undefined ? [] : [[d.id, a] as const]; });
+    if (kept.length === 0) return;
+    const size = await this.#d.transcripts.size(session);
+    const file = (await this.#d.transcripts.identity?.(session)) ?? null;
+    if (size === null) return;
+    const stale = kept.filter(([, a]) => size < a.offset || (a.file !== null && file !== null && file !== a.file));
+    if (stale.length === 0) return;
+    for (const [id] of stale) this.#after.delete(id);
+    this.#cursors.delete(session);
   }
 
   async #receipt(id: string, verdict: "delivered" | "held" | "dropped", at: number, panes: PaneState[]): Promise<void> {
@@ -358,16 +383,18 @@ export class Deliverer {
     const tryAt = this.#d.now();
     const attempt = async () => ({
       before: await this.#d.transcripts.size(at.session),
+      file: (await this.#d.transcripts.identity?.(at.session)) ?? null,
       reply: await this.#d.executor.handle({
         id: `deliver-${++this.#n}`, op: "pane.send", args: { workerId: at.workerId, text, expect }, timeoutMs: TRY_TIMEOUT_MS, key,
       }),
     });
     this.#trying.add(d.id);
-    const { before, reply } = await attempt().finally(() => this.#trying.delete(d.id));
+    const { before, file, reply } = await attempt().finally(() => this.#trying.delete(d.id));
     const retyped = retype ? { retyped: true } : {};
     if (reply.ok) {
       const r = reply.result as OpResult["pane.send"];
       if (!this.#cursors.has(at.session)) this.#cursors.set(at.session, before ?? 0);
+      this.#after.set(d.id, { offset: before ?? 0, file });  // no transcript yet: whatever it holds later is new
       this.#change(d, { state: "typed", typedAt: r.typedAt, sessionId: at.session, ...retyped });
       if (r.problem === "not_submitted" && r.typedAt >= tryAt) await this.#enterAgain(at, expect, text);
       return;

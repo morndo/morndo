@@ -248,6 +248,36 @@ describe("morndo lanes: keys, start, stop, status, events", () => {
     expect(JSON.parse(json.out)).toEqual({ node: "pc", workerId: "pc.aaaaaaaa.9", waiting: "trust" });
   });
 
+  it("start on an engine: --role or --engine with --reason reach lane.start; the answer says what ran and what it passed over", async () => {
+    const skipped = [{ entry: "acme:large-2@high", reason: "acme: not signed in" }];
+    fleet.intercept("lane.start", async () => ({ ok: true, result: { workerId: "pc.aaaaaaaa.9", engine: { entry: "beta:mid-3", role: "implement", skipped } } }));
+    const r = await lanes(["start", "build", "--cwd", "/w/build", "--role", "implement"]);
+    expect(r.code, r.err).toBe(0);
+    expect(fleet.calls.filter(c => c.op === "lane.start").at(-1)?.args).toEqual({ name: "build", cwd: "/w/build", role: "implement" });
+    expect(r.out).toContain("it runs beta:mid-3 (role implement)");
+    expect(r.out).toContain("passed over first: acme:large-2@high (acme: not signed in)");
+    expect((await lanes(["start", "build", "--cwd", "/w/build", "--engine", "acme:large-2", "--reason", "owner's call"])).code).toBe(0);
+    expect(fleet.calls.filter(c => c.op === "lane.start").at(-1)?.args).toEqual({ name: "build", cwd: "/w/build", engine: "acme:large-2", reason: "owner's call" });
+    const both = await lanes(["start", "build", "--cwd", "/w/build", "--role", "implement", "--engine", "acme:large-2"]);
+    expect([both.code, both.err]).toEqual([2, expect.stringContaining("--role or --engine, not both")]);
+  });
+
+  it("brief: the lanes' last turns (stale first), deliveries not yet taken and the day's alerts, from the fleet", async () => {
+    const now = Date.now();
+    fleet.setLaneWatch([
+      { node: "pc", window: "alpha", at: now - 40 * 60_000, status: null, deadline: now - 25 * 60_000, reason: "no_status", stale: true, stalls: 2 },
+    ]);
+    fleet.raise({ id: 1, at: now - 60_000, node: "pc", kind: "engine_fallback", detail: { lane: "alpha", entry: "beta:mid-3" } });
+    const r = await lanes(["brief"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toMatch(/^Fleet brief, /);
+    expect(r.out).toContain("alpha@pc · no status · 40 min ago · STALE x2");
+    expect(r.out).toContain("no turn seen in the last day: manager@pc");
+    expect(r.out).toContain("engine_fallback on pc alpha");
+    const json = JSON.parse((await lanes(["brief", "--json"])).out) as { watch: unknown[]; alerts: unknown[] };
+    expect([json.watch.length, json.alerts.length]).toEqual([1, 1]);
+  });
+
   it("stop: graceful by default, --kill closes the window; not seen to stop in time is 3, a refusal 4 (ruling 29)", async () => {
     fleet.intercept("lane.stop", async call => {
       const a = call.args as { name: string; mode: string };

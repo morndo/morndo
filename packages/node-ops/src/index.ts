@@ -4,6 +4,7 @@ export * from "./tmux.ts";
 export * from "./terminal.ts";
 export * from "./pid.ts";
 export * from "./sessions.ts";
+export * from "./engine-sessions.ts";
 export * from "./pane-lock.ts";
 export * from "./file-rules.ts";
 export * from "./tmux-cli.ts";

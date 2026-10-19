@@ -1,0 +1,264 @@
+// The lane watch (reliable lanes §3.2): each lane's last turn and its deadline, one stale event per turn past it with
+// nothing since, a nudge to the lane while it is worth one, stalls counted until the lane settles, and a rebuild at
+// start that never calls a lane stale for time the fleet did not see. Driven with its own clock; the fleet wiring is in
+// lane-watch-intake.test.ts.
+import { describe, expect, it, vi } from "vitest";
+import type { HookEvent, LaneEvent, LaneEventName } from "@morndo/protocol";
+import type { LaneEventDraft } from "../src/adapters/lane-events-store.ts";
+import { createLogger, type Logger } from "../src/adapters/log.ts";
+import type { DeliveryRequest } from "../src/application/deliveries.ts";
+import { LaneWatch, NUDGE_MAX_STALLS, REBUILD_WINDOW_MS, nudgeText, type LaneWatchConfig, type NudgeAnswer } from "../src/application/lane-watch.ts";
+import { quiet } from "./helpers/fleet.ts";
+
+const MIN = 60_000;
+const T0 = 1_800_000_000_000;
+const CONFIG: LaneWatchConfig = { waitingMin: 30, noStatusMin: 15, nudge: true };
+const WORKER = "pc.3fa2c1d0.1";                                                       // the pane that runs api's session
+
+function rig(o: {
+  config?: LaneWatchConfig; alive?: boolean; online?: () => boolean; nudgeTarget?: (node: string, window: string) => string | null;
+  raise?: (d: LaneEventDraft) => LaneEvent | null; answer?: NudgeAnswer; log?: Logger;
+} = {}) {
+  let now = T0;
+  let seq = 0;
+  const raised: LaneEventDraft[] = [];
+  const nudged: DeliveryRequest[] = [];
+  const alive = { value: o.alive ?? true };
+  const watch = new LaneWatch({
+    config: o.config ?? CONFIG, log: o.log ?? quiet, now: () => now, alive: () => alive.value, ...(o.online ? { online: o.online } : {}),
+    nudgeTarget: o.nudgeTarget ?? (() => WORKER),
+    raise: o.raise ?? (d => { raised.push(d); return { ...d, seq: ++seq } as LaneEvent; }),
+    nudge: async r => { nudged.push(r); return o.answer ?? { ok: true }; },
+  });
+  let n = 0;
+  const finished = (at: number, over: Partial<LaneEvent> = {}): LaneEvent =>
+    ({ v: 1, t: "lane", seq: ++n, event: "finished", node: "pc", window: "api", lane: "api", at, status: null, firstLine: "", bg: 0, crons: 0, ...over });
+  // A stored lane event that is no turn end: a session state change or a failed turn.
+  const state = (event: LaneEventName, at: number): LaneEvent => ({ v: 1, t: "lane", seq: ++n, event, node: "pc", window: "api", lane: "api", at });
+  const hook = (at: number, path: HookEvent["path"] = "/cc", body: unknown = {}): HookEvent => ({ streamId: "s", seq: ++n, at, path, node: "pc", window: "api", body });
+  return { watch, raised, nudged, alive, finished, state, hook, at: (t: number) => { now = t; } };
+}
+
+describe("the lane watch", () => {
+  it("gives each kind of turn end its deadline: no status 15 min, background work 30, a wait its lease, a settled turn none", () => {
+    const r = rig();
+    r.watch.turn(r.finished(T0));
+    expect(r.watch.view()[0]).toMatchObject({ deadline: T0 + 15 * MIN, reason: "no_status", status: null });
+    r.watch.turn(r.finished(T0, { bg: 2 }));
+    expect(r.watch.view()[0]).toMatchObject({ deadline: T0 + 30 * MIN, reason: "waiting", waitingOn: "background work" });
+    r.watch.turn(r.finished(T0, { crons: 1 }));
+    expect(r.watch.view()[0]).toMatchObject({ deadline: T0 + 30 * MIN, waitingOn: "a scheduled wake-up" });
+    r.watch.turn(r.finished(T0, { status: "waiting", waitingOn: "CI", until: T0 + 5 * MIN }));
+    expect(r.watch.view()[0]).toMatchObject({ deadline: T0 + 5 * MIN, reason: "waiting", waitingOn: "CI", status: "waiting" });
+    for (const status of ["done", "blocked", "needs_decision"] as const) {
+      r.watch.turn(r.finished(T0, { status, bg: 1 }));
+      expect(r.watch.view()[0]).toMatchObject({ deadline: null, status });
+      expect(r.watch.view()[0]?.reason).toBeUndefined();
+    }
+  });
+
+  it("past the deadline with nothing since: one stale event and one nudge for that turn; any hook since keeps it quiet", () => {
+    const r = rig();
+    r.watch.turn(r.finished(T0, { status: "waiting", waitingOn: "CI", until: T0 + 10 * MIN, sessionId: "s1" }));
+    r.at(T0 + 10 * MIN - 1);
+    r.watch.sweep();
+    expect(r.raised).toEqual([]);                                                       // not yet
+    r.at(T0 + 10 * MIN);
+    r.watch.sweep();
+    r.watch.sweep();                                                                    // once per turn
+    expect(r.raised).toEqual([{ v: 1, t: "lane", event: "stale", node: "pc", window: "api", lane: "api", at: T0 + 10 * MIN, sessionId: "s1", reason: "waiting", waitingOn: "CI", since: T0, stalls: 1 }]);
+    expect(r.nudged).toHaveLength(1);
+    expect(r.nudged[0]).toMatchObject({ id: `fleet:nudge:${WORKER}:${T0}`, workerId: WORKER });
+    expect(r.nudged[0]).not.toHaveProperty("lane");                                   // never by name: another node may use it
+    expect(r.nudged[0]?.text).toContain("waiting on CI");
+    expect(r.nudged[0]?.text).toContain("STATUS: DONE");
+    // A new turn with a hook after it: activity, so no stale event (negative control: without the hook, one more).
+    // Status line refreshes are not activity: Claude Code may re-run it on a timer while the lane sits idle.
+    r.watch.turn(r.finished(T0 + 20 * MIN));
+    r.watch.saw(r.hook(T0 + 21 * MIN));
+    const idle = rig();
+    idle.watch.turn(idle.finished(T0));
+    for (let m = 1; m <= 16; m++) idle.watch.saw(idle.hook(T0 + m * MIN, "/sl"));
+    idle.at(T0 + 16 * MIN);
+    idle.watch.sweep();
+    expect(idle.raised).toHaveLength(1);
+    r.at(T0 + 60 * MIN);
+    r.watch.sweep();
+    expect(r.raised).toHaveLength(1);
+  });
+
+  it("counts stalls until the lane settles, and stops nudging after the second", () => {
+    const r = rig();
+    let t = T0;
+    for (let i = 1; i <= NUDGE_MAX_STALLS + 1; i++) {
+      r.watch.turn(r.finished(t));
+      t += 16 * MIN;
+      r.at(t);
+      r.watch.sweep();
+      expect(r.raised.at(-1)?.stalls).toBe(i);
+    }
+    expect(r.raised).toHaveLength(3);
+    expect(r.nudged).toHaveLength(NUDGE_MAX_STALLS);                                   // the third is the orchestrator's to re-plan
+    r.watch.turn(r.finished(t, { status: "done" }));
+    r.watch.turn(r.finished(t + 1));
+    r.at(t + 20 * MIN);
+    r.watch.sweep();
+    expect(r.raised.at(-1)?.stalls).toBe(1);                                            // DONE reset the count
+  });
+
+  it("drops a lane whose window is gone instead of calling it stale; nudges off by config", () => {
+    const gone = rig({ alive: false });
+    gone.watch.turn(gone.finished(T0));
+    gone.at(T0 + 16 * MIN);
+    gone.watch.sweep();
+    expect([gone.raised, gone.watch.view()]).toEqual([[], []]);
+    const noSession = rig({ nudgeTarget: () => null });                                // a lane that runs no agent CLI
+    noSession.watch.turn(noSession.finished(T0));
+    noSession.at(T0 + 16 * MIN);
+    noSession.watch.sweep();
+    expect([noSession.raised.length, noSession.nudged.length]).toEqual([1, 0]);
+    const quietRig = rig({ config: { ...CONFIG, nudge: false } });
+    quietRig.watch.turn(quietRig.finished(T0));
+    quietRig.at(T0 + 16 * MIN);
+    quietRig.watch.sweep();
+    expect([quietRig.raised.length, quietRig.nudged.length]).toEqual([1, 0]);
+  });
+
+  it("rebuilds from stored events with the restart as the new base: a deadline runs again in full, a reported turn stays reported", () => {
+    const r = rig();
+    const restart = T0 + 60 * MIN;
+    r.at(restart);
+    r.watch.rebuild([
+      r.finished(T0, { window: "api", lane: "api" }),
+      r.finished(T0, { window: "web", lane: "web" }),
+      { v: 1, t: "lane", seq: 99, event: "stale", node: "pc", window: "web", lane: "web", at: T0 + 16 * MIN, since: T0, stalls: 1, reason: "no_status" },
+    ]);
+    expect(r.watch.view().find(v => v.window === "api")).toMatchObject({ deadline: restart + 15 * MIN, stale: false });
+    expect(r.watch.view().find(v => v.window === "web")).toMatchObject({ stale: true, stalls: 1 });
+    r.at(restart + 15 * MIN - 1);
+    r.watch.sweep();
+    expect(r.raised).toEqual([]);                                                       // negative control: no rebase, stale at once
+    r.at(restart + 15 * MIN);
+    r.watch.sweep();
+    expect(r.raised.map(e => e.window)).toEqual(["api"]);
+  });
+
+  it("leaves a lane alone while its node is not online, and reports it once the node is back", () => {
+    let online = false;
+    const r = rig({ online: () => online });
+    r.watch.turn(r.finished(T0));
+    r.at(T0 + 16 * MIN);
+    r.watch.sweep();
+    expect([r.raised, r.watch.view().length]).toEqual([[], 1]);                     // kept, not dropped as gone
+    online = true;
+    r.watch.sweep();
+    expect(r.raised).toHaveLength(1);
+  });
+
+  it("lets go of a settled turn a day old", () => {
+    const r = rig();
+    r.watch.turn(r.finished(T0, { status: "done" }));
+    r.at(T0 + REBUILD_WINDOW_MS + 1);
+    r.watch.sweep();
+    expect(r.watch.view()).toEqual([]);
+  });
+
+  it("counts a hook from after the turn end that the fleet took before it (one intake batch: the turn is told on commit)", () => {
+    const r = rig();
+    r.watch.saw(r.hook(T0, "/hook/stop"));                                              // the Stop itself
+    r.watch.saw(r.hook(T0 + MIN));                                                      // the next turn's first tool call, same batch
+    r.watch.turn(r.finished(T0));                                                       // the Stop's lane event, once committed
+    r.at(T0 + 16 * MIN);
+    r.watch.sweep();
+    expect(r.raised).toEqual([]);
+    const before = rig();                                                               // negative control: a hook from before the end
+    before.watch.saw(before.hook(T0 - MIN));
+    before.watch.turn(before.finished(T0));
+    before.at(T0 + 16 * MIN);
+    before.watch.sweep();
+    expect(before.raised).toHaveLength(1);
+  });
+
+  it("after a rebuild, counts a hook from the outage by its own time, and a stored state change or failure after the turn end", () => {
+    const restart = T0 + 10 * MIN;
+    const replayed = rig();
+    replayed.at(restart);
+    replayed.watch.rebuild([replayed.finished(T0)]);
+    replayed.watch.saw(replayed.hook(T0 + 5 * MIN));                                   // spooled on the node while the fleet was down
+    replayed.at(restart + 16 * MIN);
+    replayed.watch.sweep();
+    expect(replayed.raised).toEqual([]);
+    for (const event of ["needs_input", "answered", "stop_failure"] as const) {
+      const r = rig();
+      r.at(restart);
+      r.watch.rebuild([r.finished(T0), r.state(event, T0 + MIN)]);
+      r.at(restart + 16 * MIN);
+      r.watch.sweep();
+      expect([event, r.raised]).toEqual([event, []]);
+    }
+    const old = rig();                                                                  // negative control: one from before the end
+    old.at(restart);
+    old.watch.rebuild([old.state("needs_input", T0 - MIN), old.finished(T0)]);
+    old.at(restart + 16 * MIN);
+    old.watch.sweep();
+    expect(old.raised).toHaveLength(1);
+  });
+
+  it("takes Claude Code's idle notice as no activity, and any other notification as some", () => {
+    const notice = (r: ReturnType<typeof rig>, type: string) =>
+      r.hook(T0 + MIN, "/notify", { hook_event_name: "Notification", notification_type: type, message: "Claude is waiting for your input" });
+    const idle = rig();
+    idle.watch.turn(idle.finished(T0));
+    idle.watch.saw(notice(idle, "idle_prompt"));
+    idle.at(T0 + 16 * MIN);
+    idle.watch.sweep();
+    expect(idle.raised).toHaveLength(1);
+    const prompt = rig();
+    prompt.watch.turn(prompt.finished(T0));
+    prompt.watch.saw(notice(prompt, "permission_prompt"));
+    prompt.at(T0 + 16 * MIN);
+    prompt.watch.sweep();
+    expect(prompt.raised).toEqual([]);
+  });
+
+  it("tries a stale event fleet.db refused again on the next sweep, and counts and nudges it once it is stored", () => {
+    let calls = 0;
+    const stored: LaneEventDraft[] = [];
+    const r = rig({ raise: d => { calls += 1; if (calls === 1) throw new Error("database is locked"); stored.push(d); return { ...d, seq: calls } as LaneEvent; } });
+    r.watch.turn(r.finished(T0));
+    r.at(T0 + 16 * MIN);
+    r.watch.sweep();
+    expect([stored.length, r.nudged.length, r.watch.view()[0]?.stale, r.watch.view()[0]?.stalls]).toEqual([0, 0, false, 0]);
+    r.at(T0 + 17 * MIN);
+    r.watch.sweep();
+    expect(stored).toMatchObject([{ event: "stale", since: T0, stalls: 1 }]);
+    expect([r.nudged.length, r.watch.view()[0]?.stale, r.watch.view()[0]?.stalls]).toEqual([1, true, 1]);
+  });
+
+  it("nudges each lane at its own pane by worker ID, with an id no other lane's nudge shares", () => {
+    const panes: Record<string, string> = { api: "pc.3fa2c1d0.1", web: "pc.3fa2c1d0.2" };
+    const r = rig({ nudgeTarget: (_node, window) => panes[window] ?? null });
+    r.watch.turn(r.finished(T0));
+    r.watch.turn(r.finished(T0, { window: "web", lane: "web" }));                       // the same ms
+    r.at(T0 + 16 * MIN);
+    r.watch.sweep();
+    expect(r.nudged.map(q => ({ id: q.id, workerId: "workerId" in q ? q.workerId : null }))).toEqual([
+      { id: `fleet:nudge:pc.3fa2c1d0.1:${T0}`, workerId: "pc.3fa2c1d0.1" },
+      { id: `fleet:nudge:pc.3fa2c1d0.2:${T0}`, workerId: "pc.3fa2c1d0.2" },
+    ]);
+  });
+
+  it("logs a nudge the fleet refused", async () => {
+    const lines: string[] = [];
+    const r = rig({ log: createLogger({ level: "warn", sink: line => { lines.push(line); } }), answer: { ok: false, error: { code: "no_pane" } } });
+    r.watch.turn(r.finished(T0));
+    r.at(T0 + 16 * MIN);
+    r.watch.sweep();
+    await vi.waitFor(() => expect(lines.some(l => l.includes("nudging api on pc was refused (no_pane)"))).toBe(true));
+  });
+
+  it("says in the nudge how long ago, on what, and the line to start with", () => {
+    expect(nudgeText({ at: T0, reason: "no_status" }, T0 + 16 * MIN)).toMatch(/^\[fleet\] Your last turn ended 16 min ago without a status line/);
+    expect(nudgeText({ at: T0, reason: "waiting", waitingOn: "the deploy" }, T0 + 31 * MIN)).toContain("31 min ago waiting on the deploy");
+  });
+});

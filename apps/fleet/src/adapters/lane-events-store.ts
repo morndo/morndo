@@ -10,7 +10,7 @@ type Row = {
   seq: number; node: string; window: string | null; lane: string | null; session_id: string | null; event: LaneEventName; at: number; body: string;
 };
 // The fields of each event beyond the columns, as the body column keeps them.
-const BODY_FIELDS = ["status", "firstLine", "bg", "crons", "question", "error"] as const;
+const BODY_FIELDS = ["status", "firstLine", "bg", "crons", "question", "error", "waitingOn", "until", "reason", "since", "stalls"] as const;
 const eventOf = (r: Row): LaneEvent => ({
   v: 1, t: "lane", seq: r.seq, event: r.event, node: r.node, window: r.window, lane: r.lane,
   ...(r.session_id === null ? {} : { sessionId: r.session_id }), at: r.at, ...(JSON.parse(r.body) as Partial<LaneEvent>),
@@ -38,6 +38,13 @@ export class LaneEventsStore {
   lastOf(sessionId: string): LaneEventName | null {
     const r = this.#db.prepare("SELECT event FROM lane_events WHERE session_id = ? ORDER BY seq DESC LIMIT 1").get(sessionId) as { event: LaneEventName } | undefined;
     return r?.event ?? null;
+  }
+
+  // What the lane watch rebuilds from, after the time `after`, oldest first: the turn ends and stale events, and the
+  // session state changes and failed turn ends that may follow a turn end (activity, as they were live).
+  turnsSince(after: number): LaneEvent[] {
+    return (this.#db.prepare(`SELECT ${COLUMNS} FROM lane_events WHERE at > ? AND event IN ('finished', 'stale', 'needs_input', 'answered', 'stop_failure') ORDER BY seq`)
+      .all(after) as Row[]).map(eventOf);
   }
 
   // Events waiting for the manager, oldest first, at most `limit`.
