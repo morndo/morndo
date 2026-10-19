@@ -538,9 +538,59 @@ A read model, like Observation: what each connected account has used of its rate
 | # | Invariant |
 |---|---|
 | U1 | A Report is taken only under an agent token (B1), for the account the call names (none: the default account), with the lane the token acts as. Nothing in a conversation's text is a Report. |
-| U2 | Per account, the newest Report sets the windows. A window a Report lacks is kept until its reset time has passed, then dropped (the CLI drops it then too). A Report older than the account's last never moves the windows, though its session is noted. A Report may name its own windows (`limits`) instead of the 5-hour and the weekly; an empty list does not. A bad named row is dropped and does not reject the Report, and an on-demand line is cut to its limit. A Report that doesn't leaves those named windows as they were until each reset passes, and then the 5-hour and weekly rows show again. On-demand state goes when those named windows do. The notice counts a named card's spend meter as well as its named windows. |
+| U2 | Per account, the newest Report sets the windows. A window a Report lacks is kept until its reset time has passed, then dropped (the CLI drops it then too). A Report older than the account's last never moves the windows, though its session is noted. A Report may name its own windows (`limits`) instead of the 5-hour and the weekly; an empty list does not. A bad named row is dropped and does not reject the Report, and an on-demand line is cut to its limit. A Report that doesn't leaves those named windows as they were until each reset passes, and then the 5-hour and weekly rows show again. A named window that names no reset is kept for a day after the Report that set it, then dropped. On-demand state goes when those named windows do. The notice counts a named card's spend meter as well as its named windows. |
 | U3 | A session counts as reporting for 10 minutes after its last Report; the account keeps each session's last context used. |
 | U4 | Usage grants and decides nothing (as O4): no Mandate, Decision, Verdict or engine choice follows from it. The engines' availability stays the engine layer's (ADR-0013). |
+
+## Pool: which account runs the next turn ([ADR-0029](adr/0029-account-pool.md))
+
+Which member account a session's next turn runs on, and the rules around it. Code in `packages/domain/src/pool.ts`.
+
+**Ubiquitous language**
+
+| Term | Means | Is not |
+|---|---|---|
+| Pool | The subscription Connections of one runtime that lanes on this node share, with their settings. One per runtime. | A Chain; a Priority. |
+| Member | A Connection in the pool, with `keep`, `expires` and `onlyFor`. | A sign-in token. |
+| Identity | Who a member is signed in to, as a digest of the vendor's account id. Members with one identity are one **seat**. | The member's name; an email. |
+| Reading | One look at a member: signed in or not, identity, plan (paid or not), windows, whether the vendor allows ordinary use, reset credits, and when it was read. | A Usage Report (that belongs to the read model). |
+| Short / long window | The member's shortest and longest window: today the 5-hour and the weekly one. A plan with one window has only a long one. | A quota the pool measures. |
+| Switch point | Headroom at or below which a member is **low**: short 3 %, long 1 %. | A pick margin. |
+| Pick margin | Headroom a member needs to take a new session ahead of others: short 10 %, long 3 %. | A switch point. |
+| Mark | "Out until T", from a usage-limit failure, for the member or for one model on it. | A provider mark in the engine layer. |
+| Seat state | Logged out, retired, out, low or ok, checked in that order. | Availability (the engine layer's). |
+| Urgency | Long-window headroom divided by the hours until that window resets or the member expires, whichever comes first: the quota that expires first, per hour. | A score of the work. |
+| Session | A runtime conversation that turns resume (for Codex, the thread id). | A lane. |
+| Placement | The member a session runs on, pinned or not. | A claim. |
+| Claim | The one holder (node, pid, start ticks, boot id, lane) allowed to run a turn on a session now, on a given member. | A Connections Lease (which gates the run on that member). |
+| Move | A session's placement changing member: between turns, or as the same turn's continuation after a usage limit. Rotate mode only, or the principal's `pool move`. | An engine switch (which starts a new session on another provider). |
+| Mode | `pinned` (no automatic choice of account) or `rotate`. | A routing mode. |
+| Move by | `resume` (the same session continues on the new member) or `handoff` (a new session with a handoff brief, used when resuming across accounts fails). | |
+| Reset credit | A credit the vendor lets an account spend to reset its windows. | Spend; a credit balance. |
+| Reset advice | The pool's note that spending a reset credit now would pay off, naming the member and the reason. | A spend. |
+
+**Invariants**
+
+| # | Invariant |
+|---|---|
+| PL1 | A member is a subscription Connection in Morndo's custody, of the pool's runtime, with a sign-in home of its own (`configDir`). A key, or a subscription without a `configDir`, is never a member, so no pool turn runs in the default home. A member is in one pool only. Removing a member ends its placements. |
+| PL2 | Members with one identity are one seat. They share the freshest reading and every mark. The first member by name that can run (not retired, not past its end) takes sessions, a move never goes between them, and their claims count together. |
+| PL3 | A member's state is checked in this order: logged out (its last reading says so); retired (by hand, on a plan that isn't paid, or past `expires`); out (a live mark); low (a window at or below its switch point); ok. A window whose reset has passed counts as full. |
+| PL4 | Rotate placement. Candidates are ok seats that `onlyFor` admits; a member with `onlyFor` serves only those directories, and comes first for them. At night, a `keep` member is a candidate only with at least the night reserve left in its long window. Candidates that clear both pick margins go first. Then the least `(active + 1) / urgency`, then the earlier long reset or expiry, the earlier short reset, fewer active sessions, and the name. With `order: soonest-reset` (claude-pool's), the earlier long reset or expiry comes before the load. With no candidate the answer is "no seat", with the least bad member and when the first seat comes back. |
+| PL5 | Urgency is `max(longLeft, 0.5) / max(hours to the earlier of the long reset and expires, 1)`. An unknown long window counts as 100 % left over 168 hours. |
+| PL6 | A placed session stays on its member while that seat is ok. In rotate mode, an unpinned session whose seat is not ok moves at its next turn, never to its own identity. A pinned session, and every session in pinned mode, never moves: its turn is refused with the member's state and when the member comes back. Only the principal's `pool move` moves it. |
+| PL7 | A session has at most one live claim. A claim held by a live holder refuses a second one and names the holder. A dead holder's claim is dropped (ClaimLost). A claim made before the session is known binds to it once the runtime names it. |
+| PL8 | A usage-limit failure marks the member until the reset the failure or the next reading names, else for 60 minutes, and never more than 168 hours. When the limit names one model, only that model is marked on the member. In rotate mode the same turn then continues once on each other free seat. With none left, the turn fails as a usage limit and says when the first seat comes back. |
+| PL9 | A mark ends when its time passes, or when a reading taken after it says ordinary use is allowed. Percentages and reset times alone never end it. A reading under another identity drops the member's marks and starts it fresh. |
+| PL10 | The pool never spends a reset credit. It advises one in two cases. First: every seat is out or low, at least one session waits, the first seat comes back four hours or more from now, and a blocked member holds a credit; it names the member whose long window resets last. Second: a credit lapses within 72 hours. Spending is the principal's command, recorded with who gave it. |
+| PL11 | The mode is pinned until the principal turns rotate on, naming who decided. Anyone may turn it back to pinned. |
+| PL12 | The pool decides only placements and claims. It reads no credential and stores no email (CN1, CN5); identities are digests. The Usage read model still gets each member's windows through the agents' door and still decides nothing, so U4 stands. Engine chains and availability stay the engine layer's. |
+| PL13 | At most `turnsPerMember` live claims per seat, by default 1: one serialized stream per sign-in. A usage read of a member takes that member's turn slot, or is skipped. Raising the limit is the principal's call. |
+| PL14 | `moveBy` stays `resume` until a move's resume fails because the conversation can't be read under the new account. The pool then sets `handoff` itself and says so (MoveByChanged). Only the principal sets it back. |
+
+**Events:** MemberAdded, MemberRemoved, MemberSettingsChanged, MemberRetired, MemberActivated, MemberMarkedOut, MarkCleared, SessionPlaced, SessionMoved, ClaimGranted, ClaimReleased, ClaimLost, TurnRefused, ModeChanged, SettingsChanged, MoveByChanged, ResetAdvised, ResetSpent.
+
+Aggregate **Pool**, one per runtime. The clock is the `now` argument; whether a holder is alive is a function argument.
 
 ## Jobs: work that outlives the turn ([ADR-0017](adr/0017-background-jobs-that-report-back.md))
 
@@ -748,6 +798,9 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Fleet supplies Observation and Steering* (customer and supplier). Observation reads workers, screens and transcripts through it. A Decision (E8) or a Command (S5) for the manager reaches it as a Delivery: once queued, the answer counts as given; delivered, by a Receipt, it is recorded (E13); uncertain, it is never typed again and the Ask is not opened again; given up, nothing reached the manager and the Ask opens again. A Command to another lane reaches its pane as a keyed operation (FL7). Neither is typed twice across a dropped connection. The Hook bus feeds the chat bot, a subscriber, which turns hook events into Escalations through its own adapter; Lane events reach the manager as Deliveries.
 - *Engines is downstream of Connections* (customer and supplier). A connection name is the provider name the routing policy orders. Connections never reads the routing policy, and no spend figure decides anything but the lease gate (CN15).
 - *Connections stands beside Usage*. Usage shows a subscription's windows. It does not grant a lease.
+- *Pool → Connections* (customer/supplier): the pool reads its members and takes a Lease per turn through the existing gate (on, terms, repo, isolation).
+- *Pool → Usage* (publisher): readings go out as status-line reports through the agents' door. The read model doesn't change.
+- *Engine layer → Pool* (conformist at the edge): the engine layer runs its `codex` provider through the pool's wrapper. The pool never edits a chain.
 - *Access supplies Secrets*: the Session and its fresh verification (SR5).
 - *Secrets supplies Catch-up, Notifications and Observation with Asks*: an open Secret request has a card (C1), raises one Notification (N2), and makes its lane wait (H3).
 - *The Fleet carries Secrets' typed operations*, keyed (FL7), and one node event, `secrets.requested`, routed to the hub only (SR9). No plaintext secret and no agent-CLI credential crosses the Fleet (FL14); a value sealed to one node's recipient may.

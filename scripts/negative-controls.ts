@@ -2840,6 +2840,22 @@ export const CONTROLS: Control[] = [
   { id: "t110-uptime-clock-after", task: "T-110", file: "packages/node-ops/src/pid.ts",
     find: "startFromUptime(stat, uptime, hz, before, after)", replace: "startFromUptime(stat, uptime, hz, after, after)",
     run: ["apps/node-agent/test/job-identity.test.ts"], expect: "widens the start instead of moving it" },
+  { id: "cx-usage-env-keys", task: "codex-runtime M3", file: "apps/connections/src/cli.ts",
+    find: "const env = childEnv(home.env, loginEnv(\"codex\", connection.configDir));",
+    replace: "const env = { ...home.env, ...loginEnv(\"codex\", connection.configDir) };",
+    run: ["apps/connections/test/usage-cli.test.ts"], expect: "CODEX_API_KEY" },
+  { id: "pool-one-writer", task: "account-pool P4", file: "packages/domain/src/pool.ts",
+    find: "if (writer) return err({ problem: \"session-busy\", holder: writer.holder });",
+    replace: "if (writer && false) return err({ problem: \"session-busy\", holder: writer.holder });",
+    run: ["packages/domain/test/pool-claims.test.ts"], expect: "session-busy" },
+  { id: "pool-hide-failed", task: "account-pool P7", file: "apps/connections/src/pool-cli.ts",
+    find: "if (ended.kind === \"usage-limit\") noteEvent(io, `[pool] ${current.member} reached its usage limit; this turn goes on as the same session on ${next.member}`);",
+    replace: "if (ended.kind === \"usage-limit\" && turn.held !== null) io.stdout(`${turn.held}\\n`);",
+    run: ["apps/connections/test/pool-cli.test.ts"], expect: "turn.failed" },
+  { id: "pool-env-keys", task: "account-pool P7", file: "apps/connections/src/adapters/runtime-codex.ts",
+    find: "env: childEnv(this.#parent, loginEnv(\"codex\", runHome)),",
+    replace: "env: { ...this.#parent, ...loginEnv(\"codex\", runHome) },",
+    run: ["apps/connections/test/pool-cli.test.ts"], expect: "KEY" },
 ];
 
 // ---- the runner

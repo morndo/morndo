@@ -43,3 +43,8 @@ export function signInLine(runtime: string): string | null {
   if (runtime === "claude" || runtime === "codex" || runtime === "cursor") return CONNECTION_WORDS.signIn[runtime];
   return null;
 }
+
+// What to do before the sign-in line, where a runtime needs it (ADR-0028 decision 2).
+export function signInNote(runtime: string): string | null {
+  return runtime === "codex" ? CONNECTION_WORDS.signInNotes.codex : null;
+}

@@ -28,14 +28,31 @@ export function sweepScratch(dirs: Set<string>, remove: (dir: string) => void): 
 
 function dropScratch(dir: string): void {
   if (!scratches.has(dir)) return;
-  rmSync(dir, { recursive: true, force: true });
-  scratches.delete(dir);
+  try {
+    rmSync(dir, { recursive: true, force: true });
+    scratches.delete(dir);
+  } catch (error) {
+    // The dir stays in the set, as a failed sweep leaves its dir: a stop's sweep retries it. A clip
+    // that cannot be removed must not replace the run's own exit code with a crash, but a leaked clip
+    // must not be silent either. The path and the error code go to this process's stderr, for whoever
+    // runs the transcriber: the hub keeps a run's stderr only as a failed run's detail, so a leak
+    // beside a successful run reaches no one through the hub, and this line never joins a fail()
+    // detail — a failure's reason stays the reason, without a filesystem path in it.
+    const code = (error as NodeJS.ErrnoException).code ?? String(error);
+    process.stderr.write(`scratch dir not removed: ${dir} (${code})\n`);
+  }
 }
 
 function clearScratch(): void {
   sweepScratch(scratches, (dir) => rmSync(dir, { recursive: true, force: true }));
 }
 
+// The hub's cancel and a Ctrl-C signal the whole group, so a child dies with this process and its
+// close can settle before this handler runs; whatever close settles first becomes the run's result —
+// the engine's failure exit 1, the converter's "not audio" 3, or a finished transcript's 0 when the
+// engine crossed the line as the signal landed. The hub still settles a cancelled run as aborted,
+// because it reads its own run.aborted before the code (transcriber-process.ts). This handler is what
+// makes a stop end at all: kill the children, take the scratch, exit 128+N.
 function onStop(signal: NodeJS.Signals): void {
   for (const child of children) {
     try { child.kill("SIGTERM"); } catch { /* already gone */ }
@@ -280,7 +297,7 @@ function runChild(cmd: string, args: string[], cwd: string): Promise<Child> {
     const child = spawn(cmd, args, { cwd, stdio: ["ignore", "ignore", "ignore"] });
     children.add(child);
     child.on("error", reject);
-    child.on("close", (code) => {
+    child.on("close", code => {
       children.delete(child);
       resolve({ code: code ?? 1 });
     });

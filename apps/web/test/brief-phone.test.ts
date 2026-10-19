@@ -267,14 +267,15 @@ describe("the sheet and cards report what happened to an answer", () => {
     await tab.waitForFunction(() => (globalThis as { __ready?: boolean }).__ready === true);
     const dialog = tab.locator("dialog.sheet");
     await dialog.waitFor();
-    // The due line's clock is frozen before it is read: the harness starts it at the fixture's time and moves it to
-    // the real one on its next tick, so a line read before the freeze can be a day off the one after (on a day other
-    // than the fixture's). The countdown keeps its own, real clock.
-    await tab.evaluate(() => {
+    // Pin the due line's clock before reading it. dueLine counts calendar days (decisions.ts), so a line read at the
+    // sheet's mount time and re-read at the real now differs once midnight has passed between the two: CI saw "in 49
+    // days" become "in 48 days" after midnight UTC on 2026-10-14 (02:40 and 03:30). Pinned, the countdown still ticks
+    // on the session clock, as it does in the app.
+    await tab.evaluate(n => {
       const g = globalThis as unknown as { __freezeClock?: boolean; __setClock: (t: number) => void };
       g.__freezeClock = true;
-      g.__setClock(Date.now());
-    });
+      g.__setClock(n);
+    }, NOW);
     const due = await dialog.locator(".meta").innerText();
     await tab.evaluate(() => {
       const g = globalThis as unknown as { __setAnswering: (a: { label: string; sending: boolean; commitAt: number }) => void };

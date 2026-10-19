@@ -1,5 +1,5 @@
 // morndo-keys. The design names this morndo-connections; this build uses the name the manager asked for.
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
@@ -10,7 +10,10 @@ import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
-import { baseUrlProblem, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram } from "./adapters/runtime-claude.ts";
+import { baseUrlProblem, childEnv, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
+import { readCodexLimits, usageReport } from "./adapters/usage-codex.ts";
+import { productVersion } from "@morndo/service-kit";
+import { poolCommand } from "./pool-cli.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
@@ -28,7 +31,7 @@ const LEASES = 8;
 
 export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string };
 
-type Parsed = { cmd: string; positionals: string[]; rest: string[]; get(name: string): string | undefined; all(name: string): string[] };
+export type Parsed = { cmd: string; positionals: string[]; rest: string[]; get(name: string): string | undefined; all(name: string): string[] };
 
 export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
   const parsed = parse(argv);
@@ -69,6 +72,8 @@ async function dispatch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     case "check": return check(home, need(parsed.get("connection") ?? name), parsed, io);
     case "run": return launch(home, parsed, io);
     case "spend": return spend(home, need(name), io);
+    case "usage": return usage(home, parsed, io);
+    case "pool": return poolCommand(home, parsed, io);
     case "log": return log(home, name, io);
     case "revoke": return done(home.connections.revoke(need(name), ACTOR), io);
     case "rotate": return rotate(home, need(name), io);
@@ -273,6 +278,33 @@ function spend(home: Opened, name: string, io: Io): number {
   const connection = findConnection(home.store.load().directory, name);
   if (!connection || connection.kind !== "api-key" || connection.custody !== "morndo") return fail(io, "missing");
   io.stdout(`${JSON.stringify({ name, spent: spentOf(connection.spend) })}\n`);
+  return 0;
+}
+
+// A Codex subscription's usage windows, one line of the status-line JSON the hub's Usage route takes (ADR-0028 decision 5).
+// Nothing on stdout and exit 1 when they can't be read, so a caller that posts only on exit 0 sends nothing (a bare pipe would
+// still send an empty body). The child gets childEnv: no key variable,
+// and the Connection's own CODEX_HOME.
+async function usage(home: Opened, parsed: Parsed, io: Io): Promise<number> {
+  const name = need(parsed.get("connection") ?? parsed.positionals[0]);
+  const connection = findConnection(home.store.load().directory, name);
+  if (!connection || connection.status === "revoked") return fail(io, "missing");
+  if (connection.custody !== "morndo" || connection.kind !== "subscription" || connection.runtime !== "codex") {
+    return fail(io, "usage reads a Codex subscription only");
+  }
+  const env = childEnv(home.env, loginEnv("codex", connection.configDir));
+  // A pool member takes one turn at a time (PL13): a read of its account waits for no turn and is refused while one runs.
+  const slot = home.pool.list("codex").seats.some(seat => seat.member === name) ? randomUUID() : null;
+  if (slot !== null) {
+    const holder = selfHolder(null);
+    const held = holder ? home.pool.hold("codex", name, slot, holder) : null;
+    if (!held?.ok) return fail(io, "busy");
+  }
+  let reading: Awaited<ReturnType<typeof readCodexLimits>>;
+  try { reading = await readCodexLimits({ bin: home.env.MORNDO_CODEX_BIN ?? "codex", env, version: productVersion() }); }
+  finally { if (slot !== null) home.pool.release("codex", slot); }
+  if (!reading.ok) return fail(io, reading.problem);
+  io.stdout(`${JSON.stringify(usageReport(reading.limits, `${name}-limits`))}\n`);
   return 0;
 }
 
@@ -488,7 +520,7 @@ async function probe(home: Opened, name: string, io: Io, body: (connection: Conn
   finally { home.leases.close(name, granted.value.id, "done", null); }
 }
 
-function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, reserve: number, entry?: string): { ok: true; id: string } | { ok: false; problem: string; exit?: number } {
+export function ask(home: Opened, name: string, parsed: Parsed, probeLease: boolean, reserve: number, entry?: string): { ok: true; id: string } | { ok: false; problem: string; exit?: number } {
   const connection = findConnection(home.store.load().directory, name);
   if (!connection) return { ok: false, problem: "missing" };
   if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return { ok: false, problem: LOGIN_KEY_REFUSAL };
@@ -541,7 +573,7 @@ function done(result: { ok: true } | { ok: false; error: { problem: string; role
   return fail(io, result.error.problem, result.error.exit, result.error.role);
 }
 
-function fail(io: Io, problem: string, exit?: number, role?: string): number {
+export function fail(io: Io, problem: string, exit?: number, role?: string): number {
   io.stderr(`${role ? `${problem} ${role}` : problem}\n`);
   if (exit !== undefined) return exit;
   return GATE.has(problem) ? 75 : 1;
@@ -557,7 +589,7 @@ export function freshRef(name: string, now: number, current = "", bytes: () => B
   return ref;
 }
 
-function need(value: string | undefined): string {
+export function need(value: string | undefined): string {
   if (!value) throw new Error("missing argument");
   return value;
 }
@@ -595,7 +627,7 @@ function parse(argv: readonly string[]): Parsed {
   const values = new Map<string, string[]>();
   for (let i = 1; i < ours.length; i++) {
     const token = ours[i] ?? "";
-    if (token === "--subscription" || token === "--all" || token === "--risk") {
+    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep") {
       values.set(token.slice(2), ["true"]);
       continue;
     }

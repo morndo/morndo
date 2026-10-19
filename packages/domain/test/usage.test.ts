@@ -122,3 +122,25 @@ describe("the headline", () => {
     expect([0, 74.9, 75, 89.9, 90, 100].map(usageLevel)).toEqual(["ok", "ok", "warning", "warning", "critical", "critical"]);
   });
 });
+
+describe("named windows with no reset time (review of the Codex runtime, point 2)", () => {
+  const nameless = (at: number) => report({ at, sessionId: "s1", fiveHour: null, sevenDay: null, limits: [{ label: "Window", usedPercentage: 90, resetsAt: null, resetsOn: null }] });
+  it("a read that named a window with no reset, then ordinary 5-hour and weekly reads: the old named row goes within a day, not never", () => {
+    const first = applyReport(null, nameless(NOW), NOW);
+    expect(first.limits?.map(w => w.label)).toEqual(["Window"]);
+    const soon = applyReport(first, report({ at: NOW + HOUR }), NOW + HOUR);
+    expect(soon.limits?.map(w => w.label)).toEqual(["Window"]);               // kept for now: its own reset is unknown
+    const later = applyReport(first, report({ at: NOW + 25 * HOUR }), NOW + 25 * HOUR);
+    expect(later.limits).toBeNull();                                             // a day on, the fixed rows show again
+    expect(later.fiveHour?.usedPercentage).toBe(23.5);
+  });
+  it("what the dashboard shows drops such a row a day after the report that set it", () => {
+    const a = applyReport(null, nameless(NOW), NOW);
+    expect(accountNow(a, NOW + 23 * HOUR).limits).not.toBeNull();
+    expect(accountNow(a, NOW + 25 * HOUR).limits).toBeNull();
+  });
+  it("a named window that does name its reset stays until that reset, however long", () => {
+    const a = applyReport(null, report({ fiveHour: null, sevenDay: null, limits: [{ label: "Weekly", usedPercentage: 50, resetsAt: NOW + 6 * 24 * HOUR, resetsOn: null }] }), NOW);
+    expect(accountNow(a, NOW + 5 * 24 * HOUR).limits).not.toBeNull();
+  });
+});

@@ -19,6 +19,7 @@
 // https://code.claude.com/docs/en/settings-reference
 // CLAUDE_CODE_API_KEY_HELPER_TTL_MS overrides the helper cache.
 // https://code.claude.com/docs/en/env-vars
+import { binCommand, stopGroup } from "./spawn-bin.ts";
 import { spawn, type SpawnOptions } from "node:child_process";
 import { statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
@@ -37,13 +38,14 @@ const DENIED_NAMES = [
 ] as const;
 
 export type ChildResult = { status: number; stdout: string; stderr: string };
-export type ChildHooks = { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void };
+export type ChildHooks = { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onStart?: (pid: number) => void };
 
 export function runChild(command: string, args: readonly string[], options: {
-  env: NodeJS.ProcessEnv; cwd: string; hooks?: ChildHooks;
+  env: NodeJS.ProcessEnv; cwd: string; hooks?: ChildHooks; detached?: boolean;
 }): Promise<ChildResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { env: options.env, cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { env: options.env, cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"], ...(options.detached ? { detached: true } : {}) });
+    if (child.pid !== undefined) options.hooks?.onStart?.(child.pid);
     const decodeOut = new StringDecoder("utf8");
     const decodeErr = new StringDecoder("utf8");
     const out: string[] = [];
@@ -100,9 +102,7 @@ export type AuthReading =
 const STATUS_TIMEOUT_MS = 15_000;
 
 export function readAuth(bin: string, args: readonly string[], env: NodeJS.ProcessEnv, timeoutMs = STATUS_TIMEOUT_MS): Promise<AuthReading> {
-  const script = bin.endsWith(".mjs") || bin.endsWith(".js");
-  const command = script ? process.execPath : bin;
-  const argv = [...(script ? [bin] : []), ...args];
+  const { command, argv } = binCommand(bin, args);
   const options: SpawnOptions = { env, stdio: ["ignore", "pipe", "pipe"], detached: true };
   return new Promise(resolve => {
     const child = spawn(command, argv, options);
@@ -120,10 +120,7 @@ export function readAuth(bin: string, args: readonly string[], env: NodeJS.Proce
     };
     const timer = setTimeout(() => {
       timedOut = true;
-      if (child.pid !== undefined) {
-        try { process.kill(-child.pid, "SIGKILL"); }
-        catch { try { child.kill("SIGKILL"); } catch { /* already gone */ } }
-      }
+      void stopGroup(child.pid, 0);
       finish("timeout");
     }, timeoutMs);
     child.on("error", error => {
@@ -401,7 +398,6 @@ export class ClaudeRuntime implements Runtime {
   }
 
   async execute(plan: RunPlan, extra: readonly string[], hooks?: ChildHooks): Promise<ChildResult> {
-    const script = this.#bin.endsWith(".mjs") || this.#bin.endsWith(".js");
     const extraEnv = loginEnv("claude", plan.configDir);
     let denyWebSearch = false;
     if (plan.subscription) await assertSubscription(this.#bin, ["auth", "status"], childEnv(this.#parent, extraEnv), "claude");
@@ -413,7 +409,8 @@ export class ClaudeRuntime implements Runtime {
     const flags = plan.subscription
       ? ["-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, null), ...extra]
       : claudeArgv(this.#bin, plan, this.#helper, extra, denyWebSearch).slice(1);
-    return runChild(script ? process.execPath : this.#bin, script ? [this.#bin, ...flags] : flags, {
+    const started = binCommand(this.#bin, flags);
+    return runChild(started.command, started.argv, {
       env: childEnv(this.#parent, extraEnv),
       cwd: plan.workspace,
       ...(hooks ? { hooks } : {}),

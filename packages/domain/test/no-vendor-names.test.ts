@@ -23,6 +23,7 @@ function sources(): string[] {
     join(ROOT, "packages/domain/src/connections.ts"),
     join(ROOT, "packages/domain/src/routing.ts"),
     join(ROOT, "packages/domain/src/secrets.ts"),
+    join(ROOT, "packages/domain/src/pool.ts"),
   ];
   const app = join(ROOT, "apps/connections/src/application");
   if (existsSync(app)) {

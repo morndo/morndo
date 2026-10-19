@@ -1,6 +1,6 @@
 // Ports for the connections application (ADR-0018). No secret bytes cross a port: a vault answers
 // whether a ref exists and what its fingerprint is, and nothing else.
-import type { Directory, Holder, Isolation, Policy, SecretDirectory } from "@morndo/domain";
+import type { Directory, Holder, Isolation, Policy, Pool, SecretDirectory } from "@morndo/domain";
 import type { VendorPreset } from "@morndo/protocol";
 
 export type Clock = { now(): number };
@@ -198,3 +198,12 @@ export type SecretsDirectory = {
 
 // The repository a path belongs to: its git common directory, absolute, or null outside a repository (design §6).
 export type WorkspaceRoots = { commonDir(path: string): string | null };
+
+// ---- The account pool (ADR-0029). One row per runtime, saved only on the version it was read at.
+export type PoolStore = {
+  load(runtime: string): { pool: Pool; version: number };
+  // false when `version` is no longer current, so a stale read cannot land.
+  save(pool: Pool, version: number): boolean;
+};
+// A notice at most once per `everyMs` for one key; where it goes (a hub, the terminal) is the adapter's.
+export type PoolNotices = { send(key: string, text: string, everyMs: number): void };

@@ -8,12 +8,14 @@
 // If sandbox_mode is set, Codex uses the older sandbox instead of permission profiles.
 // Built-ins: :read-only, :workspace, :danger-full-access.
 // https://developers.openai.com/codex/permissions
+import { binCommand } from "./spawn-bin.ts";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { Isolation } from "@morndo/domain";
 import type { RunHandle, RunPlan, Runtime } from "../application/ports.ts";
 import { assertSubscription, childEnv, loginEnv, runChild, StatusRefused, statusOf, type ChildHooks, type ChildResult } from "./runtime-claude.ts";
+import { poolRunHome } from "./codex-pool-home.ts";
 import { CODEX_AUTH_TIMEOUT_MS, HELPER_TTL_MS } from "./runtime-limits.ts";
 
 function quoted(value: string): string {
@@ -172,8 +174,9 @@ export class CodexRuntime implements Runtime {
     return { id: plan.lease };
   }
 
-  async execute(plan: RunPlan, extra: readonly string[], hooks?: ChildHooks): Promise<ChildResult> {
-    const prefix = this.#bin.endsWith(".mjs") || this.#bin.endsWith(".js") ? [process.execPath, this.#bin] : [this.#bin];
+  // `shared` is a pool turn: its home links the conversation store every account shares (ADR-0029), and its child leads a group of its own.
+  async execute(plan: RunPlan, extra: readonly string[], hooks?: ChildHooks, shared?: string): Promise<ChildResult> {
+    const started = binCommand(this.#bin, extra);
     if (plan.subscription) {
       const env = childEnv(this.#parent, loginEnv("codex", plan.configDir));
       await assertSubscription(this.#bin, ["login", "status"], env, "codex");
@@ -181,12 +184,13 @@ export class CodexRuntime implements Runtime {
       if (keyringLogin(loginConfig(login))) {
         throw new StatusRefused("a keyring login stays in its own directory; this run uses another home and cannot find it");
       }
-      const runHome = subscriptionRunHome(login, this.#profileText(), plan.deny);
+      const runHome = shared === undefined ? subscriptionRunHome(login, this.#profileText(), plan.deny) : poolRunHome(login, shared, this.#profileText(), plan.deny);
       try {
-        return await runChild(prefix[0] ?? this.#bin, [...prefix.slice(1), ...extra], {
+        return await runChild(started.command, started.argv, {
           env: childEnv(this.#parent, loginEnv("codex", runHome)),
           cwd: plan.workspace,
           ...(hooks ? { hooks } : {}),
+          ...(shared === undefined ? {} : { detached: true }),
         });
       } finally {
         rmSync(runHome, { recursive: true, force: true });
@@ -198,7 +202,7 @@ export class CodexRuntime implements Runtime {
     const path = `${this.#configDir}/config.toml`;
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     writeFileSync(path, config, { mode: 0o600 });
-    return runChild(prefix[0] ?? this.#bin, [...prefix.slice(1), ...extra], {
+    return runChild(started.command, started.argv, {
       env: childEnv(this.#parent, loginEnv("codex", this.#configDir)),
       cwd: plan.workspace,
       ...(hooks ? { hooks } : {}),
