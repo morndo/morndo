@@ -214,8 +214,13 @@ try {
       const chip = p.page.getByRole("group", { name: "Lanes working without a task" }).locator('[data-lane="worker-01"]');
       await chip.waitFor();
       await p.page.screenshot({ path: join(OUT, "6-runs.png") });
+      // Dark, from a fresh load: a theme switched under a page already drawn can leave some colours as they were.
       await p.page.emulateMedia({ colorScheme: "dark" });
+      await p.page.reload();
+      await p.page.locator(".desk").waitFor({ timeout: 15_000 });
       await p.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+      await p.page.locator(".rail").getByRole("button", { name: "Board" }).click();
+      await chip.waitFor({ timeout: 10_000 });
       await p.page.screenshot({ path: join(OUT, "7-runs-dark.png") });
       await chip.click();
       await p.page.locator("header.vh h1", { hasText: "worker-01" }).waitFor({ timeout: 5000 });
