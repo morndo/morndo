@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/protocol";
+import { CLIENT_API, ChannelFeedSchema, FileListSchema, FLEET_PROTO, ManifestSchema } from "@morndo/protocol";
 import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
@@ -154,14 +154,21 @@ describe("file list and manifest", () => {
     expect(readSchemaJson(probe)).toEqual({ cwd: realRoot, execArgv: [] });
   });
 
-  it("states this tree's schemas, including a floor of 0 where nothing breaking has shipped", () => {
-    expect(declaredSchemas()).toEqual({
-      hub: { version: 17, floor: 0 },
-      fleet: { version: 14, floor: 7 },
-      node: { version: 6, floor: 0 },
-      connections: { version: 2, floor: 0 },
+  it("states this tree's schemas: the last migration's version, and a floor of 0 where nothing breaking has shipped", async () => {
+    const { MIGRATIONS: hub } = await import("../../apps/hub/src/adapters/migrations.ts");
+    const { MIGRATIONS: fleet } = await import("../../apps/fleet/src/adapters/migrations.ts");
+    const { MIGRATIONS: node } = await import("../../apps/node-agent/src/db/migrations.ts");
+    const { MIGRATIONS: connections } = await import("../../apps/connections/src/adapters/store-migrations.ts");
+    // Worked out from the lists here, so a migration main adds later is the tree's, not a number to update.
+    const expected = (list: readonly { version: number; compat: "additive" | "breaking" }[]) => ({
+      version: Math.max(...list.map(m => m.version)),
+      floor: Math.max(0, ...list.filter(m => m.compat === "breaking").map(m => m.version)),
     });
-    expect(protocolRange()).toEqual({ agent: [1, 1], clientApi: [1, 1] });
+    expect(declaredSchemas()).toEqual({ hub: expected(hub), fleet: expected(fleet), node: expected(node), connections: expected(connections) });
+    expect(protocolRange()).toEqual({
+      agent: [Math.max(1, FLEET_PROTO - 1), FLEET_PROTO],
+      clientApi: [Math.max(1, CLIENT_API - 1), CLIENT_API],
+    });
   });
 
   it("reads the schema version and floor from the migration list", () => {
@@ -188,7 +195,7 @@ describe("file list and manifest", () => {
     const parsed = ManifestSchema.safeParse(JSON.parse(json));
     expect(parsed.success).toBe(true);
     if (!parsed.success) return;
-    expect(parsed.data.schemas.hub).toEqual({ version: 17, floor: 0 });
+    expect(parsed.data.schemas).toEqual(declaredSchemas());
     expect(parsed.data.artifacts.map(a => a.platform)).toEqual(["darwin-arm64", "linux-x64"]);
     expect(parsed.data.notes).toBe("https://github.com/morndo/morndo/releases/tag/v0.1.0");
     expect(parsed.data.publishedAt).toBe(WHEN);
