@@ -43,7 +43,8 @@ morndo-keys pool exec --runtime codex [--lane L] [--account A] -- exec … <prom
 
   When the reader of the output has gone (\`… | head\`), or the terminal has (SIGHUP), the agent and the processes it started are
   stopped: SIGTERM, SIGKILL after 3 s, and the lease is closed with what the turn used. run then exits 1 (129 for the terminal),
-  pool exec 143. A run's agent stays in the terminal's own session, so Ctrl-C, Ctrl-Z and /dev/tty work as for any command (a pool
+  pool exec 143. nohup does not exempt a run: Node resets an inherited SIGHUP ignore when it starts, for the bin and for the agent
+  it starts. A run's agent stays in the terminal's own session, so Ctrl-C, Ctrl-Z and /dev/tty work as for any command (a pool
   turn has a process group of its own, as it always had, and is stopped as a group).
 
   A reader that is gone is noticed only when the bin writes to it. An agent that prints once at the end (claude with

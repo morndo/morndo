@@ -130,6 +130,19 @@ describe("morndo-keys run in a terminal that closes", () => {
     expect(existsSync(join(t.dir, "finished"))).toBe(false);
     expect(t.outcomes()).toEqual(["failed"]);
   }, 60_000);
+
+  it.skipIf(process.platform !== "linux")("is stopped by SIGHUP even when started with it ignored: Node resets an inherited ignore at startup, so nohup cannot exempt it", async () => {
+    const t = ready(fixture);
+    const bin = spawn("sh", ["-c", 'trap "" HUP; exec "$0" "$@"', process.execPath, "--no-warnings", ...t.args([])], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+    bin.stdout.resume();
+    bin.stderr.resume();
+    const closed = new Promise<number | null>(resolve => bin.once("close", resolve));
+    for (let i = 0; i < 100 && !existsSync(join(t.dir, "pid")); i++) await pause(50);
+    bin.kill("SIGHUP");
+    expect(await closed).toBe(129);
+    expect(alive(pidIn(t.dir, "pid"))).toBe(false);
+    expect(t.outcomes()).toEqual(["failed"]);
+  }, 30_000);
 });
 
 describe("morndo-keys help", () => {

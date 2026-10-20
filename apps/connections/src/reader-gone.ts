@@ -3,7 +3,9 @@
 // the connection's budget on output that goes nowhere, so the bin raises `Io.gone` when a write fails that way and the
 // run stops its child and the processes the child started (process-tree.ts): SIGTERM, then SIGKILL after a grace. The agent stays
 // in the bin's own session and process group, so a terminal's Ctrl-C, Ctrl-Z and /dev/tty reach it as they would any command; when
-// the terminal itself goes (SIGHUP to the bin) the same stop runs. The books are still closed by the caller with what the turn used.
+// the terminal itself goes (SIGHUP to the bin) the same stop runs. `nohup` cannot exempt a run: a Node process starts with an
+// inherited SIGHUP ignore reset to the default (PlatformInit in src/node.cc, https://github.com/nodejs/node/blob/v24.x/src/node.cc),
+// and so does every child Node starts (libuv's uv__process_child_init), so the agent would not keep it either. The books are still closed by the caller with what the turn used.
 // A reader that is gone is noticed on a write: an agent that is silent, or prints one result at the end (an --output-format json
 // run), goes on until its next line. Node has no way to see a pipe's reader close without writing: libuv offers the hang-up event
 // on a poll handle (UV_DISCONNECT, https://docs.libuv.org/en/v1.x/poll.html) but Node exposes no poll handle, and a second socket on
