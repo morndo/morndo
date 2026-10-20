@@ -32,9 +32,9 @@ export function assertPrivate(path: string, kind: "file" | "dir", uid: number): 
 }
 
 // A directory this process creates is 0700. One that already exists is only checked: ownership first,
-// then the mode. It is never chmod'd, so a home directory cannot be tightened by accident. The one exception to
-// "private" is a missing ~/.config, which a vault directory needs as its parent: it is created 0755, the mode the
-// XDG base directory spec gives a missing directory (specifications.freedesktop.org/basedir/latest, read 2026-10-20).
+// then the mode. It is never chmod'd, so a home directory cannot be tightened by accident. A missing ~/.config, which
+// a vault directory needs as its parent, is made as the XDG base directory spec asks of a missing directory: 0700, and
+// an existing one keeps its permissions (specifications.freedesktop.org/basedir/latest, read 2026-10-20).
 export function ensurePrivateDir(dir: string, uid: number): void {
   refuseBareDirectory(dir);
   try {
@@ -62,16 +62,13 @@ export function ensurePrivateDir(dir: string, uid: number): void {
   assertPrivate(dir, "dir", uid);
 }
 
-// Only a ~/.config that is missing is made, and only a directory made here is chmod'd (the umask may have narrowed
-// it). One that appears meanwhile, or was there, keeps its mode.
+// Only a ~/.config that is missing is made. The mode is 0700 and the umask may narrow it; it is not chmod'd after, so one
+// that appears meanwhile, or was there, keeps its mode.
 function ensureConfigHome(): void {
-  const config = resolve(homedir(), ".config");
-  try { mkdirSync(config, { mode: 0o755 }); }
+  try { mkdirSync(resolve(homedir(), ".config"), { mode: 0o700 }); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "EEXIST") return;
-    throw error;
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   }
-  chmodSync(config, 0o755);
 }
 
 export function refuseBareHome(path: string, home = homedir()): void {
