@@ -216,7 +216,10 @@ export const STEP_UP_OPS: ReadonlySet<OpName> = new Set<OpName>(["connections.pr
 
 export type Health = { memTotal: number; memAvailable: number; psiSome10: number | null; psiFull10: number | null;
   diskFreeHome: number; load1: number; tmuxOk: boolean; wallClock: number; spoolDepth: number; drops: number;
-  jobs?: string };
+  jobs?: string;
+  // The node's UTC offset in minutes now (east positive, so UTC+2 is 120): the time its lanes' wake-up schedules are
+  // written in (ADR-0032, R3). Absent from an older node: its wake-ups get no fire time.
+  tzOffsetMin?: number };
 // "/lane": a lane state event the node made from its session state (fleet clients §7), carried and replayed like a hook.
 // Its body: { event: "needs_input" | "answered"; sessionId: string | null; question?: string }.
 export type HookEvent = { streamId: string; seq: number; at: number;
@@ -476,7 +479,7 @@ const OpErrorSchema = z.pipe(
 const HealthSchema = z.object({
   memTotal: z.number(), memAvailable: z.number(), psiSome10: z.nullable(z.number()), psiFull10: z.nullable(z.number()),
   diskFreeHome: z.number(), load1: z.number(), tmuxOk: z.boolean(), wallClock: z.number(), spoolDepth: count(), drops: count(),
-  jobs: z.exactOptional(z.string()),
+  jobs: z.exactOptional(z.string()), tzOffsetMin: z.exactOptional(z.int().check(z.gte(-840), z.lte(840))),
 });
 const HookEventSchema = z.object({
   streamId: z.uuid(), seq: z.int().check(z.gte(1)), at: z.number(),
