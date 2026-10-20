@@ -1,6 +1,7 @@
 // `morndo-keys run` when the reader of its output is gone (T-274): the turn must stop, not run on to its end with nobody
 // reading and spending the key's budget. The real bin as a child, run into `head -c 20` (a real pipe), against a fake
-// runtime that streams for 5 s. The lease is still closed with what the turn used, so the books are right.
+// runtime that streams for 15 s. Nothing here times the stop closely: the bin must be back well inside the turn (9 s of 15),
+// and by then the agent is gone and never finished. The lease is still closed with what the turn used, so the books are right.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,13 +32,13 @@ describe("morndo-keys run with its reader gone", () => {
     expect(keys(["ack", "credit", "--by", "owner"]).status).toBe(0);
 
     const started = Date.now();
-    await runIntoHead([MAIN, "run", "--connection", "credit", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--dir", dir], env);
+    const ran = await runIntoHead([MAIN, "run", "--connection", "credit", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--dir", dir], env);
     const took = Date.now() - started;
 
-    expect(took).toBeLessThan(3_500);
+    expect({ code: ran.code, stderr: ran.stderr }).toEqual({ code: 1, stderr: "" });     // the killed child's status is 1
+    expect(took).toBeLessThan(9_000);
     const pid = Number(readFileSync(join(dir, "pid"), "utf8"));
     expect(alive(pid)).toBe(false);
-    await new Promise(resolve => setTimeout(resolve, 3_000));
     expect(existsSync(join(dir, "finished"))).toBe(false);
     expect(keys(["log", "credit"]).stdout).toContain("LeaseClosed");
   }, 40_000);

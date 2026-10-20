@@ -159,11 +159,11 @@ describe("morndo-keys pool exec", () => {
   it("stops the turn when the reader of its output is gone, instead of running on to the end", async () => {
     const t = await poolNode({ mode: "pinned", members: { "codex-a": "stream" }, defaultMember: "codex-a" });
     const started = Date.now();
-    await runIntoHead([MAIN, ...turn()], t.env);
-    expect(Date.now() - started).toBeLessThan(3_500);
+    const ran = await runIntoHead([MAIN, ...turn()], t.env);
+    expect(Date.now() - started).toBeLessThan(9_000);                                    // the fake turn is 15 s
+    expect(ran.code).toBe(143);                                                          // stopped as a SIGTERM stops it
     const pid = Number(readFileSync(join(t.home("codex-a"), "pid"), "utf8"));
     expect(() => process.kill(pid, 0)).toThrow();
-    await new Promise(resolve => setTimeout(resolve, 3_000));
     expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
   }, 30_000);
 
