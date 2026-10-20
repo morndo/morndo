@@ -128,7 +128,7 @@ describe("check-signing-feed.sh", () => {
   const keys = (version: number) => JSON.stringify({ schema: 1, version, expiresAt: "2027-11-02T10:00:00Z", root: ["a"], release: ["b"], feed: ["c"] });
 
   // A fake gh: the feed branch head is "h1" and its files are in prev/, the published manifest is manifest.json.
-  function world(p: { branch: boolean; age?: number; headError?: boolean }) {
+  function world(p: { branch: boolean; age?: number; headError?: boolean; pages?: "none" | "feed" | "empty" }) {
     const dir = temp();
     const prev = join(dir, "prev");
     mkdirSync(prev);
@@ -147,6 +147,7 @@ describe("check-signing-feed.sh", () => {
       `D=${dir}`,
       'case "$*" in',
       `  *git/ref/heads/feed*) ${p.headError ? "echo 'gh: Server Error (HTTP 500)' >&2; exit 1" : p.branch ? 'echo h1' : "echo 'gh: Not Found (HTTP 404)' >&2; exit 1"} ;;`,
+      `  *repos/o/r/pages*) ${p.pages === undefined || p.pages === "none" ? "echo 'gh: Not Found (HTTP 404)' >&2; exit 1" : "echo https://pages.example.invalid/site/"} ;;`,
       '  *contents/latest.json*) cat "$D/prev/latest.json" ;;',
       '  *contents/stable.json*) cat "$D/prev/stable.json" ;;',
       '  "release download"*) while [ $# -gt 0 ]; do [ "$1" = --dir ] && out=$2; shift; done; cp "$D/manifest.json" "$out/manifest.json" ;;',
@@ -154,10 +155,18 @@ describe("check-signing-feed.sh", () => {
       "esac",
       "",
     ].join("\n"), { mode: 0o755 });
-    return { dir, gh, latest, stable };
+    const curl = join(dir, "curl");
+    writeFileSync(curl, [
+      "#!/bin/sh",
+      'while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done',
+      `echo '{}' > "$out"`,
+      `printf ${p.pages === "feed" ? "200" : "404"}`,
+      "",
+    ].join("\n"), { mode: 0o755 });
+    return { dir, gh, curl, latest, stable };
   }
   const check = (w: ReturnType<typeof world>, env: Record<string, string>) =>
-    sh("check-signing-feed.sh", w.dir, { GH: w.gh, REPOSITORY: "o/r", ...env });
+    sh("check-signing-feed.sh", w.dir, { GH: w.gh, CURL: w.curl, REPOSITORY: "o/r", ...env });
   const put = (w: ReturnType<typeof world>, latest: string, stable: string) => {
     writeFileSync(join(w.dir, "site/latest.json"), latest);
     writeFileSync(join(w.dir, "site/stable.json"), stable);
@@ -262,6 +271,23 @@ describe("check-signing-feed.sh", () => {
     const done = check(w, { MODE: "publish", VERSION });
     expect(done.status).toBe(1);
     expect(done.stderr).toMatch(/whole number/);
+  });
+
+  it("refuses a missing feed branch when a feed is deployed: a deleted branch is not a first feed", () => {
+    const w = world({ branch: false, pages: "feed" });
+    put(w, publishRelease(null, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), emptyFeed({ channel: "stable", now: NOW, keySetVersion: 1 }));
+    const done = check(w, { MODE: "publish", VERSION });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/feed is deployed but the feed branch is missing/);
+  });
+
+  it("allows a first feed when Pages has no site or no feed on it", () => {
+    for (const pages of ["none", "empty"] as const) {
+      const w = world({ branch: false, pages });
+      put(w, publishRelease(null, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), emptyFeed({ channel: "stable", now: NOW, keySetVersion: 1 }));
+      const done = check(w, { MODE: "publish", VERSION });
+      expect(done.status, `${pages}: ${done.stderr}`).toBe(0);
+    }
   });
 
   it("refuses a first feed that does not start at 1, and a re-sign with no branch", () => {

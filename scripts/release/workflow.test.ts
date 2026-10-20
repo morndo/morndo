@@ -208,6 +208,7 @@ describe("release pipeline files", () => {
     expect(second).toContain("FEED_SSH_KEY");
     expect(second).toContain("MODE: publish");
     expect(second).toContain("check-signing-feed.sh");
+    expect(second).toContain("pages: read");
     const third = job(release, "feed");
     expect(third).toContain("needs: [release-please, feed-sign]");
     expect(third).toContain("feed-commit");

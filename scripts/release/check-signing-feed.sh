@@ -37,6 +37,22 @@ elif grep -q 'HTTP 404' "$work/head.err"; then
 else
   fail "cannot read the feed branch: $(cat "$work/head.err")"
 fi
+# A missing branch is a first feed only if no feed is deployed. A deleted branch with a deployed feed would
+# restart the number at 1 and drop the withdrawals, so that stops here (Pages serves the last good feed).
+if [ -z "$head" ] && [ "$MODE" = publish ]; then
+  CURL=${CURL:-/usr/bin/curl}
+  if site=$("$GH" api "/repos/$REPOSITORY/pages" --jq .html_url 2> "$work/pages.err"); then
+    code=$("$CURL" -s -o "$work/deployed.json" -w '%{http_code}' "${site%/}/latest.json") || fail "cannot read the deployed feed"
+    case $code in
+      404) ;;
+      200) fail "a feed is deployed but the feed branch is missing; restore the branch, do not start a new feed" ;;
+      *) fail "the deployed feed answered HTTP $code" ;;
+    esac
+  elif ! grep -q 'HTTP 404' "$work/pages.err"; then
+    fail "cannot read the Pages site: $(cat "$work/pages.err")"
+  fi
+fi
+
 if [ "$MODE" = publish ]; then
   keys_version=$(jq -er .version "$TRUST/keys.json") || fail "no key-set version in $TRUST/keys.json"
 fi
