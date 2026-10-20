@@ -703,7 +703,8 @@ describe("a draft in the way (#64)", () => {
   const HOUR = 60 * 60_000;
   const W1_LANE: DeliveryTarget = { lane: "w1", sticky: false };
   // The box as Claude Code keeps it: pane.send refuses while it holds text; Ctrl+S empties it (or not, `stashWorks`).
-  function boxRig(o: { lanes?: string[]; save?: DraftStashDeps["save"]; stashWorks?: boolean } = {}) {
+  // `restores`: Claude Code puts the stashed draft back in the box once a message is submitted (seen live, 2.1.303).
+  function boxRig(o: { lanes?: string[]; save?: DraftStashDeps["save"]; stashWorks?: boolean; restores?: boolean } = {}) {
     const saved: { text: string; lane: string; at: number }[] = [];
     const r = rig({
       panes: [pane("manager", W1, "%1", S1), pane("w1", W2, "%2", S2)],
@@ -713,14 +714,19 @@ describe("a draft in the way (#64)", () => {
       },
     });
     const paneOf = (workerId: unknown) => (workerId === W1 ? "%1" : "%2");
+    const stash = new Map<string, string>();
     r.answer(req => {
       const args = req.args as { workerId: string; names?: string[] };
       const id = paneOf(args.workerId);
       if (req.op === "pane.keys") {
-        if (args.names?.[0] === "C-s" && o.stashWorks !== false) r.drafts.delete(id);
+        const text = r.drafts.get(id);
+        if (args.names?.[0] === "C-s" && o.stashWorks !== false && text !== undefined) { stash.set(id, text); r.drafts.delete(id); }
         return r.typed()(req);
       }
-      return r.drafts.has(id) ? refuse("draft_present")(req) : r.typed()(req);
+      if (r.drafts.has(id)) return refuse("draft_present")(req);
+      const back = stash.get(id);
+      if (o.restores && back !== undefined) { r.drafts.set(id, back); stash.delete(id); }
+      return r.typed()(req);
     });
     return { ...r, saved };
   }
@@ -749,6 +755,45 @@ describe("a draft in the way (#64)", () => {
     }
     expect(r.sends().map(c => (c.args as { text: string }).text).filter((t, i, all) => all.indexOf(t) === i)).toEqual(["message 1", "message 2", "message 3"]);
     expect(["lanes:m1", "lanes:m2", "lanes:m3"].map(id => state(r, id))).toEqual(["delivered", "delivered", "delivered"]);
+    expect(stashKeys(r)).toHaveLength(1);
+  });
+
+  it("Claude Code puts the draft back after each delivery: stashed again at once for the next, saved and recorded once", async () => {
+    const r = boxRig({ restores: true });
+    r.drafts.set("%1", "a long plan, pasted");
+    for (const n of [1, 2, 3]) r.deliverer.enqueue({ id: `lanes:r${n}`, target: MANAGER, text: `note ${n}` });
+    await r.deliverer.drain();
+    r.clock.now = T0 + HOUR;
+    await r.round();
+    expect(state(r, "lanes:r1")).toBe("typed");
+    expect(r.drafts.get("%1")).toBe("a long plan, pasted");                  // back in the box
+    for (const n of [1, 2, 3]) {
+      r.clock.now += 1000;
+      r.say(S1, L.prompt(`note ${n}`, r.clock.now));
+      await r.round();
+    }
+    expect(["lanes:r1", "lanes:r2", "lanes:r3"].map(id => state(r, id))).toEqual(["delivered", "delivered", "delivered"]);   // negative control: without it r2 waits another hour
+    expect(r.clock.now - T0 - HOUR).toBeLessThan(10_000);
+    expect(stashKeys(r)).toHaveLength(3);
+    expect(r.saved).toHaveLength(1);
+    expect(["lanes:r1", "lanes:r2", "lanes:r3"].map(id => r.store.get(id)?.stashed !== undefined)).toEqual([true, false, false]);
+    expect(r.drafts.get("%1")).toBe("a long plan, pasted");                  // and it stays the owner's at the end
+  });
+
+  it("a draft edited after its stash came back is someone typing: the full wait again", async () => {
+    const r = boxRig({ restores: true });
+    r.drafts.set("%1", "first words");
+    for (const n of [1, 2]) r.deliverer.enqueue({ id: `lanes:e${n}`, target: MANAGER, text: `note ${n}` });
+    await r.deliverer.drain();
+    r.clock.now = T0 + HOUR;
+    await r.round();
+    r.drafts.set("%1", "first words, and more");                          // the owner came back to it
+    r.clock.now += 1000;
+    r.say(S1, L.prompt("note 1", r.clock.now));
+    await r.round();
+    r.clock.now += 30 * 60_000;
+    await r.round();
+    expect(state(r, "lanes:e2")).toBe("queued");
     expect(stashKeys(r)).toHaveLength(1);
   });
 

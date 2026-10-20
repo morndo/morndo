@@ -38,6 +38,9 @@
 //   that key: Ctrl+C twice exits Claude Code, and Esc Esc on an empty box opens the rewind menu. The delivery records it
 //   (`stashed`), which the fleet raises as draft_stashed. A box that still shows text after the key, or a copy that
 //   could not be saved, leaves that draft alone until it changes: the delivery keeps waiting.
+//   Claude Code puts a stashed draft back in the box once a message is submitted (seen live with 2.1.303, 2026-10-20; the
+//   docs name only Ctrl+S on an empty box). That same text again is the stash coming back, not someone typing: it is
+//   stashed again at once for the next delivery, without another copy or another `stashed`, so one draft is one alert.
 // - Every change is emitted (agent.ts sends it as ev.delivery); a round that changes nothing emits nothing.
 // - Test hooks for the drills (test-hooks.ts): noSessionBinding holds a lane name like a sticky one (no binding);
 //   retypeUnderFirstKey retypes under the delivery's own key; deliveryStartGraceMs shortens the 2-minute grace.
@@ -118,6 +121,7 @@ export class Deliverer {
   // pane → the draft a delivery waits on there, since when this process has seen it unchanged, and whether stashing it
   // failed (then it is left alone until it changes). Not kept over a restart: the wait starts again.
   #drafts = new Map<string, { text: string; since: number; failed: boolean }>();
+  #stashedText = new Map<string, string>();                // pane → the draft this process last stashed there
   #current: Promise<void> | null = null;
   #again = false;
   #stopped = false;
@@ -456,6 +460,8 @@ export class Deliverer {
     if (!stash || !stash.lanes.includes(expect.window)) return;
     const draft = await this.#d.panes.draft(at.pane);
     if (draft === null) return;
+    if (this.#stashedText.get(at.pane) === draft) { await this.#restash(d, at, expect, draft); return; }
+    this.#stashedText.delete(at.pane);
     const now = this.#d.now();
     const seen = this.#drafts.get(at.pane);
     if (!seen || seen.text !== draft) { this.#drafts.set(at.pane, { text: draft, since: now, failed: false }); return; }
@@ -478,9 +484,27 @@ export class Deliverer {
       return;
     }
     this.#drafts.delete(at.pane);
+    this.#stashedText.set(at.pane, draft);
     this.#change(d, { stashed: { at: now, since: seen.since, chars: [...draft].length, copy } });
     this.#d.log.info(`${expect.window}'s draft, unchanged since ${new Date(seen.since).toISOString()}, was stashed so its deliveries go in; a copy: ${copy}`);
     this.#again = true;                                     // the next round types what waited
+  }
+
+  // The draft this process stashed, back in the box after a delivery went in: put away again for the next one.
+  async #restash(d: Delivery, at: At, expect: Expect, draft: string): Promise<void> {
+    const r = await this.#d.executor.handle({
+      id: `deliver-${++this.#n}`, op: "pane.keys", args: { workerId: at.workerId, names: ["C-s"], expect }, timeoutMs: KEYS_TIMEOUT_MS,
+    });
+    await sleep(ENTER_PAUSE_MS);
+    const left = r.ok && (r.result as OpResult["pane.keys"]).ok ? await this.#d.panes.draft(at.pane) : draft;
+    if (left !== null) {
+      this.#stashedText.delete(at.pane);
+      this.#drafts.set(at.pane, { text: draft, since: this.#d.now(), failed: true });
+      this.#d.log.warn(`${expect.window}'s draft came back and is still in its box after Ctrl+S; its deliveries keep waiting`);
+      return;
+    }
+    this.#d.log.info(`${expect.window}'s stashed draft came back after a delivery and was stashed again for ${d.id}`);
+    this.#again = true;
   }
 
   #wait(d: Delivery, reason: WaitingReason): void {

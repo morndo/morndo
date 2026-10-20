@@ -47,7 +47,7 @@ export function alertWords(a: AlertWire): AlertWords {
       const when = since === null ? "a long time" : `since ${new Date(since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
       return {
         title: `Your unsent text to ${who} was put away`,
-        detail: `It sat unchanged in its input box ${when} and held its messages, so ${node} stashed it and they went in. Press Ctrl+S in ${who}'s empty input box to bring it back. A copy is on ${node}: ${str(d.copy, "in its drafts folder")}.`,
+        detail: `It sat unchanged in its input box ${when} and held its messages, so ${node} stashed it and they went in. Claude Code puts it back in the box after they are sent; if it isn't there, Ctrl+S in ${who}'s empty input box brings it back. A copy is on ${node}: ${str(d.copy, "in its drafts folder")}.`,
         urgent: urgentAlert(a) };
     }
     case "lane_conflict": return {

@@ -25,7 +25,7 @@ describe("alert words", () => {
     const w = alertWords(a("draft_stashed", { lane: "manager", since, at: since + 3_600_000, chars: 42, copy: "/data/drafts/1-manager.txt" }));
     expect(w.title).toBe("Your unsent text to the manager was put away");
     expect(w.detail).toContain(new Date(since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
-    expect(w.detail).toContain("Press Ctrl+S in the manager's empty input box to bring it back.");
+    expect(w.detail).toContain("Claude Code puts it back in the box after they are sent; if it isn't there, Ctrl+S in the manager's empty input box brings it back.");
     expect(w.detail).toContain("A copy is on pc: /data/drafts/1-manager.txt.");
     expect(w.urgent).toBe(true);
   });
