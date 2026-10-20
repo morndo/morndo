@@ -37,9 +37,12 @@ for channel in latest stable; do
   new="$SITE/$channel.json"
   [ -f "$new" ] || fail "$new is missing"
   jq -e --arg ch "$channel" '.schema == 1 and .channel == $ch and ((.expiresAt | fromdateiso8601) - (.issuedAt | fromdateiso8601) == 1209600)' "$new" > /dev/null || fail "$channel.json is not a 14-day $channel feed"
-  issued=$(jq -r '.issuedAt | fromdateiso8601' "$new")
-  delta=$((issued - now))
-  [ "$delta" -le 3600 ] && [ "$delta" -ge -3600 ] || fail "$channel.json was issued ${delta}s from now"
+  # Only a feed written now is fresh. A publish carries stable.json over as it was, hours or days old.
+  if [ "$MODE" = resign ] || [ "$channel" = latest ] || [ -z "$head" ]; then
+    issued=$(jq -r '.issuedAt | fromdateiso8601' "$new")
+    delta=$((issued - now))
+    [ "$delta" -le 3600 ] && [ "$delta" -ge -3600 ] || fail "$channel.json was issued ${delta}s from now"
+  fi
   seq=$(jq -r .seq "$new")
   prev="$work/$channel.prev"
   if [ -n "$head" ]; then

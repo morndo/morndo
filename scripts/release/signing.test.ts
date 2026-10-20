@@ -98,7 +98,7 @@ describe("check-signing-feed.sh", () => {
   const keys = (version: number) => JSON.stringify({ schema: 1, version, expiresAt: "2027-11-02T10:00:00Z", root: ["a"], release: ["b"], feed: ["c"] });
 
   // A fake gh: the feed branch head is "h1" and its files are in prev/, the published manifest is manifest.json.
-  function world(p: { branch: boolean }) {
+  function world(p: { branch: boolean; age?: number }) {
     const dir = temp();
     const prev = join(dir, "prev");
     mkdirSync(prev);
@@ -106,8 +106,9 @@ describe("check-signing-feed.sh", () => {
     mkdirSync(join(dir, "site"));
     writeFileSync(join(dir, "trust/keys.json"), keys(1));
     writeFileSync(join(dir, "manifest.json"), manifestBytes);
-    const latest = publishRelease(null, { channel: "latest", entry: entry("0.1.0"), now: NOW - 5000, keySetVersion: 1 });
-    const stable = emptyFeed({ channel: "stable", now: NOW - 5000, keySetVersion: 1 });
+    const then = NOW - (p.age ?? 5000);
+    const latest = publishRelease(null, { channel: "latest", entry: entry("0.1.0"), now: then, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: then, keySetVersion: 1 });
     writeFileSync(join(prev, "latest.json"), latest);
     writeFileSync(join(prev, "stable.json"), stable);
     const gh = join(dir, "gh");
@@ -137,6 +138,21 @@ describe("check-signing-feed.sh", () => {
     put(w, publishRelease(w.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), w.stable);
     const done = check(w, { MODE: "publish", VERSION });
     expect(done.status, done.stderr).toBe(0);
+  });
+
+  it("passes a publish whose carried-over stable.json was issued hours ago: freshness is for the feed published now", () => {
+    const w = world({ branch: true, age: 5 * 3_600_000 });
+    put(w, publishRelease(w.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), w.stable);
+    const done = check(w, { MODE: "publish", VERSION });
+    expect(done.status, done.stderr).toBe(0);
+  });
+
+  it("control: the same hours-old feed is refused when a re-sign tries to carry it as new", () => {
+    const w = world({ branch: true, age: 5 * 3_600_000 });
+    put(w, resignFeed(w.latest, NOW - 5 * 3_600_000), resignFeed(w.stable, NOW - 5 * 3_600_000));
+    const done = check(w, { MODE: "resign" });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/issued/);
   });
 
   it("passes a first publish with no branch, and a re-sign", () => {
