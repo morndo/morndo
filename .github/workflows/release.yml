@@ -175,15 +175,15 @@ jobs:
           path: dist
           if-no-files-found: error
 
-  publish:
+  # The three jobs below are one release step split on purpose. `assemble` runs npm and repo code and holds no
+  # key. `sign` holds the release key and runs no npm, no node and no repo program: it checks the files in plain
+  # shell, signs, and uploads signatures only. `publish` attests and uploads, again without the key.
+  assemble:
     needs: [release-please, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    environment: release
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -224,22 +224,90 @@ jobs:
             "dist/morndo-${VERSION}-linux-arm64.tar.gz" \
             "dist/morndo-${VERSION}-darwin-arm64.tar.gz" \
             dist/manifest.json dist/install.sh
-      # The only step that holds the release key. It runs no npm code and no action: the shell writes the
-      # key to a 0600 file, ssh-keygen signs, and the file is removed. npm ci ran in an earlier step, so the
-      # command is named by path and not found on PATH.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned
+          path: |
+            dist/manifest.json
+            dist/install.sh
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  sign:
+    needs: [release-please, assemble]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      # Read only: the trust files and the committed install.sh. No program of the repo runs in this job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: unsigned
+          path: dist
+      - name: Check what will be signed
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+        run: /bin/sh scripts/release/check-signing-release.sh
+      # The only step that holds the release key.
       - name: Sign
         env:
           RELEASE_SSH_KEY: ${{ secrets.RELEASE_SSH_KEY }}
         run: |
           set -euo pipefail
+          PATH=/usr/bin:/bin
           umask 077
-          key="$RUNNER_TEMP/release.key"
-          trap 'rm -f "$key"' EXIT
+          key=$(/usr/bin/mktemp "$RUNNER_TEMP/sign.XXXXXXXX")
+          trap '/bin/rm -f "$key"' EXIT
           printf '%s\n' "$RELEASE_SSH_KEY" > "$key"
           for name in manifest.json install.sh; do
             /usr/bin/ssh-keygen -Y sign -f "$key" -n release@morndo.github.io "dist/$name"
           done
-          rm -f "$key"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signatures
+          path: |
+            dist/manifest.json.sig
+            dist/install.sh.sig
+          if-no-files-found: error
+
+  publish:
+    needs: [release-please, sign]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: unsigned
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: signatures
+          path: dist
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
@@ -328,20 +396,14 @@ jobs:
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: sh scripts/release/published-gh.sh
 
-  feed:
+  # The feed is three jobs, like the release: `feed-prepare` runs npm and holds no key, `feed-sign` holds the
+  # feed key and runs no npm (it checks the feeds in plain shell first), `feed` pushes the signed feeds.
+  feed-prepare:
     needs: [release-please, published]
-    # A shared group cancels the other workflow's pending run.
-    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
-    # read 2026-10-13. This group is not feed.yml's morndo-feed. The commit step
-    # refuses a moved branch and fails the job; running it again reads the new head.
-    concurrency:
-      group: morndo-release-feed
-      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: feed
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -369,20 +431,91 @@ jobs:
             --repository "$GITHUB_REPOSITORY" --dir site --version "$VERSION" \
             --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" \
             --now "$now" --key-set "$key_set" --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
-      # The only step that holds the feed key; shell and ssh-keygen only, as in the publish job.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: feed-unsigned
+          path: |
+            site/latest.json
+            site/stable.json
+            site/feed-prepared.json
+          if-no-files-found: error
+
+  feed-sign:
+    needs: [release-please, feed-prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: feed
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-unsigned
+          path: site
+      - name: Check what will be signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: publish
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: /bin/sh scripts/release/check-signing-feed.sh
+      # The only step that holds the feed key.
       - name: Sign the feeds
         env:
           FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
         run: |
           set -euo pipefail
+          PATH=/usr/bin:/bin
           umask 077
-          key="$RUNNER_TEMP/feed.key"
-          trap 'rm -f "$key"' EXIT
+          key=$(/usr/bin/mktemp "$RUNNER_TEMP/sign.XXXXXXXX")
+          trap '/bin/rm -f "$key"' EXIT
           printf '%s\n' "$FEED_SSH_KEY" > "$key"
           for name in latest stable; do
             /usr/bin/ssh-keygen -Y sign -f "$key" -n feed@morndo.github.io "site/${name}.json"
           done
-          rm -f "$key"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: feed-signatures
+          path: |
+            site/latest.json.sig
+            site/stable.json.sig
+          if-no-files-found: error
+
+  feed:
+    needs: [release-please, feed-sign]
+    # A shared group cancels the other workflow's pending run.
+    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+    # read 2026-10-13. This group is not feed.yml's morndo-feed. The commit step
+    # refuses a moved branch and fails the job; running it again reads the new head.
+    concurrency:
+      group: morndo-release-feed
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-unsigned
+          path: site
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-signatures
+          path: site
       - name: Commit the feeds
         env:
           GH_TOKEN: ${{ github.token }}

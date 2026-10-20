@@ -5,6 +5,8 @@
 # Pins, resolved from the release tags on 2026-10-13:
 #   actions/checkout v7.0.1                3d3c42e5aac5ba805825da76410c181273ba90b1
 #   actions/setup-node v7.0.0              820762786026740c76f36085b0efc47a31fe5020
+#   actions/upload-artifact v7.0.1         043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+#   actions/download-artifact v7.0.0       37930b1c2abaa49bbe596cd826c3c89aef350131
 #   actions/upload-pages-artifact v5.0.0   fc324d3547104276b827a68afc52ff2a11cc49c9
 #   actions/deploy-pages v5.0.1            368f82528645a54fb793d4d04e342629a3f51346
 name: Feed
@@ -22,14 +24,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  resign:
+  # The re-sign is three jobs, as in the release workflow: prepare runs npm and holds no key, sign holds the
+  # feed key and runs no npm (it checks the feeds in plain shell first), and the last pushes the signed feeds.
+  resign-prepare:
     runs-on: ubuntu-24.04
-    outputs:
-      present: ${{ steps.resign.outputs.present }}
     timeout-minutes: 20
-    environment: feed
+    outputs:
+      status: ${{ steps.prepare.outputs.status }}
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,25 +62,87 @@ jobs:
             echo "skipping re-sign: branch feed has no feed yet" >&2
           fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
-      # The only step that holds the feed key; shell and ssh-keygen only. npm ci ran in an earlier
-      # step, so the command is named by path and not found on PATH.
+      - if: steps.prepare.outputs.status == 'ready'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: feed-unsigned
+          path: |
+            site/latest.json
+            site/stable.json
+            site/feed-prepared.json
+          if-no-files-found: error
+
+  resign-sign:
+    needs: resign-prepare
+    if: needs.resign-prepare.outputs.status == 'ready'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: feed
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-unsigned
+          path: site
+      - name: Check what will be signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: resign
+          REPOSITORY: ${{ github.repository }}
+        run: /bin/sh scripts/release/check-signing-feed.sh
+      # The only step that holds the feed key.
       - name: Sign the feeds
-        if: steps.prepare.outputs.status == 'ready'
         env:
           FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
         run: |
           set -euo pipefail
+          PATH=/usr/bin:/bin
           umask 077
-          key="$RUNNER_TEMP/feed.key"
-          trap 'rm -f "$key"' EXIT
+          key=$(/usr/bin/mktemp "$RUNNER_TEMP/sign.XXXXXXXX")
+          trap '/bin/rm -f "$key"' EXIT
           printf '%s\n' "$FEED_SSH_KEY" > "$key"
           for name in latest stable; do
             /usr/bin/ssh-keygen -Y sign -f "$key" -n feed@morndo.github.io "site/${name}.json"
           done
-          rm -f "$key"
-      - id: resign
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: feed-signatures
+          path: |
+            site/latest.json.sig
+            site/stable.json.sig
+          if-no-files-found: error
+
+  resign:
+    needs: resign-sign
+    runs-on: ubuntu-24.04
+    outputs:
+      present: ${{ steps.commit.outputs.present }}
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-unsigned
+          path: site
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-signatures
+          path: site
+      - id: commit
         name: Commit the feeds
-        if: steps.prepare.outputs.status == 'ready'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
