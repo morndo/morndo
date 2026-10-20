@@ -48,12 +48,12 @@ sums=$(printf '%s\n' install.sh manifest.json "morndo-$VERSION-linux-x64.tar.gz"
 
 # What the Manifest says about itself. The exact schema floors and protocol ranges come from the code
 # and are not recomputed here (a follow-up); these are the facts plain shell can check.
-[ "$(jq -r '.schema' manifest.json)" = 1 ] && [ "$(jq -r .product manifest.json)" = morndo ] || fail "manifest is not a morndo schema 1 document"
+jq -e '.schema == 1 and .product == "morndo"' manifest.json > /dev/null || fail "manifest is not a morndo schema 1 document"
 jq -e --arg n "$BUNDLED_NODE" 'all(.artifacts[]; .node == $n)' manifest.json > /dev/null || fail "an artifact names a Node other than the pinned $BUNDLED_NODE"
 committed=$(git log -1 --format=%ct "$RELEASE_SHA") || fail "cannot read the release commit"
 [ "$(jq -r .publishedAt manifest.json)" = "$(date -u -d "@$committed" +%Y-%m-%dT%H:%M:%SZ)" ] || fail "manifest publish date is not the release commit's"
 [ "$(jq -r .notes manifest.json)" = "https://github.com/$REPOSITORY/releases/tag/v$VERSION" ] || fail "manifest notes link is not this release's"
-jq -e '[.schemas[]] | all((.version | type == "number" and . == floor and . >= 1) and (.floor | type == "number" and . == floor and . >= 0) and (.floor <= .version))' manifest.json > /dev/null || fail "a schema floor is not within 0 and its version"
+jq -e '(.schemas | type == "object" and length >= 1) and ([.schemas[]] | all((.version | type == "number" and . == floor and . >= 1) and (.floor | type == "number" and . == floor and . >= 0) and (.floor <= .version)))' manifest.json > /dev/null || fail "schemas must list at least one database, with whole-number versions and floors within 0 and the version"
 jq -e '[.protocol.agent, .protocol.clientApi] | all(length == 2 and (.[0] | type == "number" and . == floor and . >= 1) and (.[1] | type == "number" and . == floor) and .[0] <= .[1])' manifest.json > /dev/null || fail "a protocol range is not low <= high from 1"
 
 # install.sh is the committed script with one line changed.
