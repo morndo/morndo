@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, utimesSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { leftBehind, untrackedFiles } from "./clean-tree.ts";
+import { leftBehind, untrackedFiles, watchTree } from "./clean-tree.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -86,5 +86,28 @@ describe("leftBehind", () => {
     const before = untrackedFiles(dir);
     writeFileSync(join(dir, "m"), "");                                 // what the unescaped tmux control did to the working directory
     expect(leftBehind(before, untrackedFiles(dir))).toEqual(["m"]);
+  });
+});
+
+describe("watchTree", () => {
+  it("fails the check, naming the file, when the tests leave one", () => {
+    const dir = repo();
+    const check = watchTree(dir, () => {});
+    writeFileSync(join(dir, "m"), "");
+    expect(check).toThrow(/left files[^]*\n {2}m$/);
+  });
+  it("passes when they leave nothing", () => {
+    const dir = repo();
+    expect(watchTree(dir, () => {})).not.toThrow();
+  });
+  it("says once that the guard is off where git cannot be read (no repository, no git, an ownership refusal), and checks nothing", () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-clean-tree-"));
+    dirs.push(dir);
+    const said: string[] = [];
+    const check = watchTree(dir, message => said.push(message));
+    writeFileSync(join(dir, "m"), "");
+    expect(check).not.toThrow();
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/not checked/);
   });
 });
