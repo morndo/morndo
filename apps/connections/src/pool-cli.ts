@@ -19,6 +19,7 @@ import { childEnv, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { usageReport, type CodexLimits } from "./adapters/usage-codex.ts";
 import { type PoolRefusal, type TurnBegun, type TurnEnd } from "./application/pool-service.ts";
+import { STOP_GRACE_MS } from "./reader-gone.ts";
 
 const DEFAULT_RUNTIME = "codex";
 const DEFAULT_WAIT_MS = 1_800_000;
@@ -280,9 +281,14 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
 
   let stopped: number | null = null;
   let childPid: number | null = null;
+  // The signal goes to the turn's group; one that ignores it is killed after the grace, as `run` does (reader-gone.ts).
+  let killTimer: NodeJS.Timeout | null = null;
   const onSignal = (signal: NodeJS.Signals): void => {
     stopped = signal === "SIGINT" ? 130 : 143;
-    if (childPid !== null) { try { process.kill(-childPid, signal); } catch { /* already gone */ } }
+    const target = childPid;
+    if (target === null) return;
+    try { process.kill(-target, signal); } catch { return; }
+    killTimer ??= setTimeout(() => { try { process.kill(-target, "SIGKILL"); } catch { /* it is gone */ } }, STOP_GRACE_MS);
   };
   const term = (): void => onSignal("SIGTERM");
   const int = (): void => onSignal("SIGINT");
@@ -357,7 +363,10 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
       home.leases.close(current.member, granted.id, outcome, null);
       home.pool.release(runtime, current.claimId);
       throw error;
-    } finally { childPid = null; }
+    } finally {
+      childPid = null;
+      if (killTimer !== null) { clearTimeout(killTimer); killTimer = null; }
+    }
     home.leases.close(current.member, granted.id, outcome, null);
     return turn;
   };

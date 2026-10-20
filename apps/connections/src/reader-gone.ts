@@ -6,7 +6,7 @@
 // line. https://nodejs.org/docs/latest-v24.x/api/process.html#a-note-on-process-io (read 2026-10-20).
 import type { Io } from "./cli.ts";
 
-const STOP_GRACE_MS = 3_000;
+export const STOP_GRACE_MS = 3_000;
 
 export type TurnStopper = { proceed(): boolean; started(pid: number): void; done(): void };
 

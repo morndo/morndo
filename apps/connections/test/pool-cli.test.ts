@@ -167,6 +167,17 @@ describe("morndo-keys pool exec", () => {
     expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
   }, 30_000);
 
+  it("kills an agent that ignores SIGTERM once the reader is gone", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "stubborn" }, defaultMember: "codex-a" });
+    const started = Date.now();
+    const ran = await runIntoHead([MAIN, ...turn()], t.env);
+    expect(Date.now() - started).toBeLessThan(9_000);                                    // SIGKILL follows after 3 s; the turn is 15 s
+    expect(ran.code).toBe(143);
+    const pid = Number(readFileSync(join(t.home("codex-a"), "pid"), "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow();
+    expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
+  }, 40_000);
+
   it("does not start the agent when the reader goes after the seat is won", async () => {
     const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow-status" }, defaultMember: "codex-a" });
     const marker = join(t.home("codex-a"), "status-started");
