@@ -2967,6 +2967,12 @@ export const CONTROLS: Control[] = [
   { id: "m-cli-refusal-exit", task: "M-cli", file: "apps/memory-cli/src/cli.ts",
     find: "if (e instanceof Refused) { io.err(e.message); return 1; }", replace: "if (e instanceof Refused) { io.err(e.message); return 0; }",
     run: ["apps/memory-cli/test/cli.test.ts"], expect: "is refused (not_yours) with exit 1" },
+  { id: "m-hub-resend-fresh", task: "M-hub", file: "apps/hub/src/application/memory-sync.ts",
+    find: "const again = last !== null && last.version === bundle.version ? now.toString(36) : null;", replace: "const again: string | null = null;",
+    run: ["apps/hub/test/memory-sync.test.ts"], expect: "fresh keys" },
+  { id: "m-domain-replaced-meanwhile", task: "M-domain", file: "packages/domain/src/memory.ts",
+    find: "predecessor.supersededBy !== null && predecessor.supersededBy !== n.id) return refuse(\"replaced_meanwhile\");", replace: "false) return refuse(\"replaced_meanwhile\");",
+    run: ["packages/domain/test/memory.test.ts", "apps/hub/test/memory-service.test.ts"], expect: "replaced_meanwhile" },
 ];
 
 // ---- the runner

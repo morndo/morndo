@@ -140,10 +140,10 @@ export class MemoryService {
       const n = this.#store.get(id);
       if (!n) return { ok: false, problem: "not_found" };
       const now = this.#now();
-      const r = approveNote(n, CONSOLE, now);
+      const old = n.supersedes ? this.#store.get(n.supersedes) : null;
+      const r = approveNote(n, CONSOLE, now, old);
       if (!r.ok) return { ok: false, problem: r.error.problem };
       // A successor that waited for this approval now replaces the Note it supersedes (M2, M4).
-      const old = r.value.note.supersedes ? this.#store.get(r.value.note.supersedes) : null;
       const retired = old && old.invalidatedAt === null ? retireSuperseded(old, r.value.note, now) : null;
       if (retired?.ok) this.#write([r.value.note, retired.value.note], [r.value.event, retired.value.event]);
       else this.#write([r.value.note], [r.value.event]);

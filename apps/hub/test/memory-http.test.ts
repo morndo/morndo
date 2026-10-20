@@ -174,3 +174,16 @@ describe("the routes and their refusals", () => {
     expect((await apiFix.get("/api/agent/memory/nope")).status).toBe(404);
   });
 });
+
+describe("a note's size on the wire", () => {
+  it("takes a note at its character limits however the client escapes it, and refuses more", async () => {
+    const h = await hub({ board: false, memory: true });
+    const lane = agent(h, h.agents.issue("lanes", "worker").secret, "api-fix");
+    // 20,000 CJK characters, each escaped as \uXXXX (6 bytes): about 120 KB of JSON for a body at its limit.
+    const escaped = JSON.stringify(fact({ body: "記".repeat(20_000) })).replace(/[\u0080-￿]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+    expect(escaped.length).toBeGreaterThan(64 * 1024);
+    expect((await lane.post("/api/agent/memory/notes", escaped)).status).toBe(201);
+    const huge = JSON.stringify(fact({ body: "x".repeat(170 * 1024) }));
+    expect((await lane.post("/api/agent/memory/notes", huge)).status).toBe(413);
+  });
+});

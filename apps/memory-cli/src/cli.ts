@@ -68,7 +68,8 @@ function explain(error: string): string {
     case "no_evidence": return "A confirmation names the evidence it rests on.";
     case "bad_kind": return "A note's kind is fact or procedure.";
     case "bad_scope": return "That isn't a scope: give repo:<name>, project:<name>, user or org.";
-    case "bad_text": return "The title, summary, reference or reason holds a control character; only the body may have line breaks.";
+    case "bad_text": return "The title, reference or reason holds a line break or a control character; only the summary and the body may span lines.";
+    case "replaced_meanwhile": return "The note this one replaces was replaced by another version first; supersede the version that holds now.";
     case "empty": return "A note needs a title and a body.";
     case "title_size": return `The title is too long: ${MEMORY_LIMITS.title} characters at most.`;
     case "summary_size": return `The summary is too long: ${MEMORY_LIMITS.summary} characters at most.`;

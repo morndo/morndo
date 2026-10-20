@@ -194,3 +194,15 @@ describe("the bundle every node receives", () => {
     expect(bundleParts(many).map(p => p.length)).toEqual([400, 400, 100]);
   });
 });
+
+describe("competing successors (M2)", () => {
+  it("refuses the second approval when another successor replaced the note first, and keeps one live version", () => {
+    const base = made(memory.approve(made(memory.remember(apiFix, fact({ kind: "procedure", title: "Rotate the key" }))).id));
+    const a = made(memory.remember(webFix, fact({ kind: "procedure", title: "Rotate the key", body: "Version 2a.", supersedes: base.id })));
+    const b = made(memory.remember(apiFix, fact({ kind: "procedure", title: "Rotate the key", body: "Version 2b.", supersedes: base.id })));
+    made(memory.approve(a.id));
+    expect(problem(memory.approve(b.id))).toBe("replaced_meanwhile");
+    expect(store.get(b.id)).toMatchObject({ approvedAt: null, invalidatedAt: null });
+    expect(found({ q: "rotate" })).toEqual([a.id]);
+  });
+});
