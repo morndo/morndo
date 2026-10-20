@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, holdFile, productVersion } from "@morndo/service-kit";
+import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, productVersion, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
 import { startRetention } from "./application/retention.ts";
@@ -85,15 +85,20 @@ CLI, engine-layer bin/engines: the Engines page) and MORNDO_MANAGER_QUEUE (with 
 messages go through the fleet's delivery queue; "off" types them directly). MORNDO_TRANSCRIBER (absolute path of a
 protocol-1 plugin; otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcribe).`;
 
+// A reader that closes the pipe early (`morndo audit | head`) ends the output, not the process; a console command that leaves
+// early does so with `exitAfterOutput`, after its lines are out (service-kit exit-after-output.ts). `throw await …` where a
+// check below needs to know the code after it does not run. The two refusals of openStore stay `process.exit`: that
+// function is not async, and says one sentence.
+quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
   process.stdout.write(`${productVersion()}\n`);
-  process.exit(0);
+  await exitAfterOutput(0);
 }
 
 exitOnCrash(log);
 // `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
 // on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
-if (process.argv[2] === "lanes") process.exit(await runLanes(process.argv.slice(3), processIo()));
+if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
 const EXIT_DATABASE_FROM_FUTURE = EXIT_CONFIG;          // see openStore below
 const config = loadConfig();
@@ -125,17 +130,17 @@ switch (cmd) {
     const pushContact = config.pushContact ?? DEFAULT_PUSH_CONTACT;
     if (!isPushContact(pushContact)) {
       log.error(`MORNDO_PUSH_CONTACT must be an https URL or a mailto address on a public name (push services refuse others): ${JSON.stringify(pushContact)}. Set one, or unset it for the default.`);
-      process.exit(EXIT_CONFIG);
+      await exitAfterOutput(EXIT_CONFIG);
     }
     // The same for a fleet socket that isn't an absolute path (config.ts fleetSocket): `serve` only, so the console
     // commands still work.
     if (config.fleetSocket && !fleetSocketOk(config.fleetSocket)) {
       log.error(`MORNDO_FLEET_SOCKET must be an absolute path to the fleet service's client socket, not ${JSON.stringify(config.fleetSocket)}; set the full path, or unset it to use this machine's tmux.`);
-      process.exit(EXIT_CONFIG);
+      await exitAfterOutput(EXIT_CONFIG);
     }
     if (config.engineSessions && !engineSessionsOk(config.engineSessions)) {
       log.error(`MORNDO_ENGINE_SESSIONS must be an absolute path to the engine-lane registry, not ${JSON.stringify(config.engineSessions)}; set the full path, or unset it to leave engine-lane status off.`);
-      process.exit(EXIT_CONFIG);
+      await exitAfterOutput(EXIT_CONFIG);
     }
     const files = fileStore({ dir: config.filesDir, deny: denyRoots(homedir(), config.dataDir, denyConfigWithClaudeDir(denyConfigFromEnv(process.env), config.claudeDir)) });
     // MORNDO_FLEET_SOCKET set: every port goes through the fleet service; unset: this machine's tmux and Claude Code, as
@@ -314,7 +319,7 @@ switch (cmd) {
     void memorySync?.tick();                             // the first round now; then the loop's, every minute
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); if (syncMemory) clearInterval(syncMemory); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); fleet?.ports.stop(); await http.idle(); await http.close(); store.close(); memoryStore?.close(); process.exit(0); };
+    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); if (syncMemory) clearInterval(syncMemory); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); fleet?.ports.stop(); await http.idle(); await http.close(); store.close(); memoryStore?.close(); await exitAfterOutput(0); };
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     break;
@@ -338,7 +343,7 @@ switch (cmd) {
   }
   case "revoke": {
     const id = args[0];
-    if (!id) { process.stderr.write("usage: morndo revoke <device id>\n"); process.exit(2); }
+    if (!id) { process.stderr.write("usage: morndo revoke <device id>\n"); throw await exitAfterOutput(2); }
     print(access.revoke(id) ? `revoked ${id}` : `no active device ${id}`);
     store.close();
     break;
@@ -357,7 +362,7 @@ switch (cmd) {
       const roleAt = rest.indexOf("--role");
       const role = roleAt >= 0 ? rest[roleAt + 1] : undefined;
       const name = rest.filter((a, i) => i !== roleAt && i !== roleAt + 1).find(a => !a.startsWith("--")) ?? "";
-      if (!name || (role !== "manager" && role !== "worker")) { process.stderr.write("usage: morndo agent-token new <name> --role manager|worker\n"); store.close(); process.exit(2); }
+      if (!name || (role !== "manager" && role !== "worker")) { process.stderr.write("usage: morndo agent-token new <name> --role manager|worker\n"); store.close(); throw await exitAfterOutput(2); }
       const { token, secret } = agents.issue(name, role);
       print(`${secret}`);
       print(`Token ${token.id} (${token.name}, ${token.role}). Shown once: put it in MORNDO_AGENT_TOKEN for ${role === "manager" ? "the manager's lane" : "the worker lanes"}, with MORNDO_HUB=${config.origin}.`);
@@ -365,12 +370,12 @@ switch (cmd) {
       for (const t of agents.list()) print(`${t.id}  ${t.name.padEnd(20)}  ${t.role.padEnd(7)}  made ${when(t.createdAt)}  last used ${when(t.lastUsedAt)}  ${t.revokedAt ? `REVOKED ${when(t.revokedAt)}` : "active"}`);
     } else if (sub === "revoke") {
       const id = rest[0];
-      if (!id) { process.stderr.write("usage: morndo agent-token revoke <id>\n"); store.close(); process.exit(2); }
+      if (!id) { process.stderr.write("usage: morndo agent-token revoke <id>\n"); store.close(); throw await exitAfterOutput(2); }
       print(agents.revoke(id) ? `revoked ${id}` : `no active agent token ${id}`);
     } else {
       process.stderr.write("usage: morndo agent-token new <name> --role manager|worker | list | revoke <id>\n");
       store.close();
-      process.exit(2);
+      await exitAfterOutput(2);
     }
     store.close();
     break;
@@ -379,7 +384,8 @@ switch (cmd) {
   case "memory": {
     const code = await runMemory(args, processIo(), { dataDir: config.dataDir });
     store.close();
-    process.exit(code);
+    await exitAfterOutput(code);
+    break;
   }
   default:
     print(HELP);
@@ -396,7 +402,7 @@ async function openFleet(socket: string, files: LocalFileStore, jobs: JobsServic
   const check = await checkFleet(client);
   if (check === "unsupported") {
     log.error(`the fleet service at ${socket} doesn't offer client API version ${CLIENT_API}; update morndo-fleet or this hub`);
-    process.exit(EXIT_CONFIG);
+    await exitAfterOutput(EXIT_CONFIG);
   }
   if (check === "unreachable") log.warn(`the fleet service at ${socket} doesn't answer yet; the hub keeps asking`);
   const ports = fleetPorts(client, { files, jobs, ...(alerts ? { alerts } : {}), stagingDir: mkdtempSync(join(tmpdir(), "morndo-fleet-files-")) });
