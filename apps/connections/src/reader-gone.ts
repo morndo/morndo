@@ -12,7 +12,7 @@
 // the descriptor or a read on stdout's own handle is refused (ENOTCONN, checked on Node 24).
 // https://nodejs.org/docs/latest-v24.x/api/process.html#a-note-on-process-io (read 2026-10-20).
 import type { Io } from "./cli.ts";
-import { descendants } from "./process-tree.ts";
+import { descendants, startOf } from "./process-tree.ts";
 
 export const STOP_GRACE_MS = 3_000;
 
@@ -23,28 +23,32 @@ const alive = (target: number): boolean => {
 
 // SIGTERM now and SIGKILL after the grace to the processes named (a negative number names a group). The kill timer is kept until
 // they are gone, not until the output pipes close: `settle` waits for that, and sends the SIGKILL itself if the grace has run out.
+// A process is named by its pid and its start time, and the SIGKILL goes only to a pid that still has that start time: the system
+// may have given the pid to another process in the grace. A group is named by its leader's pid, which the system does not reuse
+// while the group has members. `identify` is `startOf`; a test hands in its own.
 export type Reaper = { stop(targets: readonly number[]): boolean; settle(): Promise<void> };
 
-export function reaper(graceMs = STOP_GRACE_MS): Reaper {
-  let named: readonly number[] = [];
+export function reaper(graceMs = STOP_GRACE_MS, identify: (pid: number) => string | null = startOf): Reaper {
+  type Named = { target: number; start: string | null };
+  let named: Named[] = [];
   let timer: NodeJS.Timeout | null = null;
   let killed = false;
-  const send = (signal: NodeJS.Signals): boolean => {
-    let delivered = false;
-    for (const target of named) { try { process.kill(target, signal); delivered = true; } catch { /* it is gone */ } }
-    return delivered;
-  };
+  const same = (item: Named): boolean => (item.target < 0 ? alive(item.target) : item.start !== null && identify(item.target) === item.start);
   return {
     stop(targets) {
       if (timer !== null) return false;
-      named = targets;
-      const delivered = send("SIGTERM");
-      timer = setTimeout(() => { killed = true; send("SIGKILL"); }, graceMs);
+      named = targets.map(target => ({ target, start: target > 0 ? identify(target) : null }));
+      let delivered = false;
+      for (const item of named) { try { process.kill(item.target, "SIGTERM"); delivered = true; } catch { /* it is gone */ } }
+      timer = setTimeout(() => {
+        killed = true;
+        for (const item of named) if (same(item)) { try { process.kill(item.target, "SIGKILL"); } catch { /* it is gone */ } }
+      }, graceMs);
       return delivered;
     },
     async settle() {
       if (timer === null) return;
-      while (!killed && named.some(alive)) await pause(20);
+      while (!killed && named.some(same)) await pause(20);
       clearTimeout(timer);
       timer = null;
     },
