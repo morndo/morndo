@@ -11,6 +11,7 @@ PATH=/usr/bin:/bin
 GH=${GH:-/usr/bin/gh}
 SITE=${SITE:-site}
 TRUST=${TRUST:-trust}
+MAX_AGE=${MAX_AGE:-86400}
 
 fail() {
   echo "refusing to sign: $1" >&2
@@ -48,7 +49,9 @@ for channel in latest stable; do
   if [ "$MODE" = resign ] || [ "$channel" = latest ] || [ -z "$head" ]; then
     issued=$(jq -r '.issuedAt | fromdateiso8601' "$new")
     delta=$((issued - now))
-    [ "$delta" -le 3600 ] && [ "$delta" -ge -3600 ] || fail "$channel.json was issued ${delta}s from now"
+    # The feed environment may hold the job for an approval, so a feed prepared up to MAX_AGE ago (a day) is fresh.
+    # One dated ahead of this machine by more than an hour is not.
+    [ "$delta" -le 3600 ] && [ "$delta" -ge $((0 - MAX_AGE)) ] || fail "$channel.json was issued ${delta}s from now"
   fi
   jq -e '(.seq | type == "number" and . == floor and . >= 1) and (.keySetVersion | type == "number" and . == floor and . >= 1)' "$new" > /dev/null || fail "$channel.json: seq and keySetVersion must be whole numbers of at least 1"
   seq=$(jq -r .seq "$new")

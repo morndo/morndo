@@ -147,12 +147,19 @@ describe("check-signing-feed.sh", () => {
     expect(done.status, done.stderr).toBe(0);
   });
 
-  it("control: the same hours-old feed is refused when a re-sign tries to carry it as new", () => {
-    const w = world({ branch: true, age: 5 * 3_600_000 });
-    put(w, resignFeed(w.latest, NOW - 5 * 3_600_000), resignFeed(w.stable, NOW - 5 * 3_600_000));
+  it("allows an approval wait: a feed prepared five hours ago is still fresh, one prepared two days ago is not", () => {
+    const hours = 5 * 3_600_000;
+    const w = world({ branch: true });
+    put(w, resignFeed(w.latest, NOW - hours), resignFeed(w.stable, NOW - hours));
     const done = check(w, { MODE: "resign" });
-    expect(done.status).toBe(1);
-    expect(done.stderr).toMatch(/issued/);
+    expect(done.status, done.stderr).toBe(0);
+    const late = 2 * 86_400_000;
+    put(w, resignFeed(w.latest, NOW - late), resignFeed(w.stable, NOW - late));
+    const refused = check(w, { MODE: "resign" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/issued/);
+    put(w, resignFeed(w.latest, NOW + 2 * 3_600_000), resignFeed(w.stable, NOW + 2 * 3_600_000));
+    expect(check(w, { MODE: "resign" }).stderr).toMatch(/issued/);
   });
 
   it("passes a first publish with no branch, and a re-sign", () => {
@@ -173,7 +180,7 @@ describe("check-signing-feed.sh", () => {
     ["another key set than trust/keys.json", (w: ReturnType<typeof world>) => { put(w, publishRelease(w.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), w.stable); writeFileSync(join(w.dir, "trust/keys.json"), keys(2)); }, /key set/],
     ["a manifest digest that is not the published one", (w: ReturnType<typeof world>) => put(w, publishRelease(w.latest, { channel: "latest", entry: { ...entry(VERSION), manifestSha256: "ef".repeat(32) }, now: NOW, keySetVersion: 1 }), w.stable), /digest/],
     ["a signature that is already there", (w: ReturnType<typeof world>) => { put(w, publishRelease(w.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), w.stable); writeFileSync(join(w.dir, "site/latest.json.sig"), "old"); }, /already exists/],
-    ["a feed issued a day ago", (w: ReturnType<typeof world>) => put(w, publishRelease(w.latest, { channel: "latest", entry: entry(VERSION), now: NOW - 86_400_000, keySetVersion: 1 }), w.stable), /issued/],
+    ["a feed issued two days ago", (w: ReturnType<typeof world>) => put(w, publishRelease(w.latest, { channel: "latest", entry: entry(VERSION), now: NOW - 2 * 86_400_000, keySetVersion: 1 }), w.stable), /issued/],
   ])("refuses %s", (_name, change, message) => {
     const w = world({ branch: true });
     change(w);
