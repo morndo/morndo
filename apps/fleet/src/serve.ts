@@ -1,5 +1,5 @@
 // The fleet service, wired (ADR-0012): its key, fleet.db, the node registry, the audit, the live connections, the
-// lane registry and router, the hook bus, the agent endpoint and the client API. `morndo-fleet serve` runs it; tests
+// lane registry and router, the hook bus, the agent endpoint, the client API, and each lane's Run (ADR-0032). `morndo-fleet serve` runs it; tests
 // start it on port 0 with temporary paths. The socket directory is checked first, so an unsafe one stops the service
 // before it opens anything. Every alert the audit records is also an `alert` event. Audit rows older than 90 days go on start
 // and daily. A revoked node's lanes go whichever way it was revoked (the client API, or the console writing fleet.db).
@@ -37,6 +37,7 @@ import { LaneEventsPush } from "./application/lane-events-push.ts";
 import { LaneRegistry } from "./application/lane-registry.ts";
 import { LaneWatch, REBUILD_WINDOW_MS } from "./application/lane-watch.ts";
 import { Router } from "./application/router.ts";
+import { Runs } from "./application/runs.ts";
 
 export const AUDIT_PRUNE_EVERY_MS = 86_400_000;
 
@@ -46,12 +47,13 @@ export type FleetOptions = {
   hookBacklog?: number; delivery?: { post?: Post; backoff?: Backoff; tickMs?: number; random?: () => number };
   holdPath?: string;
   laneWatchSweepMs?: number;
+  runsSweepMs?: number;
 };
 
 export type Fleet = {
   config: FleetConfig; db: Database.Database; key: FleetKey; nodes: NodesStore; audit: Audit; events: EventHub;
   connections: Connections; lanes: LaneRegistry; router: Router; outbox: OutboxStore; delivery: DeliveryWorker; intake: IntakeWindow;
-  deliveries: Deliveries; laneEvents: LaneEvents; laneEventsPush: LaneEventsPush; laneWatch: LaneWatch; jobs: JobMirror; agentPort: number;
+  deliveries: Deliveries; laneEvents: LaneEvents; laneEventsPush: LaneEventsPush; laneWatch: LaneWatch; jobs: JobMirror; runs: Runs; agentPort: number;
   close(): Promise<void>;
 };
 
@@ -128,9 +130,11 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     log.warn(`hook bus: no subscriber takes ${path}: its events are acknowledged and counted (morndo-fleet status), never delivered; the first one raises an unrouted_hook alert`);
   }
   const tx = fleetTransactions(db);
+  // Each lane's Run (ADR-0032), made once the job mirror is: a hook is activity once its commit is on the disk.
+  let runs: Runs | null = null;
   const hooks = new HookIntake({
     store: outbox, subscribers: config.subscribers, audit, now, onStored: () => delivery.kick(), tx, lanes: laneEvents,
-    ...(o.hookBacklog === undefined ? {} : { cap: o.hookBacklog }),
+    onCommitted: () => runs?.kick(), ...(o.hookBacklog === undefined ? {} : { cap: o.hookBacklog }),
   });
   const intake = new IntakeWindow({ intake: hooks, tx, log, ...(o.intakeWindowMs === undefined ? {} : { windowMs: o.intakeWindowMs }) });
   const jobsStore = new JobsStore(db);
@@ -163,6 +167,11 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
       } catch (e) { log.error(`audit: op.job.notice on ${route.node} could not be recorded`, e); }
     },
   });
+  const laneRuns = new Runs({
+    events, connections, lanes, watch: laneWatch, jobs, waitMs: config.laneWatch.waitingMin * 60_000, log, now,
+    ...(o.runsSweepMs === undefined ? {} : { sweepMs: o.runsSweepMs }),
+  });
+  runs = laneRuns;
   const agents = startAgentEndpoint({
     host: config.listen.host, port: config.listen.port, deps: { connections, nodes, audit, fleetKey: key, hooks: intake, deliveries, jobs, log },
     ...(o.agentLimits ? { limits: o.agentLimits } : {}), ...(o.handshakeLimits ? { handshakeLimits: o.handshakeLimits } : {}),
@@ -172,7 +181,8 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   try {
     await agents.ready;
     api = await startClientApi(config.socketPath, {
-      router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, log, ...(o.eventsBufferBytes === undefined ? {} : { eventsBufferBytes: o.eventsBufferBytes }),
+      router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, runs: laneRuns, log,
+      ...(o.eventsBufferBytes === undefined ? {} : { eventsBufferBytes: o.eventsBufferBytes }),
       updates: { held: () => watch.held, flight },
     });
   } catch (e) {
@@ -190,6 +200,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   try { laneWatch.rebuild(laneEvents.turnsSince(now() - REBUILD_WINDOW_MS)); }
   catch (e) { log.error("lane watch: reading the last day's turns failed (fleet.db busy?); watching new turns only", e); }
   laneWatch.start();
+  laneRuns.start();                                     // after the watch's rebuild, so a Run reads the last day's turns
   const retention = setInterval(() => { pruneAudit(); pruneJobs(); }, AUDIT_PRUNE_EVERY_MS);
   const noticeRetry = setInterval(() => {
     try { jobs.retry(); } catch (e) { log.error("job notice retry failed; trying again next tick", e); }
@@ -197,12 +208,13 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   const clientApi = api;
   return {
     config, db, key, nodes, audit, events, connections, lanes, router, outbox, delivery, intake, deliveries, laneEvents, laneEventsPush, laneWatch, jobs,
-    agentPort: agents.port(),
+    runs: laneRuns, agentPort: agents.port(),
     close: async () => {
       watch.stop();
       clearInterval(retention);
       clearInterval(noticeRetry);
       deliveries.stop();
+      laneRuns.stop();
       laneWatch.stop();
       laneEvents.stop();
       connections.stop();                              // settles every request in flight, a lane-event batch's too

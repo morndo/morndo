@@ -190,11 +190,11 @@ const ALERT_KINDS = {
   engine_fallback: true, draft_stashed: true,
 } satisfies Record<AlertKind, true>;
 const LANE_EVENTS = { finished: true, needs_input: true, answered: true, stop_failure: true, stale: true } satisfies Record<LaneEventName, true>;
-const EVENT_TYPES = ["status", "inventory", "health", "conflict", "alert", "delivery", "lane"];
+const EVENT_TYPES = ["status", "inventory", "health", "conflict", "alert", "delivery", "lane", "run"];
 const ROUTES: RegExp[] = [
   /^GET \/v1\/caps$/, /^GET \/v1\/nodes$/, /^POST \/v1\/nodes\/[^/]+\/revoke$/, /^GET \/v1\/lanes$/, /^GET \/v1\/lanes\/[^/]+$/,
   /^GET \/v1\/alerts$/, /^POST \/v1\/op$/, /^GET \/v1\/files\/[^/]+\/[^/]+$/, /^POST \/v1\/deliveries$/, /^GET \/v1\/deliveries\/[^/?]+$/,
-  /^GET \/v1\/deliveries\?/, /^POST \/v1\/deliveries\/[^/]+\/cancel$/, /^GET \/v1\/lane-events\?since=/, /^GET \/v1\/lane-watch$/, /^WS \/v1\/events$/,
+  /^GET \/v1\/deliveries\?/, /^POST \/v1\/deliveries\/[^/]+\/cancel$/, /^GET \/v1\/lane-events\?since=/, /^GET \/v1\/lane-watch$/, /^GET \/v1\/runs$/, /^WS \/v1\/events$/,
 ];
 
 describe("docs/fleet-api.md covers the whole client API", () => {

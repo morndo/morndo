@@ -19,8 +19,9 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { WebSocket } from "ws";
 import {
-  CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, readOpError, redactText, toLogFormat, type Alert, type AlertKind, type Delivery,
-  type DeliveryState, type Health, type JobsList, type LaneEvent, type LaneWatchEntry, type OpArgs, type OpError, type OpName, type OpResult,
+  CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, readOpError, redactText, RunViewSchema, toLogFormat, type Alert, type AlertKind,
+  type Delivery, type DeliveryState, type Health, type JobsList, type LaneEvent, type LaneWatchEntry, type OpArgs, type OpError, type OpName, type OpResult,
+  type RunView,
 } from "@morndo/protocol";
 
 export type NodeStatus = "online" | "stale" | "offline";
@@ -33,11 +34,12 @@ const stderrLog = (level: "warn" | "error") => (message: string, error?: unknown
 const STDERR_LOG: FleetLog = { warn: stderrLog("warn"), error: stderrLog("error") };
 export type FleetNode = { name: string; status: NodeStatus; health: Health | null; agent: string | null };
 export type FleetLane = { name: string; node: string; workerId: string | null; conflict: boolean };
-// `alert`: its body is an Alert, and `node` is the alert's node or "". `delivery` and `lane` (fleet clients §4.4, §7):
-// their bodies are checked here, so they come typed.
+// `alert`: its body is an Alert, and `node` is the alert's node or "". `delivery`, `lane` (fleet clients §4.4, §7) and
+// `run` (a lane's Run, ADR-0032): their bodies are checked here, so they come typed.
 export type FleetEvent = { t: "inventory" | "health" | "status" | "conflict" | "alert" | "job"; node: string; body: unknown }
   | { t: "delivery"; node: string; body: Delivery & { stale: boolean } }
-  | { t: "lane"; node: string; body: LaneEvent };
+  | { t: "lane"; node: string; body: LaneEvent }
+  | { t: "run"; node: string; body: RunView };
 // A delivery as the fleet serves it: its latest state, and whether its node is offline now (stale).
 export type FleetDelivery = Delivery & { stale: boolean };
 export type OpTarget = { workerId: string } | { node: string } | { lane: string };
@@ -105,7 +107,7 @@ const CLIENT_NAME = /^[a-z]{1,16}$/;
 const FILE_IDLE_MS = 30_000;
 const RECONNECT_MS = [1000, 2000, 5000, 10_000, 30_000] as const;
 const STATUSES = new Set<string>(["online", "stale", "offline"]);
-const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "alert", "delivery", "lane", "job"]);
+const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "alert", "delivery", "lane", "job", "run"]);
 // "unrouted_hook": hook events for a script path no subscriber takes (ADR-0012 decision 8; detail { path, events }).
 // "delivery_waiting" and "subscriber_lagging": fleet clients §4.5, §6. "job_failed" and "job_unnoticed": ADR-0017.
 // "engine_fallback": ADR-0027. "draft_stashed": a lane's unsent draft put away so its deliveries went in (#64).
@@ -263,6 +265,13 @@ export class FleetClient {
     if (!isRecord(v) || !Array.isArray(v.lanes) || !v.lanes.every(ok)) throw new FleetMismatch("GET /v1/lane-watch: not a lane watch");
     return v.lanes as LaneWatchEntry[];
   }
+  // Each lane's Run (GET /v1/runs, ADR-0032), by lane. A Run this client can't read (a newer fleet's phase or wait) is
+  // left out, as an alert of a kind it doesn't know is.
+  async runs(): Promise<RunView[]> {
+    const v = await this.#json("GET", "/v1/runs");
+    if (!isRecord(v) || !Array.isArray(v.runs)) throw new FleetMismatch("GET /v1/runs: not a list of runs");
+    return v.runs.map(r => parseBody(RunViewSchema, r)).filter((r): r is RunView => r !== null);
+  }
   // A file on a node, streamed (GET /v1/files): the fleet reads it in chunks of at most 256 KiB under the node's rules.
   async *fileStream(node: string, refOrPath: string): AsyncIterable<Uint8Array> {
     const path = `/v1/files/${encodeURIComponent(node)}/${encodeURIComponent(refOrPath)}`;
@@ -310,12 +319,12 @@ export class FleetClient {
     }
   }
 
-  // The fleet's events (spec §5.6: inventory, health, node status, conflicts, alerts), until the returned function is
-  // called.
+  // The fleet's events (spec §5.6: inventory, health, node status, conflicts, alerts; deliveries, lane events, jobs and
+  // runs), until the returned function is called.
   // A closed socket is opened again after 1, 2, 5, 10, then every 30 s, each with jitter. The fleet replays only each
-  // node's status, inventory and health on a new subscription; an `alert` or `conflict` event sent meanwhile is not
-  // replayed. `onOpen` runs after every successful open, the first and each reconnect, so a consumer can read
-  // nodes(), lanes() and alerts() again.
+  // node's status, inventory and health, the jobs and every lane's Run on a new subscription; an `alert` or `conflict`
+  // event sent meanwhile is not replayed. `onOpen` runs after every successful open, the first and each reconnect, so a
+  // consumer can read nodes(), lanes() and alerts() again.
   events(on: (e: FleetEvent) => void, o: { onOpen?: () => void | Promise<void> } = {}): () => void {
     let stopped = false;
     let socket: WebSocket | null = null;
@@ -343,6 +352,10 @@ export class FleetClient {
           const body = v.t === "delivery" ? (isRecord(v.body) ? fleetDelivery(v.body, v.body.stale) : null) : parseBody(LaneEventSchema, v.body);
           if (!body) { this.#log.warn(`fleet events: a ${v.t} event of an unknown shape, ignored`); return; }
           e = v.t === "delivery" ? { t: "delivery", node: v.node, body: body as FleetDelivery } : { t: "lane", node: v.node, body: body as LaneEvent };
+        } else if (v.t === "run") {
+          const body = parseBody(RunViewSchema, v.body);
+          if (!body) { this.#log.warn("fleet events: a run event of an unknown shape, ignored"); return; }
+          e = { t: "run", node: v.node, body };
         } else {
           e = { t: v.t as "inventory" | "health" | "status" | "conflict" | "alert" | "job", node: v.node, body: v.body };
         }

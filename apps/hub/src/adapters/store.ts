@@ -475,6 +475,10 @@ export class Store {
     const r = this.db.prepare("SELECT * FROM board_tasks WHERE status = 'doing' AND assignee = ? ORDER BY n LIMIT 1").get(lane) as Row | undefined;
     return r ? taskFrom(r) : null;
   }
+  // A lane's open tasks (every status but done): what the board's own moves read for that lane (ADR-0032, D1 to D4).
+  openTasksOf(lane: string): Task[] {
+    return (this.db.prepare("SELECT * FROM board_tasks WHERE assignee = ? AND status <> 'done' ORDER BY n").all(lane) as Row[]).map(taskFrom);
+  }
   task(key: string): Task | null {
     const r = this.db.prepare("SELECT * FROM board_tasks WHERE key = ?").get(key) as Row | undefined;
     return r ? taskFrom(r) : null;

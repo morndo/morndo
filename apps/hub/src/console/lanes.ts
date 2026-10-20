@@ -1,6 +1,6 @@
 // `morndo lanes` (fleet-clients spec §9.2): every node's lanes over the fleet's client socket, for any user, with no hub
-// settings and no hub database. It names itself "lanes" (x-morndo-client), and its ids and keys are namespaced so
-// ("lanes:…"): the fleet audits each by its client (§8, §11).
+// settings and no hub database (but `start --task`'s, below). It names itself "lanes" (x-morndo-client), and its ids
+// and keys are namespaced so ("lanes:…"): the fleet audits each by its client (§8, §11).
 // - list: each lane's name, node, worker id, window, session status, pid, folder, title, and its session's topic and
 //   last prompt (reconciliation ruling 13; each online node's inventory; a node that isn't online lists the registry's
 //   rows, offline);
@@ -9,7 +9,10 @@
 // - keys: pane.keys by key name (the protocol's allow-list);
 // - start, stop: lane.start (with a first prompt typed once the lane can take it; on a Role's engine with --role, or a
 //   named one with --engine and --reason: reliable lanes §3.3), lane.stop (graceful, or --kill; an exit not seen within
-//   its 30 s is "uncertain", exit 3, and --kill may follow);
+//   its 30 s is "uncertain", exit 3, and --kill may follow). `start --task T-12` (ADR-0032, design §4 "The console
+//   actor") first assigns T-12 to the new lane as the console, on the hub's own database (main.ts's, opened here as the
+//   other console commands open it, whether the hub runs or not); an unknown task or a done one is refused (exit 4)
+//   before anything starts;
 // - status: one delivery's state; events: lane events as they happen, until interrupted;
 // - brief: what an orchestrator must know after a restart or a compaction (brief.ts, reliable lanes §3.5).
 // Exit codes (§9.2; reconciliation rulings 29 and 49): 0 accepted (with --wait: delivered; stop: stopped), 3 not
@@ -20,11 +23,18 @@
 // util.parseArgs, strict, with positionals ("--" ends the options, so a text may start with "-"):
 // https://nodejs.org/docs/latest-v24.x/api/util.html#utilparseargsconfig, read 2026-10-08.
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { DEFAULT_POLICY, parseTaskKey, type TaskKey } from "@morndo/domain";
 import { FleetClient, FleetMismatch, FleetOpFailed, FleetUnavailable } from "@morndo/fleet-client";
 import { FINAL_DELIVERY_STATES, KEY_NAMES, LIMITS, parseWorkerId, type Delivery, type KeyName, type LaneEvent, type OpError } from "@morndo/protocol";
+import { NotLocalDisk } from "@morndo/service-kit";
+import { DatabaseFromFuture } from "../adapters/migrations.ts";
+import { Store } from "../adapters/store.ts";
+import { BoardService } from "../application/board-service.ts";
+import { dataDirOf } from "../config.ts";
 import { briefLines } from "./brief.ts";
 
 export const EXIT = { ok: 0, usage: 2, late: 3, notDelivered: 4, inDoubt: 5, unavailable: 69 } as const;
@@ -60,12 +70,13 @@ export const USAGE = `usage: morndo lanes [--json]
        morndo lanes send <lane | worker id> <text | -> [--id ID] [--wait SECONDS] [--direct] [--json]
        morndo lanes keys <lane | worker id> <key>...
        morndo lanes start <name> --cwd DIR [--node NODE] [--role ROLE | --engine PROVIDER:MODEL[@EFFORT] --reason TEXT]
-                          [--account A] [--resume SESSION] [--prompt TEXT] [--json]
+                          [--account A] [--resume SESSION] [--prompt TEXT] [--task T-12] [--json]
        morndo lanes stop <lane | worker id> [--kill]
        morndo lanes status <delivery id> [--json]
        morndo lanes events [--json]
        morndo lanes brief [--json]
 send - reads the text from stdin. Keys are tmux key names: ${KEY_NAMES.join(" ")}.
+start --task assigns that task to the new lane first (the hub's board, MORNDO_HOME); its first turn moves it into progress.
 Exit codes: 0 accepted (with --wait: delivered; stop: stopped), 3 not delivered in time (stop: not seen to stop),
 4 given up, refused or uncertain, 5 in doubt (the fleet was reached and never answered: run it again with the same
 --id), 69 the fleet couldn't be reached (nothing queued), 2 bad arguments. The fleet's socket: MORNDO_FLEET_SOCKET
@@ -74,12 +85,13 @@ Exit codes: 0 accepted (with --wait: delivered; stop: stopped), 3 not delivered 
 const OPTIONS = {
   json: { type: "boolean" }, lines: { type: "string" }, id: { type: "string" }, wait: { type: "string" }, direct: { type: "boolean" },
   kill: { type: "boolean" }, prompt: { type: "string" }, cwd: { type: "string" }, account: { type: "string" }, resume: { type: "string" },
-  node: { type: "string" }, role: { type: "string" }, engine: { type: "string" }, reason: { type: "string" }, help: { type: "boolean", short: "h" },
+  node: { type: "string" }, role: { type: "string" }, engine: { type: "string" }, reason: { type: "string" }, task: { type: "string" },
+  help: { type: "boolean", short: "h" },
 } as const;
 // The options each command takes; any other is a usage error.
 const ALLOWED: Record<string, readonly string[]> = {
   list: ["json"], peek: ["lines", "json"], send: ["id", "wait", "direct", "json"], keys: [], status: ["json"], events: ["json"],
-  start: ["cwd", "node", "role", "engine", "reason", "account", "resume", "prompt", "json"], stop: ["kill"], brief: ["json"],
+  start: ["cwd", "node", "role", "engine", "reason", "account", "resume", "prompt", "task", "json"], stop: ["kill"], brief: ["json"],
 };
 const DEFAULT_LINES = 40;
 const WAIT_STEP_MS = 250;
@@ -314,19 +326,28 @@ async function start(client: FleetClient, io: LanesIo, rest: string[], v: Values
     node = online[0]?.name ?? "";
   }
   if (v.role !== undefined && v.engine !== undefined) throw new Usage("start takes --role or --engine, not both");
+  const taskKey = v.task === undefined ? null : parseTaskKey(v.task);
+  if (v.task !== undefined && taskKey === null) throw new Usage(`--task is a task's key, such as T-12, not ${JSON.stringify(v.task)}`);
+  // Assigned before the lane starts: its first turn is then a run that began after the task's last change, which D4
+  // moves into progress; assigned after that turn began, D6 would leave it where it is.
+  const task = taskKey === null ? null : assignTask(io.env, taskKey, name);
+  // A start that fails after the task was assigned says where the task stays.
+  const stays = async () => { if (task) await io.err(`${task.key} stays assigned to ${name}: morndo-board assign ${task.key} <lane> hands it on`); };
   const args = { name, cwd: v.cwd, ...(v.account !== undefined ? { account: v.account } : {}), ...(v.resume !== undefined ? { resume: v.resume } : {}),
     ...(v.prompt !== undefined ? { prompt: v.prompt } : {}), ...(v.role !== undefined ? { role: v.role } : {}),
     ...(v.engine !== undefined ? { engine: v.engine } : {}), ...(v.reason !== undefined ? { reason: v.reason } : {}) };
   let r;
   try { r = await client.op({ node }, "lane.start", args, { key: `lanes:start:${randomUUID()}`, timeoutMs: 60_000 }); }
   catch (e) {
+    await stays();
     // No --id here: a start run again is a new start. So it says to look first.
     if (e instanceof FleetUnavailable && e.reached) throw new InDoubt(`in doubt: the fleet took the start of ${name} and never answered (${e.message}); it may have started: look with morndo lanes before starting it again`);
     throw e;
   }
-  if (!r.ok) throw new FleetOpFailed("lane.start", r.error);
-  if (v.json) { await io.out(JSON.stringify({ node, ...r.result })); return EXIT.ok; }
+  if (!r.ok) { await stays(); throw new FleetOpFailed("lane.start", r.error); }
+  if (v.json) { await io.out(JSON.stringify({ node, ...r.result, ...(task ? { task: task.key } : {}) })); return EXIT.ok; }
   const lines = [`started ${name} on ${node}: ${r.result.workerId}`];
+  if (task) lines.push(`${task.key} is assigned to it${task.already ? " (it was already)" : ""}: its first turn moves it into progress`);
   const engine = r.result.engine;
   if (engine) lines.push(`it runs ${engine.entry}${engine.role ? ` (role ${engine.role})` : ""}`);
   if (engine?.skipped?.length) lines.push(`passed over first: ${engine.skipped.map(s => `${s.entry} (${s.reason})`).join("; ")}`);
@@ -334,6 +355,36 @@ async function start(client: FleetClient, io: LanesIo, rest: string[], v: Values
   if (r.result.prompt) lines.push(`its first prompt: ${r.result.prompt} (morndo lanes status ${r.result.prompt})`);
   await io.out(lines.join("\n"));
   return EXIT.ok;
+}
+
+// --task: `key` assigned to `lane` as the console ({ kind: "console" }, which acts for the principal at the control plane:
+// B2), through the board's own service, so the change is judged by the domain (applyAction), written with its event and
+// recorded as any other (B6). On the hub's database, opened as main.ts opens it and never made here: a box with no hub has
+// no board. Closed again before the lane starts, so a 60-second start holds no lock. Refused in one line (exit 4): no
+// such task, a done one (accepted work is not handed out again: file a new task), or the domain's refusal.
+function assignTask(env: NodeJS.ProcessEnv, key: TaskKey, lane: string): { key: TaskKey; already: boolean } {
+  const dir = dataDirOf(env);
+  if (!existsSync(join(dir, "morndo.db"))) throw new NotDone(`refused: no task ${key}: there is no hub database in ${dir} (MORNDO_HOME)`);
+  let store: Store;
+  try { store = new Store(dir); }
+  catch (e) {
+    if (e instanceof DatabaseFromFuture) throw new NotDone(`refused: ${dir}/morndo.db was written by a newer Morndo (schema version ${e.found}); run that hub's console`);
+    if (e instanceof NotLocalDisk) throw new NotDone(`refused: ${e.message}`);
+    throw e;
+  }
+  try {
+    // The console never acts as the principal's endpoint here, so the access policy is never read.
+    const board = new BoardService({ store, policy: () => DEFAULT_POLICY });
+    const found = board.task(key);
+    if (!found) throw new NotDone(`refused: no task ${key}`);
+    if (found.task.status === "done") throw new NotDone(`refused: ${key} is done; file a new task for more work`);
+    if (found.task.assignee === lane) return { key, already: true };
+    const r = board.act(key, { action: "assign", to: lane }, { kind: "console" });
+    if (!r.ok) throw new NotDone(`refused: ${key} can't be assigned to ${lane}: ${r.problem}${r.other ? ` (${r.other})` : ""}`);
+    return { key, already: false };
+  } finally {
+    store.close();
+  }
 }
 
 async function stop(client: FleetClient, io: LanesIo, rest: string[], v: Values): Promise<number> {

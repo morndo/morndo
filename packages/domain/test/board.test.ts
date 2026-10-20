@@ -2,8 +2,8 @@
 // work and never to Done, one task in progress per lane, every change an event with provenance and a revision.
 import { describe, expect, it } from "vitest";
 import {
-  DONE_SHOWN_MS, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, endpointId, mayMove, parseTaskKey, sessionId, taskKey, workingOn,
-  type BoardActor, type Task, type TaskAction,
+  DONE_SHOWN_MS, GONE_REASON, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, mayMove, parseTaskKey, sessionId, taskKey, workingOn,
+  type BoardActor, type Run, type Task, type TaskAction, type TaskActor,
 } from "../src/index.ts";
 
 const NOW = 1_700_000_000_000;
@@ -19,7 +19,7 @@ const value = <T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T 
 const problem = (r: { ok: boolean; error?: unknown }) => (r.ok ? "ok" : (r.error as { problem: string }).problem);
 const make = (n: number, o: Partial<Parameters<typeof createTask>[0]> = {}, by: BoardActor = manager) =>
   value(createTask({ title: `Task ${n}`, ...o }, by, n, NOW)).task;
-const apply = (t: Task, a: TaskAction, by: BoardActor, board: Task[] = [t], at = NOW + 1) => applyAction(t, a, by, at, board);
+const apply = (t: Task, a: TaskAction, by: TaskActor, board: Task[] = [t], at = NOW + 1) => applyAction(t, a, by, at, board);
 
 describe("keys (B7)", () => {
   it("T-<n>, never reused: the number is the caller's counter", () => {
@@ -195,5 +195,79 @@ describe("the board's order", () => {
   });
   it("a done task without a time is not shown (negative control: it can't be judged against the week)", () => {
     expect(boardOrder([{ ...make(1), status: "done", doneAt: null }], NOW)).toEqual([]);
+  });
+});
+
+// B10, D1 to D6 (ADR-0032): the board moves a task by itself, following its assignee's Run, along fixed edges.
+describe("the board's own moves (B10, D1 to D6)", () => {
+  // A field given as undefined is left out, as a Run without it would be.
+  const run = (o: { [K in keyof Run]?: Run[K] | undefined } = {}): Run =>
+    JSON.parse(JSON.stringify({ lane: "builder", node: "pc", phase: "ended", outcome: "done", line: "STATUS: DONE: tests pass", deadline: null, overdue: false, since: NOW + 10, source: "status", ...o })) as Run;
+  const doing = () => ({ ...make(1, { assignee: "builder" }), status: "doing" as const });
+  const boardActor = (lane = "builder", rule: "D1" | "D2" | "D3" | "D4" = "D1"): TaskActor => ({ kind: "board", rule, lane });
+
+  it("D1: in progress to in review when the assignee's run ended DONE, with its status line", () => {
+    expect(derivedMove(doing(), run(), [doing()])).toEqual({ to: "review", reason: "STATUS: DONE: tests pass", rule: "D1" });
+  });
+  it("D2: in progress to blocked on BLOCKED or NEEDS DECISION, with a reason", () => {
+    expect(derivedMove(doing(), run({ outcome: "blocked", line: "STATUS: BLOCKED on the API key" }), [doing()])).toMatchObject({ to: "blocked", rule: "D2", reason: "STATUS: BLOCKED on the API key" });
+    expect(derivedMove(doing(), run({ outcome: "needs_decision", line: "" }), [doing()])).toMatchObject({ to: "blocked", rule: "D2", reason: "needs_decision" });
+  });
+  it("D1's reason is one clean line: a control character in the status line is a space, never a refused move", () => {
+    const moved = derivedMove(doing(), run({ line: "STATUS: DONE\u001b[0m pushed\ttwice" }), [doing()]);
+    expect(moved?.reason).toBe("STATUS: DONE [0m pushed twice");
+    expect(apply(doing(), { action: "move", to: "review", reason: moved?.reason ?? "" }, boardActor()).ok).toBe(true);  // negative control: the raw line is refused (bad_text)
+  });
+  it("D3: in progress to to do when the assignee's lane is gone", () => {
+    expect(derivedMove(doing(), run({ phase: "gone", outcome: undefined }), [doing()])).toEqual({ to: "todo", reason: GONE_REASON, rule: "D3" });
+  });
+  it("D4: the lane's one to do task goes into progress when its run works or waits", () => {
+    const todo = make(2, { assignee: "builder" });
+    expect(derivedMove(todo, run({ phase: "working", outcome: undefined }), [todo])).toEqual({ to: "doing", reason: null, rule: "D4" });
+    expect(derivedMove(todo, run({ phase: "waiting", outcome: undefined, wait: { on: "background", tasks: [] } }), [todo])?.to).toBe("doing");
+  });
+  it("D4: with a task in review and a new to do, the new one is taken up; two to dos, or one in progress, move nothing", () => {
+    const review = { ...make(3, { assignee: "builder" }), status: "review" as const };
+    const todo = make(4, { assignee: "builder" });
+    const working = run({ phase: "working", outcome: undefined });
+    expect(derivedMove(todo, working, [review, todo])?.to).toBe("doing");
+    expect(derivedMove(review, working, [review, todo])).toBeNull();
+    const other = make(5, { assignee: "builder" });
+    expect(derivedMove(todo, working, [todo, other])).toBeNull();               // negative control: ambiguous, nothing moves
+    expect(derivedMove(todo, working, [todo, doing()])).toBeNull();             // B5
+    expect(derivedMove(review, working, [review])?.to).toBe("doing");           // taken up again
+  });
+  it("D6: a run whose phase began at or before the task's last change moves nothing", () => {
+    const t = { ...doing(), updatedAt: NOW + 10 };
+    expect(derivedMove(t, run({ since: NOW + 10 }), [t])).toBeNull();          // negative control: without D6 a person's move is undone
+    expect(derivedMove(t, run({ since: NOW + 11 }), [t])?.to).toBe("review");
+  });
+  it("only the assignee's run counts; an unassigned task never moves", () => {
+    expect(derivedMove(doing(), run({ lane: "reviewer" }), [doing()])).toBeNull();
+    const nobody = make(6);
+    expect(derivedMove(nobody, run({ phase: "working", outcome: undefined }), [nobody])).toBeNull();
+  });
+  it("D5: the board never moves to done, never assigns or edits, and moves only its assignee's task along its edges", () => {
+    const t = doing();
+    expect(problem(apply(t, { action: "move", to: "done", reason: "x" }, boardActor()))).toBe("bad_transition");
+    expect(problem(apply(t, { action: "assign", to: "reviewer" }, boardActor()))).toBe("not_allowed");
+    expect(problem(apply(t, { action: "edit", title: "Renamed" }, boardActor()))).toBe("not_allowed");
+    expect(problem(apply(t, { action: "move", to: "review" }, boardActor("reviewer")))).toBe("not_yours");
+    expect(problem(apply(make(7), { action: "move", to: "doing" }, boardActor()))).toBe("not_yours");
+    expect(mayMove(boardActor(), "backlog", "doing")).toBe(false);
+    for (const [from, to] of [["doing", "review"], ["doing", "blocked"], ["doing", "todo"], ["todo", "doing"], ["blocked", "doing"], ["review", "doing"]] as const) {
+      expect(mayMove(boardActor(), from, to), `${from}->${to}`).toBe(true);
+    }
+    const moved = value(apply(t, { action: "move", to: "review", reason: "STATUS: DONE" }, boardActor()));
+    expect(moved.event.actor).toEqual({ kind: "board", rule: "D1", lane: "builder" });
+    expect(moved.event.change).toMatchObject({ reason: "STATUS: DONE" });           // B10: the record keeps what it read
+    expect(boardChanged(moved.event).actor).toEqual({ kind: "board", name: "builder", endpointId: null, token: null, rule: "D1" });
+  });
+  it("the console runs the board for the principal: it assigns, and its record names it", () => {
+    const console: TaskActor = { kind: "console" };
+    const t = make(8);
+    const assigned = value(apply(t, { action: "assign", to: "builder" }, console));
+    expect(assigned.task).toMatchObject({ assignee: "builder", status: "todo" });
+    expect(boardChanged(assigned.event).actor).toEqual({ kind: "console", name: null, endpointId: null, token: null });
   });
 });

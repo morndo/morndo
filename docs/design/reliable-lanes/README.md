@@ -38,6 +38,7 @@ STATUS: DONE | STATUS: BLOCKED | STATUS: NEEDS DECISION | STATUS: WAITING <on wh
 
 - **The relay asks once.** When a `Stop` reaches the node's relay for a lane whose answer has no status line and no background work running, and Claude Code says this Stop was not already caused by a hook (`stop_hook_active`), the relay answers `{"decision": "block", "reason": …}`: Claude writes a status line and stops again. It never asks twice for one turn, so Claude Code's limit (it overrides a Stop hook after eight blocks in a row) is never reached. The asked Stop is not a turn end: it makes no lane event. It is still kept, marked `statusAsked`, because a subscriber that shows a lane's answers (a chat bridge) must not lose the answer it carried.
 - **Off for the orchestrator.** `statusContract.exempt` (default `["manager"]`) names lanes that are never asked. `statusContract.mode: "off"` turns it off for a node.
+- **A WAITING with nothing to wake it** is asked for a waker instead, under the same rules: W1 in [`docs/design/agent-board/README.md`](../agent-board/README.md) §5.
 - **WAITING is a lease.** `for <N> min` (at most 24 h) sets its deadline; without one, the fleet's default (30 min). A `finished` event carries `status: "waiting"`, `waitingOn` and `until`.
 
 ### 3.2 The fleet watches every lane's last turn (lane watch)

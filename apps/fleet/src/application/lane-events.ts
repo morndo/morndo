@@ -7,6 +7,11 @@
 //   stop_failure  /hook/failure: error
 //   needs_input   /lane (the node saw the session's status turn `waiting`): question
 //   answered      /lane (it left `waiting`)
+// A `finished` also keeps what the turn left pending (ADR-0032, R6): `tasks` and `wakes`, at most 8 of each, by the
+// domain's pendingOf (run.ts), omitted when empty. A background task keeps its type and its description cut to 80
+// characters through the protocol's key redactor (redactKeyMaterial, the one the hub's views use), never its command; a
+// wake-up keeps its schedule and whether it recurs, never its prompt. The owner's scripts' counts give one placeholder
+// each. `bg` and `crons` stay the counts, and the manager's line (lineOf) is today's, without either list.
 // Each hook body is read in either form (spec §6): Claude Code's own (last_assistant_message, background_tasks and
 // session_crons as arrays, error_type) or the owner's scripts' (text, background and crons as counts, error). kira's
 // rules are kept as they are (the chat bot's emit, firstLine, statusOf and onFailure, read 2026-10-08): the first non-blank
@@ -20,8 +25,10 @@
 // menu again) is dropped (ruling 18). Once that commit is on the disk (`committed`), each is published on /v1/events as `lane`, and the
 // manager's batch is kicked. Kept LIMITS.laneEventKeepMs (7 days) by their time on the node, pruned on start and hourly.
 // Hook fields: https://code.claude.com/docs/en/hooks (Stop: last_assistant_message, background_tasks [], session_crons [];
-// StopFailure: error_type), read 2026-10-08.
-import { LIMITS, firstLineOf as firstLine, statusLineOf, type HookEvent, type LaneEvent } from "@morndo/protocol";
+// StopFailure: error_type), read 2026-10-08; a background task's id, type, status, description (up to 1000 characters)
+// and, for a shell task, command; a cron's id, schedule, recurring and prompt (Stop input), read 2026-10-20.
+import { pendingOf } from "@morndo/domain";
+import { LIMITS, firstLineOf as firstLine, redactKeyMaterial, statusLineOf, type HookEvent, type LaneEvent } from "@morndo/protocol";
 import type { LaneEventsConfig } from "../config.ts";
 import type { LaneEventDraft, LaneEventsStore } from "../adapters/lane-events-store.ts";
 import type { Logger } from "../adapters/log.ts";
@@ -62,7 +69,12 @@ export function laneEventOf(e: HookEvent, rules: LaneEventRules): LaneEventDraft
     const first = firstLineOf(textOf(b.last_assistant_message ?? b.text).trim());
     const line = statusLineOf(first);
     const waiting = line?.status === "waiting" ? { ...(line.waitingOn ? { waitingOn: line.waitingOn } : {}), until: e.at + (line.forMs ?? rules.waitMs) } : {};
-    return { ...base, event: "finished", status: line?.status ?? null, firstLine: first, bg: countOf(b.background_tasks ?? b.background), crons: countOf(b.session_crons ?? b.crons), ...waiting };
+    const tasks = b.background_tasks ?? b.background, crons = b.session_crons ?? b.crons;
+    const pending = pendingOf(tasks, crons, redactKeyMaterial);
+    return {
+      ...base, event: "finished", status: line?.status ?? null, firstLine: first, bg: countOf(tasks), crons: countOf(crons), ...waiting,
+      ...(pending.tasks.length > 0 ? { tasks: pending.tasks } : {}), ...(pending.wakes.length > 0 ? { wakes: pending.wakes } : {}),
+    };
   }
   if (e.path === "/hook/failure") return { ...base, event: "stop_failure", error: textOf(b.error_type ?? b.error ?? "unknown").slice(0, 60) || "unknown" };
   if (b.event === "answered") return { ...base, event: "answered" };
@@ -109,7 +121,8 @@ export class LaneEvents {
   #log: Logger;
   #now: () => number;
   #timer: ReturnType<typeof setInterval> | null = null;
-  #watch: Pick<LaneWatch, "saw" | "turn"> | null = null;
+  #watch: Pick<LaneWatch, "saw" | "turn" | "runTurn"> | null = null;
+  #everyWindow: LaneEventRules;                          // the rules with no lane left out: a Run's turn ends (runTurn)
 
   constructor(p: {
     store: LaneEventsStore; events: EventHub; config: LaneEventsConfig; log: Logger; onWaiting?: () => void; now?: () => number; waitMs?: number;
@@ -117,6 +130,7 @@ export class LaneEvents {
     this.#store = p.store;
     this.#events = p.events;
     this.#rules = rulesOf(p.config, p.waitMs);
+    this.#everyWindow = { ...this.#rules, manager: null, ignore: [] };
     this.#toManager = p.config.deliverTo !== null;
     this.#onWaiting = p.onWaiting ?? (() => {});
     this.#log = p.log;
@@ -130,9 +144,15 @@ export class LaneEvents {
     this.#watch?.saw(e);
     // A Stop the relay asked to go on still tells the watch that the lane's turn may end there: if the lane never acts on
     // the ask (a hook that can't block), it is a turn without a status, and goes stale as one.
-    const asked = e.path === "/hook/stop" && isObject(e.body) && e.body.statusAsked === true
-      ? laneEventOf({ ...e, body: { ...e.body, statusAsked: false } }, this.#rules) : null;
+    const unasked = e.path === "/hook/stop" && isObject(e.body) && e.body.statusAsked === true ? { ...e, body: { ...e.body, statusAsked: false } } : null;
+    const asked = unasked ? laneEventOf(unasked, this.#rules) : null;
     if (asked) this.#watch?.turn({ ...asked, seq: 0 } as LaneEvent);
+    // A Run reads every window's turn end (ADR-0032): the manager's own lane and ignored ones make no lane event, so
+    // theirs goes to the watch for Runs only, never stored (so not after a restart) and never watched for stale.
+    if (e.path === "/hook/stop" && !asked && laneEventOf(unasked ?? e, this.#rules) === null) {
+      const only = laneEventOf(unasked ?? e, this.#everyWindow);
+      if (only) this.#watch?.runTurn(only);
+    }
     const d = laneEventOf(e, this.#rules);
     if (!d) return { event: null, own };
     if (d.event === "needs_input" && d.sessionId !== undefined && this.#store.lastOf(d.sessionId) === "needs_input") return { event: null, own };
@@ -145,8 +165,8 @@ export class LaneEvents {
     if (this.#toManager && fresh.some(le => le.event !== "answered")) this.#onWaiting();
   }
 
-  // The lane watch, told of every hook and every turn end (reliable lanes §3.2).
-  watchWith(watch: Pick<LaneWatch, "saw" | "turn">): void { this.#watch = watch; }
+  // The lane watch, told of every hook and every turn end (reliable lanes §3.2), and the turn ends only a Run reads.
+  watchWith(watch: Pick<LaneWatch, "saw" | "turn" | "runTurn">): void { this.#watch = watch; }
 
   // An event the fleet makes itself (the watch's `stale`): stored and published like the others, waiting for the manager.
   raise(d: LaneEventDraft): LaneEvent {

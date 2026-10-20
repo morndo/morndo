@@ -12,7 +12,7 @@
   import Picker, { type PickerOption } from "./Picker.svelte";
   import StatusIcon from "./StatusIcon.svelte";
   import "./board-controls.css";
-  import { COLUMNS, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, eventLine, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
+  import { COLUMNS, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, avatarOf, eventLine, whoOf, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
   import { clock } from "./grouping.ts";
 
   let { task, lanes, now, pendingBlock = false, notice = null, onAct, onOpenLane, onClose }: {
@@ -144,7 +144,7 @@
       </div>
       <div><dt>Priority</dt><dd>{PRIORITY_WORDS[task.priority]}</dd></div>
       {#if task.blockedReason}<div><dt>Blocked</dt><dd class="bad">{task.blockedReason}</dd></div>{/if}
-      <div><dt>Filed</dt><dd>{ago(task.createdAt, now)} by {task.createdBy.kind === "principal" ? "you" : task.createdBy.name}</dd></div>
+      <div><dt>Filed</dt><dd>{ago(task.createdAt, now)} by {task.createdBy.kind === "principal" ? "you" : whoOf(task.createdBy)}</dd></div>
     </dl>
 
     {#if blocking}
@@ -162,7 +162,7 @@
       {#each events as e (e.rev)}
         {@const l = eventLine(e)}
         <li>
-          <Avatar name={l.who} kind={e.actor.kind === "principal" ? "principal" : e.actor.kind === "manager" ? "peer" : "agent"} size={20} />
+          <Avatar name={l.who} kind={avatarOf(e.actor)} size={20} />
           <div>
             <p><strong>{l.who}</strong> {l.text}<time title={new Date(e.at).toLocaleString()}>{clock(e.at)}</time></p>
             {#if l.comment}<p class="cmt">{l.comment}</p>{/if}

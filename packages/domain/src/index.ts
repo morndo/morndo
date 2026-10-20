@@ -14,6 +14,7 @@ export * from "./engines.ts";
 export * from "./connections.ts";
 export * from "./routing.ts";
 export * from "./board.ts";
+export * from "./run.ts";
 export * from "./verification.ts";
 export * from "./digest.ts";
 export * from "./usage.ts";

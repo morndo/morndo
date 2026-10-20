@@ -6,7 +6,7 @@
 // pane's session state (§5) and lane events (§7).
 // What a node is asked to do (op arguments) is strict, with limits: the agent acts on it. What a node reports (results,
 // events) is checked for shape; each message is bounded by maxMessageBytes anyway.
-import { JOB_ID, NOTICE_MAX, parseEngine } from "@morndo/domain";
+import { JOB_ID, NOTICE_MAX, RUN_PHASES, parseEngine, type PendingTask, type PendingWake, type Run } from "@morndo/domain";
 import { EvJob } from "./jobs.ts";
 import * as z from "./z.ts";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "./connections.ts";
@@ -216,7 +216,10 @@ export const STEP_UP_OPS: ReadonlySet<OpName> = new Set<OpName>(["connections.pr
 
 export type Health = { memTotal: number; memAvailable: number; psiSome10: number | null; psiFull10: number | null;
   diskFreeHome: number; load1: number; tmuxOk: boolean; wallClock: number; spoolDepth: number; drops: number;
-  jobs?: string };
+  jobs?: string;
+  // The node's UTC offset in minutes now (east positive, so UTC+2 is 120): the time its lanes' wake-up schedules are
+  // written in (ADR-0032, R3). Absent from an older node: its wake-ups get no fire time.
+  tzOffsetMin?: number };
 // "/lane": a lane state event the node made from its session state (fleet clients §7), carried and replayed like a hook.
 // Its body: { event: "needs_input" | "answered"; sessionId: string | null; question?: string }.
 export type HookEvent = { streamId: string; seq: number; at: number;
@@ -240,7 +243,13 @@ export type LaneEventName = "finished" | "needs_input" | "answered" | "stop_fail
 export type LaneEvent = { v: 1; t: "lane"; seq: number; event: LaneEventName; node: string;
   window: string | null; lane: string | null; sessionId?: string; at: number;
   status?: "done" | "blocked" | "needs_decision" | "waiting" | null; firstLine?: string; bg?: number; crons?: number; question?: string; error?: string;
-  waitingOn?: string; until?: number; reason?: "waiting" | "no_status"; since?: number; stalls?: number };
+  waitingOn?: string; until?: number; reason?: "waiting" | "no_status"; since?: number; stalls?: number;
+  // ADR-0032 (R6): what a `finished` left pending, at most 8 of each: a background task by its type and a redacted
+  // description of at most 80 characters, a wake-up by its schedule. Never a command or a prompt.
+  tasks?: PendingTask[]; wakes?: PendingWake[] };
+
+// A lane's Run as the fleet derives it (ADR-0032; domain run.ts): GET /v1/runs and the `run` event.
+export type RunView = Run;
 
 // What the fleet service raises for the owner (spec §5.2, §5.4, §5.6, §7, §8): kept as audit rows, served oldest first by
 // the client API's GET /v1/alerts and sent as the "alert" event. `detail` is per kind (plan Contracts, "Alerts").
@@ -470,13 +479,16 @@ const OpErrorSchema = z.pipe(
 const HealthSchema = z.object({
   memTotal: z.number(), memAvailable: z.number(), psiSome10: z.nullable(z.number()), psiFull10: z.nullable(z.number()),
   diskFreeHome: z.number(), load1: z.number(), tmuxOk: z.boolean(), wallClock: z.number(), spoolDepth: count(), drops: count(),
-  jobs: z.exactOptional(z.string()),
+  jobs: z.exactOptional(z.string()), tzOffsetMin: z.exactOptional(z.int().check(z.gte(-840), z.lte(840))),
 });
 const HookEventSchema = z.object({
   streamId: z.uuid(), seq: z.int().check(z.gte(1)), at: z.number(),
   path: z.enum(["/cc", "/sl", "/hook/stop", "/hook/failure", "/notify", "/file", "/lane"]),
   node: nodeName(), window: z.nullable(text()), late: z.exactOptional(z.literal(true)), body: z.unknown(),
 });
+
+const PendingTaskSchema = z.object({ type: label(), label: label() });
+const PendingWakeSchema = z.object({ schedule: label(), recurring: z.boolean() });
 
 // The body of a "/lane" hook event: a lane state event the node made from its session's status (fleet clients §7).
 export type LaneStateBody = { event: "needs_input" | "answered"; sessionId: string | null; question?: string };
@@ -491,6 +503,20 @@ export const LaneEventSchema = z.object({
   bg: z.exactOptional(count()), crons: z.exactOptional(count()), question: z.exactOptional(text()), error: z.exactOptional(text()),
   waitingOn: z.exactOptional(text()), until: z.exactOptional(z.number()), reason: z.exactOptional(z.enum(["waiting", "no_status"])),
   since: z.exactOptional(z.number()), stalls: z.exactOptional(count()),
+  tasks: z.exactOptional(z.array(PendingTaskSchema).check(z.maxLength(8))), wakes: z.exactOptional(z.array(PendingWakeSchema).check(z.maxLength(8))),
+});
+const RUN_WAIT = z.discriminatedUnion("on", [
+  z.object({ on: z.literal("background"), tasks: z.array(PendingTaskSchema).check(z.maxLength(8)) }),
+  z.object({ on: z.literal("wakeup"), next: z.nullable(z.number()) }),
+  z.object({ on: z.literal("job"), jobs: z.array(z.object({ id: text(), name: text() })) }),
+  z.object({ on: z.literal("declared"), what: z.nullable(text()) }),
+]);
+// A Run as the fleet serves it (GET /v1/runs: { runs }; the `run` event's body). A client decodes each and drops one it
+// can't read.
+export const RunViewSchema = z.object({
+  lane: text(), node: nodeName(), sessionId: z.exactOptional(text()), phase: z.enum(RUN_PHASES), wait: z.exactOptional(RUN_WAIT),
+  deadline: z.nullable(z.number()), overdue: z.boolean(), outcome: z.exactOptional(z.enum(["done", "blocked", "needs_decision", "no_status"])),
+  line: z.exactOptional(text()), question: z.exactOptional(text()), since: z.number(), source: z.enum(["hook", "session", "job", "status"]),
 });
 
 // ---- messages, agent → fleet
@@ -635,5 +661,6 @@ check<Same<z.output<typeof JoinStringSchema>, JoinString>>(true);
 check<Same<z.output<typeof DeliverySchema>, Delivery>>(true);
 check<Same<z.output<typeof DeliveryTargetSchema>, DeliveryTarget>>(true);
 check<Same<z.output<typeof LaneEventSchema>, LaneEvent>>(true);
+check<Same<z.output<typeof RunViewSchema>, RunView>>(true);
 check<Same<z.output<typeof LaneStateBodySchema>, LaneStateBody>>(true);
 check<Same<(typeof SESSION_STATUSES)[number], SessionStatus>>(true);

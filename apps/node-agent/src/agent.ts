@@ -36,7 +36,7 @@ import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
 import { openAgentDb, rotateStreamId } from "./db/open.ts";
 import type { Deliverer } from "./deliveries/deliverer.ts";
-import { EventLoops } from "./events.ts";
+import { EventLoops, utcOffsetMin } from "./events.ts";
 import { LaneStates } from "./lane-state.ts";
 import { fleetPublicKey, loadNodeKey } from "./identity.ts";
 import type { Logger } from "./log.ts";
@@ -48,7 +48,7 @@ import { createOpsRuntime } from "./ops/runtime.ts";
 import { agentPaths } from "./paths.ts";
 import { RelayFiles } from "./relay/relay-files.ts";
 import { startRelay, type Relay } from "./relay/server.ts";
-import { statusAsk } from "./relay/status-ask.ts";
+import { statusAsk, type JobsOf } from "./relay/status-ask.ts";
 import { Spool } from "./relay/spool.ts";
 import { StreamSender } from "./relay/stream-sender.ts";
 import { cachedFor, windowResolver } from "./relay/window-of.ts";
@@ -145,6 +145,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     onInventory: async s => { ops.deliverer.kick("inventory"); await states.observe(s.lanes); },
     health: async () => ({
       ...(await healthProbe(config.home, { tmuxSocket: config.policy.tmuxSocket })), wallClock: ops.now(), spoolDepth: spool.depth(), drops: spool.drops,
+      tzOffsetMin: utcOffsetMin(),
       ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
     }),
     ...(o.pollMs !== undefined ? { pollMs: o.pollMs } : {}),
@@ -174,12 +175,15 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     if (!send(res, BULK_OPS.has(m.op) ? "bulk" : "control")) log.info(`the answer to a ${isOpName(m.op) ? m.op : "?"} request found no live connection`);
   };
 
+  // The waker ask's job check (W1, status-ask.ts). The job store opens after the relay, so until it does the node can't
+  // tell whether a job will wake a lane, and only the status ask is made; a read that fails can't tell either.
+  let jobsOf: JobsOf = () => null;
   let relay: Relay;
   try {
     relay = await startRelay({
       port: config.relayPort, spool, files, log, onAppended: () => { sender.kick(); ops.deliverer.kick("hook"); }, now: ops.now,
       windowOf: windowResolver({ windowOfPane: p => ops.inventory.windowOfPane(p), sessions, refresh: sessions.fresh }),
-      ask: (body, window) => statusAsk(body, window, config.policy.statusContract),
+      ask: (body, window) => statusAsk(body, window, config.policy.statusContract, lane => jobsOf(lane)),
     });
   } catch (e) {
     watch.stop();
@@ -216,6 +220,10 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     adb.close();
     throw e;
   }
+  jobsOf = lane => {
+    try { return jobs.store.openFor(lane); }
+    catch (e) { log.warn("could not read a lane's jobs; its wait is not asked for a waker", e); return null; }
+  };
   ops.bindJobs({
     notice: async (id, lane, text) => {
       const decided = await Promise.resolve(jobs.deliveries.enqueue(id, lane, text));
