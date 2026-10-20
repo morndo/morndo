@@ -14,6 +14,8 @@
 // - `engines`: the engine layer's CLI on this node (`cli`), a launch command per provider (`launch`, with `{model}`,
 //   `{effort}`, `{account}` and `{lane}` filled from the pick and the op), and the Role a new lane runs on when its start
 //   names neither a role nor an engine (`defaultRole`). Without `engines`, lane.start refuses a role or an engine.
+// Memory (ADR-0031; docs/design/memory/README.md): `memory.skillDirs`, the engines' skill folders memory.sync writes
+// Memory's skills into, at most 8, each absolute or under the node user's home as "~/…".
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { JOB_CLASS } from "@morndo/domain";
@@ -27,6 +29,7 @@ export type EnginesPolicy = { cli?: string; launch: Record<string, Launch>; defa
 export type JobClassPolicy = { limit: number; timeoutSec?: number };
 export type JobGuardPolicy = { load1?: number; memAvailableMiB?: number };
 export type JobsPolicy = { enabled: boolean; classes: Record<string, JobClassPolicy>; guard?: JobGuardPolicy };
+export type MemoryPolicy = { skillDirs: string[] };
 export type Policy = {
   ops: OpName[];
   session: string;
@@ -40,6 +43,7 @@ export type Policy = {
   engines?: EnginesPolicy;
   jobs: JobsPolicy;
   jobsWarning?: string;
+  memory: MemoryPolicy;
 };
 export type AgentConfig = {
   node: string; fleetUrl: string; fleetKey: string; keyPath: string; dbPath: string; relayPort: number; home: string; policy: Policy;
@@ -53,23 +57,26 @@ export const isOpName = (s: unknown): s is OpName => typeof s === "string" && (A
 export const RELAY_PORT = 8787;
 // Every op on (pane.keys too: the hub's terminal view needs it; spec §8 lists turning it off as the owner's mitigation),
 // the tmux session "main", no repositories for worktrees until the owner names them, files under today's rules, lanes
-// started as `claude` from the user's shell, and the manager protected from lane.stop.
+// started as `claude` from the user's shell, the manager protected from lane.stop, and Memory's skills in the two skill
+// folders the engines read (ADR-0031).
 // Shipped jobs: one class, limit 2, and no guard. A policy file that omits `jobs` keeps this. A file that sets
 // `jobs` without `guard` still reads nothing (design §5).
 export const DEFAULT_JOBS: JobsPolicy = { enabled: true, classes: { default: { limit: 2 } } };
 export const DEFAULT_POLICY: Policy = {
   ops: [...ALL_OPS], session: "main", repoRoots: [], lockedPanes: {}, tmuxSocket: null,
   launch: { command: ["claude"], via: "shell" }, protected: ["manager"], statusContract: { mode: "ask", exempt: ["manager"] }, jobs: DEFAULT_JOBS,
+  memory: { skillDirs: ["~/.claude/skills", "~/.agents/skills"] },
 };
 // The defaults as a copy that a parse may change, never DEFAULT_POLICY itself.
 const defaults = (): Policy => ({
   ...DEFAULT_POLICY, ops: [...DEFAULT_POLICY.ops], repoRoots: [], lockedPanes: {},
   launch: { command: [...DEFAULT_POLICY.launch.command], via: DEFAULT_POLICY.launch.via }, protected: [...DEFAULT_POLICY.protected],
   statusContract: { mode: DEFAULT_POLICY.statusContract.mode, exempt: [...DEFAULT_POLICY.statusContract.exempt] },
-  jobs: copyJobs(DEFAULT_JOBS),
+  jobs: copyJobs(DEFAULT_JOBS), memory: { skillDirs: [...DEFAULT_POLICY.memory.skillDirs] },
 });
 
 const CLASS_LIMIT_MAX = 1000;
+const SKILL_DIRS_MAX = 8;
 const TIMEOUT_SEC_MAX = Math.floor(MAX_TIMER_MS / 1000);
 
 export class ConfigError extends Error {
@@ -155,6 +162,23 @@ function parseEngines(v: unknown, where: string): EnginesPolicy {
     engines.defaultRole = o.defaultRole;
   }
   return engines;
+}
+
+// A skill directory: absolute, or "~/" and a path under the node user's home (memory-ops.ts expands it). No control
+// character and no ".." segment, so an entry names the directory it reads as.
+const skillDirOk = (p: unknown): p is string =>
+  typeof p === "string" && (isAbsolute(p) || (p.startsWith("~/") && p.length > 2)) && /^[^\p{Cc}]+$/u.test(p) && !p.split("/").includes("..");
+
+function parseMemory(v: unknown, where: string): MemoryPolicy {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: memory must be an object { skillDirs }`);
+  const o = v as Obj;
+  const unknown = Object.keys(o).filter(k => k !== "skillDirs");
+  if (unknown.length) throw new ConfigError(`${where}: memory has an unknown field ${unknown.join(", ")} (known: skillDirs)`);
+  const dirs = o.skillDirs ?? DEFAULT_POLICY.memory.skillDirs;
+  if (!Array.isArray(dirs) || dirs.length > SKILL_DIRS_MAX || !dirs.every(skillDirOk)) {
+    throw new ConfigError(`${where}: memory.skillDirs must be at most ${SKILL_DIRS_MAX} directories, each absolute or starting with "~/", without a ".." segment or a control character`);
+  }
+  return { skillDirs: [...new Set(dirs)] };
 }
 
 function copyJobs(jobs: JobsPolicy): JobsPolicy {
@@ -261,7 +285,7 @@ export function jobTimeouts(jobs: JobsPolicy): Record<string, number> {
 }
 
 export function parsePolicy(value: Obj, where: string): Policy {
-  const known = ["ops", "session", "repoRoots", "fileRoots", "lockedPanes", "tmuxSocket", "launch", "protected", "statusContract", "engines", "jobs"];
+  const known = ["ops", "session", "repoRoots", "fileRoots", "lockedPanes", "tmuxSocket", "launch", "protected", "statusContract", "engines", "jobs", "memory"];
   const unknown = Object.keys(value).filter(k => !known.includes(k));
   if (unknown.length) throw new ConfigError(`${where}: unknown field ${unknown.join(", ")} (known: ${known.join(", ")})`);
   const policy: Policy = defaults();
@@ -311,6 +335,7 @@ export function parsePolicy(value: Obj, where: string): Policy {
       policy.jobsWarning = e.message;
     }
   }
+  if (value.memory !== undefined) policy.memory = parseMemory(value.memory, where);
   return policy;
 }
 

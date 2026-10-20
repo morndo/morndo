@@ -109,8 +109,17 @@ export type MemoryRefusal = { problem: MemoryProblem };
 export const MEMORY_LIMITS = { title: 120, summary: 400, body: 20_000, ref: 200, reason: 300 } as const;
 
 const refuse = (problem: MemoryProblem): Result<never, MemoryRefusal> => err({ problem });
-const CONTROL = /[\x00-\x08\x0b-\x1f\x7f]/;
-const CONTROL_MULTILINE = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
+// C0 control characters and DEL other than the ones `allowed` (a function, not a regular expression with control
+// characters: the lint rule): a tab and a line feed in a single-line field, and a carriage return too in a body.
+const controlIn = (s: string, allowed: string): boolean => {
+  for (const ch of s) {
+    const c = ch.charCodeAt(0);
+    if ((c < 0x20 || c === 0x7f) && !allowed.includes(ch)) return true;
+  }
+  return false;
+};
+const CONTROL = { test: (s: string) => controlIn(s, "\t\n") };
+const CONTROL_MULTILINE = { test: (s: string) => controlIn(s, "\t\n\r") };
 const NODE_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 function provenanceOf(actor: MemoryActor, d: NoteDraft): Result<Provenance, MemoryRefusal> {

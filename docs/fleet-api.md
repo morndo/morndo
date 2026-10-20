@@ -68,7 +68,7 @@ GET /v2/caps
 
 - **The header.** Every request names its client in `x-morndo-client`: 1 to 16 lower-case letters `a`–`z`, such as `hub`, `lanes`, `kira` or `fleet`. Anything else (a missing header, upper case, digits, more than 16 letters) is recorded as `unknown`, and the request is served all the same.
 - **Namespaces.** A client namespaces its delivery ids and operation keys with the same name and a colon, such as `kira:tap:123`. The fleet never checks that a name is honest (§1).
-- **The audit.** For every side effect, the fleet's audit records the client that asked, its target and its outcome. That covers every delivery, every keyed op (`pane.send`, `file.put`, `lane.start`, `lane.stop`, `worktree.add`) and every `pane.keys`. It never records the text typed, the keys pressed or a file's bytes.
+- **The audit.** For every side effect, the fleet's audit records the client that asked, its target and its outcome. That covers every delivery, every keyed op (`pane.send`, `file.put`, `lane.start`, `lane.stop`, `worktree.add`, `memory.sync`) and every `pane.keys`. It never records the text typed, the keys pressed or a file's bytes.
 
 ```example client-name-unknown
 GET /v1/lanes/w1
@@ -766,7 +766,7 @@ A `stale` event, as `/v1/lane-events` and `/v1/events` carry it:
 
 **The body:** `{ node | workerId | lane, op, args, key?, timeoutMs? }`. Exactly one target is named.
 - **Lane targets.** For a `lane`, the fleet gives the pane ops (`pane.frame`, `pane.keys`, `pane.send`) the lane's worker id. `pane.send` and `pane.keys` also get the expectation `{ server, window: lane }`, unless `args` has one. A pane renamed or reused meanwhile then refuses with `no_pane` instead of taking the keys.
-- **Keys.** A keyed op (`pane.send`, `file.put`, `lane.start`, `lane.stop`, `worktree.add`) needs a `key`: namespaced, at most 256 characters, the same on every retry. Any other op refuses a key.
+- **Keys.** A keyed op (`pane.send`, `file.put`, `lane.start`, `lane.stop`, `worktree.add`, `memory.sync`) needs a `key`: namespaced, at most 256 characters, the same on every retry. Any other op refuses a key.
 - **Retries.** A keyed op takes effect at most once per key within 7 days. A repeat answers the stored outcome, or `uncertain` while the first attempt's outcome is unknown. `op.status` says which.
 - **Timeouts.** `timeoutMs` runs from 1 to 120000, 15000 by default. A side effect that hasn't started by then answers `timeout`, not executed.
 
@@ -795,6 +795,7 @@ A `stale` event, as `/v1/lane-events` and `/v1/events` carry it:
 | `lane.stop` | `{ name, mode?: "exit" \| "kill" }` | `{ ok: true }` (below) | yes |
 | `worktree.list` | `{ repo }` | `{ worktrees: { path, branch \| null }[] }` | none |
 | `worktree.add` | `{ repo, name, base }` | `{ path }`: beside the repository, `<repo>-worktrees/<name>` | yes |
+| `memory.sync` | `{ version, part, parts, files: { name, content }[] }`: Memory's skills (ADR-0031), each name `morndo-mem-…` | `{ committed, written, removed, skillDirs, conflicts }`: `committed` once every part of the version is on the node, which then holds exactly these skills in its skill directories (the node agent's README) | yes |
 | `lane.deliver`, `delivery.cancel` | | refused here with `bad_args`: use `/v1/deliveries` (§6), which records the delivery for every client | |
 
 **`lane.start`** runs the node's launcher, `launch` in its `policy.json`; the default is `{ "command": ["claude"], "via": "shell" }`.
