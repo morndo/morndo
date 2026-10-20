@@ -65,9 +65,14 @@ for channel in latest stable; do
     printf 'null' > "$prev"
   fi
   if [ "$MODE" = resign ] || [ "$channel" = latest ]; then
+    # Entries that were already published are carried over whole (version, URL, size, digest), not by version.
     jq -e --slurpfile p "$prev" --arg v "${VERSION:-}" --arg mode "$MODE" '
       ($p[0].releases // []) as $old
-      | (if $mode == "publish" then (([.releases[].version] | sort) == ((($old | map(.version)) + [$v]) | sort)) else (.releases == $old) end)
+      | (if $mode == "publish"
+          then (($old | map(.version) | index($v)) == null)
+            and ([.releases[] | select(.version == $v)] | length == 1)
+            and ((.releases | map(select(.version != $v)) | sort_by(.version)) == ($old | sort_by(.version)))
+          else (.releases == $old) end)
         and (.withdrawn == ($p[0].withdrawn // []))' "$new" > /dev/null || fail "$channel.json changes more than the release list should"
   fi
 done

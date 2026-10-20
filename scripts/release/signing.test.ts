@@ -183,6 +183,28 @@ describe("check-signing-feed.sh", () => {
     expect(done.stderr).toMatch(message);
   });
 
+  it.each([
+    ["digest", (text: string) => text.replace(sha256(manifestBytes), "ef".repeat(32))],
+    ["URL", (text: string) => text.replace("/v0.1.0/manifest.json", "/v0.1.0/other.json")],
+    ["size", (text: string) => text.replace(`"manifestSize": ${manifestBytes.length}`, `"manifestSize": ${manifestBytes.length + 1}`)],
+  ])("refuses a carried-over entry whose manifest %s was changed", (_what, tamper) => {
+    const w = world({ branch: true });
+    const changed = tamper(w.latest);
+    expect(changed).not.toBe(w.latest);
+    put(w, publishRelease(changed, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), w.stable);
+    const done = check(w, { MODE: "publish", VERSION });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/release list/);
+  });
+
+  it("refuses a re-sign that changes an entry", () => {
+    const w = world({ branch: true });
+    put(w, resignFeed(w.latest.replace(sha256(manifestBytes), "ef".repeat(32)), NOW), resignFeed(w.stable, NOW));
+    const done = check(w, { MODE: "resign" });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/release list/);
+  });
+
   it("refuses a first feed that does not start at 1, and a re-sign with no branch", () => {
     const first = world({ branch: false });
     put(first, publishRelease(first.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), first.stable);
