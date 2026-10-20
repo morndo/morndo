@@ -129,6 +129,25 @@ describe("page commands", () => {
     expect(mem.store.policy.roles).toEqual(before.roles);
   });
 
+  it("a same-order priority save with auto unchanged still writes the pending chains", async () => {
+    const mem = memory();
+    mem.catalog.rows = [preset()];
+    mem.vault.put("ref-a", "0123456789ab");
+    const connections = new ConnectionsService(mem.deps);
+    const routing = new RoutingService(mem.deps);
+    expect((await connections.addKey({ name: "key-a", vendor: "vendor-a", runtime: "runtime-a", ref: "ref-a", billing: "metered", budget: { kind: "capped", amount: 10 }, expiry: null }, who)).ok).toBe(true);
+    expect(routing.setOverride("implement", "follow", null, "c1").ok).toBe(true);
+    expect(routing.setPriority("keys-only", ["key-a"], "c1").ok).toBe(true);
+    expect(routing.setPicks("implement", ["key-a:m@high"], null, "c1").ok).toBe(true);
+    const writes = mem.engines.writes.length;
+    const bound = bindCommands(mem.deps);
+    const saved = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: false }, "hub");
+    expect(saved.ok).toBe(true);
+    expect(mem.engines.writes.length).toBeGreaterThan(writes);
+    expect(mem.store.policy.roles.find(item => item.role === "implement")?.written).toEqual(["key-a:m@high"]);
+    expect(mem.store.policy.events.at(-1)?.type).toBe("PriorityChanged");
+  });
+
   it("checks the saved order and picks together, and names risk picks that no longer fit", async () => {
     const mem = memory();
     mem.catalog.rows = [preset()];

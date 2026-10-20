@@ -152,14 +152,18 @@ export function sameOrder(current: Priority, mode: Mode, order: readonly string[
   return current.mode === mode && current.order.length === order.length && current.order.every((name, i) => name === order[i]);
 }
 
+// True when a Priority command carries an Auto value that differs from the policy's.
+export function switchesAuto(policy: Policy, priority: Priority): boolean {
+  return priority.auto !== undefined && priority.auto !== (policy.priority.auto ?? false);
+}
+
 export function setPriority(policy: Policy, priority: Priority, listed: readonly Listed[], command: string, at: number, authority: AutoAuthority = "session"): Result<Policy, { problem: RouteProblem; role?: string; name?: string }> {
   const who = principal(command);
   if (!who.ok) return who;
   const order = checkOrder(priority.order, listed.map(l => l.name));
   if (!order.ok) return order;
-  const currentAuto = policy.priority.auto ?? false;
-  const auto = priority.auto ?? currentAuto;
-  const switching = priority.auto !== undefined && priority.auto !== currentAuto;
+  const auto = priority.auto ?? (policy.priority.auto ?? false);
+  const switching = switchesAuto(policy, priority);
   // R16: turning Auto on or off changes no derived chain and writes nothing, so an auto-only change is not a Priority change.
   if (switching && sameOrder(policy.priority, priority.mode, order.value)) {
     const allowed = allow(changeEffect({ kind: "global-auto", on: auto }), authority, command);
