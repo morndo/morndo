@@ -3043,7 +3043,7 @@ export const CONTROLS: Control[] = [
     find: "if (contract.mode !== \"ask\" || window === null || contract.exempt.includes(window)) return null;",
     replace: "if (contract.mode !== \"ask\" || window === null) return null;",
     run: ["apps/node-agent/test/status-ask.test.ts"], expect: "never the exempt orchestrator" },
-    run: ["apps/fleet/test/delivery-mirror.test.ts"], expect: "draft_stashed once" },  // ---- ADR-0032 in the hub: the board's own moves (board-projector.ts), the runs on the board frame, `lanes start --task`.
+  // ---- ADR-0032 in the hub: the board's own moves (board-projector.ts), the runs on the board frame, `lanes start --task`.
   { id: "b10-d6-projector", task: "ADR-0032", file: "packages/domain/src/board.ts",
     find: "|| run.since <= task.updatedAt) return null;", replace: ") return null;",
     run: ["apps/hub/test/board-projector.test.ts"], expect: "D6: a move a person made after the run began is not undone" },
