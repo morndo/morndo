@@ -65,18 +65,20 @@ export function turnStopper(io: Io, graceMs = STOP_GRACE_MS): TurnStopper {
   let delivered = false;
   let prevented = false;
   let hangup = false;
+  let hangupCut = false;                                 // the SIGHUP came while the turn was still the bin's to end
+  let ended = false;
   const stop = (): void => {
     stopping = true;
     if (pid !== null && reap.stop([pid, ...descendants(pid)])) delivered = true;
   };
-  const onHangup = (): void => { hangup = true; stop(); };
+  const onHangup = (): void => { hangup = true; if (!ended) hangupCut = true; stop(); };
   io.gone?.addEventListener("abort", stop, { once: true });
   process.on("SIGHUP", onHangup);
   return {
     proceed() { if (stopping) prevented = true; return !stopping; },
     started(started) { pid = started; if (stopping) stop(); },
-    async settle() { pid = null; await reap.settle(); },
-    cut: () => delivered || prevented,
+    async settle() { pid = null; await reap.settle(); ended = true; },
+    cut: () => delivered || prevented || hangupCut,
     hungUp: () => hangup,
     done() {
       io.gone?.removeEventListener("abort", stop);

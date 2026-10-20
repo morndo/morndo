@@ -16,6 +16,8 @@ const MAIN = join(import.meta.dirname, "../src/main.ts");
 const catalog = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 const fixture = join(import.meta.dirname, "fixtures/slow-runtime.mjs");
 const wrapper = join(import.meta.dirname, "fixtures/wrapper-runtime.mjs");
+const ptyRun = join(import.meta.dirname, "fixtures/pty-run.py");
+const hasPty = spawnSync("python3", ["-c", "import pty"]).status === 0;
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
@@ -116,6 +118,17 @@ describe("morndo-keys run when its terminal goes away", () => {
       if (end.code === 0 || end.code === null) expect(outcome, `round ${round}: ${JSON.stringify(end)}`).toBe("done");
       else expect({ code: end.code, signal: end.signal, outcome }, `round ${round}: ${end.stderr}`).toEqual({ code: 129, signal: null, outcome: "failed" });
     }
+  }, 60_000);
+});
+
+describe("morndo-keys run in a terminal that closes", () => {
+  it.skipIf(!hasPty)("ends 129 without an error stack, with the agent gone and the lease closed (writes to the dead terminal fail with EIO)", async () => {
+    const t = ready(fixture);
+    const ran = spawnSync("python3", [ptyRun, process.execPath, "--no-warnings", ...t.args([])], { env: t.env, encoding: "utf8", timeout: 40_000 });
+    expect({ out: ran.stdout.trim(), err: ran.stderr }).toEqual({ out: "129", err: "" });
+    expect(alive(pidIn(t.dir, "pid"))).toBe(false);
+    expect(existsSync(join(t.dir, "finished"))).toBe(false);
+    expect(t.outcomes()).toEqual(["failed"]);
   }, 60_000);
 });
 

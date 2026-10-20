@@ -38,6 +38,18 @@ describe("exitAfterOutput", () => {
   });
 });
 
+describe("quietBrokenPipe: a gone terminal and a full disk", () => {
+  it("treats EIO, which a closed terminal gives, like a closed pipe: the bin ends with its own code and no error text", async () => {
+    const r = await run("eio");
+    expect({ code: r.code, stderr: r.stderr }).toEqual({ code: 5, stderr: "" });
+  });
+  it("keeps ENOSPC loud", async () => {
+    const r = await run("enospc");
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("ENOSPC");
+  });
+});
+
 describe("quietBrokenPipe", () => {
   it("lets a bin end with its own code and no error text when the reader closes the pipe early", async () => {
     const r = await run("big", true);
