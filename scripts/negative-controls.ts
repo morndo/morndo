@@ -2939,6 +2939,16 @@ export const CONTROLS: Control[] = [
     find: "env: childEnv(this.#parent, loginEnv(\"codex\", runHome)),",
     replace: "env: { ...this.#parent, ...loginEnv(\"codex\", runHome) },",
     run: ["apps/connections/test/pool-cli.test.ts"], expect: "KEY" },
+  // ---- Memory, the node's memory.sync (ADR-0031; docs/design/memory/README.md): each guard removed once.
+  { id: "m-node-marker", task: "M-node", file: "apps/node-agent/src/ops/memory-ops.ts",
+    find: "if (!look(folder)?.isDirectory() || !ours(folder)) continue;", replace: "if (!look(folder)?.isDirectory()) continue;",
+    run: ["apps/node-agent/test/memory-sync.test.ts"], expect: "leaves a morndo-mem-* folder without the marker" },
+  { id: "m-node-symlink", task: "M-node", file: "apps/node-agent/src/ops/memory-ops.ts",
+    find: "const st = look(folder);", replace: "const st = statSync(folder, { throwIfNoEntry: false }) ?? null;",
+    run: ["apps/node-agent/test/memory-sync.test.ts"], expect: "refuses a symbolic link where a skill folder would be" },
+  { id: "m-node-all-parts", task: "M-node", file: "apps/node-agent/src/ops/memory-ops.ts",
+    find: "if (staged.size < a.parts) return", replace: "if (staged.size < 1) return",
+    run: ["apps/node-agent/test/memory-sync.test.ts"], expect: "only when the second arrives" },
 ];
 
 // ---- the runner

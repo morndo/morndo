@@ -4,6 +4,7 @@
 // - pane.capture and pane.keys by name use the policy's tmux server;
 // - lane.start and lane.stop use the policy's launcher and protected names; they type /exit through the executor, and
 //   queue a first prompt with the deliverer.
+// Memory (ADR-0031): memory.sync writes into the node's state directory and the policy's memory.skillDirs.
 // The deliverer and the executor are made from this table, so it reaches them late (runtime.ts), by the time an op runs.
 import { join } from "node:path";
 import type Database from "better-sqlite3";
@@ -17,6 +18,7 @@ import { ok, read, type OpTable, type Reply, type Request } from "./executor.ts"
 import { fileOps } from "./file-ops.ts";
 import type { Inventory } from "./inventory.ts";
 import { laneOps, type LaneWaits } from "./lane-ops.ts";
+import { memoryOps, skillDirsOf } from "./memory-ops.ts";
 import { nodeOpener, relayRef } from "./node-files.ts";
 import { paneOps, type GuardInput } from "./pane-ops.ts";
 import { transcriptOps } from "./transcript-ops.ts";
@@ -81,5 +83,6 @@ export function buildOps(d: OpsDeps): OpTable {
     }),
     ...worktreeOps({ repoRoots: policy.repoRoots, home: config.home, stateDir: paths.stateDir }),
     ...deliveryOps({ deliverer: d.deliverer, panes: d.panes, policy }),
+    ...memoryOps({ root: paths.memoryDir, skillDirs: skillDirsOf(policy.memory.skillDirs, config.home) }),
   };
 }

@@ -75,7 +75,8 @@ The hub renders `renderBundle(all notes, now)`.
 
 ## The node's `memory.sync`
 
-The node keeps Memory's skills under `~/.local/share/morndo-node/memory/`.
+The node keeps Memory's skills under `~/.local/state/morndo-node/memory/`, beside its other state (`agent.db`, the upload
+inbox) and under the same deny root.
 
 1. Stage each part under `staging/<version>/`.
 2. When every part of a version is present, write each skill to the managed folder `skills/<name>/SKILL.md`.
