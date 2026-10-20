@@ -185,9 +185,10 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       if (!mayMove(actor, task.status, action.to)) return refuse("bad_transition", undefined, task.status);
       if (action.to === "doing" && !task.assignee) return refuse("needs_assignee");
       // B4: blocked says why. B9: the manager's done says what was checked; the principal's may say, and need not.
+      // B10: the board's own move keeps the reason it read on every edge (D1: the status line; D3: GONE_REASON).
       let reason: string | null = null;
       const given = (action.reason ?? "").trim() !== "";
-      if (action.to === "blocked" || (action.to === "done" && (actor.kind === "manager" || given))) {
+      if (action.to === "blocked" || (action.to === "done" && (actor.kind === "manager" || given)) || (actor.kind === "board" && given)) {
         const r = line(action.reason ?? "", REASON_MAX);
         if (!r.ok) return r.error.problem === "empty" ? refuse("reason_needed") : r;
         reason = r.value;

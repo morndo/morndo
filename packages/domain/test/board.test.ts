@@ -255,6 +255,7 @@ describe("the board's own moves (B10, D1 to D6)", () => {
     }
     const moved = value(apply(t, { action: "move", to: "review", reason: "STATUS: DONE" }, boardActor()));
     expect(moved.event.actor).toEqual({ kind: "board", rule: "D1", lane: "builder" });
+    expect(moved.event.change).toMatchObject({ reason: "STATUS: DONE" });           // B10: the record keeps what it read
     expect(boardChanged(moved.event).actor).toEqual({ kind: "board", name: "builder", endpointId: null, token: null, rule: "D1" });
   });
   it("the console runs the board for the principal: it assigns, and its record names it", () => {

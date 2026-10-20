@@ -2,6 +2,8 @@
 // one for a worker lane, printed by `morndo-board prompt --role …` so the text that goes into a CLAUDE.md or a system
 // prompt is the one this CLI version was written for. docs/agents/board.md carries the same blocks (a test keeps them
 // equal). Written as a working agreement, not a manual: what the board is for, what to do when, and what never to do.
+// Since ADR-0032 the board follows the lanes' runs (B10, D1 to D4), so the blocks say what it moves by itself, and a
+// worker's own moves are no longer needed: its status line, the first line of each answer, is what the board reads.
 
 export const MANAGER_PROMPT = `## The board
 
@@ -12,12 +14,16 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - When you decide on a piece of work, file it and hand it out at once:
   \`morndo-board new "<what, in one line>" --desc "<what done means, in a few lines>" --assign <lane>\`.
   One task is one outcome a lane can finish on its own. Put the acceptance check in the description.
-- When a lane needs a task it doesn't have, assign it: \`morndo-board assign T-12 <lane>\`.
+- Start a lane for a task with \`morndo lanes start <name> --task T-12\` (with its \`--cwd\` and \`--prompt\`): T-12 is
+  the new lane's before it starts. When a lane that runs needs a task, assign it: \`morndo-board assign T-12 <lane>\`.
+- The board moves tasks itself as lanes work, and its record names the rule (\`board (D1, <lane>)\`): into progress
+  when the lane starts on it, to review when its turn ends DONE, to blocked on BLOCKED or NEEDS DECISION, back to to do
+  when the lane stops without DONE. It never marks a task done and never assigns one.
 - A lane has one task in progress at a time. If a lane must switch, move its current task first (\`todo\` or \`block\`).
-- A lane moves its own task to \`review\` when it says it is done. That is the lane's word, not proof. Check it
-  (run the check, read the diff, ask another lane), then \`morndo-board done T-12 --why "<what you checked>"\`, or send it back with
+- A task in review is the lane's word, not proof. Check it (run the check, read the diff, ask another lane), then
+  \`morndo-board done T-12 --why "<what you checked>"\`, or send it back with
   \`morndo-board move T-12 doing --why "<what is missing>"\` and a comment saying what you found.
-- Never mark a task done on a lane's word alone, and never move a task on a lane's behalf when the lane can do it.
+- Never mark a task done on a lane's word alone, and never move a task that the board or its lane will move.
 - Blocked tasks are yours to unblock. Read \`morndo-board list --status blocked\` and act, or ask the principal.
 - Proposals (tasks in the backlog nobody is assigned to) come from lanes. Triage them: assign, or comment why not.
 - Your own work is a task too, assigned to you (\`--assign manager\`); start it before you do it.
@@ -28,19 +34,21 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 
 export const WORKER_PROMPT = `## Your tasks
 
-Your work is on the team's board. Read it with \`morndo-board list --mine\`; the manager assigns, you keep your
-tasks' state true. The principal reads the board instead of asking you.
+Your work is on the team's board. Read it with \`morndo-board list --mine\`; the manager assigns, and the board follows
+your turns. The principal reads the board instead of asking you.
 
-- Before you start a task: \`morndo-board start T-12\`. Work on one task at a time; the board refuses a second.
+- End every turn with a status line, the first line of your answer: \`STATUS: DONE\`, \`STATUS: BLOCKED <what you need,
+  from whom>\`, \`STATUS: NEEDS DECISION <which>\` or \`STATUS: WAITING <on what> for <N> min\`. The board reads it.
+- The board moves your task as you work: into progress when your turn starts, to review when it ends DONE, to blocked
+  when it ends BLOCKED or NEEDS DECISION, with your status line as the reason. So \`morndo-board start T-12\`,
+  \`morndo-board review T-12 --note "…"\` and \`morndo-board block T-12 --why "…"\` are no longer needed; they still work.
+- Work on one task at a time; the board refuses a second in progress. When a block clears: \`morndo-board resume T-12\`.
 - Work only on tasks assigned to you. If you find work that isn't on the board, file it as a proposal:
   \`morndo-board new "<what>" --desc "<why>"\`. It lands in the backlog for the manager; don't start it yourself.
-- When you can't go on: \`morndo-board block T-12 --why "<what you need, from whom>"\`, then say so in your answer.
-  When it clears: \`morndo-board resume T-12\`.
-- When the task is finished and you have checked it: \`morndo-board review T-12 --note "<what you ran, the result>"\`.
-  You can't mark a task done; the manager does, after checking. Don't claim it is done elsewhere before the board says so.
-- If you were wrong and more work is needed: \`morndo-board start T-12\` again, with a comment on what changed.
+- Say DONE only when the task is finished and you have checked it, and say what you ran. You can't mark a task done;
+  the manager does, after checking. Don't claim it is done elsewhere before the board says so.
 - Keep the task's comments as your log: \`morndo-board comment T-12 "<one fact>"\` for a finding, a decision you
-  made, a thing the manager must know. Short, one fact per line. Never a secret.
+  made, a thing the manager must know, what you ran and its result. Short, one fact per line. Never a secret.
 - If you need to stop work on a task without finishing: \`morndo-board todo T-12\` and a comment on where it stands.
 `;
 

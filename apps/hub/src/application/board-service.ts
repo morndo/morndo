@@ -3,12 +3,19 @@
 // written with its event in one transaction, recorded in the audit log (B6), and pushed whole to every listener
 // (the live feed), as the decisions are. The board grants nothing (B8): nothing here touches an Escalation, a Mandate
 // or a Decision.
-import { DONE_SHOWN_MS, applyAction, boardChanged, boardOrder, createTask, mayCommand, type AccessPolicy, type BoardActor, type BoardRefusal, type NewTask, type Task, type TaskAction, type TaskEvent, type TaskStatus } from "@morndo/domain";
-import { redactKeyMaterial } from "@morndo/protocol";
+// ADR-0032: the board's own moves (B10, D1 to D4) come through `follow`, as actor { kind: "board", rule, lane }, and the
+// console's (`morndo lanes start --task`) as { kind: "console" }: the same transaction, record and push as any change.
+// The view carries each lane's Run as the Fleet derived it (the projector's, board-projector.ts), and a change of runs
+// is pushed too, at most about once a second.
+import { DONE_SHOWN_MS, applyAction, boardChanged, boardOrder, createTask, mayCommand, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
+import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
 
-export type BoardView = { tasks: Task[]; lanes: string[]; at: number };
+// `runs` (ADR-0032 §6, BoardFrameSchema.runs): each lane's latest Run; empty without a fleet.
+export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[] };
+// A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
+export const RUNS_EVERY_MS = 1000;
 export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus };
 
 export class BoardService {
@@ -16,26 +23,50 @@ export class BoardService {
   #now: () => number;
   #policy: () => AccessPolicy;
   #lanes: () => string[];
+  #runs: () => RunView[];
+  #runsEveryMs: number;
+  #runsTimer: NodeJS.Timeout | null = null;
+  #toldAt = -Infinity;                                   // performance.now() of the last push, for the runs' throttle
   #listeners = new Set<(b: BoardView) => void>();
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[] }) {
+  // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `runsEveryMs`: the runs' throttle.
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; runsEveryMs?: number }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
+    this.#runs = p.runs ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
-  #tell() { const b = this.view(); for (const l of this.#listeners) l(b); }
+  // Every push carries the runs as they are then, so one due for the runs alone is dropped.
+  #tell() {
+    if (this.#runsTimer) { clearTimeout(this.#runsTimer); this.#runsTimer = null; }
+    this.#toldAt = performance.now();
+    const b = this.view();
+    for (const l of this.#listeners) l(b);
+  }
+  // The runs changed (the projector says so on every run it takes in): pushed now if the last push is a second old,
+  // else once, when it is (a trailing push, so the last change is never left unsaid). Monotonic time: a clock that
+  // jumps never holds a push back.
+  runsChanged() {
+    if (this.#runsTimer) return;
+    const wait = this.#toldAt + this.#runsEveryMs - performance.now();
+    if (wait <= 0) { this.#tell(); return; }
+    this.#runsTimer = setTimeout(() => { this.#runsTimer = null; this.#tell(); }, wait);
+    this.#runsTimer.unref?.();
+  }
+  stop() { if (this.#runsTimer) clearTimeout(this.#runsTimer); this.#runsTimer = null; }
 
   // The open tasks and Done for a week, read as such: never the whole table of done tasks.
   view(): BoardView {
     const now = this.#now();
-    return { tasks: boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now), lanes: [...new Set(this.#lanes())].sort(), at: now };
+    return { tasks: boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now), lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs() };
   }
   task(key: string): { task: Task; events: TaskEvent[] } | null {
     const task = this.#store.task(key);
     return task ? { task, events: this.#store.taskEvents(key) } : null;
   }
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }
+  openTasksOf(lane: string): Task[] { return this.#store.openTasksOf(lane); }
 
   // The principal's own changes are Commands (AC7): past the step-up window they are refused until he verifies again.
   principal(a: Authenticated): BoardActor | { problem: "step_up" } {
@@ -58,7 +89,9 @@ export class BoardService {
     return { ok: true, ...r.value };
   }
 
-  act(key: string, action: TaskAction, actor: BoardActor): BoardResult {
+  // `actor`: an agents' door actor, the console, or the board itself (follow, below); the domain judges each (B2 to B5,
+  // B10).
+  act(key: string, action: TaskAction, actor: TaskActor): BoardResult {
     const r = this.#store.transaction(() => {
       const task = this.#store.task(key);
       if (!task) return null;
@@ -78,6 +111,14 @@ export class BoardService {
     if (!r.ok) return { ok: false, ...r.error };
     this.#tell();
     return { ok: true, ...r.value };
+  }
+
+  // B10: the board's own move of `key`, following `lane`'s Run (derivedMove's answer: D1 to D4), as that rule. `rev`: the
+  // task's revision the move was judged on, so a task changed meanwhile is refused (`changed`), never moved on a stale
+  // reading (B6).
+  follow(key: string, move: { to: TaskStatus; reason: string | null; rule: BoardRule }, lane: string, rev: number): BoardResult {
+    const action: TaskAction = { action: "move", to: move.to, ...(move.reason === null ? {} : { reason: move.reason }), ifRev: rev };
+    return this.act(key, action, { kind: "board", rule: move.rule, lane });
   }
 
   #write(task: Task, event: TaskEvent) {
