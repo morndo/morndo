@@ -287,13 +287,15 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
   const reap = reaper();
   let cutShort = false;
   const onSignal = (signal: NodeJS.Signals): void => {
-    stopped = signal === "SIGINT" ? 130 : 143;
+    stopped = signal === "SIGINT" ? 130 : signal === "SIGHUP" ? 129 : 143;
     if (childPid !== null && reap.stop([-childPid])) cutShort = true;
   };
   const term = (): void => onSignal("SIGTERM");
   const int = (): void => onSignal("SIGINT");
+  const hup = (): void => onSignal("SIGHUP");           // the terminal went away: the turn has a group of its own and would go on
   process.on("SIGTERM", term);
   process.on("SIGINT", int);
+  process.on("SIGHUP", hup);
   // A reader that is gone (reader-gone.ts) stops the turn as a SIGTERM would: no account's budget is spent on unread output.
   io.gone?.addEventListener("abort", term, { once: true });
   if (io.gone?.aborted) term();
@@ -431,6 +433,7 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
   } finally {
     process.off("SIGTERM", term);
     process.off("SIGINT", int);
+    process.off("SIGHUP", hup);
     io.gone?.removeEventListener("abort", term);
   }
 }

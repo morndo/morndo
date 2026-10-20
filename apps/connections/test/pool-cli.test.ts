@@ -205,6 +205,26 @@ describe("morndo-keys pool exec", () => {
     }
   }, 60_000);
 
+  it("stops the turn on SIGHUP, as run does: 129, the agent gone, the lease failed and the seat free", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "stream" }, defaultMember: "codex-a" });
+    const bin = spawn(process.execPath, ["--no-warnings", MAIN, ...turn()], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+    bin.stdout.resume();
+    bin.stderr.resume();
+    const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => bin.once("close", (code, signal) => resolve({ code, signal })));
+    await until(() => existsSync(join(t.home("codex-a"), "pid")));
+    const started = Date.now();
+    bin.kill("SIGHUP");
+    expect(await closed).toEqual({ code: 129, signal: null });
+    expect(Date.now() - started).toBeLessThan(9_000);                                    // the fake turn is 15 s
+    expect(() => process.kill(Number(readFileSync(join(t.home("codex-a"), "pid"), "utf8")), 0)).toThrow();
+    expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
+    const closedLeases = (await t.cli(["log", "codex-a"])).stdout.split("\n").filter(l => l.includes('"LeaseClosed"')).map(l => (JSON.parse(l) as { outcome: string }).outcome);
+    expect(closedLeases).toEqual(["failed"]);
+    t.setMode("codex-a", "ok");
+    const next = await t.cli(turn());                                                    // the claim was ended: the seat is free
+    expect([next.code, next.stderr]).toEqual([0, ""]);
+  }, 40_000);
+
   it("does not start the agent when the reader goes after the seat is won", async () => {
     const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow-status" }, defaultMember: "codex-a" });
     const marker = join(t.home("codex-a"), "status-started");
