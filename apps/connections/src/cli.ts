@@ -211,6 +211,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   let outRedactor = streamRedactor([""]);
   let errRedactor = streamRedactor([""]);
   const stopper = turnStopper(io);
+  let signalled: number | null = null;
   try {
     const secret = connection.kind === "api-key" ? await home.open(connection.ref) : "";
     outRedactor = streamRedactor([secret]);
@@ -222,6 +223,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
       onStart: (pid: number) => { stopper.started(pid); },
       proceed: () => stopper.proceed(),
+      detached: true,
     };
     const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
@@ -240,6 +242,8 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     io.stderr(errRedactor.push(failure));
     status = 1;
   } finally {
+    signalled = stopper.signalled();
+    if (stopper.cut() && status === 0) status = 1;           // a launcher may exit 0 on SIGTERM: a turn cut short is not done
     stopper.done();
     io.stdout(outRedactor.flush());
     io.stderr(errRedactor.flush());
@@ -254,6 +258,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     } finally { if (released) again.close(); }
   }
   if (refusal !== null) return refusal;
+  if (signalled !== null) return signalled;                // told to stop by SIGINT or SIGTERM, as pool exec is
   // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
   // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
   // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
