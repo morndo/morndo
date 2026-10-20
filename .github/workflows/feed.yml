@@ -39,32 +39,50 @@ jobs:
           node-version-file: package.json
           cache: npm
       - run: npm ci
-      - id: resign
-        name: Verify the live feed, then re-sign
+      - id: prepare
+        name: Verify the live feed, then prepare the next one
         env:
           GH_TOKEN: ${{ github.token }}
-          FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
         run: |
           set -euo pipefail
           now=$(node -e "process.stdout.write(String(Date.now()))")
           mkdir -p site
           if [ ! -s trust/feed_allowed_signers ]; then
             echo "skipping re-sign: trust/feed_allowed_signers is not in the tree yet" >&2
-            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "status=absent" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          status=$(node scripts/release/main.ts feed-resign-prepare \
+            --repository "$GITHUB_REPOSITORY" --dir site --now "$now" \
+            --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP")
+          if [ "$status" = absent ]; then
+            echo "skipping re-sign: branch feed has no feed yet" >&2
+          fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+      # The only step that holds the feed key; shell and ssh-keygen only. npm ci ran in an earlier
+      # step, so the command is named by path and not found on PATH.
+      - name: Sign the feeds
+        if: steps.prepare.outputs.status == 'ready'
+        env:
+          FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
+        run: |
+          set -euo pipefail
           umask 077
           key="$RUNNER_TEMP/feed.key"
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$FEED_SSH_KEY" > "$key"
-          status=$(node scripts/release/main.ts feed-resign-branch \
-            --repository "$GITHUB_REPOSITORY" --dir site --now "$now" \
-            --key "$key" --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP")
-          if [ "$status" = absent ]; then
-            echo "skipping re-sign: branch feed has no feed yet" >&2
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          for name in latest stable; do
+            /usr/bin/ssh-keygen -Y sign -f "$key" -n feed@morndo.github.io "site/${name}.json"
+          done
+          rm -f "$key"
+      - id: resign
+        name: Commit the feeds
+        if: steps.prepare.outputs.status == 'ready'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          node scripts/release/main.ts feed-commit --repository "$GITHUB_REPOSITORY" --dir site --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
           echo "present=true" >> "$GITHUB_OUTPUT"
 
   pages:

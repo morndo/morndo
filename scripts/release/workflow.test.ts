@@ -5,6 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { BUNDLED_NODE, NODE_RELEASE_KEYS_COMMIT } from "./node-pin.ts";
 import { RELEASE_NAMESPACE } from "./sign.ts";
 
@@ -171,11 +172,12 @@ describe("release pipeline files", () => {
     expect(first).toContain("environment: feed");
     expect(first).toContain("FEED_SSH_KEY");
     expect(first).not.toContain(".github.io/");
-    expect(first).toContain("feed-publish");
+    expect(first).toContain("feed-publish-prepare");
+    expect(first).toContain("feed-commit");
     expect(first).toContain("contents: write");
     expect(job(feed, "resign")).not.toContain(".github.io/");
     expect(job(feed, "resign")).not.toContain("?ref=feed");
-    expect(job(feed, "resign")).toContain("feed-resign-branch");
+    expect(job(feed, "resign")).toContain("feed-resign-prepare");
     expect(first).toContain("trust/feed_allowed_signers");
     const sync = readFileSync("scripts/release/feed-sync.ts", "utf8");
     expect(sync).toContain("publishRelease");
@@ -209,12 +211,65 @@ describe("release pipeline files", () => {
     const resign = job(feed, "resign");
     expect(resign).toContain("environment: feed");
     expect(resign).toContain("FEED_SSH_KEY");
-    expect(resign).toContain("feed-resign-branch");
+    expect(resign).toContain("feed-resign-prepare");
+    expect(resign).toContain("feed-commit");
     expect(resign).not.toContain("git/blobs");
     expect(resign).toContain("trust/feed_allowed_signers");
     expect(job(feed, "node-pin")).toContain("node-check");
     expect(feed).toContain("https://nodejs.org/dist/index.json");
     expect(job(feed, "pages")).toContain(`actions/deploy-pages@${DEPLOY_PAGES}`);
     expect(feed).not.toContain("pull_request_target");
+  });
+});
+
+type Step = { name?: string; uses?: string; run?: string; env?: Record<string, string>; with?: Record<string, string> };
+type Workflow = { jobs: Record<string, { steps: Step[] }> };
+
+// A signing key may sit in exactly one step of its job, and that step must run no npm code:
+// no node, npm or npx, and no action. The key is read from the secret there and from nowhere else.
+export function keyViolations(text: string, jobs: Record<string, string>): string[] {
+  const workflow = parse(text) as Workflow;
+  const found: string[] = [];
+  for (const [name, secret] of Object.entries(jobs)) {
+    const steps = workflow.jobs[name]?.steps ?? [];
+    const keyed = steps.filter(step => JSON.stringify(step).includes(secret));
+    if (keyed.length !== 1) found.push(`${name}: ${keyed.length} steps hold ${secret}`);
+    for (const step of keyed) {
+      if (step.uses) found.push(`${name}: ${step.uses} holds ${secret}`);
+      const run = step.run ?? "";
+      if (/\b(node|npm|npx|tsx)\b/.test(run.replace(/#.*$/gm, ""))) found.push(`${name}: the step with ${secret} runs npm code`);
+      if (!run.includes("ssh-keygen -Y sign")) found.push(`${name}: the step with ${secret} does not sign`);
+      if (Object.keys(step.env ?? {}).some(key => !key.endsWith("SSH_KEY"))) found.push(`${name}: the step with ${secret} has other env`);
+    }
+  }
+  return found;
+}
+
+describe("signing keys reach one shell-only step", () => {
+  const release = readFileSync(".github/workflows/release.yml", "utf8");
+  const feed = readFileSync(".github/workflows/feed.yml", "utf8");
+
+  it("the release key is in one signing step of publish, and the feed key in one step of each feed job", () => {
+    expect(keyViolations(release, { publish: "RELEASE_SSH_KEY", feed: "FEED_SSH_KEY" })).toEqual([]);
+    expect(keyViolations(feed, { resign: "FEED_SSH_KEY" })).toEqual([]);
+  });
+
+  it("control: a key in a step that runs node, or in two steps, is named", () => {
+    const bad = [
+      "jobs:",
+      "  publish:",
+      "    steps:",
+      "      - env:",
+      "          RELEASE_SSH_KEY: ${{ secrets.RELEASE_SSH_KEY }}",
+      "        run: node scripts/release/main.ts sign",
+      "      - env:",
+      "          RELEASE_SSH_KEY: ${{ secrets.RELEASE_SSH_KEY }}",
+      "        run: ssh-keygen -Y sign -f k",
+    ].join("\n");
+    expect(keyViolations(bad, { publish: "RELEASE_SSH_KEY" })).toEqual([
+      "publish: 2 steps hold RELEASE_SSH_KEY",
+      "publish: the step with RELEASE_SSH_KEY runs npm code",
+      "publish: the step with RELEASE_SSH_KEY does not sign",
+    ]);
   });
 });

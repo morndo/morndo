@@ -1,28 +1,14 @@
-// Push the feed branch only if it still points at the commit we read.
+// The feed branch is written in three steps so the signing key never meets npm code:
+// prepare builds the unsigned feeds, a shell step signs them with ssh-keygen, commit verifies
+// the signatures and pushes only if the branch still points at the commit prepare read.
 // Update a reference leaves force false, so a moved branch is rejected
 // (https://docs.github.com/en/rest/git/refs#update-a-reference, read 2026-10-13).
-// The caller then reads that new head and tries again.
+// A moved branch fails the job; running it again reads the new head.
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
 import { FEED_FILES, gh, must, readAt, readFeedHead, verifyFeed } from "./feed-site.ts";
-import { FEED_NAMESPACE, signBytes } from "./sign.ts";
-
-export function syncFeed(p: {
-  readHead: () => string | null;
-  prepare: (head: string | null) => void;
-  commit: (parent: string | null) => "ok" | "moved";
-  attempts?: number;
-}): void {
-  const attempts = p.attempts ?? 5;
-  for (let n = 1; n <= attempts; n++) {
-    const head = p.readHead();
-    p.prepare(head);
-    if (p.commit(head) === "ok") return;
-  }
-  throw new Error("the feed branch moved on every attempt");
-}
 
 // The trees API writes the blob when the entry carries content, so the feed push
 // does not create a blob per file first.
@@ -57,74 +43,65 @@ export function refUpdateResult(ok: boolean, stderr: string): "ok" | "moved" {
   throw new Error(`feed ref update failed: ${stderr}`);
 }
 
-export function publishChannelFeeds(p: {
-  repository: string; dir: string; version: string; manifestPath: string; manifestUrl: string;
-  now: number; keySetVersion: number; keyPath: string; signers: string; scratch: string;
-}): void {
-  const manifest = readFileSync(p.manifestPath);
-  syncFeed({
-    readHead: () => readFeedHead(p.repository),
-    prepare: head => {
-      mkdirSync(p.dir, { recursive: true });
-      for (const file of FEED_FILES) rmSync(join(p.dir, file), { force: true });
-      const latest = head === null ? null : readAt(p.repository, head, "latest.json");
-      const latestSig = head === null ? null : readAt(p.repository, head, "latest.json.sig");
-      if (latest !== null) {
-        if (latestSig === null) throw new Error("latest.json has no signature");
-        verifyFeed(p.signers, latest, latestSig, p.scratch);
-      }
-      const added = publishRelease(latest, {
-        channel: "latest", now: p.now, keySetVersion: p.keySetVersion,
-        entry: {
-          version: p.version, manifest: p.manifestUrl, manifestSize: manifest.length,
-          manifestSha256: createHash("sha256").update(manifest).digest("hex"),
-        },
-      });
-      writeFileSync(join(p.dir, "latest.json"), added);
-      const stable = head === null ? null : readAt(p.repository, head, "stable.json");
-      const stableSig = head === null ? null : readAt(p.repository, head, "stable.json.sig");
-      if (stable !== null) {
-        if (stableSig === null) throw new Error("stable.json has no signature");
-        verifyFeed(p.signers, stable, stableSig, p.scratch);
-        writeFileSync(join(p.dir, "stable.json"), stable);
-      } else {
-        writeFileSync(join(p.dir, "stable.json"), emptyFeed({ channel: "stable", now: p.now, keySetVersion: p.keySetVersion }));
-      }
-      for (const name of ["latest.json", "stable.json"] as const) {
-        const bytes = readFileSync(join(p.dir, name));
-        writeFileSync(join(p.dir, `${name}.sig`), signBytes({ bytes, keyPath: p.keyPath, namespace: FEED_NAMESPACE, dir: p.scratch }));
-      }
-    },
-    commit: parent => writeRef(p.repository, parent, p.dir, "Publish the channel feeds"),
-  });
+const PREPARED = "feed-prepared.json";
+export const MOVED = "the feed branch moved; run this job again";
+
+export type Prepared = { head: string | null; message: string };
+
+export function prepareFeeds(p: {
+  repository: string; dir: string; signers: string; scratch: string; now: number;
+} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" })): "absent" | "ready" {
+  mkdirSync(p.dir, { recursive: true });
+  for (const file of [...FEED_FILES, PREPARED]) rmSync(join(p.dir, file), { force: true });
+  const head = readFeedHead(p.repository);
+  if (p.mode === "resign" && head === null) return "absent";
+  const read = (name: string, sig: string) => {
+    const body = head === null ? null : readAt(p.repository, head, name);
+    const signature = head === null ? null : readAt(p.repository, head, sig);
+    if (body !== null) {
+      if (signature === null) throw new Error(`${name} has no signature`);
+      verifyFeed(p.signers, body, signature, p.scratch);
+    }
+    return body;
+  };
+  const latest = read("latest.json", "latest.json.sig");
+  const stable = read("stable.json", "stable.json.sig");
+  if (p.mode === "resign") {
+    if (latest === null || stable === null) throw new Error(`feed ${latest === null ? "latest" : "stable"} is missing at ${head}`);
+    writeFileSync(join(p.dir, "latest.json"), resignFeed(latest, p.now));
+    writeFileSync(join(p.dir, "stable.json"), resignFeed(stable, p.now));
+  } else {
+    const manifest = readFileSync(p.manifestPath);
+    writeFileSync(join(p.dir, "latest.json"), publishRelease(latest, {
+      channel: "latest", now: p.now, keySetVersion: p.keySetVersion,
+      entry: {
+        version: p.version, manifest: p.manifestUrl, manifestSize: manifest.length,
+        manifestSha256: createHash("sha256").update(manifest).digest("hex"),
+      },
+    }));
+    writeFileSync(join(p.dir, "stable.json"), stable ?? emptyFeed({ channel: "stable", now: p.now, keySetVersion: p.keySetVersion }));
+  }
+  const prepared: Prepared = { head, message: p.mode === "publish" ? "Publish the channel feeds" : "Re-sign the channel feeds" };
+  writeFileSync(join(p.dir, PREPARED), JSON.stringify(prepared));
+  return "ready";
 }
 
-export function resignChannelFeeds(p: {
-  repository: string; dir: string; now: number; keyPath: string; signers: string; scratch: string;
-}): "absent" | "resigned" {
-  let outcome: "absent" | "resigned" = "absent";
-  syncFeed({
-    readHead: () => readFeedHead(p.repository),
-    prepare: head => {
-      mkdirSync(p.dir, { recursive: true });
-      for (const file of FEED_FILES) rmSync(join(p.dir, file), { force: true });
-      if (head === null) { outcome = "absent"; return; }
-      const latest = readAt(p.repository, head, "latest.json");
-      if (latest === null) { outcome = "absent"; return; }
-      outcome = "resigned";
-      for (const channel of ["latest", "stable"] as const) {
-        const body = channel === "latest" ? latest : readAt(p.repository, head, `${channel}.json`);
-        const signature = readAt(p.repository, head, `${channel}.json.sig`);
-        if (body === null || signature === null) throw new Error(`feed ${channel} is missing at ${head}`);
-        verifyFeed(p.signers, body, signature, p.scratch);
-        const next = resignFeed(body, p.now);
-        writeFileSync(join(p.dir, `${channel}.json`), next);
-        writeFileSync(join(p.dir, `${channel}.json.sig`), signBytes({
-          bytes: Buffer.from(next), keyPath: p.keyPath, namespace: FEED_NAMESPACE, dir: p.scratch,
-        }));
-      }
-    },
-    commit: parent => outcome === "absent" ? "ok" : writeRef(p.repository, parent, p.dir, "Re-sign the channel feeds"),
-  });
-  return outcome;
+export type CommitIo = {
+  head: () => string | null;
+  write: (parent: string | null, dir: string, message: string) => "ok" | "moved";
+};
+
+export function commitFeeds(
+  p: { repository: string; dir: string; signers: string; scratch: string },
+  io: CommitIo = { head: () => readFeedHead(p.repository), write: (parent, dir, message) => writeRef(p.repository, parent, dir, message) },
+): void {
+  const prepared = JSON.parse(readFileSync(join(p.dir, PREPARED), "utf8")) as Prepared;
+  for (const name of ["latest", "stable"] as const) {
+    const file = join(p.dir, `${name}.json`);
+    const sig = join(p.dir, `${name}.json.sig`);
+    if (!existsSync(sig)) throw new Error(`${name}.json is not signed`);
+    verifyFeed(p.signers, readFileSync(file, "utf8"), readFileSync(sig, "utf8"), p.scratch);
+  }
+  if (io.head() !== prepared.head) throw new Error(MOVED);
+  if (io.write(prepared.head, p.dir, prepared.message) !== "ok") throw new Error(MOVED);
 }

@@ -217,6 +217,9 @@ jobs:
             "dist/morndo-${VERSION}-linux-arm64.tar.gz" \
             "dist/morndo-${VERSION}-darwin-arm64.tar.gz" \
             dist/manifest.json dist/install.sh
+      # The only step that holds the release key. It runs no npm code and no action: the shell writes the
+      # key to a 0600 file, ssh-keygen signs, and the file is removed. npm ci ran in an earlier step, so the
+      # command is named by path and not found on PATH.
       - name: Sign
         env:
           RELEASE_SSH_KEY: ${{ secrets.RELEASE_SSH_KEY }}
@@ -226,8 +229,9 @@ jobs:
           key="$RUNNER_TEMP/release.key"
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$RELEASE_SSH_KEY" > "$key"
-          node scripts/release/main.ts sign --namespace release@morndo.github.io --key "$key" --in dist/manifest.json --out dist/manifest.json.sig --dest "$RUNNER_TEMP"
-          node scripts/release/main.ts sign --namespace release@morndo.github.io --key "$key" --in dist/install.sh --out dist/install.sh.sig --dest "$RUNNER_TEMP"
+          for name in manifest.json install.sh; do
+            /usr/bin/ssh-keygen -Y sign -f "$key" -n release@morndo.github.io "dist/$name"
+          done
           rm -f "$key"
       - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -321,8 +325,8 @@ jobs:
     needs: [release-please, published]
     # A shared group cancels the other workflow's pending run.
     # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
-    # read 2026-10-13. This group is not feed.yml's morndo-feed. The push itself
-    # refuses a moved branch and retries the read (feed-publish).
+    # read 2026-10-13. This group is not feed.yml's morndo-feed. The commit step
+    # refuses a moved branch and fails the job; running it again reads the new head.
     concurrency:
       group: morndo-release-feed
       cancel-in-progress: false
@@ -341,12 +345,11 @@ jobs:
           node-version-file: package.json
           cache: npm
       - run: npm ci
-      - name: Latest feed, and an empty stable feed the first time
+      - name: Prepare the feeds
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
           VERSION: ${{ needs.release-please.outputs.version }}
-          FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
         run: |
           set -euo pipefail
           repo="${GITHUB_REPOSITORY}"
@@ -354,15 +357,28 @@ jobs:
           mkdir -p site "$RUNNER_TEMP/release"
           gh release download "$TAG" --pattern manifest.json --dir "$RUNNER_TEMP/release"
           manifest_url="https://github.com/${repo}/releases/download/${TAG}/manifest.json"
+          node scripts/release/main.ts feed-publish-prepare \
+            --repository "$GITHUB_REPOSITORY" --dir site --version "$VERSION" \
+            --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" \
+            --now "$now" --key-set 1 --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
+      # The only step that holds the feed key; shell and ssh-keygen only, as in the publish job.
+      - name: Sign the feeds
+        env:
+          FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
+        run: |
+          set -euo pipefail
           umask 077
           key="$RUNNER_TEMP/feed.key"
           trap 'rm -f "$key"' EXIT
           printf '%s\n' "$FEED_SSH_KEY" > "$key"
-          node scripts/release/main.ts feed-publish \
-            --repository "$GITHUB_REPOSITORY" --dir site --version "$VERSION" \
-            --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" \
-            --now "$now" --key-set 1 --key "$key" --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
+          for name in latest stable; do
+            /usr/bin/ssh-keygen -Y sign -f "$key" -n feed@morndo.github.io "site/${name}.json"
+          done
           rm -f "$key"
+      - name: Commit the feeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/main.ts feed-commit --repository "$GITHUB_REPOSITORY" --dir site --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
 
   pages:
     needs: feed

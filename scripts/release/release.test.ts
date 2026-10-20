@@ -16,7 +16,7 @@ import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
 import { writeVerifiedSite } from "./feed-site.ts";
-import { feedTree, refUpdateResult, syncFeed } from "./feed-sync.ts";
+import { commitFeeds, feedTree, MOVED, refUpdateResult } from "./feed-sync.ts";
 import { readSchemaJson } from "./schema-read.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
@@ -331,20 +331,50 @@ describe("feed", () => {
     )).toThrow(/backwards/);
   });
 
-  it("retries the feed read when the branch moved, and commits the head it just read", () => {
-    const heads = ["aaa", "bbb"];
-    const seen: Array<string | null> = [];
-    const committed: Array<string | null> = [];
-    syncFeed({
-      readHead: () => heads.shift() ?? null,
-      prepare: head => { seen.push(head); },
-      commit: parent => {
-        committed.push(parent);
-        return committed.length === 1 ? "moved" : "ok";
-      },
+  describe("the commit step", () => {
+    function signed() {
+      const dir = temp();
+      const key = join(dir, "feed");
+      expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", "feed-test", "-q"]).status).toBe(0);
+      const pub = spawnSync("ssh-keygen", ["-y", "-f", key], { encoding: "utf8" });
+      const signers = join(dir, "allowed");
+      writeFileSync(signers, `${allowedSignerLine({ identity: FEED_NAMESPACE, namespace: FEED_NAMESPACE, publicKey: pub.stdout.trim() })}\n`);
+      const site = join(dir, "site");
+      mkdirSync(site);
+      for (const channel of ["latest", "stable"] as const) {
+        const body = emptyFeed({ channel, now: WHEN, keySetVersion: 1 });
+        writeFileSync(join(site, `${channel}.json`), body);
+        // The shell step signs with ssh-keygen -Y sign, which writes <file>.sig.
+        expect(spawnSync("ssh-keygen", ["-Y", "sign", "-f", key, "-n", FEED_NAMESPACE, join(site, `${channel}.json`)]).status).toBe(0);
+      }
+      writeFileSync(join(site, "feed-prepared.json"), JSON.stringify({ head: "aaa", message: "m" }));
+      return { dir, site, signers };
+    }
+
+    it("pushes the signed feeds on the head prepare read", () => {
+      const { dir, site, signers } = signed();
+      const pushed: Array<string | null> = [];
+      commitFeeds({ repository: "o/r", dir: site, signers, scratch: dir }, { head: () => "aaa", write: parent => { pushed.push(parent); return "ok"; } });
+      expect(pushed).toEqual(["aaa"]);
     });
-    expect(seen).toEqual(["aaa", "bbb"]);
-    expect(committed).toEqual(["aaa", "bbb"]);
+
+    it("fails, and pushes nothing, when the branch moved since prepare", () => {
+      const { dir, site, signers } = signed();
+      const pushed: unknown[] = [];
+      expect(() => commitFeeds({ repository: "o/r", dir: site, signers, scratch: dir }, { head: () => "bbb", write: () => { pushed.push(1); return "ok"; } })).toThrow(MOVED);
+      expect(() => commitFeeds({ repository: "o/r", dir: site, signers, scratch: dir }, { head: () => "aaa", write: () => "moved" })).toThrow(MOVED);
+      expect(pushed).toEqual([]);
+    });
+
+    it("refuses an unsigned or tampered feed", () => {
+      const { dir, site, signers } = signed();
+      const io = { head: () => "aaa", write: () => "ok" as const };
+      writeFileSync(join(site, "latest.json"), "{\"seq\":9}\n");
+      expect(() => commitFeeds({ repository: "o/r", dir: site, signers, scratch: dir }, io)).toThrow(/signature/i);
+      rmSync(join(site, "stable.json.sig"));
+      writeFileSync(join(site, "latest.json"), emptyFeed({ channel: "latest", now: WHEN, keySetVersion: 1 }));
+      expect(() => commitFeeds({ repository: "o/r", dir: site, signers, scratch: dir }, io)).toThrow(/signature|not signed/i);
+    });
   });
 
   it("raises seq from the last published feed", () => {

@@ -11,7 +11,7 @@ import { compileWorkspaces } from "./compile.ts";
 import { sha256Sums } from "./checksums.ts";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
 import { materialiseFeed } from "./feed-site.ts";
-import { publishChannelFeeds, resignChannelFeeds } from "./feed-sync.ts";
+import { commitFeeds, prepareFeeds } from "./feed-sync.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, type ArtifactInput } from "./manifest.ts";
 import { BUNDLED_NODE, newerNode24 } from "./node-pin.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes } from "./sign.ts";
@@ -61,7 +61,7 @@ function treeFiles(root: string): TreeFile[] {
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
-  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-resign-branch | feed-publish | feed-site | sums | node-check");
+  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-resign-prepare | feed-publish-prepare | feed-commit | feed-site | sums | node-check");
   const { values, positionals } = parseArgs({
     args: rest,
     options: {
@@ -144,10 +144,10 @@ function main(argv: string[]): void {
     case "feed-resign":
       writeFileSync(flag(values, "out"), resignFeed(readFileSync(flag(values, "in"), "utf8"), Number(flag(values, "now"))));
       return;
-    case "feed-resign-branch": {
-      const outcome = resignChannelFeeds({
-        repository: flag(values, "repository"), dir: flag(values, "dir"), now: Number(flag(values, "now")),
-        keyPath: flag(values, "key"), signers: flag(values, "signers"), scratch: flag(values, "scratch"),
+    case "feed-resign-prepare": {
+      const outcome = prepareFeeds({
+        mode: "resign", repository: flag(values, "repository"), dir: flag(values, "dir"), now: Number(flag(values, "now")),
+        signers: flag(values, "signers"), scratch: flag(values, "scratch"),
       });
       process.stdout.write(`${outcome}\n`);
       return;
@@ -159,13 +159,16 @@ function main(argv: string[]): void {
         typeof values.signers === "string" && values.signers !== "" ? values.signers : "trust/feed_allowed_signers",
       );
       return;
-    case "feed-publish":
-      publishChannelFeeds({
-        repository: flag(values, "repository"), dir: flag(values, "dir"), version: flag(values, "version"),
+    case "feed-publish-prepare":
+      prepareFeeds({
+        mode: "publish", repository: flag(values, "repository"), dir: flag(values, "dir"), version: flag(values, "version"),
         manifestPath: flag(values, "manifest"), manifestUrl: flag(values, "manifest-url"),
         now: Number(flag(values, "now")), keySetVersion: Number(flag(values, "key-set")),
-        keyPath: flag(values, "key"), signers: flag(values, "signers"), scratch: flag(values, "scratch"),
+        signers: flag(values, "signers"), scratch: flag(values, "scratch"),
       });
+      return;
+    case "feed-commit":
+      commitFeeds({ repository: flag(values, "repository"), dir: flag(values, "dir"), signers: flag(values, "signers"), scratch: flag(values, "scratch") });
       return;
     case "sums":
       writeFileSync(flag(values, "out"), sha256Sums(positionals.map(name => ({ name: name.split("/").pop() ?? name, bytes: readFileSync(name) }))));
