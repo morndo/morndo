@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -605,7 +605,8 @@ describe("install.sh", () => {
     writeFileSync(join(base, "manifest.json"), manifestBytes);
     writeFileSync(join(base, "manifest.json.sig"), signature);
     writeFileSync(join(base, name), archive);
-    const script = stampVersion(readFileSync(join(import.meta.dirname, "../../install.sh"), "utf8"), "0.1.0");
+    const script = stampVersion(readFileSync(join(import.meta.dirname, "../../install.sh"), "utf8"), "0.1.0")
+      .replace("MORNDO_HAS_INSTALL='no'", "MORNDO_HAS_INSTALL='yes'");
     const scriptPath = join(dir, "install.sh");
     writeFileSync(scriptPath, script, { mode: 0o755 });
     return { dir, signers, marker, scriptPath, base };
@@ -619,6 +620,38 @@ describe("install.sh", () => {
     writeFileSync(script, source, { mode: 0o755 });
     const run = spawnSync("sh", [script, "--role", "node", "--signers", join(dir, "missing")], { encoding: "utf8" });
     expect(run.status).toBe(78);
+  });
+
+  it("fails loudly, and creates nothing, while the release has no `morndo install`", () => {
+    const dir = temp();
+    const home = join(dir, "home");
+    mkdirSync(home);
+    const script = join(dir, "install.sh");
+    writeFileSync(script, stampVersion(readFileSync(join(import.meta.dirname, "../../install.sh"), "utf8"), "0.1.0"), { mode: 0o755 });
+    const signers = join(dir, "allowed");
+    writeFileSync(signers, "x\n");
+    const run = spawnSync("sh", [script, "--role", "control-plane", "--signers", signers], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: home, MORNDO_RELEASE_BASE: `file://${join(dir, "no-such-release")}` },
+    });
+    expect(run.status).toBe(69);
+    expect(run.stderr).toMatch(/morndo install is not in this release/);
+    expect(readdirSync(home)).toEqual([]);
+    expect(readdirSync(dir).sort()).toEqual(["allowed", "home", "install.sh"]);
+  });
+
+  it("control: the same script with the flag on goes on to fetch the release", () => {
+    const dir = temp();
+    const script = join(dir, "install.sh");
+    writeFileSync(script, stampVersion(readFileSync(join(import.meta.dirname, "../../install.sh"), "utf8"), "0.1.0").replace("MORNDO_HAS_INSTALL='no'", "MORNDO_HAS_INSTALL='yes'"), { mode: 0o755 });
+    const signers = join(dir, "allowed");
+    writeFileSync(signers, "x\n");
+    const run = spawnSync("sh", [script, "--role", "control-plane", "--signers", signers], {
+      encoding: "utf8",
+      env: { ...process.env, MORNDO_RELEASE_BASE: `file://${join(dir, "no-such-release")}` },
+    });
+    expect(run.status).not.toBe(0);
+    expect(run.status).not.toBe(69);
   });
 
   it("runs the archive's morndo only after the signature, the size and the digest match", () => {
