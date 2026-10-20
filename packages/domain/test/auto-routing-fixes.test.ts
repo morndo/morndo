@@ -1,6 +1,6 @@
 // Fix round 1 for auto routing PR 1 (design sections 7.1, 7.2; R19, R22, R25, R26). Names here are test data.
 import { describe, expect, it } from "vitest";
-import { decide, parseFact, recordFact, scorecard, type CandidateFacts, type OutcomeFact, type TaskProfile } from "../src/index.ts";
+import { decide, emptyPolicy, ensureRole, parseFact, recordFact, scorecard, setPriority, type CandidateFacts, type OutcomeFact, type TaskProfile } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
 
@@ -125,5 +125,21 @@ describe("the Scorecard keeps the last 20 outcomes (design 7.2)", () => {
     const [cell] = scorecard(facts, runs, T + 100);
     expect(cell?.n).toBe(20);
     expect(cell?.k).toBe(20);
+  });
+});
+
+describe("R16: switching auto through the priority writes nothing", () => {
+  it("an auto-only change appends AutoSwitched alone and leaves every role byte-equal", () => {
+    const base = ensureRole(emptyPolicy(), "implement");
+    const next = setPriority(base, { mode: "subscriptions-first", order: [], auto: true }, [], "c1", T, "step-up");
+    expect(next.ok).toBe(true);
+    if (!next.ok) return;
+    expect(next.value.roles).toEqual(base.roles);
+    expect(next.value.events.map(event => event.type)).toEqual(["AutoSwitched"]);
+  });
+
+  it("control: a changed mode still appends PriorityChanged", () => {
+    const next = setPriority(emptyPolicy(), { mode: "keys-only", order: [], auto: true }, [], "c1", T, "step-up");
+    expect(next.ok && next.value.events.map(event => event.type)).toEqual(["PriorityChanged", "AutoSwitched"]);
   });
 });

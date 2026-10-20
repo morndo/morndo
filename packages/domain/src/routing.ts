@@ -147,6 +147,11 @@ function derivedProblem(policy: Policy, row: RoleRoute, listed: readonly Listed[
   return null;
 }
 
+// True when a Priority command changes neither the mode nor the order, so only Auto's switch could differ.
+export function sameOrder(current: Priority, mode: Mode, order: readonly string[]): boolean {
+  return current.mode === mode && current.order.length === order.length && current.order.every((name, i) => name === order[i]);
+}
+
 export function setPriority(policy: Policy, priority: Priority, listed: readonly Listed[], command: string, at: number, authority: AutoAuthority = "session"): Result<Policy, { problem: RouteProblem; role?: string; name?: string }> {
   const who = principal(command);
   if (!who.ok) return who;
@@ -154,11 +159,19 @@ export function setPriority(policy: Policy, priority: Priority, listed: readonly
   if (!order.ok) return order;
   const currentAuto = policy.priority.auto ?? false;
   const auto = priority.auto ?? currentAuto;
-  const events: RouteEvent[] = [...policy.events, { type: "PriorityChanged", at, command }];
-  if (priority.auto !== undefined && priority.auto !== currentAuto) {
-    const allowed = allow(changeEffect({ kind: "global-auto", on: priority.auto }), authority, command);
+  const switching = priority.auto !== undefined && priority.auto !== currentAuto;
+  // R16: turning Auto on or off changes no derived chain and writes nothing, so an auto-only change is not a Priority change.
+  if (switching && sameOrder(policy.priority, priority.mode, order.value)) {
+    const allowed = allow(changeEffect({ kind: "global-auto", on: auto }), authority, command);
     if (!allowed.ok) return fail(allowed.error.problem === "principal" ? "principal" : "step-up");
-    events.push({ type: "AutoSwitched", scope: "global", role: null, on: priority.auto, at, command });
+    const event: RouteEvent = { type: "AutoSwitched", scope: "global", role: null, on: auto, at, command };
+    return ok({ ...policy, priority: { ...policy.priority, auto }, events: [...policy.events, event] });
+  }
+  const events: RouteEvent[] = [...policy.events, { type: "PriorityChanged", at, command }];
+  if (switching) {
+    const allowed = allow(changeEffect({ kind: "global-auto", on: auto }), authority, command);
+    if (!allowed.ok) return fail(allowed.error.problem === "principal" ? "principal" : "step-up");
+    events.push({ type: "AutoSwitched", scope: "global", role: null, on: auto, at, command });
   }
   const next: Policy = { ...policy, priority: { mode: priority.mode, order: order.value, auto }, events };
   for (const row of next.roles) {

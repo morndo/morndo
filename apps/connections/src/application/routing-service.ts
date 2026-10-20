@@ -1,6 +1,6 @@
 // The routing policy is saved whole, then written through EngineSettings. A chain changed outside is drift (R7–R15).
 import {
-  engineText, ensureRole, observeDrift, parseEngine, planWrites, prepareWrite, project,
+  engineText, ensureRole, observeDrift, parseEngine, planWrites, prepareWrite, project, sameOrder,
   setOverride, setPicks, setPriority, setRole, type Engine, type Listed, type Mode, type Override, type Policy, type Priority,
 } from "@morndo/domain";
 import { err, ok, type Result } from "@morndo/domain";
@@ -21,6 +21,10 @@ export class RoutingService {
     const priority = auto === undefined ? { mode, order } : { mode, order, auto };
     const next = setPriority(policy, priority, this.#listed(), command, this.#deps.clock.now(), auto === undefined ? "session" : "step-up");
     if (!next.ok) return problem(next.error);
+    // R16: an auto-only switch writes no chain, pending or not; it only saves the policy.
+    if (auto !== undefined && sameOrder(policy.priority, mode, order)) {
+      return this.#deps.store.save(directory, next.value, version) ? ok(undefined) : err({ problem: "conflict" });
+    }
     return this.#write(directory, next.value, version, this.#deps.engines.chains(), policy);
   }
 
