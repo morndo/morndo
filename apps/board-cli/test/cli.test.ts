@@ -110,6 +110,19 @@ describe("a lane's day", () => {
     expect(await asBuilder("show", "T-9")).toMatchObject({ code: 1, err: "refused: no such task" });
     expect((await asBuilder("show", "nope")).code).toBe(2);
   });
+  it("the record names the console's change and the board's own moves, with the rule and the lane (ADR-0032)", async () => {
+    await asManager("new", "A");
+    expect(hub.board.act("T-1", { action: "assign", to: "builder" }, { kind: "console" }).ok).toBe(true);    // lanes start --task
+    const rev = hub.board.task("T-1")?.task.rev ?? 0;
+    expect(hub.board.follow("T-1", { to: "doing", reason: null, rule: "D4" }, "builder", rev).ok).toBe(true);
+    const done = hub.board.follow("T-1", { to: "review", reason: "STATUS: DONE npm test: 14 passed", rule: "D1" }, "builder", rev + 1);
+    expect(done.ok).toBe(true);
+    const shown = await asManager("show", "T-1");
+    expect(shown.out).toContain("console      assigned it to builder");
+    expect(shown.out).toContain("board (D4, builder) todo → doing");
+    expect(shown.out).toContain("board (D1, builder) doing → review: STATUS: DONE npm test: 14 passed");
+    expect((await asManager("list")).out).toBe("In review (1)\n  T-1    builder        A");
+  });
 });
 
 describe("the prompt and the plumbing", () => {

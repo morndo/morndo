@@ -2994,7 +2994,25 @@ export const CONTROLS: Control[] = [
     run: ["apps/fleet/test/delivery-mirror.test.ts"], expect: "first in line only" },
   { id: "f-stashed-once", task: "D-stash", file: "apps/fleet/src/application/deliveries.ts",
     find: "if (d.stashed !== undefined && before?.delivery.stashed === undefined) {", replace: "if (d.stashed !== undefined) {",
-    run: ["apps/fleet/test/delivery-mirror.test.ts"], expect: "draft_stashed once" },
+    run: ["apps/fleet/test/delivery-mirror.test.ts"], expect: "draft_stashed once" },  // ---- ADR-0032 in the hub: the board's own moves (board-projector.ts), the runs on the board frame, `lanes start --task`.
+  { id: "b10-d6-projector", task: "ADR-0032", file: "packages/domain/src/board.ts",
+    find: "|| run.since <= task.updatedAt) return null;", replace: ") return null;",
+    run: ["apps/hub/test/board-projector.test.ts"], expect: "D6: a move a person made after the run began is not undone" },
+  { id: "b10-board-reason", task: "ADR-0032", file: "packages/domain/src/board.ts",
+    find: " || (actor.kind === \"board\" && given)) {", replace: ") {",
+    run: ["apps/hub/test/board-projector.test.ts", "packages/domain/test/board.test.ts"], expect: "with GONE_REASON" },
+  { id: "b10-refusal-once", task: "ADR-0032", file: "apps/hub/src/application/board-projector.ts",
+    find: "          if (this.#refused.has(memo)) continue;\n", replace: "",
+    run: ["apps/hub/test/board-projector.test.ts"], expect: "a refusal is logged once and not tried again" },
+  { id: "b10-fleet-unreachable", task: "ADR-0032", file: "apps/hub/src/application/board-projector.ts",
+    find: "if (this.#live) this.#follow(run);", replace: "if (true) this.#follow(run);",
+    run: ["apps/hub/test/board-projector.test.ts"], expect: "never acts while the fleet's runs can't be read" },
+  { id: "b10-runs-throttle", task: "ADR-0032", file: "apps/hub/src/application/board-service.ts",
+    find: "const wait = this.#toldAt + this.#runsEveryMs - performance.now();", replace: "const wait = 0;",
+    run: ["apps/hub/test/board.test.ts"], expect: "a change of runs alone is pushed at most about once a second" },
+  { id: "lanes-task-done", task: "ADR-0032", file: "apps/hub/src/console/lanes.ts",
+    find: "    if (found.task.status === \"done\") throw new NotDone(`refused: ${key} is done; file a new task for more work`);\n", replace: "",
+    run: ["apps/hub/test/lanes-console.test.ts"], expect: "an unknown or done task starts nothing" },
 ];
 
 // ---- the runner

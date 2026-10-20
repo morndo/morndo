@@ -8,7 +8,10 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_POLICY } from "@morndo/domain";
 import type { LaneEvent } from "@morndo/protocol";
+import { Store } from "../src/adapters/store.ts";
+import { BoardService } from "../src/application/board-service.ts";
 import { localNode, memoryBackend, refusal, until, type FakeFleet, type MemoryBackend } from "./helpers/fake-fleet.ts";
 import { runLanes, type LanesIo } from "../src/console/lanes.ts";
 import { startFakeFleet } from "./helpers/fake-fleet.ts";
@@ -246,6 +249,65 @@ describe("morndo lanes: keys, start, stop, status, events", () => {
     const json = await lanes(["start", "build", "--cwd", "/w/build", "--json", "--node", "pc"]);
     expect(json.code).toBe(0);
     expect(JSON.parse(json.out)).toEqual({ node: "pc", workerId: "pc.aaaaaaaa.9", waiting: "trust" });
+  });
+
+  it("start --task: the task is the new lane's first, assigned as the console on the hub's board; an unknown or done task starts nothing", async () => {
+    // The hub's database (MORNDO_HOME), as the hub left it: a task for nobody, one that is done.
+    const hubHome = join(home, "hub");
+    const manager = { kind: "manager", name: "manager", token: "tok-m" } as const;
+    const seeded = new Store(hubHome);
+    const board = new BoardService({ store: seeded, policy: () => DEFAULT_POLICY });
+    board.create({ title: "Build the login page" }, manager);                        // T-1, backlog, nobody's
+    board.create({ title: "Old work", assignee: "builder" }, manager);               // T-2, done below
+    for (const [to, reason] of [["doing", undefined], ["review", undefined], ["done", "npm test: 14 passed"]] as const) {
+      board.act("T-2", { action: "move", to, ...(reason ? { reason } : {}) }, manager);
+    }
+    seeded.close();
+    const env = { MORNDO_HOME: hubHome };
+    const readBack = <T>(f: (b: BoardService, s: Store) => T): T => {
+      const s = new Store(hubHome);
+      try { return f(new BoardService({ store: s, policy: () => DEFAULT_POLICY }), s); } finally { s.close(); }
+    };
+    // Assigned before lane.start is asked (so the lane's first turn is after the task's last change: D4, not D6).
+    let assigneeAtStart: string | null | undefined;
+    fleet.intercept("lane.start", async () => {
+      assigneeAtStart = readBack(b => b.task("T-1")?.task.assignee);
+      return { ok: true, result: { workerId: "pc.aaaaaaaa.9" } };
+    });
+    const r = await lanes(["start", "build", "--cwd", "/w/build", "--task", "T-1"], { env });
+    expect(r.code, r.err).toBe(0);
+    expect(assigneeAtStart).toBe("build");
+    expect(r.out).toContain("started build on pc: pc.aaaaaaaa.9\nT-1 is assigned to it: its first turn moves it into progress");
+    expect(fleet.calls.filter(c => c.op === "lane.start").at(-1)?.args).toEqual({ name: "build", cwd: "/w/build" });   // --task is the hub's, not the node's
+    const after = readBack((b, s) => ({ task: b.task("T-1"), audit: s.auditOf("BoardChanged", 0) }));
+    expect(after.task?.task).toMatchObject({ assignee: "build", status: "todo" });
+    expect(after.task?.events.at(-1)).toMatchObject({ actor: { kind: "console" }, change: { kind: "assigned", from: null, to: "build" } });
+    expect(after.audit.at(-1)).toMatchObject({ key: "T-1", change: "assigned", actor: { kind: "console", name: null, endpointId: null, token: null } });
+    // Again for the lane it already names: nothing to change, and the start goes ahead. --json names the task.
+    const again = await lanes(["start", "build", "--cwd", "/w/build", "--task", "T-1", "--json"], { env });
+    expect(again.code, again.err).toBe(0);
+    expect(JSON.parse(again.out)).toEqual({ node: "pc", workerId: "pc.aaaaaaaa.9", task: "T-1" });
+    expect(readBack(b => b.task("T-1")?.events.length)).toBe(after.task?.events.length);
+
+    const starts = fleet.calls.filter(c => c.op === "lane.start").length;
+    const unknown = await lanes(["start", "build", "--cwd", "/w/build", "--task", "T-9"], { env });
+    expect([unknown.code, unknown.err.trim()]).toEqual([4, "refused: no task T-9"]);
+    const done = await lanes(["start", "build", "--cwd", "/w/build", "--task", "T-2"], { env });
+    // negative control: without the done check, T-2 goes to "build" and the lane starts (lanes-task-done).
+    expect([done.code, done.err.trim()]).toEqual([4, "refused: T-2 is done; file a new task for more work"]);
+    expect(readBack(b => b.task("T-2")?.task)).toMatchObject({ status: "done", assignee: "builder" });
+    const noHub = await lanes(["start", "build", "--cwd", "/w/build", "--task", "T-1"], { env: { MORNDO_HOME: join(home, "nowhere") } });
+    expect([noHub.code, noHub.err]).toEqual([4, expect.stringContaining("refused: no task T-1: there is no hub database in")]);
+    expect(existsSync(join(home, "nowhere"))).toBe(false);                               // never made here
+    expect(fleet.calls.filter(c => c.op === "lane.start")).toHaveLength(starts);       // none of them started anything
+    expect((await lanes(["start", "build", "--cwd", "/w/build", "--task", "12"], { env })).code).toBe(2);
+
+    // A start that fails after the assignment says where the task stays.
+    fleet.intercept("lane.start", async () => refusal("name_taken", "a window named build is there"));
+    const taken = await lanes(["start", "build", "--cwd", "/w/build", "--task", "T-1"], { env });
+    expect(taken.code).toBe(4);
+    expect(taken.err).toContain("T-1 stays assigned to build: morndo-board assign T-1 <lane> hands it on");
+    expect((await lanes(["--help"])).out).toContain("[--prompt TEXT] [--task T-12] [--json]");
   });
 
   it("start on an engine: --role or --engine with --reason reach lane.start; the answer says what ran and what it passed over", async () => {

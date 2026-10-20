@@ -40,6 +40,8 @@ import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
+import { BoardProjector } from "./application/board-projector.ts";
+import { fleetRuns } from "./adapters/fleet-runs.ts";
 import { AgentAccess } from "./application/agent-access.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
@@ -231,7 +233,11 @@ switch (cmd) {
     // Said once at start: a CLI older than the page needs, or one that can't run (the page says it again when opened).
     engines?.ready().then(why => { if (why) log.warn(`engines: ${why}`); }, e => log.warn("engines: the CLI can't run", e));
     // ADR-0015: the board, changed by the principal (a Command) and by the agents (their tokens, issued below).
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name) });
+    // ADR-0032: with a fleet, the board also follows the lanes' Runs (the projector, on the fleet client the alerts and
+    // the deliveries use): each lane's run goes out with the board, and its tasks move by D1 to D4 as actor "board".
+    const following: { projector: BoardProjector | null } = { projector: null };
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [] });
+    following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     const agents = new AgentAccess(store, config.managerWindow);
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
@@ -242,6 +248,9 @@ switch (cmd) {
     const usage = new UsageService({ store });
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
+    // The runs read once, which applies what is due since the hub last ran; never in the way of the hub's start (a fleet
+    // that doesn't answer is logged, and asked again when it does).
+    void following.projector?.start().catch((e: unknown) => log.error("board: following the runs failed to start", e));
     const txSettings = loadTranscriptionSettings(config.dataDir, line => log.warn(line));
     const machine = openMachineGuard(txSettings.guard);
     try { await machine.refresh(); }
@@ -314,7 +323,7 @@ switch (cmd) {
     void memorySync?.tick();                             // the first round now; then the loop's, every minute
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); if (syncMemory) clearInterval(syncMemory); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); fleet?.ports.stop(); await http.idle(); await http.close(); store.close(); memoryStore?.close(); process.exit(0); };
+    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); if (syncMemory) clearInterval(syncMemory); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); following.projector?.stop(); board.stop(); fleet?.ports.stop(); await http.idle(); await http.close(); store.close(); memoryStore?.close(); process.exit(0); };
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     break;
