@@ -273,7 +273,9 @@ export const boardChanged = (e: TaskEvent): BoardChanged => ({
 export const GONE_REASON = "its lane stopped without DONE";
 export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
   if (task.assignee === null || task.assignee !== run.lane || run.since <= task.updatedAt) return null;
-  const said = (run.line ?? "").trim().slice(0, REASON_MAX) || null;
+  // The reason is the run's status line as one clean line: a control character in it (a lane's odd output) is a space,
+  // never a refused move (line(), bad_text).
+  const said = (run.line ?? "").replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, REASON_MAX) || null;
   if (task.status === "doing") {
     if (run.phase === "ended" && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
     if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) return { to: "blocked", reason: said ?? run.outcome, rule: "D2" };

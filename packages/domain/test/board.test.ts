@@ -213,6 +213,11 @@ describe("the board's own moves (B10, D1 to D6)", () => {
     expect(derivedMove(doing(), run({ outcome: "blocked", line: "STATUS: BLOCKED on the API key" }), [doing()])).toMatchObject({ to: "blocked", rule: "D2", reason: "STATUS: BLOCKED on the API key" });
     expect(derivedMove(doing(), run({ outcome: "needs_decision", line: "" }), [doing()])).toMatchObject({ to: "blocked", rule: "D2", reason: "needs_decision" });
   });
+  it("D1's reason is one clean line: a control character in the status line is a space, never a refused move", () => {
+    const moved = derivedMove(doing(), run({ line: "STATUS: DONE\u001b[0m pushed\ttwice" }), [doing()]);
+    expect(moved?.reason).toBe("STATUS: DONE [0m pushed twice");
+    expect(apply(doing(), { action: "move", to: "review", reason: moved?.reason ?? "" }, boardActor()).ok).toBe(true);  // negative control: the raw line is refused (bad_text)
+  });
   it("D3: in progress to to do when the assignee's lane is gone", () => {
     expect(derivedMove(doing(), run({ phase: "gone", outcome: undefined }), [doing()])).toEqual({ to: "todo", reason: GONE_REASON, rule: "D3" });
   });

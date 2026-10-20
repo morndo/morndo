@@ -46,7 +46,7 @@
     <StatusIcon status={task.status} size={14} />
     <h4 title={task.title}>{task.title}</h4>
   </div>
-  {#if look}<p class="live" data-run={run?.phase} title={look.words}><RunDot dot={look.dot} /><span>{look.words}</span></p>{/if}
+  {#if look}<p class="live" class:warn={look.dot.includes("dot-warn")} data-run={run?.phase} title={look.words}><RunDot dot={look.dot} /><span>{look.words}</span></p>{/if}
   {#each jobs as job (jobKey(job))}
     <button type="button" class="chip job" data-job={jobKey(job)} onclick={e => { e.stopPropagation(); onOpenJob(jobKey(job)); }} onkeydown={e => { if (chipOpensJob(e.key)) { e.stopPropagation(); e.preventDefault(); onOpenJob(jobKey(job)); } }}>{job.name} · {job.state}</button>
   {/each}
@@ -89,6 +89,9 @@
   /* The live line: the dot centred under the status glyph, the words under the title, one line (the rest in its title). */
   .live { margin: 0; display: flex; align-items: center; gap: 12px; min-width: 0; padding-left: 4px; font: 400 12px/17px var(--font); color: var(--muted); }
   .live span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  /* What asks for him (needs you, a wait nothing will wake, overdue) is written in the warning colour: status in colour
+     (COLOR.md 2), as the prototype the owner approved shows it. */
+  .live.warn { color: var(--warn-fg); }
   .why {
     margin: 0 0 0 22px; font: 400 12px/17px var(--font); color: var(--bad-fg);
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
