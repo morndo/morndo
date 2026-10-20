@@ -127,7 +127,7 @@ describe("release pipeline files", () => {
     expect(outside).toContain("trust/release_allowed_signers");
     expect(outside).toContain("ssh-keygen -Y verify");
     expect(outside).toContain("gh attestation verify");
-    expect(readFileSync("scripts/release/published-gh.sh", "utf8")).not.toContain("verify-asset");
+    expect(readFileSync("scripts/release/published-gh.sh", "utf8")).toContain("verify-asset");
     expect(outside).toContain("signer-workflow");
     expect(outside).toContain(".github/workflows/release.yml@refs/heads/main");
     expect(outside).not.toContain("gh release verify");
@@ -148,9 +148,12 @@ describe("release pipeline files", () => {
     });
     expect(dry.status, dry.stderr).toBe(0);
     const calls = readFileSync(log, "utf8");
-    expect(calls).not.toContain("release download");
-    expect(calls).not.toContain("verify-asset");
     expect(calls).toContain("morndo/morndo release verify v0.0.0");
+    expect(calls).toContain("morndo/morndo release download v0.0.0");
+    // Every downloaded asset is checked against the release's attestation, by tag.
+    for (const name of ["morndo-0.0.0-linux-x64.tar.gz", "manifest.json", "install.sh", "SHA256SUMS"]) {
+      expect(calls, name).toMatch(new RegExp(`morndo/morndo release verify-asset v0\\.0\\.0 .*/${name.replaceAll(".", "\\.")}\n`));
+    }
     const summary = join(dir, "summary");
     writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s %s\\n' "$GH_REPO" "$*" >> "${log}"\nif [ "$1" = release ] && [ "$2" = verify ]; then exit 1; fi\nexit 0\n`);
     chmodSync(join(bin, "gh"), 0o755);
@@ -160,6 +163,16 @@ describe("release pipeline files", () => {
     });
     expect(failed.status).not.toBe(0);
     expect(readFileSync(summary, "utf8")).toMatch(/withdraw/i);
+    // A digest that does not match the attestation fails the job and says how to withdraw.
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s %s\\n' "$GH_REPO" "$*" >> "${log}"\nif [ "$1" = release ] && [ "$2" = download ]; then\n  mkdir -p "${dir}/assets"\n  : > "${dir}/assets/manifest.json"\nfi\nif [ "$1" = release ] && [ "$2" = verify-asset ]; then echo "digest mismatch" >&2; exit 1; fi\nexit 0\n`);
+    chmodSync(join(bin, "gh"), 0o755);
+    const summary2 = join(dir, "summary2");
+    const mismatch = spawnSync("sh", ["scripts/release/published-gh.sh"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, GH_REPO: "morndo/morndo", TAG: "v0.0.0", RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary2 },
+    });
+    expect(mismatch.status).not.toBe(0);
+    expect(readFileSync(summary2, "utf8")).toMatch(/withdraw/i);
     const missing = spawnSync("sh", ["scripts/release/published-gh.sh"], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, TAG: "v0.0.0", RUNNER_TEMP: dir, GH_REPO: "" },
