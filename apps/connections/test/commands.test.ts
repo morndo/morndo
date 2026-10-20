@@ -145,7 +145,9 @@ describe("page commands", () => {
     expect(saved.ok).toBe(true);
     expect(mem.engines.writes.length).toBeGreaterThan(writes);
     expect(mem.store.policy.roles.find(item => item.role === "implement")?.written).toEqual(["key-a:m@high"]);
-    expect(mem.store.policy.events.at(-1)?.type).toBe("PriorityChanged");
+    const types = mem.store.policy.events.map(event => event.type);
+    expect(types).toContain("PriorityChanged");
+    expect(types).not.toContain("AutoSwitched");
   });
 
   it("checks the saved order and picks together, and names risk picks that no longer fit", async () => {
