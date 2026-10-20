@@ -305,6 +305,15 @@ export function keyViolations(text: string, jobs: Record<string, string>): strin
   return found;
 }
 
+describe("the Node pin is written three times and must agree", () => {
+  it("node-pin.ts, the build job and the signing check name one version", () => {
+    const release = readFileSync(".github/workflows/release.yml", "utf8");
+    const pins = (text: string) => [...text.matchAll(/BUNDLED_NODE: "([0-9.]+)"/g)].map(m => m[1]);
+    expect(pins(job(release, "build"))).toEqual([BUNDLED_NODE]);
+    expect(pins(job(release, "sign"))).toEqual([BUNDLED_NODE]);
+  });
+});
+
 describe("artifacts are downloaded by exact name", () => {
   const release = readFileSync(".github/workflows/release.yml", "utf8");
   const names = ["release-linux-x64", "release-linux-arm64", "release-darwin-arm64"];

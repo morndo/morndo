@@ -39,6 +39,13 @@ describe("check-signing-release.sh", () => {
     const dist = join(dir, "dist");
     mkdirSync(dist);
     copyFileSync(join(repoRoot, "install.sh"), join(dir, "install.sh"));
+    const stamp = "2026-11-02T10:00:00Z";
+    const git = (...args: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.invalid", ...args], {
+      cwd: dir, encoding: "utf8", env: { PATH: process.env.PATH ?? "", GIT_AUTHOR_DATE: stamp, GIT_COMMITTER_DATE: stamp },
+    });
+    expect(git("init", "-q").status).toBe(0);
+    expect(git("commit", "-q", "--allow-empty", "-m", "release").status).toBe(0);
+    const sha = git("rev-parse", "HEAD").stdout.trim();
     const artifacts = platforms.map(platform => {
       const archive = Buffer.from(`archive for ${platform}\n`);
       const list = Buffer.from(`[]\n${platform}`);
@@ -48,20 +55,30 @@ describe("check-signing-release.sh", () => {
       return { platform, name, size: archive.length, sha256: sha256(archive), filesSha256: sha256(list), node: BUNDLED_NODE };
     });
     const manifest = buildManifest({
-      version: VERSION, commit: COMMIT, publishedAt: Date.parse("2026-11-02T10:00:00Z"), repository: "o/r",
+      version: VERSION, commit: sha, publishedAt: Date.parse(stamp), repository: "o/r",
       protocol: protocolRange(), schemas: declaredSchemas(), artifacts,
     });
     writeFileSync(join(dist, "manifest.json"), manifest);
     writeFileSync(join(dist, "install.sh"), stampVersion(readFileSync(join(repoRoot, "install.sh"), "utf8"), VERSION));
     const names = [...artifacts.map(a => a.name), "manifest.json", "install.sh"];
     writeFileSync(join(dist, "SHA256SUMS"), sha256Sums(names.map(name => ({ name, bytes: readFileSync(join(dist, name)) }))));
-    return { dir, dist, archive: artifacts[0]!.name };
+    return { dir, dist, sha, archive: artifacts[0]!.name };
   }
-  const run = (dir: string, env: Record<string, string> = {}) => sh("check-signing-release.sh", dir, { VERSION, RELEASE_SHA: COMMIT, ...env });
+  const run = (dir: string, sha: string, env: Record<string, string> = {}) =>
+    sh("check-signing-release.sh", dir, { VERSION, RELEASE_SHA: sha, REPOSITORY: "o/r", BUNDLED_NODE, ...env });
+  // Change the manifest, then make SHA256SUMS agree, so only the manifest check can object.
+  const rewrite = (p: ReturnType<typeof build>, change: (text: string) => string) => {
+    const manifest = join(p.dist, "manifest.json");
+    const next = change(readFileSync(manifest, "utf8"));
+    expect(next).not.toBe(readFileSync(manifest, "utf8"));
+    writeFileSync(manifest, next);
+    const names = readdirSync(p.dist).filter(name => name.endsWith(".tar.gz")).concat(["manifest.json", "install.sh"]);
+    writeFileSync(join(p.dist, "SHA256SUMS"), sha256Sums(names.map(name => ({ name, bytes: readFileSync(join(p.dist, name)) }))));
+  };
 
   it("passes on a consistent build", () => {
-    const { dir } = build();
-    const done = run(dir);
+    const { dir, sha } = build();
+    const done = run(dir, sha);
     expect(done.status, done.stderr).toBe(0);
   });
 
@@ -75,16 +92,30 @@ describe("check-signing-release.sh", () => {
   ])("refuses %s", (_name, change, message) => {
     const built = build();
     change(built);
-    const done = run(built.dir);
+    const done = run(built.dir, built.sha);
     expect(done.status).toBe(1);
     expect(done.stderr).toMatch(/refusing to sign/);
     expect(done.stderr).toMatch(message);
   });
 
   it("refuses a manifest for another commit or version", () => {
-    const { dir } = build();
-    expect(run(dir, { RELEASE_SHA: "cd".repeat(20) }).status).toBe(1);
-    expect(run(dir, { VERSION: "0.2.1" }).status).toBe(1);
+    const { dir, sha } = build();
+    expect(run(dir, sha, { RELEASE_SHA: "cd".repeat(20) }).status).toBe(1);
+    expect(run(dir, sha, { VERSION: "0.2.1" }).status).toBe(1);
+  });
+
+  it.each([
+    ["a Node version other than the pinned one", (text: string) => text.replaceAll(`"node": "${BUNDLED_NODE}"`, '"node": "24.0.0"'), /Node/],
+    ["a publish date that is not the commit's", (text: string) => text.replace("2026-11-02T10:00:00Z", "2026-11-03T10:00:00Z"), /publish/],
+    ["a notes link for another repository", (text: string) => text.replace("github.com/o/r/", "github.com/x/y/"), /notes/],
+    ["a schema floor above its version", (text: string) => text.replace(/"floor": \d+/, '"floor": 999'), /schema/],
+    ["a protocol range that runs backwards", (text: string) => text.replace(/"agent": \[\s*(\d+),\s*(\d+)\s*\]/, '"agent": [9, 2]'), /protocol/],
+  ])("refuses a manifest with %s", (_name, change, message) => {
+    const built = build();
+    rewrite(built, change);
+    const done = run(built.dir, built.sha);
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(message);
   });
 });
 

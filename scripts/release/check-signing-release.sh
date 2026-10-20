@@ -8,6 +8,8 @@ set -eu
 PATH=/usr/bin:/bin
 : "${VERSION:?}"
 : "${RELEASE_SHA:?}"
+: "${REPOSITORY:?}"
+: "${BUNDLED_NODE:?}"
 
 fail() {
   echo "refusing to sign: $1" >&2
@@ -43,6 +45,16 @@ sha256sum -c SHA256SUMS > /dev/null || fail "SHA256SUMS does not match the files
 listed=$(cut -c67- SHA256SUMS | LC_ALL=C sort | tr '\n' ' ')
 sums=$(printf '%s\n' install.sh manifest.json "morndo-$VERSION-linux-x64.tar.gz" "morndo-$VERSION-linux-arm64.tar.gz" "morndo-$VERSION-darwin-arm64.tar.gz" | LC_ALL=C sort | tr '\n' ' ')
 [ "$listed" = "$sums" ] || fail "SHA256SUMS lists [$listed]"
+
+# What the Manifest says about itself. The exact schema floors and protocol ranges come from the code
+# and are not recomputed here (a follow-up); these are the facts plain shell can check.
+[ "$(jq -r '.schema' manifest.json)" = 1 ] && [ "$(jq -r .product manifest.json)" = morndo ] || fail "manifest is not a morndo schema 1 document"
+jq -e --arg n "$BUNDLED_NODE" 'all(.artifacts[]; .node == $n)' manifest.json > /dev/null || fail "an artifact names a Node other than the pinned $BUNDLED_NODE"
+committed=$(git log -1 --format=%ct "$RELEASE_SHA") || fail "cannot read the release commit"
+[ "$(jq -r .publishedAt manifest.json)" = "$(date -u -d "@$committed" +%Y-%m-%dT%H:%M:%SZ)" ] || fail "manifest publish date is not the release commit's"
+[ "$(jq -r .notes manifest.json)" = "https://github.com/$REPOSITORY/releases/tag/v$VERSION" ] || fail "manifest notes link is not this release's"
+jq -e '[.schemas[]] | all((.version | type == "number" and . == floor and . >= 1) and (.floor | type == "number" and . == floor and . >= 0) and (.floor <= .version))' manifest.json > /dev/null || fail "a schema floor is not within 0 and its version"
+jq -e '[.protocol.agent, .protocol.clientApi] | all(length == 2 and (.[0] | type == "number" and . == floor and . >= 1) and (.[1] | type == "number" and . == floor) and .[0] <= .[1])' manifest.json > /dev/null || fail "a protocol range is not low <= high from 1"
 
 # install.sh is the committed script with one line changed.
 sed "s/^MORNDO_RELEASE_VERSION='0.0.0-unstamped'\$/MORNDO_RELEASE_VERSION='$VERSION'/" ../install.sh | cmp -s - install.sh || fail "install.sh is not the committed script stamped with $VERSION"

@@ -273,6 +273,8 @@ jobs:
         env:
           VERSION: ${{ needs.release-please.outputs.version }}
           RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+          REPOSITORY: ${{ github.repository }}
+          BUNDLED_NODE: "24.21.0"
         run: /bin/sh scripts/release/check-signing-release.sh
       # The only step that holds the release key.
       - name: Sign
