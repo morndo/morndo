@@ -48,11 +48,11 @@ describe("errors and keys", () => {
   it("the side-effecting ops carry keys, keystrokes don't", () => {
     expect([...KEYED_OPS].sort()).toEqual([
       "connections.narrow", "connections.priority", "connections.revoke", "connections.role",
-      "file.put", "job.notice", "lane.start", "lane.stop", "pane.send", "worktree.add",
+      "file.put", "job.notice", "lane.start", "lane.stop", "memory.sync", "pane.send", "worktree.add",
     ]);
     expect(KEYED_OPS.has("pane.keys")).toBe(false);
     expect(KEYED_OPS.has("job.cancel")).toBe(false);
-    expect(OP_NAMES).toHaveLength(26);
+    expect(OP_NAMES).toHaveLength(27);
     expect(Object.keys(OP_ARGS).sort()).toEqual([...OP_NAMES].sort());
     expect(Object.keys(OP_RESULTS).sort()).toEqual([...OP_NAMES].sort());
   });
@@ -210,6 +210,7 @@ describe("op results (what a node reports: shape)", () => {
       "pane.capture": { text: "$ ", truncated: false },
       "lane.deliver": { delivery: { id: "hub:k1", node: "pc", target: { lane: "manager" }, state: "queued", queuedAt: 1, notAfter: 2 } },
       "delivery.cancel": { delivery: { id: "hub:k1", node: "pc", target: { lane: "manager" }, state: "given_up", queuedAt: 1, notAfter: 2, why: "cancelled" } },
+      "memory.sync": { committed: true, written: 2, removed: 1, skillDirs: ["/home/u/.claude/skills"], conflicts: [] },
       "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
       "connections.priority": { ok: true }, "connections.role": { ok: true }, "connections.revoke": { ok: true }, "connections.narrow": { ok: true },
     };
@@ -299,5 +300,24 @@ describe("error codes", () => {
     const codes: ErrorCode[] = ["bad_args", "unknown_op", "denied", "no_pane", "menu_open", "no_input_box", "draft_present", "busy", "name_taken", "lane_conflict", "too_large", "timeout", "node_offline", "uncertain", "internal", "updating", "not_allowed",
       "id_conflict", "no_session", "already_typed"];
     expect(Object.keys(ERROR_EXECUTED).sort()).toEqual([...codes].sort());
+  });
+});
+
+describe("memory.sync arguments (ADR-0031: Memory's own skills only, in parts under the message limit)", () => {
+  const sync = (a: unknown) => z.safeParse(OP_ARGS["memory.sync"], a).success;
+  const file = (name: string, content = "---\nname: x\n---\n") => ({ name, content });
+  const good = { version: "0123456789abcdef", part: 0, parts: 1, files: [file("morndo-mem-repo-shop-api-facts")] };
+  it("accepts Memory's skill files", () => {
+    expect(sync(good)).toBe(true);
+    expect(sync({ ...good, files: [] })).toBe(true);
+    expect(sync({ ...good, part: 2, parts: 3 })).toBe(true);
+  });
+  it("refuses another skill's name, a path, a bad version or a part past the last", () => {
+    for (const name of ["my-skill", "morndo-mem-../x", "morndo-mem-a/b", "morndo-mem-", "morndo-mem--x", "morndo-mem-x-", "Morndo-mem-x", `morndo-mem-${"a".repeat(60)}`]) {
+      expect(sync({ ...good, files: [file(name)] }), name).toBe(false);
+    }
+    expect(sync({ ...good, version: "xyz" })).toBe(false);
+    expect(sync({ ...good, part: 1, parts: 1 })).toBe(false);
+    expect(sync({ ...good, files: [file("morndo-mem-x", "a".repeat(LIMITS.memorySkillBytes + 1))] })).toBe(false);
   });
 });

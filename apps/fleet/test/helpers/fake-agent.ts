@@ -41,6 +41,7 @@ export const validResult = (op: string, node: string): unknown => {
     "worktree.add": { path: "/work" },
     "pane.capture": { text: null, truncated: false },
     "lane.deliver": { delivery: { id: "hub:fake", node: node || "node", target: { lane: "fake" }, state: "queued", queuedAt: 1, notAfter: 2 } },
+    "memory.sync": { committed: true, written: 0, removed: 0, skillDirs: [], conflicts: [] },
     "delivery.cancel": { delivery: { id: "hub:fake", node: node || "node", target: { lane: "fake" }, state: "given_up", queuedAt: 1, notAfter: 2, why: "cancelled" } },
     "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
     "connections.priority": { ok: true }, "connections.role": { ok: true }, "connections.revoke": { ok: true }, "connections.narrow": { ok: true },

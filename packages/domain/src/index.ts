@@ -25,3 +25,4 @@ export * from "./secrets.ts";
 export * from "./knowledge.ts";
 export * from "./knowledge-facts.ts";
 export * from "./pool.ts";
+export * from "./memory.ts";

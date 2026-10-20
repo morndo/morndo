@@ -60,6 +60,7 @@ export const CHECK: Checkers = {
   "delivery.cancel": decoded("delivery.cancel", a => deliveryId(a.id)),
   "worktree.list": decoded("worktree.list"),
   "worktree.add": decoded("worktree.add"),
+  "memory.sync": decoded("memory.sync"),
   "job.cancel": decoded("job.cancel"),
   "job.notice": decoded("job.notice"),
   "job.noticeResult": decoded("job.noticeResult"),

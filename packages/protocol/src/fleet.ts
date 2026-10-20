@@ -20,6 +20,8 @@ export const LIMITS = {
   // messages: each at most 512 KiB; both ends set `maxPayload` to 1 MiB; bulk data in chunks of 256 KiB before base64
   maxMessageBytes: 524_288, maxPayload: 1_048_576, chunkBytes: 262_144,
   // content: files 25 MiB (as the hub's own copies, MAX_FILE_BYTES), typed text, keystrokes, panes per capture, a needle
+  // memory (ADR-0031): one skill file, and the files of one memory.sync part, under maxMessageBytes with room for JSON
+  memorySkillBytes: 32_768, memoryPartBytes: 393_216, memoryPartsMax: 64,
   maxFileBytes: 26_214_400, maxSendText: 8000, maxKeys: 4096, captureManyMax: 64, captureBytesPerPane: 6144, maxNeedle: 200,
   // streaming: hook events unacknowledged in flight
   replayWindow: 256,
@@ -125,7 +127,7 @@ export type Delivery = {
 
 export type OpName = "inventory.get" | "pane.captureMany" | "pane.frame" | "pane.keys" | "pane.send" | "op.status"
   | "transcript.size" | "transcript.read" | "transcript.locate" | "file.stat" | "file.get" | "file.put"
-  | "lane.start" | "lane.stop" | "worktree.list" | "worktree.add" | "pane.capture" | "lane.deliver" | "delivery.cancel"
+  | "lane.start" | "lane.stop" | "worktree.list" | "worktree.add" | "pane.capture" | "lane.deliver" | "delivery.cancel" | "memory.sync"
   | "job.cancel" | "job.notice" | "job.noticeResult"
   | "connections.priority" | "connections.role" | "connections.revoke" | "connections.narrow";
 // What a lane runs on, as lane.start answers it (reliable lanes §3.3): the engine layer's entry (provider:model[@effort]),
@@ -154,6 +156,9 @@ export type OpArgs = {
   "pane.capture": { workerId: string; lines: number; attributes?: boolean; join?: boolean };   // join: tmux -J, default true
   "lane.deliver": { id: string; target: DeliveryTarget; text: string; ttlMs?: number };
   "delivery.cancel": { id: string };
+  // Memory's skill files for this node (ADR-0031), in parts: the node stages each part under the version and, once it holds
+  // all of them, replaces its own skills (names starting `morndo-mem-`) with exactly these. No command, no path.
+  "memory.sync": { version: string; part: number; parts: number; files: { name: string; content: string }[] };
   // The id, and the token whose lane owns it. No command.
   "job.cancel": { id: string; token: string };
   // One notice id, the lane that types it, and the text that lane stores. No command.
@@ -185,6 +190,7 @@ export type OpResult = {
   "pane.capture": { text: string | null; truncated: boolean };
   "lane.deliver": { delivery: Delivery };
   "delivery.cancel": { delivery: Delivery };
+  "memory.sync": { committed: boolean; written: number; removed: number; skillDirs: string[]; conflicts: string[] };
   "job.cancel": { ok: true };
   "job.notice": { ok: true };
   "job.noticeResult": { ok: true };
@@ -197,7 +203,7 @@ export type OpResult = {
 // Nor do lane.deliver and delivery.cancel: a delivery's id is its idempotency (fleet clients §4.1), and its typing runs
 // inside the agent under the id as a done key (§4.3), a retype under `${id}#2`.
 export const KEYED_OPS: ReadonlySet<OpName> = new Set<OpName>([
-  "pane.send", "file.put", "lane.start", "lane.stop", "worktree.add", "job.notice",
+  "pane.send", "file.put", "lane.start", "lane.stop", "worktree.add", "job.notice", "memory.sync",
   "connections.priority", "connections.role", "connections.revoke", "connections.narrow",
 ]);
 // A fresh passkey. Narrowing (off, a lower budget, a deny) is not in this set.
@@ -252,6 +258,9 @@ export function urgentAlert(a: { kind: string; detail: Record<string, unknown> }
 
 // ---- the pieces messages are made of
 
+// Memory's skill names (ADR-0031): the Agent Skills name rule, and always Memory's own prefix, so a node never touches
+// another skill.
+export const MEMORY_SKILL_NAME = /^morndo-mem-(?!-)(?!.*--)[a-z0-9-]{1,53}(?<!-)$/;
 const v = z.literal(1);
 const text = () => z.string();                                              // node → fleet: shape only
 const label = () => z.string().check(z.maxLength(200));
@@ -317,7 +326,7 @@ const DeliveryTargetSchema = z.union([z.strictObject({ lane: windowName(), stick
 export const OP_NAMES = [
   "inventory.get", "pane.captureMany", "pane.frame", "pane.keys", "pane.send", "op.status",
   "transcript.size", "transcript.read", "transcript.locate", "file.stat", "file.get", "file.put",
-  "lane.start", "lane.stop", "worktree.list", "worktree.add", "pane.capture", "lane.deliver", "delivery.cancel",
+  "lane.start", "lane.stop", "worktree.list", "worktree.add", "pane.capture", "lane.deliver", "delivery.cancel", "memory.sync",
   "job.cancel", "job.notice", "job.noticeResult",
   "connections.priority", "connections.role", "connections.revoke", "connections.narrow",
 ] as const satisfies readonly OpName[];
@@ -359,6 +368,15 @@ export const OP_ARGS = {
     id: deliveryId(), target: DeliveryTargetSchema, text: sendText(), ttlMs: z.exactOptional(z.int().check(z.gte(1), z.lte(LIMITS.deliveryKeepMs))),
   }),
   "delivery.cancel": z.object({ id: deliveryId() }),
+  "memory.sync": z.object({
+    version: z.string().check(z.regex(/^[a-f0-9]{16,64}$/)),
+    part: z.int().check(z.gte(0), z.lt(LIMITS.memoryPartsMax)),
+    parts: z.int().check(z.gte(1), z.lte(LIMITS.memoryPartsMax)),
+    files: z.array(z.object({
+      name: z.string().check(z.regex(MEMORY_SKILL_NAME)),
+      content: z.string().check(z.maxLength(LIMITS.memorySkillBytes)),
+    })).check(z.maxLength(400)),
+  }).check(z.refine(a => a.part < a.parts, "part below parts")),
   "job.cancel": z.object({ id: z.string().check(z.regex(JOB_ID)), token: z.string().check(z.minLength(1), z.maxLength(512)) }),
   "job.notice": z.object({
     id: z.string().check(z.minLength(1), z.maxLength(240), z.regex(/^[A-Za-z0-9:_-]+$/)),
@@ -419,6 +437,7 @@ export const OP_RESULTS = {
   "pane.capture": z.object({ text: z.nullable(text()), truncated: z.boolean() }),
   "lane.deliver": z.object({ delivery: DeliverySchema }),
   "delivery.cancel": z.object({ delivery: DeliverySchema }),
+  "memory.sync": z.object({ committed: z.boolean(), written: count(), removed: count(), skillDirs: z.array(text()), conflicts: z.array(text()) }),
   "job.cancel": z.object({ ok: z.literal(true) }),
   "job.notice": z.object({ ok: z.literal(true) }),
   "job.noticeResult": z.object({ ok: z.literal(true) }),
