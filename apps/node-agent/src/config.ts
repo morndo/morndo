@@ -16,6 +16,9 @@
 //   names neither a role nor an engine (`defaultRole`). Without `engines`, lane.start refuses a role or an engine.
 // Memory (ADR-0031; docs/design/memory/README.md): `memory.skillDirs`, the engines' skill folders memory.sync writes
 // Memory's skills into, at most 8, each absolute or under the node user's home as "~/…".
+// A draft in the way (#64): `draftStash.lanes`, the lanes whose unsent draft the deliverer stashes (Claude Code's Ctrl+S)
+// once it has held a delivery and stayed unchanged for `draftStash.afterMin` minutes (1 to 1440). The orchestrator by
+// default: its loop stops while its box holds text. `lanes: []` turns it off.
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { JOB_CLASS } from "@morndo/domain";
@@ -30,6 +33,7 @@ export type JobClassPolicy = { limit: number; timeoutSec?: number };
 export type JobGuardPolicy = { load1?: number; memAvailableMiB?: number };
 export type JobsPolicy = { enabled: boolean; classes: Record<string, JobClassPolicy>; guard?: JobGuardPolicy };
 export type MemoryPolicy = { skillDirs: string[] };
+export type DraftStashPolicy = { lanes: string[]; afterMin: number };
 export type Policy = {
   ops: OpName[];
   session: string;
@@ -44,6 +48,7 @@ export type Policy = {
   jobs: JobsPolicy;
   jobsWarning?: string;
   memory: MemoryPolicy;
+  draftStash: DraftStashPolicy;
 };
 export type AgentConfig = {
   node: string; fleetUrl: string; fleetKey: string; keyPath: string; dbPath: string; relayPort: number; home: string; policy: Policy;
@@ -65,7 +70,7 @@ export const DEFAULT_JOBS: JobsPolicy = { enabled: true, classes: { default: { l
 export const DEFAULT_POLICY: Policy = {
   ops: [...ALL_OPS], session: "main", repoRoots: [], lockedPanes: {}, tmuxSocket: null,
   launch: { command: ["claude"], via: "shell" }, protected: ["manager"], statusContract: { mode: "ask", exempt: ["manager"] }, jobs: DEFAULT_JOBS,
-  memory: { skillDirs: ["~/.claude/skills", "~/.agents/skills"] },
+  memory: { skillDirs: ["~/.claude/skills", "~/.agents/skills"] }, draftStash: { lanes: ["manager"], afterMin: 60 },
 };
 // The defaults as a copy that a parse may change, never DEFAULT_POLICY itself.
 const defaults = (): Policy => ({
@@ -73,6 +78,7 @@ const defaults = (): Policy => ({
   launch: { command: [...DEFAULT_POLICY.launch.command], via: DEFAULT_POLICY.launch.via }, protected: [...DEFAULT_POLICY.protected],
   statusContract: { mode: DEFAULT_POLICY.statusContract.mode, exempt: [...DEFAULT_POLICY.statusContract.exempt] },
   jobs: copyJobs(DEFAULT_JOBS), memory: { skillDirs: [...DEFAULT_POLICY.memory.skillDirs] },
+  draftStash: { lanes: [...DEFAULT_POLICY.draftStash.lanes], afterMin: DEFAULT_POLICY.draftStash.afterMin },
 });
 
 const CLASS_LIMIT_MAX = 1000;
@@ -128,6 +134,23 @@ function parseStatusContract(v: unknown, where: string): StatusContract {
     throw new ConfigError(`${where}: statusContract.exempt must be a list of lane names`);
   }
   return { mode, exempt: [...new Set(exempt as string[])] };
+}
+
+const STASH_AFTER_MAX = 1440;
+function parseDraftStash(v: unknown, where: string): DraftStashPolicy {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: draftStash must be an object { lanes, afterMin }`);
+  const o = v as Obj;
+  const unknown = Object.keys(o).filter(k => k !== "lanes" && k !== "afterMin");
+  if (unknown.length) throw new ConfigError(`${where}: draftStash has an unknown field ${unknown.join(", ")} (known: lanes, afterMin)`);
+  const lanes = o.lanes ?? DEFAULT_POLICY.draftStash.lanes;
+  if (!Array.isArray(lanes) || !lanes.every(n => typeof n === "string" && LANE_NAME.test(n))) {
+    throw new ConfigError(`${where}: draftStash.lanes must be a list of lane names`);
+  }
+  const afterMin = o.afterMin ?? DEFAULT_POLICY.draftStash.afterMin;
+  if (typeof afterMin !== "number" || !Number.isInteger(afterMin) || afterMin < 1 || afterMin > STASH_AFTER_MAX) {
+    throw new ConfigError(`${where}: draftStash.afterMin must be a whole number of minutes from 1 to ${STASH_AFTER_MAX}`);
+  }
+  return { lanes: [...new Set(lanes as string[])], afterMin };
 }
 
 const PROVIDER = /^[a-z][a-z0-9-]{0,31}$/;
@@ -285,7 +308,7 @@ export function jobTimeouts(jobs: JobsPolicy): Record<string, number> {
 }
 
 export function parsePolicy(value: Obj, where: string): Policy {
-  const known = ["ops", "session", "repoRoots", "fileRoots", "lockedPanes", "tmuxSocket", "launch", "protected", "statusContract", "engines", "jobs", "memory"];
+  const known = ["ops", "session", "repoRoots", "fileRoots", "lockedPanes", "tmuxSocket", "launch", "protected", "statusContract", "engines", "jobs", "memory", "draftStash"];
   const unknown = Object.keys(value).filter(k => !known.includes(k));
   if (unknown.length) throw new ConfigError(`${where}: unknown field ${unknown.join(", ")} (known: ${known.join(", ")})`);
   const policy: Policy = defaults();
@@ -336,6 +359,7 @@ export function parsePolicy(value: Obj, where: string): Policy {
     }
   }
   if (value.memory !== undefined) policy.memory = parseMemory(value.memory, where);
+  if (value.draftStash !== undefined) policy.draftStash = parseDraftStash(value.draftStash, where);
   return policy;
 }
 

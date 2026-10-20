@@ -101,7 +101,7 @@ export type Pane = { workerId: string; window: string; cwd: string; sessionId?: 
 // Keys a client may press by name (pane.keys `names`, §5): tmux key names (tmux(1), "KEY BINDINGS"), an allow-list.
 // None starts with "-" or ends in ";", so none reads as a flag or a command separator on tmux's command line.
 export const KEY_NAMES = ["Enter", "Escape", "Tab", "BSpace", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown",
-  "C-c", "C-d", "C-u", "Space", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+  "C-c", "C-d", "C-s", "C-u", "Space", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
   "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"] as const;
 export type KeyName = (typeof KEY_NAMES)[number];
 
@@ -123,7 +123,12 @@ export type Delivery = {
   sessionId?: string;                                                  // bound (a non-sticky name) or typed into
   typedAt?: number; deliveredAt?: number;
   why?: GiveUpReason; note?: string;                                   // note: e.g. "typed, never seen taken"
+  // The node stashed the lane's draft so this delivery could go in (#64): text left unsent in the input box, unchanged
+  // since `since`, put away with Claude Code's stash (Ctrl+S) at `at`, `chars` long, a copy of what the box showed at `copy`
+  // on the node. The text itself never leaves the node.
+  stashed?: DraftStash;
 };
+export type DraftStash = { at: number; since: number; chars: number; copy: string };
 
 export type OpName = "inventory.get" | "pane.captureMany" | "pane.frame" | "pane.keys" | "pane.send" | "op.status"
   | "transcript.size" | "transcript.read" | "transcript.locate" | "file.stat" | "file.get" | "file.put"
@@ -240,17 +245,19 @@ export type LaneEvent = { v: 1; t: "lane"; seq: number; event: LaneEventName; no
 // What the fleet service raises for the owner (spec §5.2, §5.4, §5.6, §7, §8): kept as audit rows, served oldest first by
 // the client API's GET /v1/alerts and sent as the "alert" event. `detail` is per kind (plan Contracts, "Alerts").
 // delivery_waiting: a delivery still queued, typed or held after 2, 15 and 60 minutes (fleet clients §4.5);
-// subscriber_lagging: a subscriber's oldest undelivered event is older than 60 s (§6).
+// subscriber_lagging: a subscriber's oldest undelivered event is older than 60 s (§6);
+// draft_stashed: a node stashed a lane's unsent draft so its deliveries could go in (#64).
 export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter", "backlog_full", "unrouted_hook",
-  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback"] as const;
+  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback", "draft_stashed"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type Alert = { id: number; at: number; node: string | null; kind: AlertKind; detail: Record<string, unknown> };
 // The alerts the app pushes (the owner, 2026-10-12): a node's key may be stolen (a new source, a second instance), events
-// are lost or piling up for a subscriber, or a message has waited a quarter of an hour (2 minutes is in-app only). The
-// hub's push and the app's marking both read this one rule.
+// are lost or piling up for a subscriber, or a message has waited a quarter of an hour (2 minutes is in-app only); and
+// text the owner left unsent was moved out of a lane's input box (#64). The hub's push and the app's marking both read
+// this one rule.
 export function urgentAlert(a: { kind: string; detail: Record<string, unknown> }): boolean {
   switch (a.kind) {
-    case "source_changed": case "instance_conflict": case "dead_letter": case "backlog_full": return true;
+    case "source_changed": case "instance_conflict": case "dead_letter": case "backlog_full": case "draft_stashed": return true;
     case "delivery_waiting": return typeof a.detail.minutes === "number" && a.detail.minutes >= 15;
     default: return false;
   }
@@ -412,6 +419,7 @@ export const DeliverySchema = z.object({
   waiting: z.exactOptional(z.object({ reason: z.enum(WAITING_REASONS), since: z.number() })),
   sessionId: z.exactOptional(text()), typedAt: z.exactOptional(z.number()), deliveredAt: z.exactOptional(z.number()),
   why: z.exactOptional(z.enum(GIVE_UP_REASONS)), note: z.exactOptional(label()),
+  stashed: z.exactOptional(z.object({ at: z.number(), since: z.number(), chars: count(), copy: text() })),
 });
 
 // Each op's result, as the fleet accepts it (agent → fleet: shape).
