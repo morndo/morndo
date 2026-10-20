@@ -8,8 +8,9 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { TestProject } from "vitest/node";
 
-// Seen in about one full run in two, under load, and not yet traced to a test: not counted until they are.
-const INTERMITTENT = ["morndo-codex-run-", "morndo-tx-"];
+// Seen in about one full run in two, under load, and not yet traced to a test: not counted until they are. Only the two
+// shapes the product makes (mkdtemp: the prefix and six characters), so a test's own dir (morndo-tx-own-*) is still named.
+const INTERMITTENT = /^morndo-(?:codex-run|tx)-[A-Za-z0-9]{6}$/;
 const OURS = /^morndo-test-(\d+)-[0-9a-f]+(?:-[a-z]+)?$/;
 
 export default function setup(project: TestProject): () => void {
@@ -21,8 +22,10 @@ export default function setup(project: TestProject): () => void {
   }
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   return () => {
-    const theirs = (existsSync(dir) ? readdirSync(dir) : []).filter(name => name.startsWith("morndo-") && !INTERMITTENT.some(prefix => name.startsWith(prefix)));
-    try { if (theirs.length > 0) throw new Error(`tests must remove the temp dirs they make, but left: ${theirs.join(", ")}`); }
+    try {
+      const theirs = (existsSync(dir) ? readdirSync(dir) : []).filter(name => name.startsWith("morndo-") && !INTERMITTENT.test(name));
+      if (theirs.length > 0) throw new Error(`tests must remove the temp dirs they make, but left: ${theirs.join(", ")}`);
+    }
     finally { rmSync(dir, { recursive: true, force: true }); }
   };
 }

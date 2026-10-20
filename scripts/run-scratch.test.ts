@@ -1,6 +1,6 @@
 // The run-scratch globalSetup's teardown (test/run-scratch.ts): the scratch dir always goes, and a run whose
 // tests left a morndo-* entry of their own in it fails naming each (entries like node-compile-cache are not theirs).
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -44,16 +44,34 @@ describe("the run-scratch teardown", () => {
     expect(message).not.toContain("other");
   });
 
-  it("lets the two known intermittent leaks pass, and still names any other", () => {
+  it("lets the two known intermittent leaks pass, in the shape the product makes them, and still names any other", () => {
     const { dir, teardown } = scratch();
-    mkdirSync(join(dir, "morndo-codex-run-a1"));
-    mkdirSync(join(dir, "morndo-tx-b2"));
+    mkdirSync(join(dir, "morndo-codex-run-aB3dE9"));
+    mkdirSync(join(dir, "morndo-tx-aB3dE9"));
     mkdirSync(join(dir, "morndo-new-c3"));
     let message = "";
     try { teardown(); } catch (e) { message = String(e); }
     expect(message).toContain("morndo-new-c3");
     expect(message).not.toContain("codex-run");
-    expect(message).not.toContain("morndo-tx");
+    expect(message).not.toContain("morndo-tx-aB3dE9");
+    expect(existsSync(dir)).toBe(false);
+  });
+
+  it("fails on a morndo-tx-own-* leftover, a test's dir, though morndo-tx-* of the product passes", () => {
+    const { dir, teardown } = scratch();
+    mkdirSync(join(dir, "morndo-tx-own-aB3dE9"));
+    mkdirSync(join(dir, "morndo-codex-run-own"));
+    mkdirSync(join(dir, "morndo-tx-aB3dE9-more"));
+    let message = "";
+    try { teardown(); } catch (e) { message = String(e); }
+    for (const name of ["morndo-tx-own-aB3dE9", "morndo-codex-run-own", "morndo-tx-aB3dE9-more"]) expect(message).toContain(name);
+  });
+
+  it("removes the dir even when it cannot be listed", () => {
+    const { dir, teardown } = scratch();
+    rmSync(dir, { recursive: true });
+    writeFileSync(dir, "not a directory");
+    expect(() => teardown()).toThrow();
     expect(existsSync(dir)).toBe(false);
   });
 
