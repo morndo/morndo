@@ -104,8 +104,10 @@ morndo-memory invalidate <id> --reason R
 
 - **Environment:** `MORNDO_HUB`, `MORNDO_AGENT_TOKEN` (or the token file the wrapper reads), and `MORNDO_LANE` (else the
   tmux window).
-- **Defaults:** the scope is `repo:<basename of the git toplevel>` of the working directory. The node is `MORNDO_NODE`,
-  else the host name's slug.
+- **Defaults:** the scope is `repo:<name>`, the folder name of the working directory's repository. That is its main
+  checkout's folder, the parent of the common git directory, not the top level of a linked worktree: a lane in
+  `.worktrees/<branch>` keeps the same notes as one in the main checkout. Outside a repository, `search` looks in every
+  scope and `remember` needs `--scope`. The node is `MORNDO_NODE`, else the host name's slug.
 - **Exit codes:** 0 done, 1 refused (one plain line), 2 usage, 3 hub unreachable.
 
 ## Acceptance (slice 1)

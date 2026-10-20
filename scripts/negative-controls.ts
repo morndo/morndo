@@ -2939,6 +2939,14 @@ export const CONTROLS: Control[] = [
     find: "env: childEnv(this.#parent, loginEnv(\"codex\", runHome)),",
     replace: "env: { ...this.#parent, ...loginEnv(\"codex\", runHome) },",
     run: ["apps/connections/test/pool-cli.test.ts"], expect: "KEY" },
+  // ---- Memory, the lanes' command (ADR-0031, morndo-memory): each guard removed once.
+  { id: "m-cli-scope", task: "M-cli", file: "apps/memory-cli/src/cli.ts",
+    find: 'const name = last === ".git" ? (common.at(-2) ?? "") : last.endsWith(".git") ? last.slice(0, -".git".length) : (parts(place.top).at(-1) ?? "");',
+    replace: 'const name = parts(place.top).at(-1) ?? "";',
+    run: ["apps/memory-cli/test/cli.test.ts"], expect: "whatever worktree the lane is in" },
+  { id: "m-cli-refusal-exit", task: "M-cli", file: "apps/memory-cli/src/cli.ts",
+    find: "if (e instanceof Refused) { io.err(e.message); return 1; }", replace: "if (e instanceof Refused) { io.err(e.message); return 0; }",
+    run: ["apps/memory-cli/test/cli.test.ts"], expect: "is refused (not_yours) with exit 1" },
 ];
 
 // ---- the runner

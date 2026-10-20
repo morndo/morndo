@@ -1,0 +1,17 @@
+{
+  "name": "@morndo/memory-cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "bin": {
+    "morndo-memory": "./src/main.ts"
+  },
+  "dependencies": {
+    "@morndo/domain": "0.0.0",
+    "@morndo/protocol": "0.0.0",
+    "@morndo/service-kit": "0.0.0"
+  }
+}
