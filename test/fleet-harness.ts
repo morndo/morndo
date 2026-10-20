@@ -561,8 +561,11 @@ export async function startHub(fleet: Fleet, o: { pollMs?: number; web?: "stub" 
     mkdirSync(web);
     writeFileSync(join(web, "200.html"), "<!doctype html><html><body>stub</body></html>");
   }
+  // The hub's own TMPDIR, inside its HOME: what a SIGKILLed hub leaves (its staging dir) goes with the HOME.
+  const scratch = join(home, "tmp");
+  mkdirSync(scratch);
   const extra: Record<string, string> = {
-    MORNDO_HOME: home, MORNDO_PORT: String(port), MORNDO_ORIGIN: origin, MORNDO_FLEET_SOCKET: fleet.socketPath,
+    TMPDIR: scratch, MORNDO_HOME: home, MORNDO_PORT: String(port), MORNDO_ORIGIN: origin, MORNDO_FLEET_SOCKET: fleet.socketPath,
     MORNDO_POLL_MS: String(o.pollMs ?? 400), MORNDO_QUIET_AFTER_MS: "2000", MORNDO_WEB_DIR: web, MORNDO_INBOX: join(home, "inbox"),
   };
   if (o.vnc !== undefined) extra.MORNDO_VNC = o.vnc;
