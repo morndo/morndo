@@ -100,7 +100,7 @@ describe("pane.keys by name (§5)", () => {
     expect(keys({ data: "\x1b[A" })).toBe(true);
     expect(keys({ names: ["Escape"] })).toBe(true);
     expect(keys({ names: [...KEY_NAMES] })).toBe(true);
-    expect(KEY_NAMES).toHaveLength(52);                                                         // 16 named keys, 10 digits, 26 letters
+    expect(KEY_NAMES).toHaveLength(53);                                                         // 17 named keys (C-s: #64), 10 digits, 26 letters
   });
   it("refuses both, neither, an empty list, and any name off the allow-list (negative controls)", () => {
     expect(keys({ data: "x", names: ["Enter"] }), "both").toBe(false);
