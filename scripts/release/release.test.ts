@@ -15,7 +15,7 @@ import { ChannelFeedSchema, FileListSchema, ManifestSchema } from "@morndo/proto
 import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
-import { writeVerifiedSite } from "./feed-site.ts";
+import { deployedSeq, writeVerifiedSite } from "./feed-site.ts";
 import { commitFeeds, feedTree, MOVED, refUpdateResult } from "./feed-sync.ts";
 import { readSchemaJson } from "./schema-read.ts";
 import { freshSite } from "./pages.ts";
@@ -336,18 +336,39 @@ describe("feed", () => {
     const site = freshSite(
       () => heads[i++] ?? heads[heads.length - 1]!,
       (head) => { built.push(head.sha); return head; },
+      () => null,
     );
     expect(built).toEqual(["aaa", "bbb"]);
     expect(site).toEqual({ sha: "bbb", seq: 5 });
   });
 
-  it("does not deploy a feed whose seq went backwards", () => {
-    const reads = [{ sha: "bbb", seq: 4 }, { sha: "bbb", seq: 5 }];
-    let i = 0;
-    expect(() => freshSite(
-      () => reads[i++] ?? reads[reads.length - 1]!,
-      head => head,
-    )).toThrow(/backwards/);
+  it("does not deploy a feed numbered below the one already deployed, and does deploy an equal or higher one", () => {
+    const at = (seq: number, deployed: number | null) => freshSite(() => ({ sha: "bbb", seq }), head => head, () => deployed);
+    expect(() => at(3, 4)).toThrow(/older than the deployed feed/);
+    expect(at(4, 4)).toEqual({ sha: "bbb", seq: 4 });
+    expect(at(5, 4)).toEqual({ sha: "bbb", seq: 5 });
+    expect(at(1, null)).toEqual({ sha: "bbb", seq: 1 });
+  });
+
+  it("reads the deployed feed's number from the Pages site, and nothing when there is no site or no feed", () => {
+    const bin = temp();
+    const fake = (body: string) => writeFileSync(join(bin, "gh"), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    const path = process.env.PATH;
+    process.env.PATH = `${bin}:${path ?? ""}`;
+    try {
+      const feed = emptyFeed({ channel: "latest", now: WHEN, keySetVersion: 1 }).replace('"seq": 1', '"seq": 7');
+      fake("echo https://example.invalid/site/");
+      const urls: string[] = [];
+      expect(deployedSeq("o/r", url => { urls.push(url); return feed; })).toBe(7);
+      expect(urls).toEqual(["https://example.invalid/site/latest.json"]);
+      expect(deployedSeq("o/r", () => null)).toBeNull();
+      fake("echo 'gh: Not Found (HTTP 404)' >&2; exit 1");
+      expect(deployedSeq("o/r", () => feed)).toBeNull();
+      fake("echo 'gh: Server Error (HTTP 500)' >&2; exit 1");
+      expect(() => deployedSeq("o/r", () => feed)).toThrow(/pages site failed/);
+    } finally {
+      process.env.PATH = path;
+    }
   });
 
   describe("the commit step", () => {

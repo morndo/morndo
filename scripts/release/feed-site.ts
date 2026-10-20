@@ -75,7 +75,33 @@ export function materialiseFeed(repository: string, dir: string, signers = "trus
       writeVerifiedSite(dir, signers, files);
       return head;
     },
+    () => deployedSeq(repository),
   );
+}
+
+// The number of the feed Pages serves now: the Pages URL from the API, then latest.json from it.
+// No Pages site, or no feed on it yet, is null. https://docs.github.com/en/rest/pages/pages#get-a-apiname-pages-site
+// (read 2026-10-13)
+export function deployedSeq(repository: string, fetchText: (url: string) => string | null = fetchFeedText): number | null {
+  const site = gh(["api", `/repos/${repository}/pages`, "--jq", ".html_url"]);
+  if (!site.ok) {
+    if (/\b404\b/.test(site.stderr)) return null;
+    throw new Error(`pages site failed: ${site.stderr}`);
+  }
+  const base = site.stdout.trim();
+  if (base === "") return null;
+  const body = fetchText(`${base.endsWith("/") ? base : `${base}/`}latest.json`);
+  return body === null ? null : feedDocument(body, "latest");
+}
+
+function fetchFeedText(url: string): string | null {
+  const run = spawnSync("curl", ["-sSL", "-w", "\n%{http_code}", url], { encoding: "utf8" });
+  if (run.status !== 0) throw new Error(`deployed feed failed: ${run.stderr}`);
+  const cut = run.stdout.lastIndexOf("\n");
+  const code = run.stdout.slice(cut + 1).trim();
+  if (code === "404") return null;
+  if (code !== "200") throw new Error(`deployed feed failed: HTTP ${code}`);
+  return run.stdout.slice(0, cut);
 }
 
 function readSiteHead(repository: string): SiteHead {
