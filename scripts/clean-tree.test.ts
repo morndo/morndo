@@ -7,6 +7,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, utimesSync, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import setup from "../test/clean-tree.ts";
 import { leftBehind, untrackedFiles, watchTree } from "./clean-tree.ts";
 
 const dirs: string[] = [];
@@ -109,5 +110,30 @@ describe("watchTree", () => {
     expect(check).not.toThrow();
     expect(said).toHaveLength(1);
     expect(said[0]).toMatch(/not checked/);
+  });
+});
+
+describe("the run's setup (test/clean-tree.ts)", () => {
+  // A failing check makes Vitest skip the teardowns after it, so the scratch directory's removal (test/run-scratch.ts) is part of
+  // the same teardown, and runs whether or not the check passes.
+  const project = (scratch: string) => ({ config: { env: { TMPDIR: scratch } } }) as unknown as Parameters<typeof setup>[0];
+
+  it("removes the project's scratch directory even when the check fails", () => {
+    const dir = repo();
+    const scratch = join(tmpdir(), `morndo-test-${process.pid}-abc123-units`);
+    dirs.push(scratch);
+    const teardown = setup(project(scratch), dir);
+    expect(existsSync(scratch)).toBe(true);                         // made before the first test
+    writeFileSync(join(dir, "m"), "");
+    expect(teardown).toThrow(/left files/);
+    expect(existsSync(scratch)).toBe(false);
+  });
+  it("removes it when the check passes", () => {
+    const dir = repo();
+    const scratch = join(tmpdir(), `morndo-test-${process.pid}-def456-units`);
+    dirs.push(scratch);
+    const teardown = setup(project(scratch), dir);
+    teardown();
+    expect(existsSync(scratch)).toBe(false);
   });
 });

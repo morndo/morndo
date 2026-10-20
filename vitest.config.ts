@@ -88,7 +88,7 @@ export default defineConfig({
           testTimeout: 20_000,
           hookTimeout: 20_000,
           env: scratch("units"),
-          globalSetup: ["test/run-scratch.ts", "test/clean-tree.ts"],     // the second fails the run if the tests leave files in the repository
+          globalSetup: ["test/clean-tree.ts"],     // the scratch directory (run-scratch.ts), and a check that the tests leave no files in the repository
           setupFiles: ["test/units-without-chromium.ts"],
           sequence: { groupOrder: 0 },
         },
@@ -96,7 +96,7 @@ export default defineConfig({
       // Their hooks start Vite and a browser, or close them: 60 s, not Vitest's 10 (review M2: two timed out at load 17).
       // A test that loads its page itself compiles the app cold: 4 files at once beside 16 busy CPU loops, those took
       // 3.8 s (median), 7.4 s (p90), up to 11.9 s (142 tests, 2026-10-12); a third went past Vitest's 5 s. 20 s, as units.
-      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, testTimeout: 20_000, hookTimeout: 60_000, env: scratch("chromium"), globalSetup: ["test/run-scratch.ts", "test/clean-tree.ts"], sequence: { groupOrder: 1 } } },
+      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, testTimeout: 20_000, hookTimeout: 60_000, env: scratch("chromium"), globalSetup: ["test/clean-tree.ts"], sequence: { groupOrder: 1 } } },
       { test: { name: "fleet", include: ["test/fleet/**/*.test.ts"], maxWorkers: fleetWorkers, testTimeout: 120_000, hookTimeout: 60_000, env: scratch("fleet"), globalSetup: ["test/run-scratch.ts"], sequence: { groupOrder: 2 } } },
     ],
   },
