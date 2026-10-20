@@ -14,7 +14,8 @@ const redact = (s: string) => s.replace(/sk-[A-Za-z0-9]+/g, "[redacted]");
 
 describe("R7: precedence, first match wins", () => {
   it("gone, then unknown, then needs you, then working, then job, then background, then wake-up, then declared, then ended", () => {
-    const busy = { session: "busy" as const, needsInput: { at: T0 + 1 }, jobs: [{ id: "j1", name: "ci", startedAt: T0 }], turn: turn({ status: "waiting", tasks: [{ type: "shell", label: "npm test" }], wakes: [{ schedule: "5 12 * * *", recurring: false }] }) };
+    // A turn running: the session busy and a hook after the last turn end (a turn's start always fires one).
+    const busy = { session: "busy" as const, activity: { first: T0 + 2 * MIN, last: T0 + 2 * MIN }, needsInput: { at: T0 + 1 }, jobs: [{ id: "j1", name: "ci", startedAt: T0 }], turn: turn({ status: "waiting", tasks: [{ type: "shell", label: "npm test" }], wakes: [{ schedule: "5 12 * * *", recurring: false }] }) };
     expect(deriveRun(facts({ ...busy, windowAlive: false })).phase).toBe("gone");
     expect(deriveRun(facts({ ...busy, nodeOnline: false, windowAlive: false })).phase).toBe("unknown");
     expect(deriveRun(facts(busy)).phase).toBe("needs_you");
@@ -40,6 +41,20 @@ describe("R2: a turn end with work pending is never ended", () => {
   });
   it("a scheduled wake-up makes it waiting on the wake-up", () => {
     expect(deriveRun(facts({ turn: turn({ status: null, wakes: [{ schedule: "30 12 * * *", recurring: false }] }) })).wait).toEqual({ on: "wakeup", next: T0 + 30 * MIN });
+  });
+});
+
+describe("R2: a session that looks busy while its own background work runs", () => {
+  const shellTask = { type: "shell", label: "Sleep 75s then print marker" };
+  it("`shell` (or `busy`) after a turn end that left work pending, with no hook since, waits on that work", () => {
+    expect(deriveRun(facts({ session: "shell", turn: turn({ status: "waiting", tasks: [shellTask] }) })).wait?.on).toBe("background");   // negative control: the session state alone said working
+    expect(deriveRun(facts({ session: "busy", turn: turn({ status: null, tasks: [shellTask] }) })).wait?.on).toBe("background");
+  });
+  it("a hook after the turn end is a new turn: working", () => {
+    expect(deriveRun(facts({ session: "shell", turn: turn({ tasks: [shellTask] }), activity: { first: T0 + MIN, last: T0 + MIN } })).phase).toBe("working");
+  });
+  it("with nothing pending, the session state alone is a turn running", () => {
+    expect(deriveRun(facts({ session: "shell", turn: turn() })).phase).toBe("working");
   });
 });
 

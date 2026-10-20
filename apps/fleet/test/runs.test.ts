@@ -73,9 +73,14 @@ describe("Runs in the fleet (ADR-0032)", () => {
     expect(await r.runs()).toEqual([r.run()]);
     const wire = JSON.stringify([await r.runs(), r.events, r.fleet.db.prepare("SELECT body FROM lane_events").all()]);
     expect(wire).not.toContain("gh run watch");                                       // negative control: pendingOf keeping the command
-    // The next turn: the node reports the session busy.
+    // The session busy (or `shell`) while its own background work runs is no turn: it still waits on that work.
+    r.pc.inventory([{ ...ALPHA, status: "shell" }]);
+    await new Promise(res => setTimeout(res, 100));                                   // the inventory taken and the run recomputed
+    expect(r.run()).toMatchObject({ phase: "waiting", wait: { on: "background" } });
+    // The next turn: a hook after the turn end (its start fires one), and the node reports the session busy.
+    await hook(r, T0 + 2 * MIN);
     r.pc.inventory([{ ...ALPHA, status: "busy" }]);
-    await vi.waitFor(() => expect(r.run()).toMatchObject({ phase: "working", source: "session", since: T0 }));
+    await vi.waitFor(() => expect(r.run()).toMatchObject({ phase: "working", source: "session", since: T0 + 2 * MIN }));
     expect(r.run()?.wait).toBeUndefined();
   });
 

@@ -89,7 +89,11 @@ export function deriveRun(f: RunFacts): Run {
     };
   }
   const after = (at: number | undefined) => at !== undefined && (t === null || at > t.at);
-  if (f.session === "busy" || f.session === "shell") {
+  // The session's own `busy` or `shell` is a turn running only when a hook came after the last turn end (a turn's start
+  // always fires one) or nothing was left pending. Claude Code shows `shell` while a background shell runs, after its
+  // turn ended (seen live, 2026-10-20, Claude Code 2.1.303): then the lane waits on its own work (R2), it isn't working.
+  const pendingLeft = t !== null && (t.tasks.length > 0 || t.wakes.length > 0);
+  if ((f.session === "busy" || f.session === "shell") && (after(f.activity?.last) || !pendingLeft)) {
     return { ...base, phase: "working", deadline: null, overdue: false, since: after(f.activity?.first) ? (f.activity?.first ?? f.now) : (t?.at ?? f.changedAt), source: "session", ...line };
   }
   if (f.session === null && f.activity && after(f.activity.last) && f.now - f.activity.last < ACTIVE_MS) {

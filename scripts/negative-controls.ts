@@ -3063,6 +3063,9 @@ export const CONTROLS: Control[] = [
     find: "    if (found.task.status === \"done\") throw new NotDone(`refused: ${key} is done; file a new task for more work`);\n", replace: "",
     run: ["apps/hub/test/lanes-console.test.ts"], expect: "an unknown or done task starts nothing" },
   // ---- ADR-0032, the fleet's Runs: a turn end's pending lists, and each lane's Run.
+  { id: "r2-busy-own-work", task: "ADR-0032", file: "packages/domain/src/run.ts",
+    find: '(f.session === "busy" || f.session === "shell") && (after(f.activity?.last) || !pendingLeft)', replace: '(f.session === "busy" || f.session === "shell")',
+    run: ["packages/domain/test/run.test.ts", "apps/fleet/test/runs.test.ts"], expect: "waits on that work" },
   { id: "rf-pending-no-command", task: "ADR-0032", file: "apps/fleet/src/application/lane-events.ts",
     find: "const pending = pendingOf(tasks, crons, redactKeyMaterial);",
     replace: "const pending = { tasks: Array.isArray(tasks) ? tasks as never[] : [], wakes: Array.isArray(crons) ? crons as never[] : [] };",

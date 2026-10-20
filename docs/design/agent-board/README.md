@@ -44,7 +44,7 @@ The Fleet supplies the Board (customer and supplier). The Board reads runs and n
 | R7 | Precedence, first match wins: gone, unknown, needs_you, working, job, background, wakeup, declared, ended. |
 | R8 | Every run names its source and the time its phase began. |
 
-`working` means the node reports the session `busy`, or a hook came after the lane's last turn end. `needs_you` means the node reports the session `waiting`, or a `needs_input` came after the last turn end with no `answered` since.
+`working` means a hook came after the lane's last turn end, or the node reports the session `busy` or `shell` and the last turn end left nothing pending. Claude Code shows `shell` while a background shell runs after its turn ended, which is the lane's own work, not a turn. `needs_you` means the node reports the session `waiting`, or a `needs_input` came after the last turn end with no `answered` since.
 
 ## 4. The board's own moves
 
