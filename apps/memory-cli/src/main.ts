@@ -9,9 +9,10 @@
 // tree, report an error").
 import { execFile } from "node:child_process";
 import { hostname } from "node:os";
-import { argvWantsVersion, productVersion } from "@morndo/service-kit";
+import { argvWantsVersion, exitAfterOutput, productVersion, quietBrokenPipe } from "@morndo/service-kit";
 import { run, type GitPlace } from "./cli.ts";
 
+quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
   process.stdout.write(`${productVersion()}\n`);
   process.exit(0);
@@ -40,6 +41,5 @@ const code = await run(process.argv.slice(2), process.env, {
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),
 });
-// Set, not forced: output to a pipe, which Node writes asynchronously on POSIX, drains first
-// (nodejs.org/docs/latest-v24.x/api/process.html, "A note on process I/O", read 2026-10-20).
-process.exitCode = code;
+// Leave once the output is out (a pipe drains first, none is waited for after it); see service-kit's exit-after-output.ts.
+await exitAfterOutput(code);

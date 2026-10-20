@@ -3,7 +3,10 @@
 // fetch, the environment, the file it reads ("-" is stdin) and, inside tmux, the window's name as this lane's name.
 import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { exitAfterOutput, quietBrokenPipe } from "@morndo/service-kit";
 import { run } from "./decide.ts";
+
+quietBrokenPipe();
 
 const laneFromTmux = () => new Promise<string | null>(resolve => {
   if (!process.env.TMUX) return resolve(null);
@@ -24,6 +27,5 @@ const code = await run(process.argv.slice(2), process.env, {
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),
 });
-// Set, not forced: output to a pipe, which Node writes asynchronously on POSIX, drains first
-// (nodejs.org/docs/latest-v24.x/api/process.html, "A note on process I/O", read 2026-10-20).
-process.exitCode = code;
+// Leave once the output is out (a pipe drains first, none is waited for after it); see service-kit's exit-after-output.ts.
+await exitAfterOutput(code);

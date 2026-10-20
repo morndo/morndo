@@ -27,18 +27,26 @@ beforeEach(async () => {
 });
 afterEach(async () => { await new Promise(resolve => hub.close(resolve)); });
 
-function runBin(main: string, args: string[]): Promise<{ code: number | null; stdout: string }> {
+// `closeAfterFirstRead`: the reader takes one chunk and closes the pipe, as `| head -c 100` does.
+function runBin(main: string, args: string[], closeAfterFirstRead = false): Promise<{ code: number | null; stdout: string; stderr: string }> {
   const env: NodeJS.ProcessEnv = { ...process.env, MORNDO_HUB: base, MORNDO_AGENT_TOKEN: "made-up-token", MORNDO_LANE: "builder" };
   delete env.TMUX;
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["--no-warnings", join(import.meta.dirname, "../src", main), ...args], { env, stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawn(process.execPath, ["--no-warnings", join(import.meta.dirname, "../src", main), ...args], { env, stdio: ["ignore", "pipe", "pipe"] });
     const chunks: Buffer[] = [];
+    const errors: Buffer[] = [];
+    child.stderr.on("data", (c: Buffer) => errors.push(c));
     let reading = false;
-    const drain = () => { for (let c; reading && (c = child.stdout.read() as Buffer | null) !== null;) chunks.push(c); };
+    const drain = () => {
+      for (let c; reading && (c = child.stdout.read() as Buffer | null) !== null;) {
+        chunks.push(c);
+        if (closeAfterFirstRead) { child.stdout.destroy(); return; }
+      }
+    };
     child.stdout.on("readable", drain);
     setTimeout(() => { reading = true; drain(); }, 300);
     child.once("error", reject);
-    child.once("close", code => resolve({ code, stdout: Buffer.concat(chunks).toString("utf8") }));
+    child.once("close", code => resolve({ code, stdout: Buffer.concat(chunks).toString("utf8"), stderr: Buffer.concat(errors).toString("utf8") }));
   });
 }
 
@@ -55,4 +63,9 @@ describe("output longer than a pipe takes at once", () => {
     expect(Buffer.byteLength(stdout)).toBeGreaterThan(PIPE_LIMIT);
     expect(JSON.parse(stdout)).toHaveLength(4000);
   });
+  it.each([["morndo-board", "main.ts", ["list", "--json"]], ["morndo-decide", "decide-main.ts", ["list", "--json"]]] as const)(
+    "%s ends quietly with its own code when the reader closes the pipe early", async (_name, main, args) => {
+      const { code, stderr } = await runBin(main, [...args], true);
+      expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
+    });
 });
