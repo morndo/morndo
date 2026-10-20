@@ -110,7 +110,8 @@ export const MEMORY_LIMITS = { title: 120, summary: 400, body: 20_000, ref: 200,
 
 const refuse = (problem: MemoryProblem): Result<never, MemoryRefusal> => err({ problem });
 // C0 control characters and DEL other than the ones `allowed` (a function, not a regular expression with control
-// characters: the lint rule): a tab and a line feed in a single-line field, and a carriage return too in a body.
+// characters: the lint rule): a tab in a single-line field (a title, a ref, a reason), and line breaks too in a summary
+// or a body.
 const controlIn = (s: string, allowed: string): boolean => {
   for (const ch of s) {
     const c = ch.charCodeAt(0);
@@ -118,7 +119,7 @@ const controlIn = (s: string, allowed: string): boolean => {
   }
   return false;
 };
-const CONTROL = { test: (s: string) => controlIn(s, "\t\n") };
+const CONTROL = { test: (s: string) => controlIn(s, "\t") };
 const CONTROL_MULTILINE = { test: (s: string) => controlIn(s, "\t\n\r") };
 const NODE_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
@@ -145,7 +146,7 @@ function checkDraft(d: NoteDraft): Result<{ kind: NoteKind; scope: Scope; title:
   const summary = (d.summary ?? "").trim();
   const body = d.body.replace(/\r\n/g, "\n").trim();
   if (!title || !body) return refuse("empty");
-  if (CONTROL.test(title) || CONTROL.test(summary) || CONTROL_MULTILINE.test(body)) return refuse("bad_text");
+  if (CONTROL.test(title) || CONTROL_MULTILINE.test(summary) || CONTROL_MULTILINE.test(body)) return refuse("bad_text");
   if (title.length > MEMORY_LIMITS.title) return refuse("title_size");
   if (summary.length > MEMORY_LIMITS.summary) return refuse("summary_size");
   if (body.length > MEMORY_LIMITS.body) return refuse("body_size");
@@ -193,9 +194,11 @@ export function confirmNote(n: Note, actor: MemoryActor, evidence: string, now: 
   return ok({ note: { ...n, tier: 2, lastConfirmedAt: now }, event: { note: n.id, at: now, actor: by, change: { kind: "confirmed", evidence: ev } } });
 }
 
-// M2: a Note is never edited. A successor carries the change, and the old Note is invalidated in favour of it. The
-// successor is judged afresh: an approval does not carry over, so an approved Procedure cannot be changed into an
-// unapproved one that still reaches the lanes (M4).
+// M2: a Note is never edited. A successor carries the change. The successor is judged afresh: an approval does not carry
+// over, so an approved Procedure cannot be changed into an unapproved one that reaches the lanes (M4). A successor that
+// reaches the lanes at once (an agent's fact, the principal's own Note) replaces the old Note at once. One that waits for
+// the principal (a Procedure, an untrusted Note) replaces it only when approved (retireSuperseded): until then the lanes
+// keep the old one, and untrusted content cannot push a Note out of their skills (M5).
 export function supersedeNote(
   old: Note, d: NoteDraft, actor: MemoryActor, id: NoteId, now: number,
 ): Result<{ old: Note; note: Note; events: MemoryEvent[] }, MemoryRefusal> {
@@ -204,9 +207,21 @@ export function supersedeNote(
   const made = proposeNote(d, actor, id, now);
   if (!made.ok) return made;
   const note = { ...made.value.note, supersedes: old.id };
+  if (!isDeliverable(note)) return ok({ old, note, events: [made.value.event] });
   const by = note.provenance.by;
   const gone: Note = { ...old, invalidatedAt: now, invalidatedBy: by, invalidReason: `superseded by ${id}`, supersededBy: id };
   return ok({ old: gone, note, events: [made.value.event, { note: old.id, at: now, actor: by, change: { kind: "superseded", by: id } }] });
+}
+
+// M2, M4: once the principal approves a waiting successor, the Note it supersedes is invalidated in its favour.
+export function retireSuperseded(old: Note, successor: Note, now: number): Result<{ note: Note; event: MemoryEvent }, MemoryRefusal> {
+  if (old.invalidatedAt !== null) return refuse("invalidated");
+  if (successor.supersedes !== old.id || !isDeliverable(successor)) return refuse("mismatch");
+  const by = successor.approvedBy ?? successor.provenance.by;
+  return ok({
+    note: { ...old, invalidatedAt: now, invalidatedBy: by, invalidReason: `superseded by ${successor.id}`, supersededBy: successor.id },
+    event: { note: old.id, at: now, actor: by, change: { kind: "superseded", by: successor.id } },
+  });
 }
 
 // M2: invalidated, never deleted. The principal and the manager may invalidate any Note; a lane only its own.

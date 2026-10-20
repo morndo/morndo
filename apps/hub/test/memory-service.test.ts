@@ -70,6 +70,18 @@ describe("remember (M3)", () => {
 });
 
 describe("invalidate and approve (M2, M4, M5)", () => {
+  it("a lane's successor of an approved procedure leaves the old one in the lanes' skills until the console approves it", () => {
+    const proc = made(memory.approve(made(memory.remember(apiFix, fact({ kind: "procedure", title: "Deploy steps" }))).id));
+    const next = made(memory.remember(webFix, fact({ kind: "procedure", title: "Deploy steps", body: "New deploy steps.", supersedes: proc.id })));
+    expect(store.get(proc.id)).toMatchObject({ invalidatedAt: null, supersededBy: null });
+    expect(found({ q: "deploy" })).toEqual([proc.id]);
+    expect(memory.bundle(now).parts.flat().some(f => f.content.includes("New deploy steps."))).toBe(false);
+    now += 1000;
+    made(memory.approve(next.id));
+    expect(store.get(proc.id)).toMatchObject({ invalidatedAt: now, supersededBy: next.id, invalidatedBy: "principal:console" });
+    expect(found({ q: "deploy" })).toEqual([next.id]);
+    expect(store.events(proc.id).map(e => e.change.kind)).toEqual(["proposed", "approved", "superseded"]);
+  });
   it("a lane invalidates only its own notes; the manager and the console any it can see", () => {
     const mine = made(memory.remember(apiFix, fact()));
     expect(problem(memory.invalidate(webFix, mine.id, "stale"))).toBe("not_yours");

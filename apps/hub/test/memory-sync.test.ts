@@ -84,7 +84,8 @@ describe("sending", () => {
     expect(store.lastSynced("pc")).toBeNull();
     answer = committing;
     await tick();
-    expect(to("pc").map(c => c.key)).toEqual(bundle.parts.map((_, i) => `hub:memory:${bundle.version}:${i}`));
+    // The round after a failed one sends under fresh keys (see the last test).
+    expect(to("pc").map(c => c.key)).toEqual(bundle.parts.map((_, i) => `hub:memory:${bundle.version}:${i}#1`));
     expect(to("pc").every(c => c.args.parts === bundle.parts.length && c.args.version === bundle.version)).toBe(true);
     expect(to("pc").flatMap(c => c.args.files)).toEqual(bundle.parts.flat());
     expect(store.lastSynced("pc")?.version).toBe(bundle.version);
@@ -186,5 +187,25 @@ describe("a round that fails", () => {
     release();
     await first;
     expect(store.lastSynced("pc")).not.toBeNull();
+  });
+});
+
+describe("a version a node could not finish goes out again under fresh keys", () => {
+  it("uses the plain keys first, then #1, #2 after failed rounds, and the plain keys again for a new version", async () => {
+    answer = c => (c.node === "pc" ? refused("uncertain") : committing(c));
+    await tick();
+    const v = to("pc")[0]!.args.version;
+    expect(to("pc").map(c => c.key)).toEqual([`hub:memory:${v}:0`]);
+    await tick();
+    expect(to("pc").map(c => c.key)).toEqual([`hub:memory:${v}:0#1`]);
+    answer = committing;
+    await tick();
+    expect(to("pc").map(c => c.key)).toEqual([`hub:memory:${v}:0#2`]);
+    expect(store.lastSynced("pc")?.version).toBe(v);
+    memory.remember({ kind: "worker", name: "api-fix", token: "tok" }, { kind: "fact", scope: "repo:shop-api", title: "Queue", body: "Jobs use the default queue." });
+    await tick();
+    const v2 = to("pc")[0]!.args.version;
+    expect(v2).not.toBe(v);
+    expect(to("pc").map(c => c.key)).toEqual([`hub:memory:${v2}:0`]);
   });
 });

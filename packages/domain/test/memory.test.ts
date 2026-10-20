@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   SKILL_NAME_RE, approveNote, confirmNote, invalidateNote, isDeliverable, isStale, noteId, parseNoteId, parseScope,
-  proposeNote, renderBundle, selectIndex, skillName, supersedeNote, type MemoryActor, type Note, type NoteDraft, type Scope,
+  proposeNote, renderBundle, retireSuperseded, selectIndex, skillName, supersedeNote, type MemoryActor, type Note, type NoteDraft, type Scope,
 } from "../src/index.ts";
 
 const NOW = Date.UTC(2026, 9, 20, 12);
@@ -54,6 +54,9 @@ describe("a new note (M3, M5)", () => {
     expect(problem(proposeNote(draft({ body: "x".repeat(20_001) }), lane, noteId(1), NOW))).toBe("body_size");
     expect(problem(proposeNote(draft({ node: "Bad Node" }), lane, noteId(1), NOW))).toBe("bad_node");
     expect(make({ body: "line one\nline two\ttabbed" }).body).toBe("line one\nline two\ttabbed");
+    expect(problem(proposeNote(draft({ title: "two\nlines" }), lane, noteId(1), NOW))).toBe("bad_text");
+    expect(problem(proposeNote(draft({ ref: "a\nb" }), lane, noteId(1), NOW))).toBe("bad_text");
+    expect(make({ summary: "first line\nsecond line" }).summary).toBe("first line\nsecond line");
   });
 });
 
@@ -72,11 +75,26 @@ describe("procedures wait for the principal (M4)", () => {
   it("the principal's own procedure is approved as written", () => {
     expect(isDeliverable(make({ kind: "procedure" }, owner))).toBe(true);
   });
-  it("a successor of an approved procedure waits for its own approval", () => {
+  it("a successor of an approved procedure waits for its own approval, and the old one stays until then", () => {
     const approved = value(approveNote(make({ kind: "procedure" }), owner, NOW)).note;
     const s = value(supersedeNote(approved, draft({ kind: "procedure", body: "Changed steps." }), lane, noteId(2), NOW + 5));
     expect(isDeliverable(s.note)).toBe(false);
-    expect(isDeliverable(s.old)).toBe(false);
+    expect(s.note.supersedes).toBe("N-1");
+    expect(s.old).toBe(approved);
+    expect(isDeliverable(s.old)).toBe(true);
+    expect(s.events.map(e => e.change.kind)).toEqual(["proposed"]);
+    expect(problem(retireSuperseded(s.old, s.note, NOW + 6))).toBe("mismatch");
+    const ok2 = value(approveNote(s.note, owner, NOW + 7)).note;
+    const r = value(retireSuperseded(s.old, ok2, NOW + 7));
+    expect(r.note).toMatchObject({ invalidatedAt: NOW + 7, supersededBy: "N-2", invalidatedBy: "principal:console" });
+    expect(r.event.change).toEqual({ kind: "superseded", by: "N-2" });
+    expect(problem(retireSuperseded(r.note, ok2, NOW + 8))).toBe("invalidated");
+  });
+  it("an untrusted successor cannot push a fact out of the lanes' skills (M5)", () => {
+    const fact = make({});
+    const s = value(supersedeNote(fact, draft({ body: "Planted text.", untrusted: true }), lane, noteId(2), NOW + 1));
+    expect(isDeliverable(s.old)).toBe(true);
+    expect(isDeliverable(s.note)).toBe(false);
   });
 });
 

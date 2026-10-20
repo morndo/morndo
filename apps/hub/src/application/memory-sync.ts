@@ -34,6 +34,8 @@ export class MemorySync {
   #log: Pick<Logger, "info" | "warn" | "error">;
   #seen = new Map<string, string>();                 // node → its status at the previous round
   #refusedUntil = new Map<string, number>();         // node → when to ask again after a refusal
+  // Per node, the version whose sending last failed and how often: the next attempt's keys (see #send).
+  #tries = new Map<string, { version: string; n: number }>();
   #running = false;
 
   constructor(p: { service: MemoryService; store: MemoryStore; fleet: MemoryFleet; now?: () => number; log?: Pick<Logger, "info" | "warn" | "error"> }) {
@@ -80,12 +82,25 @@ export class MemorySync {
   // Every part, in order; the node took the version whole only when every part was accepted and one of them committed
   // it. Only then is it recorded as the node's.
   async #send(node: string, bundle: Bundle): Promise<SyncOutcome> {
+    const outcome = await this.#sendParts(node, bundle);
+    if (outcome === "failed") {
+      // A part the node could not finish keeps its key `started` there, and the same key would be answered `uncertain` for
+      // days: the next round sends the version under fresh keys. Staging a part again changes nothing on the node.
+      const t = this.#tries.get(node);
+      this.#tries.set(node, { version: bundle.version, n: Math.min((t && t.version === bundle.version ? t.n : 0) + 1, 99) });
+    } else if (outcome === "synced") this.#tries.delete(node);
+    return outcome;
+  }
+
+  async #sendParts(node: string, bundle: Bundle): Promise<SyncOutcome> {
+    const t = this.#tries.get(node);
+    const attempt = t && t.version === bundle.version ? t.n : 0;
     let committed = false;
     for (const [part, files] of bundle.parts.entries()) {
       let answer: Awaited<ReturnType<MemoryFleet["op"]>>;
       try {
         answer = await this.#fleet.op({ node }, "memory.sync", { version: bundle.version, part, parts: bundle.parts.length, files },
-          { key: `hub:memory:${bundle.version}:${part}`, timeoutMs: OP_TIMEOUT_MS });
+          { key: `hub:memory:${bundle.version}:${part}${attempt > 0 ? `#${attempt}` : ""}`, timeoutMs: OP_TIMEOUT_MS });
       } catch (e) {
         this.#log.warn(`memory: ${node} didn't answer part ${part + 1} of ${bundle.parts.length}; the next round tries again`, e);
         return "failed";

@@ -6,7 +6,8 @@
 // Decision. What reaches a lane, in a search or in its skills, is what the domain calls deliverable (M4, M5).
 import { createHash } from "node:crypto";
 import {
-  NOTE_KINDS, actorLabel, approveNote, invalidateNote, isDeliverable, parseNoteId, parseScope, proposeNote, renderBundle, supersedeNote,
+  NOTE_KINDS, actorLabel, approveNote, invalidateNote, isDeliverable, parseNoteId, parseScope, proposeNote, renderBundle, retireSuperseded,
+  supersedeNote,
   type BoardActor, type MemoryActor, type MemoryEvent, type MemoryProblem, type Note, type NoteDraft, type NoteId, type NoteKind, type SkillFile,
 } from "@morndo/domain";
 import { LIMITS, MEMORY_SEARCH, type MemoryRememberBody } from "@morndo/protocol";
@@ -138,9 +139,14 @@ export class MemoryService {
     return this.#store.transaction((): MemoryResult => {
       const n = this.#store.get(id);
       if (!n) return { ok: false, problem: "not_found" };
-      const r = approveNote(n, CONSOLE, this.#now());
+      const now = this.#now();
+      const r = approveNote(n, CONSOLE, now);
       if (!r.ok) return { ok: false, problem: r.error.problem };
-      this.#write([r.value.note], [r.value.event]);
+      // A successor that waited for this approval now replaces the Note it supersedes (M2, M4).
+      const old = r.value.note.supersedes ? this.#store.get(r.value.note.supersedes) : null;
+      const retired = old && old.invalidatedAt === null ? retireSuperseded(old, r.value.note, now) : null;
+      if (retired?.ok) this.#write([r.value.note, retired.value.note], [r.value.event, retired.value.event]);
+      else this.#write([r.value.note], [r.value.event]);
       return { ok: true, note: r.value.note };
     });
   }
