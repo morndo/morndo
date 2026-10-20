@@ -35,8 +35,23 @@ export type Io = { stdout: (text: string) => void; stderr: (text: string) => voi
 
 export type Parsed = { cmd: string; positionals: string[]; rest: string[]; get(name: string): string | undefined; all(name: string): string[] };
 
+// `morndo-keys help`: what a run does when the reader of its output goes away, and where that stops working. Printed before
+// the store is opened, so it works on a machine with no connections yet.
+export const HELP = `morndo-keys run --connection <name> [--role R] [--workspace DIR] [--reserve USD] -- <agent arguments>
+morndo-keys pool exec --runtime codex [--lane L] [--account A] -- exec … <prompt>
+  Run the agent on a connection's key (or a pool account's sign-in) and relay its output.
+
+  When the reader of the output has gone (\`… | head\`, a closed terminal), the agent is stopped: SIGTERM to its process group,
+  SIGKILL after 3 s, and the lease is closed with what the turn used. run then exits 1 (130 or 143 for a signal), pool exec 143.
+
+  A reader that is gone is noticed only when the bin writes to it. An agent that prints once at the end (claude with
+  --output-format json) or goes quiet is not stopped before its next output, so its turn can be paid for in full: Node 24 has
+  no way to see a pipe's reader close without a write. Use a streaming output format where this matters.
+`;
+
 export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
   const parsed = parse(argv);
+  if (parsed.cmd === "help") { io.stdout(HELP); return 0; }
   try {
     if (parsed.cmd === "helper") return await helper(env, parsed, io);
     return await command(env, parsed, io);

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import { runIntoHead } from "../../../test/pipe-child.ts";
+import { run } from "../src/cli.ts";
 
 const KEY = "sk-ant-synthetic-test-key-0001";
 const MAIN = join(import.meta.dirname, "../src/main.ts");
@@ -80,4 +81,17 @@ describe("morndo-keys run with its reader gone", () => {
     expect(existsSync(join(dir, "finished"))).toBe(false);
     expect(keys(["log", "credit"]).stdout).toContain("LeaseClosed");
   }, 40_000);
+});
+
+describe("morndo-keys help", () => {
+  it("says what a gone reader stops, and the limit for an agent that prints once at the end", async () => {
+    let out = "";
+    let err = "";
+    const code = await run(["help"], {}, { stdout: t => { out += t; }, stderr: t => { err += t; } });
+    expect({ code, err }).toEqual({ code: 0, err: "" });
+    expect(out).toContain("run --connection");
+    expect(out).toMatch(/reader .*gone.*stopped/s);
+    expect(out).toMatch(/noticed only when .* writes/s);
+    expect(out).toContain("--output-format json");
+  });
 });
