@@ -2,10 +2,15 @@
 // own temporary one, leaves an untracked file behind: for `git status` of the next person, and for another test that meets it
 // (an empty `m` from a tmux negative control did both). test/clean-tree.ts reads the untracked files before a run and after it and
 // fails the run on any new one. Only untracked files count: a file edited during a run is somebody's work, not a test's leak.
-// `git status --porcelain -z --untracked-files=all` lists each untracked file by path, NUL-separated, "?? " first:
-// `--no-optional-locks` keeps it a pure read: plain `git status` refreshes the index and takes index.lock to write it, which can make
-// a commit someone is running at the same moment fail (https://git-scm.com/docs/git, "--no-optional-locks"; read 2026-10-20).
-// https://git-scm.com/docs/git-status (read 2026-10-20).
+// Scope, so the guard is not trusted for more than it does: Vitest calls a globalSetup before the workers are created, and only if a
+// test of that project is queued, and its teardown after all test files have finished (https://vitest.dev/config/globalsetup.html,
+// v5.0.5, read 2026-10-20). The window is therefore the whole run, every project's tests, not the one project's. A run that queues no
+// unit or browser test (`--project fleet`) is not checked. An untracked file somebody else creates in the repository during the run is
+// blamed on it. Files that were untracked before the run, and empty directories, are not seen.
+// `git status --porcelain -z --untracked-files=all` lists each untracked file by path, NUL-separated, "?? " first
+// (https://git-scm.com/docs/git-status, read 2026-10-20). `--no-optional-locks` keeps it a pure read: plain `git status` refreshes the
+// index and takes index.lock to write it, which can make a commit someone is running at the same moment fail
+// (https://git-scm.com/docs/git, "--no-optional-locks"; read 2026-10-20).
 import { execFileSync } from "node:child_process";
 
 // The untracked files under `root`, relative paths; null when `root` is not in a git repository or git cannot be run.
