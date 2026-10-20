@@ -1,10 +1,11 @@
 // Stands in for `codex` in the pool tests (ADR-0029): `login status`, `app-server` (the fake app server, with its files in the
 // member's sign-in home), and `exec` / `exec resume <id>` as a stream of events in codex-cli 0.161.0's `--json` shapes.
 // The member is found by following $CODEX_HOME/auth.json to its real path: that file's directory is the member's sign-in home.
-// `mode` there: ok (default), limit, slow, slow-status (a sign-in check of 1.5 s; its turn is a stream), stubborn (a stream that ignores SIGTERM), stream (a line every 100 ms for 15 s, its pid in `pid`, then `finished`), encrypted (a
+// `mode` there: ok (default), limit, slow, slow-status (a sign-in check of 1.5 s; its turn is a stream), stubborn (a stream that ignores SIGTERM), orphan (a stream that leaves on SIGTERM and an inner process that does not), stream (a line every 100 ms for 15 s, its pid in `pid`, then `finished`), encrypted (a
 // resume only), auth. Each run appends a record to runs.jsonl in that
 // home: its arguments, the member, where its sessions and writer locks really are, and the names of its environment.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { basename, dirname, join } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -50,7 +51,12 @@ if (argv[0] === "app-server") {
   out({ type: "turn.started" });
   if (mode === "slow") await pause(1500);
   if (mode === "stubborn") process.on("SIGTERM", () => {});
-  if (mode === "stream" || mode === "slow-status" || mode === "stubborn") {
+  if (mode === "orphan") {
+    // An inner process with no output of its own that ignores SIGTERM; the agent itself leaves on SIGTERM.
+    const inner = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setTimeout(()=>{},15000)"], { stdio: "ignore" });
+    writeFileSync(join(memberHome, "inner-pid"), String(inner.pid));
+  }
+  if (mode === "stream" || mode === "slow-status" || mode === "stubborn" || mode === "orphan") {
     writeFileSync(join(memberHome, "pid"), String(process.pid));
     for (let i = 0; i < 150; i++) { out({ type: "item.completed", item: { type: "agent_message", text: `line ${i}` } }); await pause(100); }
     writeFileSync(join(memberHome, "finished"), "yes");

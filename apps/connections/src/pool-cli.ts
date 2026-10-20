@@ -19,7 +19,7 @@ import { childEnv, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { usageReport, type CodexLimits } from "./adapters/usage-codex.ts";
 import { type PoolRefusal, type TurnBegun, type TurnEnd } from "./application/pool-service.ts";
-import { STOP_GRACE_MS } from "./reader-gone.ts";
+import { reaper } from "./reader-gone.ts";
 
 const DEFAULT_RUNTIME = "codex";
 const DEFAULT_WAIT_MS = 1_800_000;
@@ -281,14 +281,14 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
 
   let stopped: number | null = null;
   let childPid: number | null = null;
-  // The signal goes to the turn's group; one that ignores it is killed after the grace, as `run` does (reader-gone.ts).
-  let killTimer: NodeJS.Timeout | null = null;
+  // The stop goes to the turn's group: SIGTERM, then SIGKILL after the grace for what ignores it, and the kill is kept until the
+  // group is gone, not until the output pipes close (reader-gone.ts). `cutShort`: the turn was really stopped (a live group got the
+  // signal, or nothing was spawned), so the exit code is the signal's; a signal after a clean finish changes neither it nor the lease.
+  const reap = reaper();
+  let cutShort = false;
   const onSignal = (signal: NodeJS.Signals): void => {
     stopped = signal === "SIGINT" ? 130 : 143;
-    const target = childPid;
-    if (target === null) return;
-    try { process.kill(-target, signal); } catch { return; }
-    killTimer ??= setTimeout(() => { try { process.kill(-target, "SIGKILL"); } catch { /* it is gone */ } }, STOP_GRACE_MS);
+    if (childPid !== null && reap.stop([-childPid])) cutShort = true;
   };
   const term = (): void => onSignal("SIGTERM");
   const int = (): void => onSignal("SIGINT");
@@ -353,11 +353,11 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
     let outcome = "failed";
     try {
       const result = await runtimeCodex.execute(plan, argv, {
-        onStdout: take, onStderr: text => { io.stderr(text); }, onStart: pid => { childPid = pid; }, proceed: () => stopped === null,
+        onStdout: take, onStderr: text => { io.stderr(text); }, onStart: pid => { childPid = pid; }, proceed: () => { if (stopped !== null) cutShort = true; return stopped === null; },
       }, store);
       if (buffer !== "") { handle(buffer); buffer = ""; }
-      turn.status = result.status;
-      outcome = result.status === 0 ? "done" : "failed";
+      turn.status = cutShort && result.status === 0 ? 1 : result.status;   // a launcher may exit 0 on the signal
+      outcome = turn.status === 0 ? "done" : "failed";
     } catch (error) {
       outcome = error instanceof Error ? error.message : "run failed";
       home.leases.close(current.member, granted.id, outcome, null);
@@ -365,7 +365,7 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
       throw error;
     } finally {
       childPid = null;
-      if (killTimer !== null) { clearTimeout(killTimer); killTimer = null; }
+      await reap.settle();
     }
     home.leases.close(current.member, granted.id, outcome, null);
     return turn;
@@ -400,7 +400,7 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
         io.stderr(`${error instanceof Error ? error.message : "run failed"}\n`);
         return exit ?? 1;
       }
-      if (stopped !== null) { home.pool.end(runtime, current.claimId, { kind: "other" }); return stopped; }
+      if (stopped !== null && cutShort) { home.pool.end(runtime, current.claimId, { kind: "other" }); return stopped; }
       if (turn.status === 0) { home.pool.end(runtime, current.claimId, { kind: "done" }); return 0; }
       const ended = endOf(turn);
       const out = home.pool.end(runtime, current.claimId, ended, { dir, night: night(), tried: [...tried] });

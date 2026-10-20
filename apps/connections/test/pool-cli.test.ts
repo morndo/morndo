@@ -178,6 +178,33 @@ describe("morndo-keys pool exec", () => {
     expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
   }, 40_000);
 
+  it("kills what the turn left behind once the grace has passed, though the agent itself has gone", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "orphan" }, defaultMember: "codex-a" });
+    const started = Date.now();
+    const ran = await runIntoHead([MAIN, ...turn()], t.env);
+    expect(ran.code).toBe(143);
+    expect(Date.now() - started).toBeLessThan(9_000);
+    expect(() => process.kill(Number(readFileSync(join(t.home("codex-a"), "inner-pid"), "utf8")), 0)).toThrow();
+  }, 40_000);
+
+  it("ends with the exit code that matches the lease: a SIGTERM as the turn finishes is 0 and done, or 143 and failed", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "ok" }, defaultMember: "codex-a" });
+    const outcomes = async (): Promise<string[]> => (await t.cli(["log", "codex-a"])).stdout.split("\n").filter(l => l.includes('"LeaseClosed"')).map(l => (JSON.parse(l) as { outcome: string }).outcome);
+    for (let round = 0; round < 5; round++) {
+      const seen = t.runs("codex-a").length;
+      const bin = spawn(process.execPath, ["--no-warnings", MAIN, ...turn()], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+      bin.stdout.resume();
+      bin.stderr.resume();
+      const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => bin.once("close", (code, signal) => resolve({ code, signal })));
+      await until(() => t.runs("codex-a").length > seen);
+      try { bin.kill("SIGTERM"); } catch { /* it is already gone */ }
+      const end = await closed;
+      const outcome = (await outcomes()).at(-1);
+      if (end.code === 0 || end.code === null) expect(outcome, `round ${round}: ${JSON.stringify(end)}`).toBe("done");
+      else expect({ end, outcome }, `round ${round}`).toEqual({ end: { code: 143, signal: null }, outcome: "failed" });
+    }
+  }, 60_000);
+
   it("does not start the agent when the reader goes after the seat is won", async () => {
     const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow-status" }, defaultMember: "codex-a" });
     const marker = join(t.home("codex-a"), "status-started");
