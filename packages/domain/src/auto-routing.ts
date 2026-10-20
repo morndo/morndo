@@ -499,6 +499,7 @@ export type OutcomeFact = {
   bool?: boolean;
   by?: string;
   byLane?: string | null;
+  lease?: string;
 };
 
 const SOURCES: readonly OutcomeSource[] = ["principal", "review", "board", "lease", "ledger"];
@@ -522,6 +523,7 @@ export function parseFact(raw: unknown): Result<OutcomeFact, { problem: "refused
   if (typeof row.bool === "boolean") fact.bool = row.bool;
   if (typeof row.by === "string") fact.by = row.by;
   if (typeof row.byLane === "string" || row.byLane === null) fact.byLane = row.byLane as string | null;
+  if (typeof row.lease === "string") fact.lease = row.lease;
   return ok(fact);
 }
 
@@ -540,7 +542,7 @@ export function recordFact(
     if (fact.byLane === judged.lane) return err({ problem: "lane" });
   }
   if (fact.kind === "cost" && fact.spend === "estimate" && fact.usd !== undefined) {
-    const current = winning(facts, fact.route, "cost");
+    const current = winning(facts.filter(other => other.lease === fact.lease), fact.route, "cost");
     if (current?.usd !== undefined && fact.usd < current.usd) return err({ problem: "estimate" });
   }
   return ok([...facts, fact]);
@@ -550,6 +552,18 @@ function winning(facts: readonly OutcomeFact[], route: string, kind: FactKind): 
   const rows = facts.filter(fact => fact.route === route && fact.kind === kind);
   rows.sort((a, b) => TRUST[b.source] - TRUST[a.source] || b.at - a.at);
   return rows[0] ?? null;
+}
+
+// Cost and minutes belong to a Lease: a route's Outcome adds up one winning fact per Lease (design 7.1).
+function leaseTotal(facts: readonly OutcomeFact[], route: string, kind: "cost" | "minutes"): number | null {
+  const rows = facts.filter(fact => fact.route === route && fact.kind === kind);
+  let total: number | null = null;
+  for (const lease of new Set(rows.map(fact => fact.lease ?? ""))) {
+    const won = winning(rows.filter(fact => (fact.lease ?? "") === lease), route, kind);
+    const amount = kind === "cost" ? won?.usd : won?.n;
+    if (amount !== undefined) total = (total ?? 0) + amount;
+  }
+  return total;
 }
 
 export type ScoreRun = { id: string; at: number; group: string; tier: Tier; task: string | null; lane: string | null };
@@ -610,10 +624,10 @@ function cellOf(list: readonly { run: ScoreRun; entry: string }[], facts: readon
     if (found?.n !== undefined) { findings += found.n; knownFindings += 1; }
     const rounds = winning(prior, run.id, "fix-rounds");
     if (rounds?.n !== undefined) fixRounds += rounds.n;
-    const cost = winning(prior, run.id, "cost");
-    if (cost?.usd !== undefined) costs.push(cost.usd);
-    const minute = winning(prior, run.id, "minutes");
-    if (minute?.n !== undefined) minutes.push(minute.n);
+    const cost = leaseTotal(prior, run.id, "cost");
+    if (cost !== null) costs.push(cost);
+    const minute = leaseTotal(prior, run.id, "minutes");
+    if (minute !== null) minutes.push(minute);
     const back = winning(prior, run.id, "fell-back");
     if (back?.bool) fellBack += 1;
     const model = winning(prior, run.id, "model");
