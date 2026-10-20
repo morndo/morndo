@@ -16,7 +16,7 @@ import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
 import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
 import { deployedSeq, writeVerifiedSite } from "./feed-site.ts";
-import { commitFeeds, feedTree, MOVED, refUpdateResult } from "./feed-sync.ts";
+import { commitFeeds, feedTree, MOVED, prepareFeeds, refUpdateResult } from "./feed-sync.ts";
 import { readSchemaJson } from "./schema-read.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
@@ -369,6 +369,43 @@ describe("feed", () => {
     } finally {
       process.env.PATH = path;
     }
+  });
+
+  describe("the prepare step", () => {
+    const manifestOf = (dir: string) => {
+      const path = join(dir, "manifest.json");
+      writeFileSync(path, "{}\n");
+      return path;
+    };
+    const publish = (dir: string, io: { head: () => string | null; read: (sha: string, file: string) => string | null }) => prepareFeeds({
+      mode: "publish", repository: "o/r", dir: join(dir, "site"), signers: join(dir, "none"), scratch: dir, now: WHEN,
+      version: "0.1.0", manifestPath: manifestOf(dir), manifestUrl: "https://example.invalid/manifest.json", keySetVersion: 1,
+    }, io);
+
+    it("starts both feeds at 1 only when there is no feed branch at all", () => {
+      const dir = temp();
+      expect(publish(dir, { head: () => null, read: () => { throw new Error("no branch to read"); } })).toBe("ready");
+      expect(ChannelFeedSchema.parse(JSON.parse(readFileSync(join(dir, "site/latest.json"), "utf8"))).seq).toBe(1);
+      expect(ChannelFeedSchema.parse(JSON.parse(readFileSync(join(dir, "site/stable.json"), "utf8"))).seq).toBe(1);
+    });
+
+    it("refuses to restart a feed whose branch exists but whose file is missing", () => {
+      for (const missing of ["latest.json", "stable.json"]) {
+        const dir = temp();
+        const io = { head: () => "aaa", read: (_sha: string, file: string) => file === missing ? null : "x" };
+        expect(() => publish(dir, io), missing).toThrow(/refusing to start the feed again at 1/);
+        expect(existsSync(join(dir, "site/latest.json")), missing).toBe(false);
+      }
+    });
+
+    it("refuses a re-sign of a branch that lacks a feed, and skips when there is no branch", () => {
+      const dir = temp();
+      const re = (io: { head: () => string | null; read: (sha: string, file: string) => string | null }) => prepareFeeds({
+        mode: "resign", repository: "o/r", dir: join(dir, "site"), signers: join(dir, "none"), scratch: dir, now: WHEN,
+      }, io);
+      expect(re({ head: () => null, read: () => null })).toBe("absent");
+      expect(() => re({ head: () => "aaa", read: () => null })).toThrow(/refusing to start the feed again at 1/);
+    });
   });
 
   describe("the commit step", () => {

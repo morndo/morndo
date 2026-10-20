@@ -48,24 +48,34 @@ export const MOVED = "the feed branch moved; run this job again";
 
 export type Prepared = { head: string | null; message: string };
 
+export type PrepareIo = { head: () => string | null; read: (sha: string, file: string) => string | null };
+
+// A branch that exists must hold both feeds. A missing file is never a reason to start that feed again
+// at 1: machines that saw a higher number would reject every later feed (design §9.5).
 export function prepareFeeds(p: {
   repository: string; dir: string; signers: string; scratch: string; now: number;
-} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" })): "absent" | "ready" {
+} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" }),
+io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => readAt(p.repository, sha, file) }): "absent" | "ready" {
   mkdirSync(p.dir, { recursive: true });
   for (const file of [...FEED_FILES, PREPARED]) rmSync(join(p.dir, file), { force: true });
-  const head = readFeedHead(p.repository);
+  const head = io.head();
   if (p.mode === "resign" && head === null) return "absent";
-  const read = (name: string, sig: string) => {
-    const body = head === null ? null : readAt(p.repository, head, name);
-    const signature = head === null ? null : readAt(p.repository, head, sig);
-    if (body !== null) {
-      if (signature === null) throw new Error(`${name} has no signature`);
-      verifyFeed(p.signers, body, signature, p.scratch);
+  // Both feeds and both signatures are looked for before any is checked, so a missing file is the first error.
+  const found = head === null ? null : Object.fromEntries(FEED_FILES.map(file => [file, io.read(head, file)])) as Record<(typeof FEED_FILES)[number], string | null>;
+  if (found !== null) {
+    for (const name of ["latest.json", "stable.json"] as const) {
+      if (found[name] === null) throw new Error(`the feed branch is at ${head} but ${name} is missing; refusing to start the feed again at 1`);
+      if (found[`${name}.sig`] === null) throw new Error(`${name} has no signature`);
     }
+  }
+  const verified = (name: "latest.json" | "stable.json") => {
+    const body = found?.[name] ?? null;
+    if (body === null) return null;
+    verifyFeed(p.signers, body, found?.[`${name}.sig`] ?? "", p.scratch);
     return body;
   };
-  const latest = read("latest.json", "latest.json.sig");
-  const stable = read("stable.json", "stable.json.sig");
+  const latest = verified("latest.json");
+  const stable = verified("stable.json");
   if (p.mode === "resign") {
     if (latest === null || stable === null) throw new Error(`feed ${latest === null ? "latest" : "stable"} is missing at ${head}`);
     writeFileSync(join(p.dir, "latest.json"), resignFeed(latest, p.now));
