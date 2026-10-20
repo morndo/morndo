@@ -1,6 +1,6 @@
 // Fix round 1 for auto routing PR 1 (design sections 7.1, 7.2; R19, R22, R25, R26). Names here are test data.
 import { describe, expect, it } from "vitest";
-import { decide, emptyPolicy, ensureRole, parseFact, recordFact, scorecard, setPriority, type CandidateFacts, type OutcomeFact, type TaskProfile } from "../src/index.ts";
+import { changeEffect, decide, emptyPolicy, ensureRole, parseFact, recordFact, scorecard, setPriority, type CandidateFacts, type OutcomeFact, type TaskProfile } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
 
@@ -141,5 +141,16 @@ describe("R16: switching auto through the priority writes nothing", () => {
   it("control: a changed mode still appends PriorityChanged", () => {
     const next = setPriority(emptyPolicy(), { mode: "keys-only", order: [], auto: true }, [], "c1", T, "step-up");
     expect(next.ok && next.value.events.map(event => event.type)).toEqual(["PriorityChanged", "AutoSwitched"]);
+  });
+});
+
+describe("R28: a release from `held` is step-up without a separate change kind", () => {
+  it.each(["routine", "standard", "hard"] as const)("releasing to %s is step-up, with or without a shared metered chain", to => {
+    expect(changeEffect({ kind: "pin", from: "held", to, sharesChainWithMetered: false })).toBe("step-up");
+    expect(changeEffect({ kind: "pin", from: "held", to, sharesChainWithMetered: true })).toBe("step-up");
+  });
+
+  it("control: holding the same candidate on a private chain stays a session, so the check can tell them apart", () => {
+    expect(changeEffect({ kind: "pin", from: "routine", to: "held", sharesChainWithMetered: false })).toBe("session");
   });
 });
