@@ -13,7 +13,7 @@ export type OpBody = { target: Target; op: OpName; args: Record<string, unknown>
 const OPS: Record<OpName, "client" | "agent"> = {
   "inventory.get": "client", "pane.captureMany": "client", "pane.frame": "client", "pane.keys": "client", "pane.send": "client", "op.status": "client",
   "transcript.size": "client", "transcript.read": "client", "transcript.locate": "client", "file.stat": "client", "file.get": "client", "file.put": "client",
-  "lane.start": "client", "lane.stop": "client", "worktree.list": "client", "worktree.add": "client", "job.cancel": "client", "job.notice": "agent", "job.noticeResult": "client",
+  "lane.start": "client", "lane.stop": "client", "worktree.list": "client", "worktree.add": "client", "memory.sync": "client", "job.cancel": "client", "job.notice": "agent", "job.noticeResult": "client",
   "connections.priority": "client", "connections.role": "client", "connections.revoke": "client", "connections.narrow": "client",
   // fleet clients: a delivery goes through /v1/deliveries; client-api.ts refuses lane.deliver and delivery.cancel here
   "pane.capture": "client", "lane.deliver": "client", "delivery.cancel": "client",

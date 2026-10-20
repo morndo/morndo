@@ -52,6 +52,7 @@ export const EFFECT_FIELDS: { readonly [O in OpName]?: readonly string[] } = {
   "worktree.add": ["repo", "name", "base"],
   "file.put": ["upload", "offset"],
   "job.notice": ["id", "lane", "text"],
+  "memory.sync": ["version", "part"],
   "connections.priority": ["version", "mode", "order"],
   "connections.role": ["version", "role", "override", "order", "picks", "action"],
   "connections.revoke": ["version", "name"],

@@ -2939,6 +2939,34 @@ export const CONTROLS: Control[] = [
     find: "env: childEnv(this.#parent, loginEnv(\"codex\", runHome)),",
     replace: "env: { ...this.#parent, ...loginEnv(\"codex\", runHome) },",
     run: ["apps/connections/test/pool-cli.test.ts"], expect: "KEY" },
+  // ---- Memory, the node's memory.sync (ADR-0031; docs/design/memory/README.md): each guard removed once.
+  { id: "m-node-marker", task: "M-node", file: "apps/node-agent/src/ops/memory-ops.ts",
+    find: "if (!look(folder)?.isDirectory() || !ours(folder)) continue;", replace: "if (!look(folder)?.isDirectory()) continue;",
+    run: ["apps/node-agent/test/memory-sync.test.ts"], expect: "leaves a morndo-mem-* folder without the marker" },
+  { id: "m-node-symlink", task: "M-node", file: "apps/node-agent/src/ops/memory-ops.ts",
+    find: "const st = look(folder);", replace: "const st = statSync(folder, { throwIfNoEntry: false }) ?? null;",
+    run: ["apps/node-agent/test/memory-sync.test.ts"], expect: "refuses a symbolic link where a skill folder would be" },
+  { id: "m-node-all-parts", task: "M-node", file: "apps/node-agent/src/ops/memory-ops.ts",
+    find: "if (staged.size < a.parts) return", replace: "if (staged.size < 1) return",
+    run: ["apps/node-agent/test/memory-sync.test.ts"], expect: "only when the second arrives" },
+  // ---- Memory in the hub (ADR-0031): what reaches a lane, what a lane may read, and when a node holds a version.
+  { id: "m-hub-deliverable", task: "M-hub", file: "apps/hub/src/application/memory-service.ts",
+    find: "where: isDeliverable", replace: "where: () => true",
+    run: ["apps/hub/test/memory-service.test.ts", "apps/hub/test/memory-http.test.ts"], expect: "returns deliverable notes only" },
+  { id: "m-hub-own-only", task: "M-hub", file: "apps/hub/src/application/memory-service.ts",
+    find: "return isDeliverable(n) || n.provenance.by === actorLabel(memoryActor(caller)) ? n : null;", replace: "return n;",
+    run: ["apps/hub/test/memory-service.test.ts"], expect: "and nobody else's" },
+  { id: "m-hub-all-parts", task: "M-hub", file: "apps/hub/src/application/memory-sync.ts",
+    find: "if (answer.result.committed === true) committed = true;", replace: "committed = true;\n      break;",
+    run: ["apps/hub/test/memory-sync.test.ts"], expect: "records the version only once every part was taken" },
+  // ---- Memory, the lanes' command (ADR-0031, morndo-memory): each guard removed once.
+  { id: "m-cli-scope", task: "M-cli", file: "apps/memory-cli/src/cli.ts",
+    find: 'const name = last === ".git" ? (common.at(-2) ?? "") : last.endsWith(".git") ? last.slice(0, -".git".length) : (parts(place.top).at(-1) ?? "");',
+    replace: 'const name = parts(place.top).at(-1) ?? "";',
+    run: ["apps/memory-cli/test/cli.test.ts"], expect: "whatever worktree the lane is in" },
+  { id: "m-cli-refusal-exit", task: "M-cli", file: "apps/memory-cli/src/cli.ts",
+    find: "if (e instanceof Refused) { io.err(e.message); return 1; }", replace: "if (e instanceof Refused) { io.err(e.message); return 0; }",
+    run: ["apps/memory-cli/test/cli.test.ts"], expect: "is refused (not_yours) with exit 1" },
 ];
 
 // ---- the runner

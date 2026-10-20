@@ -731,6 +731,35 @@ Loop patterns and the recurring-job procedure, shipped as Agent Skills under `kn
 
 Rules the check refuses by, each naming its step: `effect-declared`, `gate-before-outward`, `silence-never-approves`, `gate-shape`, `round-limit`, `stop-required`, `budget-stop`, `engine-why`, `why-resolves`, `preference-in-template`, `step-check`, `no-model-id`, `model-class`, `role-known`, `step-kind`, `pattern-known`, `trigger`, `blanks-filled`, `done-required`, `report-citations`, `metrics-required`, `shape`. It warns on `stale-citation`, on `outward-sounding` (a local step whose name or tool sounds outward) and on `unchecked-citation` (a preference or snapshot it could only check for form).
 
+## Memory: what the lanes learned ([ADR-0031](adr/0031-memory.md))
+
+What lanes, the manager and the principal learned about a scope, kept as Notes in one place and handed to every lane as Agent Skills, whatever engine runs it. A lane writes on purpose through the agents' door (`morndo-memory`); the principal approves what may act like an instruction; every node writes the same skill files. Pure functions: the clock and the ids arrive from the caller, and no file, database or network is read. Code in `packages/domain/src/memory.ts`. Design: [`docs/design/memory/README.md`](design/memory/README.md).
+
+| Term | Means | Is not |
+|---|---|---|
+| Note | What was learned about one scope: an id (`N-12`), a kind, a title, a summary, a body, a tier, its provenance, and its validity (written, last confirmed, re-check date, approved, invalidated, superseded). | A Mandate, a Decision, Evidence or a Verdict (M1); Knowledge's Note, a source note in a shipped skill. |
+| Fact | A Note that states one short thing about its scope ("deploys go through make release"). A lane gets a scope's facts in one Index. | A Claim about a revision; a rule the hub enforces. |
+| Procedure | A Note that is a runbook: steps a lane follows. It reaches a lane as a Skill file of its own, and only once approved. | An SOP (Knowledge): it has no trigger, gates or budget. |
+| Scope | What a Note is about: `repo:<name>` (a repository, by the folder name of its main checkout, which its worktrees share), `project:<name>`, `user` or `org`. | A lane, a node, an engine. |
+| Provenance | Who wrote the Note (`lane:<name>`, `manager:<name>`, `principal:console` or `principal:endpoint`, `import:<label>`), on which node, from what work (a task, a report, a PR), and whether it came from untrusted content. Taken from the token and the lane the call names, never from the body. | A name found in the Note's text. |
+| Tier | How far a Note is trusted, set by where it came from: 1 the principal wrote or approved it, 2 confirmed by evidence its author did not produce, 3 an agent's (a lane's, the manager's, or imported from an agent's own notes), 4 derived from untrusted content. | A score; a ranking by use. |
+| Successor | The Note that replaces another, of the same kind and scope; the old one is invalidated in its favour. It is judged afresh: an approval does not carry over. | An edit. |
+| Approval | The principal's decision that a Note may reach the lanes. It makes the Note tier 1. Slice 1 takes it at the control plane's console. | An agent's or the manager's word; a confirmation by evidence. |
+| Skill file | One `SKILL.md` the hub renders, a scope's facts or one approved Procedure, named `morndo-mem-…` under the Agent Skills specification. Every node writes the same files into its engines' skill folders. | A skill Knowledge ships; a file a lane edits. |
+| Index | The facts of one scope in its Skill file: most trusted first, then the most recently confirmed, up to a size limit. The facts that don't fit are counted, and a search finds them. | The whole memory. |
+
+| # | Invariant |
+|---|---|
+| M1 | Memory grants nothing: a Note is never a Mandate, a Decision, Evidence or a Verdict. |
+| M2 | A Note is never edited or deleted, only superseded or invalidated. |
+| M3 | No Note without provenance. |
+| M4 | A Procedure reaches a lane only once the principal approved it. |
+| M5 | A Note's trust tier is set by where it came from and never rises on its own: an agent's Note rises only with evidence it did not produce, and a Note marked untrusted (it came from outside content: a mail, a web page, a comment) rises only by the principal's approval. |
+| M6 | The index a lane receives has a size limit. |
+| M7 | A Note past its re-check date is shown as stale, never silently dropped. |
+
+Events: NoteProposed, NoteApproved, NoteConfirmed, NoteSuperseded, NoteInvalidated (Memory's own record, `note_events`).
+
 ## On the phone: chats, status, and a digest after an absence ([ADR-0011](adr/0011-phone-chat-app.md))
 
 Since ADR-0011 the phone's catch-up holds decision cards only (C2 and C3's update cards are no longer made there). Updates wait in each lane's chat; a digest sums them up only after a real absence.
@@ -812,6 +841,10 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Secrets stands beside Connections*: they share the vault, the identity and the process adapters, not a model. An LLM key is a Connection; a value a lane's tools need is a Secret.
 - *Secrets stands beside Authority*: a Use is not a Mandate (SC10).
 - *Knowledge stands beside Engines*. An SOP step names a Role and a Model class; the Role's chain and auto routing decide what runs, and nothing in Knowledge ranks or excludes an engine (K9). A Gate is answered through Escalation as a Decision; a run starts as a Job.
+- *Fleet supplies Memory* (customer and supplier). Lanes write through the hub's agents' door with an agent token. Memory's Skill files reach each node as one typed operation, `memory.sync`, sent in parts with a key, with no command and no path (FL14); a node's policy may deny it.
+- *Memory is a customer of Authority and Escalation*: only the principal approves a Procedure or an untrusted Note (M4, M5). Slice 1 takes the approval at the control plane's console, which already acts for the principal (`pair`, `revoke`); an Ask in the app is next.
+- *Verification supplies Memory*: only evidence the author did not produce raises a Note to tier 2 (M5, V1).
+- *Memory stands beside Knowledge*: both hand agents Agent Skills and show a stale note as stale (K6, M7). They share no data: Knowledge ships what to plan with; Memory keeps what this user's lanes learned.
 
 **Anti-corruption layers** (adapters translate; the domain never sees a vendor payload):
 
@@ -830,6 +863,8 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 | Manager's chat protocol (`[buttons …]`, `[tap …]`) | a buttons line to an Ask's options; a Decision to the tap line the manager reads; a tap seen in its conversation to "answered elsewhere" (E8) — unless it is one the hub itself typed for an answer it holds, which is that answer arriving, recorded for the Endpoint whose request sent it, never an answer from elsewhere (a hand tap of the same option read only after the hub wrote its own: E8's known limit) |
 | Agent CLI status line (its JSON, posted by the lane's status-line script to `/api/agent/usage` with an agent token) | `rate_limits.*` and `context_window.used_percentage` to a Report for the account the call names (U1); everything else in the document is dropped |
 | Agents' board command (`morndo-board`, over `/api/agent/board` with an agent token) | a lane's command line to one change of one Task by one Actor (B1); the hub's refusal to one line the agent can act on |
+| Agents' memory command (`morndo-memory`, over `/api/agent/memory` with an agent token) | a lane's command line to one search, one Note, or one proposal or invalidation with provenance (M3); the git repository it runs in to the default Scope; the hub's refusal to one line the agent can act on |
+| Node's Memory sync (`memory.sync`, `morndo-node`) | Memory's Skill files to the engines' skill folders, each marked as Memory's; a folder of the same name without the mark is another skill's, left alone and reported. Never another skill's. The domain never sees a path |
 | Node job supervisor (`morndo-node`) | a class limit and an optional load or memory reading to the domain's queue decision (J5); a process exit to one Outcome; a completion to one Notice. The domain never sees a pid, a unit name, or `/proc`. |
 | Transcription plugin (protocol 1, `packages/protocol`) | `probe --json` and `run --json` to a Capability and an EngineText. A document that is not protocol 1 is `bad_output`. The domain never sees the plugin's JSON. |
 | Event store | persistence and replay (the scorer reads raw trial logs through it) |
