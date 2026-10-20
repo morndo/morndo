@@ -3,9 +3,10 @@
 // fetch, the environment and, inside tmux, the window's name as this lane's name (`tmux display-message -p '#W'`,
 // the name the hub lists the lane under).
 import { execFile } from "node:child_process";
-import { argvWantsVersion, productVersion } from "@morndo/service-kit";
+import { argvWantsVersion, exitAfterOutput, productVersion, quietBrokenPipe } from "@morndo/service-kit";
 import { run } from "./cli.ts";
 
+quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
   process.stdout.write(`${productVersion()}\n`);
   process.exit(0);
@@ -21,4 +22,5 @@ const code = await run(process.argv.slice(2), process.env, {
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),
 });
-process.exit(code);
+// Leave once the output is out (a pipe drains first, none is waited for after it); see service-kit's exit-after-output.ts.
+await exitAfterOutput(code);
