@@ -189,7 +189,10 @@ jobs:
       - id: deploy
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
+  # Runs only once the owner sets the repository variable MORNDO_RELEASES_ENABLED to true, with the release setup (keys,
+  # repository, environments). Until then a newer Node 24 would fail this job every Monday with nothing to release.
   node-pin:
+    if: vars.MORNDO_RELEASES_ENABLED == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:

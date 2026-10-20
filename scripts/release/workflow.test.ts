@@ -262,6 +262,16 @@ describe("release pipeline files", () => {
     expect(job(feed, "pages")).toContain(`actions/deploy-pages@${DEPLOY_PAGES}`);
     expect(feed).not.toContain("pull_request_target");
   });
+
+  it("gates the scheduled node-pin check on the repository variable the owner sets with the release setup", () => {
+    const jobs = (parse(feed) as { jobs: Record<string, { needs?: unknown; if?: string }> }).jobs;
+    expect(jobs["node-pin"]?.if).toBe("vars.MORNDO_RELEASES_ENABLED == 'true'");
+    // A job without `needs` starts on every scheduled run. Only resign-prepare may do so without the variable,
+    // because it ends cleanly while trust/feed_allowed_signers is not in the tree; the rest wait on it.
+    const unguarded = Object.entries(jobs).filter(([, j]) => !j.needs && !j.if).map(([name]) => name);
+    expect(unguarded).toEqual(["resign-prepare"]);
+    expect(job(feed, "resign-prepare")).toContain("skipping re-sign:");
+  });
 });
 
 type Step = { name?: string; uses?: string; run?: string; env?: Record<string, string>; with?: Record<string, string> };
