@@ -1095,6 +1095,21 @@ content-type: application/json
 { "ok": true, "result": { "path": "{{string}}" }, "invVersion": "{{number}}", "store": "{{uuid:store}}", "storeSeq": "{{number}}" }
 ```
 
+Memory's skills for one node, in one part here (ADR-0031). The node stages each part under the version and, with the last
+one, replaces its own `morndo-mem-` skills with exactly these:
+
+```example op-memory-sync
+POST /v1/op
+x-morndo-client: hub
+content-type: application/json
+
+{ "node": "n1", "op": "memory.sync", "args": { "version": "0123456789abcdef", "part": 0, "parts": 1, "files": [{ "name": "morndo-mem-repo-shop-api-facts", "content": "---\nname: morndo-mem-repo-shop-api-facts\ndescription: \"Facts about repo:shop-api\"\n---\n" }] }, "key": "hub:memory:0123456789abcdef:0" }
+---
+200
+
+{ "ok": true, "result": { "committed": true, "written": "{{number}}", "removed": "{{number}}", "skillDirs": "{{any}}", "conflicts": [] }, "invVersion": "{{number}}", "store": "{{uuid:store}}", "storeSeq": "{{number}}" }
+```
+
 The two delivery ops are the node's own; a client reaches them through `/v1/deliveries`:
 
 ```example op-deliver-refused

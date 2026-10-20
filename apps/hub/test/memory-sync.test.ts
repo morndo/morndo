@@ -209,3 +209,35 @@ describe("a version a node could not finish goes out again under fresh keys", ()
     expect(to("pc").map(c => c.key)).toEqual([`hub:memory:${v2}:0`]);
   });
 });
+
+describe("an empty memory", () => {
+  it("sends nothing to a node that never took a version, and an empty one to a node whose skills must go", async () => {
+    const empty = mkdtempSync(join(tmpdir(), "morndo-memory-sync-empty-"));
+    const store2 = new MemoryStore(empty);
+    const memory2 = new MemoryService({ store: store2, now: () => now });
+    const sent: Call[] = [];
+    const fleet: MemoryFleet = {
+      nodes: async () => [{ name: "pc", status: "online" }],
+      op: async (target, _op, args, opts) => { const c = { node: target.node, args, key: opts.key }; sent.push(c); return committing(c); },
+    };
+    const sync2 = new MemorySync({ service: memory2, store: store2, fleet, now: () => now, log: { info: () => {}, warn: () => {}, error: () => {} } });
+    try {
+      await sync2.tick();
+      expect(sent).toEqual([]);
+      const n = memory2.remember({ kind: "worker", name: "api-fix", token: "tok" }, { kind: "fact", scope: "repo:shop-api", title: "Ports", body: "8080." });
+      now += MINUTE;
+      await sync2.tick();
+      expect(sent.length).toBe(1);
+      expect(sent[0]!.args.files.length).toBe(1);
+      if (!n.ok) throw new Error(n.problem);
+      memory2.invalidate({ kind: "worker", name: "api-fix", token: "tok" }, n.note.id, "wrong");
+      now += MINUTE;
+      await sync2.tick();
+      expect(sent.length).toBe(2);
+      expect(sent[1]!.args.files).toEqual([]);
+    } finally {
+      store2.close();
+      rmSync(empty, { recursive: true, force: true });
+    }
+  });
+});

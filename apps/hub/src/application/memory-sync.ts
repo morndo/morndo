@@ -74,6 +74,9 @@ export class MemorySync {
     const now = this.#now();
     if (!force && (this.#refusedUntil.get(node.name) ?? 0) > now) return "denied";
     const last = this.#store.lastSynced(node.name);
+    // Nothing to write and nothing this node ever took to remove: no op at all (a new install, a node that never had
+    // Memory's skills). Once a node took a version, an empty one still goes out, to take its skills away.
+    if (last === null && bundle.parts.every(p => p.length === 0)) return "current";
     const back = before !== undefined && before !== "online";           // it was stale or offline at the previous round
     if (!force && !back && last !== null && last.version === bundle.version && now - last.at < RESEND_MS) return "current";
     return this.#send(node.name, bundle);
