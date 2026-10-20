@@ -288,6 +288,9 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
   const int = (): void => onSignal("SIGINT");
   process.on("SIGTERM", term);
   process.on("SIGINT", int);
+  // A reader that is gone (reader-gone.ts) stops the turn as a SIGTERM would: no account's budget is spent on unread output.
+  io.gone?.addEventListener("abort", term, { once: true });
+  if (io.gone?.aborted) term();
 
   const claimId = randomUUID();
   // Starts a turn on a session, waiting while the member is busy (backing off), saying so once.
@@ -419,5 +422,6 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
   } finally {
     process.off("SIGTERM", term);
     process.off("SIGINT", int);
+    io.gone?.removeEventListener("abort", term);
   }
 }

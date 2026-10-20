@@ -9,6 +9,7 @@ import { join, relative } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { UsageReportBody } from "@morndo/protocol";
+import { runIntoHead } from "../../../test/pipe-child.ts";
 import { run } from "../src/cli.ts";
 import { awaitSeat, isNight, waitDelay, waitLimit } from "../src/pool-cli.ts";
 
@@ -153,6 +154,17 @@ describe("morndo-keys pool exec", () => {
       expect(second.stderr).toMatch(new RegExp(`^session ${thread} is being written by pid \\d+\\n$`));
       expect(t.runs("codex-a")).toHaveLength(2);
     } finally { child.kill("SIGKILL"); await closed; }
+  }, 30_000);
+
+  it("stops the turn when the reader of its output is gone, instead of running on to the end", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "stream" }, defaultMember: "codex-a" });
+    const started = Date.now();
+    await runIntoHead([MAIN, ...turn()], t.env);
+    expect(Date.now() - started).toBeLessThan(3_500);
+    const pid = Number(readFileSync(join(t.home("codex-a"), "pid"), "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow();
+    await new Promise(resolve => setTimeout(resolve, 3_000));
+    expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
   }, 30_000);
 
   it("runs one turn at a time per account", async () => {

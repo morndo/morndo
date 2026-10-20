@@ -9,6 +9,7 @@ import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
+import { turnStopper } from "./reader-gone.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
 import { baseUrlProblem, childEnv, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
 import { readCodexLimits, usageReport } from "./adapters/usage-codex.ts";
@@ -29,7 +30,8 @@ const ACTOR: Actor = { kind: "principal", command: "cli" };
 const GATE = new Set(["off", "terms", "expired", "repo", "isolation", "dialect", "leases", "budget"]);
 const LEASES = 8;
 
-export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string };
+// `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
+export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal };
 
 export type Parsed = { cmd: string; positionals: string[]; rest: string[]; get(name: string): string | undefined; all(name: string): string[] };
 
@@ -208,6 +210,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   let failure = "";
   let outRedactor = streamRedactor([""]);
   let errRedactor = streamRedactor([""]);
+  const stopper = turnStopper(io);
   try {
     const secret = connection.kind === "api-key" ? await home.open(connection.ref) : "";
     outRedactor = streamRedactor([secret]);
@@ -217,6 +220,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const hooks = {
       onStdout: (chunk: string) => { io.stdout(outRedactor.push(chunk)); },
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
+      onStart: (pid: number) => { stopper.started(pid); },
     };
     const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
@@ -235,6 +239,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     io.stderr(errRedactor.push(failure));
     status = 1;
   } finally {
+    stopper.done();
     io.stdout(outRedactor.flush());
     io.stderr(errRedactor.flush());
     const again = released ? openHome(saved) : home;

@@ -1,9 +1,10 @@
 // Stands in for `codex` in the pool tests (ADR-0029): `login status`, `app-server` (the fake app server, with its files in the
 // member's sign-in home), and `exec` / `exec resume <id>` as a stream of events in codex-cli 0.161.0's `--json` shapes.
 // The member is found by following $CODEX_HOME/auth.json to its real path: that file's directory is the member's sign-in home.
-// `mode` there: ok (default), limit, slow, encrypted (a resume only), auth. Each run appends a record to runs.jsonl in that
+// `mode` there: ok (default), limit, slow, stream (a line every 100 ms for 5 s, its pid in `pid`, then `finished`), encrypted (a
+// resume only), auth. Each run appends a record to runs.jsonl in that
 // home: its arguments, the member, where its sessions and writer locks really are, and the names of its environment.
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -42,6 +43,11 @@ if (argv[0] === "app-server") {
   out({ type: "thread.started", thread_id: thread });
   out({ type: "turn.started" });
   if (mode === "slow") await pause(1500);
+  if (mode === "stream") {
+    writeFileSync(join(memberHome, "pid"), String(process.pid));
+    for (let i = 0; i < 50; i++) { out({ type: "item.completed", item: { type: "agent_message", text: `line ${i}` } }); await pause(100); }
+    writeFileSync(join(memberHome, "finished"), "yes");
+  }
   const fail = message => { out({ type: "error", message }); out({ type: "turn.failed", error: { message } }); process.exit(1); };
   if (mode === "limit") fail("You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at Jan 1st, 2099 9:00 AM.");
   if (mode === "auth") fail("Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.");
