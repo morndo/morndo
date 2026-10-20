@@ -158,6 +158,13 @@ jobs:
           for name in morndo morndo-fleet morndo-node morndo-job morndo-board morndo-keys; do
             "$RUNNER_TEMP/stage/bin/$name" --version
           done
+          # Every launcher, whatever CLIs the tree has, must name a file that is in the staged tree.
+          # Not run: a CLI may read stdin or a terminal.
+          for launcher in "$RUNNER_TEMP"/stage/bin/*; do
+            entry=$(sed -n 's|^exec "\$here/../node/bin/node" "\$here/../\(.*\)" "\$@"$|\1|p' "$launcher")
+            test -n "$entry"
+            test -f "$RUNNER_TEMP/stage/$entry"
+          done
           mkdir -p dist
           node scripts/release/main.ts pack --root "$RUNNER_TEMP/stage" --out "dist/morndo-${VERSION}-${PLATFORM}.tar.gz" --mtime "$mtime"
           cp "$RUNNER_TEMP/stage/files.json" "dist/files-${PLATFORM}.json"

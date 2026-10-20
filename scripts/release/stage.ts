@@ -7,7 +7,7 @@ import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkS
 import { dirname, join, relative, sep } from "node:path";
 import type { TreeFile } from "./archive.ts";
 import { listFiles } from "./files.ts";
-import { LAUNCHERS, launcherSource } from "./launchers.ts";
+import { launcherSource, launchersFrom } from "./launchers.ts";
 import { thirdPartyNotice } from "./notice.ts";
 
 const SKIP_DIR = new Set(["test", "e2e", ".cache"]);
@@ -26,7 +26,7 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     else if (st.isDirectory()) files.push(...walkCopied(abs, `app/${name}`, () => "0444", realpathSync(p.repo), p.compiled, APP_TOP));
   }
   files.push(...walkCopied(p.nodeDir, "node", rel => rel.startsWith("node/bin/") ? "0555" : "0444", realpathSync(p.nodeDir), undefined, null));
-  for (const [name, entry] of Object.entries(LAUNCHERS)) {
+  for (const [name, entry] of Object.entries(launchersFrom(p.repo))) {
     files.push({ path: `bin/${name}`, bytes: Buffer.from(launcherSource(entry)), mode: "0555" });
   }
   files.push({ path: "app/VERSION", bytes: Buffer.from(`${p.version}\n`), mode: "0444" });

@@ -20,7 +20,7 @@ import { commitFeeds, feedTree, MOVED, refUpdateResult } from "./feed-sync.ts";
 import { readSchemaJson } from "./schema-read.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
-import { launcherSource, LAUNCHERS } from "./launchers.ts";
+import { launcherSource, launchersFrom } from "./launchers.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, schemaFrom } from "./manifest.ts";
 import { orderProblems } from "./schema.ts";
 import { BUNDLED_NODE, newerNode24, nodeTarball } from "./node-pin.ts";
@@ -430,6 +430,47 @@ describe("feed", () => {
   });
 });
 
+describe("launchers follow the package bins", () => {
+  const root = dirname(dirname(fileURLToPath(new URL(".", import.meta.url))));
+
+  function bins(repo: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const top of ["apps", "packages"]) {
+      for (const dir of readdirSync(join(repo, top))) {
+        const file = join(repo, top, dir, "package.json");
+        if (!existsSync(file)) continue;
+        const bin = (JSON.parse(readFileSync(file, "utf8")) as { bin?: Record<string, string> }).bin ?? {};
+        for (const [name, path] of Object.entries(bin)) out[name] = `app/${top}/${dir}/${path.replace(/^\.\//, "")}`;
+      }
+    }
+    return out;
+  }
+
+  it("every bin in the tree has a launcher that runs its file", () => {
+    const want = bins(root);
+    expect(Object.keys(want)).toContain("morndo-secrets");
+    expect(launchersFrom(root)).toEqual(want);
+  });
+
+  it("a new CLI cannot be missed: its bin gets a launcher without a list to edit", () => {
+    const repo = temp();
+    mkdirSync(join(repo, "apps/tool/src"), { recursive: true });
+    writeFileSync(join(repo, "apps/tool/package.json"), '{"name":"@morndo/tool","bin":{"morndo-tool":"./src/main.ts","morndo-tool-two":"src/two.ts"}}\n');
+    expect(launchersFrom(repo)).toEqual({ "morndo-tool": "app/apps/tool/src/main.ts", "morndo-tool-two": "app/apps/tool/src/two.ts" });
+  });
+
+  it("refuses a bin path that leaves its package, and two packages that claim one name", () => {
+    const repo = temp();
+    mkdirSync(join(repo, "apps/a"), { recursive: true });
+    mkdirSync(join(repo, "apps/b"), { recursive: true });
+    writeFileSync(join(repo, "apps/a/package.json"), '{"bin":{"x":"../b/main.ts"}}\n');
+    expect(() => launchersFrom(repo)).toThrow(/leaves its package/);
+    writeFileSync(join(repo, "apps/a/package.json"), '{"bin":{"x":"./main.ts"}}\n');
+    writeFileSync(join(repo, "apps/b/package.json"), '{"bin":{"x":"./main.ts"}}\n');
+    expect(() => launchersFrom(repo)).toThrow(/two packages/);
+  });
+});
+
 describe("stage, launchers, node pin, notice", () => {
   it("stages a fixture tree twice into archives with the same bytes", () => {
     const repo = temp();
@@ -441,6 +482,7 @@ describe("stage, launchers, node pin, notice", () => {
     writeFileSync(join(repo, "package-lock.json"), '{"name":"morndo","lockfileVersion":3,"packages":{}}\n');
     writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
     writeFileSync(join(repo, "apps/hub/src/main.ts"), "export {}\n");
+    writeFileSync(join(repo, "apps/hub/package.json"), '{"name":"@morndo/hub","bin":{"morndo":"./src/main.ts"}}\n');
     writeFileSync(join(repo, "apps/hub/src/main.test.ts"), "nope\n");
     writeFileSync(join(repo, "docs/notes.md"), "not in the archive\n");
     writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
@@ -460,7 +502,7 @@ describe("stage, launchers, node pin, notice", () => {
     expect(files(destA)).toContain("units");
     expect(files(destA)).toContain("trust");
     expect(files(destA)).toContain("LICENSES/LICENSE.md");
-    expect(readFileSync(join(destA, "bin/morndo"), "utf8")).toBe(launcherSource(LAUNCHERS.morndo));
+    expect(readFileSync(join(destA, "bin/morndo"), "utf8")).toBe(launcherSource("app/apps/hub/src/main.ts"));
     const packedA = packTree(readStaged(destA), 1_700_000_000);
     const packedB = packTree(readStaged(destB), 1_700_000_000);
     expect(Buffer.from(packedA).equals(packedB)).toBe(true);

@@ -1,13 +1,32 @@
 // bin/<name> resolves its own directory once and runs that Version's Node on that Version's
 // program (design §5). realpath follows the link in ~/.local/bin back into the Version.
-export const LAUNCHERS = {
-  morndo: "app/apps/hub/src/main.ts",
-  "morndo-fleet": "app/apps/fleet/src/main.ts",
-  "morndo-node": "app/apps/node-agent/src/main.ts",
-  "morndo-job": "app/apps/node-agent/src/job-main.ts",
-  "morndo-board": "app/apps/board-cli/src/main.ts",
-  "morndo-keys": "app/apps/connections/src/main.ts",
-} as const;
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, normalize } from "node:path";
+
+// One launcher per package bin, read from the tree being staged, so a new CLI cannot be missed.
+// A bin's file is under its package; two packages must not claim one name.
+export function launchersFrom(repo: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const top of ["apps", "packages"]) {
+    const base = join(repo, top);
+    if (!existsSync(base)) continue;
+    for (const dir of readdirSync(base).sort()) {
+      const file = join(base, dir, "package.json");
+      if (!existsSync(file)) continue;
+      const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+      const bin = typeof parsed === "object" && parsed !== null && "bin" in parsed ? parsed.bin : undefined;
+      if (typeof bin !== "object" || bin === null) continue;
+      for (const [name, path] of Object.entries(bin)) {
+        if (typeof path !== "string") throw new Error(`bin ${name} in ${top}/${dir} is not a path`);
+        const inside = normalize(path).replace(/^\.\//, "");
+        if (inside.startsWith("..") || inside.startsWith("/")) throw new Error(`bin ${name} leaves its package: ${path}`);
+        if (Object.hasOwn(out, name)) throw new Error(`two packages claim the bin ${name}`);
+        out[name] = `app/${top}/${dir}/${inside}`;
+      }
+    }
+  }
+  return out;
+}
 
 export function launcherSource(entry: string): string {
   return [

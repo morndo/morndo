@@ -79,6 +79,7 @@ describe("release pipeline files", () => {
     expect(build).toContain("npx vitest run --project=units");
     expect(build).toContain("npm run build");
     expect(build).toContain("npm prune --omit=dev");
+    expect(build).toContain('"$RUNNER_TEMP"/stage/bin/*');
     expect(build).toContain("better-sqlite3");
     expect(build).toContain("contents: read");
   });
