@@ -3,7 +3,7 @@
 // meets it (an empty `m` from a tmux control did both). clean-tree.ts reads the untracked files before a run and after it.
 // Here against real git repositories in temporary directories.
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -15,7 +15,9 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 function repo(): string {
   const dir = mkdtempSync(join(tmpdir(), "morndo-clean-tree-"));
   dirs.push(dir);
-  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@users.noreply.github.com", ...args], { cwd: dir, stdio: "ignore" });
+  // Nothing of the surrounding environment: no GIT_DIR, GIT_INDEX_FILE … from a hook or a shell, no global or system configuration.
+  const env = { PATH: process.env.PATH ?? "", HOME: dir, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+  const git = (...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@users.noreply.github.com", ...args], { cwd: dir, env, stdio: "ignore" });
   git("init", "-q");
   writeFileSync(join(dir, "kept"), "tracked\n");
   writeFileSync(join(dir, ".gitignore"), "ignored.log\n");
@@ -23,6 +25,23 @@ function repo(): string {
   git("commit", "-q", "-m", "init");
   return dir;
 }
+
+describe("the fixture's git", () => {
+  it("is the repository in its own directory, whatever GIT_* variables the run inherits", () => {
+    const saved = { dir: process.env.GIT_DIR, tree: process.env.GIT_WORK_TREE };
+    const elsewhere = mkdtempSync(join(tmpdir(), "morndo-clean-tree-elsewhere-"));
+    dirs.push(elsewhere);
+    process.env.GIT_DIR = join(elsewhere, "not-this-one");
+    process.env.GIT_WORK_TREE = elsewhere;
+    try {
+      const dir = repo();
+      expect(existsSync(join(dir, ".git"))).toBe(true);
+      expect(existsSync(join(elsewhere, "not-this-one"))).toBe(false);
+    } finally {
+      for (const [name, value] of [["GIT_DIR", saved.dir], ["GIT_WORK_TREE", saved.tree]] as const) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    }
+  });
+});
 
 describe("untrackedFiles", () => {
   it("lists every untracked file, one by one, and none that is tracked, ignored or merely changed", () => {
