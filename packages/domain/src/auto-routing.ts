@@ -369,7 +369,7 @@ function knownFamilies(families: readonly string[]): string[] {
 
 function reviewExclusion(candidate: CandidateFacts, input: DecideInput): Reason | null {
   if (!input.reviewRule) return null;
-  if (roleGroup(input.role) === "review") {
+  if (roleGroup(input.role) !== "implement") {
     return knownFamilies(input.implementerFamilies).includes(candidate.family) ? { code: "review", stage: "rules", name: candidate.family } : null;
   }
   const reviewers = knownFamilies(input.reviewFamilies);

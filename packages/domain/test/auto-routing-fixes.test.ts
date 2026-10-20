@@ -1,6 +1,6 @@
 // Fix round 1 for auto routing PR 1 (design sections 7.1, 7.2; R19, R22, R25, R26). Names here are test data.
 import { describe, expect, it } from "vitest";
-import { parseFact, recordFact, scorecard, type OutcomeFact } from "../src/index.ts";
+import { decide, parseFact, recordFact, scorecard, type CandidateFacts, type OutcomeFact, type TaskProfile } from "../src/index.ts";
 
 const T = 1_700_000_000_000;
 
@@ -47,5 +47,50 @@ describe("an Outcome adds up all of a route's Leases (design 7.1)", () => {
     expect(added.ok).toBe(true);
     const lowered = fact({ kind: "cost", source: "lease", lease: "l-1", at: T + 2, usd: 0.3, spend: "estimate" });
     expect(recordFact([first], lowered, { lane: "lane-a" }).ok).toBe(false);
+  });
+});
+
+function profile(role: string): TaskProfile {
+  return {
+    role, group: role.split("-")[0] ?? role,
+    risk: { value: false, source: "default" }, kind: { value: "unknown", source: "default" },
+    size: { value: "unknown", source: "default" }, round: { value: 1, source: "default" },
+    priority: { value: "normal", source: "default" }, workspace: "ws", languages: [],
+    task: null, lane: null, implementers: [], brief: null,
+  };
+}
+
+function cand(entry: string, family: string): CandidateFacts {
+  return {
+    entry, connection: entry.split(":")[0] ?? "c", kindOf: "subscription", family, modelClass: "everyday", inChain: true,
+    rank: 0, available: true, gate: "ok", reservation: null, expectedUsd: null, costFrom: null, committedToday: 0,
+    dailyCap: 10, window: null, level: "hard", band: "new", minutes: null, heldSince: null, heldWhy: null,
+  };
+}
+
+describe("R19 applies to every checking role, not only `review`", () => {
+  const run = (role: string, reviewRule: boolean) => decide({
+    role, reviewRule, implementerFamilies: ["fam-a"], reviewFamilies: ["fam-a", "fam-b"],
+    candidates: [cand("sub-a:m@high", "fam-a"), cand("sub-b:m@high", "fam-b")], profile: profile(role),
+    settings: { taskCeiling: 3, saveLine: 0.5, dailyCaps: {}, reserves: {} }, derived: ["sub-a:m@high", "sub-b:m@high"],
+  });
+
+  it.each(["review", "review-fix", "verify", "verify-ui"])("%s with the rule on excludes the implementer's family", role => {
+    const got = run(role, true);
+    expect(got.excluded).toEqual([{ entry: "sub-a:m@high", reason: { code: "review", stage: "rules", name: "fam-a" } }]);
+    expect(got.pick).toBe("sub-b:m@high");
+  });
+
+  it("control: with the rule off a checking role excludes nothing", () => {
+    expect(run("verify", false).excluded).toEqual([]);
+  });
+
+  it("an implementer role keeps the review-chain branch", () => {
+    const got = decide({
+      role: "implement-backend", reviewRule: true, implementerFamilies: ["fam-b"], reviewFamilies: ["fam-a", "fam-c"],
+      candidates: [cand("sub-a:m@high", "fam-a")], profile: profile("implement-backend"),
+      settings: { taskCeiling: 3, saveLine: 0.5, dailyCaps: {}, reserves: {} }, derived: ["sub-a:m@high"],
+    });
+    expect(got.excluded).toEqual([]);
   });
 });
