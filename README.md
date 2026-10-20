@@ -66,6 +66,7 @@ Open `http://localhost:8790`. `MORNDO_ORIGIN` must be the exact origin the brows
 | `apps/fleet` | `morndo-fleet`, the fleet service: nodes dial in; the hub and other clients talk to it over a Unix socket. |
 | `apps/node-agent` | `morndo-node`, the agent on each machine that hosts agents: its tmux, transcripts and files, by typed operations only. |
 | `apps/board-cli` | `morndo-board`, the command the manager and the lanes keep the team's board with, and the prompt blocks that tell them how ([`docs/agents/board.md`](docs/agents/board.md), ADR-0015). |
+| `apps/memory-cli` | `morndo-memory`, the command the lanes search and add to Memory with: what lanes learned, kept for every lane on every machine and handed to them as skills ([`docs/design/memory/README.md`](docs/design/memory/README.md), ADR-0031). |
 | `packages/domain` | The pure domain model (no infrastructure). |
 | `packages/protocol` | The schemas between the app, the hub, the fleet and the agents. |
 | `packages/node-ops`, `packages/service-kit` | What runs on a node (tmux, sessions, files), and what the services share (migrations, rate limits, the local-disk check). |
