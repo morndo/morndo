@@ -36,7 +36,7 @@ import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
 import { openAgentDb, rotateStreamId } from "./db/open.ts";
 import type { Deliverer } from "./deliveries/deliverer.ts";
-import { EventLoops } from "./events.ts";
+import { EventLoops, utcOffsetMin } from "./events.ts";
 import { LaneStates } from "./lane-state.ts";
 import { fleetPublicKey, loadNodeKey } from "./identity.ts";
 import type { Logger } from "./log.ts";
@@ -145,6 +145,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     onInventory: async s => { ops.deliverer.kick("inventory"); await states.observe(s.lanes); },
     health: async () => ({
       ...(await healthProbe(config.home, { tmuxSocket: config.policy.tmuxSocket })), wallClock: ops.now(), spoolDepth: spool.depth(), drops: spool.drops,
+      tzOffsetMin: utcOffsetMin(),
       ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
     }),
     ...(o.pollMs !== undefined ? { pollMs: o.pollMs } : {}),
