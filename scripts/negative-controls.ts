@@ -2549,7 +2549,7 @@ export const CONTROLS: Control[] = [
     find: "process.argv[2] === \"put\" ? await stdinBytes() : null", replace: "await stdinBytes()",
     run: ["apps/connections/test/secrets-bin.test.ts"], expect: "a pipe that never closes" },
   { id: "sp2b-r11-exit-code", task: "secrets-pr2b", file: "apps/connections/src/secrets-main.ts",
-    find: "  confirm,\n});\n", replace: "  confirm,\n});\nprocess.exit(process.exitCode);\n",
+    find: "await exitAfterOutput(await runSecrets(", replace: "process.exit(await runSecrets(",
     run: ["apps/connections/test/secrets-bin.test.ts"], expect: "20001" },
   { id: "sp2b-r8-every-renewed", task: "secrets-pr2b", file: "packages/domain/src/secrets.ts",
     find: "!all.every(x => x.renewed)", replace: "!c.renewed",
