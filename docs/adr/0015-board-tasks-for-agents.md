@@ -32,8 +32,8 @@ Until now the only record of what a lane was doing was its conversation and its 
 | Agent tokens | `apps/hub/src/application/agent-access.ts`, `morndo agent-token` in `apps/hub/src/main.ts` |
 | The service, the routes | `apps/hub/src/application/board-service.ts`, `/api/board` and `/api/agent/board` in `apps/hub/src/adapters/http.ts` |
 | The CLI and the prompt blocks | `apps/board-cli/src/cli.ts`, `apps/board-cli/src/prompt.ts` |
-| The desktop | `apps/web/src/lib/desktop/BoardView.svelte`, `TaskCard.svelte`, `TaskPanel.svelte`, `NewTaskModal.svelte`, `StatusIcon.svelte`, `board.ts`; the chip in `ChannelView.svelte`; the look's QA in a private QA record, not in this tree |
-| The checks | `packages/domain/test/board.test.ts`, `apps/hub/test/board.test.ts`, `apps/board-cli/test/cli.test.ts`, `e2e/board.e2e.ts` |
+| The desktop | `apps/web/src/lib/desktop/BoardView.svelte`, `TaskCard.svelte`, `TaskPanel.svelte`, `NewTaskModal.svelte`, `StatusIcon.svelte`, `board.ts`; the runs on it (ADR-0032) in `run-words.ts`, `RunAvatar.svelte`, `RunDot.svelte`; the chip in `ChannelView.svelte`; the look's QA in a private QA record, not in this tree |
+| The checks | `packages/domain/test/board.test.ts`, `apps/hub/test/board.test.ts`, `apps/board-cli/test/cli.test.ts`, `apps/web/test/run-words.test.ts`, `board-record.test.ts`, `board-runs-web.test.ts`, `e2e/board.e2e.ts` |
 
 ## Alternatives
 

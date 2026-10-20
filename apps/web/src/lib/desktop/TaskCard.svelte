@@ -3,19 +3,25 @@
   // title (two lines, the rest in the panel), what stands out as chips (priority, comments, a lane that isn't running),
   // the blocked reason in words, and the age. Dragged between columns with the pointer; opened with a click or Enter
   // for everything else (the panel). Ink: the glyph carries the status colour, everything else is ink (COLOR.md 1, 2).
+  // ADR-0032 (design §7): on the one card its assignee's Run shows on (run-words.ts runCards), a ring on the avatar and
+  // one live line under the title, a status dot and the Run in words (runLook). The "not running" chip stays.
   import CircleDashed from "@lucide/svelte/icons/circle-dashed";
   import Flag from "@lucide/svelte/icons/flag";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import Unplug from "@lucide/svelte/icons/unplug";
-  import Avatar from "./Avatar.svelte";
+  import RunAvatar from "./RunAvatar.svelte";
+  import RunDot from "./RunDot.svelte";
   import StatusIcon from "./StatusIcon.svelte";
-  import { ago, type Task } from "./board.ts";
+  import { ago, type Run, type Task } from "./board.ts";
   import { chipOpensJob, jobKey, type ShownJob } from "./jobs.ts";
+  import { runLook } from "./run-words.ts";
 
-  let { task, now, running, selected, jobs = [], onOpen, onOpenJob, onDragStart, onDragEnd }: {
+  let { task, now, running, selected, jobs = [], run = null, onOpen, onOpenJob, onDragStart, onDragEnd }: {
     task: Task; now: number; running: boolean; selected: boolean; jobs?: ShownJob[];
+    run?: Run | null;                                     // the assignee's Run, when this is the card it shows on
     onOpen: () => void; onOpenJob: (id: string) => void; onDragStart: () => void; onDragEnd: () => void;
   } = $props();
+  const look = $derived(runLook(run, now));
   const when = $derived(task.status === "done" && task.doneAt !== null ? task.doneAt : task.updatedAt);
   const whenWord = $derived(task.status === "done" ? "Accepted" : task.rev === 1 ? "Filed" : "Updated");
 </script>
@@ -29,8 +35,8 @@
   <header>
     <span class="key">{task.key}</span>
     {#if task.assignee}
-      <span class="who" class:off={!running} title={running ? task.assignee : `${task.assignee}: no lane by this name is running`}>
-        <span class="nm">{task.assignee}</span><Avatar name={task.assignee} kind={task.assignee === "manager" ? "peer" : "agent"} size={18} />
+      <span class="who" class:off={!running} title={running ? (look ? `${task.assignee}: ${look.words}` : task.assignee) : `${task.assignee}: no lane by this name is running`}>
+        <span class="nm">{task.assignee}</span><RunAvatar name={task.assignee} kind={task.assignee === "manager" ? "peer" : "agent"} size={18} ring={look?.ring ?? null} />
       </span>
     {:else}
       <span class="who none" title="Nobody yet"><span class="nm">Nobody yet</span><CircleDashed size={18} strokeWidth={1.5} /></span>
@@ -40,6 +46,7 @@
     <StatusIcon status={task.status} size={14} />
     <h4 title={task.title}>{task.title}</h4>
   </div>
+  {#if look}<p class="live" data-run={run?.phase} title={look.words}><RunDot dot={look.dot} /><span>{look.words}</span></p>{/if}
   {#each jobs as job (jobKey(job))}
     <button type="button" class="chip job" data-job={jobKey(job)} onclick={e => { e.stopPropagation(); onOpenJob(jobKey(job)); }} onkeydown={e => { if (chipOpensJob(e.key)) { e.stopPropagation(); e.preventDefault(); onOpenJob(jobKey(job)); } }}>{job.name} · {job.state}</button>
   {/each}
@@ -79,6 +86,9 @@
     margin: 0; min-width: 0; font: 400 14px/20px var(--font); overflow-wrap: anywhere;
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;    /* the rest in the panel */
   }
+  /* The live line: the dot centred under the status glyph, the words under the title, one line (the rest in its title). */
+  .live { margin: 0; display: flex; align-items: center; gap: 12px; min-width: 0; padding-left: 4px; font: 400 12px/17px var(--font); color: var(--muted); }
+  .live span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .why {
     margin: 0 0 0 22px; font: 400 12px/17px var(--font); color: var(--bad-fg);
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;

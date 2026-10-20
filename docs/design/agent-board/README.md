@@ -84,6 +84,37 @@ The Fleet supplies the Board (customer and supplier). The Board reads runs and n
 - **Lanes without a task:** a row above the columns names the lanes that are working or waiting with no open task, so their work is never off the board.
 - **Moves:** a card that changes column moves there with Svelte's crossfade, and its avatar moves with it. Under reduced motion nothing animates.
 
+How the app does it (`apps/web/src/lib/desktop/`; the words and classes in `run-words.ts`, tested in `apps/web/test/run-words.test.ts`):
+
+- **Decoding:** the feed decodes the frame's `runs` one by one with `RunViewSchema` and keys them by lane (`board.ts` `decodeRuns`); one it can't read is dropped. A frame without `runs` shows no ring, line or count. Of two runs with one lane name, the one whose lane is there wins.
+- **Which card:** a lane's run shows on one card, its task in progress, else its open task changed last. Backlog and done cards keep a plain avatar.
+- **Ring** (`RunAvatar.svelte`): an outline 2px off the avatar. Its shape says what the lane is on, its colour how it stands:
+
+  | Run | Ring |
+  |---|---|
+  | working | solid `--working`, a soft pulse |
+  | waiting on background or a job | dashed `--working` |
+  | waiting on a wake-up | dotted `--muted` |
+  | declared (no waker) | dashed `--warn` |
+  | needs you | solid `--warn` |
+  | overdue | its wait's shape in `--warn` |
+  | ended, gone, unknown | none |
+
+- **Live line:** 12px, muted, one line, with a dot in the phase's colour (`RunDot.svelte`):
+  - "Working · 3m"
+  - "In the background: npm test (+1 more) · 6m"
+  - "Job e2e running"
+  - "Wakes at 14:42", or "A wake-up is scheduled"
+  - "Says waiting on the deploy · nothing will wake it"
+  - "Needs you: …"
+  - "Said DONE: …", "Said BLOCKED: …", "Said NEEDS DECISION: …"; no status line is "Idle"
+  - "Its machine is offline"
+
+  An overdue wait adds " · overdue". A gone lane has no line: its card shows "not running", whatever the hub's lane list says.
+- **The record:** the console is "console". A board move reads "board moved it to In review when builder said DONE: …". D2 reads "… said it is blocked or needs a decision", D3 "… when builder stopped", D4 "… when builder started on it".
+- **The row:** "Without a task", a chip per lane with its ringed avatar, name and phase word. A click opens the lane's channel, as the task panel's "Open <lane>" does.
+- **Moves:** the leaving card is inert (Svelte's outro) and loses its `data-task`, so a key is on one card at a time.
+
 ## 8. Acceptance (slice 1)
 
 - Domain tests for R1 to R8 and D1 to D6, each with a negative control.
