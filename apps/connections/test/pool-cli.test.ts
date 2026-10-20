@@ -9,6 +9,7 @@ import { join, relative } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { UsageReportBody } from "@morndo/protocol";
+import { runIntoHead } from "../../../test/pipe-child.ts";
 import { run } from "../src/cli.ts";
 import { awaitSeat, isNight, waitDelay, waitLimit } from "../src/pool-cli.ts";
 
@@ -154,6 +155,88 @@ describe("morndo-keys pool exec", () => {
       expect(t.runs("codex-a")).toHaveLength(2);
     } finally { child.kill("SIGKILL"); await closed; }
   }, 30_000);
+
+  it("stops the turn when the reader of its output is gone, instead of running on to the end", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "stream" }, defaultMember: "codex-a" });
+    const started = Date.now();
+    const ran = await runIntoHead([MAIN, ...turn()], t.env);
+    expect(Date.now() - started).toBeLessThan(9_000);                                    // the fake turn is 15 s
+    expect(ran.code).toBe(143);                                                          // stopped as a SIGTERM stops it
+    const pid = Number(readFileSync(join(t.home("codex-a"), "pid"), "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow();
+    expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
+  }, 30_000);
+
+  it("kills an agent that ignores SIGTERM once the reader is gone", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "stubborn" }, defaultMember: "codex-a" });
+    const started = Date.now();
+    const ran = await runIntoHead([MAIN, ...turn()], t.env);
+    expect(Date.now() - started).toBeLessThan(9_000);                                    // SIGKILL follows after 3 s; the turn is 15 s
+    expect(ran.code).toBe(143);
+    const pid = Number(readFileSync(join(t.home("codex-a"), "pid"), "utf8"));
+    expect(() => process.kill(pid, 0)).toThrow();
+    expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
+  }, 40_000);
+
+  it("kills what the turn left behind once the grace has passed, though the agent itself has gone", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "orphan" }, defaultMember: "codex-a" });
+    const started = Date.now();
+    const ran = await runIntoHead([MAIN, ...turn()], t.env);
+    expect(ran.code).toBe(143);
+    expect(Date.now() - started).toBeLessThan(9_000);
+    expect(() => process.kill(Number(readFileSync(join(t.home("codex-a"), "inner-pid"), "utf8")), 0)).toThrow();
+  }, 40_000);
+
+  it("ends with the exit code that matches the lease: a SIGTERM as the turn finishes is 0 and done, or 143 and failed", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "ok" }, defaultMember: "codex-a" });
+    const outcomes = async (): Promise<string[]> => (await t.cli(["log", "codex-a"])).stdout.split("\n").filter(l => l.includes('"LeaseClosed"')).map(l => (JSON.parse(l) as { outcome: string }).outcome);
+    for (let round = 0; round < 5; round++) {
+      const seen = t.runs("codex-a").length;
+      const bin = spawn(process.execPath, ["--no-warnings", MAIN, ...turn()], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+      bin.stdout.resume();
+      bin.stderr.resume();
+      const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => bin.once("close", (code, signal) => resolve({ code, signal })));
+      await until(() => t.runs("codex-a").length > seen);
+      try { bin.kill("SIGTERM"); } catch { /* it is already gone */ }
+      const end = await closed;
+      const outcome = (await outcomes()).at(-1);
+      if (end.code === 0 || end.code === null) expect(outcome, `round ${round}: ${JSON.stringify(end)}`).toBe("done");
+      else expect({ end, outcome }, `round ${round}`).toEqual({ end: { code: 143, signal: null }, outcome: "failed" });
+    }
+  }, 60_000);
+
+  it("stops the turn on SIGHUP, as run does: 129, the agent gone, the lease failed and the seat free", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "stream" }, defaultMember: "codex-a" });
+    const bin = spawn(process.execPath, ["--no-warnings", MAIN, ...turn()], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+    bin.stdout.resume();
+    bin.stderr.resume();
+    const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(resolve => bin.once("close", (code, signal) => resolve({ code, signal })));
+    await until(() => existsSync(join(t.home("codex-a"), "pid")));
+    const started = Date.now();
+    bin.kill("SIGHUP");
+    expect(await closed).toEqual({ code: 129, signal: null });
+    expect(Date.now() - started).toBeLessThan(9_000);                                    // the fake turn is 15 s
+    expect(() => process.kill(Number(readFileSync(join(t.home("codex-a"), "pid"), "utf8")), 0)).toThrow();
+    expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
+    const closedLeases = (await t.cli(["log", "codex-a"])).stdout.split("\n").filter(l => l.includes('"LeaseClosed"')).map(l => (JSON.parse(l) as { outcome: string }).outcome);
+    expect(closedLeases).toEqual(["failed"]);
+    t.setMode("codex-a", "ok");
+    const next = await t.cli(turn());                                                    // the claim was ended: the seat is free
+    expect([next.code, next.stderr]).toEqual([0, ""]);
+  }, 40_000);
+
+  it("does not start the agent when the reader goes after the seat is won", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow-status" }, defaultMember: "codex-a" });
+    const marker = join(t.home("codex-a"), "status-started");
+    rmSync(marker, { force: true });
+    const gone = new AbortController();
+    const running = run(turn(), t.env, { stdin: "", stdout: () => {}, stderr: () => {}, gone: gone.signal });
+    await until(() => existsSync(marker));
+    gone.abort();
+    expect(await running).toBe(143);
+    expect(t.runs("codex-a")).toHaveLength(0);
+    expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
+  }, 40_000);
 
   it("runs one turn at a time per account", async () => {
     const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow" }, defaultMember: "codex-a" });
