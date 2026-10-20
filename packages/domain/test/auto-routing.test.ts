@@ -556,19 +556,39 @@ describe("R16: auto is a switch beside the mode", () => {
   });
 });
 
+type Decide = typeof decide;
+
+// R22: a pick replays. True when the rule answers the same for every stored input, run twice over clones, and again
+// after the live ceiling moves, without touching the stored input.
+function replays(rule: Decide, seed = 20, count = 1000): boolean {
+  const rand = mulberry32(seed);
+  for (let i = 0; i < count; i++) {
+    const frozen = structuredClone(randomInput(rand));
+    const first = rule(structuredClone(frozen));
+    if (JSON.stringify(rule(structuredClone(frozen))) !== JSON.stringify(first)) return false;
+    const live = structuredClone(frozen);
+    live.settings = { ...live.settings, taskCeiling: live.settings.taskCeiling + 10 };
+    if (JSON.stringify(rule(structuredClone(live))) !== JSON.stringify(rule(structuredClone(live)))) return false;
+    if (JSON.stringify(rule(structuredClone(frozen))) !== JSON.stringify(first)) return false;
+  }
+  return true;
+}
+
+// R25: deciding writes nothing. True when the rule leaves every input it was given byte-equal.
+function leavesInputs(rule: Decide, seed = 21, count = 1000): boolean {
+  const rand = mulberry32(seed);
+  for (let i = 0; i < count; i++) {
+    const input = randomInput(rand);
+    const before = JSON.stringify(input);
+    rule(input);
+    if (JSON.stringify(input) !== before) return false;
+  }
+  return true;
+}
+
 describe("R22 and R25: a pick is a pure function of its inputs and writes nothing", () => {
   it("replays the same pick after the live ceiling changes, over 1000 inputs", () => {
-    const rand = mulberry32(20);
-    for (let i = 0; i < 1000; i++) {
-      const input = randomInput(rand);
-      const frozen = structuredClone(input);
-      const first = decide(frozen);
-      expect(decide(structuredClone(frozen))).toEqual(first);
-      const live = structuredClone(frozen);
-      live.settings = { ...live.settings, taskCeiling: live.settings.taskCeiling + 10 };
-      expect(decide(live)).toEqual(decide(structuredClone(live)));
-      expect(decide(frozen)).toEqual(first);
-    }
+    expect(replays(decide)).toBe(true);
     const kept = cand({ entry: "sub-a:m@high", window: null, level: "hard", rank: 0 });
     const above = cand({ entry: "key-a:m@high", kindOf: "api-key", expectedUsd: 4, reservation: 10, level: "routine", rank: 1 });
     const stored = {
@@ -586,43 +606,85 @@ describe("R22 and R25: a pick is a pure function of its inputs and writes nothin
     expect(decide(frozen).pick).toBe(first.pick);
   });
 
-  it("control: a counter that moves between calls would not replay", () => {
-    const shaky = { n: 0 };
-    const next = () => {
-      shaky.n += 1;
-      return shaky.n;
+  it("control: a rule that keeps state between calls, or reads the clock, fails the replay check", () => {
+    let calls = 0;
+    const stateful: Decide = input => {
+      calls += 1;
+      const got = decide(input);
+      return calls % 2 === 0 ? got : { ...got, chain: [...got.chain, "extra"] };
     };
-    expect(next()).not.toBe(next());
-    const input = {
-      role: "implement-backend", reviewRule: false, implementerFamilies: [] as string[], reviewFamilies: [] as string[],
-      candidates: [cand({ entry: "sub-a:m@high", window: 0.1 })],
-      profile: profile(), settings: settings(), derived: ["sub-a:m@high"],
+    expect(replays(stateful)).toBe(false);
+    const clocked: Decide = input => {
+      const got = decide(input);
+      return { ...got, reasons: [...got.reasons, { code: "now", stage: "rules", n: performance.now() }] };
     };
-    expect(decide(input)).toEqual(decide(input));
-    expect(input.candidates.map(row => row.entry)).toEqual(["sub-a:m@high"]);
+    expect(replays(clocked, 20, 5)).toBe(false);
   });
 
-  it("turning auto on and deciding leaves the policy's chains byte-equal", () => {
+  it("deciding leaves every input it was given byte-equal", () => {
+    expect(leavesInputs(decide)).toBe(true);
+  });
+
+  it("control: a rule that marks, sorts or appends to its input fails the writes-nothing check", () => {
+    const marks: Decide = input => {
+      (input.derived as string[]).push("marked");
+      return decide(input);
+    };
+    expect(leavesInputs(marks)).toBe(false);
+    const reorders: Decide = input => {
+      (input.candidates as CandidateFacts[]).reverse();
+      return decide(input);
+    };
+    expect(leavesInputs(reorders)).toBe(false);
+    const flags: Decide = input => {
+      const got = decide(input);
+      const first = input.candidates[0];
+      if (first) (first as { available: unknown }).available = { reason: "marked", until: T };
+      return got;
+    };
+    expect(leavesInputs(flags)).toBe(false);
+  });
+
+  const chainsPolicy = (): Policy => {
     const listed: Listed[] = [{ name: "sub-a", kind: "subscription", models: ["m"], efforts: ["high"] }];
     let policy = ensureRole(emptyPolicy(), "plan");
     policy = value(setOverride(policy, "plan", "follow", null, listed, "c1", T));
     policy = value(setPriority(policy, { mode: "custom", order: ["sub-a"] }, listed, "c1", T));
-    policy = value(setPicks(policy, "plan", [e("sub-a:m@high")], null, listed, "c1", T));
-    const before = structuredClone(policy);
-    const after = value(setGlobalAuto(policy, true, "step-up", "c2", T));
-    expect(after.roles.map(row => ({ picks: row.picks, written: row.written, writtenRisk: row.writtenRisk }))).toEqual(
-      before.roles.map(row => ({ picks: row.picks, written: row.written, writtenRisk: row.writtenRisk })),
-    );
-    expect(after.priority.order).toEqual(before.priority.order);
-    const marked = [...after.priority.order, "marked"];
-    expect(after.priority.order).not.toEqual(marked);
+    return value(setPicks(policy, "plan", [e("sub-a:m@high")], null, listed, "c1", T));
+  };
+  const chains = (p: Policy) => JSON.stringify({
+    order: p.priority.order, mode: p.priority.mode,
+    roles: p.roles.map(row => ({ role: row.role, override: row.override, picks: row.picks, written: row.written, writtenRisk: row.writtenRisk })),
+  });
+  // True when switching Auto leaves the order and every role's picks and written chains byte-equal.
+  const switchKeepsChains = (turnOn: (policy: Policy) => Policy): boolean => {
+    const policy = chainsPolicy();
+    return chains(turnOn(policy)) === chains(policy);
+  };
+
+  it("turning auto on and deciding leaves the policy's chains byte-equal", () => {
+    expect(switchKeepsChains(policy => value(setGlobalAuto(policy, true, "step-up", "c2", T)))).toBe(true);
+    const policy = chainsPolicy();
+    const before = chains(policy);
     decide({
       role: "plan", reviewRule: false, implementerFamilies: [], reviewFamilies: [],
       candidates: [cand({ entry: "sub-a:m@high" })], profile: profile({ role: "plan", group: "plan" }),
       settings: settings(), derived: ["sub-a:m@high"],
     });
-    expect(policy.priority.order).toEqual(before.priority.order);
-    expect(policy.roles).toEqual(before.roles);
+    expect(chains(policy)).toBe(before);
+  });
+
+  it("control: a switch that marks a provider or writes a chain fails the chains check", () => {
+    const marks = (policy: Policy): Policy => {
+      const on = value(setGlobalAuto(policy, true, "step-up", "c2", T));
+      return { ...on, priority: { ...on.priority, order: [...on.priority.order, "marked"] } };
+    };
+    expect(switchKeepsChains(marks)).toBe(false);
+    const writes = (policy: Policy): Policy => {
+      const on = value(setGlobalAuto(policy, true, "step-up", "c2", T));
+      return { ...on, roles: on.roles.map(row => ({ ...row, written: ["sub-a:m@high"] })) };
+    };
+    expect(switchKeepsChains(writes)).toBe(false);
   });
 });
 
