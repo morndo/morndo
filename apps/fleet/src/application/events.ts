@@ -1,8 +1,8 @@
 // What the fleet tells its clients as it happens (spec 5.6, WS /v1/events): a node's inventory and health, its status,
 // lane-name conflicts, alerts, a delivery's latest state (fleet clients spec §4.6; body: Delivery & { stale }), lane
-// events (§7; body: LaneEvent) and a job view (design §4). One subscriber that throws never keeps the others from hearing
-// an event.
-export type FleetEvent = { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job"; node: string; body: unknown };
+// events (§7; body: LaneEvent), a job view (design §4) and a lane's Run (ADR-0032; body: RunView, runs.ts). One
+// subscriber that throws never keeps the others from hearing an event.
+export type FleetEvent = { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run"; node: string; body: unknown };
 
 export class EventHub {
   #subscribers = new Set<(e: FleetEvent) => void>();

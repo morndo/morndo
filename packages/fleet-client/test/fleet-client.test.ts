@@ -173,6 +173,22 @@ describe("the fleet client (spec §5.6)", () => {
     expect(await checkFleet(new FleetClient(fleet.socketPath))).toBe("unsupported");
   });
 
+  it("reads each lane's Run (GET /v1/runs, ADR-0032), leaving out one it can't read; an answer that isn't a list of runs is a mismatch", async () => {
+    const path = join(dir, "runs.sock");
+    const run = { lane: "alpha", node: "pc", phase: "waiting", wait: { on: "background", tasks: [{ type: "shell", label: "npm test" }] }, deadline: 1_800_000_060_000, overdue: false, since: 1_800_000_000_000, source: "hook" };
+    let body: unknown = { runs: [run, { ...run, lane: "beta", phase: "dreaming" }, { ...run, lane: "gamma", wait: { on: "telepathy" } }] };
+    const server = createServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(body)); });
+    await new Promise<void>(resolve => server.listen(path, () => resolve()));
+    try {
+      const c = new FleetClient(path);
+      expect(await c.runs()).toEqual([run]);                                         // a newer fleet's phase or wait: left out
+      body = [run];
+      await expect(c.runs()).rejects.toBeInstanceOf(FleetMismatch);
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+
   describe("a download that isn't whole, and the events' resync", () => {
     const read = async (c: FleetClient) => { const out: Uint8Array[] = []; for await (const chunk of c.fileStream("pc", "/w/alpha/notes.txt")) out.push(chunk); return out; };
 
