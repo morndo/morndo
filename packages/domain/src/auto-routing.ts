@@ -595,7 +595,16 @@ export function scorecard(facts: readonly OutcomeFact[], runs: readonly ScoreRun
     list.push({ run, entry: ran.text });
     seen.set(key, list);
   }
-  return [...seen.entries()].map(([, list]) => cellOf(list.slice(-SCORE_KEEP), facts, before));
+  return [...seen.entries()].map(([, list]) => cellOf(lastOutcomes(list, facts, before), facts, before));
+}
+
+// The window is the last SCORE_KEEP outcomes, not runs: a run without an outcome yet must not push real ones out.
+function lastOutcomes<T extends { run: ScoreRun }>(list: readonly T[], facts: readonly OutcomeFact[], before: number): readonly T[] {
+  const decided = (item: T): boolean => winning(facts.filter(fact => fact.at <= before), item.run.id, "accepted")?.bool !== undefined;
+  const kept = list.filter(decided).slice(-SCORE_KEEP);
+  const oldest = kept[0];
+  if (!oldest || kept.length < SCORE_KEEP) return list;
+  return list.slice(list.indexOf(oldest));
 }
 
 function cellOf(list: readonly { run: ScoreRun; entry: string }[], facts: readonly OutcomeFact[], before: number): ScoreCell {

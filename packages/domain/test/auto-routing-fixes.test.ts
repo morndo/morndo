@@ -94,3 +94,36 @@ describe("R19 applies to every checking role, not only `review`", () => {
     expect(got.excluded).toEqual([]);
   });
 });
+
+describe("the Scorecard keeps the last 20 outcomes (design 7.2)", () => {
+  it("runs without an outcome do not push real outcomes out of the window", () => {
+    const runs = [];
+    const facts: OutcomeFact[] = [];
+    for (let i = 0; i < 40; i++) {
+      const id = `rt-${i}`;
+      runs.push({ id, at: T + i, group: "implement", tier: "routine" as const, task: "T-1", lane: "lane-a" });
+      facts.push(fact({ route: id, at: T + i, kind: "ran", source: "lease", text: "key-a:m@high" }));
+      // Every run from 20 on is still open: no accepted fact yet.
+      if (i < 20) facts.push(fact({ route: id, at: T + i, kind: "accepted", source: "board", bool: i % 2 === 0 }));
+    }
+    const [cell] = scorecard(facts, runs, T + 100);
+    expect(cell?.n).toBe(20);
+    expect(cell?.k).toBe(10);
+  });
+
+  it("keeps only the newest 20 of 25 outcomes", () => {
+    const runs = [];
+    const facts: OutcomeFact[] = [];
+    for (let i = 0; i < 25; i++) {
+      const id = `rt-${i}`;
+      runs.push({ id, at: T + i, group: "implement", tier: "routine" as const, task: "T-1", lane: "lane-a" });
+      facts.push(
+        fact({ route: id, at: T + i, kind: "ran", source: "lease", text: "key-a:m@high" }),
+        fact({ route: id, at: T + i, kind: "accepted", source: "board", bool: i >= 5 }),
+      );
+    }
+    const [cell] = scorecard(facts, runs, T + 100);
+    expect(cell?.n).toBe(20);
+    expect(cell?.k).toBe(20);
+  });
+});
