@@ -3,7 +3,7 @@
 The fleet service (`morndo-fleet`, [apps/fleet](../apps/fleet/README.md)) is how every client reaches the lanes: the hub, `morndo lanes`, kira, the manager's helpers, and anything you write. This is its reference, version 1. It covers:
 - the socket and the version rules;
 - every route, and every op you can run through `POST /v1/op`;
-- deliveries and lane events;
+- deliveries, lane events and each lane's Run;
 - every event on `/v1/events` and every error code;
 - the hook relay's bodies and the subscriber contract.
 
@@ -128,6 +128,7 @@ Any other value matches only itself. An answer may hold no field that its exampl
 | `POST /v1/deliveries`, `GET /v1/deliveries/<id>`, `GET /v1/deliveries?lane=&state=` (the newest 1000 of the last 7 days), `POST /v1/deliveries/<id>/cancel` | deliveries (§6) |
 | `GET /v1/lane-events?since=<seq>` | lane events (§7) |
 | `GET /v1/lane-watch` | each lane's last turn and its deadline (§7.1) |
+| `GET /v1/runs` | what each lane is doing now (§7.2) |
 | `WS /v1/events` | the fleet's events (§9) |
 
 ### 5.1 Nodes
@@ -598,7 +599,7 @@ The fleet builds five lane events from three sources: the hooks of each lane, th
 
 | `event` | When | Fields |
 |---|---|---|
-| `finished` | a turn ended (the Stop hook, §11) | `status`, `firstLine`, `bg`, `crons`; for a wait, `waitingOn` and `until` |
+| `finished` | a turn ended (the Stop hook, §11) | `status`, `firstLine`, `bg`, `crons`, and what is pending: `tasks`, `wakes`; for a wait, `waitingOn` and `until` |
 | `needs_input` | the session's status turned `waiting`: a menu (a question, a permission prompt, a usage-limit dialog) | `question` |
 | `answered` | the session's status left `waiting` | none |
 | `stop_failure` | a turn ended on an API error (the StopFailure hook) | `error` |
@@ -609,6 +610,10 @@ The fleet builds five lane events from three sources: the hooks of each lane, th
 - `waitingOn` is what a wait names (at most 120 characters); `until` is when it ends: its `for` (at most 24 h), else `laneWatch.waitingMin` after the turn.
 - `firstLine` is that first line.
 - `bg` and `crons` count the background tasks and the scheduled wake-ups.
+- `tasks` and `wakes` say what the turn left pending, at most 8 of each, and are left out when there is none (ADR-0032):
+  - a task is `{ type, label }`: Claude Code's task type (`shell`, `subagent`, `monitor`, …) and its description, cut to 80 characters with key shapes blanked. Its command line never leaves the node's hook;
+  - a wake-up is `{ schedule, recurring }`: its cron expression in the node's local time, and whether it fires again. Its prompt never leaves the node's hook;
+  - the owner's script's counts give one placeholder each: a task `{ "type": "task", "label": "background work" }`, a wake-up with an empty `schedule`.
 - `question` is the menu's question as the screen shows it: the last line ending in "?", else the line above the options, at most 200 characters.
 - `error` is the error's type.
 - `reason` is `waiting` (the turn said WAITING, or ended with background work or a wake-up) or `no_status`; `since` is the end of the turn that went stale; `stalls` counts the stale events since the lane last ended DONE, BLOCKED or NEEDS DECISION.
@@ -622,7 +627,7 @@ The fleet builds five lane events from three sources: the hooks of each lane, th
 - **Every client:** `/v1/events` (§9) and `GET /v1/lane-events?since=<seq>`. That route answers at most 1000 events, oldest first, from the last 7 days.
 - **The manager:** delivered in batches, by the fleet's `laneEvents` config:
   - every `batchMs` (3000), one delivery to the lane `deliverTo` (default `manager`; `null` turns this off), split at 8000 characters;
-  - its text is the `header` line, then one JSON line per event: `{ ts, lane, sessionId, event, status, firstLine, bg, crons }`, with `waitingOn` and `until` for a wait, and `{ ts, lane, sessionId, event, reason, waitingOn, since, stalls }` for `stale`;
+  - its text is the `header` line, then one JSON line per event: `{ ts, lane, sessionId, event, status, firstLine, bg, crons }` (never `tasks` or `wakes`), with `waitingOn` and `until` for a wait, and `{ ts, lane, sessionId, event, reason, waitingOn, since, stalls }` for `stale`;
   - its delivery id is `fleet:lane-events:<node>:<the first event's time, in ms>`. A batch split over 8000 characters gets `-1`, `-2` … after it, and a batch queued again after its delivery was given up gets `.2`, `.3` … after any of those.
 - **Not sent:**
   - `answered` is published but not delivered;
@@ -645,7 +650,7 @@ content-type: application/json
   "permission_mode": "default",
   "hook_event_name": "Stop",
   "last_assistant_message": "STATUS: DONE\nThe docs build is green.",
-  "background_tasks": [{ "id": "task-1", "name": "docs-check", "status": "running" }],
+  "background_tasks": [{ "id": "task-1", "type": "shell", "status": "running", "description": "Check the docs links", "command": "npm run docs:links" }],
   "session_crons": []
 }
 ---
@@ -663,7 +668,7 @@ GET /v1/lane-events?since=0
 { "events": [
   { "v": 1, "t": "lane", "seq": "{{number:le1}}", "event": "needs_input", "node": "n1", "window": "w1", "lane": "w1", "sessionId": "{{uuid:w1-session}}", "at": "{{time}}", "question": "Do you want to proceed?" },
   { "v": 1, "t": "lane", "seq": "{{number:le2}}", "event": "answered", "node": "n1", "window": "w1", "lane": "w1", "sessionId": "{{uuid:w1-session}}", "at": "{{time}}" },
-  { "v": 1, "t": "lane", "seq": "{{number:le3}}", "event": "finished", "node": "n1", "window": "w1", "lane": "w1", "sessionId": "{{uuid:w1-session}}", "at": "{{time}}", "status": "done", "firstLine": "STATUS: DONE", "bg": 1, "crons": 0 }
+  { "v": 1, "t": "lane", "seq": "{{number:le3}}", "event": "finished", "node": "n1", "window": "w1", "lane": "w1", "sessionId": "{{uuid:w1-session}}", "at": "{{time}}", "status": "done", "firstLine": "STATUS: DONE", "bg": 1, "crons": 0, "tasks": [{ "type": "shell", "label": "Check the docs links" }] }
 ] }
 ```
 
@@ -686,7 +691,7 @@ GET /v1/lane-events?since={{number:le3}}
 200
 
 { "events": [
-  { "v": 1, "t": "lane", "seq": "{{number:le4}}", "event": "finished", "node": "n1", "window": "w1", "lane": "w1", "sessionId": "{{uuid:w1-session}}", "at": "{{time}}", "status": "blocked", "firstLine": "STATUS: BLOCKED", "bg": 0, "crons": 1 }
+  { "v": 1, "t": "lane", "seq": "{{number:le4}}", "event": "finished", "node": "n1", "window": "w1", "lane": "w1", "sessionId": "{{uuid:w1-session}}", "at": "{{time}}", "status": "blocked", "firstLine": "STATUS: BLOCKED", "bg": 0, "crons": 1, "wakes": [{ "schedule": "", "recurring": false }] }
 ] }
 ```
 
@@ -763,6 +768,49 @@ A `stale` event, as `/v1/lane-events` and `/v1/events` carry it:
 ```json
 { "v": 1, "t": "lane", "seq": 9, "event": "stale", "node": "n1", "window": "w1", "lane": "w1", "sessionId": "…", "at": 1791850022000, "reason": "waiting", "waitingOn": "CI", "since": 1791849122000, "stalls": 1 }
 ```
+
+### 7.2 Runs
+
+A Run is what one lane is doing now, as the fleet derives it from what it observed: the lane's hooks, the session state its node reports, its jobs, and whether its window and node are there ([ADR-0032](adr/0032-board-follows-the-fleet.md); the rules R1 to R8 are in [the domain](domain.md)). Nothing a lane or a person writes to the board sets it; of a lane's own words, only its status line counts. The fleet keeps one Run for every window of every registered node, the manager's included, and after a restart one for each lane name the registry holds for a node that hasn't reported yet.
+
+Its `phase`, the first that applies, in this order:
+
+| `phase` | When | `source` |
+|---|---|---|
+| `gone` | its window is no longer in its node's inventory | `session` |
+| `unknown` | its node is not online, or hasn't sent an inventory since it came back | `session` |
+| `needs_you` | the session shows a menu (`waiting`), or a `needs_input` came after the last turn end with no `answered` since | `session` or `hook` |
+| `working` | the session is `busy` (or `shell`); for a pane with no session state, a hook came after the last turn end, less than 10 minutes ago | `session` or `hook` |
+| `waiting` | a job of the lane is not ended (`wait.on: "job"`), or the last turn end left background tasks (`background`) or a wake-up (`wakeup`), or said `STATUS: WAITING` with nothing pending (`declared`) | `job`, `hook` or `status` |
+| `ended` | none of those: the last turn end's `outcome` is its status (`done`, `blocked`, `needs_decision`), else `no_status` | `status`, `hook` or `session` |
+
+A turn end that leaves background work or a wake-up is never `ended`, whatever its status line says: the lane waits on its own work until its next turn. A job counts when it is the lane's own, or its notice goes to `lane:<the lane>`, queued, starting or running.
+
+`GET /v1/runs` answers `{ runs: { lane, node, sessionId?, phase, wait?, deadline, overdue, outcome?, line?, question?, since, source }[] }`, by lane, then node:
+- `wait`, for a `waiting` Run: `{ on: "background", tasks }` (the `tasks` of §7), `{ on: "wakeup", next }` (the next fire time, null when its node's UTC offset or its schedule can't be read), `{ on: "job", jobs: { id, name }[] }`, or `{ on: "declared", what }` (what the WAITING line names, or null): nothing will wake it.
+- `deadline` is when a wait should have shown a sign of life: the WAITING line's `for`, else the turn's end plus `laneWatch.waitingMin`; for a wake-up whose fire time is known, that time plus 5 minutes. Null for any other phase. `overdue` is true past the deadline with nothing from the lane since the turn end.
+- `line` is the last turn end's status line (its `firstLine`), `question` the open menu's.
+- `since` is when the phase began: the turn's end, the first hook of a new turn, a job's start (or, still queued, its queue time), or when the window or its node changed.
+- `sessionId` is the session in the window, or for a `gone` Run the one it had.
+
+A Run carries no command line and no prompt. A `gone` Run is kept for a day and then left out; a revoked node's Runs go at once. Neither is an event.
+
+Here `w1`'s last turn said BLOCKED, but the owner's script counted a wake-up, so it waits on that wake-up. A count has no schedule, so `next` is null and the deadline is the turn's end plus 30 minutes. The other lanes have ended no turn the fleet saw:
+
+```example runs
+GET /v1/runs
+---
+200
+
+{ "runs": [
+  { "lane": "dup", "node": "n1", "phase": "ended", "deadline": null, "overdue": false, "outcome": "no_status", "since": "{{time}}", "source": "session" },
+  { "lane": "manager", "node": "n1", "sessionId": "{{uuid:manager-session}}", "phase": "ended", "deadline": null, "overdue": false, "outcome": "no_status", "since": "{{time}}", "source": "session" },
+  { "lane": "sh1", "node": "n1", "phase": "ended", "deadline": null, "overdue": false, "outcome": "no_status", "since": "{{time}}", "source": "session" },
+  { "lane": "w1", "node": "n1", "sessionId": "{{uuid:w1-session}}", "phase": "waiting", "wait": { "on": "wakeup", "next": null }, "deadline": "{{time}}", "overdue": false, "line": "STATUS: BLOCKED", "since": "{{time}}", "source": "hook" }
+] }
+```
+
+Each change to a Run is a `run` event on `/v1/events` (§9), `{ t: "run", node, body }` with the Run as its body, sent only when the Run is different from the last one sent. The fleet recomputes every Run as hooks, inventories, health, node status and jobs come in, and every minute, since `overdue` and the 10 minutes of hook activity turn with time alone.
 
 ## 8. Ops (`POST /v1/op`)
 
@@ -1170,8 +1218,9 @@ A WebSocket on the socket, `ws://fleet/v1/events`, at the path's version. It sen
 | `delivery` | a delivery's new state: the `Delivery` of §6.2 with `stale` |
 | `lane` | a lane event (§7) |
 | `job` | a background job's state, as `GET /v1/jobs` lists it (§8, Background jobs) |
+| `run` | a lane's Run, whenever it changes (§7.2) |
 
-**On connecting,** a client first gets each node's `status`, then each online node's latest `inventory` and `health`. Every event after that comes as it happens.
+**On connecting,** a client first gets each node's `status`, then each online node's latest `inventory` and `health`, then each job not ended and the latest jobs that ended (`job`), then every lane's Run (`run`). Every event after that comes as it happens.
 
 **Reconnecting.** Deliveries, lane events, alerts and conflicts that happened while a client was away are not replayed. Read them from `/v1/deliveries`, `/v1/lane-events?since=` and `/v1/alerts` after each reconnect.
 
@@ -1201,7 +1250,13 @@ These were sent while the examples above ran:
 ```
 
 ```example events-lane events
-{"t":"lane","node":"n1","body":{"v":1,"t":"lane","seq":"{{number:le3}}","event":"finished","node":"n1","window":"w1","lane":"w1","sessionId":"{{uuid:w1-session}}","at":"{{time}}","status":"done","firstLine":"STATUS: DONE","bg":1,"crons":0}}
+{"t":"lane","node":"n1","body":{"v":1,"t":"lane","seq":"{{number:le3}}","event":"finished","node":"n1","window":"w1","lane":"w1","sessionId":"{{uuid:w1-session}}","at":"{{time}}","status":"done","firstLine":"STATUS: DONE","bg":1,"crons":0,"tasks":[{"type":"shell","label":"Check the docs links"}]}}
+```
+
+That turn end said DONE with a background task still running, so `w1`'s Run waited on it:
+
+```example events-run events
+{"t":"run","node":"n1","body":{"lane":"w1","node":"n1","sessionId":"{{uuid:w1-session}}","phase":"waiting","wait":{"on":"background","tasks":[{"type":"shell","label":"Check the docs links"}]},"deadline":"{{time}}","overdue":false,"line":"STATUS: DONE","since":"{{time}}","source":"hook"}}
 ```
 
 ## 10. Errors
@@ -1480,7 +1535,7 @@ idempotency-key: n1:{{uuid:stream}}:{{number}}
 content-type: application/json
 
 { "streamId": "{{uuid:stream}}", "seq": "{{number}}", "at": "{{time}}", "path": "/hook/stop", "node": "n1", "window": "w1",
-  "body": { "session_id": "{{uuid:w1-session}}", "transcript_path": "/home/user/.claude/projects/-home-user-docs/w1.jsonl", "cwd": "/home/user/docs", "permission_mode": "default", "hook_event_name": "Stop", "last_assistant_message": "STATUS: DONE\nThe docs build is green.", "background_tasks": [{ "id": "task-1", "name": "docs-check", "status": "running" }], "session_crons": [] } }
+  "body": { "session_id": "{{uuid:w1-session}}", "transcript_path": "/home/user/.claude/projects/-home-user-docs/w1.jsonl", "cwd": "/home/user/docs", "permission_mode": "default", "hook_event_name": "Stop", "last_assistant_message": "STATUS: DONE\nThe docs build is green.", "background_tasks": [{ "id": "task-1", "type": "shell", "status": "running", "description": "Check the docs links", "command": "npm run docs:links" }], "session_crons": [] } }
 ```
 
 ```example sub-stop-compat subscriber

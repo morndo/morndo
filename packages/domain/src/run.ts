@@ -44,7 +44,7 @@ export type RunFacts = {
   // by the node's clock. The status line's refresh and the idle notice are not activity (the lane watch's rule).
   activity: { first: number; last: number } | null;
   needsInput: { at: number; question?: string } | null;  // a needs_input after the last turn end, with no answered since
-  jobs: readonly { id: string; name: string; startedAt: number }[];  // running jobs whose notice goes to this lane
+  jobs: readonly { id: string; name: string; startedAt: number }[];  // queued, starting or running jobs of this lane or whose notice goes to it
   waitMs: number;           // the lane watch's waiting lease (laneWatch.waitingMin)
   tzOffsetMin: number | null;  // the node's UTC offset, for its wake-ups' schedules; null: not known, no fire time
   changedAt: number;        // when the window came, went, or its node changed status: the `since` of gone and unknown

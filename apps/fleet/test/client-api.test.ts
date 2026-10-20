@@ -193,7 +193,7 @@ describe("the client API", () => {
     if (r) expect(r.body.length).toBeLessThanOrEqual(100);
   });
 
-  it("the events socket starts with every node's status, then each online node's inventory and health, then each change", async () => {
+  it("the events socket starts with every node's status, then each online node's inventory and health, every Run, then each change", async () => {
     const fleet = await startTestFleet();
     const gone = await fleet.online("gone");
     gone.inventory([{ workerId: "gone.3fa2c1d0.1", window: "old", cwd: "/w" }]);
@@ -204,16 +204,19 @@ describe("the client API", () => {
     a.inventory([{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w" }]);
     a.health(health({ load1: 3 }));
     await vi.waitFor(() => expect(fleet.connections.latest("pc").health).not.toBeNull());
+    await vi.waitFor(() => expect(fleet.runs.view().map(r => `${r.lane}:${r.phase}`)).toEqual(["api:ended", "old:unknown"]));
     const ev = await client(fleet.config.socketPath).events();
-    await vi.waitFor(() => expect(ev.received.map(e => `${e.t}:${e.node}`)).toEqual(["status:gone", "status:pc", "inventory:pc", "health:pc"]));
+    // Every lane's Run last, by lane (ADR-0032): gone's old window is unknown while gone is offline.
+    await vi.waitFor(() => expect(ev.received.map(e => `${e.t}:${e.node}`)).toEqual(["status:gone", "status:pc", "inventory:pc", "health:pc", "run:pc", "run:gone"]));
     expect(ev.received.slice(0, 3).map(e => e.body)).toEqual([
       { status: "offline" }, { status: "online" }, { panes: [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w", status: null, pid: null }], invVersion: 2 },
     ]);
     const b = await fleet.online("mac");
     b.inventory([{ workerId: "mac.3fa2c1d0.1", window: "api", cwd: "/w" }]);
-    await vi.waitFor(() => expect(ev.received.slice(4).map(e => `${e.t}:${e.node}`)).toEqual(["status:mac", "inventory:mac", "conflict:pc", "alert:pc"]));
-    expect(ev.received.at(-2)?.body).toEqual({ name: "api", nodes: ["pc", "mac"] });
-    expect([ev.received.at(-1)?.body]).toEqual((await client(fleet.config.socketPath).get("/v1/alerts"))?.body);
+    const changes = () => ev.received.slice(6).filter(e => e.t !== "run");
+    await vi.waitFor(() => expect(changes().map(e => `${e.t}:${e.node}`)).toEqual(["status:mac", "inventory:mac", "conflict:pc", "alert:pc"]));
+    expect(changes().at(-2)?.body).toEqual({ name: "api", nodes: ["pc", "mac"] });
+    expect([changes().at(-1)?.body]).toEqual((await client(fleet.config.socketPath).get("/v1/alerts"))?.body);
     ev.close();
   });
 

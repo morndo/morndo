@@ -262,3 +262,74 @@ describe("the lane watch", () => {
     expect(nudgeText({ at: T0, reason: "waiting", waitingOn: "the deploy" }, T0 + 31 * MIN)).toContain("31 min ago waiting on the deploy");
   });
 });
+
+// What a Run reads of a window (ADR-0032; runOf): the last turn end with its pending lists, the first and latest activity
+// after it by the node's clock, and a menu still open after it. Kept apart from the stale turns.
+describe("the lane watch: what a Run reads (runOf)", () => {
+  const lane = (event: "needs_input" | "answered", question?: string) => ({ event, sessionId: "s1", ...(question ? { question } : {}) });
+
+  it("keeps the turn end's pending lists, and the hooks after it, first and latest; one the fleet took before its turn end counts", () => {
+    const r = rig();
+    r.watch.saw(r.hook(T0 - MIN));                                                      // the turn before it
+    r.watch.saw(r.hook(T0, "/hook/stop"));
+    r.watch.saw(r.hook(T0 + 2 * MIN));                                                  // the next turn's first tool call, same batch
+    r.watch.saw(r.hook(T0 + 3 * MIN, "/sl"));                                           // the status line's refresh: no activity
+    r.watch.turn(r.finished(T0, { status: "done", firstLine: "STATUS: DONE", bg: 1, tasks: [{ type: "shell", label: "npm test" }], wakes: [{ schedule: "0 9 * * *", recurring: true }] }));
+    r.watch.saw(r.hook(T0 + 4 * MIN));
+    expect(r.watch.runOf("pc", "api")).toEqual({
+      turn: { at: T0, status: "done", line: "STATUS: DONE", tasks: [{ type: "shell", label: "npm test" }], wakes: [{ schedule: "0 9 * * *", recurring: true }], waitingOn: null, until: null },
+      activity: { first: T0 + 2 * MIN, last: T0 + 4 * MIN }, needsInput: null,          // negative control: T0 - MIN kept as first
+    });
+    expect(r.watch.runOf("pc", "web")).toBeNull();
+    expect(r.watch.view()).toHaveLength(1);                                             // the stale turns are as they were
+  });
+
+  it("a turn end stored before the lists (counts only) gets a placeholder per count", () => {
+    const r = rig();
+    r.watch.turn(r.finished(T0, { bg: 2, crons: 1 }));
+    expect(r.watch.runOf("pc", "api")?.turn).toMatchObject({
+      tasks: [{ type: "task", label: "background work" }, { type: "task", label: "background work" }], wakes: [{ schedule: "", recurring: false }],
+    });
+  });
+
+  it("a needs_input after the turn end until it is answered; one from before the turn end is not kept", () => {
+    const r = rig();
+    r.watch.turn(r.finished(T0));
+    r.watch.saw(r.hook(T0 + MIN, "/lane", lane("needs_input", "Allow npm test?")));
+    expect(r.watch.runOf("pc", "api")?.needsInput).toEqual({ at: T0 + MIN, question: "Allow npm test?" });
+    r.watch.saw(r.hook(T0 + 2 * MIN, "/lane", lane("answered")));
+    expect(r.watch.runOf("pc", "api")?.needsInput).toBeNull();
+    r.watch.saw(r.hook(T0 + 3 * MIN, "/lane", lane("needs_input")));
+    r.watch.turn(r.finished(T0 + 4 * MIN));                                             // the menu was before this turn end
+    expect(r.watch.runOf("pc", "api")?.needsInput).toBeNull();
+  });
+
+  it("a turn end only a Run reads (the manager's) is kept, and not watched for stale", () => {
+    const r = rig();
+    const { seq: _, ...draft } = r.finished(T0, { window: "manager", lane: "manager", tasks: [{ type: "monitor", label: "lane events" }] });
+    r.watch.runTurn(draft);
+    expect(r.watch.runOf("pc", "manager")?.turn?.tasks).toEqual([{ type: "monitor", label: "lane events" }]);
+    expect(r.watch.view()).toEqual([]);
+  });
+
+  it("after a rebuild, the stored turn end's lists, and a stored menu after it", () => {
+    const r = rig();
+    r.at(T0 + 10 * MIN);
+    r.watch.rebuild([
+      r.finished(T0, { tasks: [{ type: "shell", label: "npm test" }] }),
+      { ...r.state("needs_input", T0 + MIN), question: "Which branch?" },
+    ]);
+    expect(r.watch.runOf("pc", "api")).toMatchObject({ turn: { tasks: [{ type: "shell", label: "npm test" }] }, needsInput: { at: T0 + MIN, question: "Which branch?" }, activity: { first: T0 + MIN } });
+  });
+
+  it("lets a window's entry go a day after its last sign once the window is gone, and keeps it while it is there", () => {
+    const r = rig();
+    r.watch.turn(r.finished(T0, { status: "done" }));
+    r.at(T0 + REBUILD_WINDOW_MS + 1);
+    r.watch.sweep();
+    expect(r.watch.runOf("pc", "api")).not.toBeNull();
+    r.alive.value = false;
+    r.watch.sweep();
+    expect(r.watch.runOf("pc", "api")).toBeNull();
+  });
+});

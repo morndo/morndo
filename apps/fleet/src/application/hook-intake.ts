@@ -11,6 +11,8 @@
 // commit is on the disk: the alerts and the delivery worker's kick, so nothing is announced that a failed commit took
 // back. `accept` is store and commit in one, for a caller with a single batch. With `lanes`, each event above its stream's
 // mark also makes its lane event in the same transaction (fleet clients spec §7), published once the commit is on disk.
+// `onCommitted` runs after every stored batch's commit, lane events or none: the fleet's Runs read the hooks' activity
+// (ADR-0032) only once it is on the disk.
 import { LIMITS, type HookEvent, type LaneEvent } from "@morndo/protocol";
 import type { HookPath, Subscriber } from "../config.ts";
 import type { Audit } from "../adapters/audit.ts";
@@ -35,6 +37,7 @@ export class HookIntake {
   #now: () => number;
   #cap: number;
   #onStored: () => void;
+  #onCommitted: () => void;
   #tx: Transactions | null;
   #lanes: Pick<LaneEvents, "take" | "committed"> | null;
   #overflowing = new Set<string>();
@@ -42,7 +45,7 @@ export class HookIntake {
 
   constructor(p: {
     store: OutboxStore; subscribers: Subscriber[]; audit: Audit; now?: () => number; cap?: number; onStored?: () => void; tx?: Transactions;
-    lanes?: Pick<LaneEvents, "take" | "committed">;
+    lanes?: Pick<LaneEvents, "take" | "committed">; onCommitted?: () => void;
   }) {
     this.#store = p.store;
     this.#subscribers = p.subscribers;
@@ -50,6 +53,7 @@ export class HookIntake {
     this.#now = p.now ?? Date.now;
     this.#cap = p.cap ?? LIMITS.subscriberBacklog;
     this.#onStored = p.onStored ?? (() => {});
+    this.#onCommitted = p.onCommitted ?? (() => {});
     this.#tx = p.tx ?? null;
     this.#lanes = p.lanes ?? null;
   }
@@ -81,6 +85,7 @@ export class HookIntake {
         }
         if (r.stored > 0) this.#onStored();
         if (fresh.length > 0) lanes?.committed(fresh);
+        if (events.length > 0) this.#onCommitted();
       },
     };
   }

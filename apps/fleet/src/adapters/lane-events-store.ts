@@ -9,8 +9,9 @@ export type LaneEventDraft = Omit<LaneEvent, "seq">;
 type Row = {
   seq: number; node: string; window: string | null; lane: string | null; session_id: string | null; event: LaneEventName; at: number; body: string;
 };
-// The fields of each event beyond the columns, as the body column keeps them.
-const BODY_FIELDS = ["status", "firstLine", "bg", "crons", "question", "error", "waitingOn", "until", "reason", "since", "stalls"] as const;
+// The fields of each event beyond the columns, as the body column keeps them. A `finished`'s pending `tasks` and `wakes`
+// (ADR-0032, R6) are kept with it, so GET /v1/lane-events and the lane watch's rebuild read them back as they were.
+const BODY_FIELDS = ["status", "firstLine", "bg", "crons", "question", "error", "waitingOn", "until", "reason", "since", "stalls", "tasks", "wakes"] as const;
 const eventOf = (r: Row): LaneEvent => ({
   v: 1, t: "lane", seq: r.seq, event: r.event, node: r.node, window: r.window, lane: r.lane,
   ...(r.session_id === null ? {} : { sessionId: r.session_id }), at: r.at, ...(JSON.parse(r.body) as Partial<LaneEvent>),

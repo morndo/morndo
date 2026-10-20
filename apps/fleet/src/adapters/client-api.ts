@@ -27,8 +27,9 @@
 //   GET  /v1/lane-events?since=<seq>   { events: LaneEvent[] }: after seq (0 when absent), oldest first, at most 1000
 //   GET  /v1/lane-watch                { lanes: LaneWatchEntry[] }: each
 //                                      lane's last turn as the lane watch holds it (reliable lanes §3.2, the brief)
-//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job", node, body }; a
-//                                      client more than eventsBufferBytes behind is closed with 1013 (it reconnects
+//   GET  /v1/runs                      { runs: RunView[] }: each lane's Run, by lane (ADR-0032, runs.ts)
+//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run", node, body };
+//                                      a client more than eventsBufferBytes behind is closed with 1013 (it reconnects
 //                                      and gets the current state first)
 // The path is split on "/" before any segment is decoded, so a name or path holding "/" (as %2F) stays one segment
 // (Review Focus 1). Over a Unix socket the server listens with node:http's listen(path)
@@ -48,6 +49,7 @@ import type { JobMirror } from "../application/job-mirror.ts";
 import type { LaneRegistry } from "../application/lane-registry.ts";
 import { SIDE_EFFECT_OPS, opError, type Outcome } from "../application/requests.ts";
 import type { Router } from "../application/router.ts";
+import type { Runs } from "../application/runs.ts";
 import type { Audit } from "./audit.ts";
 import { parseDeliveryBody } from "./delivery-body.ts";
 import { streamFile } from "./files-route.ts";
@@ -69,7 +71,7 @@ class HttpError extends Error {
 
 export type ClientApiDeps = {
   router: Router; connections: Connections; lanes: LaneRegistry; nodes: NodesStore; audit: Audit; events: EventHub; jobs: JobMirror; log: Logger;
-  deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">; laneWatch?: Pick<LaneWatch, "view">;
+  deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">; laneWatch?: Pick<LaneWatch, "view">; runs?: Pick<Runs, "view">;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
 };
@@ -258,6 +260,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       return json(res, 200, { events: d.laneEvents.since(Number(since)) });
     }
     if (method === "GET" && s.length === 1 && first === "lane-watch") return json(res, 200, { lanes: d.laneWatch?.view() ?? [] });
+    if (method === "GET" && s.length === 1 && first === "runs") return json(res, 200, { runs: d.runs?.view() ?? [] });
     if (method === "POST" && s.length === 1 && first === "deliveries") {
       let body: unknown;
       try { body = await readJson(req); }
@@ -302,8 +305,8 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     }
   }
 
-  // WS /v1/events: every registered node's status first, then each online node's latest inventory and health, then
-  // each event as it happens. A client that doesn't read keeps its events in our memory (ws's bufferedAmount): past
+  // WS /v1/events: every registered node's status first, then each online node's latest inventory and health, the jobs
+  // and every lane's Run, then each event as it happens. A client that doesn't read keeps its events in our memory (ws's bufferedAmount): past
   // eventsBufferBytes it is closed with 1013 and unsubscribed, and gets the current state again when it reconnects.
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
   const clients = new Set<WebSocket>();
@@ -333,6 +336,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         if (latest.health) send({ t: "health", node: n.name, body: latest.health });
       }
       for (const job of d.jobs.snapshot()) send({ t: "job", node: job.node, body: job });
+      for (const run of d.runs?.view() ?? []) send({ t: "run", node: run.node, body: run });
       unsubscribe = d.events.subscribe(send);
       ws.on("error", e => d.log.warn(`events socket: ${e.message}`));
       ws.on("close", () => { clients.delete(ws); unsubscribe(); });

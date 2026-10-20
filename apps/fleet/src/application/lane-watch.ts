@@ -18,6 +18,15 @@
 // The watch lives in memory. At start it is rebuilt from the stored lane events of the last day (turn ends, stale events,
 // and the session state changes and failed turns after them); a restart counts as activity, so a lane's deadline runs
 // again from the restart and nothing is called stale for what the fleet did not see.
+// It also keeps what a Run needs of each window (ADR-0032; domain run.ts RunFacts), read by the fleet's Runs (runs.ts)
+// through runOf, apart from the turns above so their stale events and nudges stay as they are: the last turn end (its
+// time, status, first line, pending tasks and wake-ups, what a wait names and until when), the first and the latest
+// activity after it by the same rule (not /sl, not the idle notice; before any turn end, since the fleet started), and a
+// needs_input after it with no answered since. Every window is kept, the manager's own and ignored ones too, whose Stops
+// make no lane event: LaneEvents hands their turn ends to runTurn, in memory only, so after a restart such a window's Run
+// rests on its session state until its next Stop. A restart is not activity here: a Run's overdue is deriveRun's, from
+// the turn's own lease. A window's entry goes a day after its last sign once its window is gone.
+import { pendingOf, type TurnEnd } from "@morndo/domain";
 import type { HookEvent, LaneEvent, LaneWatchEntry, TurnStatus } from "@morndo/protocol";
 import type { LaneEventDraft } from "../adapters/lane-events-store.ts";
 import type { Logger } from "../adapters/log.ts";
@@ -45,7 +54,30 @@ type Turn = {
   stalls: number;
 };
 
+// What a Run reads of a window (RunFacts' turn, activity and needsInput), and the session its last turn end named.
+export type RunTrack = {
+  turn: TurnEnd | null; sessionId?: string;
+  activity: { first: number; last: number } | null;
+  needsInput: { at: number; question?: string } | null;
+};
+type Track = RunTrack & {
+  recent: number[];                // the latest activity times as they came: a hook the fleet took before its turn end
+  seenAt: number;                  // the latest sign of this window, by the node's clock
+};
+// The activity times kept per window for a turn end told after them (one intake batch: hooks after the Stop are seen
+// first, the turn on commit). A batch holds far fewer of one lane's hooks than this.
+const RECENT_MAX = 32;
+
 const keyOf = (node: string, window: string) => `${node}\u0000${window}`;
+// A turn end as a Run reads it, from its `finished` lane event. One stored before turn ends kept their lists (only counts)
+// gets one placeholder per count, as the owner's scripts' counts do (pendingOf), so its pending work still shows (R2).
+export const turnEndOf = (le: LaneEvent): TurnEnd => {
+  const pending = le.tasks === undefined && le.wakes === undefined ? pendingOf(le.bg ?? 0, le.crons ?? 0, s => s) : { tasks: le.tasks ?? [], wakes: le.wakes ?? [] };
+  return {
+    at: le.at, status: le.status ?? null, line: le.firstLine ?? "", tasks: pending.tasks, wakes: pending.wakes,
+    waitingOn: le.waitingOn ?? null, until: le.until ?? null,
+  };
+};
 const minutes = (ms: number) => Math.max(1, Math.round(ms / 60_000));
 // Claude Code's idle notice comes "about 60 seconds after Claude finishes responding, and only if you haven't typed since"
 // (https://code.claude.com/docs/en/hooks, Notification, read 2026-10-13): it says nothing happened, so it is no activity.
@@ -57,6 +89,7 @@ const idleNotice = (body: unknown): boolean => {
 
 export class LaneWatch {
   #turns = new Map<string, Turn>();
+  #tracks = new Map<string, Track>();    // every window's Run facts (runOf), the manager's and ignored ones too
   #seen = new Map<string, number>();     // each lane's latest hook, turn or not: the fleet may take it before the Stop it follows
   #config: LaneWatchConfig;
   #raise: (d: LaneEventDraft) => LaneEvent | null;
@@ -89,15 +122,23 @@ export class LaneWatch {
   // first. Not the status line's: Claude Code re-runs it on a timer when `refreshInterval` is set, idle or not
   // (https://code.claude.com/docs/en/statusline, read 2026-10-13), so it says nothing about the lane doing anything. Nor
   // Claude Code's idle notice (idleNotice).
+  // For a Run, a node's /lane event also says the session asked something (needs_input) or was answered.
   saw(e: HookEvent): void {
     if (e.window === null || e.path === "/sl" || idleNotice(e.body)) return;
-    this.#mark(keyOf(e.node, e.window), e.at);
+    const key = keyOf(e.node, e.window);
+    this.#mark(key, e.at);
+    this.#active(key, e.at);
+    if (e.path !== "/lane" || typeof e.body !== "object" || e.body === null) return;
+    const b = e.body as Record<string, unknown>;
+    if (b.event === "needs_input") this.#asked(key, e.at, typeof b.question === "string" ? b.question.slice(0, 200) : undefined);
+    else if (b.event === "answered") this.#answered(key, e.at);
   }
 
   // A lane's turn ended: its `finished` lane event, as stored. A hook already seen from after its end is activity.
   turn(le: LaneEvent): void {
     if (le.event !== "finished" || le.window === null) return;
     const key = keyOf(le.node, le.window);
+    this.#ended(key, le);
     const before = this.#turns.get(key);
     const settled = le.status === "done" || le.status === "blocked" || le.status === "needs_decision";
     const bg = (le.bg ?? 0) > 0 || (le.crons ?? 0) > 0;
@@ -111,6 +152,23 @@ export class LaneWatch {
       ...(le.waitingOn === undefined ? (bg && !le.status ? { waitingOn: (le.bg ?? 0) > 0 ? "background work" : "a scheduled wake-up" } : {}) : { waitingOn: le.waitingOn }),
       reported: false, stalls: settled ? 0 : (before?.stalls ?? 0),
     });
+  }
+
+  // A turn end that only a Run reads: the Stop of a window that makes no lane event (the manager's own, an ignored one),
+  // as laneEventOf would read it. It is not watched for stale (reliable lanes §3.2: those lanes are not watched).
+  runTurn(d: Omit<LaneEvent, "seq">): void {
+    if (d.event !== "finished" || d.window === null) return;
+    this.#ended(keyOf(d.node, d.window), { ...d, seq: 0 });
+  }
+
+  // What a Run reads of a window now (RunFacts' turn, activity, needsInput), or null when the watch saw nothing of it.
+  runOf(node: string, window: string): RunTrack | null {
+    const t = this.#tracks.get(keyOf(node, window));
+    if (!t) return null;
+    return {
+      turn: t.turn, ...(t.sessionId === undefined ? {} : { sessionId: t.sessionId }),
+      activity: t.activity ? { ...t.activity } : null, needsInput: t.needsInput ? { ...t.needsInput } : null,
+    };
   }
 
   // A stale event of a turn, as stored: that turn has been reported (a rebuild reads them back).
@@ -127,7 +185,13 @@ export class LaneWatch {
     for (const le of events) {
       if (le.event === "finished") this.turn(le);
       else if (le.event === "stale") this.staled(le);
-      else if (le.window !== null) this.#mark(keyOf(le.node, le.window), le.at);
+      else if (le.window !== null) {
+        const key = keyOf(le.node, le.window);
+        this.#mark(key, le.at);
+        this.#active(key, le.at);
+        if (le.event === "needs_input") this.#asked(key, le.at, le.question);
+        else if (le.event === "answered") this.#answered(key, le.at);
+      }
     }
     const now = this.#now();
     for (const t of this.#turns.values()) if (t.deadline !== null) t.deadline = now + Math.max(0, t.deadline - t.at);
@@ -138,6 +202,11 @@ export class LaneWatch {
   sweep(): void {
     const now = this.#now();
     for (const [key, at] of this.#seen) if (now - at > REBUILD_WINDOW_MS && !this.#turns.has(key)) this.#seen.delete(key);
+    for (const [key, t] of this.#tracks) {
+      if (now - t.seenAt <= REBUILD_WINDOW_MS) continue;
+      const [node = "", window = ""] = key.split("\u0000");
+      if (!this.#alive(node, window)) this.#tracks.delete(key);
+    }
     for (const [key, t] of this.#turns) {
       if ((t.deadline === null || t.reported) && now - t.at > REBUILD_WINDOW_MS) { this.#turns.delete(key); continue; }
       if (t.deadline === null || t.reported || t.active > t.at || now < t.deadline || !this.#online(t.node)) continue;
@@ -186,6 +255,50 @@ export class LaneWatch {
     if (at > (this.#seen.get(key) ?? Number.NEGATIVE_INFINITY)) this.#seen.set(key, at);
     const t = this.#turns.get(key);
     if (t && at > t.active) t.active = at;
+  }
+
+  #track(key: string): Track {
+    let t = this.#tracks.get(key);
+    if (!t) { t = { turn: null, activity: null, needsInput: null, recent: [], seenAt: Number.NEGATIVE_INFINITY }; this.#tracks.set(key, t); }
+    return t;
+  }
+
+  // Activity for a Run: after the window's last turn end by the node's clock, or any before its first.
+  #active(key: string, at: number): void {
+    const t = this.#track(key);
+    t.seenAt = Math.max(t.seenAt, at);
+    t.recent.push(at);
+    if (t.recent.length > RECENT_MAX) t.recent.shift();
+    if (t.turn !== null && at <= t.turn.at) return;
+    t.activity = t.activity ? { first: Math.min(t.activity.first, at), last: Math.max(t.activity.last, at) } : { first: at, last: at };
+  }
+
+  #asked(key: string, at: number, question: string | undefined): void {
+    const t = this.#track(key);
+    if (t.turn !== null && at <= t.turn.at) return;
+    if (t.needsInput && t.needsInput.at > at) return;
+    t.needsInput = { at, ...(question === undefined || question === "" ? {} : { question }) };
+  }
+
+  #answered(key: string, at: number): void {
+    const t = this.#track(key);
+    if (t.needsInput && at >= t.needsInput.at) t.needsInput = null;
+  }
+
+  // A window's turn ended (its lane event, or a Stop only a Run reads): what came after it stays its activity, what came
+  // before goes. A turn end older than the one held is not taken.
+  #ended(key: string, le: LaneEvent): void {
+    const t = this.#track(key);
+    if (t.turn !== null && le.at < t.turn.at) return;
+    const end = turnEndOf(le);
+    t.turn = end;
+    t.seenAt = Math.max(t.seenAt, le.at);
+    if (le.sessionId === undefined) delete t.sessionId; else t.sessionId = le.sessionId;
+    const after = t.recent.filter(x => x > end.at);
+    const last = t.activity && t.activity.last > end.at ? t.activity.last : null;
+    t.activity = after.length > 0 ? { first: Math.min(...after), last: Math.max(last ?? Number.NEGATIVE_INFINITY, ...after) }
+      : last !== null ? { first: last, last } : null;
+    if (t.needsInput && t.needsInput.at <= end.at) t.needsInput = null;
   }
 }
 
