@@ -28,7 +28,14 @@ trap 'rm -rf "$work"' EXIT
 now=$(date +%s)
 [ ! -e "$SITE/latest.json.sig" ] && [ ! -e "$SITE/stable.json.sig" ] || fail "a signature already exists"
 
-head=$("$GH" api "/repos/$REPOSITORY/git/ref/heads/feed" --jq .object.sha 2>/dev/null) || head=
+# No branch is a 404 and nothing else: any other error stops the signing, it is not a first feed.
+if head=$("$GH" api "/repos/$REPOSITORY/git/ref/heads/feed" --jq .object.sha 2> "$work/head.err"); then
+  :
+elif grep -q 'HTTP 404' "$work/head.err"; then
+  head=
+else
+  fail "cannot read the feed branch: $(cat "$work/head.err")"
+fi
 if [ "$MODE" = publish ]; then
   keys_version=$(jq -er .version "$TRUST/keys.json") || fail "no key-set version in $TRUST/keys.json"
 fi
@@ -43,10 +50,12 @@ for channel in latest stable; do
     delta=$((issued - now))
     [ "$delta" -le 3600 ] && [ "$delta" -ge -3600 ] || fail "$channel.json was issued ${delta}s from now"
   fi
+  jq -e '(.seq | type == "number" and . == floor and . >= 1) and (.keySetVersion | type == "number" and . == floor and . >= 1)' "$new" > /dev/null || fail "$channel.json: seq and keySetVersion must be whole numbers of at least 1"
   seq=$(jq -r .seq "$new")
   prev="$work/$channel.prev"
   if [ -n "$head" ]; then
     "$GH" api -H 'Accept: application/vnd.github.raw+json' "/repos/$REPOSITORY/contents/$channel.json?ref=$head" > "$prev" || fail "cannot read $channel.json at $head"
+    jq -e '(.seq | type == "number" and . == floor and . >= 1)' "$prev" > /dev/null || fail "the deployed $channel.json has no whole-number seq"
     pseq=$(jq -r .seq "$prev")
     if [ "$MODE" = publish ] && [ "$channel" = stable ]; then
       cmp -s "$prev" "$new" || fail "a publish changed stable.json"

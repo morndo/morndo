@@ -98,7 +98,7 @@ describe("check-signing-feed.sh", () => {
   const keys = (version: number) => JSON.stringify({ schema: 1, version, expiresAt: "2027-11-02T10:00:00Z", root: ["a"], release: ["b"], feed: ["c"] });
 
   // A fake gh: the feed branch head is "h1" and its files are in prev/, the published manifest is manifest.json.
-  function world(p: { branch: boolean; age?: number }) {
+  function world(p: { branch: boolean; age?: number; headError?: boolean }) {
     const dir = temp();
     const prev = join(dir, "prev");
     mkdirSync(prev);
@@ -116,7 +116,7 @@ describe("check-signing-feed.sh", () => {
       "#!/bin/sh",
       `D=${dir}`,
       'case "$*" in',
-      `  *git/ref/heads/feed*) ${p.branch ? 'echo h1' : "echo 'gh: Not Found (HTTP 404)' >&2; exit 1"} ;;`,
+      `  *git/ref/heads/feed*) ${p.headError ? "echo 'gh: Server Error (HTTP 500)' >&2; exit 1" : p.branch ? 'echo h1' : "echo 'gh: Not Found (HTTP 404)' >&2; exit 1"} ;;`,
       '  *contents/latest.json*) cat "$D/prev/latest.json" ;;',
       '  *contents/stable.json*) cat "$D/prev/stable.json" ;;',
       '  "release download"*) while [ $# -gt 0 ]; do [ "$1" = --dir ] && out=$2; shift; done; cp "$D/manifest.json" "$out/manifest.json" ;;',
@@ -203,6 +203,28 @@ describe("check-signing-feed.sh", () => {
     const done = check(w, { MODE: "resign" });
     expect(done.status).toBe(1);
     expect(done.stderr).toMatch(/release list/);
+  });
+
+  it("fails on a gh error that is not 'not found', instead of treating it as no branch", () => {
+    const w = world({ branch: false, headError: true });
+    put(w, publishRelease(null, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), emptyFeed({ channel: "stable", now: NOW, keySetVersion: 1 }));
+    const done = check(w, { MODE: "publish", VERSION });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/cannot read the feed branch/);
+  });
+
+  it.each([
+    ["a fractional seq", (text: string) => text.replace('"seq": 2', '"seq": 2.5')],
+    ["a seq written as a string", (text: string) => text.replace('"seq": 2', '"seq": "2"')],
+    ["a fractional key-set version", (text: string) => text.replace('"keySetVersion": 1', '"keySetVersion": 1.5')],
+  ])("refuses %s", (_name, change) => {
+    const w = world({ branch: true });
+    const next = publishRelease(w.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 });
+    expect(change(next)).not.toBe(next);
+    put(w, change(next), w.stable);
+    const done = check(w, { MODE: "publish", VERSION });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/whole number/);
   });
 
   it("refuses a first feed that does not start at 1, and a re-sign with no branch", () => {
