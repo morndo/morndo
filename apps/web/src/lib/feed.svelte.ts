@@ -4,7 +4,7 @@
 import { unreachable, type FeedEvent, type Message, type RosterEntry } from "@morndo/domain";
 import { ServerFeedFrames, decode, decodeEvent, onDropped, type AlertWire, type CatchUpConversationWire, type ChatRowWire, type QueuedCommand, type ServerFeedFrame, type SessionInfoWire } from "@morndo/protocol";
 import type { DecisionItem, LedgerState } from "./desktop/decisions.ts";
-import { decodeTasks, type Task } from "./desktop/board.ts";
+import { decodeRuns, decodeTasks, type Run, type Task } from "./desktop/board.ts";
 import { decodeJobs, type JobCount, type ShownJob } from "./desktop/jobs.ts";
 import { decodeAccounts, type AccountUsage } from "./desktop/usage.ts";
 import { FeedConnection, PROBE_AFTER_MS, type SocketLike } from "./connection.ts";
@@ -44,6 +44,8 @@ export class LiveFeed {
   // sends it: empty, and the Board tab says so.
   board = $state<Task[]>([]);
   boardLanes = $state<string[]>([]);
+  // ADR-0032: each lane's Run as the fleet derived it, by lane, from the same frame; null: the hub sends none.
+  boardRuns = $state<ReadonlyMap<string, Run> | null>(null);
   boardAt = $state<number | null>(null);
   // ADR-0016: every connected account's usage, as the hub last sent it. A hub without it never sends: Home says so.
   usage = $state<AccountUsage[]>([]);
@@ -410,8 +412,11 @@ export class LiveFeed {
       case "board": {
         const { tasks, dropped } = decodeTasks(m.tasks);
         if (dropped) console.warn(`morndo: dropped ${dropped} task(s) the hub sent that this app can't read`);
+        const runs = decodeRuns(m.runs);
+        if (runs.dropped) console.warn(`morndo: dropped ${runs.dropped} run(s) the hub sent that this app can't read`);
         this.board = tasks;
         this.boardLanes = m.lanes;
+        this.boardRuns = runs.runs;
         this.boardAt = m.at;
         break;
       }

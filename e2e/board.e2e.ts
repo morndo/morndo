@@ -179,6 +179,50 @@ try {
     assert(paired.errors.length === 0, `console errors: ${paired.errors.join(" | ")}`);
   });
 
+  await check("the Runs of the board frame show: a ring and a live line, the run counts, the lanes without a task (ADR-0032)", async () => {
+    // This office runs no fleet, so the hub's board frames carry no Runs: the page's feed socket goes through the test,
+    // which adds them to each board frame as the hub sends it (routeWebSocket, as catchup-edges.e2e.ts does). The app's
+    // side is what is checked here; the hub's Runs are the hub's own tests'.
+    const at = Date.now();
+    const runs = [
+      { lane: "builder", node: "pc", phase: "working", deadline: null, overdue: false, since: at - 3 * 60_000, source: "session" },
+      { lane: "reviewer", node: "pc", phase: "waiting", wait: { on: "background", tasks: [{ type: "shell", label: "npm test" }] }, deadline: at + 20 * 60_000, overdue: false, since: at - 6 * 60_000, source: "hook" },
+      { lane: "worker-01", node: "pc", phase: "waiting", wait: { on: "job", jobs: [{ id: "j1", name: "e2e" }] }, deadline: null, overdue: false, since: at - 2 * 60_000, source: "job" },
+    ];
+    const p = await pairedPage(browser, office!);
+    try {
+      await p.page.routeWebSocket(/\/api\/feed$/, ws => {
+        const server = ws.connectToServer();
+        ws.onMessage(m => server.send(m));
+        server.onMessage(m => {
+          try { const f = JSON.parse(String(m)) as { t?: string }; if (f.t === "board") { ws.send(JSON.stringify({ ...f, runs })); return; } } catch { /* not JSON: as it came */ }
+          ws.send(m);
+        });
+      });
+      await p.page.reload();
+      await p.page.locator(".desk").waitFor({ timeout: 15_000 });
+      await p.page.getByRole("complementary", { name: "Decisions" }).getByRole("button", { name: "Close the right panel" }).click();
+      await p.page.locator(".rail").getByRole("button", { name: "Board" }).click();
+      // builder's open task is T-4 (to do; T-1 is done): its Run shows there. reviewer works T-2 with a shell running.
+      const ring = (key: string) => cardOf(p.page, key).locator("[data-ring]").getAttribute("data-ring", { timeout: 10_000 });
+      assert(await ring("T-4") === "ring-solid ring-working ring-pulse", "T-4 has no working ring");
+      assert(await ring("T-2") === "ring-dashed ring-working", "T-2 has no own-work ring");
+      assert((await cardOf(p.page, "T-2").locator(".live").innerText()).startsWith("In the background: npm test"), "T-2's live line");
+      assert(await cardOf(p.page, "T-1").locator("[data-ring]").count() === 0, "a done card shows a Run");
+      const sums = (await p.page.getByRole("group", { name: "The board in numbers" }).innerText()).replace(/\s+/g, " ");
+      assert(sums.includes("1 working now") && sums.includes("2 waiting on their own work"), `the counts read: ${sums}`);
+      const chip = p.page.getByRole("group", { name: "Lanes working without a task" }).locator('[data-lane="worker-01"]');
+      await chip.waitFor();
+      await p.page.screenshot({ path: join(OUT, "6-runs.png") });
+      await p.page.emulateMedia({ colorScheme: "dark" });
+      await p.page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+      await p.page.screenshot({ path: join(OUT, "7-runs-dark.png") });
+      await chip.click();
+      await p.page.locator("header.vh h1", { hasText: "worker-01" }).waitFor({ timeout: 5000 });
+      assert(p.errors.length === 0, `console errors: ${p.errors.join(" | ")}`);
+    } finally { await p.context.close(); }
+  });
+
   await check("the board reads in the dark theme", async () => {
     // The brand's tokens take data-theme on <html> too (tokens.css; ink.e2e.ts checks it), so the dark theme is set on
     // the document as well as asked of the browser: a browser build whose scheme emulation doesn't take still renders it.
