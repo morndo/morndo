@@ -117,6 +117,17 @@ export class JobStore {
     return (this.#db.prepare("SELECT * FROM jobs ORDER BY accepted_at, id").all() as Row[]).map(row => this.#job(row));
   }
 
+  // How many of a lane's jobs are still open (queued, starting or running): the ones it started, and the ones whose
+  // notice goes to it (what a fleet run counts, run.ts). Either may be what the lane waits on, so the relay asks none of
+  // these lanes for a waker (W1, ADR-0032; status-ask.ts).
+  openFor(lane: string): number {
+    const rows = this.#db.prepare("SELECT lane, notify FROM jobs WHERE state IN ('queued', 'starting', 'running')").all() as Pick<Row, "lane" | "notify">[];
+    return rows.filter(row => {
+      const notify = JSON.parse(row.notify) as Job["notify"];
+      return row.lane === lane || (notify.kind === "lane" && notify.name === lane);
+    }).length;
+  }
+
   // When a reconnect may send this job, and the time that observation was actually taken.
   // A terminal job outside the 7-day window is not sent: stamping it with now would undo the fleet's prune.
   replayAt(job: Job): number | null {

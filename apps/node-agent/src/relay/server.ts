@@ -6,9 +6,10 @@
 //   session (spec §1, hooks docs checked 2026-10-06);
 // - /hook/stop: 200 {"ok":true,"queued":true}; /hook/failure, /notify and /file: 202; when the spool can't be written
 //   they answer 503, so the calling script's own fallback runs;
-// - /hook/stop that `ask` asks (status-ask.ts, reliable lanes §3.1): 200 {"decision":"block","reason":…}; the turn goes
-//   on, and its next Stop is the one that counts. The asked one is spooled with `statusAsked: true` added to its body, so
-//   subscribers still get the answer it carried, and the fleet makes no lane event of it;
+// - /hook/stop that `ask` asks (status-ask.ts: the status ask, reliable lanes §3.1, or the waker ask, ADR-0032 W1): 200
+//   {"decision":"block","reason":…}; the turn goes on, and its next Stop is the one that counts. The asked one, either
+//   way, is spooled with `statusAsked: true` added to its body, so subscribers still get the answer it carried, and the
+//   fleet makes no lane event of it;
 // - /file {path, …}: the file is copied under today's confinement rules into relay-files and the event carries
 //   {…, ref, name, size} instead of the path; 413 over 25 MiB, 403 where files are never shared, 404 when missing, 503
 //   when the node's disk budget can't hold the copy (counted as a drop, like a spool that can't be written).

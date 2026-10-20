@@ -2995,6 +2995,20 @@ export const CONTROLS: Control[] = [
   { id: "f-stashed-once", task: "D-stash", file: "apps/fleet/src/application/deliveries.ts",
     find: "if (d.stashed !== undefined && before?.delivery.stashed === undefined) {", replace: "if (d.stashed !== undefined) {",
     run: ["apps/fleet/test/delivery-mirror.test.ts"], expect: "draft_stashed once" },
+  // ---- ADR-0032, W1: the relay's waker ask (apps/node-agent/src/relay/status-ask.ts), each guard removed once.
+  { id: "w1-jobs", task: "W1", file: "apps/node-agent/src/relay/status-ask.ts",
+    find: "return jobsOf(window) === 0 ? wakerAsk(window, line.waitingOn) : null;", replace: "return wakerAsk(window, line.waitingOn);",
+    run: ["apps/node-agent/test/status-ask.test.ts"], expect: "a job of the lane is open" },
+  { id: "w1-open-jobs", task: "W1", file: "apps/node-agent/src/ops/job-store.ts",
+    find: "FROM jobs WHERE state IN ('queued', 'starting', 'running')\").all()", replace: "FROM jobs\").all()",
+    run: ["apps/node-agent/test/job-store.test.ts", "apps/node-agent/test/status-ask.test.ts"], expect: "counts the queued, starting and running jobs" },
+  { id: "w1-empty-arrays", task: "W1", file: "apps/node-agent/src/relay/status-ask.ts",
+    find: "  if (!none(b.background_tasks) || !none(b.session_crons)) return null;\n", replace: "",
+    run: ["apps/node-agent/test/status-ask.test.ts"], expect: "the task registry wasn't read" },
+  { id: "w1-exempt", task: "W1", file: "apps/node-agent/src/relay/status-ask.ts",
+    find: "if (contract.mode !== \"ask\" || window === null || contract.exempt.includes(window)) return null;",
+    replace: "if (contract.mode !== \"ask\" || window === null) return null;",
+    run: ["apps/node-agent/test/status-ask.test.ts"], expect: "never the exempt orchestrator" },
 ];
 
 // ---- the runner
