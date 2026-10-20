@@ -1,10 +1,11 @@
 // What the signing jobs check, in plain shell, before they sign (release.yml `sign`, `feed-sign`; feed.yml
 // `resign-sign`). Each case runs the real script on a fixture tree and expects the refusal it should give.
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { parse } from "yaml";
 import { sha256Sums } from "./checksums.ts";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange } from "./manifest.ts";
@@ -171,5 +172,71 @@ describe("check-signing-feed.sh", () => {
     put(first, publishRelease(first.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), first.stable);
     expect(check(first, { MODE: "publish", VERSION }).status).toBe(1);
     expect(check(first, { MODE: "resign" }).stderr).toMatch(/needs a feed branch/);
+  });
+});
+
+// The Sign steps themselves: the `run` text is taken from the workflow and run with a throwaway key.
+describe("the Sign steps", () => {
+  type Steps = { jobs: Record<string, { steps: { name?: string; run?: string }[] }> };
+  const stepRun = (file: string, job: string, name: string): string => {
+    const found = (parse(readFileSync(join(repoRoot, ".github/workflows", file), "utf8")) as Steps).jobs[job]?.steps.find(step => step.name === name)?.run;
+    if (!found) throw new Error(`no step ${name} in ${job}`);
+    return found;
+  };
+  const cases = [
+    { file: "release.yml", job: "sign", name: "Sign", secret: "RELEASE_SSH_KEY", ns: "release@morndo.github.io", dir: "dist", files: ["manifest.json", "install.sh"], trust: "release_allowed_signers" },
+    { file: "release.yml", job: "feed-sign", name: "Sign the feeds", secret: "FEED_SSH_KEY", ns: "feed@morndo.github.io", dir: "site", files: ["latest.json", "stable.json"], trust: "feed_allowed_signers" },
+    { file: "feed.yml", job: "resign-sign", name: "Sign the feeds", secret: "FEED_SSH_KEY", ns: "feed@morndo.github.io", dir: "site", files: ["latest.json", "stable.json"], trust: "feed_allowed_signers" },
+  ] as const;
+
+  function keyPair(dir: string, label: string) {
+    const key = join(dir, label);
+    expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", label, "-q"]).status).toBe(0);
+    const pub = spawnSync("ssh-keygen", ["-y", "-f", key], { encoding: "utf8" }).stdout.trim();
+    return { private: readFileSync(key, "utf8"), pub };
+  }
+
+  function setup(c: (typeof cases)[number], p: { trusted?: "same" | "other" } = {}) {
+    const dir = temp();
+    const temps = join(dir, "runner");
+    mkdirSync(temps);
+    mkdirSync(join(dir, c.dir));
+    mkdirSync(join(dir, "trust"));
+    for (const file of c.files) writeFileSync(join(dir, c.dir, file), `{"file":"${file}"}\n`);
+    const mine = keyPair(dir, "mine");
+    const other = keyPair(dir, "other");
+    const trusted = p.trusted === "other" ? other.pub : mine.pub;
+    writeFileSync(join(dir, "trust", c.trust), `${c.ns} namespaces="${c.ns}" ${trusted}\n`);
+    return { dir, temps, key: mine.private };
+  }
+  const exec = (c: (typeof cases)[number], w: ReturnType<typeof setup>) => spawnSync("/bin/bash", ["-c", stepRun(c.file, c.job, c.name)], {
+    cwd: w.dir, encoding: "utf8",
+    env: { PATH: process.env.PATH ?? "", RUNNER_TEMP: w.temps, [c.secret]: w.key },
+  });
+
+  it.each(cases)("$job signs both files, checks the signatures against the allowed signers, and leaves no key behind", c => {
+    const w = setup(c);
+    const done = exec(c, w);
+    expect(done.status, done.stderr).toBe(0);
+    for (const file of c.files) expect(existsSync(join(w.dir, c.dir, `${file}.sig`))).toBe(true);
+    expect(readdirSync(w.temps)).toEqual([]);
+  });
+
+  it.each(cases)("$job refuses a file that already has a signature, and keeps that signature as it was", c => {
+    const w = setup(c);
+    const first = c.files[0]!;
+    writeFileSync(join(w.dir, c.dir, `${first}.sig`), "old signature\n");
+    const done = exec(c, w);
+    expect(done.status).not.toBe(0);
+    expect(done.stderr).toMatch(/already exists/);
+    expect(readFileSync(join(w.dir, c.dir, `${first}.sig`), "utf8")).toBe("old signature\n");
+    expect(readdirSync(w.temps)).toEqual([]);
+  });
+
+  it.each(cases)("$job fails when the new signature does not verify against the allowed signers", c => {
+    const w = setup(c, { trusted: "other" });
+    const done = exec(c, w);
+    expect(done.status).not.toBe(0);
+    expect(readdirSync(w.temps)).toEqual([]);
   });
 });
