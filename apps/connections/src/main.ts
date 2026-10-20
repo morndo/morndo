@@ -21,4 +21,6 @@ const code = await run(process.argv.slice(2), process.env, {
   stdout: text => process.stdout.write(text),
   stderr: text => process.stderr.write(text),
 });
-process.exit(code);
+// Set, not forced: output to a pipe, which Node writes asynchronously on POSIX, drains first
+// (nodejs.org/docs/latest-v24.x/api/process.html, "A note on process I/O", read 2026-10-20).
+process.exitCode = code;
