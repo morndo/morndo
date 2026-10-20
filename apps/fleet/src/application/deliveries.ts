@@ -17,7 +17,12 @@
 //   its queuedAt on the node's clock; a node's offset beyond 2 s raises clock_offset) raises one alert per threshold,
 //   counted in the row (`alerted`) so a restart doesn't raise one again. A stale row is skipped until its node reports.
 //   A scan that finds several thresholds crossed at once raises the highest only. Its detail: { id, lane | workerId, state,
-//   reason, minutes } (reconciliation ruling 25).
+//   reason, minutes } (reconciliation ruling 25). One waiting `earlier` (behind another delivery to its lane) raises none:
+//   the one ahead of it raises them for the lane, so a draft that holds ten messages is one alert, not ten (#64). It
+//   raises its own once it is first in line.
+// - draft_stashed: a delivery that first reports `stashed` (its node put the lane's unsent draft away so it could go in,
+//   #64) raises one, with { id, lane | workerId, since, at, chars, copy }; the row keeps it, so a node's report again or a
+//   restart raises none.
 // - The audit: every POST and cancel (delivery.post, delivery.cancel: the id, the target, the client, the outcome) and
 //   each delivery's first final state; never the text.
 // - Rows go LIMITS.deliveryKeepMs (7 days) after their last change, on start and hourly.
@@ -163,7 +168,7 @@ export class Deliveries {
     const now = this.#now();
     const thresholds = LIMITS.deliveryAlertMs;
     for (const row of this.#store.open(thresholds.length)) {
-      if (this.#stale(row.node)) continue;
+      if (this.#stale(row.node) || row.delivery.waiting?.reason === "earlier") continue;
       const age = now - row.delivery.queuedAt;
       let level = row.alerted;
       while (level < thresholds.length && age >= (thresholds[level] ?? Infinity)) level++;
@@ -203,6 +208,11 @@ export class Deliveries {
       if (before.node === node && JSON.stringify(before.delivery) === JSON.stringify(d)) return;
     }
     this.#store.upsert(node, d, this.#now());
+    if (d.stashed !== undefined && before?.delivery.stashed === undefined) {
+      const { at, since, chars, copy } = d.stashed;
+      try { this.#audit.alert("draft_stashed", node, { id: d.id, ...d.target, since, at, chars, copy }); }
+      catch (e) { this.#log.error(`audit: the draft_stashed alert of ${d.id} could not be recorded`, e); }
+    }
     if (final && !(before && FINAL.has(before.delivery.state))) {
       this.#audited("delivery.final", node, { id: d.id, state: d.state, ...(d.why === undefined ? {} : { why: d.why }) });
     }

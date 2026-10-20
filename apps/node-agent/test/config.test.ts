@@ -62,6 +62,17 @@ describe("config.json", () => {
 });
 
 describe("policy.json", () => {
+  it("draftStash (#64): the manager after 60 minutes by default; another list, another age, or off; nonsense refused", () => {
+    expect(DEFAULT_POLICY.draftStash).toEqual({ lanes: ["manager"], afterMin: 60 });
+    const h = home();
+    const at = (draftStash: unknown) => { writeConfig(h, {}, { draftStash }); return loadConfig(h).policy.draftStash; };
+    expect(at({ lanes: ["manager", "lead"], afterMin: 30 })).toEqual({ lanes: ["manager", "lead"], afterMin: 30 });
+    expect(at({ lanes: [] })).toEqual({ lanes: [], afterMin: 60 });
+    for (const [bad, message] of [
+      [{ afterMin: 0 }, /afterMin must be a whole number/], [{ afterMin: 1.5 }, /afterMin/], [{ afterMin: 1441 }, /afterMin/],
+      [{ lanes: "manager" }, /lanes must be a list/], [{ lane: ["manager"] }, /unknown field lane/], [[], /must be an object/],
+    ] as const) expect(() => at(bad), JSON.stringify(bad)).toThrow(message);
+  });
   it("keeps the defaults for fields it doesn't set", () => {
     const h = home();
     writeConfig(h, {}, { session: "work", ops: ["inventory.get", "pane.frame"] });

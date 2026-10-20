@@ -9,6 +9,12 @@ import { LIMITS, type AgentMessage, type Health } from "@morndo/protocol";
 import type { Logger } from "./log.ts";
 import type { Inventory, Snapshot } from "./ops/inventory.ts";
 
+// Health.tzOffsetMin (ADR-0032, R3): this node's UTC offset in minutes at `at`, east positive (UTC+2 is 120), the zone
+// its lanes' wake-up schedules are written in, so the fleet can tell when a lane's cron fires. Read at every health, so
+// a daylight-saving change shows at the next one. Date's getTimezoneOffset counts west positive, so it is negated; `|| 0`
+// keeps UTC a plain 0, not -0.
+export const utcOffsetMin = (at: Date = new Date()): number => -at.getTimezoneOffset() || 0;
+
 export type EventLoopOptions = {
   inventory: Inventory;
   send: (m: AgentMessage) => boolean;

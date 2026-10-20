@@ -3,7 +3,7 @@
 // MORNDO_FLEET_SOCKET. Worker IDs are opaque here: "%N" locally, "<node>.<server>.<pane>" in a fleet.
 import type { Upload } from "@morndo/domain";
 import type { Frame, SendProblem, SessionInfo, Terminal as PaneTerminal } from "@morndo/node-ops";
-import type { Delivery, ErrorCode } from "@morndo/protocol";
+import type { Delivery, ErrorCode, RunView } from "@morndo/protocol";
 
 // `typedAt`: when the node typed it, on the node's own clock, which that node's transcript times are on (echo matching).
 // "node_offline": the fleet refused it before anything was typed (fleet core §5.3, §7; never from this machine's tmux).
@@ -110,4 +110,15 @@ export type Deliveries = {
   // True when `lane`'s node is online (its replay after the welcome would have mirrored a delivery it stored).
   // False when that node is not online. null when the fleet can't be asked, or the lane isn't listed.
   laneNodeOnline(lane: string): Promise<boolean | null>;
+};
+
+// The Fleet's Runs (ADR-0032, docs/design/agent-board/README.md §2, §6), as the Board reads them: the Fleet supplies, the
+// Board never writes a run and the Fleet never reads the board. Fleet only (a hub without one has no runs).
+// - runs(): every lane's Run now (GET /v1/runs), each decoded on its own: one this build can't read is left out. Throws
+//   when the fleet can't be asked or its answer isn't a list of runs, so a caller never takes "no answer" for "no runs".
+// - subscribe(): each Run as it changes (the `run` event on /v1/events). `onOpen` after every (re)subscription, the first
+//   included: a `run` sent while the hub was away is not replayed, so the caller reads runs() again then.
+export type RunsSource = {
+  runs(): Promise<RunView[]>;
+  subscribe(on: (r: RunView) => void, onOpen: () => void): () => void;
 };

@@ -40,6 +40,16 @@ export function alertWords(a: AlertWire): AlertWords {
       const lane = str(d.lane, "a lane");
       return { title: `A message to ${lane === "manager" ? "the manager" : lane} has waited ${minutes ?? "some"} min`, detail: `It goes in once it can: ${why}.`, urgent: urgentAlert(a) };
     }
+    case "draft_stashed": {
+      const lane = str(d.lane, "a lane");
+      const who = lane === "manager" ? "the manager" : lane;
+      const since = num(d.since);
+      const when = since === null ? "a long time" : `since ${new Date(since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      return {
+        title: `Your unsent text to ${who} was put away`,
+        detail: `It sat unchanged in its input box ${when} and held its messages, so ${node} stashed it and they went in. Claude Code puts it back in the box after they are sent; if it isn't there, Ctrl+S in ${who}'s empty input box brings it back. A copy is on ${node}: ${str(d.copy, "in its drafts folder")}.`,
+        urgent: urgentAlert(a) };
+    }
     case "lane_conflict": return {
       title: `Two windows are named ${str(d.name, "the same")}`,
       detail: "Messages to that name are refused until one is renamed. Each still takes messages by its worker ID.", urgent: urgentAlert(a) };

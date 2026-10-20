@@ -90,7 +90,8 @@ Liveness: the fleet pings every 15 s and terminates a connection that missed a p
 | `POST /v1/deliveries/<id>/cancel` | `{ ok: true, delivery }` for one still `queued`; 200 `{ ok: false, error }` (`already_typed`) past that; 404 `{ error: "no_such_delivery" }` for an id it doesn't know |
 | `GET /v1/lane-events?since=<seq>` | `{ events }`: lane events after `seq`, at most 1000, oldest first, from the last 7 days |
 | `GET /v1/lane-watch` | `{ lanes }`: each lane's last turn as the lane watch holds it, oldest first: `{ node, window, at, status, deadline, reason?, waitingOn?, stale, stalls }` |
-| `WS /v1/events` | `status`, `inventory`, `health`, `conflict`, `alert`, `delivery` (a delivery's new state) and `lane` (a lane event); the current status, inventory and health first. A client more than 8 MiB of events behind is closed with 1013; on reconnecting it gets the current state first. |
+| `GET /v1/runs` | `{ runs }`: each lane's Run (Runs, below), by lane: `{ lane, node, sessionId?, phase, wait?, deadline, overdue, outcome?, line?, question?, since, source }` |
+| `WS /v1/events` | `status`, `inventory`, `health`, `conflict`, `alert`, `delivery` (a delivery's new state), `lane` (a lane event), `job` and `run` (a lane's Run, when it changes); the current status, inventory and health first, then the jobs and every Run. A client more than 8 MiB of events behind is closed with 1013; on reconnecting it gets the current state first. |
 
 A body that isn't JSON is 415 and one over 1 MiB 413, and an unknown API version is 404 `{ error: "unsupported_api" }`; an op body is answered in the op's own shape even then. From a shell: `curl --unix-socket ~/.local/state/morndo-fleet/fleet.sock http://fleet/v1/nodes`.
 
@@ -113,7 +114,7 @@ A delivery is a message for one lane running Claude Code. It is queued on the la
 ## Lane events
 
 Built per node and window, from three sources:
-- the hooks: `finished` from `/hook/stop`, `stop_failure` from `/hook/failure`. Either Claude Code's own body or the owner's older script body is read: `docs/fleet-api.md` §11.3. A `finished` event's `status` is read from the answer's status line (`waiting` too, with `waitingOn` and `until`).
+- the hooks: `finished` from `/hook/stop`, `stop_failure` from `/hook/failure`. Either Claude Code's own body or the owner's older script body is read: `docs/fleet-api.md` §11.3. A `finished` event's `status` is read from the answer's status line (`waiting` too, with `waitingOn` and `until`). It also keeps what the turn left pending, `tasks` (type and an 80-character redacted description, never the command) and `wakes` (schedule and whether it recurs, never the prompt), at most 8 of each (ADR-0032).
 - the session states the node reports: `needs_input` and `answered`, which the node sends through its hook stream as `/lane`.
 - the lane watch: `stale`, for a lane whose last turn passed its deadline with no hook from it since (WAITING: its `until`; background work or a wake-up: `laneWatch.waitingMin`; no status: `laneWatch.noStatusMin`; DONE, BLOCKED and NEEDS DECISION have none). One per turn, with `reason`, `waitingOn`, `since` and `stalls` (stale events since the lane last settled). With `laneWatch.nudge`, a lane that runs Claude Code also gets one delivery while `stalls` is at most 2. It goes to its session's pane by worker ID (`fleet:nudge:<worker ID>:<turn end, ms>`), so a window of the same name on another node doesn't stop it. A hook counts by its own time on its node, whenever it reaches the fleet. Claude Code's `idle_prompt` notification is not activity. A stale event fleet.db can't store is tried again at the next sweep. A Stop the node's relay asked for its status line makes no lane event but counts as a turn without a status until the next Stop, so a lane that never acts on the ask still goes stale. A lane whose node isn't online isn't called stale until the node is back. The watch is in memory, rebuilt from the last day's lane events at start, the state changes and failed turns after each turn end included; the restart counts as activity, so deadlines run again from it.
 
@@ -129,6 +130,10 @@ What is not delivered:
 - anything from the manager's own lane, or from lanes matching `ignore`, which raise none.
 
 A batch whose delivery is given up is queued again with the next one. After a restart, the events the manager hasn't had are sent. Events stored while `deliverTo` is `null` are never delivered later, so turning delivery on doesn't flood the manager. A Stop or StopFailure hook the relay couldn't place in a window makes no lane event.
+
+## Runs
+
+What each lane is doing now (ADR-0032, `src/application/runs.ts`), derived by the domain's `deriveRun` from what the fleet observed: the lane watch's last turn end and the hooks after it, the session state in the node's latest inventory, the lane's jobs not ended (its own, or with their notice to it), whether its window is in that inventory, and whether its node is online and has reported since it came back. One Run per window of every registered node, the manager's included; after a restart, one per lane name the registry holds for a node that hasn't reported, `unknown` from the restart. Recomputed after each intake commit, inventory, health, node status, job and lane event, and every minute; published as a `run` event only when it changes. A `gone` Run is kept a day. The manager's and ignored lanes' Stops make no lane event, so their turn ends are kept in memory only. `docs/fleet-api.md` §7.2 has the phases and fields.
 
 ## Hook bus
 

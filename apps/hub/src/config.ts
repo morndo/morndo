@@ -69,6 +69,10 @@ export function isPushContact(v: string): boolean {
   return HOST_NAME.test(host) && !/^[\d.]+$/.test(host) && !SPECIAL_USE.test(host);
 }
 
+// The hub's data directory (morndo.db and the rest): MORNDO_HOME, else ~/.local/share/morndo. The console commands that
+// open the hub's database without its other settings (`morndo lanes start --task`) find it here too.
+export const dataDirOf = (env: NodeJS.ProcessEnv = process.env): string => env.MORNDO_HOME ?? join(homedir(), ".local/share/morndo");
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const port = Number(env.MORNDO_PORT ?? 8790);
   const origin = (env.MORNDO_ORIGIN ?? `http://localhost:${port}`).replace(/\/+$/, "");
@@ -77,7 +81,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`MORNDO_ORIGIN must be https (or http://localhost for development): ${origin}`);
   }
   return {
-    dataDir: env.MORNDO_HOME ?? join(homedir(), ".local/share/morndo"),
+    dataDir: dataDirOf(env),
     port,
     origin,
     rpId: url.hostname,

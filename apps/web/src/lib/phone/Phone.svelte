@@ -386,7 +386,7 @@
       alerts={feed.alerts} seenAt={feed.reads[SEEN_MARK] ?? 0} onSeen={at => feed.markRead(SEEN_MARK, at)} />
   {:else if tab === "board"}
     <div class="phone-wide">
-      <BoardView tasks={feed.board} lanes={feed.boardLanes} live={feed.boardAt !== null} {now} open={openTask} onOpen={k => (openTask = k)}
+      <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} live={feed.boardAt !== null} {now} open={openTask} onOpen={k => (openTask = k)}
         onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />
     </div>
   {:else}

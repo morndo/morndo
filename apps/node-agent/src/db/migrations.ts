@@ -151,6 +151,13 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 8,
+    name: "a delivery records the lane's draft the node stashed so it could go in (#64)",
+    compat: "additive",
+    // JSON { at, since, chars, copy } (Delivery.stashed), or NULL: nothing was stashed for it.
+    up: db => { db.exec("ALTER TABLE deliveries ADD COLUMN stashed TEXT"); },
+  },
 ];
 
 export function migrate(db: Database.Database, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {

@@ -6,7 +6,7 @@
 // pane's session state (§5) and lane events (§7).
 // What a node is asked to do (op arguments) is strict, with limits: the agent acts on it. What a node reports (results,
 // events) is checked for shape; each message is bounded by maxMessageBytes anyway.
-import { JOB_ID, NOTICE_MAX, parseEngine } from "@morndo/domain";
+import { JOB_ID, NOTICE_MAX, RUN_PHASES, parseEngine, type PendingTask, type PendingWake, type Run } from "@morndo/domain";
 import { EvJob } from "./jobs.ts";
 import * as z from "./z.ts";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "./connections.ts";
@@ -101,7 +101,7 @@ export type Pane = { workerId: string; window: string; cwd: string; sessionId?: 
 // Keys a client may press by name (pane.keys `names`, §5): tmux key names (tmux(1), "KEY BINDINGS"), an allow-list.
 // None starts with "-" or ends in ";", so none reads as a flag or a command separator on tmux's command line.
 export const KEY_NAMES = ["Enter", "Escape", "Tab", "BSpace", "Up", "Down", "Left", "Right", "Home", "End", "PageUp", "PageDown",
-  "C-c", "C-d", "C-u", "Space", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+  "C-c", "C-d", "C-s", "C-u", "Space", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
   "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"] as const;
 export type KeyName = (typeof KEY_NAMES)[number];
 
@@ -123,7 +123,12 @@ export type Delivery = {
   sessionId?: string;                                                  // bound (a non-sticky name) or typed into
   typedAt?: number; deliveredAt?: number;
   why?: GiveUpReason; note?: string;                                   // note: e.g. "typed, never seen taken"
+  // The node stashed the lane's draft so this delivery could go in (#64): text left unsent in the input box, unchanged
+  // since `since`, put away with Claude Code's stash (Ctrl+S) at `at`, `chars` long, a copy of what the box showed at `copy`
+  // on the node. The text itself never leaves the node.
+  stashed?: DraftStash;
 };
+export type DraftStash = { at: number; since: number; chars: number; copy: string };
 
 export type OpName = "inventory.get" | "pane.captureMany" | "pane.frame" | "pane.keys" | "pane.send" | "op.status"
   | "transcript.size" | "transcript.read" | "transcript.locate" | "file.stat" | "file.get" | "file.put"
@@ -211,7 +216,10 @@ export const STEP_UP_OPS: ReadonlySet<OpName> = new Set<OpName>(["connections.pr
 
 export type Health = { memTotal: number; memAvailable: number; psiSome10: number | null; psiFull10: number | null;
   diskFreeHome: number; load1: number; tmuxOk: boolean; wallClock: number; spoolDepth: number; drops: number;
-  jobs?: string };
+  jobs?: string;
+  // The node's UTC offset in minutes now (east positive, so UTC+2 is 120): the time its lanes' wake-up schedules are
+  // written in (ADR-0032, R3). Absent from an older node: its wake-ups get no fire time.
+  tzOffsetMin?: number };
 // "/lane": a lane state event the node made from its session state (fleet clients §7), carried and replayed like a hook.
 // Its body: { event: "needs_input" | "answered"; sessionId: string | null; question?: string }.
 export type HookEvent = { streamId: string; seq: number; at: number;
@@ -235,22 +243,30 @@ export type LaneEventName = "finished" | "needs_input" | "answered" | "stop_fail
 export type LaneEvent = { v: 1; t: "lane"; seq: number; event: LaneEventName; node: string;
   window: string | null; lane: string | null; sessionId?: string; at: number;
   status?: "done" | "blocked" | "needs_decision" | "waiting" | null; firstLine?: string; bg?: number; crons?: number; question?: string; error?: string;
-  waitingOn?: string; until?: number; reason?: "waiting" | "no_status"; since?: number; stalls?: number };
+  waitingOn?: string; until?: number; reason?: "waiting" | "no_status"; since?: number; stalls?: number;
+  // ADR-0032 (R6): what a `finished` left pending, at most 8 of each: a background task by its type and a redacted
+  // description of at most 80 characters, a wake-up by its schedule. Never a command or a prompt.
+  tasks?: PendingTask[]; wakes?: PendingWake[] };
+
+// A lane's Run as the fleet derives it (ADR-0032; domain run.ts): GET /v1/runs and the `run` event.
+export type RunView = Run;
 
 // What the fleet service raises for the owner (spec §5.2, §5.4, §5.6, §7, §8): kept as audit rows, served oldest first by
 // the client API's GET /v1/alerts and sent as the "alert" event. `detail` is per kind (plan Contracts, "Alerts").
 // delivery_waiting: a delivery still queued, typed or held after 2, 15 and 60 minutes (fleet clients §4.5);
-// subscriber_lagging: a subscriber's oldest undelivered event is older than 60 s (§6).
+// subscriber_lagging: a subscriber's oldest undelivered event is older than 60 s (§6);
+// draft_stashed: a node stashed a lane's unsent draft so its deliveries could go in (#64).
 export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter", "backlog_full", "unrouted_hook",
-  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback"] as const;
+  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback", "draft_stashed"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type Alert = { id: number; at: number; node: string | null; kind: AlertKind; detail: Record<string, unknown> };
 // The alerts the app pushes (the owner, 2026-10-12): a node's key may be stolen (a new source, a second instance), events
-// are lost or piling up for a subscriber, or a message has waited a quarter of an hour (2 minutes is in-app only). The
-// hub's push and the app's marking both read this one rule.
+// are lost or piling up for a subscriber, or a message has waited a quarter of an hour (2 minutes is in-app only); and
+// text the owner left unsent was moved out of a lane's input box (#64). The hub's push and the app's marking both read
+// this one rule.
 export function urgentAlert(a: { kind: string; detail: Record<string, unknown> }): boolean {
   switch (a.kind) {
-    case "source_changed": case "instance_conflict": case "dead_letter": case "backlog_full": return true;
+    case "source_changed": case "instance_conflict": case "dead_letter": case "backlog_full": case "draft_stashed": return true;
     case "delivery_waiting": return typeof a.detail.minutes === "number" && a.detail.minutes >= 15;
     default: return false;
   }
@@ -412,6 +428,7 @@ export const DeliverySchema = z.object({
   waiting: z.exactOptional(z.object({ reason: z.enum(WAITING_REASONS), since: z.number() })),
   sessionId: z.exactOptional(text()), typedAt: z.exactOptional(z.number()), deliveredAt: z.exactOptional(z.number()),
   why: z.exactOptional(z.enum(GIVE_UP_REASONS)), note: z.exactOptional(label()),
+  stashed: z.exactOptional(z.object({ at: z.number(), since: z.number(), chars: count(), copy: text() })),
 });
 
 // Each op's result, as the fleet accepts it (agent → fleet: shape).
@@ -462,13 +479,16 @@ const OpErrorSchema = z.pipe(
 const HealthSchema = z.object({
   memTotal: z.number(), memAvailable: z.number(), psiSome10: z.nullable(z.number()), psiFull10: z.nullable(z.number()),
   diskFreeHome: z.number(), load1: z.number(), tmuxOk: z.boolean(), wallClock: z.number(), spoolDepth: count(), drops: count(),
-  jobs: z.exactOptional(z.string()),
+  jobs: z.exactOptional(z.string()), tzOffsetMin: z.exactOptional(z.int().check(z.gte(-840), z.lte(840))),
 });
 const HookEventSchema = z.object({
   streamId: z.uuid(), seq: z.int().check(z.gte(1)), at: z.number(),
   path: z.enum(["/cc", "/sl", "/hook/stop", "/hook/failure", "/notify", "/file", "/lane"]),
   node: nodeName(), window: z.nullable(text()), late: z.exactOptional(z.literal(true)), body: z.unknown(),
 });
+
+const PendingTaskSchema = z.object({ type: label(), label: label() });
+const PendingWakeSchema = z.object({ schedule: label(), recurring: z.boolean() });
 
 // The body of a "/lane" hook event: a lane state event the node made from its session's status (fleet clients §7).
 export type LaneStateBody = { event: "needs_input" | "answered"; sessionId: string | null; question?: string };
@@ -483,6 +503,20 @@ export const LaneEventSchema = z.object({
   bg: z.exactOptional(count()), crons: z.exactOptional(count()), question: z.exactOptional(text()), error: z.exactOptional(text()),
   waitingOn: z.exactOptional(text()), until: z.exactOptional(z.number()), reason: z.exactOptional(z.enum(["waiting", "no_status"])),
   since: z.exactOptional(z.number()), stalls: z.exactOptional(count()),
+  tasks: z.exactOptional(z.array(PendingTaskSchema).check(z.maxLength(8))), wakes: z.exactOptional(z.array(PendingWakeSchema).check(z.maxLength(8))),
+});
+const RUN_WAIT = z.discriminatedUnion("on", [
+  z.object({ on: z.literal("background"), tasks: z.array(PendingTaskSchema).check(z.maxLength(8)) }),
+  z.object({ on: z.literal("wakeup"), next: z.nullable(z.number()) }),
+  z.object({ on: z.literal("job"), jobs: z.array(z.object({ id: text(), name: text() })) }),
+  z.object({ on: z.literal("declared"), what: z.nullable(text()) }),
+]);
+// A Run as the fleet serves it (GET /v1/runs: { runs }; the `run` event's body). A client decodes each and drops one it
+// can't read.
+export const RunViewSchema = z.object({
+  lane: text(), node: nodeName(), sessionId: z.exactOptional(text()), phase: z.enum(RUN_PHASES), wait: z.exactOptional(RUN_WAIT),
+  deadline: z.nullable(z.number()), overdue: z.boolean(), outcome: z.exactOptional(z.enum(["done", "blocked", "needs_decision", "no_status"])),
+  line: z.exactOptional(text()), question: z.exactOptional(text()), since: z.number(), source: z.enum(["hook", "session", "job", "status"]),
 });
 
 // ---- messages, agent → fleet
@@ -627,5 +661,6 @@ check<Same<z.output<typeof JoinStringSchema>, JoinString>>(true);
 check<Same<z.output<typeof DeliverySchema>, Delivery>>(true);
 check<Same<z.output<typeof DeliveryTargetSchema>, DeliveryTarget>>(true);
 check<Same<z.output<typeof LaneEventSchema>, LaneEvent>>(true);
+check<Same<z.output<typeof RunViewSchema>, RunView>>(true);
 check<Same<z.output<typeof LaneStateBodySchema>, LaneStateBody>>(true);
 check<Same<(typeof SESSION_STATUSES)[number], SessionStatus>>(true);

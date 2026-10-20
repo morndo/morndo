@@ -169,3 +169,24 @@ describe("changing", () => {
     expect(store.get("hub:open")?.state).toBe("queued");
   });
 });
+
+// #64 (agent.db migration 8): the draft stashed so a delivery could go in is kept with it, across a reopen, and through
+// its later changes.
+describe("a stashed draft", () => {
+  it("is kept with its delivery and comes back with it", () => {
+    const h = tempHome();
+    const path = join(h.home, "agent.db");
+    let adb = openAgentDb(path);
+    const stashed = { at: T0 + 3_600_000, since: T0, chars: 9, copy: "/data/drafts/1-manager.txt" };
+    try {
+      const s = new DeliveryStore(adb.db, () => T0, "pc");
+      put(s, "lanes:x");
+      expect(s.get("lanes:x")?.stashed).toBeUndefined();
+      s.update("lanes:x", { stashed });
+      s.update("lanes:x", { state: "typed", typedAt: T0 + 3_600_001, sessionId: S1 });
+      adb.close();
+      adb = openAgentDb(path);
+      expect(new DeliveryStore(adb.db, () => T0, "pc").get("lanes:x")).toMatchObject({ state: "typed", stashed });
+    } finally { adb.close(); h.cleanup(); }
+  });
+});

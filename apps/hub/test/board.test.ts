@@ -7,11 +7,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 import { frameText } from "./http-crash-fixture.ts";
 import { ObservationService } from "../src/application/observation-service.ts";
+import type { RunView } from "@morndo/protocol";
 
 let hub: InProcessHub;
 let now: number;
 let managerToken: string;
 let workerToken: string;
+let runs: RunView[];                                              // the lanes' runs, as the projector would hold them
 const HOUR = 3_600_000;
 
 function frames(ws: WebSocket) {
@@ -51,7 +53,8 @@ beforeEach(async () => {
   };
   const observation = new ObservationService(tmux, 1000, () => now);
   await observation.poll();
-  hub = await startInProcessHub({ now: () => now, observation });
+  runs = [];
+  hub = await startInProcessHub({ now: () => now, observation, runs: () => runs });
   managerToken = hub.agents.issue("manager", "manager").secret;
   workerToken = hub.agents.issue("lanes", "worker").secret;
 });
@@ -193,6 +196,30 @@ describe("the principal's side (AC7) and the feed", () => {
     b.send(JSON.stringify({ t: "hello" }));
     expect(((await fb.next("board")).tasks as Body[]).length).toBe(1);
     a.close(); b.close();
+  });
+  it("the board frame carries each lane's run (ADR-0032 §6); a change of runs alone is pushed at most about once a second", async () => {
+    const run = (phase: RunView["phase"]): RunView => ({ lane: "builder", node: "pc", phase, deadline: null, overdue: false, since: now, source: "session" });
+    const cookie = await hub.cookie();
+    const a = await hub.socket("/api/feed", cookie);
+    const fa = frames(a);
+    a.send(JSON.stringify({ t: "hello" }));
+    expect(await fa.next("board")).toMatchObject({ t: "board", runs: [] });
+    runs = [run("working")];
+    let mark = fa.seen.length;
+    hub.board.runsChanged();                                        // nothing pushed for a second: at once
+    expect((await fa.next("board", mark)).runs).toEqual([run("working")]);
+    const firstAt = performance.now();
+    mark = fa.seen.length;
+    for (const phase of ["waiting", "ended", "gone"] as const) { runs = [run(phase)]; hub.board.runsChanged(); }
+    const trailing = await fa.next("board", mark);
+    expect(performance.now() - firstAt).toBeGreaterThan(900);
+    expect(trailing.runs).toEqual([run("gone")]);                   // the runs as they are when it goes
+    await new Promise(r => setTimeout(r, 300));
+    // negative control: told at once on every change, the burst is three frames (b10-runs-throttle).
+    expect(fa.seen.slice(mark).filter(m => m.t === "board")).toHaveLength(1);
+    // The agents' board answer carries them too.
+    expect((await json(await agent(managerToken).get("/api/agent/board"))).runs).toEqual([run("gone")]);
+    a.close();
   });
   it("the principal's board writes draw on the commands bucket like a send", async () => {
     const cookie = await hub.cookie();

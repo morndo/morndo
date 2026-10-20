@@ -11,16 +11,45 @@ const hook = (path: HookEvent["path"], body: unknown, window: string | null = "s
   ({ streamId: "3f0c1d2e-1111-4222-8333-444455556666", seq: 1, at: AT, path, node: "pc", window, body });
 const RULES = rulesOf({ deliverTo: "manager", header: "h", ignore: ["pooltest*", "pool-probe*"], batchMs: 3000 });
 const base = { v: 1, t: "lane", node: "pc", window: "studio", lane: "studio", at: AT, sessionId: SID };
+const KEY = `sk-ant-api03-${"a".repeat(24)}`;                                          // synthetic key shapes
+const TOKEN = `ghp_${"b".repeat(36)}`;
 
 describe("lane events from hooks", () => {
   it("finished from Claude Code's Stop body: the first line, its status, background tasks and crons counted", () => {
     const body = { session_id: SID, hook_event_name: "Stop", last_assistant_message: "\n  \n  STATUS: DONE — the parser ships\nmore", background_tasks: [{}, {}], session_crons: [{}] };
-    expect(laneEventOf(hook("/hook/stop", body), RULES)).toEqual({ ...base, event: "finished", status: "done", firstLine: "STATUS: DONE — the parser ships", bg: 2, crons: 1 });
+    // A task with neither type nor description is a "task"; a cron with no schedule is no wake-up (pendingOf).
+    expect(laneEventOf(hook("/hook/stop", body), RULES)).toEqual({
+      ...base, event: "finished", status: "done", firstLine: "STATUS: DONE — the parser ships", bg: 2, crons: 1, tasks: [{ type: "task", label: "task" }, { type: "task", label: "task" }],
+    });
+  });
+
+  it("finished keeps what the turn left pending (ADR-0032, R6): a task's type and redacted description, a wake-up's schedule; never a command or a prompt", () => {
+    const body = {
+      session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: WAITING on CI for 20 min",
+      background_tasks: [
+        { id: "task-1", type: "shell", status: "running", description: `Watch the CI run with ${KEY}`, command: `gh run watch --token ${TOKEN}` },
+        { id: "task-2", type: "subagent", status: "running", description: `Review ${"x".repeat(200)}`, agent_type: "reviewer" },
+      ],
+      session_crons: [{ id: "cron-1", schedule: "*/15 * * * *", recurring: true, prompt: "check the deploy with the staging key" }],
+    };
+    const d = laneEventOf(hook("/hook/stop", body), RULES);
+    expect(d).toMatchObject({ event: "finished", status: "waiting", bg: 2, crons: 1, wakes: [{ schedule: "*/15 * * * *", recurring: true }] });
+    expect(d?.tasks?.[0]).toEqual({ type: "shell", label: "Watch the CI run with [redacted]" });
+    expect(d?.tasks?.[1]?.label).toHaveLength(80);
+    const wire = JSON.stringify(d);
+    expect(wire).not.toContain("gh run watch");                                       // negative control: a task kept whole keeps its command
+    expect(wire).not.toContain("ghp_");
+    expect(wire).not.toContain(KEY);
+    expect(wire).not.toContain("staging key");
+    // Nothing pending: neither list.
+    expect(laneEventOf(hook("/hook/stop", { session_id: SID, last_assistant_message: "Done.", background_tasks: [], session_crons: [] }), RULES)).not.toHaveProperty("tasks");
+    expect(laneEventOf(hook("/hook/stop", { session_id: SID, last_assistant_message: "Done.", background_tasks: [], session_crons: [] }), RULES)).not.toHaveProperty("wakes");
   });
 
   it("finished from the owner's Stop script body: text, background and crons as numbers", () => {
     const body = { window: "studio", cwd: "/w", session_id: SID, branch: "main", changed: 1, ahead: 0, text: "Plain answer.", background: 1, crons: 0 };
-    expect(laneEventOf(hook("/hook/stop", body), RULES)).toEqual({ ...base, event: "finished", status: null, firstLine: "Plain answer.", bg: 1, crons: 0 });
+    // A count is one placeholder each (pendingOf).
+    expect(laneEventOf(hook("/hook/stop", body), RULES)).toEqual({ ...base, event: "finished", status: null, firstLine: "Plain answer.", bg: 1, crons: 0, tasks: [{ type: "task", label: "background work" }] });
     expect(laneEventOf(hook("/hook/stop", { session_id: SID }), RULES)).toEqual({ ...base, event: "finished", status: null, firstLine: "", bg: 0, crons: 0 });
   });
 

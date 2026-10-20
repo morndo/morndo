@@ -67,8 +67,9 @@ describe("over the connection", () => {
     expect(inv).toMatchObject({ v: 1, invVersion: 1, panes: [{ window: "api", workerId: expect.stringMatching(/^pc\.[0-9a-f]{8}\.\d+$/) }] });
     const health = await fleet.waitFor(m => m.t === "ev.health");
     const h = (health as Msg & { health: Record<string, unknown> }).health;
-    expect(Object.keys(h).sort()).toEqual(["diskFreeHome", "drops", "load1", "memAvailable", "memTotal", "psiFull10", "psiSome10", "spoolDepth", "tmuxOk", "wallClock"]);
+    expect(Object.keys(h).sort()).toEqual(["diskFreeHome", "drops", "load1", "memAvailable", "memTotal", "psiFull10", "psiSome10", "spoolDepth", "tmuxOk", "tzOffsetMin", "wallClock"]);
     expect(Math.abs((h.wallClock as number) - Date.now())).toBeLessThan(5000);
+    expect(h.tzOffsetMin).toBe(-new Date().getTimezoneOffset() || 0);              // ADR-0032: east positive, in every health
     t.tmux("new-window", "-d", "-t", "=main:", "-n", "web", "sleep 600");
     const next = await fleet.waitFor(m => m.t === "ev.inventory" && m.invVersion === 2);
     expect((next.panes as { window: string }[]).map(p => p.window).sort()).toEqual(["api", "web"]);

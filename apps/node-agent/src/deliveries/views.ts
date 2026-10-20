@@ -2,11 +2,15 @@
 // - the lanes the inventory lists, each with its Claude Code session and that session's status (Task 4's Lane, from the
 //   session registry), and when its pane's own process started (ruling 14);
 // - the input box's own text, read from the pane's screen with its colours (Claude Code's dim suggestion is no draft);
-// - a session's transcript, read as whole JSONL lines from a byte offset, at most 1 MiB a call.
+// - a session's transcript, read as whole JSONL lines from a byte offset, at most 1 MiB a call;
+// - where a stashed draft's copy goes (#64): <drafts>/<time>-<lane>.txt, readable by this node's user only. The last 50
+//   are kept.
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { draftOnScreen, localTranscriptBytes, type Tmux } from "@morndo/node-ops";
 import { LIMITS } from "@morndo/protocol";
+import { writeFileAtomic } from "../atomic-write.ts";
 import type { Inventory, Snapshot } from "../ops/inventory.ts";
 import type { PaneState, PaneView, TranscriptView } from "./deliverer.ts";
 
@@ -153,5 +157,19 @@ export function agentTranscripts(transcriptPath: (sessionId: string) => string |
       }
       return { lines, starts, next: start + end + 1 };
     },
+  };
+}
+
+const DRAFTS_KEPT = 50;
+// A draft's copy, as its own file; the oldest beyond the last DRAFTS_KEPT go. A lane's name keeps only its letters, digits,
+// "_" and "-" in the file name.
+export function draftSaver(dir: string): (text: string, lane: string, at: number) => string {
+  return (text, lane, at) => {
+    const name = `${new Date(at).toISOString().replace(/[:.]/g, "-")}-${lane.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 40)}.txt`;
+    const path = join(dir, name);
+    writeFileAtomic(path, text.endsWith("\n") ? text : `${text}\n`, 0o600);
+    const old = readdirSync(dir).filter(f => f.endsWith(".txt")).sort();
+    for (const f of old.slice(0, Math.max(0, old.length - DRAFTS_KEPT))) rmSync(join(dir, f), { force: true });
+    return path;
   };
 }
