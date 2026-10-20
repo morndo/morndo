@@ -41,8 +41,10 @@ export const HELP = `morndo-keys run --connection <name> [--role R] [--workspace
 morndo-keys pool exec --runtime codex [--lane L] [--account A] -- exec … <prompt>
   Run the agent on a connection's key (or a pool account's sign-in) and relay its output.
 
-  When the reader of the output has gone (\`… | head\`, a closed terminal), the agent is stopped: SIGTERM to its process group,
-  SIGKILL after 3 s, and the lease is closed with what the turn used. run then exits 1 (130 or 143 for a signal), pool exec 143.
+  When the reader of the output has gone (\`… | head\`), or the terminal has (SIGHUP), the agent and the processes it started are
+  stopped: SIGTERM, SIGKILL after 3 s, and the lease is closed with what the turn used. run then exits 1 (129 for the terminal),
+  pool exec 143. A run's agent stays in the terminal's own session, so Ctrl-C, Ctrl-Z and /dev/tty work as for any command (a pool
+  turn has a process group of its own, as it always had, and is stopped as a group).
 
   A reader that is gone is noticed only when the bin writes to it. An agent that prints once at the end (claude with
   --output-format json) or goes quiet is not stopped before its next output, so its turn can be paid for in full: Node 24 has
@@ -226,7 +228,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   let outRedactor = streamRedactor([""]);
   let errRedactor = streamRedactor([""]);
   const stopper = turnStopper(io);
-  let signalled: number | null = null;
+  let hungUp = false;
   try {
     const secret = connection.kind === "api-key" ? await home.open(connection.ref) : "";
     outRedactor = streamRedactor([secret]);
@@ -238,7 +240,6 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
       onStart: (pid: number) => { stopper.started(pid); },
       proceed: () => stopper.proceed(),
-      detached: true,
     };
     const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
@@ -257,9 +258,9 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     io.stderr(errRedactor.push(failure));
     status = 1;
   } finally {
-    signalled = stopper.signalled();
+    await stopper.settle();                                  // what the agent started is gone before the books close
     if (stopper.cut() && status === 0) status = 1;           // a launcher may exit 0 on SIGTERM: a turn cut short is not done
-    stopper.done();
+    hungUp = stopper.cut() && stopper.hungUp();
     io.stdout(outRedactor.flush());
     io.stderr(errRedactor.flush());
     const again = released ? openHome(saved) : home;
@@ -270,10 +271,10 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       again.leases.close(name, lease.id, outcome, cost);
       const seen = modelFromOutput(stdout);
       if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
-    } finally { if (released) again.close(); }
+    } finally { if (released) again.close(); stopper.done(); }
   }
   if (refusal !== null) return refusal;
-  if (signalled !== null) return signalled;                // told to stop by SIGINT or SIGTERM, as pool exec is
+  if (hungUp) return 129;                                  // the terminal went away (SIGHUP): 128 + 1
   // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
   // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
   // The old wrapper's fallback on 70 then still means only what the launcher itself decided.

@@ -39,18 +39,15 @@ const DENIED_NAMES = [
 
 export type ChildResult = { status: number; stdout: string; stderr: string };
 // `proceed`: asked right before the child is spawned; false means do not spawn (the reader of the output is gone) and the run
-// ends with status 1 and no output. `detached`: the child leads a process group of its own, so a stop reaches what it starts.
-export type ChildHooks = {
-  onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onStart?: (pid: number) => void;
-  proceed?: () => boolean; detached?: boolean;
-};
+// ends with status 1 and no output.
+export type ChildHooks = { onStdout?: (chunk: string) => void; onStderr?: (chunk: string) => void; onStart?: (pid: number) => void; proceed?: () => boolean };
 
 export function runChild(command: string, args: readonly string[], options: {
   env: NodeJS.ProcessEnv; cwd: string; hooks?: ChildHooks; detached?: boolean;
 }): Promise<ChildResult> {
   return new Promise((resolve, reject) => {
     if (options.hooks?.proceed?.() === false) { resolve({ status: 1, stdout: "", stderr: "" }); return; }
-    const child = spawn(command, args, { env: options.env, cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"], ...(options.detached || options.hooks?.detached ? { detached: true } : {}) });
+    const child = spawn(command, args, { env: options.env, cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"], ...(options.detached ? { detached: true } : {}) });
     if (child.pid !== undefined) options.hooks?.onStart?.(child.pid);
     const decodeOut = new StringDecoder("utf8");
     const decodeErr = new StringDecoder("utf8");

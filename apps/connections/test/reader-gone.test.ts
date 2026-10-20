@@ -1,7 +1,8 @@
-// `morndo-keys run` when the reader of its output is gone (T-274): the turn must stop, not run on to its end with nobody
-// reading and spending the key's budget. The real bin as a child, run into `head -c 20` (a real pipe), against a fake
-// runtime that streams for 15 s. Nothing here times the stop closely: the bin must be back well inside the turn (9 s of 15),
-// and by then the agent is gone and never finished. The lease is still closed with what the turn used, so the books are right.
+// `morndo-keys run` when the reader of its output is gone, or its terminal (T-274): the turn must stop, not run on to its end
+// with nobody reading and spending the key's budget. The real bin as a child, run into `head -c 20` (a real pipe), against fake
+// runtimes that stream for 15 s. Nothing here times the stop closely: the bin must be back well inside the turn (9 s of 15), and
+// by then the agent and what it started are gone and never finished. The lease is still closed with what the turn used, and the
+// bin's exit code agrees with the lease's outcome: 0 for done, never 0 for a turn that was cut short.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +20,8 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+const pidIn = (dir: string, file: string): number => Number(readFileSync(join(dir, file), "utf8"));
 
 // A connection ready to run: a scratch home, a made-up key, the terms acknowledged, and `bin` as the claude runtime.
 function ready(bin: string) {
@@ -30,57 +33,90 @@ function ready(bin: string) {
     PWD: join(dir, "work"), ANTHROPIC_API_KEY: KEY,
   };
   const keys = (args: string[], input = "") => spawnSync(process.execPath, ["--no-warnings", MAIN, ...args], { env, input, encoding: "utf8", timeout: 30_000 });
-  expect(keys(["add", "credit", "--vendor", "anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], KEY).status).toBe(0);
+  expect(keys(["add", "credit", "--vendor", "anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "100"], KEY).status).toBe(0);
   expect(keys(["ack", "credit", "--by", "owner"]).status).toBe(0);
-  const runIntoHeadWith = (extra: string[]) => runIntoHead([MAIN, "run", "--connection", "credit", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--dir", dir, ...extra], env);
-  return { dir, keys, runIntoHead: runIntoHeadWith };
+  const args = (extra: string[]) => [MAIN, "run", "--connection", "credit", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--dir", dir, ...extra];
+  const outcomes = (): string[] => keys(["log", "credit"]).stdout.split("\n").filter(l => l.includes('"LeaseClosed"')).map(l => (JSON.parse(l) as { outcome: string }).outcome);
+  return { dir, env, keys, args, outcomes, intoHead: (extra: string[]) => runIntoHead(args(extra), env) };
+}
+
+// The bin itself as a child, output drained, for a test that sends it a signal.
+function start(t: ReturnType<typeof ready>, extra: string[] = []) {
+  const bin = spawn(process.execPath, ["--no-warnings", ...t.args(extra)], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+  bin.stdout.resume();
+  let stderr = "";
+  bin.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+  const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>(resolve => bin.once("close", (code, signal) => resolve({ code, signal, stderr })));
+  return { bin, closed };
 }
 
 describe("morndo-keys run with its reader gone", () => {
   it("stops the turn and closes the lease, instead of running on to the end", async () => {
-    const { dir, keys, runIntoHead: go } = ready(fixture);
+    const t = ready(fixture);
     const started = Date.now();
-    const ran = await go([]);
+    const ran = await t.intoHead([]);
     const took = Date.now() - started;
 
     expect({ code: ran.code, stderr: ran.stderr }).toEqual({ code: 1, stderr: "" });     // the killed child's status is 1
     expect(took).toBeLessThan(9_000);
-    const pid = Number(readFileSync(join(dir, "pid"), "utf8"));
-    expect(alive(pid)).toBe(false);
-    expect(existsSync(join(dir, "finished"))).toBe(false);
-    expect(keys(["log", "credit"]).stdout).toContain("LeaseClosed");
+    expect(alive(pidIn(t.dir, "pid"))).toBe(false);
+    expect(existsSync(join(t.dir, "finished"))).toBe(false);
+    expect(t.outcomes()).toEqual(["failed"]);
   }, 40_000);
 
-  it("stops the whole process group: an inner process that ignores SIGTERM behind a launcher does not finish the turn", async () => {
-    const { dir, keys, runIntoHead: go } = ready(wrapper);
+  it("stops a launcher's inner process too, though it ignores SIGTERM", async () => {
+    const t = ready(wrapper);
     const started = Date.now();
-    const ran = await go([]);
+    const ran = await t.intoHead([]);
     const took = Date.now() - started;
 
     expect({ code: ran.code, stderr: ran.stderr }).toEqual({ code: 1, stderr: "" });
     expect(took).toBeLessThan(9_000);                                                    // SIGTERM, then SIGKILL after 3 s; the turn is 15 s
-    expect(alive(Number(readFileSync(join(dir, "pid"), "utf8")))).toBe(false);
-    expect(alive(Number(readFileSync(join(dir, "wrapper-pid"), "utf8")))).toBe(false);
-    expect(existsSync(join(dir, "finished"))).toBe(false);
-    expect(keys(["log", "credit"]).stdout).toContain("LeaseClosed");
+    expect(alive(pidIn(t.dir, "pid"))).toBe(false);
+    expect(alive(pidIn(t.dir, "wrapper-pid"))).toBe(false);
+    expect(existsSync(join(t.dir, "finished"))).toBe(false);
+    expect(t.outcomes()).toEqual(["failed"]);
   }, 40_000);
 
-  it("forwards SIGTERM sent to the bin to the agent's group, and ends with 143", async () => {
-    const { dir, keys } = ready(wrapper);
-    const env: NodeJS.ProcessEnv = { ...process.env, MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: catalog, MORNDO_CLAUDE_BIN: wrapper, PWD: join(dir, "work"), ANTHROPIC_API_KEY: KEY };
-    const bin = spawn(process.execPath, ["--no-warnings", MAIN, "run", "--connection", "credit", "--workspace", join(dir, "work"), "--reserve", "2", "--", "--dir", dir], { env, stdio: ["ignore", "pipe", "pipe"] });
-    bin.stdout.resume();
-    bin.stderr.resume();
-    const closed = new Promise<number | null>(resolve => bin.once("close", resolve));
-    for (let i = 0; i < 100 && !existsSync(join(dir, "pid")); i++) await new Promise(resolve => setTimeout(resolve, 50));
+  it("kills an inner process that outlives the launcher and the output pipes, once the grace has passed", async () => {
+    const t = ready(wrapper);
     const started = Date.now();
-    bin.kill("SIGTERM");
-    expect(await closed).toBe(143);
+    const ran = await t.intoHead(["--detach-inner"]);
+    expect({ code: ran.code, stderr: ran.stderr }).toEqual({ code: 1, stderr: "" });
     expect(Date.now() - started).toBeLessThan(9_000);
-    expect(alive(Number(readFileSync(join(dir, "pid"), "utf8")))).toBe(false);
-    expect(existsSync(join(dir, "finished"))).toBe(false);
-    expect(keys(["log", "credit"]).stdout).toContain("LeaseClosed");
+    expect(alive(pidIn(t.dir, "pid"))).toBe(false);                                      // it ignores SIGTERM and holds no pipe
+    expect(existsSync(join(t.dir, "finished"))).toBe(false);
   }, 40_000);
+});
+
+describe("morndo-keys run when its terminal goes away", () => {
+  it("stops the agent and closes the lease on SIGHUP, and ends with 129", async () => {
+    const t = ready(fixture);
+    const { bin, closed } = start(t);
+    for (let i = 0; i < 100 && !existsSync(join(t.dir, "pid")); i++) await pause(50);
+    const started = Date.now();
+    bin.kill("SIGHUP");
+    expect(await closed).toMatchObject({ code: 129, signal: null });
+    expect(Date.now() - started).toBeLessThan(9_000);
+    expect(alive(pidIn(t.dir, "pid"))).toBe(false);
+    expect(existsSync(join(t.dir, "finished"))).toBe(false);
+    expect(t.outcomes()).toEqual(["failed"]);
+  }, 40_000);
+
+  it("never ends 129 for a lease that was closed as done, nor 0 for one closed as failed (a SIGHUP as the agent finishes)", async () => {
+    const t = ready(fixture);
+    for (let round = 0; round < 6; round++) {
+      rmSync(join(t.dir, "finished"), { force: true });
+      const { bin, closed } = start(t, ["--fast"]);
+      for (let i = 0; i < 400 && !existsSync(join(t.dir, "finished")); i++) await pause(2);
+      try { bin.kill("SIGHUP"); } catch { /* it is already gone */ }
+      const end = await closed;
+      const outcome = t.outcomes().at(-1);
+      // A bin that is done and then hit by the signal dies of it (code null), after its lease was closed as done.
+      if (end.code === 0 || end.code === null) expect(outcome, `round ${round}: ${JSON.stringify(end)}`).toBe("done");
+      else expect({ code: end.code, signal: end.signal, outcome }, `round ${round}: ${end.stderr}`).toEqual({ code: 129, signal: null, outcome: "failed" });
+    }
+  }, 60_000);
 });
 
 describe("morndo-keys help", () => {
