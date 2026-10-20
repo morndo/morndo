@@ -36,6 +36,7 @@ export class MemorySync {
   #refusedUntil = new Map<string, number>();         // node → when to ask again after a refusal
   // Per node, the version whose sending last failed and how often: the next attempt's keys (see #send).
   #tries = new Map<string, { version: string; n: number }>();
+  #conflictsSaid = new Map<string, string>();          // node → the version whose conflicts were last logged
   #running = false;
 
   constructor(p: { service: MemoryService; store: MemoryStore; fleet: MemoryFleet; now?: () => number; log?: Pick<Logger, "info" | "warn" | "error"> }) {
@@ -79,13 +80,17 @@ export class MemorySync {
     if (last === null && bundle.parts.every(p => p.length === 0)) return "current";
     const back = before !== undefined && before !== "online";           // it was stale or offline at the previous round
     if (!force && !back && last !== null && last.version === bundle.version && now - last.at < RESEND_MS) return "current";
-    return this.#send(node.name, bundle);
+    // A version the node already took goes out again (the 30-minute resend, a node back online, the console's sync) to
+    // repair it: a skill folder deleted or a file edited since. Under its first keys the node would answer from its done
+    // keys and change nothing, so a resend's keys carry this round's time.
+    const again = last !== null && last.version === bundle.version ? now.toString(36) : null;
+    return this.#send(node.name, bundle, again);
   }
 
   // Every part, in order; the node took the version whole only when every part was accepted and one of them committed
   // it. Only then is it recorded as the node's.
-  async #send(node: string, bundle: Bundle): Promise<SyncOutcome> {
-    const outcome = await this.#sendParts(node, bundle);
+  async #send(node: string, bundle: Bundle, again: string | null = null): Promise<SyncOutcome> {
+    const outcome = await this.#sendParts(node, bundle, again);
     if (outcome === "failed") {
       // A part the node could not finish keeps its key `started` there, and the same key would be answered `uncertain` for
       // days: the next round sends the version under fresh keys. Staging a part again changes nothing on the node.
@@ -95,15 +100,16 @@ export class MemorySync {
     return outcome;
   }
 
-  async #sendParts(node: string, bundle: Bundle): Promise<SyncOutcome> {
+  async #sendParts(node: string, bundle: Bundle, again: string | null): Promise<SyncOutcome> {
     const t = this.#tries.get(node);
     const attempt = t && t.version === bundle.version ? t.n : 0;
     let committed = false;
+    const conflicts: string[] = [];
     for (const [part, files] of bundle.parts.entries()) {
       let answer: Awaited<ReturnType<MemoryFleet["op"]>>;
       try {
         answer = await this.#fleet.op({ node }, "memory.sync", { version: bundle.version, part, parts: bundle.parts.length, files },
-          { key: `hub:memory:${bundle.version}:${part}${attempt > 0 ? `#${attempt}` : ""}`, timeoutMs: OP_TIMEOUT_MS });
+          { key: `hub:memory:${bundle.version}:${part}${again ? `@${again}` : ""}${attempt > 0 ? `#${attempt}` : ""}`, timeoutMs: OP_TIMEOUT_MS });
       } catch (e) {
         this.#log.warn(`memory: ${node} didn't answer part ${part + 1} of ${bundle.parts.length}; the next round tries again`, e);
         return "failed";
@@ -118,6 +124,13 @@ export class MemorySync {
         return "failed";
       }
       if (answer.result.committed === true) committed = true;
+      conflicts.push(...answer.result.conflicts);
+    }
+    // A folder of one of Memory's names that isn't Memory's (no marker, or a link) is left alone on the node; say so once
+    // per node and version, so someone can look.
+    if (conflicts.length > 0 && this.#conflictsSaid.get(node) !== bundle.version) {
+      this.#conflictsSaid.set(node, bundle.version);
+      this.#log.warn(`memory: ${node} left ${conflicts.length} folder(s) alone that are not Memory's: ${conflicts.slice(0, 5).join(", ")}`);
     }
     if (!committed) {
       this.#log.warn(`memory: ${node} took every part of ${bundle.version} but committed none; the next round sends it again`);

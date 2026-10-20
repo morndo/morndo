@@ -241,3 +241,23 @@ describe("an empty memory", () => {
     }
   });
 });
+
+describe("repairing a node", () => {
+  it("sends a version the node already took again under fresh keys, so the node re-applies it", async () => {
+    await tick();
+    const v = to("pc")[0]!.args.version;
+    expect(to("pc").map(c => c.key)).toEqual([`hub:memory:${v}:0`]);
+    await tick(RESEND_MS + MINUTE);
+    expect(to("pc").map(c => c.key)).toEqual([`hub:memory:${v}:0@${now.toString(36)}`]);
+    calls = [];
+    await sync.push({ force: true });
+    expect(to("pc").map(c => c.key)).toEqual([`hub:memory:${v}:0@${now.toString(36)}`]);
+  });
+  it("says once per node and version which folders a node left alone", async () => {
+    answer = c => ({ ok: true, result: { committed: true, written: 0, removed: 0, skillDirs: [], conflicts: c.node === "pc" ? ["/data/skills/morndo-mem-x"] : [] } });
+    await tick();
+    await tick(RESEND_MS + MINUTE);
+    expect(warnings.filter(w => w.includes("left 1 folder(s) alone")).length).toBe(1);
+    expect(warnings.find(w => w.includes("left 1 folder(s) alone"))).toContain("pc left 1 folder(s) alone that are not Memory's: /data/skills/morndo-mem-x");
+  });
+});

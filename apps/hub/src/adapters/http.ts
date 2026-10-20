@@ -50,6 +50,9 @@ import { RateLimiter, takeAll, type BucketConfig, type Taken } from "./rate-limi
 
 const COOKIE = "__Host-morndo";
 const MAX_BODY = 64 * 1024;
+// A Note's own limits are characters (MEMORY_LIMITS): 20,000 of them can be 120 KB as JSON that escapes every character
+// (\uXXXX), so a Note's body gets room for that, and no more.
+const MEMORY_MAX_BODY = 160 * 1024;
 // The terminal view's frames: asked every 80 ms; while they are unavailable, at most every 2 s (streamTerminal).
 const FRAME_POLL_MS = 80;
 const FRAME_BACKOFF_MAX_MS = 2000;
@@ -124,19 +127,19 @@ async function readRaw(req: IncomingMessage, max: number): Promise<Buffer> {
 }
 
 // A JSON body decoded with its protocol schema (ADR-0008, A2): 400 "bad_request" before any service sees it.
-async function readBody<S extends Schema>(req: IncomingMessage, schema: S): Promise<Output<S>> {
-  const v = parseBody(schema, await readJson(req));
+async function readBody<S extends Schema>(req: IncomingMessage, schema: S, max = MAX_BODY): Promise<Output<S>> {
+  const v = parseBody(schema, await readJson(req, max));
   if (v === null) throw new HttpError(400, "bad_request");
   return v;
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(req: IncomingMessage, max = MAX_BODY): Promise<Record<string, unknown>> {
   if (!(req.headers["content-type"] ?? "").startsWith("application/json")) throw new HttpError(415, "send JSON");
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new HttpError(413, "body too large");
+    if (size > max) throw new HttpError(413, "body too large");
     chunks.push(chunk as Buffer);
   }
   try {
@@ -397,7 +400,7 @@ export function startHttp(p: {
       const found = service.search({ q: q.get("q"), scope: q.get("scope"), kind: q.get("kind"), limit: q.get("limit") });
       return found.ok ? json(res, 200, { notes: found.notes }) : json(res, 400, { error: found.problem });
     }
-    if (path === "/api/agent/memory/notes" && method === "POST") return memoryAnswer(res, service.remember(actor, await readBody(req, MemoryRememberBody)), 201);
+    if (path === "/api/agent/memory/notes" && method === "POST") return memoryAnswer(res, service.remember(actor, await readBody(req, MemoryRememberBody, MEMORY_MAX_BODY)), 201);
     const one = /^\/api\/agent\/memory\/notes\/(N-\d{1,9})(\/invalidate)?$/.exec(path);
     if (one && !one[2] && method === "GET") return memoryAnswer(res, service.note(actor, one[1] ?? ""));
     if (one && one[2] && method === "POST") return memoryAnswer(res, service.invalidate(actor, one[1] ?? "", (await readBody(req, MemoryInvalidateBody)).reason));

@@ -111,6 +111,10 @@ export async function runMemory(argv: string[], io: MemoryIo, o: { dataDir: stri
       }
       case "approve": {
         const r = service.approve(id);
+        if (!r.ok && r.problem === "replaced_meanwhile") {
+          await io.err(`${id}: the note it replaces was replaced by another successor first; look at both (morndo memory show) and, if this one should win, have it proposed again against the version that holds now`);
+          return MEMORY_EXIT.refused;
+        }
         if (!r.ok) { await io.err(`${id}: ${r.problem}`); return MEMORY_EXIT.refused; }
         await io.out(`approved ${r.note.id} (${r.note.kind}, ${r.note.scope}): it reaches the lanes at the next sync`);
         return MEMORY_EXIT.ok;
