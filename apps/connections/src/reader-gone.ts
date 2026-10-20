@@ -8,7 +8,7 @@ import type { Io } from "./cli.ts";
 
 const STOP_GRACE_MS = 3_000;
 
-export type TurnStopper = { started(pid: number): void; done(): void };
+export type TurnStopper = { proceed(): boolean; started(pid: number): void; done(): void };
 
 export function turnStopper(io: Io, graceMs = STOP_GRACE_MS): TurnStopper {
   let pid: number | null = null;
@@ -23,6 +23,7 @@ export function turnStopper(io: Io, graceMs = STOP_GRACE_MS): TurnStopper {
   };
   io.gone?.addEventListener("abort", stop, { once: true });
   return {
+    proceed: () => !gone,
     started(started) { pid = started; if (gone) stop(); },
     done() {
       pid = null;

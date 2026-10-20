@@ -347,7 +347,7 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
     let outcome = "failed";
     try {
       const result = await runtimeCodex.execute(plan, argv, {
-        onStdout: take, onStderr: text => { io.stderr(text); }, onStart: pid => { childPid = pid; },
+        onStdout: take, onStderr: text => { io.stderr(text); }, onStart: pid => { childPid = pid; }, proceed: () => stopped === null,
       }, store);
       if (buffer !== "") { handle(buffer); buffer = ""; }
       turn.status = result.status;

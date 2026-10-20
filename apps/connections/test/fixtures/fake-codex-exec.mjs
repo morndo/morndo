@@ -1,7 +1,7 @@
 // Stands in for `codex` in the pool tests (ADR-0029): `login status`, `app-server` (the fake app server, with its files in the
 // member's sign-in home), and `exec` / `exec resume <id>` as a stream of events in codex-cli 0.161.0's `--json` shapes.
 // The member is found by following $CODEX_HOME/auth.json to its real path: that file's directory is the member's sign-in home.
-// `mode` there: ok (default), limit, slow, stream (a line every 100 ms for 15 s, its pid in `pid`, then `finished`), encrypted (a
+// `mode` there: ok (default), limit, slow, slow-status (a sign-in check of 1.5 s; its turn is a stream), stream (a line every 100 ms for 15 s, its pid in `pid`, then `finished`), encrypted (a
 // resume only), auth. Each run appends a record to runs.jsonl in that
 // home: its arguments, the member, where its sessions and writer locks really are, and the names of its environment.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
@@ -13,6 +13,12 @@ const out = event => process.stdout.write(`${JSON.stringify(event)}\n`);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 if (argv[0] === "login" && argv[1] === "status") {
+  // mode slow-status: the sign-in check takes 1.5 s and says so first (`status-started`), so a test can act inside that window.
+  const home = dirname(realpathSync(join(codexHome, "auth.json")));
+  if (existsSync(join(home, "mode")) && readFileSync(join(home, "mode"), "utf8").trim() === "slow-status") {
+    writeFileSync(join(home, "status-started"), "yes");
+    await pause(1500);
+  }
   process.stderr.write("Logged in using ChatGPT\n");
   process.exit(0);
 }
@@ -43,7 +49,7 @@ if (argv[0] === "app-server") {
   out({ type: "thread.started", thread_id: thread });
   out({ type: "turn.started" });
   if (mode === "slow") await pause(1500);
-  if (mode === "stream") {
+  if (mode === "stream" || mode === "slow-status") {
     writeFileSync(join(memberHome, "pid"), String(process.pid));
     for (let i = 0; i < 150; i++) { out({ type: "item.completed", item: { type: "agent_message", text: `line ${i}` } }); await pause(100); }
     writeFileSync(join(memberHome, "finished"), "yes");

@@ -221,6 +221,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       onStdout: (chunk: string) => { io.stdout(outRedactor.push(chunk)); },
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
       onStart: (pid: number) => { stopper.started(pid); },
+      proceed: () => stopper.proceed(),
     };
     const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"

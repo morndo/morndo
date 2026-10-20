@@ -167,6 +167,19 @@ describe("morndo-keys pool exec", () => {
     expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
   }, 30_000);
 
+  it("does not start the agent when the reader goes after the seat is won", async () => {
+    const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow-status" }, defaultMember: "codex-a" });
+    const marker = join(t.home("codex-a"), "status-started");
+    rmSync(marker, { force: true });
+    const gone = new AbortController();
+    const running = run(turn(), t.env, { stdin: "", stdout: () => {}, stderr: () => {}, gone: gone.signal });
+    await until(() => existsSync(marker));
+    gone.abort();
+    expect(await running).toBe(143);
+    expect(t.runs("codex-a")).toHaveLength(0);
+    expect(existsSync(join(t.home("codex-a"), "finished"))).toBe(false);
+  }, 40_000);
+
   it("runs one turn at a time per account", async () => {
     const t = await poolNode({ mode: "pinned", members: { "codex-a": "slow" }, defaultMember: "codex-a" });
     const first = t.cli(turn(["--lane", "lane-1"]));
