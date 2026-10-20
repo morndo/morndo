@@ -305,6 +305,23 @@ export function keyViolations(text: string, jobs: Record<string, string>): strin
   return found;
 }
 
+describe("artifacts are downloaded by exact name", () => {
+  const release = readFileSync(".github/workflows/release.yml", "utf8");
+  const names = ["release-linux-x64", "release-linux-arm64", "release-darwin-arm64"];
+
+  it.each(["assemble", "sign", "publish"])("%s takes the three build artifacts by name, and no pattern", name => {
+    const text = job(release, name);
+    expect(text).not.toMatch(/pattern:/);
+    expect(text).not.toContain("merge-multiple");
+    for (const artifact of names) expect(text).toContain(`name: ${artifact}\n`);
+  });
+
+  it("the build matrix uploads under exactly those names", () => {
+    expect(job(release, "build")).toContain("name: release-${{ matrix.platform }}");
+    expect([...release.matchAll(/platform: ([a-z0-9-]+)/g)].map(m => `release-${m[1]}`)).toEqual(names);
+  });
+});
+
 describe("signing keys reach one shell-only step", () => {
   const release = readFileSync(".github/workflows/release.yml", "utf8");
   const feed = readFileSync(".github/workflows/feed.yml", "utf8");
