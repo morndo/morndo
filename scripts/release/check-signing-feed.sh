@@ -78,6 +78,8 @@ for channel in latest stable; do
     pseq=$(jq -r .seq "$prev")
     if [ "$MODE" = publish ] && [ "$channel" = stable ]; then
       cmp -s "$prev" "$new" || fail "a publish changed stable.json"
+      # Carried over as it was, but not past its expiry: signing it again would hand out a dead feed.
+      jq -e --argjson now "$now" '(.expiresAt | fromdateiso8601) > $now' "$new" > /dev/null || fail "the carried-over stable.json has expired; re-sign the feeds first"
     else
       [ "$seq" = $((pseq + 1)) ] || fail "$channel.json is number $seq, expected $((pseq + 1))"
     fi

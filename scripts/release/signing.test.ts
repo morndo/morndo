@@ -290,6 +290,14 @@ describe("check-signing-feed.sh", () => {
     }
   });
 
+  it("refuses a publish that carries over a stable.json that has already expired", () => {
+    const w = world({ branch: true, age: 15 * 86_400_000 });
+    put(w, publishRelease(w.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), w.stable);
+    const done = check(w, { MODE: "publish", VERSION });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/stable\.json has expired/);
+  });
+
   it("refuses a first feed that does not start at 1, and a re-sign with no branch", () => {
     const first = world({ branch: false });
     put(first, publishRelease(first.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), first.stable);
