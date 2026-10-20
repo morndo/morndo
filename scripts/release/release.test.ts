@@ -22,6 +22,7 @@ import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
 import { launcherSource, LAUNCHERS } from "./launchers.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, schemaFrom } from "./manifest.ts";
+import { orderProblems } from "./schema.ts";
 import { BUNDLED_NODE, newerNode24, nodeTarball } from "./node-pin.ts";
 import { sha256Sums } from "./checksums.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes } from "./sign.ts";
@@ -113,9 +114,27 @@ describe("file list and manifest", () => {
       node: schemaFrom(node),
       connections: schemaFrom(connections),
     });
-    const diff = spawnSync("git", ["diff", "origin/main", "--", "apps/hub/src/adapters/migrations.ts", "apps/fleet/src/adapters/migrations.ts", "apps/node-agent/src/db/migrations.ts", "apps/connections/src/adapters/store-migrations.ts"], { encoding: "utf8" });
-    expect(diff.status).toBe(0);
-    expect(diff.stdout).toBe("");
+  });
+
+  it("the release declares every migration in the tree, in order", async () => {
+    const { MIGRATIONS: hub } = await import("../../apps/hub/src/adapters/migrations.ts");
+    const { MIGRATIONS: fleet } = await import("../../apps/fleet/src/adapters/migrations.ts");
+    const { MIGRATIONS: node } = await import("../../apps/node-agent/src/db/migrations.ts");
+    const { MIGRATIONS: connections } = await import("../../apps/connections/src/adapters/store-migrations.ts");
+    const lists = { hub, fleet, node, connections };
+    for (const [name, list] of Object.entries(lists)) expect(orderProblems(list), name).toEqual([]);
+    const declared = declaredSchemas();
+    for (const [name, list] of Object.entries(lists)) {
+      expect(declared[name as keyof typeof declared].version, name).toBe(list.length);
+    }
+  });
+
+  it("control: a gap, a repeat or a swap in a migration list is named", () => {
+    const at = (...versions: number[]) => versions.map(version => ({ version, compat: "additive" as const }));
+    expect(orderProblems(at(1, 2, 3))).toEqual([]);
+    expect(orderProblems(at(1, 3))).toEqual(["version 3 follows 1"]);
+    expect(orderProblems(at(1, 1))).toEqual(["version 1 follows 1"]);
+    expect(orderProblems(at(2, 1))).toEqual(["version 2 follows 0", "version 1 follows 2"]);
   });
 
   it("starts the schema child in the repo and reports the child's own error", () => {
