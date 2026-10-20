@@ -3,7 +3,7 @@
 // meets it (an empty `m` from a tmux control did both). clean-tree.ts reads the untracked files before a run and after it.
 // Here against real git repositories in temporary directories.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -52,6 +52,17 @@ describe("untrackedFiles", () => {
     writeFileSync(join(dir, "deep/er/stray"), "x");
     writeFileSync(join(dir, "m"), "");
     expect(untrackedFiles(dir)?.sort()).toEqual(["deep/er/stray", "m"]);
+  });
+  it("only reads: it leaves the index alone, so it never takes the index lock while someone else commits", () => {
+    const dir = repo();
+    // Same content, new mtime: plain `git status` refreshes the stat data and rewrites the index (through index.lock) when it can.
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(join(dir, "kept"), later, later);
+    const index = join(dir, ".git/index");
+    const before = statSync(index);
+    untrackedFiles(dir);
+    const after = statSync(index);
+    expect({ ino: after.ino, mtimeMs: after.mtimeMs }).toEqual({ ino: before.ino, mtimeMs: before.mtimeMs });
   });
   it("is null where there is no git repository, so a run outside one is not judged", () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-clean-tree-"));
