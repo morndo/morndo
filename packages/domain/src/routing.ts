@@ -2,7 +2,7 @@
 // derived from its Picks. Pure. Availability never reorders a chain. No vendor is named here.
 import { MAX_CHAIN, engineText, type Engine } from "./engines.ts";
 import type { Kind } from "./connections.ts";
-import { changeEffect, dailyCapFor, DEFAULT_AUTO_SETTINGS, reserveFor, roleGroup, type AutoChange, type AutoSettings } from "./auto-routing.ts";
+import { changeEffect, dailyCapFor, DEFAULT_AUTO_SETTINGS, reserveFor, routingRoleGroup, type AutoChange, type AutoSettings } from "./auto-routing.ts";
 import { err, ok, type Result } from "./shared.ts";
 
 export type Mode = "subscriptions-first" | "keys-first" | "subscriptions-only" | "keys-only" | "custom";
@@ -261,7 +261,7 @@ export function ensureRole(policy: Policy, role: string): Policy {
   if (policy.roles.some(r => r.role === role)) return policy;
   const row: RoleRoute = {
     role, override: "hand", priority: null, picks: [], riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null,
-    auto: roleGroup(role) === "implement",
+    auto: routingRoleGroup(role) === "implement",
   };
   return { ...policy, roles: [...policy.roles, row] };
 }
@@ -568,7 +568,7 @@ export function parsePolicy(raw: unknown): Policy | null {
     roles.push({
       role: row.role, override: row.override, priority: rolePriority, picks: row.picks, riskPicks: row.riskPicks as Engine[] | null,
       written, writtenRisk, seenChain, seenRisk,
-      auto: typeof row.auto === "boolean" ? row.auto : roleGroup(row.role) === "implement",
+      auto: typeof row.auto === "boolean" ? row.auto : routingRoleGroup(row.role) === "implement",
     });
   }
   const settings = typeof body.autoSettings === "object" && body.autoSettings !== null ? body.autoSettings as Record<string, unknown> : {};

@@ -2,11 +2,11 @@
 // The decider's fences and the decision step land with PR 7. No vendor is named here.
 import { err, ok, unreachable, type Result } from "./shared.ts";
 
-export type Tier = "routine" | "standard" | "hard";
+export type RoutingTier = "routine" | "standard" | "hard";
 export type Size = "S" | "M" | "L" | "XL" | "unknown";
 export type TaskKind = "fix" | "feature" | "refactor" | "test" | "docs" | "chore" | "review-fix" | "unknown";
-export type ModelClass = "flagship" | "everyday" | "fast" | "unknown";
-export type Level = "held" | Tier;
+export type RoutingModelClass = "flagship" | "everyday" | "fast" | "unknown";
+export type RoutingLevel = "held" | RoutingTier;
 export type Band = "A" | "B" | "C" | "new";
 export type Source = "flag" | "board" | "lane-task" | "branch" | "diff" | "findings" | "brief" | "picks" | "ledger" | "default";
 export type Signal<T> = { value: T; source: Source };
@@ -36,9 +36,9 @@ const BRANCH_PREFIX: readonly (readonly [string, TaskKind])[] = [
 ];
 const KEYWORDS: readonly (readonly [string, TaskKind])[] = [["readme", "docs"], ["documentation", "docs"]];
 
-const LEVEL_RANK: Record<Level, number> = { held: 0, routine: 1, standard: 2, hard: 3 };
+const LEVEL_RANK: Record<RoutingLevel, number> = { held: 0, routine: 1, standard: 2, hard: 3 };
 const BAND_RANK: Record<Band, number> = { A: 0, B: 1, new: 2, C: 3 };
-const CLASS_RANK: Record<ModelClass, number> = { flagship: 0, everyday: 1, fast: 2, unknown: 3 };
+const CLASS_RANK: Record<RoutingModelClass, number> = { flagship: 0, everyday: 1, fast: 2, unknown: 3 };
 const TRUST: Record<OutcomeSource, number> = { principal: 5, review: 4, board: 3, lease: 2, ledger: 1 };
 
 export type TaskProfile = {
@@ -83,7 +83,7 @@ export type CandidateFacts = {
   connection: string;
   kindOf: "subscription" | "api-key";
   family: string;
-  modelClass: ModelClass;
+  modelClass: RoutingModelClass;
   inChain: boolean;
   rank: number;
   available: true | { reason: string; until: number | null };
@@ -94,7 +94,7 @@ export type CandidateFacts = {
   committedToday: number | null;
   dailyCap: number | null;
   window: number | null;
-  level: Level;
+  level: RoutingLevel;
   band: Band;
   minutes: number | null;
   heldSince: number | null;
@@ -114,7 +114,7 @@ export type Reason = { code: string; stage: "rules" | "declined"; n?: number; na
 export type Decline = "off" | "role-off" | "hand" | "drifted" | "none-eligible";
 
 export type RulesResult = {
-  tier: Tier;
+  tier: RoutingTier;
   pick: string | null;
   rulesPick: string | null;
   chain: readonly string[];
@@ -136,7 +136,7 @@ export type DecideInput = {
   derived: readonly string[];
 };
 
-export function roleGroup(role: string): string {
+export function routingRoleGroup(role: string): string {
   const cut = role.indexOf("-");
   return cut === -1 ? role : role.slice(0, cut);
 }
@@ -151,7 +151,7 @@ export function familyOf(model: string, families: readonly { pattern: string; fa
   return families.find(row => glob(row.pattern, id))?.family ?? presetFamily;
 }
 
-export function modelClassOf(model: string, rows: readonly { pattern: string; class: ModelClass }[]): ModelClass {
+export function modelClassOf(model: string, rows: readonly { pattern: string; class: RoutingModelClass }[]): RoutingModelClass {
   const id = modelId(model);
   return rows.find(row => glob(row.pattern, id))?.class ?? "unknown";
 }
@@ -191,7 +191,7 @@ export function reasonOk(reason: Reason): boolean {
 export function taskProfile(input: ProfileInput): TaskProfile {
   return {
     role: input.role,
-    group: roleGroup(input.role),
+    group: routingRoleGroup(input.role),
     risk: input.risk === undefined ? { value: false, source: "default" } : { value: input.risk, source: "flag" },
     kind: kindOf(input),
     size: sizeOf(input),
@@ -249,7 +249,7 @@ function briefSize(items: number, paths: number): Size {
   return "M";
 }
 
-export function tierOf(profile: TaskProfile): { tier: Tier; reason: Reason } {
+export function tierOf(profile: TaskProfile): { tier: RoutingTier; reason: Reason } {
   if (profile.risk.value) return { tier: "hard", reason: { code: "risk", stage: "rules" } };
   if (profile.round.value >= 3) return { tier: "hard", reason: { code: "third-round", stage: "rules" } };
   if (profile.size.value === "L" || profile.size.value === "XL") return { tier: "hard", reason: { code: "large", stage: "rules" } };
@@ -369,7 +369,7 @@ function knownFamilies(families: readonly string[]): string[] {
 
 function reviewExclusion(candidate: CandidateFacts, input: DecideInput): Reason | null {
   if (!input.reviewRule) return null;
-  if (roleGroup(input.role) !== "implement") {
+  if (routingRoleGroup(input.role) !== "implement") {
     return knownFamilies(input.implementerFamilies).includes(candidate.family) ? { code: "review", stage: "rules", name: candidate.family } : null;
   }
   const reviewers = knownFamilies(input.reviewFamilies);
@@ -397,12 +397,12 @@ function costRank(candidate: CandidateFacts, settings: AutoSettings): CostRank {
   return { rank: 3, usd: candidate.expectedUsd };
 }
 
-function trustedFor(level: Level, tier: Tier): boolean {
+function trustedFor(level: RoutingLevel, tier: RoutingTier): boolean {
   if (level === "held") return false;
   return LEVEL_RANK[level] >= LEVEL_RANK[tier];
 }
 
-function sortKey(tier: Tier, candidate: CandidateFacts, settings: AutoSettings, derived: readonly string[]): number[] {
+function sortKey(tier: RoutingTier, candidate: CandidateFacts, settings: AutoSettings, derived: readonly string[]): number[] {
   const trust = tier === "routine" ? 0 : trustedFor(candidate.level, tier) ? 0 : 1;
   const band = BAND_RANK[candidate.band];
   const model = CLASS_RANK[candidate.modelClass];
@@ -429,7 +429,7 @@ function compare(a: readonly number[], b: readonly number[]): number {
   return 0;
 }
 
-function pickReason(tier: Tier, winner: CandidateFacts, other: CandidateFacts | undefined, settings: AutoSettings, derived: readonly string[]): Reason {
+function pickReason(tier: RoutingTier, winner: CandidateFacts, other: CandidateFacts | undefined, settings: AutoSettings, derived: readonly string[]): Reason {
   if (tier !== "routine" && !trustedFor(winner.level, tier)) return { code: "no-trusted-available", stage: "rules" };
   if (!other) return { code: soleCode(tier, winner, settings), stage: "rules" };
   const left = sortKey(tier, winner, settings, derived);
@@ -440,12 +440,12 @@ function pickReason(tier: Tier, winner: CandidateFacts, other: CandidateFacts | 
   return { code: "role-order", stage: "rules" };
 }
 
-function soleCode(tier: Tier, winner: CandidateFacts, settings: AutoSettings): string {
+function soleCode(tier: RoutingTier, winner: CandidateFacts, settings: AutoSettings): string {
   if (tier === "hard") return "trusted-for";
   return costRank(winner, settings).rank === 0 ? "included" : "cheapest";
 }
 
-function keyCode(tier: Tier, index: number, winner: CandidateFacts, settings: AutoSettings): string {
+function keyCode(tier: RoutingTier, index: number, winner: CandidateFacts, settings: AutoSettings): string {
   if (tier === "hard") return ["trusted-for", "band", "model-class", "role-order"][index] ?? "role-order";
   const costAt = tier === "standard" ? index === 1 || index === 2 : index === 0 || index === 1;
   if (costAt) return costRank(winner, settings).rank === 0 ? "included" : "cheapest";
@@ -462,7 +462,7 @@ export type AutoChange =
   | { kind: "save-line"; from: number; to: number }
   | { kind: "daily-cap"; from: number; to: number }
   | { kind: "reserve"; from: number; to: number }
-  | { kind: "pin"; from: Level; to: Level; sharesChainWithMetered: boolean };
+  | { kind: "pin"; from: RoutingLevel; to: RoutingLevel; sharesChainWithMetered: boolean };
 
 export function changeEffect(change: AutoChange): "session" | "step-up" {
   switch (change.kind) {
@@ -566,11 +566,11 @@ function leaseTotal(facts: readonly OutcomeFact[], route: string, kind: "cost" |
   return total;
 }
 
-export type ScoreRun = { id: string; at: number; group: string; tier: Tier; task: string | null; lane: string | null };
+export type ScoreRun = { id: string; at: number; group: string; tier: RoutingTier; task: string | null; lane: string | null };
 export type ScoreCell = {
   entry: string;
   group: string;
-  tier: Tier;
+  tier: RoutingTier;
   coverage: number;
   n: number;
   k: number;
@@ -679,17 +679,17 @@ export function leaseJoins(route: { task: string | null }, laneTask: string | nu
   return laneTask === route.task;
 }
 
-export type StandingRow = { entry: string; group: string; level: Level; pinned: boolean };
+export type StandingRow = { entry: string; group: string; level: RoutingLevel; pinned: boolean };
 
 export function startStanding(groups: readonly { group: string; chains: readonly (readonly string[])[] }[]): StandingRow[] {
-  const levels = new Map<string, Level>();
+  const levels = new Map<string, RoutingLevel>();
   const order: string[] = [];
   for (const group of groups) {
     for (const chain of group.chains) {
       chain.forEach((entry, index) => {
         const key = `${group.group}\0${entry}`;
         if (!levels.has(key)) order.push(key);
-        const next: Level = index === 0 ? "hard" : "routine";
+        const next: RoutingLevel = index === 0 ? "hard" : "routine";
         const current = levels.get(key);
         levels.set(key, current === undefined || LEVEL_RANK[next] > LEVEL_RANK[current] ? next : current);
       });
@@ -702,12 +702,12 @@ export function startStanding(groups: readonly { group: string; chains: readonly
 }
 
 export function moveStanding(args: {
-  level: Level;
+  level: RoutingLevel;
   pinned: boolean;
-  tier: Tier;
+  tier: RoutingTier;
   atTier: readonly { accepted: boolean | "unknown"; fixRounds: number }[];
   deciderChoice: string | null;
-}): { level: Level; cause: "promoted" | "demoted" | "unchanged" } {
+}): { level: RoutingLevel; cause: "promoted" | "demoted" | "unchanged" } {
   void args.deciderChoice;
   if (args.pinned || args.level === "held" || args.atTier.length === 0) return { level: args.level, cause: "unchanged" };
   const last = args.atTier.slice(-5);
@@ -725,13 +725,13 @@ export function moveStanding(args: {
   return { level: args.level, cause: "unchanged" };
 }
 
-function below(tier: Tier): Level {
+function below(tier: RoutingTier): RoutingLevel {
   if (tier === "hard") return "standard";
   if (tier === "standard") return "routine";
   return "held";
 }
 
-function above(level: Level): Level {
+function above(level: RoutingLevel): RoutingLevel {
   if (level === "routine") return "standard";
   if (level === "standard") return "hard";
   return level;

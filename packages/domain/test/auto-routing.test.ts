@@ -3,9 +3,9 @@
 import { describe, expect, it } from "vitest";
 import {
   autoRouted, changeEffect, dailyCapFor, decide, expectedUsd, familyOf, leaseJoins, modelClassOf, moveStanding,
-  nextRound, parseFact, reasonOk, recordFact, reserveFor, roleGroup, route, scorecard, startStanding, taskProfile,
+  nextRound, parseFact, reasonOk, recordFact, reserveFor, routingRoleGroup, route, scorecard, startStanding, taskProfile,
   tierOf, type AutoSettings, type CandidateFacts, type Size, type TaskKind, type TaskProfile,
-  type Tier,
+  type RoutingTier,
 } from "../src/index.ts";
 import {
   chainText, deriveChain, effectiveOrder, emptyPolicy, ensureRole, setGlobalAuto, setOverride, setPicks, setPriority,
@@ -81,7 +81,7 @@ function run(candidates: readonly CandidateFacts[], derived: readonly string[], 
 }
 
 describe("R20: tier is the first matching row of rules-v1", () => {
-  const rows: [string, Partial<TaskProfile>, Tier, string][] = [
+  const rows: [string, Partial<TaskProfile>, RoutingTier, string][] = [
     ["risk", { risk: { value: true, source: "flag" }, size: { value: "S", source: "flag" }, kind: { value: "docs", source: "flag" } }, "hard", "risk"],
     ["third round", { round: { value: 3, source: "flag" }, size: { value: "S", source: "flag" } }, "hard", "third-round"],
     ["size L", { size: { value: "L", source: "flag" } }, "hard", "large"],
@@ -161,8 +161,8 @@ describe("profile signals: the first source that answers wins, and the title is 
     expect(got.group).toBe("implement");
     expect(got.brief).toEqual({ digest: "deadbeef", items: 2, paths: 1 });
     expect(JSON.stringify(got)).not.toContain("MARKER-TITLE");
-    expect(roleGroup("implement-ui")).toBe("implement");
-    expect(roleGroup("review")).toBe("review");
+    expect(routingRoleGroup("implement-ui")).toBe("implement");
+    expect(routingRoleGroup("review")).toBe("review");
   });
 });
 
