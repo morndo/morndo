@@ -5,7 +5,9 @@
 // a lane has one task in progress at a time (B5), every change is recorded with who made it and the task's revision
 // grows by one (B6), keys are never reused (B7), and the board grants nothing (B8): a status is never a Mandate, a
 // Decision, Evidence or a Verdict. Done is the manager's (or the principal's) acceptance of a lane's word, not proof; the
-// manager's says what it checked (B9).
+// manager's says what it checked (B9). The board also moves a task by itself, following its assignee's Run, along the
+// fixed edges of B10 (D1 to D6, ADR-0032): never to Done, never an assignment.
+import type { Run } from "./run.ts";
 import { err, ok, type EndpointId, type Result, type SessionId } from "./shared.ts";
 
 export type TaskKey = string & { readonly __brand: "TaskKey" };
@@ -25,6 +27,11 @@ export type BoardActor =
   | { kind: "manager"; name: string; token: string }
   | { kind: "worker"; name: string; token: string };
 
+// Who changed a task: an agents' door actor, the control plane's console (which acts for the principal there, as
+// `memory approve` does), or the board itself following a Run (B10), naming the rule and the lane it read.
+export type BoardRule = "D1" | "D2" | "D3" | "D4";
+export type TaskActor = BoardActor | { kind: "console" } | { kind: "board"; rule: BoardRule; lane: string };
+
 export type Task = {
   key: TaskKey;
   n: number;                              // the number in the key; the counter never goes back (B7)
@@ -36,7 +43,7 @@ export type Task = {
   blockedReason: string | null;           // while blocked: why, in the mover's words
   createdAt: number;
   updatedAt: number;
-  createdBy: BoardActor;
+  createdBy: TaskActor;
   rev: number;                            // one more per event (B6); a change may name the rev it saw
   doneAt: number | null;
   comments: number;
@@ -48,7 +55,7 @@ export type TaskChange =
   | { kind: "assigned"; from: string | null; to: string | null }
   | { kind: "edited"; title?: string; description?: string; priority?: TaskPriority }
   | { kind: "commented"; text: string };
-export type TaskEvent = { key: TaskKey; rev: number; at: number; actor: BoardActor; change: TaskChange };
+export type TaskEvent = { key: TaskKey; rev: number; at: number; actor: TaskActor; change: TaskChange };
 
 export type NewTask = { title: string; description?: string; assignee?: string | null; priority?: TaskPriority; status?: TaskStatus };
 export type TaskAction =
@@ -104,10 +111,11 @@ function lane(v: string | null | undefined): Result<string | null, BoardRefusal>
   return LANE_NAME.test(t) ? ok(t) : refuse("bad_name");
 }
 
-// B2: the manager and the principal run the board; a worker only works its tasks and files proposals.
-export const runsTheBoard = (a: BoardActor) => a.kind === "principal" || a.kind === "manager";
+// B2: the manager, the principal and the console run the board; a worker only works its tasks and files proposals; the
+// board itself only follows runs (B10).
+export const runsTheBoard = (a: TaskActor) => a.kind === "principal" || a.kind === "manager" || a.kind === "console";
 // The lane an actor is, for B3 and for "my tasks": the manager is a lane too.
-export const laneOf = (a: BoardActor) => (a.kind === "principal" ? null : a.name);
+export const laneOf = (a: TaskActor) => (a.kind === "manager" || a.kind === "worker" ? a.name : null);
 
 // B4: the moves. The manager and the principal may move a task anywhere but where it is; a lane moves its own task
 // along the work: take it up, put it back, block it, offer it for review, take it up again. Never to Done (B3).
@@ -119,15 +127,24 @@ const WORKER_MOVES: Record<TaskStatus, readonly TaskStatus[]> = {
   review: ["doing"],
   done: [],
 };
-export const mayMove = (a: BoardActor, from: TaskStatus, to: TaskStatus) =>
-  from !== to && (runsTheBoard(a) || WORKER_MOVES[from].includes(to));
+// B10: the board's own moves, the edges D1 to D4 follow; never to Done (D5).
+const BOARD_MOVES: Record<TaskStatus, readonly TaskStatus[]> = {
+  backlog: [],
+  todo: ["doing"],
+  doing: ["review", "blocked", "todo"],
+  blocked: ["doing"],
+  review: ["doing"],
+  done: [],
+};
+export const mayMove = (a: TaskActor, from: TaskStatus, to: TaskStatus) =>
+  from !== to && (a.kind === "board" ? BOARD_MOVES[from].includes(to) : runsTheBoard(a) || WORKER_MOVES[from].includes(to));
 
 // B5: the task a lane has in progress now, if any.
 export const workingOn = (board: readonly Task[], laneName: string): Task | null =>
   board.find(t => t.status === "doing" && t.assignee === laneName) ?? null;
 
 // `board`: the tasks in progress now, for B5 when a task is filed straight into progress.
-export function createTask(input: NewTask, actor: BoardActor, n: number, now: number, board: readonly Task[] = []): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
+export function createTask(input: NewTask, actor: BoardActor | { kind: "console" }, n: number, now: number, board: readonly Task[] = []): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
   const title = line(input.title, TITLE_MAX);
   if (!title.ok) return title;
   const description = text(input.description ?? "", DESCRIPTION_MAX, true);
@@ -152,7 +169,7 @@ export function createTask(input: NewTask, actor: BoardActor, n: number, now: nu
 }
 
 // One change to one task, by one actor, judged against the board as it is (B5 needs the assignee's other tasks).
-export function applyAction(task: Task, action: TaskAction, actor: BoardActor, now: number, board: readonly Task[]): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
+export function applyAction(task: Task, action: TaskAction, actor: TaskActor, now: number, board: readonly Task[]): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
   if ("ifRev" in action && action.ifRev !== undefined && action.ifRev !== task.rev) return refuse("changed");
   const mine = laneOf(actor) !== null && task.assignee === laneOf(actor);
   const next = (t: Task, change: TaskChange): Result<{ task: Task; event: TaskEvent }, BoardRefusal> => {
@@ -161,7 +178,9 @@ export function applyAction(task: Task, action: TaskAction, actor: BoardActor, n
   };
   switch (action.action) {
     case "move": {
-      if (!runsTheBoard(actor) && !mine) return refuse("not_yours");
+      // B10: the board moves only its assignee's task, the one whose Run it read.
+      if (actor.kind === "board" && task.assignee !== actor.lane) return refuse("not_yours");
+      if (actor.kind !== "board" && !runsTheBoard(actor) && !mine) return refuse("not_yours");
       if (action.to === task.status) return refuse("same");
       if (!mayMove(actor, task.status, action.to)) return refuse("bad_transition", undefined, task.status);
       if (action.to === "doing" && !task.assignee) return refuse("needs_assignee");
@@ -181,7 +200,7 @@ export function applyAction(task: Task, action: TaskAction, actor: BoardActor, n
       return next(moved, { kind: "moved", from: task.status, to: action.to, reason });
     }
     case "assign": {
-      if (!runsTheBoard(actor)) return refuse("not_allowed");
+      if (!runsTheBoard(actor)) return refuse("not_allowed");                // D5: never the board
       const who = lane(action.to);
       if (!who.ok) return who;
       if (who.value === task.assignee) return refuse("same");
@@ -237,11 +256,39 @@ export function boardOrder(tasks: readonly Task[], now: number): Task[] {
 // What the record keeps of a change (B6): the task, the kind of change and who made it, never a comment's words.
 export type BoardChanged = {
   type: "BoardChanged"; key: TaskKey; change: TaskChange["kind"]; at: number;
-  actor: { kind: BoardActor["kind"]; name: string | null; endpointId: EndpointId | null; token: string | null };
+  actor: { kind: TaskActor["kind"]; name: string | null; endpointId: EndpointId | null; token: string | null; rule?: BoardRule };
 };
 export const boardChanged = (e: TaskEvent): BoardChanged => ({
   type: "BoardChanged", key: e.key, change: e.change.kind, at: e.at,
-  actor: e.actor.kind === "principal"
-    ? { kind: "principal", name: null, endpointId: e.actor.endpointId, token: null }
+  actor: e.actor.kind === "principal" ? { kind: "principal", name: null, endpointId: e.actor.endpointId, token: null }
+    : e.actor.kind === "console" ? { kind: "console", name: null, endpointId: null, token: null }
+    : e.actor.kind === "board" ? { kind: "board", name: e.actor.lane, endpointId: null, token: null, rule: e.actor.rule }
     : { kind: e.actor.kind, name: e.actor.name, endpointId: null, token: e.actor.token },
 });
+
+// B10, D1 to D6: the move the board makes by itself for `task`, following its assignee's Run, or null. D6: a Run whose
+// phase began at or before the task's last change moves nothing, so the board never undoes what a person or a lane did
+// after it. D5: never to Done, never an assignment (the board's actor can't: runsTheBoard is false for it).
+export const GONE_REASON = "its lane stopped without DONE";
+export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
+  if (task.assignee === null || task.assignee !== run.lane || run.since <= task.updatedAt) return null;
+  const said = (run.line ?? "").trim().slice(0, REASON_MAX) || null;
+  if (task.status === "doing") {
+    if (run.phase === "ended" && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
+    if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) return { to: "blocked", reason: said ?? run.outcome, rule: "D2" };
+    if (run.phase === "gone") return { to: "todo", reason: GONE_REASON, rule: "D3" };
+    return null;
+  }
+  if (task.status === "todo" || task.status === "blocked" || task.status === "review") {
+    if (run.phase !== "working" && run.phase !== "waiting") return null;
+    // D4: the lane's one task it works on now. Its to do or blocked one, when it has exactly one; else its one in review
+    // (taken up again). Two candidates, or a task already in progress (B5), and the board moves nothing.
+    const mine = board.filter(t => t.assignee === run.lane);
+    if (mine.some(t => t.status === "doing")) return null;
+    const waiting = mine.filter(t => t.status === "todo" || t.status === "blocked");
+    const reviews = mine.filter(t => t.status === "review");
+    const pick = waiting.length === 1 ? waiting[0] : waiting.length === 0 && reviews.length === 1 ? reviews[0] : undefined;
+    return pick?.key === task.key ? { to: "doing", reason: null, rule: "D4" } : null;
+  }
+  return null;
+}

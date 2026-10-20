@@ -528,7 +528,35 @@ The team's task board, run as a real org runs one. The manager files tasks and h
 | B8 | The board grants nothing: a status, a comment or an assignment is never a Mandate, a Decision, an Acknowledgement, Evidence or a Verdict. "Done" on the board is a person's or the manager's acceptance of a lane's word. |
 | B9 | The manager moves a task to Done only with a reason that names what it checked (tests run, CI at a commit, a review). The principal may give one. The reason makes the acceptance checkable; it is still not Evidence (B8). |
 
+| B10 | The board moves a task by itself, as actor `board`, only by D1 to D6, each naming its rule and the run it read ([ADR-0032](adr/0032-board-follows-the-fleet.md)). D1: in progress to in review when the assignee's run ended DONE after the task's last change. D2: in progress to blocked when it ended BLOCKED or NEEDS DECISION; the reason is its status line. D3: in progress to to do when the assignee's lane is gone. D4: to do, blocked or in review to in progress when the assignee's run is working or waiting since after the task's last change, the lane has no other task in progress, and this is its only open task. D5: never to done, and never an assignment or an edit. D6: a run whose phase began before the task's last change moves nothing. |
+
+The console (`morndo …` on the control plane) is an Actor too: it acts for the principal there, as `memory approve` does. `morndo lanes start --task T-12` assigns T-12 to the new lane as the console.
+
 Events: TaskFiled, TaskMoved, TaskAssigned, TaskEdited, TaskCommented (the record), BoardChanged (the audit row).
+
+## Runs: what each lane is doing now ([ADR-0032](adr/0032-board-follows-the-fleet.md))
+
+What the fleet saw a lane do, as one value per lane: the facts the board follows. Code in `packages/domain/src/run.ts`, computed by the fleet (`apps/fleet/src/application/runs.ts`).
+
+| Term | Means | Is not |
+|---|---|---|
+| Run | One lane's current activity: its phase, what it waits on, until when, and what told the fleet. | A task; a turn. |
+| Phase | working, waiting, needs you, ended, gone, or unknown. | A board status. |
+| Wait | What a waiting run waits on: its own background tasks, a scheduled wake-up, a Morndo job of its lane, or nothing that will wake it (declared). | A reason to stop watching. |
+| Deadline | When a wait should have shown a sign of life; past it with nothing since, the run is overdue. | A timeout that ends anything. |
+| Source | `hook` (the agent CLI's hook fields), `session` (the node's session state), `job`, or `status` (the turn-end status line). | Evidence. |
+
+| # | Invariant |
+|---|---|
+| R1 | A Run's phase comes only from what the fleet observed: hooks, the node's session state, jobs, and the lane registry. Nothing written to the board sets it. Of a lane's own words, only its turn-end status line counts. |
+| R2 | A turn end that leaves background work running or a wake-up scheduled is never `ended`. The Run waits on its own work until a later turn starts, or a later turn end reports nothing pending. |
+| R3 | Every wait has a deadline: its WAITING `for`, else the lane watch's waiting lease; a wake-up whose schedule can be read, its next fire time plus 5 minutes. Past it with no activity since, the Run is overdue. |
+| R4 | A WAITING turn end with nothing pending and no running job of that lane is a declared wait, shown as having no waker. |
+| R5 | A lane whose window is gone while its node is online is gone. While its node is not online, its Run is unknown, never working. |
+| R6 | A Run carries no command line and no prompt: a background task as its type and a description of at most 80 characters through the shared redactor, a wake-up as its fire time and whether it recurs. |
+| R7 | Precedence, first match wins: gone, unknown, needs you, working, job, background, wake-up, declared, ended. |
+| R8 | Every Run names its source and the time its phase began. |
+| W1 | A Claude Code Stop whose status line is WAITING, with no background task, no wake-up and no running job of that lane on its node, is asked once to give its wait a waker: a scheduled wake-up, a `morndo job start --notify lane:<lane>`, or a settled status. Never the orchestrator, never after a Stop-hook continuation. |
 
 ## Usage: how much of each account is spent ([ADR-0016](adr/0016-home-usage-across-accounts.md))
 
@@ -825,6 +853,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Verification publishes to Escalation*: Verdict events become Reports (E6).
 - *Verification supplies Authority*: a conditional Mandate ("ship when green") references a Verdict, never a Claim.
 - *Board stands beside Observation*: the board says what a lane was asked to do and where it stands; Observation says what the lane is doing on its screen. Neither decides anything for the other, and the board grants nothing (B8). A lane's "in review" is its word, as "says done" is in Catch-up (C5).
+- *Fleet supplies Board with Runs* (customer and supplier, ADR-0032). The board's projector reads `GET /v1/runs` and the `run` events, and moves tasks only by B10. The fleet never reads the board, and a Run is never written by the board.
 - *Jobs stand beside the board and the fleet*. A task notice is one comment and does not move the task (B3, B8, J7). The fleet stores the job's state and a redacted tail. It never stores the command (J1, FL14). The node decides when a queued job may start (J5).
 - *Jobs supplies Transcription* with the queue decision. This is a shared rule (`packages/domain/src/queue.ts`), not shared rows: one class, at most its limit, FIFO with a visible position, a guard that delays a start and never stops a run (J5, TX5).
 - *Transcription supplies Steering*: a done Transcription's Text can become a Command's text, and only the principal's send makes it one (AC7, TX8); an audio Upload is on Steering's list only while the Capability is there (TX9, S1).

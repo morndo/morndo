@@ -66,7 +66,9 @@ function explain(error: string, other: string | undefined, from: string | undefi
 }
 
 const when = (t: number) => new Date(t).toISOString().slice(0, 16).replace("T", " ");
-const who = (a: TaskEvent["actor"]) => (a.kind === "principal" ? "principal" : a.name);
+// The board's own moves (ADR-0032) name their rule and the lane whose run they followed.
+const who = (a: TaskEvent["actor"]) =>
+  a.kind === "principal" ? "principal" : a.kind === "console" ? "console" : a.kind === "board" ? `board (${a.rule}, ${a.lane})` : a.name;
 function changeText(e: TaskEvent): string {
   const c = e.change;
   switch (c.kind) {
