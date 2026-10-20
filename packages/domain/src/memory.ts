@@ -299,7 +299,7 @@ export function renderBundle(notes: readonly Note[], now: number, factsBudget = 
     if (chosen.length === 0) continue;
     const total = chosen.length + left;
     const name = skillName(scope, "facts");
-    const description = cap(`Facts Morndo's lanes learned about ${scope} (${total} notes). Read it before working in ${scope}, and before searching the code or its history for how something was done before.`, 1024);
+    const description = cap(`Facts Morndo's lanes learned about ${scope} (${total} ${total === 1 ? "note" : "notes"}). Read it before working in ${scope}, and before searching the code or its history for how something was done before.`, 1024);
     const lines = chosen.map(n => factLine(n, now));
     files.push({
       name,
@@ -308,7 +308,7 @@ export function renderBundle(notes: readonly Note[], now: number, factsBudget = 
         `# What Morndo's memory knows about ${scope}`, "",
         "Most trusted first, then the most recently confirmed. Each line ends with the note's id, its trust, who wrote it and when it was last confirmed.",
         "Use `morndo-memory show <id>` for a note in full and `morndo-memory search <words>` for the rest. Record what you learn with `morndo-memory remember`.",
-        "", ...lines, ...(left > 0 ? ["", `${left} more notes did not fit here; \`morndo-memory search\` finds them.`] : []), "",
+        "", ...lines, ...(left > 0 ? ["", `${left} more ${left === 1 ? "note" : "notes"} did not fit here; \`morndo-memory search\` finds ${left === 1 ? "it" : "them"}.`] : []), "",
       ].join("\n"),
     });
   }
