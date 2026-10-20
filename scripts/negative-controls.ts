@@ -2959,6 +2959,14 @@ export const CONTROLS: Control[] = [
   { id: "m-hub-all-parts", task: "M-hub", file: "apps/hub/src/application/memory-sync.ts",
     find: "if (answer.result.committed === true) committed = true;", replace: "committed = true;\n      break;",
     run: ["apps/hub/test/memory-sync.test.ts"], expect: "records the version only once every part was taken" },
+  // ---- Memory, the lanes' command (ADR-0031, morndo-memory): each guard removed once.
+  { id: "m-cli-scope", task: "M-cli", file: "apps/memory-cli/src/cli.ts",
+    find: 'const name = last === ".git" ? (common.at(-2) ?? "") : last.endsWith(".git") ? last.slice(0, -".git".length) : (parts(place.top).at(-1) ?? "");',
+    replace: 'const name = parts(place.top).at(-1) ?? "";',
+    run: ["apps/memory-cli/test/cli.test.ts"], expect: "whatever worktree the lane is in" },
+  { id: "m-cli-refusal-exit", task: "M-cli", file: "apps/memory-cli/src/cli.ts",
+    find: "if (e instanceof Refused) { io.err(e.message); return 1; }", replace: "if (e instanceof Refused) { io.err(e.message); return 0; }",
+    run: ["apps/memory-cli/test/cli.test.ts"], expect: "is refused (not_yours) with exit 1" },
 ];
 
 // ---- the runner
