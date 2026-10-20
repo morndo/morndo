@@ -551,12 +551,12 @@ What the fleet saw a lane do, as one value per lane: the facts the board follows
 | R1 | A Run's phase comes only from what the fleet observed: hooks, the node's session state, jobs, and the lane registry. Nothing written to the board sets it. Of a lane's own words, only its turn-end status line counts. |
 | R2 | A turn end that leaves background work running or a wake-up scheduled is never `ended`. The Run waits on its own work until a later turn starts, or a later turn end reports nothing pending. |
 | R3 | Every wait has a deadline: its WAITING `for`, else the lane watch's waiting lease; a wake-up whose schedule can be read, its next fire time plus 5 minutes. Past it with no activity since, the Run is overdue. |
-| R4 | A WAITING turn end with nothing pending and no running job of that lane is a declared wait, shown as having no waker. |
+| R4 | A WAITING turn end with nothing pending and no job of that lane (queued, starting or running, by its lane or its notice) is a declared wait, shown as having no waker. |
 | R5 | A lane whose window is gone while its node is online is gone. While its node is not online, its Run is unknown, never working. |
 | R6 | A Run carries no command line and no prompt: a background task as its type and a description of at most 80 characters through the shared redactor, a wake-up as its fire time and whether it recurs. |
 | R7 | Precedence, first match wins: gone, unknown, needs you, working, job, background, wake-up, declared, ended. |
 | R8 | Every Run names its source and the time its phase began. |
-| W1 | A Claude Code Stop whose status line is WAITING, with no background task, no wake-up and no running job of that lane on its node, is asked once to give its wait a waker: a scheduled wake-up, a `morndo job start --notify lane:<lane>`, or a settled status. Never the orchestrator, never after a Stop-hook continuation. |
+| W1 | A Claude Code Stop whose status line is WAITING, with no background task, no wake-up and no job of that lane on its node (queued, starting or running, by its lane or its notice), is asked once to give its wait a waker: a scheduled wake-up, a `morndo job start --notify lane:<lane>`, or a settled status. Never the orchestrator, never after a Stop-hook continuation. |
 
 ## Usage: how much of each account is spent ([ADR-0016](adr/0016-home-usage-across-accounts.md))
 

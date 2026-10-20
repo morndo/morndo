@@ -38,7 +38,7 @@ The Fleet supplies the Board (customer and supplier). The Board reads runs and n
 | R1 | A run's phase comes only from what the fleet observed: hooks, the node's session state, jobs, and the lane registry. Nothing written to the board sets it. Of a lane's own words, only its turn-end status line counts. |
 | R2 | A turn end that leaves background work running or a wake-up scheduled is never `ended`. The run waits on its own work until a later turn starts, or until a later turn end reports nothing pending. |
 | R3 | Every wait has a deadline: the `for` of its WAITING line, else `laneWatch.waitingMin`. For a wake-up whose schedule can be read, the deadline is its next fire time plus 5 minutes. A wait past its deadline with no activity since is overdue, which is the lane watch's `stale`. |
-| R4 | A WAITING turn end with nothing pending and no running job of that lane is a `declared` wait. It is shown as having no waker, and the relay asks once for one (W1). |
+| R4 | A WAITING turn end with nothing pending and no job of that lane (queued, starting or running, by its lane or its notice) is a `declared` wait. It is shown as having no waker, and the relay asks once for one (W1). |
 | R5 | A lane whose window is gone while its node is online is `gone`. While its node is not online, its run is `unknown`, never `working`. |
 | R6 | A run carries no command line and no prompt. A background task shows only its type and a description of at most 80 characters, through the shared redactor. A wake-up shows only its fire time and whether it recurs (FL14). |
 | R7 | Precedence, first match wins: gone, unknown, needs_you, working, job, background, wakeup, declared, ended. |
@@ -64,7 +64,7 @@ The Fleet supplies the Board (customer and supplier). The Board reads runs and n
 
 | # | Invariant |
 |---|---|
-| W1 | Some Claude Code Stops are asked once to give their wait a waker: the status line says WAITING, `background_tasks` and `session_crons` are empty, and no job of that lane is running on its node. The rules are the status ask's: never the orchestrator, never after a Stop-hook continuation, and once per turn. A waker is a scheduled wake-up, a `morndo job start --notify lane:<lane>`, or a settled status (DONE, BLOCKED or NEEDS DECISION). |
+| W1 | Some Claude Code Stops are asked once to give their wait a waker: the status line says WAITING, `background_tasks` and `session_crons` are empty, and no job of that lane is queued, starting or running on its node (by its lane or its notice). The rules are the status ask's: never the orchestrator, never after a Stop-hook continuation, and once per turn. A waker is a scheduled wake-up, a `morndo job start --notify lane:<lane>`, or a settled status (DONE, BLOCKED or NEEDS DECISION). |
 
 ## 6. The wire
 
