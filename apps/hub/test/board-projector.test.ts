@@ -175,9 +175,10 @@ describe("safe and idempotent", () => {
     const t = task("A", "builder", T0, "doing");
     await projector.start();
     const follow = vi.spyOn(board, "follow");
+    // The board refuses the move once, as it does when the task changed between the read and the write (B6).
+    follow.mockImplementationOnce(() => ({ ok: false, problem: "changed" }));
     now = T0 + 60_000;
-    // A status line with a control character: the domain refuses it as a reason (bad_text).
-    const blocked = run("builder", "ended", T0 + 30_000, { outcome: "blocked", line: "STATUS: BLOCKED \u0007 bell" });
+    const blocked = run("builder", "ended", T0 + 30_000, { outcome: "blocked", line: "STATUS: BLOCKED on the keys" });
     source.tell(blocked);
     source.tell({ ...blocked, deadline: T0 + 90_000 });
     source.tell({ ...blocked, overdue: true });
@@ -186,7 +187,7 @@ describe("safe and idempotent", () => {
     expect(shown(t.key)?.status).toBe("doing");
     // negative control: without the remembered refusal, each run told tries again, several times (b10-refusal-once).
     expect(follow).toHaveBeenCalledTimes(1);
-    expect(logged.filter(l => l.level === "warn")).toEqual([{ level: "warn", line: `board: D2 would move ${t.key} doing → blocked for builder, refused (bad_text); it stays where it is` }]);
+    expect(logged.filter(l => l.level === "warn")).toEqual([{ level: "warn", line: `board: D2 would move ${t.key} doing → blocked for builder, refused (changed); it stays where it is` }]);
     // A new run is judged afresh.
     source.tell(run("builder", "ended", T0 + 50_000, { outcome: "done", line: "STATUS: DONE" }));
     expect(shown(t.key)?.status).toBe("review");
