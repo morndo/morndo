@@ -268,6 +268,7 @@ content-type: application/json
 | `typedAt`, `deliveredAt` | milliseconds on the node's clock |
 | `why` | for `given_up` |
 | `note` | words for a person, such as why it is `uncertain` |
+| `stashed` | the lane's draft the node put away so this delivery could go in: `{ at, since, chars, copy }`, the draft unchanged in the box since `since`, stashed at `at`, `chars` long, and the path of its copy on the node. The draft's text never leaves the node. |
 
 **The states:**
 
@@ -296,12 +297,13 @@ content-type: application/json
 **How the node types and confirms it.**
 - **One at a time per lane,** in the order queued. A try comes at once, on every change the node sees, and at least every 5 seconds. A delivery typed or held and waiting for its receipt holds the next one back for at most 60 s; then the next one types.
 - **The checks of `pane.send`,** each time: never over a menu or a draft, never past the pane's lock.
+- **A draft in the way, on the orchestrator.** On a lane of the node's `draftStash.lanes` (default `["manager"]`), a draft that has held a delivery and stayed the same for `draftStash.afterMin` minutes (default 60) is saved to a file on the node, then stashed with Claude Code's `Ctrl+S`, which keeps pasted content too; `Ctrl+S` in the empty box brings it back. Then the queued deliveries go in, in order, and the first carries `stashed`. A draft that changes starts the wait again. If the box still holds text after the key, or the copy can't be saved, the draft is left alone until it changes. No other key is pressed: `Ctrl+C` twice exits Claude Code, and `Esc Esc` in an empty box opens its rewind menu. On every other lane a draft holds its deliveries.
 - **A line that stays in the box after Enter** gets Enter again, but only while the box still shows exactly that line, and at most twice more.
 - **`delivered` comes only from Claude Code's transcript** of the session it was typed into, as a prompt that holds the text. Each receipt confirms one delivery, the earliest still waiting.
 - **A slash command that starts a new session** (`/clear`, `/new`) is recorded only in the new session's transcript. Its receipt is the pane's session changing to a new id after the typing.
 - **A line Claude Code dropped on an interrupt** is typed once more, under its own key, if the box is clear and the session idle. Otherwise the delivery is `uncertain`. There is never a third typing.
 
-**`stale`** is true while the delivery's node is offline: the fleet's copy may be behind the node's. A delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes raises a `delivery_waiting` alert each time (§14).
+**`stale`** is true while the delivery's node is offline: the fleet's copy may be behind the node's. A delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes raises a `delivery_waiting` alert each time (§14), except while it waits `earlier`: the one ahead of it alerts for the lane, so a lane held by one draft raises one alert per threshold, not one per message. A delivery that first reports `stashed` raises `draft_stashed`.
 
 ```example delivery-delivered poll
 GET /v1/deliveries/kira:doc:1
@@ -782,7 +784,7 @@ A `stale` event, as `/v1/lane-events` and `/v1/events` carry it:
 | `pane.captureMany` | `{ workerIds }`, at most 64 | `{ captures: { workerId, text \| null, truncated }[] }`, each at most 6 KiB | none |
 | `pane.capture` | `{ workerId, lines (1–2000), attributes?, join? }` | `{ text \| null, truncated }`, at most 256 KiB as JSON. `attributes` keeps tmux's colour escapes, so dim text can be told apart; `join` (default true) joins wrapped lines. | none |
 | `pane.frame` | `{ workerId }` | `{ frame: { cols, rows, x, y, cursor, lines } \| null }` | none |
-| `pane.keys` | `{ workerId, expect }` with exactly one of `data` (literal text, at most 4096) or `names` (key names: `Enter`, `Escape`, `Tab`, `BSpace`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`, `C-c`, `C-d`, `C-u`, `Space`, the digits, the letters) | `{ ok }` | none: keys are never retried |
+| `pane.keys` | `{ workerId, expect }` with exactly one of `data` (literal text, at most 4096) or `names` (key names: `Enter`, `Escape`, `Tab`, `BSpace`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PageUp`, `PageDown`, `C-c`, `C-d`, `C-s`, `C-u`, `Space`, the digits, the letters) | `{ ok }` | none: keys are never retried |
 | `pane.send` | `{ workerId, text (at most 8000), expect }` | `{ problem: null \| "not_submitted", typedAt }`. It types at once or refuses (§10). A lane running Claude Code is better reached by a delivery (§6). | yes |
 | `op.status` | `{ key }` | `{ state: "unknown" \| "started" \| "done", outcome? }` | none |
 | `transcript.size` | `{ sessionId }` | `{ size \| null }` | none |
@@ -1587,7 +1589,8 @@ An alert is something for the owner to look at that changes no state. Each one i
 | `dead_letter` | a subscriber refused an event, or the event failed 20 times; once per subscriber until a delivery to it succeeds again | `{ subscriber, streamId, seq, path, reason, attempts }` |
 | `backlog_full` | a subscriber's backlog reached 50,000 events | `{ subscriber, cap, droppedProgress, deadLettered }` |
 | `unrouted_hook` | the first event of a script path that no subscriber takes | `{ path, events }` |
-| `delivery_waiting` | a delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes, once each | `{ id, lane, state, reason, minutes }` |
+| `delivery_waiting` | a delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes, once each; never while it waits `earlier` behind another to its lane | `{ id, lane, state, reason, minutes }` |
+| `draft_stashed` | a node stashed a lane's unsent draft so its deliveries could go in (§4, `stashed`); once per delivery | `{ id, lane \| workerId, since, at, chars, copy }` |
 | `subscriber_lagging` | a subscriber's oldest undelivered event is older than 60 s | `{ subscriber, oldestAgeMs, streams }`: `streams`, the streams it holds up |
 | `job_failed` | a background job exited non-zero, timed out or was lost; once per job (node, id) | `{ id, name, class, outcome }` |
 | `job_unnoticed` | a job's notice was given up before its lane took it; once per job | `{ id, name, class, outcome }` |

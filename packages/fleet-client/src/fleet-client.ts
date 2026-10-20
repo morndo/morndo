@@ -108,9 +108,9 @@ const STATUSES = new Set<string>(["online", "stale", "offline"]);
 const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "alert", "delivery", "lane", "job"]);
 // "unrouted_hook": hook events for a script path no subscriber takes (ADR-0012 decision 8; detail { path, events }).
 // "delivery_waiting" and "subscriber_lagging": fleet clients §4.5, §6. "job_failed" and "job_unnoticed": ADR-0017.
-// "engine_fallback": ADR-0027.
+// "engine_fallback": ADR-0027. "draft_stashed": a lane's unsent draft put away so its deliveries went in (#64).
 const ALERT_KINDS = new Set<string>(["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter",
-  "backlog_full", "unrouted_hook", "delivery_waiting", "subscriber_lagging", "job_failed", "job_unnoticed", "engine_fallback"] satisfies AlertKind[]);
+  "backlog_full", "unrouted_hook", "delivery_waiting", "subscriber_lagging", "job_failed", "job_unnoticed", "engine_fallback", "draft_stashed"] satisfies AlertKind[]);
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // A store sequence as the fleet passes it on, or null: absent, null, or not a count (never guessed at).

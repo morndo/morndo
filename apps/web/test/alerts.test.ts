@@ -20,6 +20,15 @@ describe("alert words", () => {
       title: "api started on a fallback: beta:mid-3", detail: "Its role implement passed over acme:large-2 on pc.", urgent: false,
     });
   });
+  it("a stashed draft (#64) says whose text, since when, how to get it back and where its copy is, and is urgent", () => {
+    const since = Date.parse("2026-10-20T09:04:00");
+    const w = alertWords(a("draft_stashed", { lane: "manager", since, at: since + 3_600_000, chars: 42, copy: "/data/drafts/1-manager.txt" }));
+    expect(w.title).toBe("Your unsent text to the manager was put away");
+    expect(w.detail).toContain(new Date(since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+    expect(w.detail).toContain("Press Ctrl+S in the manager's empty input box to bring it back.");
+    expect(w.detail).toContain("A copy is on pc: /data/drafts/1-manager.txt.");
+    expect(w.urgent).toBe(true);
+  });
   it("a kind a newer fleet added still shows, in general words", () => {
     expect(alertWords(a("moon_phase"))).toEqual({ title: "pc: moon phase", detail: "A newer fleet raised this alert.", urgent: false });
   });

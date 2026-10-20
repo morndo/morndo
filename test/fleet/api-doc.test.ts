@@ -187,7 +187,7 @@ describe("docs/fleet-api.md: every example against a real fleet, in the order wr
 const ALERT_KINDS = {
   instance_conflict: true, source_changed: true, clock_offset: true, rate_limited: true, lane_conflict: true, dead_letter: true,
   backlog_full: true, unrouted_hook: true, delivery_waiting: true, subscriber_lagging: true, job_failed: true, job_unnoticed: true, connection: true,
-  engine_fallback: true,
+  engine_fallback: true, draft_stashed: true,
 } satisfies Record<AlertKind, true>;
 const LANE_EVENTS = { finished: true, needs_input: true, answered: true, stop_failure: true, stale: true } satisfies Record<LaneEventName, true>;
 const EVENT_TYPES = ["status", "inventory", "health", "conflict", "alert", "delivery", "lane"];

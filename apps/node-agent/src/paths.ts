@@ -2,13 +2,14 @@
 // (written by `morndo-node join`), policy.json (the owner's to edit) and the node's private key. State lives under
 // ~/.local/state/morndo-node: the database, the hook relay's file copies, the upload inbox, the job socket, Memory's
 // skills as memory.sync staged and committed them (memory/, ADR-0031: what the hub sends again, so state rather than
-// data, beside the node's other files and under the same deny root), and the status the running agent reports. Every
+// data, beside the node's other files and under the same deny root), copies of the drafts the deliverer stashed (drafts/,
+// #64), and the status the running agent reports. Every
 // path derives from one home directory, so a test runs the whole agent in a temporary one.
 import { join } from "node:path";
 
 export type AgentPaths = {
   configDir: string; configFile: string; policyFile: string; keyPath: string;
-  stateDir: string; dbPath: string; statusFile: string; relayFilesDir: string; inboxDir: string; jobSock: string; memoryDir: string;
+  stateDir: string; dbPath: string; statusFile: string; relayFilesDir: string; inboxDir: string; jobSock: string; memoryDir: string; draftsDir: string;
 };
 
 export function agentPaths(home: string): AgentPaths {
@@ -26,5 +27,6 @@ export function agentPaths(home: string): AgentPaths {
     inboxDir: join(stateDir, "inbox"),
     jobSock: join(stateDir, "job.sock"),
     memoryDir: join(stateDir, "memory"),
+    draftsDir: join(stateDir, "drafts"),
   };
 }

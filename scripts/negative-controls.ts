@@ -2973,6 +2973,25 @@ export const CONTROLS: Control[] = [
   { id: "m-domain-replaced-meanwhile", task: "M-domain", file: "packages/domain/src/memory.ts",
     find: "predecessor.supersededBy !== null && predecessor.supersededBy !== n.id) return refuse(\"replaced_meanwhile\");", replace: "false) return refuse(\"replaced_meanwhile\");",
     run: ["packages/domain/test/memory.test.ts", "apps/hub/test/memory-service.test.ts"], expect: "replaced_meanwhile" },
+  // #64: a draft in the orchestrator's box.
+  { id: "d-stash-age", task: "D-stash", file: "apps/node-agent/src/deliveries/deliverer.ts",
+    find: "if (seen.failed || now - seen.since < stash.afterMs) return;", replace: "if (seen.failed) return;",
+    run: ["apps/node-agent/test/deliverer.test.ts"], expect: "the same draft for an hour" },
+  { id: "d-stash-lanes", task: "D-stash", file: "apps/node-agent/src/deliveries/deliverer.ts",
+    find: "if (!stash || !stash.lanes.includes(expect.window)) return;", replace: "if (!stash) return;",
+    run: ["apps/node-agent/test/deliverer.test.ts"], expect: "on any other lane" },
+  { id: "d-stash-changed", task: "D-stash", file: "apps/node-agent/src/deliveries/deliverer.ts",
+    find: "if (!seen || seen.text !== draft) {", replace: "if (!seen) {",
+    run: ["apps/node-agent/test/deliverer.test.ts"], expect: "a draft that changes" },
+  { id: "d-stash-box-left", task: "D-stash", file: "apps/node-agent/src/deliveries/deliverer.ts",
+    find: "    if (left !== null) {", replace: "    if (false) {",
+    run: ["apps/node-agent/test/deliverer.test.ts"], expect: "still full after Ctrl+S" },
+  { id: "f-waiting-earlier", task: "D-stash", file: "apps/fleet/src/application/deliveries.ts",
+    find: "if (this.#stale(row.node) || row.delivery.waiting?.reason === \"earlier\") continue;", replace: "if (this.#stale(row.node)) continue;",
+    run: ["apps/fleet/test/delivery-mirror.test.ts"], expect: "first in line only" },
+  { id: "f-stashed-once", task: "D-stash", file: "apps/fleet/src/application/deliveries.ts",
+    find: "if (d.stashed !== undefined && before?.delivery.stashed === undefined) {", replace: "if (d.stashed !== undefined) {",
+    run: ["apps/fleet/test/delivery-mirror.test.ts"], expect: "draft_stashed once" },
 ];
 
 // ---- the runner

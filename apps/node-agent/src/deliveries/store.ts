@@ -19,7 +19,7 @@
 //   change (LIMITS.deliveryKeepMs); open ones never are.
 // - The text stays on this node: the Delivery the store answers with carries none (textOf reads it for the deliverer).
 import type Database from "better-sqlite3";
-import { FINAL_DELIVERY_STATES as FINAL, LIMITS, type Delivery, type DeliveryState, type DeliveryTarget, type GiveUpReason, type WaitingReason } from "@morndo/protocol";
+import { FINAL_DELIVERY_STATES as FINAL, LIMITS, type Delivery, type DeliveryState, type DeliveryTarget, type DraftStash, type GiveUpReason, type WaitingReason } from "@morndo/protocol";
 import { synced } from "../ops/done-keys.ts";
 
 const OPEN = "('queued', 'typed', 'held')";
@@ -27,13 +27,13 @@ const OPEN = "('queued', 'typed', 'held')";
 // What the deliverer needs beyond the Delivery the fleet sees: whether a lane name is sticky, the session a name is bound
 // to, and whether its one retype after an interrupt was used (spec §4.1, §4.3).
 export type DeliveryDetail = { target: DeliveryTarget; boundSession: string | null; retyped: boolean };
-export type DeliveryChange = Partial<Pick<Delivery, "state" | "waiting" | "sessionId" | "typedAt" | "deliveredAt" | "why" | "note">> & { retyped?: boolean };
+export type DeliveryChange = Partial<Pick<Delivery, "state" | "waiting" | "sessionId" | "typedAt" | "deliveredAt" | "why" | "note" | "stashed">> & { retyped?: boolean };
 
 type Row = {
   id: string; target_lane: string | null; target_worker: string | null; sticky: number; bound_session: string | null; text: string;
   state: DeliveryState; waiting_reason: WaitingReason | null; waiting_since: number | null; queued_at: number; not_after: number;
   typed_at: number | null; typed_session: string | null; delivered_at: number | null; why: GiveUpReason | null; note: string | null;
-  retyped: number; updated_at: number;
+  retyped: number; updated_at: number; stashed: string | null;
 };
 
 export class DeliveryStore {
@@ -63,6 +63,7 @@ export class DeliveryStore {
       ...(r.delivered_at !== null ? { deliveredAt: r.delivered_at } : {}),
       ...(r.why !== null ? { why: r.why } : {}),
       ...(r.note !== null ? { note: r.note } : {}),
+      ...(r.stashed !== null ? { stashed: JSON.parse(r.stashed) as DraftStash } : {}),
     };
   }
 
@@ -141,11 +142,12 @@ export class DeliveryStore {
       note: change.note ?? r.note,
       retyped: change.retyped === undefined ? r.retyped : change.retyped ? 1 : 0,
       updated_at: this.#now(),
+      stashed: change.stashed !== undefined ? JSON.stringify(change.stashed) : r.stashed,
     };
     this.#db.prepare(`UPDATE deliveries SET state = ?, waiting_reason = ?, waiting_since = ?, bound_session = ?, typed_session = ?, typed_at = ?,
-      delivered_at = ?, why = ?, note = ?, retyped = ?, updated_at = ? WHERE id = ?`)
+      delivered_at = ?, why = ?, note = ?, retyped = ?, updated_at = ?, stashed = ? WHERE id = ?`)
       .run(next.state, next.waiting_reason, next.waiting_since, next.bound_session, next.typed_session, next.typed_at, next.delivered_at, next.why,
-        next.note, next.retyped, next.updated_at, id);
+        next.note, next.retyped, next.updated_at, next.stashed, id);
     return this.#delivery(next);
   }
 

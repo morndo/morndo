@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ERROR_EXECUTED, LIMITS, type Delivery, type DeliveryTarget, type ErrorCode, type OpError, type SessionStatus } from "@morndo/protocol";
 import { openAgentDb } from "../src/db/open.ts";
-import { Deliverer, ownLine, type DelivererDeps, type PaneState } from "../src/deliveries/deliverer.ts";
+import { Deliverer, ownLine, type DelivererDeps, type DraftStashDeps, type PaneState } from "../src/deliveries/deliverer.ts";
 import { DeliveryStore } from "../src/deliveries/store.ts";
 import type { Reply, Request } from "../src/ops/executor.ts";
 import { captureLog, tempHome, until } from "./helpers.ts";
@@ -48,7 +48,7 @@ type Answer = (r: Request) => Reply | Promise<Reply>;
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => { for (const c of cleanups.splice(0)) await c(); });
 
-function rig(o: { panes?: PaneState[]; hooks?: DelivererDeps["hooks"] } = {}) {
+function rig(o: { panes?: PaneState[]; hooks?: DelivererDeps["hooks"]; stash?: DraftStashDeps } = {}) {
   const home = tempHome();
   const adb = openAgentDb(join(home.home, "agent.db"));
   const clock = { now: T0 };
@@ -88,6 +88,7 @@ function rig(o: { panes?: PaneState[]; hooks?: DelivererDeps["hooks"] } = {}) {
       },
     },
     ...(o.hooks ? { hooks: o.hooks } : {}),
+    ...(o.stash ? { stash: o.stash } : {}),
   });
   cleanups.push(async () => { deliverer.stop(); await deliverer.drain(); adb.close(); home.cleanup(); });
   return {
@@ -693,5 +694,116 @@ describe("the test hooks for Task 16's drills", () => {
     expect(short.deliverer.enqueue({ id: "hub:g", target: { workerId: W1 }, text: "x" })).toMatchObject({ code: "no_session" });
     const usual = rig({ panes: started() });
     expect(usual.deliverer.enqueue({ id: "hub:g", target: { workerId: W1 }, text: "x" })).toMatchObject({ delivery: { state: "queued" } });
+  });
+});
+
+// #64: a draft left in the orchestrator's input box held every delivery to it for hours. On a lane of draftStash, once the
+// same draft has held a delivery for draftStash.afterMs, it is saved, stashed with Ctrl+S, and the deliveries go in.
+describe("a draft in the way (#64)", () => {
+  const HOUR = 60 * 60_000;
+  const W1_LANE: DeliveryTarget = { lane: "w1", sticky: false };
+  // The box as Claude Code keeps it: pane.send refuses while it holds text; Ctrl+S empties it (or not, `stashWorks`).
+  function boxRig(o: { lanes?: string[]; save?: DraftStashDeps["save"]; stashWorks?: boolean } = {}) {
+    const saved: { text: string; lane: string; at: number }[] = [];
+    const r = rig({
+      panes: [pane("manager", W1, "%1", S1), pane("w1", W2, "%2", S2)],
+      stash: {
+        lanes: o.lanes ?? ["manager"], afterMs: HOUR,
+        save: o.save ?? ((text, lane, at) => { saved.push({ text, lane, at }); return `/data/drafts/${saved.length}-${lane}.txt`; }),
+      },
+    });
+    const paneOf = (workerId: unknown) => (workerId === W1 ? "%1" : "%2");
+    r.answer(req => {
+      const args = req.args as { workerId: string; names?: string[] };
+      const id = paneOf(args.workerId);
+      if (req.op === "pane.keys") {
+        if (args.names?.[0] === "C-s" && o.stashWorks !== false) r.drafts.delete(id);
+        return r.typed()(req);
+      }
+      return r.drafts.has(id) ? refuse("draft_present")(req) : r.typed()(req);
+    });
+    return { ...r, saved };
+  }
+  const stashKeys = (r: Rig) => r.keys().filter(k => (k.args as { names: string[] }).names[0] === "C-s");
+
+  it("on the manager: the same draft for an hour is saved, stashed with Ctrl+S, and the deliveries go in, in order", async () => {
+    const r = boxRig();
+    r.drafts.set("%1", "half a thought about the release");
+    for (const n of [1, 2, 3]) r.deliverer.enqueue({ id: `lanes:m${n}`, target: MANAGER, text: `message ${n}` });
+    await r.deliverer.drain();
+    expect(r.store.get("lanes:m1")?.waiting?.reason).toBe("draft_present");
+    expect(r.store.get("lanes:m2")?.waiting?.reason).toBe("earlier");
+    r.clock.now = T0 + HOUR - 1;
+    await r.round();
+    expect(stashKeys(r)).toHaveLength(0);                                    // negative control: no age check stashes at once
+    r.clock.now = T0 + HOUR;
+    await r.round();
+    expect(stashKeys(r)).toHaveLength(1);
+    expect(r.saved).toEqual([{ text: "half a thought about the release", lane: "manager", at: T0 + HOUR }]);
+    expect(state(r, "lanes:m1")).toBe("typed");
+    expect(r.store.get("lanes:m1")?.stashed).toEqual({ at: T0 + HOUR, since: T0, chars: 32, copy: "/data/drafts/1-manager.txt" });
+    expect(r.emitted.some(d => d.id === "lanes:m1" && d.stashed !== undefined)).toBe(true);
+    for (const n of [1, 2, 3]) {
+      r.say(S1, L.prompt(`message ${n}`, r.clock.now + 1));
+      await r.round();
+    }
+    expect(r.sends().map(c => (c.args as { text: string }).text).filter((t, i, all) => all.indexOf(t) === i)).toEqual(["message 1", "message 2", "message 3"]);
+    expect(["lanes:m1", "lanes:m2", "lanes:m3"].map(id => state(r, id))).toEqual(["delivered", "delivered", "delivered"]);
+    expect(stashKeys(r)).toHaveLength(1);
+  });
+
+  it("on any other lane: a draft still holds its deliveries, however long", async () => {
+    const r = boxRig();
+    r.drafts.set("%2", "my own notes");
+    r.deliverer.enqueue({ id: "lanes:w", target: W1_LANE, text: "go on" });
+    await r.deliverer.drain();
+    for (const t of [HOUR, 3 * HOUR, 20 * HOUR]) { r.clock.now = T0 + t; await r.round(); }
+    expect(stashKeys(r)).toHaveLength(0);
+    expect(r.saved).toEqual([]);
+    expect(r.store.get("lanes:w")?.waiting?.reason).toBe("draft_present");
+  });
+
+  it("a draft that changes is someone typing: the hour starts again from the change", async () => {
+    const r = boxRig();
+    r.drafts.set("%1", "draft one");
+    r.deliverer.enqueue({ id: "lanes:c", target: MANAGER, text: "hello" });
+    await r.deliverer.drain();
+    r.clock.now = T0 + 50 * 60_000;
+    r.drafts.set("%1", "draft one, longer now");
+    await r.round();
+    r.clock.now = T0 + 70 * 60_000;
+    await r.round();
+    expect(stashKeys(r)).toHaveLength(0);                                    // negative control: an hour from the first sight stashes here
+    r.clock.now = T0 + 110 * 60_000;
+    await r.round();
+    expect(stashKeys(r)).toHaveLength(1);
+    expect(r.store.get("lanes:c")?.stashed?.since).toBe(T0 + 50 * 60_000);
+  });
+
+  it("a box still full after Ctrl+S is left alone: one key, the delivery keeps waiting, and the draft has its copy", async () => {
+    const r = boxRig({ stashWorks: false });
+    r.drafts.set("%1", "stubborn");
+    r.deliverer.enqueue({ id: "lanes:s", target: MANAGER, text: "hello" });
+    await r.deliverer.drain();
+    r.clock.now = T0 + HOUR;
+    await r.round();
+    r.clock.now = T0 + 2 * HOUR;
+    await r.round();
+    expect(stashKeys(r)).toHaveLength(1);
+    expect(r.keys().map(k => (k.args as { names: string[] }).names[0])).toEqual(["C-s"]);   // never Ctrl+C or Esc
+    expect(r.saved.map(x => x.text)).toEqual(["stubborn"]);
+    expect(state(r, "lanes:s")).toBe("queued");
+    expect(r.store.get("lanes:s")?.stashed).toBeUndefined();
+  });
+
+  it("a copy that can't be saved: no key is pressed", async () => {
+    const r = boxRig({ save: () => { throw new Error("disk full"); } });
+    r.drafts.set("%1", "keep me");
+    r.deliverer.enqueue({ id: "lanes:f", target: MANAGER, text: "hello" });
+    await r.deliverer.drain();
+    r.clock.now = T0 + HOUR;
+    await r.round();
+    expect(r.keys()).toHaveLength(0);
+    expect(state(r, "lanes:f")).toBe("queued");
   });
 });

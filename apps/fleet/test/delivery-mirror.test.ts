@@ -190,6 +190,46 @@ describe("delivery_waiting", () => {
   });
 });
 
+// #64: a draft in a lane's input box holds every delivery to that lane, one waiting draft_present and the rest `earlier`.
+describe("a draft that holds a lane's deliveries", () => {
+  it("raises delivery_waiting for the one first in line only, and for the next once it is first", async () => {
+    let now = T0;
+    const fleet = await startTestFleet({ now: () => now });
+    const pc = await fleet.online("pc");
+    pc.delivery(deliveryOf("pc", "hub:d1", { waiting: { reason: "draft_present", since: T0 } }));
+    for (const id of ["hub:d2", "hub:d3"]) pc.delivery(deliveryOf("pc", id, { waiting: { reason: "earlier", since: T0 } }));
+    await vi.waitFor(async () => expect(await stateOf(fleet, "hub:d3")).toBe("queued"));
+    const alerts = () => fleet.audit.of("alert.delivery_waiting").map(e => [e.detail.id, e.detail.minutes]);
+    now = T0 + 15 * MIN;
+    fleet.deliveries.scanAlerts();
+    expect(alerts()).toEqual([["hub:d1", 15]]);                                       // negative control: without the skip, d2 and d3 raise too
+    pc.delivery(deliveryOf("pc", "hub:d1", { state: "delivered", typedAt: now, deliveredAt: now + 1 }));
+    pc.delivery(deliveryOf("pc", "hub:d2", { waiting: { reason: "draft_present", since: now } }));
+    await vi.waitFor(async () => expect((await one(fleet, "hub:d2"))?.body).toMatchObject({ delivery: { waiting: { reason: "draft_present" } } }));
+    fleet.deliveries.scanAlerts();
+    expect(alerts()).toEqual([["hub:d1", 15], ["hub:d2", 15]]);
+  });
+
+  it("raises draft_stashed once when a delivery first reports its stashed draft, not on a report again or after a restart", async () => {
+    const dir = tempDir();
+    const first = await startTestFleet({ dir });
+    const pc = await first.online("pc");
+    const stashed = { at: T0 + 60 * MIN, since: T0, chars: 42, copy: "/data/drafts/x-manager.txt" };
+    pc.delivery(deliveryOf("pc", "hub:m", { target: { lane: "manager" }, waiting: { reason: "draft_present", since: T0 } }));
+    pc.delivery(deliveryOf("pc", "hub:m", { target: { lane: "manager" }, waiting: { reason: "draft_present", since: T0 }, stashed }));
+    pc.delivery(deliveryOf("pc", "hub:m", { target: { lane: "manager" }, state: "typed", typedAt: T0 + 60 * MIN, sessionId: "s1", stashed }));
+    await vi.waitFor(async () => expect(await stateOf(first, "hub:m")).toBe("typed"));
+    expect(first.audit.of("alert.draft_stashed").map(e => [e.node, e.detail])).toEqual([["pc", { id: "hub:m", lane: "manager", ...stashed }]]);
+    await first.close();
+    const again = await startTestFleet({ dir });
+    const back = again.agent({ node: "pc", key: pc.key, instanceId: pc.instanceId, streamId: pc.streamId });
+    expect((await back.connect()).ok).toBe(true);
+    back.delivery(deliveryOf("pc", "hub:m", { target: { lane: "manager" }, state: "typed", typedAt: T0 + 60 * MIN, sessionId: "s1", stashed }));
+    await new Promise(r => setTimeout(r, 100));
+    expect(again.audit.of("alert.draft_stashed")).toHaveLength(1);                   // the one from before the restart (fleet.db keeps the audit)
+  });
+});
+
 describe("ev.delivery and the per-node rate limit", () => {
   it("a node replaying 200 delivery states at once after a reconnect is not closed (inventory and health are)", async () => {
     const fleet = await startTestFleet({ agentLimits: { capacity: 20, refillPerSecond: 1 } });

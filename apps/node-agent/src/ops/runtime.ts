@@ -17,7 +17,7 @@ import type { Flight } from "@morndo/service-kit";
 import type { AgentConfig } from "../config.ts";
 import { Deliverer, type PaneView } from "../deliveries/deliverer.ts";
 import { DeliveryStore } from "../deliveries/store.ts";
-import { agentPaneView, agentTranscripts } from "../deliveries/views.ts";
+import { agentPaneView, agentTranscripts, draftSaver } from "../deliveries/views.ts";
 import type { Logger } from "../log.ts";
 import { agentPaths } from "../paths.ts";
 import { killOnce, wallClock, type TestHooks } from "../test-hooks.ts";
@@ -100,6 +100,7 @@ export function createOpsRuntime(o: RuntimeOptions): OpsRuntime {
   const deliverer = new Deliverer({
     store: deliveries, executor, panes, transcripts: agentTranscripts(sessionId => registry.transcriptPath(sessionId)),
     now, emit: o.emitDelivery ?? (() => {}), log: o.log, hooks,
+    stash: { lanes: config.policy.draftStash.lanes, afterMs: config.policy.draftStash.afterMin * 60_000, save: draftSaver(paths.draftsDir) },
   });
   return {
     inventory, doneKeys, inbox, registry, executor, now, tmux, deliveries, deliverer, panes,
