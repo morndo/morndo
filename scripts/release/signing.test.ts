@@ -14,7 +14,6 @@ import { createHash } from "node:crypto";
 import { stampVersion } from "./stamp.ts";
 
 const repoRoot = join(import.meta.dirname, "../..");
-const COMMIT = "ab".repeat(20);
 const VERSION = "0.2.0";
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
