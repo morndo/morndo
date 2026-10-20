@@ -2949,6 +2949,16 @@ export const CONTROLS: Control[] = [
   { id: "m-node-all-parts", task: "M-node", file: "apps/node-agent/src/ops/memory-ops.ts",
     find: "if (staged.size < a.parts) return", replace: "if (staged.size < 1) return",
     run: ["apps/node-agent/test/memory-sync.test.ts"], expect: "only when the second arrives" },
+  // ---- Memory in the hub (ADR-0031): what reaches a lane, what a lane may read, and when a node holds a version.
+  { id: "m-hub-deliverable", task: "M-hub", file: "apps/hub/src/application/memory-service.ts",
+    find: "where: isDeliverable", replace: "where: () => true",
+    run: ["apps/hub/test/memory-service.test.ts", "apps/hub/test/memory-http.test.ts"], expect: "returns deliverable notes only" },
+  { id: "m-hub-own-only", task: "M-hub", file: "apps/hub/src/application/memory-service.ts",
+    find: "return isDeliverable(n) || n.provenance.by === actorLabel(memoryActor(caller)) ? n : null;", replace: "return n;",
+    run: ["apps/hub/test/memory-service.test.ts"], expect: "and nobody else's" },
+  { id: "m-hub-all-parts", task: "M-hub", file: "apps/hub/src/application/memory-sync.ts",
+    find: "if (answer.result.committed === true) committed = true;", replace: "committed = true;\n      break;",
+    run: ["apps/hub/test/memory-sync.test.ts"], expect: "records the version only once every part was taken" },
 ];
 
 // ---- the runner
