@@ -485,7 +485,7 @@ export class Deliverer {
     }
     this.#drafts.delete(at.pane);
     this.#stashedText.set(at.pane, draft);
-    this.#change(d, { stashed: { at: now, since: seen.since, chars: [...draft].length, copy } });
+    this.#change(d, { stashed: { at: now, since: seen.since, chars: draft.length, copy } });
     this.#d.log.info(`${expect.window}'s draft, unchanged since ${new Date(seen.since).toISOString()}, was stashed so its deliveries go in; a copy: ${copy}`);
     this.#again = true;                                     // the next round types what waited
   }
