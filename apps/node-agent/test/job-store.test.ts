@@ -102,6 +102,29 @@ describe("jobs table", () => {
   });
 });
 
+describe("a lane's open jobs (W1, the relay's waker ask)", () => {
+  it("counts the queued, starting and running jobs a lane started or that notify it, and no others", () => {
+    const { store } = storeOn();
+    expect(store.openFor("builder")).toBe(0);
+    value(store.accept(body({ id: "own", notify: { kind: "fleet" } })));                       // started by builder
+    value(store.accept(body({ id: "to-builder", lane: "alpha", notify: { kind: "lane", name: "builder" } })));
+    value(store.accept(body({ id: "alpha-only", lane: "alpha", notify: { kind: "lane", name: "alpha" } })));
+    expect(store.openFor("builder")).toBe(2);
+    expect(store.openFor("alpha")).toBe(2);
+    expect(store.openFor("beta")).toBe(0);
+    store.applySchedule({ default: 3 }, "off");
+    expect(store.get("own")?.state).toBe("starting");
+    expect(store.openFor("builder")).toBe(2);
+    value(store.started("own"));
+    expect(store.openFor("builder")).toBe(2);                                                    // running
+    value(store.settle("own", EXIT));
+    expect(store.openFor("builder")).toBe(1);                                                    // a terminal job is no waker
+    value(store.settle("to-builder", { outcome: "lost", at: AT + 5_000 }));
+    expect(store.openFor("builder")).toBe(0);
+    expect(store.openFor("alpha")).toBe(1);
+  });
+});
+
 describe("home", () => {
   it("requires a home directory and does not assume the filesystem root", () => {
     const h = tempHome();
