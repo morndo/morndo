@@ -2,7 +2,9 @@
 // every live handle, and a reader that closes the pipe early turns the next write into an unhandled EPIPE
 // (https://nodejs.org/docs/latest-v24.x/api/process.html#a-note-on-process-io, read 2026-10-20). exitAfterOutput leaves
 // once stdout and stderr hold what was written; quietBrokenPipe keeps a closed pipe from being an error.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { closeSync, mkdtempSync, openSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -38,10 +40,20 @@ describe("exitAfterOutput", () => {
   });
 });
 
-describe("quietBrokenPipe: a gone terminal and a full disk", () => {
-  it("treats EIO, which a closed terminal gives, like a closed pipe: the bin ends with its own code and no error text", async () => {
-    const r = await run("eio");
+describe("quietBrokenPipe: a gone terminal, a failing disk and a full one", () => {
+  it("treats EIO on a terminal, which a hung-up one gives, like a closed pipe: the bin ends with its own code and no error text", async () => {
+    const r = await run("eio-tty");
     expect({ code: r.code, stderr: r.stderr }).toEqual({ code: 5, stderr: "" });
+  });
+  it("keeps EIO loud when the output is a regular file: a failing disk is not a reader that left", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-eio-file-"));
+    try {
+      const fd = openSync(join(dir, "out"), "w");
+      const r = spawnSync(process.execPath, ["--no-warnings", FIXTURE, "eio"], { stdio: ["ignore", fd, "pipe"], encoding: "utf8" });
+      closeSync(fd);
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("EIO");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
   it("keeps ENOSPC loud", async () => {
     const r = await run("enospc");

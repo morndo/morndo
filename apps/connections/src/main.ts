@@ -20,7 +20,7 @@ const stdin = readStdin ? Promise.resolve("") : new Promise<string>(resolve => {
 // A reader that closes the pipe is told to the run, which stops its turn rather than let it spend on, unread (reader-gone.ts).
 const readerGone = new AbortController();
 for (const stream of [process.stdout, process.stderr]) {
-  stream.on("error", (error: NodeJS.ErrnoException) => { if (isReaderGone(error)) readerGone.abort(); });
+  stream.on("error", (error: NodeJS.ErrnoException) => { if (isReaderGone(error, stream)) readerGone.abort(); });
 }
 
 const code = await run(process.argv.slice(2), process.env, {
