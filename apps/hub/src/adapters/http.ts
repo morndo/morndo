@@ -7,7 +7,7 @@ import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
 import { hostname } from "node:os";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type FeedEvent, type Transcription } from "@morndo/domain";
+import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type BoardActor, type FeedEvent, type Transcription } from "@morndo/domain";
 import { Flight, HoldWatch, productVersion } from "@morndo/service-kit";
 import { catchUp } from "../application/catchup.ts";
 import { chats, digest } from "../application/chats.ts";
@@ -31,6 +31,7 @@ import type { AlertsService } from "../application/alerts-service.ts";
 import type { UsageService } from "../application/usage-service.ts";
 import type { TranscriptionService } from "../application/transcription-service.ts";
 import type { BriefService } from "../application/brief-service.ts";
+import type { MemoryService } from "../application/memory-service.ts";
 import { BRIEF_TEMPLATE } from "./brief-template.ts";
 import { bridgeDesktop } from "./rfb.ts";
 import { servingHeaders, type Files } from "./files.ts";
@@ -38,7 +39,7 @@ import type { Inbox } from "./uploads.ts";
 import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
-  LinkDecisionBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
+  LinkDecisionBody, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
   RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UsageReportBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
@@ -216,6 +217,7 @@ export function startHttp(p: {
   alerts?: AlertsService | null;                                            // the fleet's alerts in the app; null: no fleet
   transcription?: TranscriptionService | null;                              // ADR-0021; null: the plugin is not wired
   briefs?: BriefService | null;                                             // ADR-0023: decision briefs; null: off
+  memory?: { service: MemoryService; agents: AgentAccess } | null;          // ADR-0031: Memory's agent door, board or not; null: off
 }) {
   const { config, identity, access, observation, steering, escalations, remote } = p;
   const files = p.files ?? null;
@@ -361,23 +363,57 @@ export function startHttp(p: {
     return briefAnswer(res, briefs.settle(actor, id, typeof body.note === "string" ? body.note : null));
   }
 
-  async function agentApi(req: IncomingMessage, res: ServerResponse, path: string) {
-    const method = req.method ?? "GET";
-    if (!p.board) return json(res, 404, { error: "board_off" });
+  // Who an agent call is from (agent-access.ts), or null once the refusal is answered. Each call spends the token's
+  // bucket; a refusal the caller's.
+  function agentCaller(req: IncomingMessage, res: ServerResponse, agents: AgentAccess) {
     const auth = req.headers.authorization;
     const bearer = typeof auth === "string" && /^Bearer\s+/i.test(auth) ? auth.replace(/^Bearer\s+/i, "").trim() : null;
     const laneHeader = req.headers["x-morndo-lane"];
     // A caller that has spent its refusals is turned away before any token is looked up (guessing costs nothing).
     limited(buckets.agentRefusals.peek(callerOf(req)));
-    const who = p.board.agents.authenticate(bearer, typeof laneHeader === "string" ? laneHeader : null);
+    const who = agents.authenticate(bearer, typeof laneHeader === "string" ? laneHeader : null);
     if (!who.ok) {
       // A token that isn't one spends the caller's refusals; a real token without its lane is that token's own
       // misconfiguration, charged to the token, so the answer stays "which lane?" rather than "too many calls".
       if (who.token) limited(buckets.agentCalls.take(who.token.id));
       else limited(buckets.agentRefusals.take(callerOf(req)));
-      return json(res, who.refused === "lane_needed" || who.refused === "bad_name" ? 400 : 401, { error: who.refused });
+      json(res, who.refused === "lane_needed" || who.refused === "bad_name" ? 400 : 401, { error: who.refused });
+      return null;
     }
     limited(buckets.agentCalls.take(who.token.id));
+    return who;
+  }
+
+  // ADR-0031: Memory's side of the agent door (docs/design/memory/README.md, "Agent door"), on the board's tokens and
+  // buckets, whether the board is on or off. Provenance is the token and the lane it names (M3), never the body.
+  const memoryStatus = (problem: string) =>
+    problem === "not_found" ? 404 : problem === "not_principal" || problem === "not_yours" ? 403
+      : problem === "invalidated" || problem.startsWith("already_") || problem === "mismatch" ? 409 : 400;
+  const memoryAnswer = (res: ServerResponse, r: ReturnType<MemoryService["note"]>, status = 200) =>
+    r.ok ? json(res, status, { note: r.note }) : json(res, memoryStatus(r.problem), { error: r.problem });
+  async function agentMemory(req: IncomingMessage, res: ServerResponse, path: string, method: string, service: MemoryService, actor: BoardActor) {
+    if (path === "/api/agent/memory/search" && method === "GET") {
+      const q = new URL(req.url ?? "/", "http://hub").searchParams;
+      const found = service.search({ q: q.get("q"), scope: q.get("scope"), kind: q.get("kind"), limit: q.get("limit") });
+      return found.ok ? json(res, 200, { notes: found.notes }) : json(res, 400, { error: found.problem });
+    }
+    if (path === "/api/agent/memory/notes" && method === "POST") return memoryAnswer(res, service.remember(actor, await readBody(req, MemoryRememberBody)), 201);
+    const one = /^\/api\/agent\/memory\/notes\/(N-\d{1,9})(\/invalidate)?$/.exec(path);
+    if (one && !one[2] && method === "GET") return memoryAnswer(res, service.note(actor, one[1] ?? ""));
+    if (one && one[2] && method === "POST") return memoryAnswer(res, service.invalidate(actor, one[1] ?? "", (await readBody(req, MemoryInvalidateBody)).reason));
+    throw new HttpError(404, "no such route");
+  }
+
+  async function agentApi(req: IncomingMessage, res: ServerResponse, path: string) {
+    const method = req.method ?? "GET";
+    if (path.startsWith("/api/agent/memory/")) {
+      if (!p.memory) return json(res, 404, { error: "memory_off" });
+      const who = agentCaller(req, res, p.memory.agents);
+      return who ? agentMemory(req, res, path, method, p.memory.service, who.actor) : undefined;
+    }
+    if (!p.board) return json(res, 404, { error: "board_off" });
+    const who = agentCaller(req, res, p.board.agents);
+    if (!who) return;
     const { service } = p.board;
     if (path === "/api/agent/whoami" && method === "GET") return json(res, 200, { actor: who.actor, token: { id: who.token.id, name: who.token.name, role: who.token.role } });
     if (path.startsWith("/api/agent/decisions")) return agentDecisions(req, res, path, method, who.actor);

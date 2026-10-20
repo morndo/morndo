@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { NotLocalDisk, argvWantsVersion, holdFile, productVersion } from "@morndo/service-kit";
+import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, holdFile, productVersion } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
 import { startRetention } from "./application/retention.ts";
@@ -48,6 +48,11 @@ import { locateTranscriber } from "./adapters/transcriber-path.ts";
 import { processTranscriber } from "./adapters/transcriber-process.ts";
 import { guardNow, loadTranscriptionSettings, openMachineGuard } from "./adapters/transcription-config.ts";
 import { fileOnDisk, TranscriptionService } from "./application/transcription-service.ts";
+import { MemoryStore } from "./adapters/memory-store.ts";
+import { MemoryFromFuture } from "./adapters/memory-migrations.ts";
+import { MemoryService } from "./application/memory-service.ts";
+import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
+import { runMemory } from "./console/memory.ts";
 import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,6 +70,9 @@ const HELP = `morndo: your agents, on your phone.
                           a token for the manager's lane, or one the worker lanes share (shown once)
   morndo agent-token list
   morndo agent-token revoke <id>
+  morndo memory list [--scope S] [--pending] [--all]
+                          what the lanes learned (Memory); also show <id>, approve <id>, invalidate <id> --reason R,
+                          import --dir D --scope S [--label L] [--procedure FILE]..., sync (morndo memory --help)
 
 Settings (environment): MORNDO_ORIGIN (the URL your browser opens), MORNDO_HOME, MORNDO_PORT,
 MORNDO_REQUIRE_PROXY_IDENTITY=1, MORNDO_PRINCIPAL_LOGIN, MORNDO_TMUX_SOCKET, MORNDO_TMUX_SESSION,
@@ -225,6 +233,11 @@ switch (cmd) {
     // ADR-0015: the board, changed by the principal (a Command) and by the agents (their tokens, issued below).
     const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name) });
     const agents = new AgentAccess(store, config.managerWindow);
+    // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
+    // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
+    const memoryStore = openMemory(config.dataDir);
+    const memory = memoryStore ? new MemoryService({ store: memoryStore }) : null;
+    const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
     // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens.
     const usage = new UsageService({ store });
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
@@ -262,9 +275,10 @@ switch (cmd) {
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
       push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
-      transcription, briefs, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
+      transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
     });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
+    const syncMemory = memorySync ? setInterval(() => void memorySync.tick(), SYNC_EVERY_MS) : null;
     // Old pairing tokens and long-ended sessions, on start and daily; never the audit or the decisions (A8).
     const stopRetention = startRetention(store, Date.now,
       r => { if (r.tokens || r.sessions || r.sends) log.info(`retention: pruned ${r.tokens} pairing tokens, ${r.sessions} sessions and ${r.sends} send records`); },
@@ -297,9 +311,10 @@ switch (cmd) {
     access.onLinked(() => notifications.linked());
     observation.start(config.pollMs);
     escalations.start(Math.max(config.pollMs, 1000));
+    void memorySync?.tick();                             // the first round now; then the loop's, every minute
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); fleet?.ports.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
+    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); if (syncMemory) clearInterval(syncMemory); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); fleet?.ports.stop(); await http.idle(); await http.close(); store.close(); memoryStore?.close(); process.exit(0); };
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     break;
@@ -360,6 +375,12 @@ switch (cmd) {
     store.close();
     break;
   }
+  // ADR-0031: Memory at the console, which acts for the principal; it opens memory.db itself (console/memory.ts).
+  case "memory": {
+    const code = await runMemory(args, processIo(), { dataDir: config.dataDir });
+    store.close();
+    process.exit(code);
+  }
   default:
     print(HELP);
     store.close();
@@ -381,6 +402,17 @@ async function openFleet(socket: string, files: LocalFileStore, jobs: JobsServic
   const ports = fleetPorts(client, { files, jobs, ...(alerts ? { alerts } : {}), stagingDir: mkdtempSync(join(tmpdir(), "morndo-fleet-files-")) });
   await ports.start();
   return { ports, client };
+}
+
+// Memory's file (ADR-0031). One this hub can't open (a newer floor, not SQLite) is said in one sentence and leaves
+// Memory off: its agent routes answer memory_off and nothing is synced, while the rest of the hub serves.
+function openMemory(dir: string): MemoryStore | null {
+  try { return new MemoryStore(dir); }
+  catch (e) {
+    if (!(e instanceof MemoryFromFuture) && !(e instanceof DatabaseUnreadable)) throw e;
+    log.error(`Memory is off: ${e.message} Run the newer hub, or move ${dir}/memory.db away to start Memory empty.`);
+    return null;
+  }
 }
 
 function openConnections(policy: () => AccessPolicy): ConnectionsPageService | null {
