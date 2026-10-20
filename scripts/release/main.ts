@@ -11,6 +11,7 @@ import { compileWorkspaces } from "./compile.ts";
 import { sha256Sums } from "./checksums.ts";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
 import { materialiseFeed } from "./feed-site.ts";
+import { keySetVersion } from "./key-set.ts";
 import { commitFeeds, prepareFeeds } from "./feed-sync.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, type ArtifactInput } from "./manifest.ts";
 import { BUNDLED_NODE, newerNode24 } from "./node-pin.ts";
@@ -61,7 +62,7 @@ function treeFiles(root: string): TreeFile[] {
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
-  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-resign-prepare | feed-publish-prepare | feed-commit | feed-site | sums | node-check");
+  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-resign-prepare | feed-publish-prepare | feed-commit | key-set | feed-site | sums | node-check");
   const { values, positionals } = parseArgs({
     args: rest,
     options: {
@@ -73,7 +74,7 @@ function main(argv: string[]): void {
       channel: { type: "string" }, existing: { type: "string" }, manifest: { type: "string" },
       "manifest-url": { type: "string" }, now: { type: "string" }, "key-set": { type: "string" },
       dir: { type: "string" }, signers: { type: "string" }, scratch: { type: "string" },
-      index: { type: "string" },
+      index: { type: "string" }, keys: { type: "string" },
     },
     strict: true,
     allowPositionals: true,
@@ -152,6 +153,9 @@ function main(argv: string[]): void {
       process.stdout.write(`${outcome}\n`);
       return;
     }
+    case "key-set":
+      process.stdout.write(`${keySetVersion(flag(values, "keys"))}\n`);
+      return;
     case "feed-site":
       materialiseFeed(
         flag(values, "repository"),

@@ -23,6 +23,7 @@ import { listFiles } from "./files.ts";
 import { launcherSource, launchersFrom } from "./launchers.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, schemaFrom } from "./manifest.ts";
 import { orderProblems } from "./schema.ts";
+import { keySetVersion } from "./key-set.ts";
 import { BUNDLED_NODE, newerNode24, nodeTarball } from "./node-pin.ts";
 import { sha256Sums } from "./checksums.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes } from "./sign.ts";
@@ -405,6 +406,34 @@ describe("feed", () => {
       }, io);
       expect(re({ head: () => null, read: () => null })).toBe("absent");
       expect(() => re({ head: () => "aaa", read: () => null })).toThrow(/refusing to start the feed again at 1/);
+    });
+  });
+
+  describe("the key-set version", () => {
+    const keys = (version: number) => JSON.stringify({
+      schema: 1, version, expiresAt: "2027-11-02T10:00:00Z", root: ["SHA256:r"], release: ["SHA256:a"], feed: ["SHA256:b"],
+    });
+
+    it("comes from trust/keys.json, so a rotation to set 2 reaches the next feed", () => {
+      const dir = temp();
+      const file = join(dir, "keys.json");
+      writeFileSync(file, keys(2));
+      expect(keySetVersion(file)).toBe(2);
+      const run = spawnSync(process.execPath, [join(import.meta.dirname, "main.ts"), "key-set", "--keys", file], { encoding: "utf8" });
+      expect(run.stdout.trim()).toBe("2");
+      const feed = prepareFeeds({
+        mode: "publish", repository: "o/r", dir: join(dir, "site"), signers: join(dir, "none"), scratch: dir, now: WHEN,
+        version: "0.1.0", manifestPath: file, manifestUrl: "https://example.invalid/manifest.json", keySetVersion: keySetVersion(file),
+      }, { head: () => null, read: () => null });
+      expect(feed).toBe("ready");
+      expect(ChannelFeedSchema.parse(JSON.parse(readFileSync(join(dir, "site/latest.json"), "utf8"))).keySetVersion).toBe(2);
+    });
+
+    it("refuses a missing, malformed or version-less key set", () => {
+      const dir = temp();
+      expect(() => keySetVersion(join(dir, "missing.json"))).toThrow();
+      writeFileSync(join(dir, "bad.json"), "{\"version\":0}");
+      expect(() => keySetVersion(join(dir, "bad.json"))).toThrow(/key set/);
     });
   });
 

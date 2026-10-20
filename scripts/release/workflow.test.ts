@@ -175,6 +175,8 @@ describe("release pipeline files", () => {
     expect(first).not.toContain(".github.io/");
     expect(first).toContain("feed-publish-prepare");
     expect(first).toContain("feed-commit");
+    expect(first).not.toMatch(/--key-set [0-9]/);
+    expect(first).toContain("key-set --keys trust/keys.json");
     expect(first).toContain("contents: write");
     expect(job(feed, "resign")).not.toContain(".github.io/");
     expect(job(feed, "resign")).not.toContain("?ref=feed");

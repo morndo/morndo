@@ -42,10 +42,10 @@ jobs:
       - id: check
         run: |
           set -euo pipefail
-          if [ -s trust/release_allowed_signers ] && [ -s trust/feed_allowed_signers ]; then
+          if [ -s trust/release_allowed_signers ] && [ -s trust/feed_allowed_signers ] && [ -s trust/keys.json ]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
-            echo "skipping release: trust/release_allowed_signers or trust/feed_allowed_signers is not in the tree yet" >&2
+            echo "skipping release: trust/release_allowed_signers, trust/feed_allowed_signers or trust/keys.json is not in the tree yet" >&2
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -364,10 +364,11 @@ jobs:
           mkdir -p site "$RUNNER_TEMP/release"
           gh release download "$TAG" --pattern manifest.json --dir "$RUNNER_TEMP/release"
           manifest_url="https://github.com/${repo}/releases/download/${TAG}/manifest.json"
+          key_set=$(node scripts/release/main.ts key-set --keys trust/keys.json)
           node scripts/release/main.ts feed-publish-prepare \
             --repository "$GITHUB_REPOSITORY" --dir site --version "$VERSION" \
             --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" \
-            --now "$now" --key-set 1 --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
+            --now "$now" --key-set "$key_set" --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
       # The only step that holds the feed key; shell and ssh-keygen only, as in the publish job.
       - name: Sign the feeds
         env:
