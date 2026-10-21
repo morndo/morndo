@@ -32,6 +32,7 @@ type Fake = {
   files?: Record<string, { body: string; mtimeMs: number; ctimeMs: number }>; links?: Record<string, string>;
   now?: { exe?: string | null; started?: number | null };       // what a second read of the parent answers
   identity?: { size: number; mtimeMs: number; ctimeMs: number; ino: number } | null;   // the running binary's inode, as the pin has it by default
+  identityLater?: { size: number; mtimeMs: number; ctimeMs: number; ino: number } | null;   // what a read after the checks answers (the file moved on)
   sha?: string | null;                                                // its content hash, when it is asked for
   symlinked?: string[];                                               // paths that are, or go through, a symlink
   release?: ReleasePin | null;                                        // the signed releases the owner pinned
@@ -40,10 +41,15 @@ type Fake = {
   hashed?: { count: number };                                         // counts the reads of the binary's content
   env?: Record<string, string> | [string, string][] | null;          // the parent's environment (a list may name a variable twice)
 };
+// How many identity reads the checks make before the last one, at the end of the proof: the pinned binary reads it once, a signed
+// release twice (to judge the binary and for the hash cache's key), and the proof once more at the end.
+const lastBeforeEnd = (over: { release?: unknown }): number => (over.release ? 2 : 1);
+
 // A fake /proc: the parent is pid 50, a claude of the pinned version started at START with inline sandbox settings.
 function reader(over: Fake = {}): ProcReader {
   let exeReads = 0;
   let tickReads = 0;
+  let identityReads = 0;
   return {
     exe: () => (++exeReads > 1 && over.now?.exe !== undefined ? over.now.exe : over.exe === undefined ? PIN.resolved : over.exe),
     cmdline: () => (over.args === undefined ? ["claude", "--strict-mcp-config", "--setting-sources", "", "--settings", JSON.stringify(good())] : over.args),
@@ -53,7 +59,11 @@ function reader(over: Fake = {}): ProcReader {
     file: path => over.files?.[path] ?? null,
     real: path => over.links?.[path] ?? path,
     linked: path => over.symlinked?.includes(path) ?? false,
-    exeIdentity: () => (over.identity === undefined ? { size: PIN.size, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs, ino: PIN.ino } : over.identity),
+    exeIdentity: () => {
+      identityReads++;
+      const first = over.identity === undefined ? { size: PIN.size, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs, ino: PIN.ino } : over.identity;
+      return identityReads > lastBeforeEnd(over) && over.identityLater !== undefined ? over.identityLater : first;
+    },
     environ: () => {
       const env = over.env === undefined ? { ANTHROPIC_BASE_URL: BASE, PATH: "/usr/bin" } : over.env;
       return env === null ? null : Array.isArray(env) ? env : Object.entries(env);
@@ -393,6 +403,24 @@ describe("the lease's caller proof (check 2)", () => {
       expect(await signed({ shaCache, hashed, sha: "e".repeat(64) })).toMatchObject({ ok: false });
       expect(hashed.count).toBe(2);                                                           // not remembered: hashed both times
       expect(shaCache.get("/versions/2.1.306", { size: PIN.size, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs, ino: PIN.ino })).toBeNull();
+    });
+
+    it("refuses a parent binary that is not the file it was at the start: another inode, or a rewritten one, by the end of the checks", async () => {
+      const same = { size: PIN.size, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs, ino: PIN.ino };
+      expect(await signed({ identityLater: same })).toEqual({ ok: true });
+      for (const [what, later] of [["inode", { ...same, ino: same.ino + 1 }], ["ctime", { ...same, ctimeMs: same.ctimeMs + 1 }], ["mtime", { ...same, mtimeMs: same.mtimeMs + 1 }], ["size", { ...same, size: same.size + 1 }], ["gone", null]] as const) {
+        expect(await signed({ identityLater: later }), what).toMatchObject({ ok: false, why: "the parent binary changed while it was checked" });
+      }
+      expect(await verify({ exe: PIN.resolved, identityLater: { ...same, ino: same.ino + 1 } })).toMatchObject({ ok: false, why: "the parent binary changed while it was checked" });   // the binary pin too
+    });
+
+    it("refuses when the hash that was found in the manifest is not the one the cache holds for the file at the end", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "morndo-sha-"));
+      dirs.push(dir);
+      const real = fileShaCache(dir);
+      let moved = false;
+      const shaCache: ShaCache = { get: (path, id) => (moved ? "f".repeat(64) : real.get(path, id)), put: (path, id, sha) => { real.put(path, id, sha); moved = true; } };
+      expect(await signed({ shaCache })).toMatchObject({ ok: false, why: "the parent binary's hash changed while it was checked" });
     });
 
     it("admits either proof: a release that is not admitted still passes on the binary pin, and neither pin refuses", async () => {

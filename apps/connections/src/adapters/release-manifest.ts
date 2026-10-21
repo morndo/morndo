@@ -14,7 +14,7 @@
 // OSV, 2026-10-21), in process, not with a gpg found on PATH: the Mac has none, and a subprocess would add a binary to trust.
 import { mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createMessage, readKey, readSignature, verify, type PublicKey } from "openpgp";
+import { createMessage, enums, readKey, readSignature, verify, type PublicKey } from "openpgp";
 import { CLAUDE_RELEASES_URL, CLAUDE_RELEASE_FINGERPRINT, CLAUDE_RELEASE_FIRST_SIGNED, CLAUDE_RELEASE_PUBLIC_KEY } from "./claude-release-key.ts";
 
 // A Claude Code version as the native installer names its files: 2.1.306.
@@ -26,6 +26,11 @@ export function compareVersions(a: string, b: string): number {
   for (let i = 0; i < 3; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0) ? -1 : 1;
   return 0;
 }
+
+// The hashes a manifest signature may not use: MD5, SHA-1, RIPEMD-160 and SHA-224, so SHA-256 and up remain (every hash the library knows is
+// in one group or the other). The library's own defaults reject MD5 and RIPEMD, and (for data signatures, observed on 6.3.2) SHA-1, but
+// accept SHA-224; the list is ours, passed in every verify call, so a change of the library's defaults changes nothing here.
+const WEAK_HASHES = new Set([enums.hash.md5, enums.hash.sha1, enums.hash.ripemd, enums.hash.sha224]);
 
 export type Trust = { armoredKey: string; fingerprint: string };
 export const COMPILED_TRUST: Trust = { armoredKey: CLAUDE_RELEASE_PUBLIC_KEY, fingerprint: CLAUDE_RELEASE_FINGERPRINT };
@@ -50,7 +55,10 @@ export async function verifyManifest(manifest: Uint8Array, signature: Uint8Array
   try {
     const armored = new TextDecoder().decode(signature.subarray(0, 40)).startsWith("-----BEGIN PGP SIGNATURE");
     const parsed = armored ? await readSignature({ armoredSignature: new TextDecoder().decode(signature) }) : await readSignature({ binarySignature: signature });
-    const result = await verify({ message: await createMessage({ binary: manifest }), signature: parsed, verificationKeys: key, date: at, format: "binary" });
+    const result = await verify({
+      message: await createMessage({ binary: manifest }), signature: parsed, verificationKeys: key, date: at, format: "binary",
+      config: { rejectHashAlgorithms: WEAK_HASHES, rejectMessageHashAlgorithms: WEAK_HASHES },
+    });
     const first = result.signatures[0];
     if (first === undefined) return no("no signature");
     await first.verified;                                                       // rejects unless the signature is good

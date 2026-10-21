@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createMessage, generateKey, readKey, sign } from "openpgp";
+import { PacketList, SignaturePacket, config as pgpConfig, createMessage, enums, generateKey, readKey, sign } from "openpgp";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLAUDE_RELEASE_FINGERPRINT, CLAUDE_RELEASE_PUBLIC_KEY } from "../src/adapters/claude-release-key.ts";
 import {
@@ -85,6 +85,31 @@ describe("verifying a manifest", () => {
     const text = await sign(new TextEncoder().encode("not json"));
     expect(await verifyManifest(text.bytes, text.signature, "2.1.999", own.trust, AT)).toMatchObject({ ok: false, why: "the manifest is not JSON" });
   });
+
+  it("refuses a signature made with a weak hash (SHA-1, SHA-224), and takes SHA-256 and SHA-512", async () => {
+    // A classic (v4) RSA key, like Anthropic's, and signature packets built by hand with the hash asked for: the library will not sign with a weak one.
+    const made = await generateKey({ type: "rsa", rsaBits: 2048, userIDs: [{ name: "Test Release Signing", email: "release@example.test" }], format: "object", config: { v6Keys: false } });
+    const trust: Trust = { armoredKey: made.publicKey.armor(), fingerprint: made.publicKey.getFingerprint() };
+    const manifest = manifestFor("2.1.999", { "linux-x64": SUM });
+    const signWith = async (hash: number): Promise<Uint8Array> => {
+      const packet = new SignaturePacket();
+      packet.signatureType = enums.signature.binary;
+      packet.hashAlgorithm = hash;
+      packet.publicKeyAlgorithm = made.privateKey.keyPacket.algorithm;
+      const literal = (await createMessage({ binary: manifest })).packets.findPacket(enums.packet.literalData);
+      if (literal === undefined) throw new Error("no literal packet");
+      await (packet as unknown as { sign: (...args: unknown[]) => Promise<void> }).sign(made.privateKey.keyPacket, literal, new Date(), true, { ...pgpConfig, rejectHashAlgorithms: new Set(), nonDeterministicSignaturesViaNotation: false });
+      const list = new PacketList();
+      list.push(packet);
+      return list.write();
+    };
+    for (const [name, hash] of [["SHA-256", enums.hash.sha256], ["SHA-512", enums.hash.sha512]] as const) {
+      expect(await verifyManifest(manifest, await signWith(hash), "2.1.999", trust, AT), name).toMatchObject({ ok: true });
+    }
+    for (const [name, hash] of [["SHA-1", enums.hash.sha1], ["SHA-224", enums.hash.sha224]] as const) {
+      expect(await verifyManifest(manifest, await signWith(hash), "2.1.999", trust, AT), name).toMatchObject({ ok: false, why: "the manifest signature is not good" });
+    }
+  }, 30_000);
 
   it("knows no signed release before 2.1.89, and judges the key at the date asked", async () => {
     expect(await verifyManifest(MANIFEST, SIGNATURE, "2.1.88", COMPILED_TRUST, AT)).toMatchObject({ ok: false, why: "no signed release of that version" });

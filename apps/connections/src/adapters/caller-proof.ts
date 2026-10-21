@@ -279,21 +279,23 @@ function pinnedBinary(pin: Pin, path: string, read: ProcReader, parent: number):
 // Or the binary is a signed release: a file named by its version in the pinned directory, at or above the pinned floor, whose
 // sha256 (read from the running inode) a verified, cached manifest lists. The owner pinned the key, once; an update needs
 // nothing more, since the update's manifest is signed by the same key.
-async function signedRelease(release: ReleasePin, verify: Check["verifyRelease"], cache: ShaCache | undefined, path: string, read: ProcReader, parent: number): Promise<Proof> {
-  if (release.fingerprint.toLowerCase() !== CLAUDE_RELEASE_FINGERPRINT) return no("the pinned release key is not the compiled-in one");
-  if (verify === undefined) return no("no release verifier");
-  if (read.real(dirname(path)) !== read.real(release.versionsDir)) return no("the parent binary is outside the pinned releases directory");
+const nope = (why: string): { proof: Proof; sha256: string | null } => ({ proof: no(why), sha256: null });
+
+async function signedRelease(release: ReleasePin, verify: Check["verifyRelease"], cache: ShaCache | undefined, path: string, read: ProcReader, parent: number): Promise<{ proof: Proof; sha256: string | null }> {
+  if (release.fingerprint.toLowerCase() !== CLAUDE_RELEASE_FINGERPRINT) return nope("the pinned release key is not the compiled-in one");
+  if (verify === undefined) return nope("no release verifier");
+  if (read.real(dirname(path)) !== read.real(release.versionsDir)) return nope("the parent binary is outside the pinned releases directory");
   const version = basename(path);
-  if (!isVersion(version) || compareVersions(version, release.floor) < 0) return no("the parent binary is not a release at or above the pinned floor");
+  if (!isVersion(version) || compareVersions(version, release.floor) < 0) return nope("the parent binary is not a release at or above the pinned floor");
   // The hash of the running inode, from the cache when this very file (path, size, mtime, ctime, inode) was hashed and found in a
   // signed manifest before; the manifest is verified again either way.
   const identity = read.exeIdentity(parent);
   const known = identity === null ? null : cache?.get(path, identity) ?? null;
   const sha256 = known ?? read.exeSha256(parent);
-  if (sha256 === null) return no("parent binary unreadable");
+  if (sha256 === null) return nope("parent binary unreadable");
   const proof = await verify(version, sha256);
   if (proof.ok && known === null && identity !== null) cache?.put(path, identity, sha256);
-  return proof;
+  return { proof, sha256: proof.ok ? sha256 : null };
 }
 
 export async function verifyClaudeParent(check: Check): Promise<Proof> {
@@ -307,11 +309,14 @@ export async function verifyClaudeParent(check: Check): Promise<Proof> {
   if (args === null) return no("parent command line unreadable");
   // The binary: the pinned file or a signed release; after an update it reads "(deleted)" while that version still runs.
   const path = exe.endsWith(DELETED) ? exe.slice(0, -DELETED.length) : exe;
+  // What file this is, as the kernel has it: read before the binary is judged and again at the end.
+  const identity = read.exeIdentity(parent);
   let baseUrls: Record<string, string> | null = null;
   let refused: Proof = no("no pinned claude binary");
+  let sha256: string | null = null;
   if (check.release !== null) {
-    const proof = await signedRelease(check.release, check.verifyRelease, check.shaCache, path, read, parent);
-    if (proof.ok) baseUrls = check.release.baseUrls; else refused = proof;
+    const admitted = await signedRelease(check.release, check.verifyRelease, check.shaCache, path, read, parent);
+    if (admitted.proof.ok) { baseUrls = check.release.baseUrls; sha256 = admitted.sha256; } else refused = admitted.proof;
   }
   if (baseUrls === null && check.pin !== null) {
     const proof = pinnedBinary(check.pin, path, read, parent);
@@ -366,7 +371,13 @@ export async function verifyClaudeParent(check: Check): Promise<Proof> {
     const file = read.real(isAbsolute(value) ? value : join(read.cwd(parent) ?? "", value));
     if (!denyWrite.some(entry => covers(entry, file))) return no("the settings file is not denied to writing");
   }
-  // Still the process the checks read: a pid that went away and was reused, or a parent that was replaced, is refused.
+  // Still the process the checks read: a pid that went away and was reused, or a parent that was replaced, is refused. And still the
+  // file: the same inode with the same size and times (a rewritten one has a new ctime), and the hash that was found in the manifest is
+  // the one the cache holds for it now.
   if (check.ppid() !== parent || read.ticks(parent) !== ticks || read.exe(parent) !== exe) return no("the parent changed while it was checked");
+  const after = read.exeIdentity(parent);
+  if (identity === null || after === null || after.ino !== identity.ino || after.size !== identity.size || after.mtimeMs !== identity.mtimeMs || after.ctimeMs !== identity.ctimeMs) return no("the parent binary changed while it was checked");
+  const remembered = sha256 === null ? null : check.shaCache?.get(path, after) ?? null;
+  if (remembered !== null && remembered !== sha256) return no("the parent binary's hash changed while it was checked");
   return { ok: true };
 }
