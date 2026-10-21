@@ -24,12 +24,14 @@ import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
 import { FileRefused } from "./adapters/file-mode.ts";
-import { verifyClaudeParent } from "./adapters/caller-proof.ts";
+import { parsePin, pinFor, procReader, verifyClaudeParent } from "./adapters/caller-proof.ts";
 import { DatabaseFromFuture } from "./adapters/store-migrations.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
 const GATE = new Set(["off", "terms", "expired", "repo", "isolation", "dialect", "leases", "budget"]);
 const LEASES = 8;
+// The claude binary the owner pinned, in the connections home (adapters/caller-proof.ts); the lease reads it, not the env.
+const PIN_FILE = "claude-pin.json";
 const USAGE_WORDS = new Set(["missing argument", "isolation"]);
 
 // `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
@@ -59,12 +61,17 @@ morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [-
   the TTL). One call is one lease — the gate runs, a KeyServed audit line is written, the lease closes; a call killed
   before that is swept at the next lease, run or check. A refusal names its reason on stderr and exits 1, or 75 when the
   gate refuses (off, terms, expired, repo, isolation, dialect, leases, budget).
+  morndo-keys pin-claude [--path P] pins the claude binary a lease may be served to (once, by the owner, in a terminal).
   The helper line is: ulimit -c 0; exec morndo-keys lease --connection <name> --lane <lane> --workspace <dir> --isolation os
   The ulimit keeps a crash from dumping the key (Node can neither wipe a string nor set its own core limit); the exec makes
   Claude Code the lease's parent, which is what it checks. For a connection whose floor is os (Z.ai today) the parent must
-  be the claude binary (MORNDO_CLAUDE_BIN, else claude on PATH) started with --settings (a file or JSON) whose sandbox is
-  enabled, failIfUnavailable true and allowUnsandboxedCommands false, with this node's vault, connections.db and identity
-  in sandbox.filesystem.denyRead and in permissions.deny as Read rules; anything else is refused with isolation. --lane and
+  be the pinned binary (its real path, read from /proc), started with --strict-mcp-config (and no --mcp-config), one
+  --settings (a file or inline JSON) and
+  --setting-sources "" (no user, project or local settings merge in), whose sandbox is enabled, failIfUnavailable true,
+  allowUnsandboxedCommands false and excludedCommands empty, with this node's vault, connections.db and identity in
+  sandbox.filesystem.denyRead and as Read rules in permissions.deny, not re-opened by allowRead or opened by allowWrite;
+  a settings file must not have changed since the parent started and must be in sandbox.filesystem.denyWrite. Anything else
+  is refused with isolation.
   --workspace are the caller's claims. run keeps its own helper, \`helper --lease <id>\`.
 `;
 
@@ -111,6 +118,7 @@ async function dispatch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     case "check": return check(home, need(parsed.get("connection") ?? name), parsed, io);
     case "run": return launch(home, parsed, io);
     case "lease": return leaseKey(home, parsed, io);
+    case "pin-claude": return pinClaude(home, parsed, io);
     case "spend": return spend(home, need(name), io);
     case "usage": return usage(home, parsed, io);
     case "pool": return poolCommand(home, parsed, io);
@@ -324,7 +332,11 @@ async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   let seen = vouched;
   let proof: "verified" | "claimed" = "claimed";
   if (effectiveIsolation(connection, floorOf(preset)) === "os") {
-    const checked = verifyClaudeParent(process.ppid, home.env.MORNDO_CLAUDE_BIN ?? "claude", home.env.PATH, [home.vaultDir, home.db, home.identity]);
+    const pinFile = join(home.dir, PIN_FILE);
+    const checked = verifyClaudeParent({
+      ppid: () => process.ppid, pin: parsePin(procReader.file(pinFile)?.body ?? null),
+      want: { denied: [home.vaultDir, home.db, home.identity], writeProtected: [home.vaultDir, home.db, home.identity, pinFile] },
+    });
     seen = checked.ok ? "os" : "none";
     proof = checked.ok ? "verified" : "claimed";
   }
@@ -347,6 +359,16 @@ async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     io.stderr("failed\n");
     return 1;
   } finally { home.leases.close(name, granted.value.id, outcome, null); }
+}
+
+// `morndo-keys pin-claude [--path P]`: the owner says which claude binary a lease may be served to (P, else `claude` on this
+// shell's PATH), once, from a terminal. It is written to the connections home, which an agent's sandbox denies.
+function pinClaude(home: Opened, parsed: Parsed, io: Io): number {
+  const pin = pinFor(parsed.get("path") ?? "claude", home.env.PATH);
+  if (pin === null) return fail(io, "missing");
+  writeFileSync(join(home.dir, PIN_FILE), `${JSON.stringify(pin)}\n`, { mode: 0o600 });
+  io.stdout(`${JSON.stringify(pin)}\n`);
+  return 0;
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {

@@ -3,8 +3,9 @@
 // file outside the vault. The `run` path that serves `helper --lease <id>` stays e2e.test.ts's
 // "sends the key only as the helper header and keeps it out of env".
 // Z.ai's floor is os, so its lease is served only to a claude parent started with the sandbox settings (check 2,
-// adapters/caller-proof.ts). The tests make that parent: a process whose exe is the binary MORNDO_CLAUDE_BIN names (here
-// node itself), started with --settings, which runs the helper line through `sh -c` as Claude Code does.
+// adapters/caller-proof.ts). The tests make that parent: a process whose exe is the binary the node pinned with
+// `pin-claude` (here node itself), started with --settings and --setting-sources "", which runs the helper line through
+// `sh -c` as Claude Code does.
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -58,35 +59,46 @@ function cli(args: string[], env: NodeJS.ProcessEnv, stdin = ""): Promise<Out> {
 
 // The settings a lane's Claude Code is started with: what the runtime writes (vault, database and identity denied to Bash
 // and to the Read tool, sandbox on and fail-closed), changed by `change` for a case that must be refused.
-let counter = 0;
-function settingsFile(dir: string, change: (body: Record<string, any>) => void = () => {}): string {
+type Body = Record<string, any>;
+function settingsJson(dir: string, change: (body: Body) => void = () => {}): string {
   const deny = [join(dir, "vault"), join(dir, "connections.db"), join(dir, "identity")];
   const plan = { lease: "l", connection: "zai", ref: null, configDir: null, model: "m", effort: "low", workspace: join(dir, "work"), deny, reservation: 0, probe: true };
-  const body = JSON.parse(claudeSettings(plan, "ulimit -c 0; exec morndo-keys lease --connection zai")) as Record<string, any>;
+  const body = JSON.parse(claudeSettings(plan, "ulimit -c 0; exec morndo-keys lease --connection zai")) as Body;
   change(body);
+  return JSON.stringify(body);
+}
+
+let counter = 0;
+function settingsFile(dir: string, change: (body: Body) => void = () => {}): string {
   const path = join(dir, `settings-${counter++}.json`);
-  writeFileSync(path, JSON.stringify(body));
+  writeFileSync(path, settingsJson(dir, body => { body.sandbox.filesystem.denyWrite = [path]; change(body); }));
   return path;
 }
 
-type Via = { settings?: string | null; keepShell?: boolean; sample?: Buffer[]; isolation?: string | null };
+// `settings`: inline JSON (what the lane passes), or `file` a path; `sources` the --setting-sources value (null: the flag
+// is left out); `touch` a file the "claude" parent changes after it started; `keepShell` leaves a shell between the lease and
+// the parent, as an agent's own shell command has; `sample` collects /proc/<pid>/{cmdline,environ} of the whole tree.
+type Via = { strictMcp?: boolean; settings?: string | null; file?: string; sources?: string | null; touch?: string; keepShell?: boolean; sample?: Buffer[]; isolation?: string | null };
 
-// Runs `lease` as an apiKeyHelper: a "claude" parent (this node binary, started with --settings) that runs the helper line
-// through `sh -c`. With `exec`, as the documented line has, the lease's parent is the claude process; `keepShell` leaves a
-// shell between them, as an agent's own shell command has. `sample` collects /proc/<pid>/{cmdline,environ} of the tree.
+// Runs `lease` as an apiKeyHelper: a "claude" parent (this node binary, which `pin-claude` pinned) that runs the helper line
+// through `sh -c`. With `exec`, as the documented line has, the lease's parent is the claude process.
 function viaClaude(dir: string, args: string[], via: Via = {}): Promise<Out> {
   const script = join(dir, "parent.mjs");
   writeFileSync(script, `import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
+// a file changed well after this process started (the check allows only the clock's own grain)
+if (process.env.TOUCH) { await new Promise(done => setTimeout(done, 300)); appendFileSync(process.env.TOUCH, " "); }
 const child = spawn("sh", ["-c", process.env.LEASE_CMD], { stdio: ["ignore", "inherit", "inherit"] });
 child.on("close", code => process.exit(code ?? 1));
 `);
   const isolation = via.isolation === null ? [] : ["--isolation", via.isolation ?? "os"];
   const lease = `${process.execPath} --experimental-strip-types ${main} lease ${[...args, ...isolation].join(" ")}`;
   const command = via.keepShell ? `${lease}; code=$?; exit $code` : `ulimit -c 0; exec ${lease}`;
-  const settings = via.settings === null ? [] : ["--settings", via.settings ?? settingsFile(dir)];
-  const env = envOf(dir, { LEASE_CMD: command, MORNDO_CLAUDE_BIN: process.execPath });
+  const sources = [...(via.strictMcp === false ? [] : ["--strict-mcp-config"]), ...(via.sources === null ? [] : ["--setting-sources", via.sources ?? ""])];
+  const settings = via.file !== undefined ? ["--settings", via.file] : via.settings === null ? [] : ["--settings", via.settings ?? settingsJson(dir)];
+  const env = envOf(dir, { LEASE_CMD: command, ...(via.touch ? { TOUCH: via.touch } : {}) });
   return new Promise(resolve => {
-    const child = spawn(process.execPath, [script, ...settings], { env });
+    const child = spawn(process.execPath, [script, ...sources, ...settings], { env });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -112,6 +124,8 @@ async function zaiReady(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
   const added = await cli(["add", "zai", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, KEY);
   expect(added.code, added.stderr).toBe(0);
   expect((await cli(["ack", "zai", "--by", "owner"], env)).code).toBe(0);
+  const pinned = await cli(["pin-claude", "--path", process.execPath], env);          // the owner's one-time step
+  expect(pinned.code, pinned.stderr).toBe(0);
 }
 
 async function events(env: NodeJS.ProcessEnv, name?: string): Promise<Record<string, unknown>[]> {
@@ -206,21 +220,28 @@ describe("keys lease", () => {
     }
   }, 180_000);
 
-  it("check 2: a connection that has to run under os is served only to a claude parent with the sandbox settings", async () => {
+  it("check 2: a connection that has to run under os is served only to the pinned claude with the sandbox settings", async () => {
     const dir = homeDir();
     const env = envOf(dir);
     await zaiReady(dir, env);
-    type Settings = { sandbox: { enabled?: boolean; failIfUnavailable?: boolean; allowUnsandboxedCommands?: boolean; filesystem: { denyRead: string[] } }; permissions: { deny: string[] } };
-    const changed = (change: (s: Settings) => void) => settingsFile(dir, body => change(body as unknown as Settings));
+    const changed = (change: (s: Body) => void) => settingsJson(dir, change);
     const rows: { what: string; run: () => Promise<Out> }[] = [
       { what: "a bare --isolation os claim from any process", run: () => cli(["lease", "--connection", "zai", "--isolation", "os"], env) },
       { what: "the agent's own shell command: a shell between the lease and claude", run: () => lease(dir, [], { keepShell: true }) },
       { what: "claude started without --settings", run: () => lease(dir, [], { settings: null }) },
+      { what: "claude started without --setting-sources: user and project settings merge in", run: () => lease(dir, [], { sources: null }) },
+      { what: "claude started without --strict-mcp-config: the repo's MCP servers would start outside the sandbox", run: () => lease(dir, [], { strictMcp: false }) },
+      { what: "claude started with --setting-sources user", run: () => lease(dir, [], { sources: "user" }) },
       { what: "the sandbox is off", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.enabled = false; }) }) },
       { what: "the sandbox opens on failure", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.failIfUnavailable = false; }) }) },
       { what: "a command may leave the sandbox", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.allowUnsandboxedCommands = true; }) }) },
-      { what: "the vault is readable to Bash", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.filesystem.denyRead = s.sandbox.filesystem.denyRead.filter(p => !p.endsWith("/vault")); }) }) },
-      { what: "the identity is readable to the Read tool", run: () => lease(dir, [], { settings: changed(s => { s.permissions.deny = s.permissions.deny.filter(rule => !rule.includes("/identity")); }) }) },
+      { what: "a command is excluded from the sandbox", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.excludedCommands = ["cat"]; }) }) },
+      { what: "the vault is readable to Bash", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.filesystem.denyRead = s.sandbox.filesystem.denyRead.filter((p: string) => !p.endsWith("/vault")); }) }) },
+      { what: "the identity is readable to the Read tool", run: () => lease(dir, [], { settings: changed(s => { s.permissions.deny = s.permissions.deny.filter((rule: string) => !rule.includes("/identity")); }) }) },
+      { what: "allowRead re-opens the vault", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.filesystem.allowRead = [join(dir, "vault")]; }) }) },
+      { what: "allowWrite opens the pin", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.filesystem.allowWrite = [dir]; }) }) },
+      { what: "a settings file changed after claude started", run: () => { const file = settingsFile(dir); return lease(dir, [], { file, touch: file }); } },
+      { what: "a settings file the sandbox may write", run: () => lease(dir, [], { file: settingsFile(dir, s => { s.sandbox.filesystem.denyWrite = []; }) }) },
     ];
     for (const row of rows) {
       const ran = await row.run();
@@ -229,14 +250,28 @@ describe("keys lease", () => {
       expect(ran.stderr, row.what).not.toContain(KEY);
       expect(ran.code, row.what).toBe(75);
     }
+    // the parent is the node's pinned binary, not whatever the caller says: another pin, or none, refuses the right parent
+    const pinFile = join(dir, "claude-pin.json");
+    const pin = readFileSync(pinFile, "utf8");
+    expect((await cli(["pin-claude", "--path", "/bin/sh"], env)).code).toBe(0);
+    const wrong = await lease(dir);
+    expect([wrong.code, wrong.stdout, wrong.stderr.includes("isolation")], "pinned to another binary").toEqual([75, "", true]);
+    rmSync(pinFile);
+    const none = await lease(dir);
+    expect([none.code, none.stdout, none.stderr.includes("isolation")], "no pin").toEqual([75, "", true]);
     const all = await events(env, "zai");
-    expect(all.filter(e => e.type === "LeaseRefused" && e.reason === "isolation")).toHaveLength(rows.length);
+    expect(all.filter(e => e.type === "LeaseRefused" && e.reason === "isolation")).toHaveLength(rows.length + 2);
     expect(all.some(e => e.type === "KeyServed")).toBe(false);
     // and the right parent, once more, is served: the refusals above were the settings, not the setup
+    writeFileSync(pinFile, pin);
     const served = await lease(dir);
     expect(served.code, served.stderr).toBe(0);
     expect(served.stdout).toBe(`${KEY}\n`);
-  }, 240_000);
+    // a settings file that stays as it was, and is denied to writing, is served like inline JSON
+    const file = await lease(dir, [], { file: settingsFile(dir) });
+    expect(file.code, file.stderr).toBe(0);
+    expect(file.stdout).toBe(`${KEY}\n`);
+  }, 300_000);
 
   it("a connection that needs less than os is served on the caller's claim, and the audit says claimed", async () => {
     const dir = homeDir();
