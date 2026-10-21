@@ -842,7 +842,7 @@ Each change to a Run is a `run` event on `/v1/events` (§9), `{ t: "run", node, 
 | `file.get` | `{ path \| ref, offset, max }` | `{ bytes (base64), size, eof }` | none |
 | `file.put` | `{ upload, offset, bytes (base64), final, name }` | `{ path \| null }`: the file's place once final | yes |
 | `lane.start` | `{ name, cwd, account?, resume?, prompt?, role?, engine?, reason? }` | `{ workerId, waiting?: "trust", prompt?, engine? }` (below) | yes |
-| `lane.stop` | `{ name, mode?: "exit" \| "kill" }` | `{ ok: true }` (below) | yes |
+| `lane.stop` | `{ name, mode?: "exit" \| "kill", keepWindow?: boolean }` | `{ ok: true }` (below) | yes |
 | `worktree.list` | `{ repo }` | `{ worktrees: { path, branch \| null }[] }` | none |
 | `worktree.add` | `{ repo, name, base }` | `{ path }`: beside the repository, `<repo>-worktrees/<name>` | yes |
 | `memory.sync` | `{ version, part, parts, files: { name, content }[] }`: Memory's skills (ADR-0031), each name `morndo-mem-…` | `{ committed, written, removed, skillDirs, conflicts }`: `committed` once every part of the version is on the node, which then holds exactly these skills in its skill directories (the node agent's README) | yes |
@@ -861,7 +861,7 @@ Each change to a Run is a `run` event on `/v1/events` (§9), `{ t: "run", node, 
 - It never falls back to `launch` quietly. A node without engines, a role nothing can fill now, a provider with no launch command there, or the engine layer switched off: `denied`, nothing started. An unknown role: `bad_args`.
 - The answer's `engine` says what ran: `{ entry, role?, skipped? }`. `skipped` lists what the resolver passed over first, each with its reason; when it isn't empty, the fleet raises `engine_fallback` (§14). The audit row of the start keeps the `role` or `engine`, the `reason` and the entry that ran (`ran`).
 
-**`lane.stop`.** The default, `exit`, types `/exit` the way a delivery is typed and answers Claude Code's exit prompt. It then answers once the window has closed or is back at its shell, or with `uncertain` after 30 s. `kill` closes the window. Names in the policy's `protected` list (default `["manager"]`) are refused with `denied`.
+**`lane.stop`.** The default, `exit`, types `/exit` the way a delivery is typed and answers Claude Code's exit prompt. It then answers once the window has closed or is back at its shell, or with `uncertain` after 30 s. A window left at its shell is closed before the answer unless `keepWindow` is `true`. `kill` closes the window. Names in the policy's `protected` list (default `["manager"]`) are refused with `denied`.
 
 ```example op-inventory
 POST /v1/op
