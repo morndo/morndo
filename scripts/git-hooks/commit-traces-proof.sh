@@ -319,22 +319,22 @@ mkdir -p "$flog" "$scratch/bin"
 cat > "$scratch/bin/git" <<EOF
 #!/bin/sh
 echo x >> "$flog/git"
-exec "$real_git" "$@"
+exec "$real_git" "\$@"
 EOF
 cat > "$scratch/bin/grep" <<EOF
 #!/bin/sh
 echo x >> "$flog/grep"
-exec "$real_grep" "$@"
+exec "$real_grep" "\$@"
 EOF
 cat > "$scratch/bin/awk" <<EOF
 #!/bin/sh
 echo x >> "$flog/awk"
-exec "$real_awk" "$@"
+exec "$real_awk" "\$@"
 EOF
 cat > "$scratch/bin/sed" <<EOF
 #!/bin/sh
 echo x >> "$flog/sed"
-exec "$real_sed" "$@"
+exec "$real_sed" "\$@"
 EOF
 chmod +x "$scratch/bin/git" "$scratch/bin/grep" "$scratch/bin/awk" "$scratch/bin/sed"
 
@@ -343,7 +343,9 @@ shimmed() {
   rm -f "$flog/git" "$flog/grep" "$flog/awk" "$flog/sed"
   PATH="$scratch/bin:$PATH" sh "$checker" "$1" "$many" >/dev/null 2>&1
 }
-counts() { wc -l < "$flog/$1" | tr -d ' '; }
+counts() {
+  [ -f "$flog/$1" ] && cat "$flog/$1" | wc -l | tr -d " " || echo 0
+}
 
 shimmed mails || fail "mails over 150 clean commits should exit 0"
 gits=$(counts git)
@@ -378,14 +380,13 @@ exit 3
 EOF
 set +e
 PATH="$scratch/bin:$PATH" sh "$checker" mails "$fail_bad" >/dev/null 2>&1
-code=$?
+awk_code=$?
 PATH="$scratch/bin:$PATH" sh "$checker" range "$fail_bad" >/dev/null 2>&1
-two_code=$?
-set -e
+awk_two_code=$?
 cat > "$scratch/bin/git" <<EOF
 #!/bin/sh
 case " \$* " in
-  *" log "*) exit 1 ;;
+*" log "*) exit 1 ;;
 esac
 exec "$real_git" "\$@"
 EOF
@@ -394,12 +395,12 @@ code=$?
 PATH="$scratch/bin:$PATH" sh "$checker" range "$fail_bad" >/dev/null 2>&1
 two_code=$?
 set -e
-[ "$code" -ne 0 ] || fail "a failing awk should fail mails"
-[ "$two_code" -ne 0 ] || fail "a failing awk should fail range"
+[ "$awk_code" -ne 0 ] || fail "a failing awk should fail mails"
+[ "$awk_two_code" -ne 0 ] || fail "a failing awk should fail range"
 [ "$code" -ne 0 ] || fail "a failing git log should fail mails"
 [ "$two_code" -ne 0 ] || fail "a failing git log should fail range"
-
 cd "$root"
+
 set +e
 out=$(sh "$checker" range deadbeef..HEAD 2>&1)
 code=$?
