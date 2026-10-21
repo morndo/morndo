@@ -9,7 +9,7 @@
 // (orphans; the projector's, board-projector.ts), and a change of runs is pushed too, at most about once a second.
 // B11: each task's merges are kept with their liveness (merge-liveness.ts over the fleet's node builds), Done is judged
 // against them, and the view says for each task with merges where they stand ("merged, not live: pc on abc1234").
-import { DONE_SHOWN_MS, applyAction, boardChanged, boardOrder, createTask, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
+import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
@@ -136,13 +136,14 @@ export class BoardService {
 
   // `act`, for the agents' door (B11): a lane's merge record is first checked against the hub's checkout, once, and turned
   // away (`no_commit`) when the checkout says it has no such commit, so a lane cannot make the hub run git for any sha it
-  // invents. The manager's, the principal's and the console's records are not asked: they may come before the operator
+  // invents (a morndo/morndo record only). The manager's, the principal's and the console's records are not asked: they may come before the operator
   // brings the checkout up to date, and a refused record would leave the task with no merge to hold done for. "unknown"
   // (no checkout, git failing) takes the record.
   async actChecked(key: string, action: TaskAction, actor: TaskActor): Promise<BoardResult> {
     if (action.action === "merged" && actor.kind === "worker" && this.#knows) {
       const sha = action.sha.trim().toLowerCase();
-      if (/^[0-9a-f]{7,40}$/.test(sha) && await this.#knows(sha) === "no") return { ok: false, problem: "no_commit" };
+      // Only morndo/morndo: the checkout is a Morndo one and says nothing of another repo's commits.
+      if (isMorndoRepo((action.repo ?? MORNDO_REPO).trim()) && /^[0-9a-f]{7,40}$/.test(sha) && await this.#knows(sha) === "no") return { ok: false, problem: "no_commit" };
     }
     return this.act(key, action, actor);
   }

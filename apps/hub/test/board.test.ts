@@ -262,6 +262,14 @@ describe("merged, not live (B11)", () => {
     expect((await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA })).status).toBe(200);
   });
 
+  it("the checkout is asked only about morndo/morndo: a lane's record in another repo is taken", async () => {
+    await atReview();
+    knows = async () => "no";
+    const builder = agent(workerToken, "builder");
+    expect((await builder.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA, repo: "acme/other" })).status).toBe(200);
+    expect((await builder.post("/api/agent/board/tasks/T-1", { action: "merged", sha: "b".repeat(40), repo: "Morndo/Morndo" })).status).toBe(409);   // the same repo, any case
+  });
+
   it("a lane's merge record passes when the checkout has the commit, or cannot say", async () => {
     await atReview();
     const builder = agent(workerToken, "builder");
