@@ -152,6 +152,8 @@ export interface ServiceManager {
   tmuxInAgentUnit(): Promise<boolean>;
 }
 export interface RoleProbe {
+  /** Whether the service has read hold.json (its health's `held`, from service-kit HoldWatch); null: no answer. */
+  seesHold(s: UpdateService): Promise<boolean | null>;
   safePoint(s: UpdateService): Promise<SafePointReport | null>;
   health(s: UpdateService): Promise<HealthReport | null>;
 }

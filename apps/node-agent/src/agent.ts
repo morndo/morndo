@@ -111,10 +111,15 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   // for a safe point reads it while the work runs, not at the next health tick. saveStatus never throws (its write is
   // caught), so a failing disk cannot disturb the op that began or ended the item.
   const flight = o.flight ?? new Flight({ onChange: () => saveStatus() });
+  // Seeing the hold or no longer seeing it lands in status.json at once too: the updater waits for the node's word that
+  // it has seen the hold before it judges the drain. The status writer is defined below; until then there is nothing
+  // to rewrite.
+  let statusReady = false;
   const watch = new HoldWatch({
     path: holdFile(config.home),
     service: "node",
     onStale: message => log.warn(message),
+    onChange: () => { if (statusReady) saveStatus(); },
   });
   watch.start();
   let draining = false;
@@ -157,13 +162,14 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   const status = (): AgentStatus => ({
     ...(conn?.status() ?? { state: "stopped", since: Date.now(), connEpoch: null, lastClose: null, retryInMs: null }),
     node: config.node, instanceId, pid: process.pid, spoolDepth: spool.depth(), drops: spool.drops,
-    version: productVersion(), ready: true,
+    version: productVersion(), ready: true, held: watch.held,
     inFlight: flight.list().slice(0, 100),               // the protocol's cap; what a restart would interrupt
     ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
   });
   const saveStatus = () => {
     try { writeStatus(paths.statusFile, status()); } catch (e) { log.warn("could not write status.json", e); }
   };
+  statusReady = true;
   const errorRes = (id: string, error: OpError): AgentMessage =>
     ({ v: 1, t: "res", id, invVersion: ops.inventory.invVersion, store: streamId, ok: false, error, storeSeq: ops.doneKeys.seq() });
 

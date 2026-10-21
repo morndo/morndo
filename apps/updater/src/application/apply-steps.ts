@@ -30,13 +30,13 @@ export type ApplyDeps = {
 };
 
 // §6.2's walls: the drain's patience, the polls, §6.4's health deadline and probation.
-export type ApplyTiming = { drainMs: number; pollMs: number; healthMs: number; probationMs: number; holdSeenMs: number };
+export type ApplyTiming = { drainMs: number; pollMs: number; healthMs: number; probationMs: number; holdAckMs: number };
 export const timingOf = (t?: Partial<ApplyTiming>): ApplyTiming => ({
   drainMs: t?.drainMs ?? 30_000,            // §6.2 step 3's patience with work in flight
   pollMs: t?.pollMs ?? 1_000,
-  // The services re-read hold.json every second (service-kit HoldWatch): a safe point read sooner after the hold is
-  // written can pass before a service has stopped taking new work (review of 2026-10-21).
-  holdSeenMs: t?.holdSeenMs ?? 2_000,
+  // How long each service gets to say it has seen the hold (its health's `held`; service-kit HoldWatch re-reads
+  // hold.json every second). A service that does not say so in time defers the apply (review of 2026-10-21).
+  holdAckMs: t?.holdAckMs ?? 5_000,
   healthMs: t?.healthMs ?? HEALTH_DEADLINE_MS,
   probationMs: t?.probationMs ?? PROBATION_MS,
 });
@@ -144,6 +144,19 @@ export async function waitSafePoint(
     });
     if (judged.ok) return null;
     if (ctx.deps.clock.now() >= deadline) return blockerNames(judged.error);
+    await ctx.deps.sleeper.sleep(ctx.timing.pollMs);
+  }
+}
+
+// The services' own word that they have seen the hold (§6.2 step 3): each running service's health says `held` once
+// its HoldWatch has read hold.json. Null when they all have; otherwise the ones that did not, by the ack's wall.
+export async function waitHoldSeen(ctx: StepCtx, running: readonly UpdateService[]): Promise<string[] | null> {
+  const deadline = ctx.deps.clock.now() + ctx.timing.holdAckMs;
+  for (;;) {
+    const missing: string[] = [];
+    for (const s of running) if ((await ctx.deps.probe.seesHold(s)) !== true) missing.push(`${s}: has not seen the hold`);
+    if (missing.length === 0) return null;
+    if (ctx.deps.clock.now() >= deadline) return missing;
     await ctx.deps.sleeper.sleep(ctx.timing.pollMs);
   }
 }
@@ -264,13 +277,20 @@ export type RollbackOutcome =
 // rolling_back for the recovery unit to pick up again, with the critical Alert (RL13). A rollback that cannot put
 // the old Version back healthy is the loudest outcome there is, and it stops there: no loop, and the services are
 // left to the service manager (§4.4).
+const revocationsDropped = (db: string, dropped: readonly string[], target: string, cause: string): string =>
+  `${db}: restoring its backup would drop the revocation of ${dropped.join(", ")}, made since the backup; ${target} keeps running (${cause})`;
+
 export async function runRollback(ctx: StepCtx, o: {
   running: readonly UpdateService[];
   cause: string;
   baseline: Record<string, string[]> | null;    // the apply's own, when it has one; a recovery reads fresh
 }): Promise<RollbackOutcome> {
   const { deps } = ctx;
+  // A failed rollback is the target failing here all the same: bad on this machine (RL7) and its Rollout halted
+  // (RL12) go on record before the alert, so nothing auto-installs it again and the fleet stops it elsewhere.
   const failed = (reason: string): RollbackOutcome => {
+    deps.store.recordBad(formatVersion(ctx.u.target), deps.clock.now());
+    deps.store.recordHalt(formatVersion(ctx.u.target), reason, deps.clock.now());
     deps.alerts.raise("update_rollback_failed", reason);
     done(ctx, "rolling_back");
     finish(ctx, "rollback_failed");
@@ -304,12 +324,18 @@ export async function runRollback(ctx: StepCtx, o: {
       });
       if (!allowed.ok) return failed(`${db}: ${allowed.error} (${o.cause})`);
       const dropped = deps.revocations.droppedBy(ctx.u.id, db);
-      if (dropped.length > 0) {
-        return failed(`${db}: restoring its backup would drop the revocation of ${dropped.join(", ")}, made since the backup; `
-          + `${targetText} keeps running (${o.cause})`);
-      }
+      if (dropped.length > 0) return failed(revocationsDropped(db, dropped, targetText, o.cause));
     }
     await stopServices(deps, o.running);
+    // Again now that nothing runs: a revoke that landed between the check above and the stop lives only in the
+    // database the restore would replace. Then the target's services start again and the rollback fails loudly.
+    for (const db of restores) {
+      const dropped = deps.revocations.droppedBy(ctx.u.id, db);
+      if (dropped.length > 0) {
+        await startServices(deps, o.running);
+        return failed(revocationsDropped(db, dropped, targetText, o.cause));
+      }
+    }
     // The pair goes back as it was recorded (§6.5 step 2): the units, then the links — current first, then
     // previous, so a crash in between leaves both links on the known-good Version.
     await deps.services.renderUnits(oldText);

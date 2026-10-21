@@ -68,6 +68,23 @@ describe("HoldWatch", () => {
   });
 });
 
+describe("HoldWatch onChange", () => {
+  it("is told when the service starts and stops seeing the hold, and only then", () => {
+    const path = join(dir(), "hold.json");
+    const t = Date.parse("2026-10-11T08:20:00.000Z");
+    const seen: boolean[] = [];
+    const watch = new HoldWatch({ path, service: "hub", now: () => t, onChange: held => seen.push(held) });
+    watch.refresh();
+    writeFileSync(path, hold({ since: "2026-10-11T08:20:00.000Z" }));
+    watch.refresh();
+    watch.refresh();
+    rmSync(path);
+    watch.refresh();
+    expect(seen).toEqual([true, false]);
+    watch.stop();
+  });
+});
+
 describe("Flight", () => {
   it("is idle at once when nothing is running, and waits for what is", async () => {
     const flight = new Flight();

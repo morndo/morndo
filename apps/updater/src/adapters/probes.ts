@@ -79,6 +79,13 @@ export class ServiceProbes implements RoleProbe {
     this.#timeoutMs = o.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
+  // The service's word that it has seen hold.json (`held`, from its HoldWatch). A service from before that word says
+  // nothing, which is no acknowledgement: the apply then waits it out and defers (§6.2 step 3).
+  async seesHold(s: UpdateService): Promise<boolean | null> {
+    const doc = s === "node" ? this.#agentStatus() : await this.#serviceHealth(s);
+    return doc === null || doc.held === undefined ? null : doc.held;
+  }
+
   async safePoint(s: UpdateService): Promise<SafePointReport | null> {
     if (s === "node") {
       const status = this.#agentStatus();

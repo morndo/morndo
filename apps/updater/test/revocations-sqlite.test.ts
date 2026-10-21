@@ -47,4 +47,19 @@ describe("SqliteRevocations", () => {
     expect(r.droppedBy("upd-missing", "hub")).toEqual([]);
     expect(r.droppedBy("upd-2", "node")).toEqual([]);
   });
+
+  it("names the connections store's revoked secrets and secret versions", () => {
+    const home = join(scratch, "c");
+    const paths = databasePaths(home, {});
+    const backups = join(home, "backups");
+    const tables = `CREATE TABLE secrets (reference TEXT NOT NULL, status TEXT NOT NULL);
+      CREATE TABLE secret_versions (reference TEXT NOT NULL, version INTEGER NOT NULL, state TEXT NOT NULL);`;
+    db(join(backups, "upd-3", "connections.db"), `${tables}
+      INSERT INTO secrets VALUES ('vendor-key', 'active'); INSERT INTO secret_versions VALUES ('vendor-key', 1, 'current');`);
+    db(paths.connections, `${tables}
+      INSERT INTO secrets VALUES ('vendor-key', 'revoked'); INSERT INTO secret_versions VALUES ('vendor-key', 1, 'revoked');`);
+    const r = new SqliteRevocations({ paths, backups });
+    expect(r.droppedBy("upd-3", "connections")).toEqual(["secret_versions:vendor-key#1", "secrets:vendor-key"]);
+  });
+
 });

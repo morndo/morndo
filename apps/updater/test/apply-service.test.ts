@@ -347,10 +347,10 @@ describe("the apply service (§6.2–§6.5)", () => {
 
   // ---- the review of 2026-10-21 (md-rev5 on #101)
 
-  it("waits for the services to have seen the hold before it judges the drain", async () => {
-    // The services re-read hold.json every second (service-kit HoldWatch): a safe-point read in the same instant as
-    // the write can pass before a service has stopped taking new work. The first read under the hold comes a full
-    // re-read interval later.
+  it("waits for each service's acknowledgement of the hold before it judges the drain", async () => {
+    // The services re-read hold.json every second (service-kit HoldWatch) and say so in their health (`held`): a
+    // safe-point read before a service has seen the hold can pass while it still takes new work. The world's services
+    // acknowledge one re-read interval after the write; no read under the hold comes before that.
     const w = await buildApplyWorld(scratch);
     const sinceHold: number[] = [];
     w.probe.safePointScript = (s) => {
@@ -434,6 +434,72 @@ describe("the apply service (§6.2–§6.5)", () => {
     w.timeline.nowMs += 6 * 60_000;                           // 12 minutes after the first hold
     const view = readHold({ path: w.holdPath, service: "fleet", now: w.timeline.now() });
     expect(view.kind, "still held, not stale").toBe("held");
+  });
+
+
+  // ---- the second review of 2026-10-21 (md-rev5 on #101 at 679be5a)
+
+  it("a service that never acknowledges the hold defers the apply, with the hold lifted and nothing stopped", async () => {
+    const w = await buildApplyWorld(scratch);
+    w.probe.seesHoldScript = (s) => s !== "fleet";            // the fleet never says it has seen the hold
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "deferred" });
+    if (out.kind !== "deferred") throw new Error("unreachable");
+    expect(out.blockers.join(" ")).toContain("fleet");
+    expect(w.tape.some(t => t.startsWith("stop:"))).toBe(false);
+    expect(holdText(w.holdPath)).toBeNull();
+    expect(w.current()).toBe(A);
+  });
+
+  it("a rollback that fails records the target bad and halts its rollout, then raises the alert", async () => {
+    const w = await buildApplyWorld(scratch);
+    let seenB = false;
+    w.probe.healthScript = (s) => {
+      const at = w.current();
+      if (at === B) { seenB = true; return s === "hub" ? null : { service: s, version: B, checks: { ready: true, database: true } }; }
+      if (seenB) return { service: s, version: A, checks: { ready: false, database: true } };   // A will not come back either
+      return { service: s, version: at ?? A, checks: { ready: true, database: true } };
+    };
+    expect(await w.apply().apply({ now: false })).toMatchObject({ kind: "rollback_failed" });
+    expect(w.store.badVersions()).toContain(B);
+    expect(w.store.halts().map(h => h.version)).toEqual([B]);
+    expect(w.alerts.raised.some(a => a.kind === "update_rollback_failed")).toBe(true);
+  });
+
+  it("a revocation that lands while the services stop is still never dropped by a restore", async () => {
+    // The first check runs before the stop; a revoke can land between it and the stop. The check runs again once
+    // nothing runs any more, and refuses then: the target's services start again and the rollback fails loudly.
+    const w = await buildApplyWorld(scratch, { bSchemas: SCHEMAS_B_FLEET_FLOOR });
+    const fleet = new Database(w.dbPaths.fleet);
+    fleet.exec("CREATE TABLE nodes (name TEXT PRIMARY KEY, revoked_at INTEGER)");
+    fleet.prepare("INSERT INTO nodes (name, revoked_at) VALUES (?, NULL)").run("node-c");
+    fleet.close();
+    w.services.onStart = (s, current) => {
+      if (s !== "fleet" || current !== B) return;
+      const db = new Database(w.dbPaths.fleet);
+      db.pragma("user_version = 3");
+      writeFloor(db, 3);
+      db.close();
+    };
+    let stopsAtB = 0;
+    w.services.onStop = (s, current) => {
+      if (current !== B || s !== "fleet") return;
+      stopsAtB += 1;
+      const db = new Database(w.dbPaths.fleet);
+      db.prepare("UPDATE nodes SET revoked_at = ? WHERE name = ?").run(2, "node-c");     // the last write before the stop
+      db.close();
+    };
+    w.probe.healthScript = (s) =>
+      s === "hub" && w.current() === B ? null : { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+    const out = await w.apply().apply({ now: false });
+    expect(stopsAtB).toBe(1);
+    expect(out).toMatchObject({ kind: "rollback_failed" });
+    if (out.kind !== "rollback_failed") throw new Error("unreachable");
+    expect(out.reason).toContain("nodes:node-c");
+    expect(w.tape).not.toContain("backup:restore:fleet");
+    expect(w.current(), "the links never moved back").toBe(B);
+    const after = w.tape.slice(w.tape.lastIndexOf("stop:fleet"));
+    expect(after.filter(t => t.startsWith("start:")).length, "the target's services started again").toBe(3);
   });
 
 });

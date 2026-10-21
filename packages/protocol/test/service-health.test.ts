@@ -3,7 +3,7 @@
 // file has none, which the updater takes as no_answer rather than as quiet, so the field is optional but its absence
 // says something.
 import { describe, expect, it } from "vitest";
-import { NodeStatusHealth } from "../src/service-health.ts";
+import { NodeStatusHealth, ServiceHealth } from "../src/service-health.ts";
 
 const status = (over: Record<string, unknown> = {}) => ({
   version: "0.5.0", ready: true, state: "online", node: "pc", instanceId: "0d1e2f3a-1111-4222-8333-444455556666",
@@ -13,6 +13,11 @@ const status = (over: Record<string, unknown> = {}) => ({
 const item = (id: string) => ({ kind: "pane.send", id });
 
 describe("NodeStatusHealth", () => {
+  it("carries a service's acknowledgement of the hold, as a boolean or not at all", () => {
+    expect(NodeStatusHealth.safeParse(status({ held: true })).success).toBe(true);
+    expect(ServiceHealth.safeParse({ version: "0.2.0", schema: 3, ready: true, held: false, inFlight: [] }).success).toBe(true);
+    expect(ServiceHealth.safeParse({ version: "0.2.0", schema: 3, ready: true, held: "yes", inFlight: [] }).success).toBe(false);
+  });
   it("accepts the agent's status with inFlight and one without (an older agent)", () => {
     expect(NodeStatusHealth.safeParse(status({ inFlight: [item("hub:1"), { kind: "lane.start", id: "hub:2" }] })).success).toBe(true);
     expect(NodeStatusHealth.safeParse(status()).success).toBe(true);

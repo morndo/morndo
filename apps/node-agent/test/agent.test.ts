@@ -7,10 +7,10 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CAP_LONG_TEXT, LIMITS, NodeStatusHealth } from "@morndo/protocol";
-import { Flight } from "@morndo/service-kit";
+import { Flight, holdFile } from "@morndo/service-kit";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
 import { agentPaths } from "../src/paths.ts";
 import { openAgentDb } from "../src/db/open.ts";
@@ -516,6 +516,22 @@ describe("in-flight work, in status.json and across a stop (§6.3)", () => {
   };
   const sendPaste = (id: string, key: string, workerId: string, text: string) =>
     fleet.send({ t: "req", id, op: "pane.send", args: { workerId, text, expect: { server: workerId.split(".")[1], window: "api" } }, timeoutMs: 10_000, key });
+
+  it("status.json says the node has seen the hold within a re-read interval, not at the next health tick", async () => {
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    const heldOf = (): boolean | undefined => {
+      try { return (JSON.parse(readFileSync(agentPaths(home.home).statusFile, "utf8")) as { held?: boolean }).held; }
+      catch { return undefined; }
+    };
+    expect(await until(() => heldOf() === false, 2000, 5)).toBe(true);
+    const path = holdFile(home.home, { HOME: home.home, NODE_ENV: "test" });
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ services: ["node"], reason: "drain", version: "0.2.0", since: new Date().toISOString() }));
+    try {
+      expect(await until(() => heldOf() === true, 3000, 5), "acknowledged within about a second").toBe(true);
+    } finally { rmSync(path, { force: true }); }
+  });
 
   it("status.json lists the paste while it is typed, and nothing after", async () => {
     const submitted = await claudeLane();

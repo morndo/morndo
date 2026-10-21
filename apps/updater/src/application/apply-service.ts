@@ -11,7 +11,7 @@ import { ManifestSchema } from "@morndo/protocol";
 import { CHECKOUT_SENTENCE } from "./check-service.ts";
 import {
   ApplyInterrupted, type ApplyDeps, type ApplyTiming, type StepCtx, abandonAttempt, baselineBefore, continueAfterSwap,
-  done, finish, mark, runRollback, startServices, stopServices, takeBackups, timingOf, waitSafePoint,
+  done, finish, mark, runRollback, startServices, stopServices, takeBackups, timingOf, waitHoldSeen, waitSafePoint,
 } from "./apply-steps.ts";
 import type {
   AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, SchemaInspector,
@@ -139,9 +139,14 @@ export class ApplyService {
       // the recovery unit runs on, so a process that dies past this point is always somebody's to finish.
       applying.set(ctx.u.id);
       hold.write({ services: [...running], reason: "drain", version: staged.version, since: clock.now() });
-      // The services re-read the hold every second; the drain is judged only once each has had a full interval to
-      // see it and stop taking new work (review of 2026-10-21).
-      await deps.sleeper.sleep(timing.holdSeenMs);
+      // The drain is judged only once every service has said it has seen the hold and stopped taking new work; one
+      // that does not say so in time defers the attempt like work that never drains (review of 2026-10-21).
+      const unseen = await waitHoldSeen(ctx, running);
+      if (unseen !== null) {
+        hold.clear();
+        finish(ctx, "abandoned");
+        return { kind: "deferred", reason: "a service did not acknowledge the hold", blockers: unseen };
+      }
       const drainBlockers = await waitSafePoint(ctx, running, { now: o.now });
       if (drainBlockers !== null) {
         hold.clear();

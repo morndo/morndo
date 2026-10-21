@@ -182,7 +182,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     const method = req.method ?? "GET";
     const [first, second, third] = s;
     if (method === "GET" && s.length === 1 && first === "health") {
-      return json(res, 200, { version: productVersion(), schema, ready: true, inFlight: flight.list() });
+      return json(res, 200, { version: productVersion(), schema, ready: true, held: held(), inFlight: flight.list() });
     }
     if (method === "GET" && s.length === 1 && first === "caps") return json(res, 200, { api: API_VERSIONS, stickyLanes: d.deliveries.stickyLanes });
     if (method === "GET" && s.length === 1 && first === "nodes") return json(res, 200, d.connections.list());

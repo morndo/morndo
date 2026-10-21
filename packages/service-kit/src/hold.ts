@@ -103,11 +103,18 @@ export class HoldWatch {
   #staleNoted = false;
   #timer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(opts: { path: string; service: ServiceName; now?: () => number; onStale?: (message: string) => void }) {
+  #onChange: (held: boolean) => void;
+
+  // onChange: told when this service starts or stops seeing the hold, so it can say so in its health at once — the
+  // updater waits for that acknowledgement before it judges the drain (updates design §6.2 step 3).
+  constructor(opts: {
+    path: string; service: ServiceName; now?: () => number; onStale?: (message: string) => void; onChange?: (held: boolean) => void;
+  }) {
     this.#path = opts.path;
     this.#service = opts.service;
     this.#now = opts.now ?? Date.now;
     this.#onStale = opts.onStale ?? (() => {});
+    this.#onChange = opts.onChange ?? (() => {});
   }
 
   start(): void {
@@ -131,7 +138,11 @@ export class HoldWatch {
     } else {
       this.#staleNoted = false;
     }
-    this.#held = view.kind === "held";
+    const held = view.kind === "held";
+    if (held !== this.#held) {
+      this.#held = held;
+      this.#onChange(held);
+    }
     return view;
   }
 
