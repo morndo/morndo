@@ -2149,15 +2149,23 @@ export const CONTROLS: Control[] = [
   // differently normalised) link target climb out, and two spellings that fold to one name pass as two entries.
   // The rule is the archive's names, not the file system's, so these run on every platform (no platform field).
   { id: "pr4-link-case-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
-    find: "path.normalize(\"NFKC\").toUpperCase().toLowerCase().normalize(\"NFC\")", replace: "path",
+    find: "const next = foldStep(key);", replace: "const next = key;",
     run: ["apps/updater/test/tar-read.test.ts"], expect: "to be an instance of TarRefused" },
   { id: "pr4-link-nfd-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
-    find: ".normalize(\"NFKC\").toUpperCase().toLowerCase().normalize(\"NFC\")", replace: ".toUpperCase().toLowerCase()",
+    find: "export const foldKey = (path: string): string => {\n  let key = path.normalize(FOLD_FORM);\n  for (let round = 0; round < FOLD_ROUNDS; round += 1) {\n    const next = foldStep(key);\n    if (next === key) break;\n    key = next;\n  }\n  return key.normalize(\"NFC\");\n};",
+    replace: "export const foldKey = (path: string): string => path.toLowerCase().toUpperCase().toLowerCase();",
     run: ["apps/updater/test/tar-read.test.ts"], expect: "to be an instance of TarRefused" },
   // The review of 2026-10-21 (second round): lower case alone keeps ß/ss and ς/σ apart.
   { id: "pr4-full-case-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
-    find: ".toUpperCase().toLowerCase()", replace: ".toLowerCase()",
+    find: "s.toLowerCase().toUpperCase().toLowerCase().normalize(FOLD_FORM)", replace: "s.toLowerCase().normalize(FOLD_FORM)",
     run: ["apps/updater/test/tar-read.test.ts"], expect: "sharp-s" },
+  // The review of 2026-10-21 (third round): the compatibility step on its own, and the packer's fold.
+  { id: "pr4-nfkc-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
+    find: "const FOLD_FORM = \"NFKC\";", replace: "const FOLD_FORM = \"NFC\";",
+    run: ["apps/updater/test/tar-read.test.ts"], expect: "compatibility form" },
+  { id: "pr4-pack-fold", task: "pr4", file: "scripts/release/archive.ts",
+    find: "const next = foldStep(key);", replace: "const next = key;",
+    run: ["scripts/release/release.test.ts"], expect: "folded names" },
   { id: "pr4-download-cap-ignored", task: "pr4", file: "apps/updater/src/adapters/https-get.ts",
     find: "if (chunk.length > room) overLimit = true;", replace: "if (false) overLimit = true;",
     run: ["apps/updater/test/artifacts-https.test.ts"], expect: "expected false to be true" },
