@@ -108,7 +108,9 @@ export function deriveRun(f: RunFacts): Run {
   const quiet = !(f.activity && f.activity.last > t.at);
   const lease = t.until ?? t.at + f.waitMs;
   if (t.tasks.length > 0) {
-    return { ...base, phase: "waiting", wait: { on: "background", tasks: [...t.tasks] }, deadline: lease, overdue: quiet && f.now > lease, since: t.at, source: "hook", line: t.line };
+    // The turn's own word stays on the Run: a DONE with background work left is still DONE (the board's D1 reads it).
+    const said = t.status === "waiting" || t.status === null ? {} : { outcome: t.status };
+    return { ...base, phase: "waiting", wait: { on: "background", tasks: [...t.tasks] }, ...said, deadline: lease, overdue: quiet && f.now > lease, since: t.at, source: "hook", line: t.line };
   }
   if (t.wakes.length > 0) {
     const fires = t.wakes.map(w => (f.tzOffsetMin === null ? null : nextFire(w.schedule, t.at, f.tzOffsetMin)));

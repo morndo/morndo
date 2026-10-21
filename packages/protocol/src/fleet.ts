@@ -158,7 +158,7 @@ export type OpArgs = {
   // role or engine, at most one (reliable lanes §3.3): what the lane runs on; reason: why an engine was named instead of the
   // node's default role, for the audit.
   "lane.start": { name: string; cwd: string; account?: string; resume?: string; prompt?: string; role?: string; engine?: string; reason?: string };
-  "lane.stop": { name: string; mode?: "exit" | "kill" };
+  "lane.stop": { name: string; mode?: "exit" | "kill"; keepWindow?: boolean };
   "worktree.list": { repo: string };
   "worktree.add": { repo: string; name: string; base: string };
   "pane.capture": { workerId: string; lines: number; attributes?: boolean; join?: boolean };   // join: tmux -J, default true
@@ -380,7 +380,7 @@ export const OP_ARGS = {
   "lane.start": z.object({ name: windowName(), cwd: absolutePath(), account: z.exactOptional(account()), resume: z.exactOptional(z.uuid()),
     prompt: z.exactOptional(sendText()), role: z.exactOptional(roleName()), engine: z.exactOptional(engineEntry()), reason: z.exactOptional(reason()),
   }).check(z.refine(a => a.role === undefined || a.engine === undefined, "role or engine, not both")),
-  "lane.stop": z.object({ name: windowName(), mode: z.exactOptional(z.enum(["exit", "kill"])) }),
+  "lane.stop": z.object({ name: windowName(), mode: z.exactOptional(z.enum(["exit", "kill"])), keepWindow: z.exactOptional(z.boolean()) }),
   "worktree.list": z.object({ repo: absolutePath() }),
   "worktree.add": z.object({ repo: absolutePath(), name: refName(), base: refName() }),
   "pane.capture": z.object({

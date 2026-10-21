@@ -8,6 +8,11 @@
 # A dependabot[bot] author, committer, or trailer is allowed. Any other
 # [bot] identity is not. Install the commit-msg hook with
 # scripts/install-git-hooks.sh.
+# COMMIT_TRACES_LEGACY: full commit ids, separated by spaces, whose author and
+# committer addresses are not checked. For a commit already in the published
+# history whose address cannot be rewritten; only its address is spared, by an
+# exact match of the whole id. Nothing sets it but a proof (pre-push-proof.sh
+# pins the one commit this repository has); never set it in CI or a hook.
 set -eu
 
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
@@ -61,6 +66,7 @@ github_committer() {
 
 check_mails() {
   sha=$1
+  case " ${COMMIT_TRACES_LEGACY:-} " in *" $sha "*) return 0 ;; esac
   ae=$(git log -1 --format='%ae' "$sha")
   ce=$(git log -1 --format='%ce' "$sha")
   noreply_mail "$ae" || fail "$sha author email is not @users.noreply.github.com"

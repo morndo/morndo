@@ -51,12 +51,12 @@ The Fleet supplies the Board (customer and supplier). The Board reads runs and n
 | # | Invariant |
 |---|---|
 | B10 | The board moves a task by itself, as actor `board`, only along these edges. The record names the rule and the run it read. |
-| D1 | In progress to in review: the assignee's run ended `done` after the task's last change. The reason is its status line. |
+| D1 | In progress to in review: the assignee's turn ended `done` after the task's last change of state, even while its background work is still running (the run keeps the turn's outcome). The reason is its status line, or "background work still running" while that work runs. |
 | D2 | In progress to blocked: the run ended `blocked` or `needs_decision`. The reason is its status line. |
 | D3 | In progress to to do: the assignee's run is `gone`. The reason is "its lane stopped without DONE". |
 | D4 | To do, blocked or in review to in progress: the assignee's run is `working` or `waiting` since after the task's last change, the lane has no other task in progress (B5), and this is its only open task. |
 | D5 | The board never moves a task to done, and never assigns or edits one (B2, B3, B9 hold). |
-| D6 | A run whose phase began before the task's last change moves nothing, so the board never undoes a move a person or a lane made after it. |
+| D6 | A run whose phase began before the task's last change of state (status, assignee or description; a comment is not one) moves nothing, so the board never undoes a move a person or a lane made after it. |
 
 **The console actor.** `morndo lanes start <name> --task T-12` assigns T-12 to the new lane as `console`, the control plane's console, which already acts for the principal (`memory approve`, `pair`, `revoke`). The lane's first turn then moves T-12 to in progress (D4).
 

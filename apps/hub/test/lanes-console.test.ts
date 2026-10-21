@@ -359,6 +359,15 @@ describe("morndo lanes: keys, start, stop, status, events", () => {
     expect(denied.err).toContain("refused: denied");                          // the refusal's code, on stderr
   });
 
+  it("stop --keep-window asks the node to leave the window; without it the arg is not sent; --kill takes no --keep-window", async () => {
+    fleet.intercept("lane.stop", async () => ({ ok: true, result: { ok: true } }));
+    expect((await lanes(["stop", "alpha", "--keep-window"])).code).toBe(0);
+    expect(fleet.calls.filter(c => c.op === "lane.stop").map(c => c.args)).toEqual([{ name: "alpha", mode: "exit", keepWindow: true }]);
+    const both = await lanes(["stop", "alpha", "--kill", "--keep-window"]);
+    expect(both.code).toBe(2);
+    expect(both.err).toContain("--keep-window");
+  });
+
   // QA on two machines (PR #34): a window named by hand on a second node puts a name in conflict, and the fleet's refusal
   // says to address one by its worker ID. Every command that takes a lane takes one, and routes to that node.
   it("a worker ID names one of two windows that share a name: peek, send, keys and stop reach it; the name alone is refused", async () => {
