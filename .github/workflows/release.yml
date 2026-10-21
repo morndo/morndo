@@ -1,0 +1,588 @@
+# Cut a release when Release Please merges to main (design §9, ADR-0019).
+# A tag this workflow creates with GITHUB_TOKEN does not start another workflow, so build, sign and
+# publish stay in this run. Job permissions replace the workflow permissions; they do not merge
+# (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#defining-access-for-the-github_token-permissions,
+# read 2026-10-13).
+#
+# Pins, resolved from the release tags on 2026-10-13:
+#   googleapis/release-please-action v5.0.0  45996ed1f6d02564a971a2fa1b5860e934307cf7
+#   actions/checkout v7.0.1                   3d3c42e5aac5ba805825da76410c181273ba90b1
+#   actions/setup-node v7.0.0                 820762786026740c76f36085b0efc47a31fe5020
+#   actions/upload-artifact v7.0.1            043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+#   actions/download-artifact v7.0.0          37930b1c2abaa49bbe596cd826c3c89aef350131
+#   actions/attest v4.2.2                     1e69f48acb82d1966a394da916b4c1698aa569d6
+#   actions/upload-pages-artifact v5.0.0      fc324d3547104276b827a68afc52ff2a11cc49c9
+#   actions/deploy-pages v5.0.1               368f82528645a54fb793d4d04e342629a3f51346
+#   actions/create-github-app-token v3.3.0    64ab729a6294000f5aa4a4bc0b73d1f32bc45510
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: morndo-release
+  cancel-in-progress: false
+
+jobs:
+  signers:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: check
+        run: |
+          set -euo pipefail
+          if [ -s trust/release_allowed_signers ] && [ -s trust/feed_allowed_signers ] && [ -s trust/keys.json ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skipping release: trust/release_allowed_signers, trust/feed_allowed_signers or trust/keys.json is not in the tree yet" >&2
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  release-please:
+    # The manifest releaser creates the tag and the draft only when this job runs
+    # (draft, force-tag-creation). https://github.com/googleapis/release-please/blob/main/docs/manifest-releaser.md
+    # read 2026-10-13. Missing signer files skip the job, so no tag and no draft are left behind.
+    needs: signers
+    if: needs.signers.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      # release-please-action v5.0.0 sets these from code. Its action.yml declares no outputs
+      # (tag 45996ed1f6d02564a971a2fa1b5860e934307cf7, read 2026-10-13), so actionlint cannot see them.
+      # actionlint-disable-next-line
+      release_created: ${{ steps.release.outputs.release_created }}
+      # actionlint-disable-next-line
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      # actionlint-disable-next-line
+      sha: ${{ steps.release.outputs.sha }}
+      # actionlint-disable-next-line
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      # A pull request opened with GITHUB_TOKEN starts no workflows, so the required checks never run.
+      # https://docs.github.com/en/actions/concepts/security/github_token (read 2026-10-13)
+      # The app token opens the release PR. Secrets: RELEASE_APP_ID, RELEASE_APP_PRIVATE_KEY.
+      - id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+      - id: release
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build:
+    needs: [release-please, signers]
+    if: needs.signers.outputs.ready == 'true' && needs.release-please.outputs.release_created == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    # Hosted runners: ubuntu-24.04, ubuntu-24.04-arm, macos-15 (Apple silicon).
+    # https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#choosing-runners-in-a-group
+    # read 2026-10-13. Floating runner labels move; these three stay put.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-arm64
+            runner: macos-15
+    env:
+      BUNDLED_NODE: "24.21.0"
+      NODE_RELEASE_KEYS_COMMIT: "481637f813e912c4aa3622d7964ab426c97b8e8d" #gitleaks:allow
+      VERSION: ${{ needs.release-please.outputs.version }}
+      RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+      PLATFORM: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: GnuPG on macOS
+        if: runner.os == 'macOS'
+        run: command -v gpgv >/dev/null || brew install gnupg
+
+      - name: Node release keyring
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pubring.kbx" \
+            "https://raw.githubusercontent.com/nodejs/release-keys/${NODE_RELEASE_KEYS_COMMIT}/gpg/pubring.kbx"
+
+      - name: Verify and unpack Node
+        run: sh scripts/release/verify-node.sh "$BUNDLED_NODE" "$PLATFORM" "$RUNNER_TEMP/node" "$RUNNER_TEMP/pubring.kbx"
+
+      - name: Test, build and pack
+        run: |
+          set -euo pipefail
+          export PATH="$RUNNER_TEMP/node/bin:$PATH"
+          node -v | grep -qx "v${BUNDLED_NODE}"
+          npm ci
+          # better-sqlite3 13.0.3 ships its prebuild and has no install script (gypfile false).
+          # allowScripts keeps npm from running one (ADR-0005). If a later version adds scripts.install,
+          # run that script on this Node, then load the module from the staged tree below.
+          if node -e "const s=require('./node_modules/better-sqlite3/package.json').scripts||{}; if(!s.install) process.exit(1)"; then
+            npm run install --prefix node_modules/better-sqlite3
+          fi
+          npx vitest run --project=units
+          npm run build
+          # Node will not strip types under node_modules (nodejs.org/docs/latest-v24.x/api/typescript.html,
+          # "Type stripping in dependencies", v24.21.0, read 2026-10-13). Compile while typescript is installed.
+          node scripts/release/main.ts compile --repo "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/compiled"
+          npm prune --omit=dev
+          mtime=$(git log -1 --format=%ct "$RELEASE_SHA")
+          node scripts/release/main.ts stage --repo "$GITHUB_WORKSPACE" --node "$RUNNER_TEMP/node" --dest "$RUNNER_TEMP/stage" --version "$VERSION" --compiled "$RUNNER_TEMP/compiled"
+          ( cd "$RUNNER_TEMP/stage/app" && "$RUNNER_TEMP/node/bin/node" -e "require('better-sqlite3')(':memory:').close()" )
+          for name in morndo morndo-fleet morndo-node morndo-job morndo-board morndo-keys; do
+            "$RUNNER_TEMP/stage/bin/$name" --version
+          done
+          # Every launcher, whatever CLIs the tree has, must name a file that is in the staged tree.
+          # Not run: a CLI may read stdin or a terminal.
+          for launcher in "$RUNNER_TEMP"/stage/bin/*; do
+            entry=$(sed -n 's|^exec "\$here/../node/bin/node" "\$here/../\(.*\)" "\$@"$|\1|p' "$launcher")
+            test -n "$entry"
+            test -f "$RUNNER_TEMP/stage/$entry"
+          done
+          mkdir -p dist
+          node scripts/release/main.ts pack --root "$RUNNER_TEMP/stage" --out "dist/morndo-${VERSION}-${PLATFORM}.tar.gz" --mtime "$mtime"
+          cp "$RUNNER_TEMP/stage/files.json" "dist/files-${PLATFORM}.json"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.platform }}
+          path: dist
+          if-no-files-found: error
+
+  # The three jobs below are one release step split on purpose. `assemble` runs npm and repo code and holds no
+  # key. `sign` holds the release key and runs no npm, no node and no repo program: it checks the files in plain
+  # shell, signs, and uploads signatures only. `publish` attests and uploads, again without the key.
+  assemble:
+    needs: [release-please, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-linux-x64
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-linux-arm64
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-darwin-arm64
+          path: dist
+      - name: Manifest, stamp, sums
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mtime=$(git log -1 --format=%ct "$RELEASE_SHA")
+          published=$((mtime * 1000))
+          node scripts/release/main.ts manifest \
+            --version "$VERSION" --commit "$RELEASE_SHA" --published-at "$published" \
+            --repository "$GITHUB_REPOSITORY" \
+            --artifact "linux-x64=dist/morndo-${VERSION}-linux-x64.tar.gz" \
+            --files "linux-x64=dist/files-linux-x64.json" \
+            --artifact "linux-arm64=dist/morndo-${VERSION}-linux-arm64.tar.gz" \
+            --files "linux-arm64=dist/files-linux-arm64.json" \
+            --artifact "darwin-arm64=dist/morndo-${VERSION}-darwin-arm64.tar.gz" \
+            --files "darwin-arm64=dist/files-darwin-arm64.json" \
+            --out dist/manifest.json
+          node scripts/release/main.ts stamp --version "$VERSION" --in install.sh --out dist/install.sh
+          node scripts/release/main.ts sums --out dist/SHA256SUMS \
+            "dist/morndo-${VERSION}-linux-x64.tar.gz" \
+            "dist/morndo-${VERSION}-linux-arm64.tar.gz" \
+            "dist/morndo-${VERSION}-darwin-arm64.tar.gz" \
+            dist/manifest.json dist/install.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned
+          path: |
+            dist/manifest.json
+            dist/install.sh
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  sign:
+    needs: [release-please, assemble]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      # Read only: the trust files and the committed install.sh. No program of the repo runs in this job.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-linux-x64
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-linux-arm64
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-darwin-arm64
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: unsigned
+          path: dist
+      - name: Check what will be signed
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+          RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
+          REPOSITORY: ${{ github.repository }}
+          BUNDLED_NODE: "24.21.0"
+        run: /bin/sh scripts/release/check-signing-release.sh
+      # The only step that holds the release key.
+      - name: Sign
+        env:
+          RELEASE_SSH_KEY: ${{ secrets.RELEASE_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          PATH=/usr/bin:/bin
+          umask 077
+          key=$(/usr/bin/mktemp "$RUNNER_TEMP/sign.XXXXXXXX")
+          trap '/bin/rm -f "$key"' EXIT
+          printf '%s\n' "$RELEASE_SSH_KEY" > "$key"
+          for name in manifest.json install.sh; do
+            file="dist/$name"
+            # ssh-keygen keeps an existing .sig and exits 0, so refuse one, and check the new one.
+            if [ -e "$file.sig" ]; then echo "refusing to sign: $file.sig already exists" >&2; exit 1; fi
+            /usr/bin/ssh-keygen -Y sign -f "$key" -n release@morndo.github.io "$file"
+            /usr/bin/ssh-keygen -Y verify -f trust/release_allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s "$file.sig" < "$file"
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signatures
+          path: |
+            dist/manifest.json.sig
+            dist/install.sh.sig
+          if-no-files-found: error
+
+  publish:
+    needs: [release-please, sign]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-linux-x64
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-linux-arm64
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: release-darwin-arm64
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: unsigned
+          path: dist
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: signatures
+          path: dist
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: |
+            dist/morndo-*.tar.gz
+            dist/manifest.json
+            dist/install.sh
+            dist/SHA256SUMS
+      - name: Upload the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$TAG" \
+            dist/morndo-*.tar.gz \
+            dist/manifest.json dist/manifest.json.sig \
+            dist/install.sh dist/install.sh.sig \
+            dist/SHA256SUMS
+
+  outside:
+    needs: [release-please, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - name: Verify without the release secret
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          test -s trust/release_allowed_signers
+          mkdir -p "$RUNNER_TEMP/assets"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/assets"
+          ssh-keygen -Y verify -f trust/release_allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s "$RUNNER_TEMP/assets/manifest.json.sig" < "$RUNNER_TEMP/assets/manifest.json"
+          ssh-keygen -Y verify -f trust/release_allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s "$RUNNER_TEMP/assets/install.sh.sig" < "$RUNNER_TEMP/assets/install.sh"
+          # Asset digests against the build attestations, while the release is still a draft.
+          # The release-asset command needs the release attestation, which exists only after
+          # an immutable release is published, so it runs in the published job.
+          # https://cli.github.com/manual/gh_release_verify-asset (read 2026-10-13)
+          # https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases
+          # (read 2026-10-13)
+          for f in "$RUNNER_TEMP/assets"/morndo-*.tar.gz "$RUNNER_TEMP/assets/manifest.json" "$RUNNER_TEMP/assets/install.sh" "$RUNNER_TEMP/assets/SHA256SUMS"; do
+            gh attestation verify "$f" --repo "$GITHUB_REPOSITORY" --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/heads/main"
+          done
+
+  ship:
+    needs: [release-please, outside]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Publish after the outside check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # No checkout in this job. GH_REPO is how gh names the repository.
+          # https://cli.github.com/manual/gh_help_environment (read 2026-10-13)
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release edit "$TAG" --draft=false
+
+  published:
+    needs: [release-please, ship]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - name: Verify the published release attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # https://cli.github.com/manual/gh_help_environment (read 2026-10-13)
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: sh scripts/release/published-gh.sh
+
+  # The feed is three jobs, like the release: `feed-prepare` runs npm and holds no key, `feed-sign` holds the
+  # feed key and runs no npm (it checks the feeds in plain shell first), `feed` pushes the signed feeds.
+  feed-prepare:
+    needs: [release-please, published]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - name: Prepare the feeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY}"
+          now=$(node -e "process.stdout.write(String(Date.now()))")
+          mkdir -p site "$RUNNER_TEMP/release"
+          gh release download "$TAG" --pattern manifest.json --dir "$RUNNER_TEMP/release"
+          manifest_url="https://github.com/${repo}/releases/download/${TAG}/manifest.json"
+          key_set=$(node scripts/release/main.ts key-set --keys trust/keys.json)
+          node scripts/release/main.ts feed-publish-prepare \
+            --repository "$GITHUB_REPOSITORY" --dir site --version "$VERSION" \
+            --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" \
+            --now "$now" --key-set "$key_set" --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: feed-unsigned
+          path: |
+            site/latest.json
+            site/stable.json
+            site/feed-prepared.json
+          if-no-files-found: error
+
+  feed-sign:
+    needs: [release-please, feed-prepare]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: feed
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-unsigned
+          path: site
+      - name: Check what will be signed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: publish
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: /bin/sh scripts/release/check-signing-feed.sh
+      # The only step that holds the feed key.
+      - name: Sign the feeds
+        env:
+          FEED_SSH_KEY: ${{ secrets.FEED_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          PATH=/usr/bin:/bin
+          umask 077
+          key=$(/usr/bin/mktemp "$RUNNER_TEMP/sign.XXXXXXXX")
+          trap '/bin/rm -f "$key"' EXIT
+          printf '%s\n' "$FEED_SSH_KEY" > "$key"
+          for name in latest stable; do
+            file="site/${name}.json"
+            # ssh-keygen keeps an existing .sig and exits 0, so refuse one, and check the new one.
+            if [ -e "$file.sig" ]; then echo "refusing to sign: $file.sig already exists" >&2; exit 1; fi
+            /usr/bin/ssh-keygen -Y sign -f "$key" -n feed@morndo.github.io "$file"
+            /usr/bin/ssh-keygen -Y verify -f trust/feed_allowed_signers -I feed@morndo.github.io -n feed@morndo.github.io -s "$file.sig" < "$file"
+          done
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: feed-signatures
+          path: |
+            site/latest.json.sig
+            site/stable.json.sig
+          if-no-files-found: error
+
+  feed:
+    needs: [release-please, feed-sign]
+    # A shared group cancels the other workflow's pending run.
+    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+    # read 2026-10-13. This group is not feed.yml's morndo-feed. The commit step
+    # refuses a moved branch and fails the job; running it again reads the new head.
+    concurrency:
+      group: morndo-release-feed
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-unsigned
+          path: site
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: feed-signatures
+          path: site
+      - name: Commit the feeds
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/main.ts feed-commit --repository "$GITHUB_REPOSITORY" --dir site --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
+
+  pages:
+    needs: feed
+    # The two Pages deploys share one group, so they cannot land in either order.
+    # https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency
+    # (read 2026-10-13). feed-site rebuilds from the feed head just before the upload.
+    concurrency:
+      group: morndo-pages
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json
+      - name: Rebuild the site from the feed head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/feed-site.ts --repository "$GITHUB_REPOSITORY" --dir site --signers trust/feed_allowed_signers
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

@@ -59,7 +59,10 @@ export const ChannelFeedSchema = z.strictObject({
 
 // ---- manifest.json (the release key's document, one per Release)
 
-const SchemaInfoSchema = z.strictObject({ version: z.int().check(z.gte(1)), floor: z.int().check(z.gte(1)) });
+// Floor 0 is a database whose migrations are all additive: service-kit's runner starts the floor at 0
+// and only a breaking migration raises it (migrate.ts). The hub, the node and the connections store
+// are there today, so a Manifest has to be able to say so.
+const SchemaInfoSchema = z.strictObject({ version: z.int().check(z.gte(1)), floor: z.int().check(z.gte(0)) });
 const SchemasSchema = z.strictObject({           // one entry per database, all four of them
   hub: SchemaInfoSchema, fleet: SchemaInfoSchema, node: SchemaInfoSchema, connections: SchemaInfoSchema,
 });
