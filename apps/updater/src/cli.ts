@@ -4,13 +4,13 @@
 // manager this machine runs. The command line is parsed here and nowhere else; the exit codes are sysexits.h's,
 // as in the rest of Morndo. The applies run as the machine's own units (§6.2): `morndo update` starts the apply
 // unit and reports its record; the tick, the boot and the recovery units run the same services themselves.
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import { formatVersion, parseVersion, type Channel, type Platform, type UpdateService } from "@morndo/domain";
+import { formatVersion, parseVersion, rollbackRestores, type Channel, type Platform, type UpdateService } from "@morndo/domain";
 import { KeySetSchema, UpdateStatusSchema } from "@morndo/protocol";
 import { ApplyService, type ApplyOutcome } from "./application/apply-service.ts";
-import type { ApplyTiming } from "./application/apply-steps.ts";
-import { CheckService, type CheckOutcome } from "./application/check-service.ts";
+import { planOf, type ApplyTiming } from "./application/apply-steps.ts";
+import { CHECKOUT_SENTENCE, CheckService, type CheckOutcome } from "./application/check-service.ts";
 import { doctor } from "./application/doctor-service.ts";
 import type { RecoverOutcome } from "./application/recovery-service.ts";
 import { RecoveryService } from "./application/recovery-service.ts";
@@ -52,7 +52,7 @@ const EXIT_CONFIG = 78;
 const USAGE = `usage: morndo-update update [--yes] [--now]       check, then apply what stands staged (asks first on a terminal)
        morndo-update update --check [--json]        check the channel feed, verify, and stage what passes
        morndo-update update --status [--json]       what this machine believes, the last updates included
-       morndo-update update --rollback              back to the previous Version
+       morndo-update update --rollback [--yes]      back to the previous Version (a restore asks for the typed word)
        morndo-update update apply --version <v>     one apply, as the apply unit runs it
        morndo-update update tick | boot | recover   the timer's, the boot unit's and the recovery unit's commands
        morndo-update install --role control-plane|node [--channel stable|latest]
@@ -115,6 +115,21 @@ const applyCode = (o: ApplyOutcome): number =>
   : o.kind === "rollback_failed" ? EXIT_SOFTWARE
   : o.kind === "no_previous" || o.kind === "not_ours" ? EXIT_CONFIG
   : EXIT_TEMPFAIL;
+
+// The rollback preview's clock words (§11.4): a moment as a person reads one, and an age in the largest whole
+// unit that is not zero — the span of writes a restore would drop, printed before the word is asked for.
+const stampOf = (ms: number): string => {
+  const t = new Date(ms);
+  const two = (n: number): string => String(n).padStart(2, "0");
+  return `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())} ${two(t.getHours())}:${two(t.getMinutes())}`;
+};
+const ageWords = (ms: number): string => {
+  if (ms < 60_000) return "less than a minute";
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+};
 
 // The recovery unit's outcome to one line and one exit (§6.6, §8.4).
 const recoverLine = (o: RecoverOutcome): string => {
@@ -186,7 +201,7 @@ export async function runUpdater(
     | { cmd: "status" }
     | { cmd: "doctor" }
     | { cmd: "update"; yes: boolean; now: boolean }
-    | { cmd: "rollback" }
+    | { cmd: "rollback"; yes: boolean }
     | { cmd: "apply-unit"; version: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
     | { cmd: "install"; role: "control-plane" | "node"; channel: Channel };
@@ -207,18 +222,23 @@ export async function runUpdater(
     parsed = { cmd: "install", role, channel: channel ?? "stable" };
   } else {
     // update: one subcommand, or one flag set — never two asks in one line. Bare `update` is the ask itself.
-    if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json") {
+    // The rollback is read before the update's own set so `--rollback --yes` and `--yes --rollback` are one ask.
+    if (flags.includes("--rollback") && flags.every(f => f === "--rollback" || f === "--yes")) {
+      parsed = { cmd: "rollback", yes: flags.includes("--yes") };
+    } else if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json") {
       if (flags.some(f => f !== "--yes" && f !== "--now" && f !== "--json")) return usage();
       parsed = { cmd: "update", yes: flags.includes("--yes"), now: flags.includes("--now") };
     } else if (flags[0] === "tick" && flags.length === 1) parsed = { cmd: "tick" };
     else if (flags[0] === "boot" && flags.length === 1) parsed = { cmd: "boot" };
     else if (flags[0] === "recover" && flags.length === 1) parsed = { cmd: "recover" };
     else if (flags[0] === "apply") {
-      if (flags.length !== 3 || flags[1] !== "--version" || parseVersion(flags[2]!) === null) return usage();
+      // "rollback" is the one instance name that is not a Version: the apply unit the rollback command starts
+      // (§5) is named for what it does, and what it does is not an apply of a staged Version.
+      if (flags.length !== 3 || flags[1] !== "--version"
+        || (flags[2] !== "rollback" && parseVersion(flags[2]!) === null)) return usage();
       parsed = { cmd: "apply-unit", version: flags[2]! };
     } else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
     else if (flags.includes("--status") && flags.every(f => f === "--status" || f === "--json")) parsed = { cmd: "status" };
-    else if (flags.includes("--rollback") && flags.every(f => f === "--rollback")) parsed = { cmd: "rollback" };
     else return usage();
   }
 
@@ -383,14 +403,20 @@ export async function runUpdater(
 
     if (parsed.cmd === "apply-unit") {
       // What the apply unit runs (§6.2): one apply, of the Version the unit was named for, in its own process.
+      // The instance named "rollback" runs the principal's own rollback (§8.1) — the one `morndo update
+      // --rollback` starts, so that no service the walk stops is its parent.
+      const m = needManager();
+      if (m === null) return EXIT_CONFIG;
+      if (parsed.version === "rollback") {
+        const outcome = await applyWith(m).rollback();
+        return printOutcome(applyLine(outcome), applyCode(outcome));
+      }
       const staged = store.staged();
       if (staged === null) { io.err("nothing stands staged to apply\n"); return EXIT_TEMPFAIL; }
       if (staged.version !== parsed.version) {
         io.err(`the staged version changed: ${staged.version} is staged, not ${parsed.version}\n`);
         return EXIT_TEMPFAIL;
       }
-      const m = needManager();
-      if (m === null) return EXIT_CONFIG;
       const now = existsSync(applyNowFile);
       if (now) rmSync(applyNowFile, { force: true });
       const outcome = await applyWith(m).apply({ now });
@@ -399,10 +425,69 @@ export async function runUpdater(
 
     if (parsed.cmd === "rollback") {
       // §8.1's rollback: the principal's own Update against the commit that put the running Version here.
+      // §11.4's ask comes first, on a preview the store and the links answer alone — no service is touched
+      // before the word is typed — because a restore drops every write since the Backup. Then §5's own unit:
+      // the walk stops services, and the hub runs this very command for the web app (PR 6), so a rollback in
+      // this process could stop its own parent.
+      const layout = installer.layout();
+      if (layout.method !== "updater" || layout.current === null || parseVersion(layout.current) === null) {
+        io.err(`${CHECKOUT_SENTENCE}\n`);
+        return EXIT_CONFIG;
+      }
+      if (layout.previous === null) {
+        io.err("No previous Version to roll back to.\n");
+        return EXIT_CONFIG;
+      }
+      // The commit that owns the Backups a restore would use (§6.5): the same owner the walk itself finds.
+      const owner = store.recentUpdates(200)
+        .find(row => row.state === "committed" && formatVersion(row.target) === layout.current) ?? null;
+      const restores = rollbackRestores(planOf(owner?.migrations ?? null));
+      // Each Backup's own moment: the file's mtime where there is one, the update's start where there is not.
+      const dropped = restores.map(db => {
+        const file = join(paths.state, "backups", owner?.id ?? "", `${db}.db`);
+        let at = owner?.startedAt ?? systemClock.now();
+        try { at = statSync(file).mtimeMs; } catch { /* no file: the update's own start stands in for it */ }
+        return { db, at };
+      });
+      io.out(restores.length === 0
+        ? `Back to ${layout.previous} from ${layout.current}; no database is restored.\n`
+        : `Back to ${layout.previous} from ${layout.current}.\n`);
+      for (const { db, at } of dropped) {
+        io.out(`The ${db} database goes back to its backup from ${stampOf(at)} (${ageWords(systemClock.now() - at)} of writes since are dropped).\n`);
+      }
+      if (!parsed.yes) {
+        if (io.tty !== true) {
+          io.err(restores.length === 0
+            ? "morndo update --rollback needs --yes, or a terminal to ask in (the services restart for a few seconds; lanes keep running)\n"
+            : "morndo update --rollback would restore a database's backup and drop the writes since: it needs --yes, or a terminal to type the word in\n");
+          return EXIT_USAGE;
+        }
+        const ask = io.ask ?? askOnTerminal;
+        const answer = restores.length === 0
+          ? await ask(`Roll back to ${layout.previous}? Morndo's services restart for a few seconds; lanes keep running. [y/N] `)
+          : await ask("Type rollback to go on: ");
+        // A restore needs the word itself (§11.4): "y" is not it, exactly because the writes dropped are real.
+        const goOn = restores.length === 0 ? answer === "y" || answer === "yes" : answer === "rollback";
+        if (!goOn) {
+          io.out("Not rolled back.\n");
+          return EXIT_OK;
+        }
+      }
       const m = needManager();
       if (m === null) return EXIT_CONFIG;
-      const outcome = await applyWith(m).rollback();
-      return printOutcome(applyLine(outcome), applyCode(outcome));
+      try {
+        await m.runApply("rollback");            // §5: the morndo-update-apply@rollback.service instance
+      } catch (error) {
+        io.err(`the apply unit did not run: ${error instanceof Error ? error.message : String(error)}\n`);
+        return EXIT_TEMPFAIL;
+      }
+      // The unit's record is the answer (§8.1): the exit follows the state it ended in.
+      const last = store.recentUpdates(1)[0] ?? null;
+      if (last === null) {
+        io.err("the apply unit recorded nothing; try again\n");
+        return EXIT_TEMPFAIL;
+      }
+      return recordExit(last, io);
     }
 
     if (parsed.cmd === "tick") {
@@ -571,11 +656,16 @@ export async function runUpdater(
 }
 
 // The apply unit's record, to one line and one exit (§8.1, §8.4): committed 0; rolled back 1; a rollback that
-// failed 70; anything else — an attempt that never finished, was abandoned, or was deferred — 75.
+// failed 70; anything else — an attempt that never finished, was abandoned, or was deferred — 75. A
+// rollback-kind record's target is where the machine went back to, not the Version it left (§6.5's two records).
 function recordExit(row: UpdateHistory, io: { out(s: string): void; err(s: string): void }): number {
   const target = formatVersion(row.target);
   if (row.state === "committed") { io.out(`Committed ${target}.\n`); return EXIT_OK; }
-  if (row.state === "rolled_back") { io.out(`Rolled back from ${target}: the previous Version runs.\n`); return EXIT_FAILED; }
+  if (row.state === "rolled_back") {
+    if (row.kind === "rollback") { io.out(`Rolled back to ${target}.\n`); return EXIT_FAILED; }
+    io.out(`Rolled back from ${target}: the previous Version runs.\n`);
+    return EXIT_FAILED;
+  }
   if (row.state === "rollback_failed") { io.err(`The rollback failed at ${target}; this machine needs a person.\n`); return EXIT_SOFTWARE; }
   io.err(`The apply did not finish (${row.state}); try again.\n`);
   return EXIT_TEMPFAIL;

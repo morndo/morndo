@@ -3237,6 +3237,11 @@ export const CONTROLS: Control[] = [
     find: 'if (status === null || !("inFlight" in status)) return null;',
     replace: "if (status === null) return null;",
     run: ["apps/updater/test/probes.test.ts"], expect: "reading 'map'" },
+  // 5b round 2 (the review of B3): a rollback that would restore a database needs the typed word (§11.4); with
+  // the check always true, a plain "y" starts the unit and "Not rolled back." never prints.
+  { id: "c2b-rollback-without-confirmation", task: "c2b", file: "apps/updater/src/cli.ts",
+    find: ": answer === \"rollback\";", replace: ": true;",
+    run: ["apps/updater/test/cli-apply.test.ts"], expect: "Not rolled back" },
   // ---- B2 (board T-302): a lane the fleet doesn't list is gone, each guard removed once.
   { id: "b2-unregistered-only-doing", task: "302", file: "packages/domain/src/board.ts",
     find: "if (task.status !== \"doing\" || task.assignee === null || registered.has(task.assignee)) return null;",

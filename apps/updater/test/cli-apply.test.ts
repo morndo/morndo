@@ -5,12 +5,12 @@
 // machine's own doors). The feed is faked the same way with the fixtures' own signed documents, so the tick's
 // check stages from a feed the test signed, and the apply that follows is the real walk on the real machine
 // files with nothing of the machine itself running.
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { writeFloor } from "@morndo/service-kit";
-import { parseVersion, type UpdateService } from "@morndo/domain";
+import { parseVersion, type DatabaseName, type MigrationStep, type UpdateService } from "@morndo/domain";
 import { UpdateStatusSchema } from "@morndo/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApplyTiming } from "../src/application/apply-steps.ts";
@@ -49,7 +49,12 @@ type World = {
   /** Writes the settings file (its directory with it), as a principal or the install would. */
   writeConfig(doc: unknown): void;
   current(): string | null;
-  run(argv: string[], env?: Record<string, string | undefined>, o?: { timing?: Partial<ApplyTiming> }): Promise<{ code: number; out: string; err: string }>;
+  run(argv: string[], env?: Record<string, string | undefined>, o?: {
+    timing?: Partial<ApplyTiming>;
+    /** A terminal is there, and its ask answers `answer` (the prompts are taped for assertions). */
+    tty?: boolean;
+    answer?: string;
+  }): Promise<{ code: number; out: string; err: string; prompts: string[] }>;
 };
 
 const feedOf = (keys: Keys, releases: readonly ReleaseFixture[]) => {
@@ -119,14 +124,15 @@ async function world(o: { running?: UpdateService[]; preStageB?: boolean; offerB
     },
     current: () => installer.layout().current,
     run: async (argv, env = {}, opts = {}) => {
-      const out: string[] = [], err: string[] = [];
+      const out: string[] = [], err: string[] = [], prompts: string[] = [];
       const code = await runUpdater(argv, { HOME: home, PATH: process.env.PATH, ...env }, {
         out: s => out.push(s), err: s => err.push(s),
+        ...(opts.tty === true ? { tty: true, ask: async (prompt: string) => { prompts.push(prompt); return opts.answer ?? ""; } } : {}),
       }, {
         services, probe, feed, artifacts,
         ...(opts.timing ? { timing: opts.timing } : {}),
       });
-      return { code, out: out.join(""), err: err.join("") };
+      return { code, out: out.join(""), err: err.join(""), prompts };
     },
     writeConfig,
   };
@@ -275,32 +281,132 @@ describe("`morndo update boot` — the boot apply (§6.7)", () => {
   });
 });
 
-describe("`morndo update --rollback` — the principal's rollback (§8.1, §6.5)", () => {
-  it("with a previous Version it goes back, records the left one bad here, and exits 1", async () => {
-    const w = await world({ preStageB: true });
-    // Roll back the running A to an installed earlier Version, as a machine with a history would.
+describe("`morndo update --rollback` — asks first on a preview, then its own unit (§8.1, §6.5, §11.4, §5)", () => {
+  // The plan of the commit that put A here, in the case that matters to a rollback: it migrated the fleet
+  // database across a raised floor (RL8), so going back restores the Backup and drops the writes since.
+  const RESTORES_FLEET: Record<DatabaseName, MigrationStep> = {
+    hub: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.hub.version, restoreOnRollback: false },
+    fleet: { willMigrate: true, backupRequired: true, expectedSchema: SCHEMAS_A.fleet.version, restoreOnRollback: true },
+    node: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.node.version, restoreOnRollback: false },
+    connections: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.connections.version, restoreOnRollback: false },
+  };
+
+  // A machine with somewhere to go back to: 0.0.9 installed and linked as previous. With `restoreFleet`, the
+  // commit that put A here is on record with the plan above, and its fleet Backup sits on disk three hours old —
+  // the span §11.4's ask names.
+  const withPrevious = async (w: World, o: { restoreFleet?: boolean } = {}): Promise<void> => {
     const stale = versionFixture({ version: "0.0.9", schemas: SCHEMAS_A });
     const archive = join(w.home, "stale.tar.gz");
     writeFileSync(archive, stale.archive);
     const installer = new DirsInstaller({ releases: w.paths.releases });
     const unpacked = await installer.unpack(archive, stale.version, { filesSha256: stale.filesSha256, maxBytes: 1 << 20 });
-    expect(unpacked.ok).toBe(true);
+    if (!unpacked.ok) throw new Error(`0.0.9 did not unpack: ${unpacked.reason}`);
     installer.promote(stale.version, { manifestSha256: stale.manifestSha256, filesSha256: stale.filesSha256, at: NOW });
     installer.swap({ current: A, previous: stale.version });
-    const r = await w.run(["update", "--rollback"]);
-    expect(r.code, r.err).toBe(1);
-    expect(w.current()).toBe(stale.version);
-    expect(w.store.badVersions()).toContain(A);            // RL7: the Version left behind is never auto-installed here again
-    expect(w.store.openUpdate()).toBeNull();
-    expect(r.out + r.err).toMatch(new RegExp(stale.version));
+    if (o.restoreFleet !== true) return;
+    const backupAt = Date.now() - 3 * 3600_000;
+    w.store.saveUpdate({
+      id: "upd-commit", kind: "update", target: parseVersion(A)!, preUpdate: { current: parseVersion(stale.version)!, previous: null },
+      state: "committed", mark: null, backups: [], migrations: RESTORES_FLEET,
+      format: 1, startedAt: backupAt, doneMarks: [], judgeBaseline: null, backupOf: null,
+    });
+    const file = join(w.paths.state, "backups", "upd-commit", "fleet.db");
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+    writeFileSync(file, "the fleet database as it was at the backup", { mode: 0o600 });
+    utimesSync(file, new Date(backupAt), new Date(backupAt));
+  };
+
+  // The apply unit's whole work as a script, as `update`'s test scripts it: one rollback-kind record, ended.
+  const unitRollsBack = (w: World): void => {
+    w.services.runApplyScript = async () => {
+      const unit = openUpdateStore({ db: w.paths.db, lock: w.paths.lock });
+      unit.saveUpdate({
+        id: "upd-back", kind: "rollback", target: parseVersion("0.0.9")!, preUpdate: { current: parseVersion(A)!, previous: null },
+        state: "rolled_back", mark: "rolling_back", backups: [], migrations: null,
+        format: 1, startedAt: Date.now(), doneMarks: ["rolling_back"], judgeBaseline: null, backupOf: "upd-commit",
+      });
+      unit.close();
+    };
+  };
+
+  it("--rollback with a restore lists what it drops and needs the typed word", async () => {
+    // no terminal and no --yes: a usage error, one sentence, and nothing started
+    {
+      const w = await world();
+      await withPrevious(w, { restoreFleet: true });
+      const r = await w.run(["update", "--rollback"]);
+      expect(r.code, r.err).toBe(64);
+      expect(r.err).toMatch(/--yes|terminal/i);
+      expect(w.services.tape).toEqual([]);
+    }
+    // a terminal answering anything but the word: not rolled back, exit 0, no unit started — but the preview
+    // said what a go-on would drop (§11.4: the span, per database)
+    {
+      const w = await world();
+      await withPrevious(w, { restoreFleet: true });
+      const r = await w.run(["update", "--rollback"], {}, { tty: true, answer: "y" });
+      expect(r.code, r.err).toBe(0);
+      expect(r.out).toMatch(/Back to 0\.0\.9 from 0\.1\.0\./);
+      expect(r.out).toMatch(/The fleet database goes back to its backup from \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(3 hours of writes since are dropped\)\./);
+      expect(r.prompts.join("")).toMatch(/Type rollback to go on:/);
+      expect(r.out).toMatch(/Not rolled back\./);
+      expect(w.services.tape).toEqual([]);
+    }
+    // the word itself: the rollback runs in its own unit (§5), and the record it leaves is the answer
+    {
+      const w = await world();
+      await withPrevious(w, { restoreFleet: true });
+      unitRollsBack(w);
+      const r = await w.run(["update", "--rollback"], {}, { tty: true, answer: "rollback" });
+      expect(r.code, r.err).toBe(1);                        // the record's state decides the exit (§8.4)
+      expect(w.services.calls.some(c => c.op === "runApply" && c.version === "rollback")).toBe(true);
+      expect(r.out).toMatch(/Rolled back to 0\.0\.9/);
+    }
   });
 
-  it("with no previous Version there is nothing to go back to: exit 78", async () => {
+  it("--rollback without a restore asks the plain question, and --yes starts the unit at once", async () => {
+    // nothing is restored (no commit on record owns a Backup): the ask is update's own [y/N], not the typed word
+    {
+      const w = await world();
+      await withPrevious(w);
+      unitRollsBack(w);
+      const r = await w.run(["update", "--rollback"], {}, { tty: true, answer: "y" });
+      expect(r.out).toMatch(/Back to 0\.0\.9 from 0\.1\.0; no database is restored\./);
+      expect(r.prompts.join("")).toMatch(/\[y\/N\]/);
+      expect(r.prompts.join("")).not.toMatch(/Type rollback/);
+      expect(r.code, r.err).toBe(1);
+      expect(w.services.calls.some(c => c.op === "runApply" && c.version === "rollback")).toBe(true);
+    }
+    // --yes is the whole ask: no terminal needed, the unit starts at once
+    {
+      const w = await world();
+      await withPrevious(w);
+      unitRollsBack(w);
+      const r = await w.run(["update", "--rollback", "--yes"]);
+      expect(r.code, r.err).toBe(1);
+      expect(r.prompts).toEqual([]);
+      expect(w.services.calls.some(c => c.op === "runApply" && c.version === "rollback")).toBe(true);
+    }
+  });
+
+  it("the apply unit runs a rollback for the instance named rollback", async () => {
+    const w = await world();
+    await withPrevious(w);
+    const r = await w.run(["update", "apply", "--version", "rollback"]);
+    expect(r.code, r.err).toBe(1);
+    expect(w.current()).toBe("0.0.9");
+    expect(w.store.badVersions()).toContain(A);            // RL7: the Version left behind is never auto-installed here again
+    expect(w.store.openUpdate()).toBeNull();
+    expect(w.services.tape.filter(t => t.startsWith("stop:")).length).toBeGreaterThan(0);   // the real walk ran
+  });
+
+  it("with no previous Version there is nothing to go back to: exit 78, nothing started", async () => {
     const w = await world({ preStageB: true });
     const r = await w.run(["update", "--rollback"]);
     expect(r.code, r.err).toBe(78);
     expect(r.err).toMatch(/no previous|nothing to roll back/i);
     expect(w.current()).toBe(A);
+    expect(w.services.tape).toEqual([]);
   });
 });
 
