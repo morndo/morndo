@@ -26,7 +26,7 @@ import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/en
 import { FileRefused } from "./adapters/file-mode.ts";
 import { parsePin, pinFor, procReader, verifyClaudeParent } from "./adapters/caller-proof.ts";
 import { CLAUDE_RELEASE_FINGERPRINT, CLAUDE_RELEASE_FIRST_SIGNED } from "./adapters/claude-release-key.ts";
-import { compareVersions, installedVersions, isVersion, parseReleasePin, releaseAdmits, syncReleases, type Fetch } from "./adapters/release-manifest.ts";
+import { compareVersions, installedVersions, isVersion, fileShaCache, parseReleasePin, releaseAdmits, syncReleases, type Fetch } from "./adapters/release-manifest.ts";
 import { DatabaseFromFuture } from "./adapters/store-migrations.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
@@ -355,7 +355,7 @@ async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const checked = await verifyClaudeParent({
       ppid: () => process.ppid, connection: name, pin: parsePin(procReader.file(pinFile)?.body ?? null),
       release: parseReleasePin(procReader.file(join(home.dir, RELEASE_PIN_FILE))?.body ?? null),
-      verifyRelease: (version, sha256) => releaseAdmits(home.dir, version, sha256),
+      verifyRelease: (version, sha256) => releaseAdmits(home.dir, version, sha256), shaCache: fileShaCache(home.dir),
       want: { denied: [home.vaultDir, home.db, home.identity], writeProtected: [home.vaultDir, home.db, home.identity, pinFile] },
     });
     seen = checked.ok ? "os" : "none";

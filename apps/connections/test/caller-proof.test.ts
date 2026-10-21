@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ALLOWED_SETTINGS, parseEnviron, parsePin, pinFor, settingsProof, sha256Of, verifyClaudeParent, type Pin, type ProcReader, type Wanted } from "../src/adapters/caller-proof.ts";
 import { CLAUDE_RELEASE_FINGERPRINT } from "../src/adapters/claude-release-key.ts";
-import type { ReleasePin } from "../src/adapters/release-manifest.ts";
+import { fileShaCache, type ReleasePin, type ShaCache } from "../src/adapters/release-manifest.ts";
 import { claudeSettings } from "../src/adapters/runtime-claude.ts";
 
 const dirs: string[] = [];
@@ -36,6 +36,7 @@ type Fake = {
   symlinked?: string[];                                               // paths that are, or go through, a symlink
   release?: ReleasePin | null;                                        // the signed releases the owner pinned
   verifyRelease?: (version: string, sha256: string) => Promise<{ ok: true } | { ok: false; why: string }>;   // the cache, as the lease asks it
+  shaCache?: ShaCache;                                                // hashes already found in a signed manifest, by identity
   hashed?: { count: number };                                         // counts the reads of the binary's content
   env?: Record<string, string> | [string, string][] | null;          // the parent's environment (a list may name a variable twice)
 };
@@ -61,7 +62,7 @@ function reader(over: Fake = {}): ProcReader {
   };
 }
 const verify = (over: Fake = {}, pin: Pin | null = PIN, ppid: () => number = () => 50) =>
-  verifyClaudeParent({ ppid, pin, release: over.release ?? null, ...(over.verifyRelease === undefined ? {} : { verifyRelease: over.verifyRelease }), connection: "zai", want: WANT, read: reader(over) });
+  verifyClaudeParent({ ppid, pin, release: over.release ?? null, ...(over.verifyRelease === undefined ? {} : { verifyRelease: over.verifyRelease }), ...(over.shaCache === undefined ? {} : { shaCache: over.shaCache }), connection: "zai", want: WANT, read: reader(over) });
 
 describe("the lease's caller proof (check 2)", () => {
   it("admits the pinned claude, started with the sandbox settings the runtime writes and no other setting sources", async () => {
@@ -345,6 +346,53 @@ describe("the lease's caller proof (check 2)", () => {
       expect(await signed({ args: ["claude", "--strict-mcp-config", "--settings", "{}"] })).toMatchObject({ ok: false });
       expect(await signed({ now: { exe: "/versions/2.1.307" } })).toMatchObject({ ok: false, why: "the parent changed while it was checked" });
       expect(await verify({ exe: "/versions/2.1.306", release: { ...RELEASE, baseUrls: {} }, verifyRelease: cache })).toMatchObject({ ok: false });   // no host pinned for the connection
+    });
+
+    it("hashes a release binary once: the next lease with the same identity takes the hash from the cache, and still checks the manifest", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "morndo-sha-"));
+      dirs.push(dir);
+      const shaCache = fileShaCache(dir);
+      const hashed = { count: 0 };
+      calls.length = 0;
+      expect(await signed({ shaCache, hashed })).toEqual({ ok: true });
+      expect(hashed.count).toBe(1);
+      expect(await signed({ shaCache, hashed })).toEqual({ ok: true });                       // a new process, the same file: no hash
+      expect(hashed.count).toBe(1);
+      expect(calls).toEqual([["2.1.306", GOOD_SHA], ["2.1.306", GOOD_SHA]]);                   // the manifest was asked each time
+      // the manifest decides, whatever the cache holds: a cached hash that a manifest no longer lists is refused
+      expect(await signed({ shaCache, hashed, verifyRelease: async () => ({ ok: false, why: "no cached manifest for that version" }) })).toMatchObject({ ok: false });
+      expect(hashed.count).toBe(1);
+    });
+
+    it("hashes again when the file is not the one that was hashed: a new ctime, mtime, size or inode, or another path", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "morndo-sha-"));
+      dirs.push(dir);
+      const shaCache = fileShaCache(dir);
+      const hashed = { count: 0 };
+      const same = { size: PIN.size, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs, ino: PIN.ino };
+      await signed({ shaCache, hashed, identity: same });
+      expect(hashed.count).toBe(1);
+      let expected = 1;
+      for (const [what, identity, exe] of [
+        ["ctime", { ...same, ctimeMs: same.ctimeMs + 1 }, undefined], ["mtime", { ...same, mtimeMs: same.mtimeMs + 1 }, undefined],
+        ["size", { ...same, size: same.size + 1 }, undefined], ["inode", { ...same, ino: same.ino + 1 }, undefined], ["path", same, "/versions/2.1.307"],
+      ] as const) {
+        expect(await signed({ shaCache, hashed, identity, ...(exe === undefined ? {} : { exe }) }), what).toEqual({ ok: true });
+        expect(hashed.count, what).toBe(++expected);
+      }
+      expect(await signed({ shaCache, hashed, identity: same })).toEqual({ ok: true });       // the entry kept for this path is the inode+1 file's: this one hashes
+      expect(hashed.count).toBe(expected + 1);
+    });
+
+    it("never caches a hash a signed manifest did not list", async () => {
+      const dir = mkdtempSync(join(tmpdir(), "morndo-sha-"));
+      dirs.push(dir);
+      const shaCache = fileShaCache(dir);
+      const hashed = { count: 0 };
+      expect(await signed({ shaCache, hashed, sha: "e".repeat(64) })).toMatchObject({ ok: false });
+      expect(await signed({ shaCache, hashed, sha: "e".repeat(64) })).toMatchObject({ ok: false });
+      expect(hashed.count).toBe(2);                                                           // not remembered: hashed both times
+      expect(shaCache.get("/versions/2.1.306", { size: PIN.size, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs, ino: PIN.ino })).toBeNull();
     });
 
     it("admits either proof: a release that is not admitted still passes on the binary pin, and neither pin refuses", async () => {

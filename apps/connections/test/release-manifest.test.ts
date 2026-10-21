@@ -8,7 +8,7 @@ import { createMessage, generateKey, readKey, sign } from "openpgp";
 import { afterEach, describe, expect, it } from "vitest";
 import { CLAUDE_RELEASE_FINGERPRINT, CLAUDE_RELEASE_PUBLIC_KEY } from "../src/adapters/claude-release-key.ts";
 import {
-  COMPILED_TRUST, compareVersions, installedVersions, isVersion, parseReleasePin, releaseAdmits, releaseCacheDir, releaseKey, syncReleases, verifyManifest,
+  COMPILED_TRUST, compareVersions, fileShaCache, installedVersions, isVersion, parseReleasePin, releaseAdmits, releaseCacheDir, releaseKey, syncReleases, verifyManifest,
   type Fetch, type Trust,
 } from "../src/adapters/release-manifest.ts";
 
@@ -197,5 +197,40 @@ describe("versions and the owner's pin", () => {
     expect(parseReleasePin(JSON.stringify({ versionsDir: "/versions", floor: "2.1.300", baseUrls: {} }))).toBeNull();
     expect(parseReleasePin("not json")).toBeNull();
     expect(parseReleasePin(null)).toBeNull();
+  });
+});
+
+describe("the cache of hashes of binaries a signed manifest listed", () => {
+  const id = { size: 290_532_720, mtimeMs: 1_792_000_000_000.5, ctimeMs: 1_792_000_000_100.25, ino: 4242 };
+  const SHA = "ab".repeat(32);
+
+  it("gives a hash back only for the exact identity it was stored under", () => {
+    const cache = fileShaCache(tmp());
+    expect(cache.get("/versions/2.1.306", id)).toBeNull();
+    cache.put("/versions/2.1.306", id, SHA);
+    expect(cache.get("/versions/2.1.306", id)).toBe(SHA);
+    expect(fileShaCache(tmp()).get("/versions/2.1.306", id)).toBeNull();                     // another home has its own
+    for (const changed of [{ ...id, ctimeMs: id.ctimeMs + 0.5 }, { ...id, mtimeMs: id.mtimeMs + 1 }, { ...id, size: id.size + 1 }, { ...id, ino: id.ino + 1 }]) {
+      expect(cache.get("/versions/2.1.306", changed), JSON.stringify(changed)).toBeNull();
+    }
+    expect(cache.get("/versions/2.1.307", id)).toBeNull();
+  });
+
+  it("survives a new process (it is a file), keeps one entry per path and the newest sixteen, and ignores a damaged file", () => {
+    const home = tmp();
+    fileShaCache(home).put("/versions/2.1.306", id, SHA);
+    expect(fileShaCache(home).get("/versions/2.1.306", id)).toBe(SHA);                       // read by another instance
+    fileShaCache(home).put("/versions/2.1.306", { ...id, ino: 1 }, "cd".repeat(32));
+    expect(fileShaCache(home).get("/versions/2.1.306", id)).toBeNull();                       // replaced, not accumulated
+    for (let i = 0; i < 20; i++) fileShaCache(home).put(`/versions/2.2.${i}`, id, SHA);
+    expect(fileShaCache(home).get("/versions/2.2.0", id)).toBeNull();
+    expect(fileShaCache(home).get("/versions/2.2.19", id)).toBe(SHA);
+    writeFileSync(join(releaseCacheDir(home), "verified-binaries.json"), "not json");
+    expect(fileShaCache(home).get("/versions/2.2.19", id)).toBeNull();
+    writeFileSync(join(releaseCacheDir(home), "verified-binaries.json"), JSON.stringify([{ path: "/versions/2.2.19", ...id, sha256: "not a hash" }]));
+    expect(fileShaCache(home).get("/versions/2.2.19", id)).toBeNull();                       // a hash must look like one
+    const readonly = join(tmp(), "file");
+    writeFileSync(readonly, "x");
+    expect(() => fileShaCache(readonly).put("/versions/2.1.306", id, SHA)).not.toThrow();    // a cache that can't be written costs a hash
   });
 });

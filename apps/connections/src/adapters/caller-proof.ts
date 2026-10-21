@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { CLAUDE_RELEASE_FINGERPRINT } from "./claude-release-key.ts";
-import { compareVersions, isVersion, type ReleasePin } from "./release-manifest.ts";
+import { compareVersions, isVersion, type ReleasePin, type ShaCache } from "./release-manifest.ts";
 import { sandboxReady } from "./runtime-claude.ts";
 
 // What the check reads about a process and the file system; injectable so the cases are shown without a process each.
@@ -241,6 +241,7 @@ export type Check = {
   release: ReleasePin | null;          // the signed releases the owner pinned (T-346): either admits the binary
   // Is this sha256 in the signed manifest cached for this version? Offline (release-manifest.ts); the proof calls it, never the network.
   verifyRelease?: (version: string, sha256: string) => Promise<Proof>;
+  shaCache?: ShaCache;                 // the sha256 of a binary already found in a signed manifest, by its identity (skips the hash)
   connection: string;                  // the connection the key is for: its API host is looked up in the pin
   want: Wanted;
   read?: ProcReader;
@@ -278,15 +279,21 @@ function pinnedBinary(pin: Pin, path: string, read: ProcReader, parent: number):
 // Or the binary is a signed release: a file named by its version in the pinned directory, at or above the pinned floor, whose
 // sha256 (read from the running inode) a verified, cached manifest lists. The owner pinned the key, once; an update needs
 // nothing more, since the update's manifest is signed by the same key.
-async function signedRelease(release: ReleasePin, verify: Check["verifyRelease"], path: string, read: ProcReader, parent: number): Promise<Proof> {
+async function signedRelease(release: ReleasePin, verify: Check["verifyRelease"], cache: ShaCache | undefined, path: string, read: ProcReader, parent: number): Promise<Proof> {
   if (release.fingerprint.toLowerCase() !== CLAUDE_RELEASE_FINGERPRINT) return no("the pinned release key is not the compiled-in one");
   if (verify === undefined) return no("no release verifier");
   if (read.real(dirname(path)) !== read.real(release.versionsDir)) return no("the parent binary is outside the pinned releases directory");
   const version = basename(path);
   if (!isVersion(version) || compareVersions(version, release.floor) < 0) return no("the parent binary is not a release at or above the pinned floor");
-  const sha256 = read.exeSha256(parent);
+  // The hash of the running inode, from the cache when this very file (path, size, mtime, ctime, inode) was hashed and found in a
+  // signed manifest before; the manifest is verified again either way.
+  const identity = read.exeIdentity(parent);
+  const known = identity === null ? null : cache?.get(path, identity) ?? null;
+  const sha256 = known ?? read.exeSha256(parent);
   if (sha256 === null) return no("parent binary unreadable");
-  return verify(version, sha256);
+  const proof = await verify(version, sha256);
+  if (proof.ok && known === null && identity !== null) cache?.put(path, identity, sha256);
+  return proof;
 }
 
 export async function verifyClaudeParent(check: Check): Promise<Proof> {
@@ -303,7 +310,7 @@ export async function verifyClaudeParent(check: Check): Promise<Proof> {
   let baseUrls: Record<string, string> | null = null;
   let refused: Proof = no("no pinned claude binary");
   if (check.release !== null) {
-    const proof = await signedRelease(check.release, check.verifyRelease, path, read, parent);
+    const proof = await signedRelease(check.release, check.verifyRelease, check.shaCache, path, read, parent);
     if (proof.ok) baseUrls = check.release.baseUrls; else refused = proof;
   }
   if (baseUrls === null && check.pin !== null) {

@@ -143,3 +143,36 @@ export function parseReleasePin(body: string | null): ReleasePin | null {
   if (typeof urls !== "object" || urls === null || Array.isArray(urls) || Object.values(urls).some(url => typeof url !== "string")) return null;
   return { fingerprint: pin.fingerprint, versionsDir: pin.versionsDir, floor: pin.floor, baseUrls: { ...urls } };
 }
+
+// The sha256 of a running binary that a signed manifest listed, kept by the identity of the file it was read from: its path, size,
+// mtime, ctime and inode. A lease is a new process each call, and hashing a ~290 MB binary each time is the slow part, so the
+// next lease with the same identity takes the hash from here. It is only ever read back on an exact match of all five (a changed
+// file has a new ctime, and a swapped one a new inode), and only written after a manifest listed it; the manifest itself is
+// still verified on every lease. The file is in the connections home, which an agent's sandbox denies.
+export type ExeIdentity = { size: number; mtimeMs: number; ctimeMs: number; ino: number };
+export type ShaCache = { get(path: string, id: ExeIdentity): string | null; put(path: string, id: ExeIdentity, sha256: string): void };
+const SHA_ENTRIES = 16;
+
+export function fileShaCache(home: string): ShaCache {
+  const file = join(releaseCacheDir(home), "verified-binaries.json");
+  type Entry = ExeIdentity & { path: string; sha256: string };
+  const load = (): Entry[] => {
+    try {
+      const rows: unknown = JSON.parse(readFileSync(file, "utf8"));
+      return Array.isArray(rows) ? rows.filter((row): row is Entry => typeof row === "object" && row !== null && typeof (row as Entry).path === "string" && typeof (row as Entry).sha256 === "string"
+        && ["size", "mtimeMs", "ctimeMs", "ino"].every(key => typeof (row as Record<string, unknown>)[key] === "number")) : [];
+    } catch { return []; }
+  };
+  return {
+    get: (path, id) => load().find(row => row.path === path && row.size === id.size && row.mtimeMs === id.mtimeMs && row.ctimeMs === id.ctimeMs && row.ino === id.ino && /^[0-9a-f]{64}$/.test(row.sha256))?.sha256 ?? null,
+    put: (path, id, sha256) => {
+      try {
+        const rows = [...load().filter(row => row.path !== path), { path, ...id, sha256 }].slice(-SHA_ENTRIES);
+        mkdirSync(releaseCacheDir(home), { recursive: true, mode: 0o700 });
+        const staging = `${file}.${process.pid}.new`;
+        writeFileSync(staging, JSON.stringify(rows), { mode: 0o600 });
+        renameSync(staging, file);
+      } catch { /* a cache that can't be written costs a hash, nothing else */ }
+    },
+  };
+}

@@ -3302,9 +3302,8 @@ export const CONTROLS: Control[] = [
     find: `  if (release.fingerprint.toLowerCase() !== CLAUDE_RELEASE_FINGERPRINT) return no("the pinned release key is not the compiled-in one");\n`, replace: "",
     run: ["apps/connections/test/caller-proof.test.ts"], expect: "refuses a pin whose key is not the compiled-in one" },
   { id: "t346-release-running-inode", task: "T-346", file: "apps/connections/src/adapters/caller-proof.ts",
-    find: `  const sha256 = read.exeSha256(parent);\n  if (sha256 === null) return no("parent binary unreadable");\n  return verify(version, sha256);`, replace: `  const sha256 = "0".repeat(64);\n  return verify(version, sha256);`,
+    find: `  const sha256 = known ?? read.exeSha256(parent);`, replace: `  const sha256 = known ?? "0".repeat(64);`,
     run: ["apps/connections/test/caller-proof.test.ts"], expect: "admits a binary in the pinned directory" },
-  // ---- B13: a lane waiting on its own background work is listed under Working (the sidebar's sections, the phone's status).
   { id: "b13-partition-no-background", task: "B13", file: "apps/web/src/lib/lanes.ts",
     find: "w.needsYou || inBackground(w, runs)", replace: "w.needsYou",
     run: ["apps/web/test/lanes.test.ts"], expect: "a lane waiting on its own background work is listed under Working" },
@@ -3314,6 +3313,12 @@ export const CONTROLS: Control[] = [
   { id: "b13-status-no-background", task: "B13", file: "apps/web/src/lib/phone/chat/rows.ts",
     find: 'run && onOwnWork(run) && (s.kind === "idle" || s.kind === "finished")', replace: "false",
     run: ["apps/web/test/phone-chat.test.ts"], expect: "is listed under Working" },
+  { id: "t346-sha-cache-ctime", task: "T-346", file: "apps/connections/src/adapters/release-manifest.ts",
+    find: " && row.ctimeMs === id.ctimeMs", replace: "",
+    run: ["apps/connections/test/release-manifest.test.ts", "apps/connections/test/caller-proof.test.ts"], expect: "only for the exact identity" },
+  { id: "t346-sha-cache-after-verify", task: "T-346", file: "apps/connections/src/adapters/caller-proof.ts",
+    find: "  if (proof.ok && known === null && identity !== null) cache?.put(path, identity, sha256);", replace: "  if (known === null && identity !== null) cache?.put(path, identity, sha256);",
+    run: ["apps/connections/test/caller-proof.test.ts"], expect: "never caches a hash a signed manifest did not list" },
 ];
 
 // ---- the runner
