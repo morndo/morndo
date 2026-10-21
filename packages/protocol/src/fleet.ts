@@ -331,7 +331,7 @@ const oneFile = (a: { path?: string; ref?: string }) => (a.path === undefined) !
 // component ending in ".lock"; not ending in "/" or "."; not "HEAD"; at most 200 characters. The agent asks git itself
 // as well (`git check-ref-format --branch`).
 const refName = () => z.string().check(z.regex(/^(?![-/.]|HEAD$)(?!.*(?:\.\.|\/\/|\/\.|@\{|\.lock(?:\/|$)))(?!.*[/.]$)[A-Za-z0-9._/-]{1,200}$/));
-// Text typed into a lane: a delivery's, a first prompt's (as pane.send's).
+// A lane's first prompt (lane.start): at most maxSendText. A message typed into a running lane is messageText, below.
 const sendText = () => z.string().check(z.minLength(1), z.maxLength(LIMITS.maxSendText));
 // A message the principal types into a lane (pane.send, lane.deliver), up to maxMessageText, and only to an agent that
 // said it takes one (CAP_LONG_TEXT); lane.start's first prompt and the lane-event parts stay at maxSendText.
