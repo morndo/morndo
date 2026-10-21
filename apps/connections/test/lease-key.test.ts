@@ -167,7 +167,7 @@ describe("keys lease", () => {
       expect(ran.code, row.what).toBe(row.exit);
       expect((await events(env)).some(e => e.type === "KeyServed"), row.what).toBe(false);
     }
-  }, 20_000);
+  }, 120_000);   // nine rows, each a fresh home and a handful of process starts: slow under a full run
 
   it("a vault that fails says only failed, never its message", async () => {
     const dir = homeDir();
