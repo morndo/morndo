@@ -2132,8 +2132,11 @@ export const CONTROLS: Control[] = [
   // ---- PR 4, check and stage (design §6.1, §10.2, §13): each guard of the chain and its edges, removed once.
   // CI on #94 (2026-10-22): the switch off gave up on a cancel answered busy, and the drill timed out waiting for it.
   { id: "pr4-hub-cancel-busy-once", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
-    find: "const CANCEL_BUSY_TRIES = 8;", replace: "const CANCEL_BUSY_TRIES = 1;",
+    find: "const CANCEL_BUSY_MAX_MS = 30_000;", replace: "const CANCEL_BUSY_MAX_MS = 0;",
     run: ["apps/hub/test/manager-queue.test.ts"], expect: "answered busy" },
+  { id: "pr4-hub-busy-drops-sending-row", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
+    find: ' && r.refused !== "busy") {', replace: ") {",
+    run: ["apps/hub/test/manager-queue.test.ts"], expect: "the node holds it" },
   { id: "pr4-feed-namespace-unchecked", task: "pr4", file: "apps/updater/src/application/check-service.ts",
     find: "facts.feed_namespace = feedFact !== undefined && feedFact.namespace === FEED_NAMESPACE;",
     replace: "facts.feed_namespace = true;",
