@@ -59,10 +59,10 @@ function cli(args: string[], env: NodeJS.ProcessEnv, stdin = ""): Promise<Out> {
 // The settings a lane's Claude Code is started with: what the runtime writes (vault, database and identity denied to Bash
 // and to the Read tool, sandbox on and fail-closed), changed by `change` for a case that must be refused.
 let counter = 0;
-function settingsFile(dir: string, change: (body: Record<string, any>) => void = () => {}): string { // eslint-disable-line @typescript-eslint/no-explicit-any
+function settingsFile(dir: string, change: (body: Record<string, any>) => void = () => {}): string {
   const deny = [join(dir, "vault"), join(dir, "connections.db"), join(dir, "identity")];
   const plan = { lease: "l", connection: "zai", ref: null, configDir: null, model: "m", effort: "low", workspace: join(dir, "work"), deny, reservation: 0, probe: true };
-  const body = JSON.parse(claudeSettings(plan, "ulimit -c 0; exec morndo-keys lease --connection zai")) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const body = JSON.parse(claudeSettings(plan, "ulimit -c 0; exec morndo-keys lease --connection zai")) as Record<string, any>;
   change(body);
   const path = join(dir, `settings-${counter++}.json`);
   writeFileSync(path, JSON.stringify(body));
