@@ -23,6 +23,9 @@ export const LIMITS = {
   // memory (ADR-0031): one skill file, and the files of one memory.sync part, under maxMessageBytes with room for JSON
   memorySkillBytes: 32_768, memoryPartBytes: 393_216, memoryPartsMax: 64,
   maxFileBytes: 26_214_400, maxSendText: 8000, maxKeys: 4096, captureManyMax: 64, captureBytesPerPane: 6144, maxNeedle: 200,
+  // a message the principal types (pane.send, lane.deliver): 100,000 characters, what the app's HTTP send already took
+  // (~25,000 tokens; anything bigger is a file to upload, maxFileBytes), not the 8,000 of the rest of the typed text
+  maxMessageText: 100_000,
   // streaming: hook events unacknowledged in flight
   replayWindow: 256,
   // timing: pings, liveness (the agent's timeout is two missed pings plus slack), health and inventory, and what an
@@ -328,8 +331,11 @@ const oneFile = (a: { path?: string; ref?: string }) => (a.path === undefined) !
 // component ending in ".lock"; not ending in "/" or "."; not "HEAD"; at most 200 characters. The agent asks git itself
 // as well (`git check-ref-format --branch`).
 const refName = () => z.string().check(z.regex(/^(?![-/.]|HEAD$)(?!.*(?:\.\.|\/\/|\/\.|@\{|\.lock(?:\/|$)))(?!.*[/.]$)[A-Za-z0-9._/-]{1,200}$/));
-// Text typed into a lane: a delivery's, a first prompt's (as pane.send's).
+// A lane's first prompt (lane.start): at most maxSendText. A message typed into a running lane is messageText, below.
 const sendText = () => z.string().check(z.minLength(1), z.maxLength(LIMITS.maxSendText));
+// A message the principal types into a lane (pane.send, lane.deliver), up to maxMessageText, and only to an agent that
+// said it takes one (CAP_LONG_TEXT); lane.start's first prompt and the lane-event parts stay at maxSendText.
+const messageText = () => z.string().check(z.minLength(1), z.maxLength(LIMITS.maxMessageText));
 // A delivery's id (fleet clients §4.1), chosen by its client and namespaced like a key ("hub:…", "kira:…"; the client a-z,
 // at most 16 letters, §8), at most 200 characters, no control character. It is also the done key its typing runs under,
 // and `${id}#2` the one retype's (§4.3), so an id never ends in "#" and digits: "hub:x#2" would meet the retype of "hub:x".
@@ -357,7 +363,7 @@ export const OP_ARGS = {
     workerId: workerId(), data: z.exactOptional(z.string().check(z.minLength(1), z.maxLength(LIMITS.maxKeys))),
     names: z.exactOptional(z.array(z.enum(KEY_NAMES)).check(z.minLength(1), z.maxLength(LIMITS.maxKeys))), expect: ExpectSchema,
   }).check(z.refine(a => (a.data === undefined) !== (a.names === undefined), "data or names, exactly one")),
-  "pane.send": z.object({ workerId: workerId(), text: z.string().check(z.minLength(1), z.maxLength(LIMITS.maxSendText)), expect: ExpectSchema }),
+  "pane.send": z.object({ workerId: workerId(), text: messageText(), expect: ExpectSchema }),
   "op.status": z.object({ key: opKey() }),
   "transcript.size": z.object({ sessionId: sessionId() }),
   "transcript.read": z.object({ sessionId: sessionId(), offset: offset(), max: chunkMax() }),
@@ -381,7 +387,7 @@ export const OP_ARGS = {
   // ttlMs, never a clock time: the node turns it into notAfter on its own clock (Review Focus 3). At most the 7 days a
   // final delivery is kept.
   "lane.deliver": z.object({
-    id: deliveryId(), target: DeliveryTargetSchema, text: sendText(), ttlMs: z.exactOptional(z.int().check(z.gte(1), z.lte(LIMITS.deliveryKeepMs))),
+    id: deliveryId(), target: DeliveryTargetSchema, text: messageText(), ttlMs: z.exactOptional(z.int().check(z.gte(1), z.lte(LIMITS.deliveryKeepMs))),
   }),
   "delivery.cancel": z.object({ id: deliveryId() }),
   "memory.sync": z.object({
@@ -525,7 +531,12 @@ export const RunViewSchema = z.object({
 export const Join = z.object({
   v, t: z.literal("join"), node: nodeName(), code: joinCode(), publicKey: ed25519Spki(), agent: z.object({ version: label() }), proto: protoList(),
 });
-// Every connection (§5.2). `caps`: the ops this node's policy allows (strings: a newer agent's are ignored, not refused).
+// A capability a hello may carry beside its ops: this agent takes pane.send and lane.deliver text up to
+// LIMITS.maxMessageText. A node that has not said it gets no message over maxSendText.
+export const CAP_LONG_TEXT = "long-text";
+
+// Every connection (§5.2). `caps`: the ops this node's policy allows, and capabilities beside them (CAP_LONG_TEXT;
+// strings: a newer agent's are ignored, not refused).
 export const Hello = z.object({
   v, t: z.literal("hello"), node: nodeName(), instanceId: z.uuid(), streamId: z.uuid(), proto: protoList(),
   agent: z.object({ version: label() }), claude: z.object({ version: z.nullable(label()) }),

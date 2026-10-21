@@ -199,7 +199,7 @@ Messages are JSON over WebSocket, validated with zod/mini on both sides. Every m
 | `pane.captureMany` | `workerIds` (≤ 64) | `{ workerId, text \| null }[]` | no |
 | `pane.frame` | `workerId` | `Frame` | no |
 | `pane.keys` | `workerId, data` (≤ 4096), `expect` | `true`/`false` | no; keystrokes are never retried |
-| `pane.send` | `workerId, text` (≤ 8000), `expect` | `{ problem: SendProblem \| null, typedAt }` | yes |
+| `pane.send` | `workerId, text` (≤ 100,000, ADR-0033), `expect` | `{ problem: SendProblem \| null, typedAt }` | yes |
 | `op.status` | `key` | `unknown` \| `started` \| `done` + outcome | n/a |
 | `transcript.size` / `transcript.read` / `transcript.locate` | `sessionId`; `offset, max` (≤ 256 KiB); `needle` (≤ 200 chars) | size; `{ bytes, eof }`; offset or `null` | no |
 | `file.stat` / `file.get` | `path` or `ref`; `offset, max` (≤ 256 KiB) | `{ size, mtime }`; `{ bytes, eof }`; today's confinement rules, up to 25 MiB | no |

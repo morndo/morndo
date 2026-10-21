@@ -58,6 +58,8 @@ export type InProcessHub = {
 // `engines`: the engine layer's CLI to run (a test's fake) and its environment; absent, the Engines page is off.
 // `queue`: the manager's delivery queue, made on the hub's own store (fleet-clients §9.1; default none). This hub has no
 // manager pane: a test puts deliveries on the queue itself, and the feed and the cancel route follow them.
+// `steering`: the service the send routes use, when a test wires its own (over a fleet rig); default: the hub's own,
+// over this hub's empty tmux.
 // `watch`, `ledger`, `send`: what the escalation service sees and how it types an answer (a test's own; default none).
 // `runs`: each lane's Run the board frame carries (ADR-0032; default none), as the projector would hold them.
 export async function startInProcessHub(o: {
@@ -65,6 +67,7 @@ export async function startInProcessHub(o: {
   engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
   locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
   queue?: (store: Store) => ManagerQueue; manager?: string; typed?: string[]; alerts?: AlertsService;
+  steering?: (store: Store) => SteeringService;
   watch?: Watch; ledger?: (() => LedgerRead) | null;
   send?: (pane: string, text: string, key: string) => Promise<SendOutcome>;
   runs?: () => RunView[];
@@ -140,7 +143,7 @@ export async function startInProcessHub(o: {
   await transcription.start();
   const http = startHttp({
     config, identity: loadOrCreateIdentity(dir), access, observation: o.observation ?? new ObservationService(tmux, 1000),
-    steering: new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox, undefined, undefined, undefined, null,
+    steering: o.steering ? o.steering(store) : new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox, undefined, undefined, undefined, null,
       queue ? { queue, isManager: id => id === o.manager } : null, () => o.manager ?? null),
     escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now), queue, ...(o.alerts ? { alerts: o.alerts } : {}),
     push: { publicKey: vapid.publicKey, notifications },

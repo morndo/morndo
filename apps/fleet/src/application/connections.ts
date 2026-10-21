@@ -16,7 +16,7 @@
 // Status: online after a welcome, stale from the first missed pong until terminated, offline once closed. The same
 // sweep re-checks that each node is still registered, so a revocation made while the service runs (the console writes
 // fleet.db directly) takes effect within one interval, for a node that is offline too (its lanes go: `onRevoked`).
-import { CLOSE, LIMITS, type FleetMessage, type Health, type OpName, type Pane } from "@morndo/protocol";
+import { CAP_LONG_TEXT, CLOSE, LIMITS, type FleetMessage, type Health, type OpName, type Pane } from "@morndo/protocol";
 import type { Audit } from "../adapters/audit.ts";
 import type { Logger } from "../adapters/log.ts";
 import type { NodesStore } from "../adapters/nodes-store.ts";
@@ -231,6 +231,14 @@ export class Connections {
   }
 
   request(node: string, op: OpName, args: unknown, o: { key?: string; timeoutMs: number }): Promise<Outcome> {
+    // A message over the old bound goes only to a live node whose hello said it takes one (CAP_LONG_TEXT): an older
+    // agent would refuse it bad_args after 8,000, so the fleet refuses it here, unknown_op (an old end reads that code
+    // safely), and nothing is sent. A node not live (offline or stale) keeps its own answer.
+    const c = this.#live.get(node);
+    const text = (op === "pane.send" || op === "lane.deliver") && typeof args === "object" && args !== null
+      ? (args as { text?: unknown }).text : undefined;
+    if (typeof text === "string" && text.length > LIMITS.maxSendText && c !== undefined && !c.stale && !c.caps.includes(CAP_LONG_TEXT))
+      return Promise.resolve(failed("unknown_op", `${node}'s agent takes messages of at most ${LIMITS.maxSendText} characters; update Morndo on it`));
     if (!BULK_OPS.has(op)) return this.#send(node, op, args, o);
     const q = this.#bulk.get(node) ?? { running: false, waiting: [] };
     this.#bulk.set(node, q);

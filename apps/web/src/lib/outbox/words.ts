@@ -2,7 +2,8 @@
 // code. One wording for the desktop's conversation and the phone's update card (review of PR #7, finding 12): the
 // phone had its own short list and showed the hub's raw codes for the rest.
 import { unreachable } from "@morndo/domain";
-import { UNSEEN_AFTER_MS, type OutboxRecord } from "./state.ts";
+import { LIMITS } from "@morndo/protocol";
+import { MAX_TEXT, UNSEEN_AFTER_MS, type OutboxRecord } from "./state.ts";
 import { DELIVERED, GIVEN_UP, MAY_HAVE_BEEN, NOT_DELIVERED, QUEUED, queuedLine } from "../queue-words.ts";
 
 // After the worker's name: "builder is showing a menu. …". The desktop says where to look as "the Terminal tab".
@@ -13,7 +14,7 @@ const PROBLEMS: Record<string, string> = {
   not_submitted: "didn't take the message. Check its Terminal tab.",
   no_pane: "is no longer running.",
   busy: "is being typed into by something else right now. Try again in a few seconds.",
-  too_long: "can't take a message this long (8000 characters at most).",
+  too_long: `can't take a message this long (${MAX_TEXT.toLocaleString("en-US")} characters at most).`,
   not_yours: "can't take that file: it was uploaded from another device.",
   unknown_upload: "can't take that file anymore. Attach it again.",
   expired: "can't take that file anymore: it's over a day old. Attach it again.",
@@ -44,6 +45,9 @@ const REASONS: Record<string, string> = {
   uncertain: "May have been sent. Check again asks whether it was typed; if that can't be known, it stays here, so look at the worker's screen before sending it again.",
 };
 
+const TOO_OLD_FOR_LONG = `is on a machine whose Morndo agent or fleet is too old for a message this long (${LIMITS.maxSendText.toLocaleString("en-US")} characters at most there), so nothing was typed. Update Morndo on that machine, or send a shorter message.`;
+const TEXT_TOO_BIG = "can't take a message this big: its text is too large to send, so nothing was typed. Shorten it.";
+
 // A message waits behind an earlier one of the same conversation that is Not sent or Uncertain (review M3).
 export const heldBehind = (o: OutboxRecord, all: readonly OutboxRecord[]) =>
   all.some(x => x.worker === o.worker && x.createdAt < o.createdAt && (x.state === "failed" || x.state === "uncertain"));
@@ -53,6 +57,11 @@ export function sendReason(o: OutboxRecord, name: string, screen = "the Terminal
   if (o.error === null) return "";
   const problem = PROBLEMS[o.error];
   if (REASONS[o.error]) return REASONS[o.error] ?? "";
+  // A message over the old bound that an older agent (the fleet answers unknown_op for it) or an older fleet (bad_args:
+  // it checks 8,000) won't take: the fix is an update, not a rename or a smaller file.
+  if (o.text.length > LIMITS.maxSendText && (o.error === "unknown_op" || o.error === "bad_args")) return `${name} ${TOO_OLD_FOR_LONG}`;
+  // The text alone (no file) can be over the agent's message cap, say with a great many control characters.
+  if (o.error === "too_large" && o.uploads.length === 0) return `${name} ${TEXT_TOO_BIG}`;
   if (!problem) return `Not sent: the hub answered "${o.error}".`;
   return `${name} ${screen === "the Terminal tab" ? problem : problem.replace(/(the|its) Terminal tab/g, screen)}`;
 }

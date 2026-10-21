@@ -1,6 +1,6 @@
 // The body of POST /v1/deliveries (fleet clients spec §8; plan Contracts, "Client API routes"): { id, lane | workerId
 // (exactly one), text, ttlMs? }, its id, target, text and ttlMs checked against OP_ARGS["lane.deliver"] as the agent will
-// (the id namespaced, at most 200 characters, no trailing "#<digits>"; the text 1 to 8000 characters): what doesn't fit
+// (the id namespaced, at most 200 characters, no trailing "#<digits>"; the text 1 to LIMITS.maxMessageText characters): what doesn't fit
 // is a body that doesn't fit, 400 (reconciliation ruling 3). Unknown fields are refused, so a client's typo never routes
 // somewhere unintended. A deadline travels as a duration (ttlMs), never as a clock time (Review Focus 3): the node turns
 // it into notAfter on its own clock.
@@ -36,7 +36,7 @@ function whyNot(b: { id: string; text: string; ttlMs?: number }, target: "lane" 
   if (b.id.length > LIMITS.maxDeliveryId) return `id is at most ${LIMITS.maxDeliveryId} characters, its client's name included`;
   if (/#\d+$/.test(b.id)) return "id must not end in \"#\" and digits: that is the key of a delivery's retype";
   if (!b.text) return "text is empty";
-  if (b.text.length > LIMITS.maxSendText) return `text is at most ${LIMITS.maxSendText} characters`;
+  if (b.text.length > LIMITS.maxMessageText) return `text is at most ${LIMITS.maxMessageText} characters`;
   if (b.ttlMs !== undefined && (b.ttlMs < 1 || b.ttlMs > LIMITS.deliveryKeepMs)) return `ttlMs is from 1 to ${LIMITS.deliveryKeepMs} (7 days)`;
   return target === "lane" ? "lane isn't a window name a lane can have" : "workerId isn't a worker ID (node.server.pane)";
 }

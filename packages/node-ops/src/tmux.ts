@@ -201,8 +201,11 @@ export function draftOnScreen(screen: string): string | null {
 // 20 code points are the whole short paste, or the start of a longer one. Leading space is ignored on both sides:
 // draftOnScreen trims the box.
 function draftStillWaiting(sent: string, draft: string): boolean {
-  // A multi-line paste is folded into one chip. The chip is the paste, still in the box; a one-line paste never is.
+  // A long paste is folded into one chip: "[Pasted text #1 +12 lines]" for several lines, "[Pasted text #1]" for one long
+  // line (Claude Code 2.1.305, seen with 100,000 characters). The chip is the paste, still in the box, when its form
+  // fits the text; a short one-line paste is never folded.
   if (/^\[Pasted text #\d+ \+\d+ lines\]$/.test(draft)) return sent.includes("\n");
+  if (/^\[Pasted text #\d+\]$/.test(draft)) return !sent.includes("\n");
   const sentPoints = Array.from(sent.trim());
   const head = sentPoints.slice(0, 20);
   const shown = Array.from(draft).slice(0, 20);

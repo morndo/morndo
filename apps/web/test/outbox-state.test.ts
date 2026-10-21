@@ -2,10 +2,17 @@
 // echo matching.
 import { describe, expect, it } from "vitest";
 import { LIMITS } from "@morndo/protocol";
-import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, HUB_KEEPS_MS, RETRY_WINDOW_MS, advance, canEdit, canRetry, matchEchoes, retryDelay, withinBudget, type OutboxRecord } from "../src/lib/outbox/state.ts";
+import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, HUB_KEEPS_MS, MAX_TEXT, RETRY_WINDOW_MS, advance, canEdit, canRetry, matchEchoes, retryDelay, withinBudget, type OutboxRecord } from "../src/lib/outbox/state.ts";
 
 const rec = (id: string, createdAt: number, text: string, state: OutboxRecord["state"] = "sent"): OutboxRecord =>
   ({ id, worker: "%1", workerName: "alpha", text, uploads: [], createdAt, budgetFrom: createdAt, state, error: null, attempts: 1, seen: "none", sentAt: createdAt, typedAt: null });
+
+describe("the longest one message", () => {
+  it("is the protocol's maxMessageText", () => {
+    expect(MAX_TEXT).toBe(LIMITS.maxMessageText);
+    expect(MAX_TEXT).toBe(100_000);
+  });
+});
 
 describe("send states move forward only (S8)", () => {
   it("queued, sending, sent", () => {

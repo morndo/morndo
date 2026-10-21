@@ -26,7 +26,7 @@
 //   it; the events go into the spool on "/lane" and to the fleet with the hooks (lane-state.ts).
 import { randomUUID } from "node:crypto";
 import { fleetRecord } from "@morndo/domain";
-import { ERROR_EXECUTED, LIMITS, type AgentMessage, type Delivery, type OpError } from "@morndo/protocol";
+import { CAP_LONG_TEXT, ERROR_EXECUTED, LIMITS, type AgentMessage, type Delivery, type OpError } from "@morndo/protocol";
 import { healthProbe, tmuxAdapter } from "@morndo/node-ops";
 import { Flight, HoldWatch, holdFile, productVersion } from "@morndo/service-kit";
 import { ConfigError, isOpName, jobLimits, jobsConfigProblem, jobTimeouts, type AgentConfig } from "./config.ts";
@@ -242,7 +242,8 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
 
   conn = new FleetConnection({
     url: config.fleetUrl, node: config.node, instanceId, streamId, fleetKey, nodeKey,
-    caps: config.policy.ops, log,
+    // CAP_LONG_TEXT beside the ops: this agent takes pane.send and lane.deliver text up to LIMITS.maxMessageText.
+    caps: [...config.policy.ops, CAP_LONG_TEXT], log,
     claudeVersion: () => [...sessions().values()].find(s => s.version)?.version ?? null,
     admit: w => !restored(w),
     onWelcome: w => {

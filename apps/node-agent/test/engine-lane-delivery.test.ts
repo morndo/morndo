@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DeliveryTarget } from "@morndo/protocol";
+import { LIMITS, type DeliveryTarget } from "@morndo/protocol";
 import { isolatedTmux, tempHome, until, type TestTmux } from "./helpers.ts";
 import { opsHarness, type Harness } from "./ops-harness.ts";
 
@@ -65,6 +65,17 @@ describe("an engine lane takes briefs", () => {
     expect(await kickUntil(() => h.deliveries.get("lanes:e1")?.state === "delivered" && h.deliveries.get("lanes:e2")?.state === "delivered")).toBe(true);
     expect(submitted()).toEqual(["ping", brief]);
   }, 30_000);
+
+  it("delivers a brief of maxMessageText characters whole, and marks it delivered from the lane's own transcript", async () => {
+    startLane("codex-long");
+    const target: DeliveryTarget = { lane: "codex-long", sticky: false };
+    expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-long")?.sessionId != null; })).toBe(true);
+    const brief = 'ü€"\n'.repeat(24_999) + 'ü€".';                // exactly maxMessageText, with what a paste must survive
+    expect(brief).toHaveLength(LIMITS.maxMessageText);
+    expect(h.deliverer.enqueue({ id: "lanes:long", target, text: brief })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await kickUntil(() => h.deliveries.get("lanes:long")?.state === "delivered", 30_000)).toBe(true);
+    expect(submitted()).toEqual([brief]);
+  }, 60_000);
 
   it("does not lose a brief sent while a turn runs and the engine renames the lane's session under it", async () => {
     startLane("codex-c", "--busy", "1500");

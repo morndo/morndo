@@ -107,6 +107,7 @@
   let text = $state(restored?.text ?? "");
   // Longer than a lane takes: said while typing, and not sent (the hub would refuse it too_long).
   const over = $derived(text.length > MAX_TEXT);
+  const withSep = (n: number) => n.toLocaleString("en-US");
   let seen = $state<string | null>(restored?.seen ?? null);
   $effect(() => { drafts.typed(worker.id, worker.name, text, seen); });
   let note = $state<string | null>(null);
@@ -311,7 +312,7 @@
         onkeydown={e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); void send(); } }}></textarea>
       <button class="send" disabled={!canWrite || over || ((!text.trim() && readyIds.length === 0 && !failed) || busy || uploading)} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
     </div>
-    {#if over}<p class="err" data-over>Too long for one message: {text.length} of {MAX_TEXT} characters.</p>{/if}
+    {#if over}<p class="err" data-over>Too long for one message: {withSep(text.length)} of {withSep(MAX_TEXT)} characters.</p>{/if}
     <p class="scope note">{scope}</p>
   </div>
 </section>

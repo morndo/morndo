@@ -16,7 +16,8 @@ describe("limits shared with the protocol", () => {
   it("are read from the protocol, not typed again", () => {
     expect(src("packages/node-ops/src/file-rules.ts")).toMatch(/MAX_FILE_BYTES = LIMITS\.maxFileBytes/);
     expect(src("packages/node-ops/src/terminal.ts")).toMatch(/MAX_KEYS = LIMITS\.maxKeys/);
-    expect(src("apps/hub/src/application/steering-service.ts")).toMatch(/MAX_TEXT = LIMITS\.maxSendText/);
+    expect(src("apps/hub/src/application/steering-service.ts")).toMatch(/MAX_TEXT = LIMITS\.maxMessageText/);
+    expect(src("apps/web/src/lib/outbox/state.ts")).toMatch(/MAX_TEXT = LIMITS\.maxMessageText/);
     expect(src("apps/fleet/src/application/connections.ts")).not.toMatch(/\.close\(4\d{3}/);
   });
 });

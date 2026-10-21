@@ -57,11 +57,12 @@ describe("the new ops", () => {
 
 describe("lane.deliver and delivery.cancel arguments (§4.1)", () => {
   const deliver = (o: Record<string, unknown>) => ok("lane.deliver", { id: "hub:c1:r1", target: { lane: "manager", sticky: true }, text: "hello", ...o });
-  it("take a lane (sticky or not) or a worker ID, a text of up to 8000 characters and a duration", () => {
+  it("take a lane (sticky or not) or a worker ID, a text of up to 100000 characters and a duration", () => {
     expect(deliver({})).toBe(true);
     expect(deliver({ target: { lane: "fix: a/b ü.2", sticky: false } })).toBe(true);
     expect(deliver({ target: { workerId: W } })).toBe(true);
-    expect(deliver({ text: "x".repeat(8000), ttlMs: 60_000 })).toBe(true);
+    expect(deliver({ text: "x".repeat(8000), ttlMs: 60_000 })).toBe(true);   // what the old bound took, still taken
+    expect(deliver({ text: "x".repeat(LIMITS.maxMessageText) })).toBe(true);
     expect(deliver({ ttlMs: LIMITS.deliveryKeepMs })).toBe(true);
     expect(deliver({ id: `kira:${"x".repeat(195)}` })).toBe(true);                               // 200 characters
     for (const id of ["fleet:lane-events:pc:1791460800000", "fleet:lane-events:pc:1791460800000-2.3", "inbox:digest-tick:d1", "lanes:7f3a",
@@ -83,7 +84,7 @@ describe("lane.deliver and delivery.cancel arguments (§4.1)", () => {
     }
   });
   it("refuse an empty or too long text, and a duration out of range; a clock time is dropped, never used (negative controls)", () => {
-    for (const o of [{ text: "" }, { text: "x".repeat(8001) }, { ttlMs: 0 }, { ttlMs: 1.5 }, { ttlMs: LIMITS.deliveryKeepMs + 1 }, { ttlMs: "60000" }]) {
+    for (const o of [{ text: "" }, { text: "x".repeat(LIMITS.maxMessageText + 1) }, { ttlMs: 0 }, { ttlMs: 1.5 }, { ttlMs: LIMITS.deliveryKeepMs + 1 }, { ttlMs: "60000" }]) {
       expect(deliver(o), JSON.stringify(o).slice(0, 40)).toBe(false);
     }
     expect(z.parse(OP_ARGS["lane.deliver"], { id: "hub:x", target: { workerId: W }, text: "t", notAfter: 1 })).toEqual({ id: "hub:x", target: { workerId: W }, text: "t" });

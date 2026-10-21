@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS, NodeStatusHealth } from "@morndo/protocol";
+import { CAP_LONG_TEXT, LIMITS, NodeStatusHealth } from "@morndo/protocol";
 import { Flight } from "@morndo/service-kit";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
 import { agentPaths } from "../src/paths.ts";
@@ -57,6 +57,13 @@ describe("over the connection", () => {
     await stopping;
     expect(performance.now() - started).toBeLessThan(8000);
     stuck();
+  });
+
+  it("its hello says it takes long messages (CAP_LONG_TEXT) beside the policy's ops", async () => {
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    const hello = await fleet.waitFor(m => m.t === "hello");
+    expect((hello as Msg & { caps: string[] }).caps).toEqual([...config.policy.ops, CAP_LONG_TEXT]);
   });
 
   it("sends the full inventory and health after welcome, then inventory again when tmux changes", async () => {

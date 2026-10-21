@@ -230,7 +230,7 @@ A delivery is a message for one lane running Claude Code. It is queued on the la
   - while no window has the name, the delivery goes to the node that last had it and waits there (`no_pane`).
 - **`lane`, any other name.** The delivery is bound to the session that lane has when it is queued. If another session takes the name, the delivery is given up (`gone`) and never typed into the other conversation.
 - **`workerId`.** Bound to that pane: when the pane is gone, so is the delivery.
-- **`text`.** At most 8000 characters.
+- **`text`.** At most 100,000 characters ([ADR-0033](adr/0033-long-messages.md)). Over 8000 it is typed only on a node whose agent said it takes long messages; on any other the answer is `unknown_op` and nothing is sent.
 - **`ttlMs`.** How long it may wait, at most 7 days. The default is 24 hours, turned into `notAfter` on the node's clock when stored, so the clocks of client and node never need to agree.
 - **Only a lane with a live Claude Code session takes deliveries,** whatever the session's `status` (`busy`, `idle`, `waiting`, or `shell`: a shell command running under it).
   - A pane with no live session (no session file, or its process gone) makes the delivery wait (`no_session`) when the lane is sticky, or when the pane's process started in the last 2 minutes (Claude Code still starting).

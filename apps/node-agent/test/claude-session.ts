@@ -47,9 +47,12 @@ export function claudeSession(o: { tmux: TestTmux; claudeDir: string; pane: stri
         if (!existsSync(f)) return;
         const lines = readFileSync(f, "utf8").split("\n").filter(Boolean);
         for (const l of lines.slice(seen)) {
+          // A long paste lands wrapped in pasted_content tags, as Claude Code writes one; the receipt strips them again.
+          const text = JSON.parse(l) as string;
+          const content = text.length > 1000 ? `\n\n<pasted_content id="p1">\n${text}\n</pasted_content id="p1">\n` : text;
           appendFileSync(transcript, `${JSON.stringify({
             type: "user", uuid: randomUUID(), timestamp: new Date().toISOString(), promptSource: "typed",
-            message: { role: "user", content: JSON.parse(l) as string },
+            message: { role: "user", content },
           })}\n`);
         }
         seen = lines.length;
