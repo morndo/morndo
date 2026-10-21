@@ -168,7 +168,10 @@ export class CheckService {
       store.saveTrust({ keySet, highestFeedSeq: { ...trust.highestFeedSeq, [settings.channel]: channelFeed.seq } });
 
       // The offer: the highest Version the feed lists that is not withdrawn (RL2, RL12). An unparsable entry is
-      // skipped, never guessed at.
+      // skipped, never guessed at. A pin (RL14) narrows it: the entry the pin names — when the feed offers it and
+      // nobody withdrew it — is the offer even with a higher one standing above it, so a pinned machine moves to
+      // its pin instead of refusing every check. A pin the feed does not offer leaves the highest as the offer,
+      // and admit's own word for the difference — pinned — is the answer.
       const withdrawn = channelFeed.withdrawn
         .map(parseVersion).filter((v): v is Version => v !== null);
       const offers: { text: string; version: Version; entry: FeedEntry }[] = [];
@@ -178,8 +181,11 @@ export class CheckService {
         if (withdrawn.some(w => equalVersions(w, version))) continue;
         offers.push({ text: entry.version, version, entry });
       }
-      const best = offers.reduce<{ text: string; version: Version; entry: FeedEntry } | null>(
+      const highest = offers.reduce<{ text: string; version: Version; entry: FeedEntry } | null>(
         (best, offer) => best === null || compareVersions(offer.version, best.version) > 0 ? offer : best, null);
+      const pin = settings.pin;
+      const best = pin === null ? highest
+        : offers.find(offer => equalVersions(offer.version, pin)) ?? highest;
       if (best === null) {
         return finish({ kind: "up_to_date", current: layout.current }, `no version offered on ${settings.channel}`, layout.current);
       }

@@ -440,6 +440,44 @@ describe("the check service (§6.1, §10.2)", () => {
     recorded(w, "skipped", null, OFFERED);
   });
 
+  it("a pin below the highest release stages the pinned one when the feed offers it", async () => {
+    const w = build(w => {
+      const rel03 = releaseFixture({ version: "0.3.0", now: NOW });
+      w.feed.channels.set("stable", feedFixture(w.keys, [w.rel, rel03], { channel: "stable", now: NOW }).served);
+      w.feed.manifests.set(rel03.manifestUrl, signed(rel03.manifestBytes, manifestSignature(w.keys, rel03)));
+      w.settings.value = { ...w.settings.value, pin: parseVersion(OFFERED) };
+    });
+    expect(await w.service.check()).toEqual({ kind: "staged", version: OFFERED, already: false });
+    expect(w.installer.has(OFFERED)).toBe(true);                     // the pin the feed offers…
+    expect(w.installer.has("0.3.0")).toBe(false);                    // …not the highest entry above it
+  });
+
+  it("a pin the feed does not offer is skipped pinned, the highest entry as the named Version", async () => {
+    const w = build(w => {
+      const rel03 = releaseFixture({ version: "0.3.0", now: NOW });
+      w.feed.channels.set("stable", feedFixture(w.keys, [w.rel, rel03], { channel: "stable", now: NOW }).served);
+      w.feed.manifests.set(rel03.manifestUrl, signed(rel03.manifestBytes, manifestSignature(w.keys, rel03)));
+      w.settings.value = { ...w.settings.value, pin: parseVersion("0.4.0") };
+    });
+    expect(await w.service.check()).toEqual({ kind: "skipped", reason: "pinned", version: "0.3.0" });
+    expect(w.artifacts.calls).toEqual([]);
+    nothingLeft(w, "0.3.0");
+    nothingLeft(w, OFFERED);
+    recorded(w, "skipped", null, "0.3.0");
+  });
+
+  it("a pin at the current Version, offered by the feed, answers up_to_date", async () => {
+    const w = build(w => {
+      const rel01 = releaseFixture({ version: "0.1.0", now: NOW });
+      const rel03 = releaseFixture({ version: "0.3.0", now: NOW });
+      w.feed.channels.set("stable", feedFixture(w.keys, [rel01, w.rel, rel03], { channel: "stable", now: NOW }).served);
+      w.feed.manifests.set(rel03.manifestUrl, signed(rel03.manifestBytes, manifestSignature(w.keys, rel03)));
+      w.settings.value = { ...w.settings.value, pin: parseVersion("0.1.0") };
+    });
+    expect(await w.service.check()).toEqual({ kind: "up_to_date", current: "0.1.0" });
+    expect(w.artifacts.calls).toEqual([]);                           // nothing fetched: the machine already sits at its pin
+  });
+
   it("a Version marked bad here is skipped bad_here", async () => {
     const w = build(w => w.store.markBad(OFFERED));
     expect(await w.service.check()).toEqual({ kind: "skipped", reason: "bad_here", version: OFFERED });
