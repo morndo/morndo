@@ -784,7 +784,7 @@ Its `phase`, the first that applies, in this order:
 | `waiting` | a job of the lane is not ended (`wait.on: "job"`), or the last turn end left background tasks (`background`) or a wake-up (`wakeup`), or said `STATUS: WAITING` with nothing pending (`declared`) | `job`, `hook` or `status` |
 | `ended` | none of those: the last turn end's `outcome` is its status (`done`, `blocked`, `needs_decision`), else `no_status` | `status`, `hook` or `session` |
 
-A turn end that leaves background work or a wake-up is never `ended`, whatever its status line says: the lane waits on its own work until its next turn. A job counts when it is the lane's own, or its notice goes to `lane:<the lane>`, queued, starting or running.
+A turn end that leaves background work or a wake-up is never `ended`, whatever its status line says: the lane waits on its own work until its next turn. A Run waiting on background tasks keeps the turn's `outcome` (`done`, `blocked`, `needs_decision`), so a client can tell a DONE with work left from a turn with no status. A job counts when it is the lane's own, or its notice goes to `lane:<the lane>`, queued, starting or running.
 
 `GET /v1/runs` answers `{ runs: { lane, node, sessionId?, phase, wait?, deadline, overdue, outcome?, line?, question?, since, source }[] }`, by lane, then node:
 - `wait`, for a `waiting` Run: `{ on: "background", tasks }` (the `tasks` of §7), `{ on: "wakeup", next }` (the next fire time, null when its node's UTC offset or its schedule can't be read), `{ on: "job", jobs: { id, name }[] }`, or `{ on: "declared", what }` (what the WAITING line names, or null): nothing will wake it.
@@ -1256,7 +1256,7 @@ These were sent while the examples above ran:
 That turn end said DONE with a background task still running, so `w1`'s Run waited on it:
 
 ```example events-run events
-{"t":"run","node":"n1","body":{"lane":"w1","node":"n1","sessionId":"{{uuid:w1-session}}","phase":"waiting","wait":{"on":"background","tasks":[{"type":"shell","label":"Check the docs links"}]},"deadline":"{{time}}","overdue":false,"line":"STATUS: DONE","since":"{{time}}","source":"hook"}}
+{"t":"run","node":"n1","body":{"lane":"w1","node":"n1","sessionId":"{{uuid:w1-session}}","phase":"waiting","wait":{"on":"background","tasks":[{"type":"shell","label":"Check the docs links"}]},"deadline":"{{time}}","overdue":false,"outcome":"done","line":"STATUS: DONE","since":"{{time}}","source":"hook"}}
 ```
 
 ## 10. Errors
