@@ -90,8 +90,7 @@
         {#if !collapsed[s.key]}
           {#each s.items as w (w.id)}
             <button class="row" class:sel={view === "home" && selected === w.id} class:unread={unread(w)} class:muted={prefsOf(w.name).muted}
-              onclick={() => onSelect(w.id)} oncontextmenu={ctx(w)} title={w.title ?? w.location}
-              aria-label={tagged(s.key, w) ? `${w.name}, working in the background` : undefined}>
+              onclick={() => onSelect(w.id)} oncontextmenu={ctx(w)} title={w.title ?? w.location}>
               <span class="ic">{#if w.offline}<Unplug size={16} />{:else if w.state === "active"}<i class="spin"></i>{:else}<Hash size={16} />{/if}</span>
               <span class="nm">{w.name}</span>
               {#if tagged(s.key, w)}<span class="off" title={BACKGROUND_LABEL}>background</span>{/if}
