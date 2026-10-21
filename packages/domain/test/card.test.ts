@@ -242,6 +242,45 @@ describe("lintCard", () => {
     });
   });
 
+  // No list of characters (T-307 review): the Unicode properties decide. Every code point the standard marks Default_Ignorable
+  // (the invisible function characters, variation selectors, the Hangul fillers, the tag characters), every format character
+  // (Cf) and every control (Cc) is refused in each text field and echoed escaped; ordinary text from any script passes.
+  it("every Default_Ignorable, Cf and Cc code point is refused in every text field, and echoed escaped", () => {
+    const hidden = /[\p{Default_Ignorable_Code_Point}\p{Cf}\p{Cc}]/u;
+    const points: string[] = [];
+    for (let cp = 0; cp <= 0x10ffff; cp++) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue;                    // a lone surrogate is no character
+      const c = String.fromCodePoint(cp);
+      if (hidden.test(c)) points.push(c);
+    }
+    expect(points.length).toBeGreaterThan(4000);                       // the property really was walked
+    const missed: string[] = [];
+    for (const c of points) {
+      const name = `U+${c.codePointAt(0)!.toString(16)}`;
+      const fields = [
+        lintCard(card({ outcome: `a${c}b` })).card,
+        lintCard(card({ options: [{ key: "merge", label: `a${c}b` }, { key: "hold", label: "Hold until Monday" }] })).card,
+        lintCard(card({ risk: `a${c}b` })).card,
+      ];
+      if (fields.some(f => f !== null)) missed.push(name);
+      const echo = lintCard(card({ recommend: `go${c}ahead` })).problems.map(p => p.text).join(" ");
+      if (echo.includes(c) || !echo.includes("\\")) missed.push(`${name} echo`);    // never raw, always an escape (JSON's \n or \uXXXX)
+    }
+    expect(missed).toEqual([]);
+    // The ones the review named, by name: invisible operators, the combining grapheme joiner, the Mongolian vowel separator,
+    // the emoji variation selector.
+    for (const c of ["\u{2061}", "\u{2062}", "\u{2063}", "\u{2064}", "\u{034F}", "\u{180E}", "\u{FE0F}"]) {
+      expect(lintCard(card({ outcome: `a${c}b` })).card, `U+${c.codePointAt(0)!.toString(16)}`).toBeNull();
+    }
+  });
+
+  it("ordinary text passes: punctuation, umlauts, CJK, accents and plain symbols", () => {
+    for (const text of ["Hold, continue later", "Zürich äöüß, naïve café", "你好，世界", "Ship it ✅ — Tuesday", "Fiancée’s “quote” (50%)"]) {
+      const lint = lintCard(card({ outcome: text, risk: text, options: [{ key: "merge", label: text.slice(0, 30), kind: "continue" }, { key: "hold", label: "Hold until Monday", kind: "stop" }] }));
+      expect(lint.problems.filter(p => p.level === "error"), text).toEqual([]);
+    }
+  });
+
   it("every problem is one line, whatever the draft holds", () => {
     // A hostile draft: echoed values and keys that would put their own lines into the refusal if it echoed them raw.
     const echoed = lintCard(card({ recommend: "go\nahead", default: "go\non" }));

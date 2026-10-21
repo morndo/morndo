@@ -26,26 +26,21 @@ export const CARD_RISK_MAX = 140;
 const ID = /^[A-Za-z0-9_-]{1,32}$/;
 // An option key (DB1's grammar): letters, digits, - and _, at most 16.
 const KEY = /^[A-Za-z0-9_-]{1,16}$/;
-// A control character (T-307): every C0 control (tab and the line breaks among them), DEL and the C1 controls. The
-// outcome, the labels and the risk are one line each, and a draft from --json could otherwise put anything into the
-// printed card.
-const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
-// The line breaks that are no \n and no control character: the Unicode line and paragraph separators (U+2028, U+2029).
-// Where a card is posted they end a line as a newline does, so every one-line field refuses them too — a draft from
-// --json could otherwise add lines of its own to the printed card, a fake buttons line among them.
-const SEPARATOR = /[\u{2028}\u{2029}]/u;
-// The characters that reorder or hide what the principal reads (T-307): the bidirectional overrides and isolates, the
-// marks (LRM, RLM, ALM), the zero-width ones, the word joiner, the soft hyphen, the Hangul fillers (blank letters) and the
-// tag characters (an invisible alphabet) — a bidi override can make `merge` look like `hold` on a phone card. One list,
-// so what a field refuses and what the echo escapes cannot drift apart. (The file is already in .oxlintrc.json's
-// no-control-regex override.)
-const HIDDEN_CLASS = "\\u{202A}-\\u{202E}\\u{2066}-\\u{2069}\\u{200B}-\\u{200F}\\u{FEFF}\\u{061C}\\u{2060}\\u{00AD}\\u{115F}\\u{1160}\\u{3164}\\u{FFA0}\\u{E0000}-\\u{E007F}";
-const HIDDEN = new RegExp(`[${HIDDEN_CLASS}]`, "u");
+// What a one-line field may not hold (T-307), by Unicode property and not by a list of characters, which always missed
+// one: every control (Cc: the C0 and C1 controls, tab and the line breaks among them), every format character (Cf: the
+// bidirectional overrides, isolates and marks, the zero-width ones, the soft hyphen, the Arabic number signs), every
+// Default_Ignorable_Code_Point (the invisible operators, the combining grapheme joiner, the variation selectors, the
+// Hangul fillers, the tag characters, the Mongolian vowel separator) and the Unicode line and paragraph separators
+// (U+2028, U+2029, Zl and Zp). A bidi override can make `merge` look like `hold` on a phone card; a line break would add
+// a line of its own to the printed card, a fake buttons line among them (a draft from --json). Ordinary text of any
+// script, accents and CJK among it, is none of these. (The file is already in .oxlintrc.json's no-control-regex override.)
+const INVISIBLE_CLASS = "\\p{Cc}\\p{Cf}\\p{Default_Ignorable_Code_Point}\\u2028\\u2029";
+const INVISIBLE = new RegExp(`[${INVISIBLE_CLASS}]`, "u");
 // A placeholder left from the blank: "<…>" with no line break of its own inside.
 const PLACEHOLDER = /<[^<>\n]*>/;
-// What quoted() escapes: the union of CONTROL, SEPARATOR and HIDDEN, so a draft value echoed into a problem's text can
-// neither add a line of its own nor hide inside one.
-const ESCAPE = new RegExp(`[\\u{0}-\\u{1F}\\u{7F}-\\u{9F}\\u{2028}\\u{2029}${HIDDEN_CLASS}]`, "gu");
+// What quoted() escapes: the same set, so a draft value echoed into a problem's text can neither add a line of its own nor
+// hide inside one.
+const ESCAPE = new RegExp(`[${INVISIBLE_CLASS}]`, "gu");
 // Jargon the principal cannot read on a phone card: a tracker number, a commit hash, an ask id (T-307). A hash needs
 // both a digit and a letter, so a word of letters alone ("defaced") and a plain number ("1234567") stay prose.
 const JARGON = [
@@ -57,7 +52,7 @@ const JARGON = [
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isText = (v: unknown): v is string => typeof v === "string";
 const blank = (s: string) => s.trim() === "";
-const oneLine = (s: string) => !CONTROL.test(s) && !SEPARATOR.test(s) && !HIDDEN.test(s);
+const oneLine = (s: string) => !INVISIBLE.test(s);
 
 // A draft value echoed into a problem's text, made safe to print (T-307): JSON-quoted, and every character that could
 // break the line or hide in it comes back as its \uXXXX escape.

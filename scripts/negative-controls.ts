@@ -3122,9 +3122,11 @@ export const CONTROLS: Control[] = [
     find: "if (kind !== \"stop\" && kind !== \"continue\") {", replace: "if (false && kind !== \"stop\" && kind !== \"continue\") {",
     run: ["packages/protocol/test/card.test.ts"], expect: "bad_option_kind" },
   { id: "b7-card-hidden-chars", task: "307", file: "packages/domain/src/card.ts",
-    find: 'const HIDDEN = new RegExp(`[${HIDDEN_CLASS}]`, "u");', replace: 'const HIDDEN = /(?!)/u;',
-    // (also breaks the new groups: marks, joiner, soft hyphen, fillers, tag characters)
+    find: 'const INVISIBLE = new RegExp(`[${INVISIBLE_CLASS}]`, "u");', replace: 'const INVISIBLE = /(?!)/u;',
     run: ["packages/domain/test/card.test.ts"], expect: "outcome_not_one_line" },
+  { id: "b7-card-default-ignorable", task: "307", file: "packages/domain/src/card.ts",
+    find: String.raw`\\p{Cf}\\p{Default_Ignorable_Code_Point}`, replace: String.raw`\\p{Cf}`,
+    run: ["packages/domain/test/card.test.ts"], expect: "U+34f" },
   { id: "b7-card-echo-astral-whole", task: "307", file: "packages/domain/src/card.ts",
     find: 'return cp > 0xffff ? `\\\\u{${cp.toString(16)}}` : `\\\\u${cp.toString(16).padStart(4, "0")}`;', replace: 'return `\\\\u${(c.charCodeAt(0) ?? 0).toString(16).padStart(4, "0")}`;',
     run: ["packages/domain/test/card.test.ts"], expect: "the tag characters" },
