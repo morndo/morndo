@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ALLOWED_SETTINGS, parsePin, pinFor, settingsProof, sha256Of, verifyClaudeParent, type Pin, type ProcReader, type Wanted } from "../src/adapters/caller-proof.ts";
+import { ALLOWED_SETTINGS, parseEnviron, parsePin, pinFor, settingsProof, sha256Of, verifyClaudeParent, type Pin, type ProcReader, type Wanted } from "../src/adapters/caller-proof.ts";
 import { claudeSettings } from "../src/adapters/runtime-claude.ts";
 
 const dirs: string[] = [];
@@ -33,7 +33,7 @@ type Fake = {
   sha?: string | null;                                                // its content hash, when it is asked for
   symlinked?: string[];                                               // paths that are, or go through, a symlink
   hashed?: { count: number };                                         // counts the reads of the binary's content
-  env?: Record<string, string> | null;                                // the parent's environment
+  env?: Record<string, string> | [string, string][] | null;          // the parent's environment (a list may name a variable twice)
 };
 // A fake /proc: the parent is pid 50, a claude of the pinned version started at START with inline sandbox settings.
 function reader(over: Fake = {}): ProcReader {
@@ -49,7 +49,10 @@ function reader(over: Fake = {}): ProcReader {
     real: path => over.links?.[path] ?? path,
     linked: path => over.symlinked?.includes(path) ?? false,
     exeIdentity: () => (over.identity === undefined ? { size: PIN.size, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs, ino: PIN.ino } : over.identity),
-    environ: () => (over.env === undefined ? { ANTHROPIC_BASE_URL: BASE, PATH: "/usr/bin" } : over.env),
+    environ: () => {
+      const env = over.env === undefined ? { ANTHROPIC_BASE_URL: BASE, PATH: "/usr/bin" } : over.env;
+      return env === null ? null : Array.isArray(env) ? env : Object.entries(env);
+    },
     exeSha256: () => { if (over.hashed) over.hashed.count++; return over.sha === undefined ? PIN.sha256 : over.sha; },
   };
 }
@@ -191,6 +194,23 @@ describe("the lease's caller proof (check 2)", () => {
     }
     expect(verify({ env: { ...base, NODE_TLS_REJECT_UNAUTHORIZED: "1" } })).toEqual({ ok: true });   // Node's own default is not a switch
     expect(verify({ env: { ...base, NO_PROXY: "localhost", HTTPS_PROXY_NOTE: "x" } })).toEqual({ ok: true });   // not a proxy, and no lookalike counts
+  });
+
+  it("refuses a checked name that the parent's environment holds twice, even with the same value", () => {
+    const twice = (name: string, first: string, second: string): [string, string][] => [["PATH", "/usr/bin"], ["ANTHROPIC_BASE_URL", BASE], [name, first], [name, second]];
+    for (const name of ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_TLS_REJECT_UNAUTHORIZED"]) {
+      expect(verify({ env: twice(name, "1", "1") }), name).toMatchObject({ ok: false, why: `the parent's environment names ${name} twice` });
+    }
+    const base: [string, string][] = [["ANTHROPIC_BASE_URL", BASE], ["ANTHROPIC_BASE_URL", BASE]];
+    expect(verify({ env: base })).toMatchObject({ ok: false, why: "the parent's environment names ANTHROPIC_BASE_URL twice" });
+    expect(verify({ env: [["ANTHROPIC_BASE_URL", "https://elsewhere.example.test"], ["ANTHROPIC_BASE_URL", BASE]] })).toMatchObject({ ok: false });
+    expect(verify({ env: [["ANTHROPIC_BASE_URL", BASE], ["PATH", "/a"], ["PATH", "/b"]] })).toEqual({ ok: true });   // a name that is not checked may repeat
+  });
+
+  it("reads /proc's environ entry by entry, repeats included", () => {
+    expect(parseEnviron("A=1\0B=2=3\0A=4\0")).toEqual([["A", "1"], ["B", "2=3"], ["A", "4"]]);
+    expect(parseEnviron("")).toEqual([]);
+    expect(parseEnviron("=x\0noequals\0C=\0")).toEqual([["C", ""]]);
   });
 
   it("takes the parent's API host from its own environment, pinned for the connection, never from the lease's", () => {

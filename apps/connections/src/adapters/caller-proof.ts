@@ -35,7 +35,7 @@ export type ProcReader = {
   linked(path: string): boolean;                                        // the path is, or goes through, a symlink (or cannot be read)
   exeIdentity(pid: number): Identity | null;                            // the running binary's inode, whatever its name (it may be deleted)
   exeSha256(pid: number): string | null;                                // the content of the running binary
-  environ(pid: number): Record<string, string> | null;                  // the environment the process started with
+  environ(pid: number): [string, string][] | null;                      // the environment the process started with, every entry (a name may repeat)
 };
 
 export type Identity = { size: number; mtimeMs: number; ctimeMs: number; ino: number };
@@ -87,15 +87,19 @@ export const procReader: ProcReader = {
   exeSha256: pid => sha256Of(`/proc/${pid}/exe`),
   environ: pid => {
     const raw = text(() => readFileSync(`/proc/${pid}/environ`, "utf8"));
-    if (raw === null) return null;
-    const env: Record<string, string> = {};
-    for (const entry of raw.split("\0")) {
-      const eq = entry.indexOf("=");
-      if (eq > 0) env[entry.slice(0, eq)] = entry.slice(eq + 1);
-    }
-    return env;
+    return raw === null ? null : parseEnviron(raw);
   },
 };
+
+// /proc/<pid>/environ: NAME=value entries, each ended by a NUL, in order and as many times as they occur.
+export function parseEnviron(raw: string): [string, string][] {
+  const out: [string, string][] = [];
+  for (const entry of raw.split("\0")) {
+    const eq = entry.indexOf("=");
+    if (eq > 0) out.push([entry.slice(0, eq), entry.slice(eq + 1)]);
+  }
+  return out;
+}
 
 // The sha256 of a file, read in chunks (a claude binary is large), or null when it can't be read.
 export function sha256Of(path: string): string | null {
@@ -275,9 +279,18 @@ export function verifyClaudeParent(check: Check): Proof {
     if (read.exeSha256(parent) !== check.pin.sha256) return no("the claude binary is not the one that was pinned");
   }
   // The API host: the parent's own environment, read from /proc, names the host the owner pinned for this connection.
-  const env = read.environ(parent);
+  const entries = read.environ(parent);
   const pinned = check.pin.baseUrls[check.connection];
-  if (env === null || pinned === undefined || sameBase(env.ANTHROPIC_BASE_URL, pinned) !== true) return no("the parent is not pointed at the pinned API host");
+  if (entries === null || pinned === undefined) return no("the parent is not pointed at the pinned API host");
+  // A name that occurs twice could be read one way here and taken the other way by the process: refused, for every name
+  // that is checked.
+  const seen = new Set<string>();
+  for (const [name] of entries) {
+    if (seen.has(name) && (name === "ANTHROPIC_BASE_URL" || name === "NODE_TLS_REJECT_UNAUTHORIZED" || INTERCEPTING_ENV.test(name))) return no(`the parent's environment names ${name} twice`);
+    seen.add(name);
+  }
+  const env = Object.fromEntries(entries);
+  if (sameBase(env.ANTHROPIC_BASE_URL, pinned) !== true) return no("the parent is not pointed at the pinned API host");
   const intercepts = Object.entries(env).find(([name, value]) => INTERCEPTING_ENV.test(name) || (name === "NODE_TLS_REJECT_UNAUTHORIZED" && value === "0"));
   if (intercepts !== undefined) return no(`the parent's environment can put another party on the line: ${intercepts[0]}`);
   const flag = (name: string): string[] => args.flatMap((arg, i) => (arg === name ? [args[i + 1] ?? ""] : arg.startsWith(`${name}=`) ? [arg.slice(name.length + 1)] : []));
