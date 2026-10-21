@@ -39,8 +39,7 @@ afterAll(async () => {
 export function startWeb(html = DESKTOP_PAGE): Promise<Web> {
   const started = start(html);
   starting.add(started);
-  const done = () => { starting.delete(started); };
-  started.then(done, done);
+  void started.then(() => starting.delete(started), () => starting.delete(started));
   return started;
 }
 
