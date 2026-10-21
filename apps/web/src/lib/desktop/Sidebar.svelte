@@ -12,15 +12,16 @@
   import SquarePen from "@lucide/svelte/icons/square-pen";
   import Signpost from "@lucide/svelte/icons/signpost";
   import Unplug from "@lucide/svelte/icons/unplug";
-  import type { RosterEntry } from "@morndo/domain";
+  import type { RosterEntry, Run } from "@morndo/domain";
   import Avatar from "./Avatar.svelte";
   import { ABSENT_MANAGER } from "../manager.ts";
+  import { BACKGROUND_LABEL, inBackground, partitionAgents } from "../lanes.ts";
   import type { ConversationPrefs } from "./present.ts";
 
-  let { office, workers, manager, selected, view, unread, needsYouCount, decisions, decisionsOpen, prefsOf, engines = false, onMenu, onSelect, onActivity, onDecisions, onCompose }: {
+  let { office, workers, manager, selected, view, unread, needsYouCount, decisions, decisionsOpen, prefsOf, engines = false, runs = null, onMenu, onSelect, onActivity, onDecisions, onCompose }: {
     office: string; workers: RosterEntry[]; manager: RosterEntry | null; selected: string | null; view: "home" | "activity" | "board" | "dashboard";
     unread: (w: RosterEntry) => boolean; needsYouCount: number; decisions: number; decisionsOpen: boolean; prefsOf: (name: string) => ConversationPrefs;
-    engines?: boolean;
+    engines?: boolean; runs?: ReadonlyMap<string, Run> | null;
     onMenu: (id: string, x: number, y: number) => void;
     onSelect: (id: string) => void; onActivity: () => void; onDecisions: () => void; onCompose: () => void;
   } = $props();
@@ -29,16 +30,15 @@
   let filter = $state("");
   let collapsed = $state<Record<string, boolean>>({});
   const match = (w: RosterEntry) => !filter.trim() || `${w.name} ${w.title ?? ""}`.toLowerCase().includes(filter.trim().toLowerCase());
-  const byName = (a: RosterEntry, b: RosterEntry) => a.name.localeCompare(b.name);
   const agents = $derived(workers.filter(w => w !== manager && match(w)));
-  const starred = $derived(agents.filter(w => prefsOf(w.name).starred).sort(byName));
-  const working = $derived(agents.filter(w => !prefsOf(w.name).starred && (w.state === "active" || w.needsYou)).sort(byName));
-  const idle = $derived(agents.filter(w => !prefsOf(w.name).starred && w.state !== "active" && !w.needsYou).sort(byName));
+  const parts = $derived(partitionAgents(agents, runs, w => prefsOf(w.name).starred));
   const sections = $derived([
-    ...(starred.length ? [{ key: "starred", label: "Starred", items: starred }] : []),
-    { key: "working", label: "Working", items: working },
-    { key: "idle", label: "Idle", items: idle },
+    ...(parts.starred.length ? [{ key: "starred", label: "Starred", items: parts.starred }] : []),
+    { key: "working", label: "Working", items: parts.working },
+    { key: "idle", label: "Idle", items: parts.idle },
   ]);
+  // A working row whose lane waits on its own background work says so beside the name.
+  const tagged = (key: string, w: RosterEntry) => key === "working" && inBackground(w, runs);
 </script>
 
 <aside class="side" aria-label="Agents">
@@ -90,9 +90,11 @@
         {#if !collapsed[s.key]}
           {#each s.items as w (w.id)}
             <button class="row" class:sel={view === "home" && selected === w.id} class:unread={unread(w)} class:muted={prefsOf(w.name).muted}
-              onclick={() => onSelect(w.id)} oncontextmenu={ctx(w)} title={w.title ?? w.location}>
+              onclick={() => onSelect(w.id)} oncontextmenu={ctx(w)} title={w.title ?? w.location}
+              aria-label={tagged(s.key, w) ? `${w.name}, working in the background` : undefined}>
               <span class="ic">{#if w.offline}<Unplug size={16} />{:else if w.state === "active"}<i class="spin"></i>{:else}<Hash size={16} />{/if}</span>
               <span class="nm">{w.name}</span>
+              {#if tagged(s.key, w)}<span class="off" title={BACKGROUND_LABEL}>background</span>{/if}
               {#if w.offline}<span class="off">offline</span>{/if}
               {#if w.needsYou}<span class="badge">!</span>{/if}
             </button>
