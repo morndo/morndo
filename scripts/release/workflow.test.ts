@@ -1,10 +1,10 @@
 // The release pipeline's shape (design §9, ADR-0019). These read the workflow files; they do not
 // call GitHub. A private scratch repository still has to run the real tag once the owner adds keys.
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { BUNDLED_NODE, NODE_RELEASE_KEYS_COMMIT } from "./node-pin.ts";
 import { RELEASE_NAMESPACE } from "./sign.ts";
@@ -15,6 +15,9 @@ const ATTEST = "1e69f48acb82d1966a394da916b4c1698aa569d6";
 const DOWNLOAD_ARTIFACT = "37930b1c2abaa49bbe596cd826c3c89aef350131";
 const UPLOAD_PAGES = "fc324d3547104276b827a68afc52ff2a11cc49c9";
 const DEPLOY_PAGES = "368f82528645a54fb793d4d04e342629a3f51346";
+
+const scratch: string[] = [];
+afterEach(() => { for (const d of scratch.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
 function job(yaml: string, name: string): string {
   const marker = `\n  ${name}:\n`;
@@ -151,6 +154,7 @@ describe("release pipeline files", () => {
     expect(published).toContain("published-gh.sh");
     expect(job(release, "ship")).toContain("GH_REPO: ${{ github.repository }}");
     const dir = mkdtempSync(join(tmpdir(), "morndo-gh-"));
+    scratch.push(dir);
     const bin = join(dir, "bin");
     mkdirSync(bin);
     const log = join(dir, "log");
