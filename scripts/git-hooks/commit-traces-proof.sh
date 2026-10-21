@@ -305,10 +305,11 @@ tree=$(git mktree </dev/null)
 parent=-
 i=1
 while [ "$i" -le 150 ]; do
-  parent=$(one - Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com "note $i")
+  parent=$(one "$parent" Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com "note $i")
   i=$((i + 1))
 done
 many=$parent
+[ "$(git rev-list --count "$many")" -eq 150 ] || fail "the long history is a chain of 150 commits"
 
 real_git=$(command -v git)
 real_grep=$(command -v grep)
