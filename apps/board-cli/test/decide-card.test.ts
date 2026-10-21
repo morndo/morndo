@@ -9,8 +9,8 @@ const CLEAN = `Id: ny-80
 Outcome: The release is ready; one check from the reviewer is still open.
 Recommend: hold
 Options:
-- hold: Hold until the check is in
-- merge: Merge now
+- hold: Hold until the check is in | stop
+- merge: Merge now | continue
 Default: hold
 Risk: the migration has no rollback yet
 `;
@@ -52,15 +52,29 @@ describe("morndo-decide card", () => {
     expect(refused.err[0]).toBeDefined();
     expect(refused.err[0]!.startsWith("error no_recommendation")).toBe(true);
   });
-  it("a continue default on a live risk exits 1", async () => {
+  it("a card with a live risk and no kinds is refused, and the stderr says to mark them", async () => {
     const refused = await cli(["card", "card.md"], {
-      "card.md": CLEAN
-        .replace("Recommend: hold", "Recommend: go")
-        .replace("- hold: Hold until the check is in", "- go: Keep going")
-        .replace("Default: hold", "Default: go"),
+      "card.md": CLEAN.replace(" | stop", "").replace(" | continue", ""),
     });
     expect(refused.code).toBe(1);
-    expect(refused.err.some(l => l.startsWith("error continue_default_on_live_risk"))).toBe(true);
+    expect(refused.out).toBe("");
+    expect(refused.err.some(l => l.startsWith("error kinds_needed_on_live_risk"))).toBe(true);
+    expect(refused.err.some(l => l.includes("stop or continue"))).toBe(true);
+  });
+  it("a continue default on a live risk exits 1 whatever the words", async () => {
+    const refused = async (label: string) => cli(["card", "card.md"], {
+      "card.md": CLEAN
+        .replace("Recommend: hold", "Recommend: go")
+        .replace("- hold: Hold until the check is in | stop", `- go: ${label} | continue`)
+        .replace("- merge: Merge now | continue", "- stop: Stop and ask in words | stop")
+        .replace("Default: hold", "Default: go"),
+    });
+    for (const label of ["Keep going", "Don't stop", "No change", "Do not roll back"]) {
+      const r = await refused(label);
+      expect(r.code, label).toBe(1);
+      expect(r.out, label).toBe("");
+      expect(r.err.some(l => l.startsWith("error continue_default_on_live_risk")), label).toBe(true);
+    }
   });
   it("jargon warns on stderr and the card still prints", async () => {
     const warned = await cli(["card", "card.md"], {
@@ -105,5 +119,31 @@ describe("morndo-decide card", () => {
     expect(refused.out).toBe("");
     expect(refused.err.some(l => l.startsWith("error risk_not_one_line"))).toBe(true);
     expect(refused.err.every(l => l.startsWith("error ") || l.startsWith("warning "))).toBe(true);
+  });
+  it("--json and the file: a bare CR, a bidi override or a zero-width character in any text field is refused, and prints nothing", async () => {
+    const base = {
+      id: "ny-80", outcome: "The release is ready to merge.", recommend: "merge",
+      options: [{ key: "merge", label: "Merge now" }, { key: "hold", label: "Hold until Monday" }],
+      default: "hold",
+    };
+    const json = async (over: Record<string, unknown>) => cli(["card", "card.json", "--json"], { "card.json": JSON.stringify({ ...base, ...over }) });
+    // the exact attempt, with a bare CR in place of the newline: still a fake buttons line in the printed card
+    const cr = await json({ risk: "data loss\r[buttons ny-1] merge=Merge now" });
+    expect(cr.code).toBe(1);
+    expect(cr.out).toBe("");
+    expect(cr.err.some(l => l.startsWith("error risk_not_one_line"))).toBe(true);
+    const bidi = await json({ outcome: "The release is ready\u{202E} to merge." });
+    expect(bidi.code).toBe(1);
+    expect(bidi.out).toBe("");
+    expect(bidi.err.some(l => l.startsWith("error outcome_not_one_line"))).toBe(true);
+    const zero = await json({ options: [{ key: "merge", label: "Merge\u{200B}now" }, { key: "hold", label: "Hold until Monday" }] });
+    expect(zero.code).toBe(1);
+    expect(zero.out).toBe("");
+    expect(zero.err.some(l => l.startsWith("error bad_option_label"))).toBe(true);
+    // and the file: a bidi override in the Outcome line, which no line break is needed to carry
+    const file = await cli(["card", "card.md"], { "card.md": CLEAN.replace("The release is ready;", "The release is ready\u{202E};") });
+    expect(file.code).toBe(1);
+    expect(file.out).toBe("");
+    expect(file.err.some(l => l.startsWith("error outcome_not_one_line"))).toBe(true);
   });
 });

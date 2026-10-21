@@ -63,7 +63,7 @@ You ask the principal for a decision with \`morndo-decide\`. One brief, his form
 
 - File one when the decision is his: spending money, anything public or outside the team, an irreversible step, a product or taste call. Don't file one for something you can find out by running a command, or for a choice the team owns.
 - Start from the blank: \`morndo-decide template\`. Check it before you file: \`morndo-decide lint brief.md\`. A refusal is one line per problem; fix those and lint again. Warnings do not refuse.
-- A short question for his phone is a card, not a brief: \`morndo-decide card --template\`, then \`morndo-decide card card.md\`. It refuses a card with no recommendation or a default that continues a live risk, warns on ids he can't read (#12, a commit hash, ny-80), and prints the card to post, buttons line last.
+- A short question for his phone is a card, not a brief: \`morndo-decide card --template\`, then \`morndo-decide card card.md\`. It refuses a card with no recommendation or, with a live Risk named, options not marked stop or continue or a default that is not a stop, warns on ids he can't read (#12, a commit hash, ny-80), and prints the card to post, buttons line last.
 - File it: \`morndo-decide new brief.md\`. It prints an id, such as \`d-12\`. \`morndo-decide show d-12\` says where it stands.
 - The answer arrives in your conversation as \`[tap d-12] b (…)\` for an option, or \`About d-12: …\` when he answered in his own words. Act on it, then \`morndo-decide settle d-12\`.
 - The facts changed: \`morndo-decide restate d-12 brief.md\`. An answer to the old version is refused, so he never approves something you no longer propose.

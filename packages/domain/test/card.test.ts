@@ -18,7 +18,8 @@ const card = (over: Record<string, unknown> = {}) => ({
 });
 const codes = (draft: unknown) => lintCard(draft).problems.map(p => `${p.code} ${p.where}`);
 // One line, whatever a draft holds in it: no break of any kind (\n, \r, NEL, the two Unicode separators), no control
-// character (tab aside, as the lint's CONTROL). Problems are printed as lines, so this is what they must be.
+// character (a tab cannot break a line, so it passes here; a card's own fields refuse it). Problems are printed as
+// lines, so this is what they must be.
 const BREAKS = ["\n", "\r", "\x85", "\u{2028}", "\u{2029}"];
 const oneLineText = (s: string) => {
   if (BREAKS.some(b => s.includes(b))) return false;
@@ -28,6 +29,14 @@ const oneLineText = (s: string) => {
   }
   return true;
 };
+// Every character a text field refuses beyond plain words (T-307): the C0 controls (tab and the line breaks among
+// them), DEL and the C1 controls, the two Unicode separators, the bidirectional overrides and isolates, and the
+// zero-width characters — each can break a line, reorder it, or hide a word of it on the principal's phone.
+const HOSTILE = [
+  "\r", "\n", "\t", "\u0000", "\u0007", "\u0008", "\u000B", "\u000C", "\u001B", "\u007F", "\u0085", "\u009F",
+  "\u{2028}", "\u{2029}", "\u{200B}", "\u{200C}", "\u{200D}", "\u{FEFF}",
+  "\u{202A}", "\u{202B}", "\u{202C}", "\u{202D}", "\u{202E}", "\u{2066}", "\u{2067}", "\u{2068}", "\u{2069}",
+];
 
 describe("lintCard", () => {
   it("a clean card has no problems, and cardText puts the buttons line last", () => {
@@ -44,7 +53,13 @@ describe("lintCard", () => {
       "If you don't answer: Hold until Monday",
       "[buttons ny-80] merge=Merge now | hold=Hold until Monday",
     ]);
-    expect(cardText(lintCard(card({ risk: "the migration has no rollback yet" })).card!)).toEqual([
+    expect(cardText(lintCard(card({
+      risk: "the migration has no rollback yet",
+      options: [
+        { key: "merge", label: "Merge now", kind: "continue" },
+        { key: "hold", label: "Hold until Monday", kind: "stop" },
+      ],
+    })).card!)).toEqual([
       "The release is ready to merge.",
       "Recommended: Merge now",
       "If you don't answer: Hold until Monday",
@@ -68,8 +83,8 @@ describe("lintCard", () => {
     const going = card({
       recommend: "go",
       options: [
-        { key: "go", label: "Keep going" },
-        { key: "hold", label: "Hold until Monday" },
+        { key: "go", label: "Keep going", kind: "continue" },
+        { key: "hold", label: "Hold until Monday", kind: "stop" },
       ],
       default: "go",
     });
@@ -77,40 +92,81 @@ describe("lintCard", () => {
     expect(refused.card).toBeNull();
     expect(refused.problems).toEqual([{
       level: "error", code: "continue_default_on_live_risk", where: "default",
-      text: 'the default "Keep going" continues the live risk "the deploy can still delete backups"; default to the safe option (hold, stop, undo), or drop the Risk line once the risk is closed',
+      text: 'the default "Keep going" continues the live risk "the deploy can still delete backups"; default to a stop option, or drop the Risk line once the risk is closed',
     }]);
     expect(lintCard(going).problems).toEqual([]);                                    // no risk named: carrying on is a choice
-    expect(lintCard(card({ risk: "the deploy can still delete backups" })).problems).toEqual([]);   // a safe default with a risk
+    expect(lintCard(card({                                                          // a stop default with a risk
+      risk: "the deploy can still delete backups",
+      options: [
+        { key: "merge", label: "Merge now", kind: "continue" },
+        { key: "hold", label: "Hold until Monday", kind: "stop" },
+      ],
+    })).problems).toEqual([]);
   });
 
-  it("a default is judged by its meaning: carrying on is refused, a stop or hold is not", () => {
-    // The label is what is judged, so the keys stay neutral; the default is the first option, under a named Risk.
-    const underRisk = (label: string) => card({
+  it("a live risk needs every option marked stop or continue, and a stop default; the wording is never read", () => {
+    // Round 3 (T-307): no word list can judge a label ("Don't stop" carries on, "Keep it paused" stops), so the asker
+    // declares each option's kind and lint reads only that. The default is the first option, under a named Risk.
+    const underRisk = (kind: "stop" | "continue", label: string) => card({
       recommend: "go",
       options: [
-        { key: "go", label },
-        { key: "stop", label: "Stop and ask in words" },
+        { key: "go", label, kind },
+        { key: "stop", label: "Stop and ask in words", kind: "stop" },
       ],
       default: "go",
       risk: "the deploy can still delete backups",
     });
-    for (const label of ["Let it run", "Keep waiting", "Keep going", "Continue", "Proceed with the merge"])
-      expect(lintCard(underRisk(label)).problems.map(p => `${p.code} ${p.where}`), label)
+    // No kinds declared under a live risk: one error for the card, and no card.
+    const bare = lintCard(card({ risk: "the deploy can still delete backups" }));
+    expect(bare.problems).toEqual([{
+      level: "error", code: "kinds_needed_on_live_risk", where: "options",
+      text: "a card with a live risk marks each option stop or continue (… | stop), so what happens if he does not answer is declared, not guessed",
+    }]);
+    expect(bare.card).toBeNull();
+    // A continue default is refused and a stop default is clean, whatever the words say.
+    for (const label of ["Don't stop", "Never stop", "No change", "Do not roll back", "Let it run", "Keep waiting", "Hold until Monday"])
+      expect(lintCard(underRisk("continue", label)).problems.map(p => `${p.code} ${p.where}`), label)
         .toEqual(["continue_default_on_live_risk default"]);
-    for (const label of ["Do not proceed", "Hold, continue later", "Hold until Monday", "Stop the deploy", "Don't continue", "Please don't proceed",
-      "Pause, then carry on", "Wait for the reviewer", "Merge now", "Undo the change"])
-      expect(lintCard(underRisk(label)).problems, label).toEqual([]);
-    // The key counts as its label: "keep-going" is caught like "Keep going".
-    const keyed = lintCard(card({
-      recommend: "keep-going",
+    for (const label of ["Keep it paused", "Hold, continue later", "Do not proceed", "Merge now", "Don't stop"])
+      expect(lintCard(underRisk("stop", label)).problems, label).toEqual([]);
+    // Without a risk no kinds are needed, a continue default is fine, and a kind that is neither word is refused.
+    expect(lintCard(card({
+      recommend: "go",
       options: [
-        { key: "keep-going", label: "Ask him first" },
-        { key: "stop", label: "Stop and ask in words" },
+        { key: "go", label: "Keep going", kind: "continue" },
+        { key: "hold", label: "Hold until Monday", kind: "continue" },
       ],
-      default: "keep-going",
-      risk: "the deploy can still delete backups",
+      default: "go",
+    })).problems).toEqual([]);
+    expect(codes(card({
+      options: [
+        { key: "merge", label: "Merge now", kind: "pause" },
+        { key: "hold", label: "Hold until Monday" },
+      ],
+    }))).toEqual(["bad_option_kind option merge"]);
+  });
+
+  it("cardText never prints a kind", () => {
+    const withKinds = lintCard(card({
+      recommend: "go",
+      options: [
+        { key: "go", label: "Keep going", kind: "continue" },
+        { key: "hold", label: "Hold until Monday", kind: "stop" },
+      ],
+      default: "hold",
+      risk: "the migration has no rollback yet",
     }));
-    expect(keyed.problems.map(p => `${p.code} ${p.where}`)).toEqual(["continue_default_on_live_risk default"]);
+    expect(withKinds.problems).toEqual([]);
+    const lines = cardText(withKinds.card!);
+    expect(lines).toEqual([
+      "The release is ready to merge.",
+      "Recommended: Keep going",
+      "If you don't answer: Hold until Monday",
+      "Live risk: the migration has no rollback yet",
+      "[buttons ny-80] go=Keep going | hold=Hold until Monday",
+    ]);
+    // The kind is for lint, not for the principal: neither word appears, and the only bars are the buttons line's.
+    for (const line of lines) expect(/\b(?:stop|continue)\b/.test(line)).toBe(false);
   });
 
   it("a free-text field is one line and bounded: a newline in the risk, with a fake buttons line, is refused", () => {
@@ -125,9 +181,34 @@ describe("lintCard", () => {
     expect(codes(card({ risk: "r".repeat(CARD_RISK_MAX + 1) }))).toEqual(["risk_too_long risk"]);
     expect(codes(card({ risk: 42 }))).toEqual(["bad_risk risk"]);
     // What is posted is lines: every line one line, and the buttons line the only one, last.
-    const lines = cardText(lintCard(card({ risk: "the migration has no rollback yet" })).card!);
+    const lines = cardText(lintCard(card({
+      risk: "the migration has no rollback yet",
+      options: [
+        { key: "merge", label: "Merge now", kind: "continue" },
+        { key: "hold", label: "Hold until Monday", kind: "stop" },
+      ],
+    })).card!);
     expect(lines.every(l => !BREAKS.some(b => l.includes(b)))).toBe(true);
     expect(lines.filter(l => l.startsWith("[buttons"))).toEqual([lines.at(-1)]);
+  });
+
+  it("no text field holds a control, a line separator, a bidi override or a zero-width character", () => {
+    // Each of HOSTILE, in each field the card prints: the card is refused with an error naming that field.
+    const fields = [
+      ["outcome", "outcome_not_one_line", "outcome", (c: string) => ({ outcome: `a${c}b` })],
+      ["option label", "bad_option_label", "option merge", (c: string) => ({
+        options: [{ key: "merge", label: `a${c}b` }, { key: "hold", label: "Hold until Monday" }],
+      })],
+      ["risk", "risk_not_one_line", "risk", (c: string) => ({ risk: `a${c}b` })],
+    ] as const;
+    for (const c of HOSTILE) {
+      const name = `U+${c.codePointAt(0)!.toString(16)}`;
+      for (const [field, code, where, over] of fields) {
+        const lint = lintCard(card(over(c)));
+        expect(lint.problems.map(p => `${p.code} ${p.where}`), `${field} holds ${name}`).toContain(`${code} ${where}`);
+        expect(lint.card, `${field} holds ${name}`).toBeNull();
+      }
+    }
   });
 
   it("every problem is one line, whatever the draft holds", () => {
@@ -141,9 +222,25 @@ describe("lintCard", () => {
       ],
     }));
     expect(keys.problems.map(p => `${p.code} ${p.where}`)).toEqual(["bad_option_key option 0", "bad_option_key option 1"]);
-    for (const p of [...echoed.problems, ...keys.problems]) {
+    // And one that neither breaks the line nor shows: a bidi override and a zero-width character, echoed escaped.
+    const hiddenEcho = lintCard(card({ recommend: "go\u{202E}ahead", default: "go\u{200B}on" }));
+    expect(hiddenEcho.problems.map(p => `${p.code} ${p.where}`)).toEqual(["recommend_unknown recommend", "default_unknown default"]);
+    expect(hiddenEcho.problems[0]!.text).toContain("\\u202e");
+    expect(hiddenEcho.problems[1]!.text).toContain("\\u200b");
+    const hiddenKeys = lintCard(card({
+      options: [
+        { key: "a\u{202E}b", label: "Merge now" },
+        { key: "c\u{200B}d", label: "Hold until Monday" },
+      ],
+    }));
+    expect(hiddenKeys.problems.map(p => `${p.code} ${p.where}`)).toEqual(["bad_option_key option 0", "bad_option_key option 1"]);
+    for (const p of [...echoed.problems, ...keys.problems, ...hiddenEcho.problems, ...hiddenKeys.problems]) {
       expect(oneLineText(p.text), `${p.code} text`).toBe(true);
       expect(oneLineText(p.where), `${p.code} where`).toBe(true);
+      for (const c of ["\u{202E}", "\u{200B}"]) {
+        expect(p.text.includes(c), `${p.code} text`).toBe(false);
+        expect(p.where.includes(c), `${p.code} where`).toBe(false);
+      }
     }
   });
 

@@ -82,7 +82,7 @@ on his phone, never filed. A card now gets the brief's discipline as a short for
 text adapter in the protocol, and `morndo-decide card`, which checks a card file and prints the lines to post — it
 files nothing and needs no hub, like `lint` and `template`. Its rules: an id for the buttons line, one plain outcome
 line, two to four options with the protocol's keys and labels, the recommended option first and named, a default that
-is one of the options, and no placeholder left from the blank; with a live Risk named, a default that carries on
-("continue", "keep going", "do nothing") is refused, and ids only the manager can read (#12, a commit hash, an ask id)
-warn. The continue words and the jargon patterns are lint — shape, not judgement of truth: whether the risk is real
-stays with the manager.
+is one of the options, and no placeholder left from the blank; with a live Risk named, each option is marked stop or
+continue (`| stop`) and the default must be a stop, and ids only the manager can read (#12, a commit hash, an ask id)
+warn. The kinds are declared by the asker, and lint checks they are there and that the default is a stop under a live
+risk; the jargon patterns are lint — shape, not judgement of truth: whether the risk is real stays with the manager.
