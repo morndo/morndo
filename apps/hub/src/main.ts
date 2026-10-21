@@ -98,7 +98,7 @@ if (argvWantsVersion(process.argv)) {
   await exitAfterOutput(0);
 }
 
-exitOnCrash(log);
+const crash = exitOnCrash(log);
 // `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
 // on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
 if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
@@ -149,8 +149,10 @@ switch (cmd) {
     // is closed (adapters/shutdown.ts), then exit 0. Each resource names its close when it exists; every wait of the start
     // goes through `shutdown.whileRunning`, so a start that is waiting when the stop begins goes no further.
     const shutdown = shutdownStack(log);
-    const running = shutdown.whileRunning.bind(shutdown);
-    const stop = () => shutdown.stop().then(() => exitAfterOutput(0));
+    const running = shutdown.whileRunning;
+    const stop = () => shutdown.stop().then(() => exitAfterOutput(shutdown.exitCode));
+    // A start that fails (a taken port, a throw) closes what it made too, and exits 1; once it serves, a crash exits at once.
+    crash.beforeExit(() => { shutdown.exitCode ||= 1; return shutdown.stop(); });
     process.on("SIGINT", () => void stop());
     process.on("SIGTERM", () => void stop());
     shutdown.onStop(() => store.close());
@@ -158,6 +160,7 @@ switch (cmd) {
     // MORNDO_FLEET_SOCKET set: every port goes through the fleet service; unset: this machine's tmux and Claude Code, as
     // before (spec §10). Nothing below this line knows which.
     const jobs = new JobsService();
+    shutdown.onStop(() => jobs.close());
     // The fleet's alerts in the app; an urgent new one is a push (counts only), told once the notifications exist below.
     let alertPush: (urgent: boolean) => void = () => {};
     const alerts = config.fleetSocket ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
@@ -319,6 +322,10 @@ switch (cmd) {
       r => { if (r.tokens || r.sessions || r.sends) log.info(`retention: pruned ${r.tokens} pairing tokens, ${r.sessions} sessions and ${r.sends} send records`); },
       e => log.warn("retention: pruning failed; trying again tomorrow", e));
     shutdown.onStop(stopRetention);
+    // Everything that polls on a timer stops before the drain above waits for the requests in flight (up to 10 s): none of it
+    // is still asking the fleet when the store closes at the end. Each stop is idempotent; the closes registered where each was
+    // made stay, for a stop in the middle of the start.
+    shutdown.onStop(() => { observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); following.projector?.stop(); board.stop(); });
     await running(http.ready);                                    // report "on" only once the socket really listens
     // What already waits when the hub starts raises no Notification: one complete look first, then only changes count. A
     // look that fails, or isn't complete (the fleet not answering yet, a node's first round slower than a poll), is tried
@@ -350,6 +357,7 @@ switch (cmd) {
     void memorySync?.tick();                             // the first round now; then the loop's, every minute
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
+    crash.beforeExit(null);
     break;
   }
   case "pair": {
@@ -430,6 +438,7 @@ async function openFleet(socket: string, files: LocalFileStore, jobs: JobsServic
   const check = await shutdown.whileRunning(checkFleet(client));
   if (check === "unsupported") {
     log.error(`the fleet service at ${socket} doesn't offer client API version ${CLIENT_API}; update morndo-fleet or this hub`);
+    shutdown.exitCode = EXIT_CONFIG;                     // a signal while the output drains still ends the process with 78
     await exitAfterOutput(EXIT_CONFIG);
   }
   if (check === "unreachable") log.warn(`the fleet service at ${socket} doesn't answer yet; the hub keeps asking`);

@@ -62,4 +62,23 @@ describe("shutdownStack", () => {
     await new Promise(r => setTimeout(r, 20));
     expect(settled).toBe(false);
   });
+
+  it("a close registered while the stop runs is waited for by that stop", async () => {
+    const s = shutdownStack(quiet);
+    const seen: string[] = [];
+    s.onStop(() => { seen.push("last"); });
+    s.onStop(() => {
+      s.onStop(async () => { await new Promise(r => setTimeout(r, 20)); seen.push("late"); });
+      seen.push("first");
+    });
+    await s.stop();
+    expect(seen).toEqual(["first", "last", "late"]);       // it starts at once; the stop is not over until it is
+  });
+
+  it("a stop ends with the code a failing start set, 0 otherwise", () => {
+    const s = shutdownStack(quiet);
+    expect(s.exitCode).toBe(0);
+    s.exitCode = 78;
+    expect(s.exitCode).toBe(78);
+  });
 });

@@ -3,6 +3,7 @@
 // port 0, a temporary home and its own TMPDIR, against the fake fleet on a real Unix socket. Never the owner's hub, fleet
 // or ports.
 import { spawn, type ChildProcess } from "node:child_process";
+import { createServer } from "node:net";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,8 +34,8 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function start() {
-  const e: NodeJS.ProcessEnv = { ...process.env, MORNDO_HOME: dir, MORNDO_PORT: "0", MORNDO_FLEET_SOCKET: fleet.socketPath, MORNDO_POLL_MS: "200", TMPDIR: scratch };
+function start(port = 0) {
+  const e: NodeJS.ProcessEnv = { ...process.env, MORNDO_HOME: dir, MORNDO_PORT: String(port), MORNDO_FLEET_SOCKET: fleet.socketPath, MORNDO_POLL_MS: "200", TMPDIR: scratch };
   delete e.MORNDO_PUSH_CONTACT;
   delete e.MORNDO_MANAGER_QUEUE;
   const c = spawn(process.execPath, ["--no-warnings", MAIN, "serve"], { env: e, stdio: ["ignore", "pipe", "pipe"] });
@@ -71,7 +72,7 @@ describe("morndo serve stopped while it starts", () => {
   it("SIGTERM during the first look, with the hub's socket already listening", async () => {
     holdFirstLook();
     const exited = start();
-    await until(() => fleet.calls.length > 0, 20_000);
+    await until(() => fleet.calls.some(c => c.op === "pane.captureMany"), 20_000);   // the first look runs once the socket listens
     expect(existsSync(scratch)).toBe(true);
     expect(out).not.toContain("morndo hub on");
     child?.kill("SIGTERM");
@@ -87,5 +88,26 @@ describe("morndo serve stopped while it starts", () => {
     child?.kill("SIGTERM");
     expect(await exited).toEqual({ code: 0, signal: null });
     expect(staged(scratch)).toEqual([]);
+  });
+
+  it("a start that fails (its port is taken) closes what it made, removes the staging dir, and exits 1", async () => {
+    const taken = createServer();
+    await new Promise<void>(resolve => taken.listen(0, "127.0.0.1", resolve));
+    try {
+      const port = (taken.address() as { port: number }).port;
+      const end = await start(port);
+      expect(end, out).toEqual({ code: 1, signal: null });
+      expect(out).toMatch(/EADDRINUSE/);
+      expect(staged(scratch), out).toEqual([]);
+    } finally { await new Promise(r => taken.close(r)); }
+  });
+
+  it("a fleet that does not offer this hub's API is a setting to fix: exit 78, the staging dir never made", async () => {
+    await fleet.close();
+    fleet = await startFakeFleet({ nodes: [], api: [99] });
+    const end = await start();
+    expect(end, out).toEqual({ code: 78, signal: null });
+    expect(out).toMatch(/doesn't offer client API version/);
+    expect(staged(scratch), out).toEqual([]);
   });
 });
