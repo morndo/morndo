@@ -182,4 +182,20 @@ describe("the recovery unit (§6.6, §13)", () => {
     expect(w.store.openUpdate(), "the record stands untouched").not.toBeNull();
     expect(w.current()).toBe(A);
   });
+
+  it("abandoning at swapping puts the old Version's units back", async () => {
+    // The units are rendered for the target before the links move (§6.2 step 6). A death between the two leaves
+    // current on A with B's units on disk: the abandon renders A's again before it starts anything.
+    const w = await buildApplyWorld(scratch);
+    await killedApply(w, die => { die.on = { op: "swap" }; });
+    expect(w.current()).toBe(A);
+    expect(w.tape).toContain(`renderUnits:${B}`);
+    const at = w.tape.length;
+    expect(await w.recover().recover()).toEqual({ kind: "abandoned" });
+    const after = w.tape.slice(at);
+    const render = after.indexOf(`renderUnits:${A}`);
+    expect(render, "A's units rendered again").toBeGreaterThan(-1);
+    expect(render).toBeLessThan(after.findIndex(t => t.startsWith("start:")));
+  });
+
 });

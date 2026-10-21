@@ -10,11 +10,11 @@ import {
 import { ManifestSchema } from "@morndo/protocol";
 import { CHECKOUT_SENTENCE } from "./check-service.ts";
 import {
-  ApplyInterrupted, type ApplyDeps, type ApplyTiming, type StepCtx, baselineBefore, continueAfterSwap, done, mark,
-  runRollback, startServices, stopServices, takeBackups, timingOf, waitSafePoint,
+  ApplyInterrupted, type ApplyDeps, type ApplyTiming, type StepCtx, abandonAttempt, baselineBefore, continueAfterSwap,
+  done, mark, runRollback, startServices, stopServices, takeBackups, timingOf, waitSafePoint,
 } from "./apply-steps.ts";
 import type {
-  AlertSink, Backup, Clock, HoldWriter, Installer, RoleProbe, SchemaInspector, ServiceManager, Sleeper,
+  AlertSink, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, SchemaInspector, ServiceManager, Sleeper,
   StoredUpdate, UpdateStore, Verifier,
 } from "./ports.ts";
 
@@ -45,23 +45,23 @@ const decode = <T>(schema: Decoder<T>, text: string): T | null => {
 
 export class ApplyService {
   readonly #p: {
-    services: ServiceManager; probe: RoleProbe; schemas: SchemaInspector; backup: Backup; hold: HoldWriter;
-    installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
+    services: ServiceManager; probe: RoleProbe; schemas: SchemaInspector; backup: Backup; revocations: Revocations;
+    hold: HoldWriter; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
     verifier: Pick<Verifier, "sha256">; timing?: Partial<ApplyTiming>;
   };
 
   constructor(p: {
-    services: ServiceManager; probe: RoleProbe; schemas: SchemaInspector; backup: Backup; hold: HoldWriter;
-    installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
+    services: ServiceManager; probe: RoleProbe; schemas: SchemaInspector; backup: Backup; revocations: Revocations;
+    hold: HoldWriter; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
     verifier: Pick<Verifier, "sha256">; timing?: Partial<ApplyTiming>;
   }) {
     this.#p = p;
   }
 
   async apply(o: { now: boolean }): Promise<ApplyOutcome> {
-    const { services, probe, schemas, backup, hold, installer, store, clock, sleeper, alerts, verifier } = this.#p;
+    const { services, probe, schemas, backup, revocations, hold, installer, store, clock, sleeper, alerts, verifier } = this.#p;
     const timing = timingOf(this.#p.timing);
-    const deps: ApplyDeps = { services, probe, backup, hold, installer, store, clock, sleeper, alerts };
+    const deps: ApplyDeps = { services, probe, backup, revocations, hold, installer, store, clock, sleeper, alerts };
 
     // §6.2 step 1, the plan — nothing below touches the machine. Only an install this updater made is ours (RL14).
     const layout = installer.layout();
@@ -136,6 +136,9 @@ export class ApplyService {
       // finishes is a deferral, not a failure: the hold comes off and the attempt ends, to try again later.
       mark(ctx, "draining");
       hold.write({ services: [...running], reason: "drain", version: staged.version, since: clock.now() });
+      // The services re-read the hold every second; the drain is judged only once each has had a full interval to
+      // see it and stop taking new work (review of 2026-10-21).
+      await deps.sleeper.sleep(timing.holdSeenMs);
       const drainBlockers = await waitSafePoint(ctx, running, { now: o.now });
       if (drainBlockers !== null) {
         hold.clear();
@@ -186,9 +189,7 @@ export class ApplyService {
       if (installer.layout().current === formatVersion(open.target)) {
         return await runRollback(ctx, { running, cause: message, baseline });
       }
-      hold.clear();
-      await startServices(deps, running);
-      store.finishUpdate(open.id, "abandoned", clock.now());
+      await abandonAttempt(ctx, running);
       return { kind: "abandoned", reason: message };
     } finally {
       lock.release();

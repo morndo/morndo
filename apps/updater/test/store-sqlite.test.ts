@@ -335,7 +335,19 @@ describe("the step record (RL4, §6.2)", () => {
     store.close();
   });
 
-  it("an update.db at schema 2 migrates to 3 and keeps its rows", () => {
+  it("records a Rollout halt and lists it, newest first (RL12)", () => {
+    const store = openUpdateStore({ db: join(state, "halts.db"), lock: join(state, "halts.lock") });
+    try {
+      store.recordHalt("0.2.0", "hub: no_report", 10);
+      store.recordHalt("0.3.0", "node: restarted", 20);
+      expect(store.halts()).toEqual([
+        { version: "0.3.0", reason: "node: restarted", at: 20 },
+        { version: "0.2.0", reason: "hub: no_report", at: 10 },
+      ]);
+    } finally { store.close(); }
+  });
+
+  it("an update.db at schema 2 migrates to the newest schema and keeps its rows", () => {
     // Written by hand, as the updater before this step left it: migrations 1 and 2, version 2, a staged Version
     // from before manifests were kept, the feed's word in its own row.
     mkdirSync(state, { recursive: true });
@@ -385,7 +397,7 @@ describe("the step record (RL4, §6.2)", () => {
 
     const store = openUpdateStore({ db: join(state, "old2.db"), lock: join(state, "apply.lock") });
     const raw = new Database(join(state, "old2.db"), { readonly: true });
-    expect(raw.pragma("user_version", { simple: true })).toBe(3);
+    expect(raw.pragma("user_version", { simple: true })).toBe(4);   // every migration since, all additive
     raw.close();
     expect(store.lastFeedCheck()).toMatchObject({ at: 40, feedSeq: 9 });   // the old rows read as they were
     expect(store.highestCommitted()).toBe("0.1.0");

@@ -9,7 +9,8 @@ import {
   type Update, type UpdateMark, type UpdateService, type UpdateState, type Version,
 } from "@morndo/domain";
 import type {
-  AlertSink, Backup, Clock, HoldWriter, Installer, RoleProbe, ServiceManager, Sleeper, StoredUpdate, UpdateStore,
+  AlertSink, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper, StoredUpdate,
+  UpdateStore,
 } from "./ports.ts";
 
 // What the tests kill with: an interruption, not a failure. Every catch below lets it through — a dead process
@@ -23,15 +24,18 @@ export class ApplyInterrupted extends Error {
 
 // The ports every shared step needs; the apply and the recovery services each hold their own view of these.
 export type ApplyDeps = {
-  services: ServiceManager; probe: RoleProbe; backup: Backup; hold: HoldWriter; installer: Installer;
-  store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
+  services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
+  installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
 };
 
 // §6.2's walls: the drain's patience, the polls, §6.4's health deadline and probation.
-export type ApplyTiming = { drainMs: number; pollMs: number; healthMs: number; probationMs: number };
+export type ApplyTiming = { drainMs: number; pollMs: number; healthMs: number; probationMs: number; holdSeenMs: number };
 export const timingOf = (t?: Partial<ApplyTiming>): ApplyTiming => ({
   drainMs: t?.drainMs ?? 30_000,            // §6.2 step 3's patience with work in flight
   pollMs: t?.pollMs ?? 1_000,
+  // The services re-read hold.json every second (service-kit HoldWatch): a safe point read sooner after the hold is
+  // written can pass before a service has stopped taking new work (review of 2026-10-21).
+  holdSeenMs: t?.holdSeenMs ?? 2_000,
   healthMs: t?.healthMs ?? HEALTH_DEADLINE_MS,
   probationMs: t?.probationMs ?? PROBATION_MS,
 });
@@ -182,18 +186,27 @@ export async function waitHealthy(ctx: StepCtx, running: readonly UpdateService[
   }
 }
 
-// The probation wall, up without a restart. The clock measures it — sleeping is the only way time passes — and the
-// restarts are the manager's own count since the starts.
+// The probation wall (§6.4: healthy, then up "for 60 more"): it runs from the moment health passed, without a
+// restart, and at its end the services are asked again — a service that went down inside the minute fails here
+// even when the service manager has not restarted it yet (review of 2026-10-21). The clock measures it; sleeping is
+// the only way time passes; the restarts are the manager's own count since the starts.
 export async function waitProbation(
-  ctx: StepCtx, running: readonly UpdateService[], o: { startedAt: number },
+  ctx: StepCtx, running: readonly UpdateService[], o: { healthyAt: number; baseline: Record<string, string[]> },
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  while (ctx.deps.clock.now() - o.startedAt < ctx.timing.probationMs) {
-    await ctx.deps.sleeper.sleep(ctx.timing.probationMs - (ctx.deps.clock.now() - o.startedAt));
+  while (ctx.deps.clock.now() - o.healthyAt < ctx.timing.probationMs) {
+    await ctx.deps.sleeper.sleep(ctx.timing.probationMs - (ctx.deps.clock.now() - o.healthyAt));
   }
   let restarts = 0;
   for (const s of running) restarts += await ctx.deps.services.restarts(s);
-  const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.startedAt, restarts });
-  return judged.ok ? { ok: true } : { ok: false, reason: judged.error };
+  const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.healthyAt, restarts });
+  if (!judged.ok) return { ok: false, reason: judged.error };
+  const after: HealthReport[] = [];
+  for (const s of running) {
+    const report = await ctx.deps.probe.health(s);
+    if (report !== null) after.push(report);
+  }
+  const still = judgeHealth({ baseline: o.baseline, after, target: ctx.u.target });
+  return still.ok ? { ok: true } : { ok: false, reason: `at the end of probation, ${healthLine(still.error)}` };
 }
 
 // ---- the backups (§6.2 step 5, RL5)
@@ -262,8 +275,29 @@ export async function runRollback(ctx: StepCtx, o: {
       // else moves either. The record stays open at rolling_back, never finished: the recovery unit (every
       // 5 minutes) walks this again once tmux no longer sits there.
       const reason = `tmux inside the node agent's unit; the rollback from ${targetText} waits (${o.cause})`;
+      // The hold is taken again on every visit while the rollback waits: a hold older than 10 minutes is ignored (§5),
+      // and the writes a later restore would drop must stay held for as long as that restore may still come (RL9).
+      holdForProbation(deps, o.running, { plan: planOf(ctx.u.migrations), version: targetText });
       deps.alerts.raise("update_rollback_waiting", reason);
       return { kind: "rollback_waiting", reason };
+    }
+    // RL8 and RL10, settled before anything moves: what a migration changed goes back only when the old Version truly
+    // cannot open it; a restore with the Backup gone is refused, never forced; and a restore that would bring back a
+    // device, agent token or node revoked since the Backup was taken is refused too — the services kept taking
+    // revocations during probation (RL9), and until the revocation journals arrive (PR 5c) those rows live only in
+    // the database a restore would replace. The target keeps running; the principal decides.
+    const plan = planOf(ctx.u.migrations);
+    const restores = rollbackRestores(plan);
+    for (const db of restores) {
+      const allowed = mayRestore({
+        database: db, restoreOnRollback: plan[db].restoreOnRollback, backupPresent: deps.backup.has(ctx.u.id, db),
+      });
+      if (!allowed.ok) return failed(`${db}: ${allowed.error} (${o.cause})`);
+      const dropped = deps.revocations.droppedBy(ctx.u.id, db);
+      if (dropped.length > 0) {
+        return failed(`${db}: restoring its backup would drop the revocation of ${dropped.join(", ")}, made since the backup; `
+          + `${targetText} keeps running (${o.cause})`);
+      }
     }
     await stopServices(deps, o.running);
     // The pair goes back as it was recorded (§6.5 step 2): the units, then the links — current first, then
@@ -273,16 +307,7 @@ export async function runRollback(ctx: StepCtx, o: {
       current: oldText,
       previous: ctx.u.preUpdate.previous === null ? null : formatVersion(ctx.u.preUpdate.previous),
     });
-    // RL8: only what a migration changed goes back, and only when the old Version truly cannot open it — and a
-    // restore with the Backup gone is refused, never forced.
-    const plan = planOf(ctx.u.migrations);
-    for (const db of rollbackRestores(plan)) {
-      const allowed = mayRestore({
-        database: db, restoreOnRollback: plan[db].restoreOnRollback, backupPresent: deps.backup.has(ctx.u.id, db),
-      });
-      if (!allowed.ok) return failed(`${db}: ${allowed.error} (${o.cause})`);
-      deps.backup.restore(ctx.u.id, db);
-    }
+    for (const db of restores) deps.backup.restore(ctx.u.id, db);
     await startServices(deps, o.running);
     const baseline = o.baseline ?? await baselineNow(deps, o.running);
     const healthy = await waitHealthy(ctx, o.running, { baseline, target: ctx.u.preUpdate.current });
@@ -290,6 +315,7 @@ export async function runRollback(ctx: StepCtx, o: {
     // Whole again: the hold comes off, the Version is bad here forever (RL7), the Alert says what happened.
     deps.hold.clear();
     deps.store.recordBad(targetText, deps.clock.now());
+    deps.store.recordHalt(targetText, o.cause, deps.clock.now());      // RL12: the fleet halts the Rollout (PR 6)
     deps.alerts.raise("update_rolled_back", `${targetText} rolled back to ${oldText}: ${o.cause}`);
     done(ctx, "rolling_back");
     deps.store.finishUpdate(ctx.u.id, "rolled_back", deps.clock.now());
@@ -298,6 +324,19 @@ export async function runRollback(ctx: StepCtx, o: {
     if (error instanceof ApplyInterrupted) throw error;
     return failed(error instanceof Error ? error.message : String(error));
   }
+}
+
+// ---- an abandon (§4.4: nothing swapped; the old Version runs again)
+
+// The units are rendered for the target before the links move (§6.2 step 6), so an attempt that stood at swapping
+// may have the target's unit files on disk while current is still the old Version: those go back before anything
+// starts (review of 2026-10-21). Then the hold comes off, the services start on the old Version, and the attempt ends.
+export async function abandonAttempt(ctx: StepCtx, running: readonly UpdateService[]): Promise<void> {
+  const { deps } = ctx;
+  if (ctx.u.mark === "swapping") await deps.services.renderUnits(formatVersion(ctx.u.preUpdate.current));
+  deps.hold.clear();
+  await startServices(deps, running);
+  deps.store.finishUpdate(ctx.u.id, "abandoned", deps.clock.now());
 }
 
 // ---- the commit (§6.2 step 10)
@@ -338,7 +377,6 @@ export async function continueAfterSwap(ctx: StepCtx, o: {
   try {
     mark(ctx, "starting");
     holdForProbation(deps, o.running, { plan: planOf(ctx.u.migrations), version: formatVersion(ctx.u.target) });
-    const startedAt = deps.clock.now();
     await startServices(deps, o.running);
     done(ctx, "starting");
     moveTo(ctx, "probation");
@@ -347,7 +385,7 @@ export async function continueAfterSwap(ctx: StepCtx, o: {
     if (!healthy.ok) {
       return await runRollback(ctx, { running: o.running, cause: healthy.reason, baseline: o.baseline });
     }
-    const probation = await waitProbation(ctx, o.running, { startedAt });
+    const probation = await waitProbation(ctx, o.running, { healthyAt: deps.clock.now(), baseline });
     if (!probation.ok) {
       return await runRollback(ctx, { running: o.running, cause: probation.reason, baseline: o.baseline });
     }
