@@ -24,8 +24,9 @@ export interface ReleaseFeed {
 // One Artifact download into the downloads directory. The body is written up to maxBytes and no further.
 export type Download = { path: string; size: number; overLimit: boolean; cut: boolean };
 export interface ArtifactStore {
-  /** overLimit: the server had more than maxBytes; cut: the connection ended before the body did. */
-  fetch(url: string, o: { name: string; maxBytes: number; timeoutMs: number }): Promise<Download>;
+  /** overLimit: the server had more than maxBytes; cut: the connection ended before the body did.
+   *  deadlineMs: the download's one wall, idle gaps and slow dribbles included. */
+  fetch(url: string, o: { name: string; maxBytes: number; timeoutMs: number; deadlineMs: number }): Promise<Download>;
   /** Removes the download named `name`, if any. */
   discard(name: string): void;
 }

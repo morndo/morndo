@@ -20,7 +20,7 @@ export class HttpsArtifacts implements ArtifactStore {
     mkdirSync(o.dir, { recursive: true, mode: 0o700 });
   }
 
-  async fetch(url: string, o: { name: string; maxBytes: number; timeoutMs: number }): Promise<Download> {
+  async fetch(url: string, o: { name: string; maxBytes: number; timeoutMs: number; deadlineMs: number }): Promise<Download> {
     const path = this.part(o.name);
     // 0600 and truncated, before anything is fetched: a retry never appends to a previous attempt's bytes.
     const sink = createWriteStream(path, { flags: "w", mode: 0o600 });
@@ -30,7 +30,7 @@ export class HttpsArtifacts implements ArtifactStore {
     const broken = new Promise<never>((_, reject) => sink.once("error", error => { reject(error); }));
     try {
       const r = await Promise.race([
-        httpsGet(url, { ...(this.ca === undefined ? {} : { ca: this.ca }), maxBytes: o.maxBytes, timeoutMs: o.timeoutMs, sink }),
+        httpsGet(url, { ...(this.ca === undefined ? {} : { ca: this.ca }), maxBytes: o.maxBytes, timeoutMs: o.timeoutMs, deadlineMs: o.deadlineMs, sink }),
         broken,
       ]);
       if (r.status === 404) throw new FetchFailed("status", `HTTP 404 from ${url}`);

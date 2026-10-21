@@ -68,7 +68,7 @@ export class FakeFeed implements ReleaseFeed {
 // ---- the artifacts: bytes served from memory into real files, capped like the real download
 
 export type ServedArtifact = { bytes: Uint8Array; cutAt?: number; extra?: number };
-export type FetchCall = { url: string; name: string; maxBytes: number; size: number; overLimit: boolean; cut: boolean };
+export type FetchCall = { url: string; name: string; maxBytes: number; deadlineMs: number; size: number; overLimit: boolean; cut: boolean };
 
 export class FakeArtifacts implements ArtifactStore {
   private readonly served = new Map<string, ServedArtifact>();
@@ -87,7 +87,7 @@ export class FakeArtifacts implements ArtifactStore {
   /** Stops serving `name`, as a host that no longer has the asset would. */
   unserve(name: string): void { this.served.delete(name); }
 
-  async fetch(url: string, o: { name: string; maxBytes: number; timeoutMs: number }): Promise<Download> {
+  async fetch(url: string, o: { name: string; maxBytes: number; timeoutMs: number; deadlineMs: number }): Promise<Download> {
     if (!ARTIFACT_NAME.test(o.name)) throw new Error(`not a plain file name: ${o.name}`);   // the real adapter's rule
     const served = this.served.get(o.name);
     if (served === undefined) throw new FetchFailed("status", `HTTP 404 from ${url}`);
@@ -97,7 +97,7 @@ export class FakeArtifacts implements ArtifactStore {
       : Math.min(total, o.maxBytes, served.bytes.length);
     const path = join(this.dir, `${o.name}.part`);
     writeFileSync(path, served.bytes.subarray(0, size), { mode: 0o600 });
-    const call = { url, name: o.name, maxBytes: o.maxBytes, size, overLimit: total > o.maxBytes, cut };
+    const call = { url, name: o.name, maxBytes: o.maxBytes, deadlineMs: o.deadlineMs, size, overLimit: total > o.maxBytes, cut };
     this.calls.push(call);
     return { path, ...call };
   }

@@ -83,7 +83,7 @@ const store = () => new HttpsArtifacts({ dir: downloads, ca: tls.ca });
 describe("HttpsArtifacts against a local HTTPS server", () => {
   it("downloads an artifact whole, 0600, into a 0700 directory, and discard removes it", async () => {
     const one = store();
-    const download = await one.fetch(`${server.url}full.tar.gz`, { name: "full.tar.gz", maxBytes: 4096, timeoutMs: 5000 });
+    const download = await one.fetch(`${server.url}full.tar.gz`, { name: "full.tar.gz", maxBytes: 4096, timeoutMs: 5000, deadlineMs: 10_000 });
     expect(download).toMatchObject({ path: join(downloads, "full.tar.gz.part"), size: 3000, overLimit: false, cut: false });
     expect(readFileSync(download.path).equals(full)).toBe(true);
     expect(statSync(download.path).mode & 0o777).toBe(0o600);
@@ -93,7 +93,7 @@ describe("HttpsArtifacts against a local HTTPS server", () => {
   });
 
   it("reads a connection the server cut early as cut, with the bytes that arrived", async () => {
-    const download = await store().fetch(`${server.url}half.tar.gz`, { name: "half.tar.gz", maxBytes: 4096, timeoutMs: 5000 });
+    const download = await store().fetch(`${server.url}half.tar.gz`, { name: "half.tar.gz", maxBytes: 4096, timeoutMs: 5000, deadlineMs: 10_000 });
     expect(download.cut).toBe(true);
     expect(download.overLimit).toBe(false);
     expect(download.size).toBe(2000);
@@ -103,7 +103,7 @@ describe("HttpsArtifacts against a local HTTPS server", () => {
   it("never reads a destroyed connection as a whole download: cut or refused, whichever the reset left", async () => {
     let outcome: { ok: true; download: unknown } | { ok: false; reason: string } | null = null;
     try {
-      outcome = { ok: true, download: await store().fetch(`${server.url}reset.tar.gz`, { name: "reset.tar.gz", maxBytes: 4096, timeoutMs: 5000 }) };
+      outcome = { ok: true, download: await store().fetch(`${server.url}reset.tar.gz`, { name: "reset.tar.gz", maxBytes: 4096, timeoutMs: 5000, deadlineMs: 10_000 }) };
     } catch (error) {
       if (error instanceof FetchFailed) outcome = { ok: false, reason: error.reason };
       else throw error;
@@ -114,7 +114,7 @@ describe("HttpsArtifacts against a local HTTPS server", () => {
   });
 
   it("stops a body that grows past its cap at the cap, and no further", async () => {
-    const download = await store().fetch(`${server.url}chunky.tar.gz`, { name: "chunky.tar.gz", maxBytes: 100, timeoutMs: 5000 });
+    const download = await store().fetch(`${server.url}chunky.tar.gz`, { name: "chunky.tar.gz", maxBytes: 100, timeoutMs: 5000, deadlineMs: 10_000 });
     expect(download.overLimit).toBe(true);
     expect(download.cut).toBe(false);
     expect(download.size).toBe(100);
@@ -122,14 +122,14 @@ describe("HttpsArtifacts against a local HTTPS server", () => {
   });
 
   it("refuses at once, writing nothing, when the content-length alone is over the cap", async () => {
-    const download = await store().fetch(`${server.url}huge.tar.gz`, { name: "huge.tar.gz", maxBytes: 100, timeoutMs: 5000 });
+    const download = await store().fetch(`${server.url}huge.tar.gz`, { name: "huge.tar.gz", maxBytes: 100, timeoutMs: 5000, deadlineMs: 10_000 });
     expect(download.overLimit).toBe(true);
     expect(download.size).toBe(0);
     expect(readFileSync(download.path).length).toBe(0);
   });
 
   it("refuses a name that is not a plain file name", async () => {
-    const o = { maxBytes: 4096, timeoutMs: 5000 };
+    const o = { maxBytes: 4096, timeoutMs: 5000, deadlineMs: 10_000 };
     await expect(store().fetch(`${server.url}full.tar.gz`, { name: "sub/full.tar.gz", ...o })).rejects.toThrow(/plain file name/);
     await expect(store().fetch(`${server.url}full.tar.gz`, { name: "..", ...o })).rejects.toThrow(/plain file name/);
     await expect(store().fetch(`${server.url}full.tar.gz`, { name: "./full.tar.gz", ...o })).rejects.toThrow(/plain file name/);
@@ -140,11 +140,11 @@ describe("HttpsArtifacts against a local HTTPS server", () => {
     // validly signed name crashes the check. The rule's other edges hold as before: no leading dot, no separator.
     const name = "morndo-1.4.0+b7-linux-x64.tar.gz";
     const one = store();
-    const download = await one.fetch(`${server.url}${name}`, { name, maxBytes: 4096, timeoutMs: 5000 });
+    const download = await one.fetch(`${server.url}${name}`, { name, maxBytes: 4096, timeoutMs: 5000, deadlineMs: 10_000 });
     expect(download).toMatchObject({ path: join(downloads, `${name}.part`), size: 3000, overLimit: false, cut: false });
     one.discard(name);
     expect(existsSync(download.path)).toBe(false);
-    const o = { maxBytes: 4096, timeoutMs: 5000 };
+    const o = { maxBytes: 4096, timeoutMs: 5000, deadlineMs: 10_000 };
     await expect(store().fetch(`${server.url}full.tar.gz`, { name: "sub/full.tar.gz", ...o })).rejects.toThrow(/plain file name/);
     await expect(store().fetch(`${server.url}full.tar.gz`, { name: ".full.tar.gz", ...o })).rejects.toThrow(/plain file name/);
   });

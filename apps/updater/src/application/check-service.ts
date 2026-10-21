@@ -20,6 +20,11 @@ import {
 export const CHECKOUT_SENTENCE = "this Morndo runs from a checkout; update it with git pull";
 const DISABLED_SENTENCE = "updates are disabled (MORNDO_DISABLE_UPDATES)";
 const ARTIFACT_TIMEOUT_MS = 60_000;
+// An artifact's whole download gets one wall: ten minutes of slack plus its size at 32 KiB/s, so a 50 MB archive
+// gets about 36 minutes and a host that dribbles one byte inside every idle window cannot hold the apply lock (RL4)
+// past it. Slower than 32 KiB/s is a refusal, not a wait.
+export const MIN_RATE_BYTES_PER_S = 32 * 1024;
+export const artifactDeadlineMs = (size: number): number => 10 * 60_000 + Math.ceil(size / MIN_RATE_BYTES_PER_S) * 1000;
 // A ladder of key sets this long is a broken host, not a rotation; the walk stops and says what it saw (§10.2 step 2).
 const KEY_WALK_LIMIT = 32;
 
@@ -268,7 +273,7 @@ export class CheckService {
       const slash = best.entry.manifest.lastIndexOf("/");
       const url = `${best.entry.manifest.slice(0, slash + 1)}${artifact.name}`;   // the entry's directory, the manifest's name
       artifactName = artifact.name;
-      const download = await artifacts.fetch(url, { name: artifact.name, maxBytes: artifact.size, timeoutMs: ARTIFACT_TIMEOUT_MS });
+      const download = await artifacts.fetch(url, { name: artifact.name, maxBytes: artifact.size, timeoutMs: ARTIFACT_TIMEOUT_MS, deadlineMs: artifactDeadlineMs(artifact.size) });
       facts.artifact_size = !download.overLimit && !download.cut && download.size === artifact.size;
       if (facts.artifact_size !== true) {
         return refused("artifact_size",

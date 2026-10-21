@@ -9,17 +9,22 @@ import { httpsGet } from "./https-get.ts";
 
 const DOC_CAP = 64 * 1024;
 const DEFAULT_TIMEOUT_MS = 10_000;
+// Two minutes for a whole document, every redirect hop included: these are small pages, and a host that dribbles
+// one byte inside every idle window meets a wall here it cannot dribble past.
+const DOC_DEADLINE_MS = 120_000;
 
 export class HttpsFeed implements ReleaseFeed {
   private readonly base: string;
   private readonly ca: string | undefined;
   private readonly timeoutMs: number;
+  private readonly deadlineMs: number;
 
-  constructor(o: { base: string; ca?: string; timeoutMs?: number }) {
+  constructor(o: { base: string; ca?: string; timeoutMs?: number; deadlineMs?: number }) {
     // The CLI hands a base that ends in "/; a feed URL is joined, not parsed, so this stays a one-way detail.
     this.base = o.base.endsWith("/") ? o.base : `${o.base}/`;
     this.ca = o.ca;
     this.timeoutMs = o.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.deadlineMs = o.deadlineMs ?? DOC_DEADLINE_MS;
   }
 
   async keySet(version: number): Promise<Signed | null> {
@@ -48,7 +53,7 @@ export class HttpsFeed implements ReleaseFeed {
 
   // One capped document: bytes, or null for a 404, and a refusal for anything the wire did to it.
   private async fetch(url: string, maxBytes: number): Promise<Uint8Array | null> {
-    const r = await httpsGet(url, { ...(this.ca === undefined ? {} : { ca: this.ca }), maxBytes, timeoutMs: this.timeoutMs });
+    const r = await httpsGet(url, { ...(this.ca === undefined ? {} : { ca: this.ca }), maxBytes, timeoutMs: this.timeoutMs, deadlineMs: this.deadlineMs });
     if (r.status === 404) return null;
     if (r.overLimit) throw new FetchFailed("too_large", `${url}: over its ${maxBytes}-byte cap at ${r.size} bytes`);
     if (r.cut) throw new FetchFailed("network", `${url}: the transfer ended early at ${r.size} bytes`);
