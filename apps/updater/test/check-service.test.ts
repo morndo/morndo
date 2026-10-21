@@ -542,6 +542,18 @@ describe("the check service (§6.1, §10.2)", () => {
     nothingLeft(w);
   });
 
+  it("a full disk while unpacking is a recorded failure to retry (75), not a file_list refusal (65)", async () => {
+    const w = build(world => {
+      world.installer.unpack = async () => {
+        throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+      };
+    });
+    const out = await w.service.check();
+    expect(out).toEqual({ kind: "failed", detail: "ENOSPC: no space left on device, write" });
+    recorded(w, "failed", "error", OFFERED);
+    nothingLeft(w);
+  });
+
   // ---- the self-test
 
   it("a failed self-test refuses and leaves nothing", async () => {

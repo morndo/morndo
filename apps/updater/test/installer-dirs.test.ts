@@ -111,6 +111,12 @@ describe("DirsInstaller", () => {
     expect(readdirSync(releases)).toEqual([VERSION]);   // promoted away: no .staging-* left
   });
 
+  it("an I/O error while unpacking is thrown, not returned as a refusal, and leaves no staging", async () => {
+    const { installer, filesSha256 } = good();
+    await expect(installer.unpack(join(scratch, "vanished.tar.gz"), VERSION, { filesSha256, maxBytes: 1 << 20 }))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    expect(readdirSync(releases).filter(name => name.startsWith(".staging-"))).toEqual([]);
+  });
   it("refuses a files.json whose digest is not the signed one", async () => {
     await fault(buildRelease(TREE()).gz, "0".repeat(64), /files\.json: file list digest/);
   });

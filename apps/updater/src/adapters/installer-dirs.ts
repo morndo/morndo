@@ -84,7 +84,10 @@ export class DirsInstaller implements Installer {
       entries = await extractTar(archive, staging, { maxBytes: o.maxBytes });
     } catch (error) {
       this.removeTree(staging);
-      return { ok: false, reason: error instanceof TarRefused ? error.reason : `unpack failed: ${error instanceof Error ? error.message : String(error)}` };
+      // Only the archive's fault is a refusal (RL1 file_list). An I/O error is thrown on, so the check records a
+      // failure to try again later (exit 75), not a verdict on the release.
+      if (error instanceof TarRefused) return { ok: false, reason: error.reason };
+      throw error;
     }
     const fault = this.checkAgainstList(staging, entries, o.filesSha256);
     if (fault !== null) { this.removeTree(staging); return { ok: false, reason: fault }; }
