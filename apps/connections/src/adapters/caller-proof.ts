@@ -4,6 +4,7 @@
 // settings the parent was started with, never from the caller's environment:
 //  - /proc/<ppid>/exe is the claude binary the owner pinned (`morndo-keys pin-claude`, a file in the connections home) and its
 //    content is what was pinned: size, mtime and inode as pinned, else the sha256 of the running binary;
+//  - its environment (/proc/<ppid>/environ) names, as ANTHROPIC_BASE_URL, the API host the owner pinned for this connection;
 //  - its command line has --strict-mcp-config and no --mcp-config (no MCP server, which would run outside the sandbox), exactly
 //    one --settings, and --setting-sources with an empty value (so no user, project or local
 //    settings file merges its arrays into the sandbox: https://code.claude.com/docs/en/cli-reference, read 2026-10-21);
@@ -33,9 +34,10 @@ export type ProcReader = {
   linked(path: string): boolean;                                        // the path is, or goes through, a symlink (or cannot be read)
   exeIdentity(pid: number): Identity | null;                            // the running binary's inode, whatever its name (it may be deleted)
   exeSha256(pid: number): string | null;                                // the content of the running binary
+  environ(pid: number): Record<string, string> | null;                  // the environment the process started with
 };
 
-export type Identity = { size: number; mtimeMs: number; ino: number };
+export type Identity = { size: number; mtimeMs: number; ctimeMs: number; ino: number };
 
 const text = <T>(read: () => T): T | null => { try { return read(); } catch { return null; } };
 
@@ -79,9 +81,19 @@ export const procReader: ProcReader = {
   },
   exeIdentity: pid => {
     const info = text(() => statSync(`/proc/${pid}/exe`));                  // follows the link to the inode the process runs
-    return info === null ? null : { size: info.size, mtimeMs: info.mtimeMs, ino: info.ino };
+    return info === null ? null : { size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino };
   },
   exeSha256: pid => sha256Of(`/proc/${pid}/exe`),
+  environ: pid => {
+    const raw = text(() => readFileSync(`/proc/${pid}/environ`, "utf8"));
+    if (raw === null) return null;
+    const env: Record<string, string> = {};
+    for (const entry of raw.split("\0")) {
+      const eq = entry.indexOf("=");
+      if (eq > 0) env[entry.slice(0, eq)] = entry.slice(eq + 1);
+    }
+    return env;
+  },
 };
 
 // The sha256 of a file, read in chunks (a claude binary is large), or null when it can't be read.
@@ -101,19 +113,24 @@ export function sha256Of(path: string): string | null {
 }
 
 // The claude binary the owner pinned: where it was found, the real path it had then, and what it was: its content hash,
-// and the size, mtime and inode that tell at lease time whether it is still the same file (the hash is read again only when
-// one of them differs, since a claude binary is large). An update is a new file: it is pinned again by the owner.
-export type Pin = { path: string; resolved: string; sha256: string; size: number; mtimeMs: number; ino: number };
+// and the size, mtime, ctime and inode that tell at lease time whether it is still the same file (the hash is read again only
+// when one of them differs, since a claude binary is large; utimes can put an mtime back, never a ctime); and, for each key
+// connection the lease may serve, the API base URL its preset names, so a parent started against another host does not get
+// the key. An update is a new file, and a new connection a new URL: both are pinned again by the owner.
+export type Pin = {
+  path: string; resolved: string; sha256: string; size: number; mtimeMs: number; ctimeMs: number; ino: number;
+  baseUrls: Record<string, string>;      // per connection, the API host its claude must be started with (ANTHROPIC_BASE_URL)
+};
 
 // The pin to write for `path` (a file, or a name found on `pathVar`), or null when there is no such file.
-export function pinFor(path: string, pathVar: string | undefined): Pin | null {
+export function pinFor(path: string, pathVar: string | undefined, baseUrls: Record<string, string> = {}): Pin | null {
   const candidates = path.includes("/") ? [resolve(path)] : (pathVar ?? "").split(delimiter).filter(Boolean).map(dir => join(dir, path));
   for (const candidate of candidates) {
     const resolved = text(() => realpathSync(candidate));
     const info = resolved === null ? null : text(() => statSync(resolved));
     if (resolved === null || info === null || !info.isFile()) continue;
     const sha256 = sha256Of(resolved);
-    if (sha256 !== null) return { path: candidate, resolved, sha256, size: info.size, mtimeMs: info.mtimeMs, ino: info.ino };
+    if (sha256 !== null) return { path: candidate, resolved, sha256, size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino, baseUrls };
   }
   return null;
 }
@@ -122,8 +139,10 @@ export function parsePin(body: string | null): Pin | null {
   if (body === null) return null;
   const pin = text(() => JSON.parse(body) as Partial<Pin>);
   if (pin === null || typeof pin.path !== "string" || typeof pin.resolved !== "string" || typeof pin.sha256 !== "string") return null;
-  if (typeof pin.size !== "number" || typeof pin.mtimeMs !== "number" || typeof pin.ino !== "number") return null;
-  return { path: pin.path, resolved: pin.resolved, sha256: pin.sha256, size: pin.size, mtimeMs: pin.mtimeMs, ino: pin.ino };
+  if (typeof pin.size !== "number" || typeof pin.mtimeMs !== "number" || typeof pin.ctimeMs !== "number" || typeof pin.ino !== "number") return null;
+  const urls = pin.baseUrls;
+  if (typeof urls !== "object" || urls === null || Array.isArray(urls) || Object.values(urls).some(url => typeof url !== "string")) return null;
+  return { path: pin.path, resolved: pin.resolved, sha256: pin.sha256, size: pin.size, mtimeMs: pin.mtimeMs, ctimeMs: pin.ctimeMs, ino: pin.ino, baseUrls: { ...urls } };
 }
 
 export type Proof = { ok: true } | { ok: false; why: string };
@@ -142,60 +161,66 @@ export type Wanted = {
 
 type Settings = {
   sandbox?: {
-    enabled?: unknown; failIfUnavailable?: unknown; allowUnsandboxedCommands?: unknown; excludedCommands?: unknown;
-    filesystem?: { denyRead?: unknown; allowRead?: unknown; allowWrite?: unknown; denyWrite?: unknown };
+    enabled?: unknown; failIfUnavailable?: unknown; allowUnsandboxedCommands?: unknown;
+    filesystem?: { denyRead?: unknown; allowWrite?: unknown; denyWrite?: unknown };
   } & Record<string, unknown>;
   permissions?: { deny?: unknown };
 };
 
-// Every sandbox key that weakens the sandbox, in one place (https://code.claude.com/docs/en/sandboxing, read 2026-10-21,
-// "weaken" list and the sections on unix sockets, filesystem isolation and ignoreViolations). Each is refused when it is set
-// to anything but false, null, an empty list or an empty object. `excludedCommands` and `allowUnsandboxedCommands` have
-// their own checks above; network.allowedDomains is not here: the lane needs its API host.
-export const SANDBOX_WEAKENERS: readonly (readonly string[])[] = [
-  ["enableWeakerNestedSandbox"],
-  ["enableWeakerNetworkIsolation"],
-  ["allowAppleEvents"],
-  ["ignoreViolations"],
-  ["filesystem", "disabled"],
-  ["network", "allowAllUnixSockets"],
-  ["network", "allowUnixSockets"],
-  ["network", "allowLocalBinding"],
-  ["network", "allowMachLookup"],
-];
+// The settings keys a lane turn may carry: an allowlist, because every key that is not named here (a proxy, hooks, env, a
+// model endpoint, a status line command, plugins, extra directories, anything a later Claude Code version adds) could
+// weaken the sandbox or send the key somewhere. A leaf `true` takes any value (the checks below judge the ones that matter);
+// a key that is not here is refused, set or not. The set is exactly what the lane launcher (agent-engines glm-turn) puts in
+// its inline settings; the sandbox keys that weaken it (https://code.claude.com/docs/en/sandboxing, read 2026-10-21:
+// enableWeakerNestedSandbox, enableWeakerNetworkIsolation, allowAppleEvents, ignoreViolations, filesystem.disabled,
+// network.allowAllUnixSockets, network.allowUnixSockets, network.allowLocalBinding, network.allowMachLookup, excludedCommands,
+// filesystem.allowRead) are among those it keeps out. `run` does not pass through the lease check and writes its own.
+type Tree = { [key: string]: true | Tree };
+export const ALLOWED_SETTINGS: Tree = {
+  apiKeyHelper: true,
+  permissions: { deny: true },
+  sandbox: {
+    enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: true,
+    filesystem: { denyRead: true, allowWrite: true, denyWrite: true },
+    network: { allowedDomains: true },
+  },
+};
 
-const isSet = (value: unknown): boolean =>
-  !(value === undefined || value === null || value === false || (Array.isArray(value) && value.length === 0)
-    || (typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).length === 0));
-
-const at = (root: unknown, path: readonly string[]): unknown => path.reduce<unknown>((node, key) => (typeof node === "object" && node !== null ? (node as Record<string, unknown>)[key] : undefined), root);
+// The path of the first key of `value` that `tree` does not allow, or null.
+function unlisted(value: unknown, tree: Tree, prefix: string[] = []): string | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  for (const [key, inner] of Object.entries(value)) {
+    const allowed = Object.hasOwn(tree, key) ? tree[key] : undefined;
+    if (allowed === undefined) return [...prefix, key].join(".");
+    if (allowed !== true) {
+      const deeper = unlisted(inner, allowed, [...prefix, key]);
+      if (deeper !== null) return deeper;
+      if (typeof inner !== "object" || inner === null || Array.isArray(inner)) return [...prefix, key].join(".");   // a branch holds keys
+    }
+  }
+  return null;
+}
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : []);
 
 // What the settings leave of the sandbox, judged on real paths (a link can't dodge a deny entry).
 export function settingsProof(settings: unknown, want: Wanted, real: (path: string) => string = p => p): Proof {
   if (typeof settings !== "object" || settings === null) return no("settings are not an object");
+  const extra = unlisted(settings, ALLOWED_SETTINGS);
+  if (extra !== null) return no(`settings key ${extra} is not one a lane turn may carry`);
   const body = settings as Settings;
   const sandbox = body.sandbox ?? {};
   if (!sandboxReady(sandbox as { enabled?: boolean; failIfUnavailable?: boolean; allowUnsandboxedCommands?: boolean })) return no("sandbox is not on and fail-closed");
-  const excluded = sandbox.excludedCommands;
-  if (excluded !== undefined && (!Array.isArray(excluded) || excluded.length > 0)) return no("commands may run outside the sandbox");
-  for (const weakener of SANDBOX_WEAKENERS) {
-    if (isSet(at(sandbox, weakener))) return no(`sandbox weakened by ${weakener.join(".")}`);
-  }
   const files = sandbox.filesystem ?? {};
   const denyRead = strings(files.denyRead).map(real);
   // permissions.deny blocks the Read tool, denyRead only sandboxed Bash: both must name every path (runtime-claude.ts).
   const rules = strings(body.permissions?.deny)
     .filter(rule => rule.startsWith("Read(//") && rule.endsWith(")"))
     .map(rule => real(rule.slice("Read(/".length, -1).replace(/\/\*\*$/, "")));
-  const allowRead = strings(files.allowRead).map(real);
   const allowWrite = strings(files.allowWrite).map(real);
   for (const path of want.denied.map(real)) {
     if (!denyRead.some(entry => covers(entry, path))) return no(`denyRead does not cover ${path}`);
     if (!rules.some(entry => covers(entry, path))) return no(`Read is not denied for ${path}`);
-    // allowRead re-opens a region inside a denyRead one: an entry that reaches the path, or lies inside it, is refused
-    if (allowRead.some(entry => covers(entry, path) || covers(path, entry))) return no(`allowRead reaches ${path}`);
   }
   for (const path of want.writeProtected.map(real)) {
     if (allowWrite.some(entry => covers(entry, path))) return no(`allowWrite reaches ${path}`);
@@ -206,11 +231,22 @@ export function settingsProof(settings: unknown, want: Wanted, real: (path: stri
 export type Check = {
   ppid: () => number;                  // the live parent: process.ppid reads it again each time
   pin: Pin | null;
+  connection: string;                  // the connection the key is for: its API host is looked up in the pin
   want: Wanted;
   read?: ProcReader;
 };
 
 const DELETED = " (deleted)";
+
+// Two base URLs name the same place: scheme, host, port and path, the host in lower case, without a trailing slash.
+function sameBase(given: string | undefined, pinned: string): boolean | null {
+  const norm = (url: string): string | null => {
+    try { const u = new URL(url); return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, "")}`; } catch { return null; }
+  };
+  const a = given === undefined ? null : norm(given);
+  const b = norm(pinned);
+  return a !== null && b !== null && a === b;
+}
 // Process start times come in ticks of 10 ms: a settings file written just before the fork can read as just after.
 const START_SLACK_MS = 20;
 
@@ -225,14 +261,18 @@ export function verifyClaudeParent(check: Check): Proof {
   if (started === null || ticks === null || exe === null) return no("parent unreadable");
   if (args === null) return no("parent command line unreadable");
   // The binary: the pinned file, which after an update reads "(deleted)" while that version still runs; and what it is: the
-  // inode the process runs has the pinned size, mtime and inode, or else the pinned content hash.
+  // inode the process runs has the pinned size, mtime, ctime and inode, or else the pinned content hash.
   const path = exe.endsWith(DELETED) ? exe.slice(0, -DELETED.length) : exe;
   if (path !== check.pin.resolved) return no("parent is not the pinned claude");
   const running = read.exeIdentity(parent);
   if (running === null) return no("parent binary unreadable");
-  if (running.size !== check.pin.size || running.mtimeMs !== check.pin.mtimeMs || running.ino !== check.pin.ino) {
+  if (running.size !== check.pin.size || running.mtimeMs !== check.pin.mtimeMs || running.ctimeMs !== check.pin.ctimeMs || running.ino !== check.pin.ino) {
     if (read.exeSha256(parent) !== check.pin.sha256) return no("the claude binary is not the one that was pinned");
   }
+  // The API host: the parent's own environment, read from /proc, names the host the owner pinned for this connection.
+  const env = read.environ(parent);
+  const pinned = check.pin.baseUrls[check.connection];
+  if (env === null || pinned === undefined || sameBase(env.ANTHROPIC_BASE_URL, pinned) !== true) return no("the parent is not pointed at the pinned API host");
   const flag = (name: string): string[] => args.flatMap((arg, i) => (arg === name ? [args[i + 1] ?? ""] : arg.startsWith(`${name}=`) ? [arg.slice(name.length + 1)] : []));
   const sources = flag("--setting-sources");
   if (sources.length !== 1 || sources[0] !== "") return no("setting sources are not limited to none");

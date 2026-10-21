@@ -22,6 +22,9 @@ const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalo
 const main = join(import.meta.dirname, "../src/main.ts");
 const composeTs = join(import.meta.dirname, "../src/compose.ts");
 const processesTs = join(import.meta.dirname, "../src/adapters/processes.ts");
+// The API host a lane for the zai connection is started against: the catalog's, which pin-claude pins.
+const ZAI_BASE = (JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; runtimes: { runtime: string; baseUrl?: string }[] }[])
+  .find(p => p.id === "zai")?.runtimes.find(r => r.runtime === "claude")?.baseUrl ?? "";
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -65,6 +68,7 @@ function settingsJson(dir: string, change: (body: Body) => void = () => {}): str
   const deny = [join(dir, "vault"), join(dir, "connections.db"), join(dir, "identity")];
   const plan = { lease: "l", connection: "zai", ref: null, configDir: null, model: "m", effort: "low", workspace: join(dir, "work"), deny, reservation: 0, probe: true };
   const body = JSON.parse(claudeSettings(plan, "ulimit -c 0; exec morndo-keys lease --connection zai")) as Body;
+  delete body.sandbox.credentials;                                // what `run` writes and a lane turn does not carry
   change(body);
   return JSON.stringify(body);
 }
@@ -79,7 +83,7 @@ function settingsFile(dir: string, change: (body: Body) => void = () => {}): str
 // `settings`: inline JSON (what the lane passes), or `file` a path; `sources` the --setting-sources value (null: the flag
 // is left out); `touch` a file the "claude" parent changes after it started; `keepShell` leaves a shell between the lease and
 // the parent, as an agent's own shell command has; `sample` collects /proc/<pid>/{cmdline,environ} of the whole tree.
-type Via = { strictMcp?: boolean; settings?: string | null; file?: string; sources?: string | null; touch?: string; keepShell?: boolean; sample?: Buffer[]; isolation?: string | null };
+type Via = { baseUrl?: string | null; strictMcp?: boolean; settings?: string | null; file?: string; sources?: string | null; touch?: string; keepShell?: boolean; sample?: Buffer[]; isolation?: string | null };
 
 // Runs `lease` as an apiKeyHelper: a "claude" parent (this node binary, which `pin-claude` pinned) that runs the helper line
 // through `sh -c`. With `exec`, as the documented line has, the lease's parent is the claude process.
@@ -97,7 +101,8 @@ child.on("close", code => process.exit(code ?? 1));
   const command = via.keepShell ? `${lease}; code=$?; exit $code` : `ulimit -c 0; exec ${lease}`;
   const sources = [...(via.strictMcp === false ? [] : ["--strict-mcp-config"]), ...(via.sources === null ? [] : ["--setting-sources", via.sources ?? ""])];
   const settings = via.file !== undefined ? ["--settings", via.file] : via.settings === null ? [] : ["--settings", via.settings ?? settingsJson(dir)];
-  const env = envOf(dir, { LEASE_CMD: command, ...(via.touch ? { TOUCH: via.touch } : {}) });
+  const env = envOf(dir, { LEASE_CMD: command, ...(via.touch ? { TOUCH: via.touch } : {}), ...(via.baseUrl === null ? {} : { ANTHROPIC_BASE_URL: via.baseUrl ?? ZAI_BASE }) });
+  if (via.baseUrl === null) delete env.ANTHROPIC_BASE_URL;
   return new Promise(resolve => {
     const child = spawn(process.execPath, [script, ...sources, ...settings], { env });
     let stdout = "";
@@ -250,6 +255,15 @@ describe("keys lease", () => {
       { what: "allowRead re-opens the vault", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.filesystem.allowRead = [join(dir, "vault")]; }) }) },
       { what: "allowWrite opens the pin", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.filesystem.allowWrite = [dir]; }) }) },
       { what: "the sandbox lets a command use unix sockets", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.network = { allowUnixSockets: ["/run/x.sock"] }; }) }) },
+      { what: "claude started against another API host", run: () => lease(dir, [], { baseUrl: "https://elsewhere.example.test/api/anthropic" }) },
+      { what: "claude started without an API host: its own default", run: () => lease(dir, [], { baseUrl: null }) },
+      { what: "settings that carry enabledPlugins", run: () => lease(dir, [], { settings: changed(s => { s.enabledPlugins = { "x@y": true }; }) }) },
+      { what: "settings that add directories", run: () => lease(dir, [], { settings: changed(s => { s.permissions.additionalDirectories = ["/tmp"]; }) }) },
+      { what: "settings that allow a tool", run: () => lease(dir, [], { settings: changed(s => { s.permissions.allow = ["Bash(*)"]; }) }) },
+      { what: "settings that run a status line command", run: () => lease(dir, [], { settings: changed(s => { s.statusLine = { type: "command", command: "x" }; }) }) },
+      { what: "settings that carry hooks", run: () => lease(dir, [], { settings: changed(s => { s.hooks = { Stop: [] }; }) }) },
+      { what: "settings that point the API somewhere else", run: () => lease(dir, [], { settings: changed(s => { s.env = { ANTHROPIC_BASE_URL: "https://elsewhere.example.test" }; }) }) },
+      { what: "a sandbox proxy port", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.network = { httpProxyPort: 8080 }; }) }) },
       { what: "the sandbox is the weaker nested one", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.enableWeakerNestedSandbox = true; }) }) },
       { what: "a settings file reached through a symlink", run: () => { const real = join(dir, "real-settings"); mkdirSync(real, { recursive: true }); symlinkSync(real, join(dir, "linked-settings")); const file = join(dir, "linked-settings", "s.json"); writeFileSync(join(real, "s.json"), settingsJson(dir, s => { s.sandbox.filesystem.denyWrite = [real]; })); return lease(dir, [], { file }); } },
       { what: "a settings file changed after claude started", run: () => { const file = settingsFile(dir); return lease(dir, [], { file, touch: file }); } },
@@ -298,9 +312,26 @@ describe("keys lease", () => {
     const pinned = await pinClaude(env);
     expect(pinned.code, pinned.stderr).toBe(0);
     const said = JSON.parse(pinned.stdout) as { path: string; resolved: string; sha256: string; size: number; ino: number };
+    expect(said).toMatchObject({ baseUrls: {} });                                       // no connection yet: no host pinned
     expect(said).toMatchObject({ path: process.execPath, resolved: realpathSync(process.execPath), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(JSON.parse(readFileSync(join(dir, "claude-pin.json"), "utf8"))).toEqual(said);
   }, 60_000);
+
+  it("the pin records each connection's API host: a connection added later is refused until pinned again", async () => {
+    const dir = homeDir();
+    const env = envOf(dir);
+    await zaiReady(dir, env);
+    expect(JSON.parse(readFileSync(join(dir, "claude-pin.json"), "utf8"))).toMatchObject({ baseUrls: { zai: ZAI_BASE } });
+    const added = await cli(["add", "later", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, "sk-ant-synthetic-test-key-0003");
+    expect(added.code, added.stderr).toBe(0);
+    expect((await cli(["ack", "later", "--by", "owner"], env)).code).toBe(0);
+    const early = await viaClaude(dir, ["--connection", "later"]);
+    expect([early.code, early.stdout, early.stderr.includes("isolation")]).toEqual([75, "", true]);
+    expect((await pinClaude(env)).code).toBe(0);
+    const late = await viaClaude(dir, ["--connection", "later"]);
+    expect(late.code, late.stderr).toBe(0);
+    expect(late.stdout).toBe("sk-ant-synthetic-test-key-0003\n");
+  }, 90_000);
 
   it("a connection that needs less than os is served on the caller's claim, and the audit says claimed", async () => {
     const dir = homeDir();

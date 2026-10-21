@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { SANDBOX_WEAKENERS, parsePin, pinFor, settingsProof, sha256Of, verifyClaudeParent, type Pin, type ProcReader, type Wanted } from "../src/adapters/caller-proof.ts";
+import { ALLOWED_SETTINGS, parsePin, pinFor, settingsProof, sha256Of, verifyClaudeParent, type Pin, type ProcReader, type Wanted } from "../src/adapters/caller-proof.ts";
 import { claudeSettings } from "../src/adapters/runtime-claude.ts";
 
 const dirs: string[] = [];
@@ -14,19 +14,26 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const DENIED = ["/node/cfg/vault", "/node/cfg/connections.db", "/node/cfg/identity"];
 const WANT: Wanted = { denied: DENIED, writeProtected: [...DENIED, "/node/cfg/claude-pin.json"] };
 const plan = { lease: "l1", connection: "zai", ref: null, configDir: null, model: "m", effort: "low", workspace: "/w", deny: DENIED, reservation: 0, probe: true };
-const PIN: Pin = { path: "/bin/claude", resolved: "/real/claude/2.1.306", sha256: "a".repeat(64), size: 1000, mtimeMs: 5000, ino: 77 };
+const BASE = "https://api.example.test/anthropic";
+const PIN: Pin = { path: "/bin/claude", resolved: "/real/claude/2.1.306", sha256: "a".repeat(64), size: 1000, mtimeMs: 5000, ctimeMs: 6000, ino: 77, baseUrls: { zai: BASE } };
 type Body = Record<string, any>;
-const good = (): Body => JSON.parse(claudeSettings(plan, "ulimit -c 0; exec morndo-keys lease --connection zai")) as Body;
+// What a lane launcher passes: the runtime's settings without the credentials block, which a lane turn does not carry.
+const good = (): Body => {
+  const body = JSON.parse(claudeSettings(plan, "ulimit -c 0; exec morndo-keys lease --connection zai")) as Body;
+  delete body.sandbox.credentials;
+  return body;
+};
 const START = 1_800_000_000_000;
 
 type Fake = {
   exe?: string | null; args?: string[] | null; cwd?: string | null; started?: number | null;
   files?: Record<string, { body: string; mtimeMs: number; ctimeMs: number }>; links?: Record<string, string>;
   now?: { exe?: string | null; started?: number | null };       // what a second read of the parent answers
-  identity?: { size: number; mtimeMs: number; ino: number } | null;   // the running binary's inode, as the pin has it by default
+  identity?: { size: number; mtimeMs: number; ctimeMs: number; ino: number } | null;   // the running binary's inode, as the pin has it by default
   sha?: string | null;                                                // its content hash, when it is asked for
   symlinked?: string[];                                               // paths that are, or go through, a symlink
   hashed?: { count: number };                                         // counts the reads of the binary's content
+  env?: Record<string, string> | null;                                // the parent's environment
 };
 // A fake /proc: the parent is pid 50, a claude of the pinned version started at START with inline sandbox settings.
 function reader(over: Fake = {}): ProcReader {
@@ -41,12 +48,12 @@ function reader(over: Fake = {}): ProcReader {
     file: path => over.files?.[path] ?? null,
     real: path => over.links?.[path] ?? path,
     linked: path => over.symlinked?.includes(path) ?? false,
-    exeIdentity: () => (over.identity === undefined ? { size: PIN.size, mtimeMs: PIN.mtimeMs, ino: PIN.ino } : over.identity),
+    exeIdentity: () => (over.identity === undefined ? { size: PIN.size, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs, ino: PIN.ino } : over.identity),
+    environ: () => (over.env === undefined ? { ANTHROPIC_BASE_URL: BASE, PATH: "/usr/bin" } : over.env),
     exeSha256: () => { if (over.hashed) over.hashed.count++; return over.sha === undefined ? PIN.sha256 : over.sha; },
   };
 }
-const verify = (over: Fake = {}, pin: Pin | null = PIN, ppid: () => number = () => 50) => verifyClaudeParent({ ppid, pin, want: WANT, read: reader(over) });
-const withSettings = (settings: Body, extra: string[] = []) => ["claude", "--strict-mcp-config", "--setting-sources", "", ...extra, "--settings", JSON.stringify(settings)];
+const verify = (over: Fake = {}, pin: Pin | null = PIN, ppid: () => number = () => 50) => verifyClaudeParent({ ppid, pin, connection: "zai", want: WANT, read: reader(over) });
 
 describe("the lease's caller proof (check 2)", () => {
   it("admits the pinned claude, started with the sandbox settings the runtime writes and no other setting sources", () => {
@@ -79,9 +86,14 @@ describe("the lease's caller proof (check 2)", () => {
     const hashed = { count: 0 };
     expect(verify({ hashed })).toEqual({ ok: true });
     expect(hashed.count).toBe(0);                                                            // size, mtime and inode as pinned: no hash
-    const touched = { size: PIN.size, mtimeMs: PIN.mtimeMs + 1, ino: PIN.ino };
+    const touched = { size: PIN.size, mtimeMs: PIN.mtimeMs + 1, ctimeMs: PIN.ctimeMs, ino: PIN.ino };
     expect(verify({ identity: touched, hashed })).toEqual({ ok: true });                     // same bytes, new mtime: the hash says so
     expect(hashed.count).toBe(1);
+    // utimes can put an old mtime back on a changed file, but not the ctime: a moved ctime sends it to the hash too
+    const reset = { ...touched, mtimeMs: PIN.mtimeMs, ctimeMs: PIN.ctimeMs + 9 };
+    expect(verify({ identity: reset, hashed })).toEqual({ ok: true });
+    expect(hashed.count).toBe(2);
+    expect(verify({ identity: reset, sha: "b".repeat(64) })).toMatchObject({ ok: false, why: "the claude binary is not the one that was pinned" });
     for (const identity of [{ ...touched, size: PIN.size + 1 }, { ...touched, ino: PIN.ino + 1 }, touched]) {
       expect(verify({ identity, sha: "b".repeat(64) }), JSON.stringify(identity)).toMatchObject({ ok: false, why: "the claude binary is not the one that was pinned" });
     }
@@ -134,17 +146,6 @@ describe("the lease's caller proof (check 2)", () => {
     expect(settingsProof(null, WANT).ok).toBe(false);
   });
 
-  it("refuses commands that run outside the sandbox", () => {
-    for (const excluded of [["git"], "git", {}]) {
-      const settings = good();
-      settings.sandbox.excludedCommands = excluded;
-      expect(verify({ args: withSettings(settings) }), JSON.stringify(excluded)).toMatchObject({ ok: false, why: "commands may run outside the sandbox" });
-    }
-    const empty = good();
-    empty.sandbox.excludedCommands = [];
-    expect(verify({ args: withSettings(empty) })).toEqual({ ok: true });
-  });
-
   it("refuses settings that leave the vault, the database or the identity readable, to Bash or to the Read tool", () => {
     for (const path of DENIED) {
       const noBash = good();
@@ -165,21 +166,25 @@ describe("the lease's caller proof (check 2)", () => {
     expect(settingsProof(above, WANT).ok).toBe(false);
   });
 
-  it("refuses allowRead that re-opens the vault, the database or the identity, and allowWrite that opens them or the pin", () => {
-    for (const reopen of ["/node/cfg", "/node/cfg/vault", "/node/cfg/vault/key-1", "/node/cfg/identity"]) {
-      const settings = good();
-      settings.sandbox.filesystem.allowRead = [reopen];
-      expect(settingsProof(settings, WANT), reopen).toMatchObject({ ok: false });
-    }
+  it("refuses allowWrite that opens the vault, the database, the identity or the pin", () => {
     for (const open of ["/node/cfg", "/node/cfg/claude-pin.json", "/node/cfg/vault"]) {
       const settings = good();
       settings.sandbox.filesystem.allowWrite = [open];
       expect(settingsProof(settings, WANT), open).toMatchObject({ ok: false });
     }
     const fine = good();
-    fine.sandbox.filesystem.allowRead = ["/work/repo"];
     fine.sandbox.filesystem.allowWrite = ["/work/repo/.git"];
     expect(settingsProof(fine, WANT)).toEqual({ ok: true });
+  });
+
+  it("takes the parent's API host from its own environment, pinned for the connection, never from the lease's", () => {
+    expect(verify({ env: { ANTHROPIC_BASE_URL: `${BASE}/` } })).toEqual({ ok: true });                 // a trailing slash is the same place
+    expect(verify({ env: { ANTHROPIC_BASE_URL: "HTTPS://API.EXAMPLE.TEST/anthropic" } })).toEqual({ ok: true });
+    for (const env of [{ ANTHROPIC_BASE_URL: "https://elsewhere.example.test/anthropic" }, { ANTHROPIC_BASE_URL: "https://api.example.test/other" }, { ANTHROPIC_BASE_URL: "http://api.example.test/anthropic" }, { ANTHROPIC_BASE_URL: "https://api.example.test.evil.test/anthropic" }, { ANTHROPIC_BASE_URL: "not a url" }, { PATH: "/usr/bin" }, null]) {
+      expect(verify({ env }), JSON.stringify(env)).toMatchObject({ ok: false, why: "the parent is not pointed at the pinned API host" });
+    }
+    const unpinned = verifyClaudeParent({ ppid: () => 50, pin: PIN, connection: "other", want: WANT, read: reader() });   // a connection added after the pin
+    expect(unpinned).toMatchObject({ ok: false, why: "the parent is not pointed at the pinned API host" });
   });
 
   it("judges deny entries on real paths: a link to the vault is the vault, a link elsewhere is not", () => {
@@ -212,22 +217,42 @@ describe("the lease's caller proof (check 2)", () => {
     expect(verify({ args, files, symlinked: ["/settings/s.json"] })).toMatchObject({ ok: false, why: "settings path goes through a symlink" });
   });
 
-  it("refuses every known weakening of the sandbox, and takes the off values of them", () => {
-    for (const path of SANDBOX_WEAKENERS) {
+  it("takes only the settings keys a lane turn may carry, and refuses anything else, set or not", () => {
+    // what the lane launcher (agent-engines glm-turn) and `morndo-keys run` both put in --settings
+    const lane = good();
+    lane.sandbox.network = { allowedDomains: ["api.example.test"] };
+    lane.sandbox.filesystem.allowWrite = ["/work/repo/.git"];
+    lane.sandbox.filesystem.denyWrite = ["/work/repo/.git/hooks"];
+    expect(settingsProof(lane, WANT)).toEqual({ ok: true });
+    // every key of the sandbox that weakens it (docs: https://code.claude.com/docs/en/sandboxing, read 2026-10-21), and the
+    // ones a denylist would have missed: a proxy, hooks, env, a model endpoint, apiKeyHelper's neighbours
+    const extras: [string[], unknown][] = [
+      [["sandbox", "enableWeakerNestedSandbox"], true], [["sandbox", "enableWeakerNetworkIsolation"], true], [["sandbox", "allowAppleEvents"], true],
+      [["sandbox", "ignoreViolations"], { "*": ["/x"] }], [["sandbox", "filesystem", "disabled"], true],
+      [["sandbox", "network", "allowAllUnixSockets"], true], [["sandbox", "network", "allowUnixSockets"], ["/x"]],
+      [["sandbox", "network", "allowLocalBinding"], true], [["sandbox", "network", "allowMachLookup"], ["x"]],
+      [["sandbox", "network", "httpProxyPort"], 8080], [["sandbox", "network", "socksProxyPort"], 1080],
+      [["sandbox", "network", "tlsTerminate"], true], [["sandbox", "credentials", "files"], []], [["sandbox", "autoAllowBashIfSandboxed"], true],
+      [["hooks"], { Stop: [] }], [["env"], { ANTHROPIC_BASE_URL: "https://elsewhere.example.test" }], [["model"], "m"],
+      [["permissions", "allow"], ["Read(//x)"]], [["permissions", "defaultMode"], "bypassPermissions"], [["statusLine"], { type: "command" }],
+      [["enableAllProjectMcpServers"], true], [["apiBaseUrl"], "https://elsewhere.example.test"],
+      [["enabledPlugins"], { "x@y": true }], [["permissions", "additionalDirectories"], ["/x"]], [["sandbox", "excludedCommands"], []],
+      [["sandbox", "filesystem", "allowRead"], ["/x"]], [["sandbox", "credentials"], { envVars: [] }],
+    ];
+    for (const [path, value] of extras) {
       const set = good();
-      let node = set.sandbox;
+      let node: Body = set;
       path.slice(0, -1).forEach(key => { node = node[key] ??= {}; });
-      node[path.at(-1) as string] = path.at(-1) === "ignoreViolations" ? { "*": ["/x"] } : path.at(-1)?.startsWith("allowUnix") || path.at(-1) === "allowMachLookup" ? ["/x"] : true;
-      expect(settingsProof(set, WANT), path.join(".")).toMatchObject({ ok: false, why: `sandbox weakened by ${path.join(".")}` });
-      for (const off of [false, null, [], {}]) {
-        const quiet = good();
-        let at = quiet.sandbox;
-        path.slice(0, -1).forEach(key => { at = at[key] ??= {}; });
-        at[path.at(-1) as string] = off;
-        expect(settingsProof(quiet, WANT), `${path.join(".")} = ${JSON.stringify(off)}`).toEqual({ ok: true });
-      }
+      node[path.at(-1) as string] = value;
+      // refused at the first key the allowlist does not name: the key itself, or the branch that holds it
+      const refused = settingsProof(set, WANT);
+      const named = refused.ok ? null : /^settings key (\S+) is not one a lane turn may carry$/.exec(refused.why)?.[1];
+      expect(named, path.join(".")).toBeTruthy();
+      expect(path.join(".").startsWith(named ?? "\0"), path.join(".")).toBe(true);
+      node[path.at(-1) as string] = false;                                                       // an off value is still an unknown key
+      expect(settingsProof(set, WANT).ok, `${path.join(".")} = false`).toBe(false);
     }
-    expect(SANDBOX_WEAKENERS.map(path => path.join("."))).toEqual(expect.arrayContaining(["enableWeakerNestedSandbox", "enableWeakerNetworkIsolation", "network.allowAllUnixSockets", "network.allowUnixSockets", "network.allowLocalBinding", "filesystem.disabled"]));
+    expect(ALLOWED_SETTINGS).toMatchObject({ apiKeyHelper: true, permissions: { deny: true }, sandbox: { enabled: true, filesystem: { denyRead: true }, network: { allowedDomains: true } } });
   });
 
   it("pins a binary by its real path, and reads a pin back", () => {
@@ -240,7 +265,7 @@ describe("the lease's caller proof (check 2)", () => {
     expect(pin?.path).toBe(join(dir, "bin", "claude"));
     expect(pin?.resolved.endsWith("real-claude")).toBe(true);
     expect(pin?.sha256).toBe(sha256Of(join(dir, "real-claude")));
-    expect(pin).toMatchObject({ size: 0, ino: expect.any(Number), mtimeMs: expect.any(Number) });
+    expect(pin).toMatchObject({ size: 0, ino: expect.any(Number), mtimeMs: expect.any(Number), ctimeMs: expect.any(Number) });
     writeFileSync(join(dir, "real-claude"), "changed");
     expect(pinFor("claude", join(dir, "bin"))?.sha256).not.toBe(pin?.sha256);              // another content is another pin
     expect(sha256Of(join(dir, "nowhere"))).toBeNull();
@@ -251,6 +276,9 @@ describe("the lease's caller proof (check 2)", () => {
     expect(parsePin("not json")).toBeNull();
     expect(parsePin("{}")).toBeNull();
     expect(parsePin(JSON.stringify({ path: "/a", resolved: "/b" }))).toBeNull();            // a pin from before the content was bound
+    expect(parsePin(JSON.stringify({ path: "/a", resolved: "/b", sha256: "c", size: 1, mtimeMs: 2, ino: 3 }))).toBeNull();   // and one with no ctime
+    expect(parsePin(JSON.stringify({ path: "/a", resolved: "/b", sha256: "c", size: 1, mtimeMs: 2, ctimeMs: 2, ino: 3 }))).toBeNull();   // or no hosts
+    expect(parsePin(JSON.stringify({ ...PIN, baseUrls: { zai: 5 } }))).toBeNull();
     expect(parsePin(null)).toBeNull();
   });
 });
