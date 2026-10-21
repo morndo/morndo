@@ -324,7 +324,7 @@ describe("readCodeLine: the one-time code, from stdin", () => {
     expect(modes[0]).toBe(true);                                         // raw: the tty driver echoes nothing
     expect(modes.at(-1)).toBe(false);                                    // and the terminal is given back as it was
     expect(shown).toEqual(["One-time code: "]);                          // the prompt only, never the code
-    expect(written.join("").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "")).not.toContain("K7M2");   // nothing was echoed to either stream
+    expect(written.join("").replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "")).not.toContain("K7M2");   // nothing was echoed to either stream
   });
   it("on a terminal it asks first; no input at all is the empty code", async () => {
     const shown: string[] = [];
