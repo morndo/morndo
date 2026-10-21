@@ -21,7 +21,12 @@ beforeEach(async () => {
   out = "";
 });
 afterEach(async () => {
-  if (child && child.exitCode === null) { child.kill("SIGTERM"); await new Promise(r => child?.once("exit", r)); }
+  // The hub handles SIGTERM (and so removes its staging dir) only once it logs that it is up; sooner, the signal ends it
+  // as it is and leaves morndo-fleet-files-* in TMPDIR. A test that stops at the first HTTP answer can be that early.
+  if (child && child.exitCode === null) {
+    await until(() => out.includes("morndo hub on"), 20_000).catch(() => {});
+    if (child.exitCode === null) { child.kill("SIGTERM"); await new Promise(r => child?.once("exit", r)); }
+  }
   child = null;
   await fleet.close();
   rmSync(dir, { recursive: true, force: true });
