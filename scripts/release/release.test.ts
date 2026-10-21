@@ -851,7 +851,7 @@ describe("install.sh", () => {
       { path: "README", mode: "0444", bytes: new Uint8Array([1]) },
       { path: "readme", mode: "0444", bytes: new Uint8Array([2]) },
     ], 1_700_000_000)).toThrow(/fold/);
-    for (const [a, b] of [["stra\u00dfe", "strasse"], ["\ufb01le", "file"], ["\u03bb\u03bf\u03b3\u03bf\u03c2", "\u03bb\u03bf\u03b3\u03bf\u03c3"]]) {
+    for (const [a, b] of [["stra\u00dfe", "strasse"], ["\ufb01le", "file"], ["\u03bb\u03bf\u03b3\u03bf\u03c2", "\u03bb\u03bf\u03b3\u03bf\u03c3"]] as const) {
       expect(() => packTree([
         { path: a, mode: "0444", bytes: new Uint8Array([1]) },
         { path: b, mode: "0444", bytes: new Uint8Array([2]) },
