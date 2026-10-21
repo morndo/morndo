@@ -205,6 +205,7 @@ describe("list, show, approve, invalidate", () => {
     const code = codeFor("N-1");
     const argv = await run(["approve", "N-1", "--code", code]);
     expect(argv.code).toBe(MEMORY_EXIT.usage);
+    expect(argv.err).toContain("process list");                                // the specific refusal, not the generic usage
     expect(argv.err).toContain("stdin");
     expect(argv.err).not.toContain(code);                                       // the refusal never echoes the code back
     expect(asked).toBe(0);                                                      // nothing was read either
