@@ -160,6 +160,18 @@ export class DirsInstaller implements Installer {
 
   discard(version: string): void { this.removeTree(this.staging(version)); }
 
+  // A Version a link still points at (§5: current runs it, previous and good are kept for rollback and recovery)
+  // is never removed. Anything else — a leftover whose record never made it — is made writable and goes.
+  removeVersion(version: string): void {
+    const links = this.layout();
+    for (const name of ["current", "previous", "good"] as const) {
+      if (links[name] === version) {
+        throw new Error(`${version}: ${name} points at it; a Version in use is never removed`);
+      }
+    }
+    this.removeTree(join(this.releases, version));
+  }
+
   async verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]> {
     const dir = join(this.releases, version);
     const findings: TreeFinding[] = [];

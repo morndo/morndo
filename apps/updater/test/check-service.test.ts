@@ -3,14 +3,14 @@
 // the chain's own word, not a mock's. Each case bends exactly one thing and asserts three: the outcome, that nothing
 // is left (no staging directory, no promoted Version, no download), and what the store recorded.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseVersion } from "@morndo/domain";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CheckService } from "../src/application/check-service.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE } from "../src/application/namespaces.ts";
-import { FetchFailed } from "../src/application/ports.ts";
+import { FetchFailed, type StagedRecord } from "../src/application/ports.ts";
 import { SshSigVerifier } from "../src/adapters/verifier-sshsig.ts";
 import { FakeArtifacts, FakeClock, FakeFeed, FakeInstaller, FakeSettings, FakeStore, wipe } from "./helpers/fakes.ts";
 import {
@@ -486,5 +486,48 @@ describe("the check service (§6.1, §10.2)", () => {
     expect(await w.service.check()).toMatchObject({ kind: "refused", step: "selftest" });
     nothingLeft(w);
     recorded(w, "refused", "selftest", OFFERED);
+  });
+
+  // ---- §13: a crash between the rename and the record
+
+  it("a Version directory promoted before its record was written is verified and adopted, with nothing downloaded", async () => {
+    const w = build(world => {
+      const real = world.store.recordStaged.bind(world.store);
+      let died = false;
+      world.store.recordStaged = (r: StagedRecord) => {            // the process dies between rename and record
+        if (!died) { died = true; throw new Error("record failed: update.db could not be written"); }
+        real(r);
+      };
+    });
+    await w.service.check().catch(() => undefined);                // a crash or a refusal: either way, no staging
+    expect(w.store.versionRecord(OFFERED)).toBeNull();             // the row never made it…
+    expect(w.installer.has(OFFERED)).toBe(true);                   // …but the promoted directory did
+
+    const fetches = w.artifacts.calls.length;
+    const out = await w.service.check();
+    expect(out).toEqual({ kind: "staged", version: OFFERED, already: true });
+    expect(w.artifacts.calls.length).toBe(fetches);                // adopted: nothing downloaded
+    expect(w.store.versionRecord(OFFERED)).toMatchObject({ filesSha256: w.rel.filesSha256, manifestSha256: w.rel.manifestSha256 });
+    recorded(w, "staged", null, OFFERED);
+    expect(w.store.checks(1)[0]!.detail).toBe("adopted a verified directory left without its record");
+  });
+
+  it("a leftover Version directory that fails verification is removed and staged again", async () => {
+    const w = build();
+    expect(await w.service.check()).toEqual({ kind: "staged", version: OFFERED, already: false });
+    w.store.versions.delete(OFFERED);                              // the record lost, the directory left
+    const vdir = join(w.installer.dir, OFFERED);
+    chmodSync(vdir, 0o755);                                        // one listed file now differs from the signed list
+    chmodSync(join(vdir, "README.md"), 0o644);
+    writeFileSync(join(vdir, "README.md"), "morndo 0.9.9\n");
+    chmodSync(join(vdir, "README.md"), 0o444);
+    chmodSync(vdir, 0o555);
+
+    const fetches = w.artifacts.calls.length;
+    const out = await w.service.check();
+    expect(out).toEqual({ kind: "staged", version: OFFERED, already: false });   // staged afresh, over the removed leftover
+    expect(w.artifacts.calls.length).toBe(fetches + 1);            // downloaded again
+    expect(w.store.versionRecord(OFFERED)).not.toBeNull();
+    recorded(w, "staged", null, OFFERED);
   });
 });

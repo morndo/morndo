@@ -251,6 +251,20 @@ export class CheckService {
       if (artifact === undefined) {
         return finish({ kind: "skipped", reason: "no_artifact", version: best.text }, "no_artifact", best.text);
       }
+
+      // A crash after the rename and before the record (§13) leaves a Version directory without its row, and
+      // promote refuses to overwrite it — so every later check would die at the same place. The signed
+      // filesSha256 is in hand here: a leftover tree that still checks out against it is adopted as staged, and
+      // one that does not is removed and staged afresh.
+      if (installer.has(best.text) && store.versionRecord(best.text) === null) {
+        const findings = await installer.verifyTree(best.text, artifact.filesSha256);
+        if (findings.length === 0) {
+          store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now() });
+          return finish({ kind: "staged", version: best.text, already: true },
+            "adopted a verified directory left without its record", best.text);
+        }
+        installer.removeVersion(best.text);
+      }
       const slash = best.entry.manifest.lastIndexOf("/");
       const url = `${best.entry.manifest.slice(0, slash + 1)}${artifact.name}`;   // the entry's directory, the manifest's name
       artifactName = artifact.name;

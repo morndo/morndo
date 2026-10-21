@@ -60,6 +60,8 @@ export interface Installer {
   promote(version: string, record: { manifestSha256: string; filesSha256: string; at: number }): void;
   /** Removes .staging-<version>/ if present. */
   discard(version: string): void;
+  /** Removes an installed <version>/ tree; refuses (throws) while current, previous or good points at it. */
+  removeVersion(version: string): void;
   /** Re-checks an installed Version against its files.json (and that list against `filesSha256` when known). */
   verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]>;
   /** Free bytes on the file system holding the releases directory. */

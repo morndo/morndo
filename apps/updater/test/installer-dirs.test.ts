@@ -243,6 +243,23 @@ describe("DirsInstaller", () => {
       .toThrow(/already installed/);
   });
 
+  it("removeVersion removes a promoted read-only Version tree", async () => {
+    const { installer } = await installGood();
+    installer.removeVersion(VERSION);
+    expect(installer.has(VERSION)).toBe(false);
+    expect(readdirSync(releases)).toEqual([]);
+  });
+
+  it("removeVersion refuses a Version that current, previous or good points at", async () => {
+    const { installer } = await installGood();
+    for (const name of ["current", "previous", "good"]) {
+      symlinkSync(VERSION, join(releases, name));
+      expect(() => installer.removeVersion(VERSION), name).toThrow(/points at it/);
+      rmSync(join(releases, name));
+    }
+    expect(installer.has(VERSION)).toBe(true);   // a kept Version is never removed
+  });
+
   it("freeBytes(): a positive number from the file system holding the releases directory", () => {
     expect(new DirsInstaller({ releases }).freeBytes()).toBeGreaterThan(0);
   });

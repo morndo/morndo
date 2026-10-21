@@ -160,6 +160,11 @@ export class FakeInstaller implements Installer {
     this.real.discard(version);
   }
 
+  removeVersion(version: string): void {
+    this.calls.push({ op: "removeVersion", version });
+    this.real.removeVersion(version);
+  }
+
   verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]> {
     return this.real.verifyTree(version, filesSha256);
   }
