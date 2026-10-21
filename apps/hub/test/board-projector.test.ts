@@ -190,6 +190,7 @@ describe("a lane the fleet does not list is gone (D3, orphans)", () => {
 
   it("nothing is moved or flagged while the fleet's list can't be read", async () => {
     const t = task("A", "ghost", T0, "doing");
+    task("B", "ghost", T0);                                           // a to do task on the same lane: not flagged blind either
     source.list = new Error("fleet down");
     await projector.start();
     expect(shown(t.key)?.status).toBe("doing");
