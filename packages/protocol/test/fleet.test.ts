@@ -164,7 +164,7 @@ describe("op arguments (what the agent acts on: strict)", () => {
     expect(ok("lane.start", { name: "fix: a/b ü.2", cwd: "/w/repo", account: "acct2", resume: UUID })).toBe(true);
     expect(ok("worktree.add", { repo: "/w/repo", name: "fix/login", base: "main" })).toBe(true);
   });
-  it("takes a message of up to maxMessageText in pane.send and lane.deliver; lane.start's prompt stays at maxSendText", () => {
+  it("takes a message of up to maxMessageText in pane.send and lane.deliver, and in lane.start's first prompt", () => {
     const deliver = (text: string) => ok("lane.deliver", { id: "hub:k1", target: { lane: "w", sticky: false }, text });
     expect(ok("pane.send", { workerId: W, text: "ü".repeat(LIMITS.maxMessageText), expect: expectArgs })).toBe(true);
     expect(deliver("ü".repeat(LIMITS.maxMessageText))).toBe(true);
@@ -172,8 +172,9 @@ describe("op arguments (what the agent acts on: strict)", () => {
     expect(deliver("x".repeat(LIMITS.maxMessageText + 1))).toBe(false);
     expect(ok("pane.send", { workerId: W, text: "", expect: expectArgs })).toBe(false);                    // a message is never empty
     expect(deliver("")).toBe(false);
-    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(LIMITS.maxSendText) })).toBe(true);
-    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(LIMITS.maxSendText + 1) })).toBe(false);
+    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(LIMITS.maxMessageText) })).toBe(true);
+    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(LIMITS.maxMessageText + 1) })).toBe(false);
+    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "" })).toBe(false);                            // a prompt is never empty
   });
   it("refuses what is too long, not a path, or could escape (negative controls)", () => {
     expect(ok("inventory.get", { all: true })).toBe(false);

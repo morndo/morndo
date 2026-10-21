@@ -333,10 +333,8 @@ const oneFile = (a: { path?: string; ref?: string }) => (a.path === undefined) !
 // component ending in ".lock"; not ending in "/" or "."; not "HEAD"; at most 200 characters. The agent asks git itself
 // as well (`git check-ref-format --branch`).
 const refName = () => z.string().check(z.regex(/^(?![-/.]|HEAD$)(?!.*(?:\.\.|\/\/|\/\.|@\{|\.lock(?:\/|$)))(?!.*[/.]$)[A-Za-z0-9._/-]{1,200}$/));
-// A lane's first prompt (lane.start): at most maxSendText. A message typed into a running lane is messageText, below.
-const sendText = () => z.string().check(z.minLength(1), z.maxLength(LIMITS.maxSendText));
-// A message the principal types into a lane (pane.send, lane.deliver), up to maxMessageText, and only to an agent that
-// said it takes one (CAP_LONG_TEXT); lane.start's first prompt and the lane-event parts stay at maxSendText.
+// A message the principal types into a lane (pane.send, lane.deliver) and a lane's first prompt (lane.start), up to
+// maxMessageText, and only to an agent that said it takes one (CAP_LONG_TEXT); the lane-event parts stay at maxSendText.
 const messageText = () => z.string().check(z.minLength(1), z.maxLength(LIMITS.maxMessageText));
 // A delivery's id (fleet clients §4.1), chosen by its client and namespaced like a key ("hub:…", "kira:…"; the client a-z,
 // at most 16 letters, §8), at most 200 characters, no control character. It is also the done key its typing runs under,
@@ -378,7 +376,7 @@ export const OP_ARGS = {
     name: z.string().check(z.minLength(1), z.maxLength(255), z.refine(n => !n.includes("/") && !n.includes("\0"), "a file name")),
   }),
   "lane.start": z.object({ name: windowName(), cwd: absolutePath(), account: z.exactOptional(account()), resume: z.exactOptional(z.uuid()),
-    prompt: z.exactOptional(sendText()), role: z.exactOptional(roleName()), engine: z.exactOptional(engineEntry()), reason: z.exactOptional(reason()),
+    prompt: z.exactOptional(messageText()), role: z.exactOptional(roleName()), engine: z.exactOptional(engineEntry()), reason: z.exactOptional(reason()),
   }).check(z.refine(a => a.role === undefined || a.engine === undefined, "role or engine, not both")),
   "lane.stop": z.object({ name: windowName(), mode: z.exactOptional(z.enum(["exit", "kill"])), keepWindow: z.exactOptional(z.boolean()) }),
   "worktree.list": z.object({ repo: absolutePath() }),
