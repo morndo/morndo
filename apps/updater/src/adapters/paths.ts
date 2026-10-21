@@ -35,7 +35,7 @@ export function updaterPaths(home: string): UpdaterPaths {
 }
 
 // The four databases an Update may migrate (§5, §6.2 step 1): each at its own service's path, the same path that
-// service itself opens — hub apps/hub/src/config.ts, fleet, node, connections apps/connections/src/compose.ts.
+// service itself opens — hub apps/hub/src/config.ts, fleet, node, and the connections store (its compose.ts).
 // A role's database exists only where that role runs; reading one that is not there is the caller's null.
 export type DatabasePaths = Record<DatabaseName, string>;
 
