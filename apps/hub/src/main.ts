@@ -2,7 +2,7 @@
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
 import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/domain";
-import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
+import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
 import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
@@ -43,6 +43,9 @@ import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
+import { gitAncestry, gitHasCommit } from "./adapters/git-ancestry.ts";
+import { MergeLiveness } from "./application/merge-liveness.ts";
+import { NodeBuilds } from "./application/node-builds.ts";
 import { AgentAccess } from "./application/agent-access.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
@@ -84,8 +87,9 @@ MORNDO_PANE_LOCK (the lock file other typists into the manager's pane take), MOR
 VNC server), MORNDO_VNC_PASSWORD_FILE, MORNDO_FLEET_SOCKET (the fleet service's client socket; unset, this
 machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane registry directory; off unless set),
 MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet), MORNDO_ENGINES (the engine layer's
-CLI, engine-layer bin/engines: the Engines page) and MORNDO_MANAGER_QUEUE (with a fleet, the manager's answers and
-messages go through the fleet's delivery queue; "off" types them directly). MORNDO_TRANSCRIBER (absolute path of a
+CLI, engine-layer bin/engines: the Engines page), MORNDO_MANAGER_QUEUE (with a fleet, the manager's answers and
+messages go through the fleet's delivery queue; "off" types them directly) and MORNDO_REPO (a local Morndo checkout:
+the board compares merge commits with the nodes' builds in it). MORNDO_TRANSCRIBER (absolute path of a
 protocol-1 plugin; otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcribe).`;
 
 // A reader that closes the pipe early (`morndo audit | head`) ends the output, not the process; a console command that leaves
@@ -143,6 +147,12 @@ switch (cmd) {
     }
     if (config.engineSessions && !engineSessionsOk(config.engineSessions)) {
       log.error(`MORNDO_ENGINE_SESSIONS must be an absolute path to the engine-lane registry, not ${JSON.stringify(config.engineSessions)}; set the full path, or unset it to leave engine-lane status off.`);
+      await exitAfterOutput(EXIT_CONFIG);
+    }
+    // The same for a Morndo checkout that isn't an absolute path (config.ts morndoRepo): `git -C` would read it against
+    // wherever the service started. Unset is fine: the board just never says a merge is live.
+    if (config.morndoRepo && !morndoRepoOk(config.morndoRepo)) {
+      log.error(`MORNDO_REPO must be an absolute path to a Morndo checkout, not ${JSON.stringify(config.morndoRepo)}; set the full path, or unset it to judge every merge unknown.`);
       await exitAfterOutput(EXIT_CONFIG);
     }
     // From here on, a SIGTERM or SIGINT at any moment ends the hub as it ends one that serves: what the start has made so far
@@ -257,10 +267,23 @@ switch (cmd) {
     // ADR-0015: the board, changed by the principal (a Command) and by the agents (their tokens, issued below).
     // ADR-0032: with a fleet, the board also follows the lanes' Runs (the projector, on the fleet client the alerts and
     // the deliveries use): each lane's run goes out with the board, and its tasks move by D1 to D4 as actor "board".
+    // B11: with a fleet it also learns each node's build, and each merge's liveness over them, read from a local
+    // Morndo checkout (MORNDO_REPO). Without either, nothing is live: done waits, or is accepted with an override.
+    const builds = fleet ? new NodeBuilds({ source: () => fleet.client.nodes(), log }) : null;
+    builds?.start();
+    // When a background check settles what a merge's liveness is, the board says so at once: the frames wait for no
+    // next look. `board` is made below, so it is reached through a holder, as the projector is.
+    const held: { board: BoardService | null } = { board: null };
+    const liveness = new MergeLiveness({
+      builds: () => builds?.list() ?? [],
+      ancestry: gitAncestry(config.morndoRepo ?? null),
+      onChange: () => held.board?.runsChanged(),
+    });
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [] });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null) });
+    held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
-    shutdown.onStop(() => { following.projector?.stop(); board.stop(); });
+    shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
     const agents = new AgentAccess(store, config.managerWindow);
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.

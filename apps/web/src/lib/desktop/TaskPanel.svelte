@@ -12,11 +12,12 @@
   import Picker, { type PickerOption } from "./Picker.svelte";
   import StatusIcon from "./StatusIcon.svelte";
   import "./board-controls.css";
-  import { COLUMNS, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, avatarOf, eventLine, whoOf, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
+  import { COLUMNS, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, avatarOf, eventLine, whoOf, type MergedView, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
   import { clock } from "./grouping.ts";
 
-  let { task, lanes, now, pendingBlock = false, notice = null, onAct, onOpenLane, onClose }: {
+  let { task, lanes, now, merged = null, pendingBlock = false, notice = null, onAct, onOpenLane, onClose }: {
     task: Task; lanes: string[]; now: number;
+    merged?: MergedView | null;                           // where the task's merges stand (B11), from the board frame; null: none
     pendingBlock?: boolean;                               // opened by a drop on Blocked: ask the reason first
     notice?: string | null;                               // why a drop on the board was refused, in words
     // One change, as the hub takes it; null when it went, else the words for why not.
@@ -139,7 +140,11 @@
         <dt>Status</dt>
         <dd>
           <Picker value={task.status} options={statusOptions} label="Status" size="sm" disabled={busy} onPick={v => void move(v as TaskStatus)} />
-          {#if task.status === "review"}<button class="bd-btn primary sm" disabled={busy} onclick={() => void act({ action: "move", to: "done", ifRev: task.rev })}><CircleCheckBig size={14} />Accept as done</button>{/if}
+          {#if task.status === "review"}<button class="bd-btn primary sm" disabled={busy} title={merged?.live === false ? "Its merge is not live on every node; this is recorded as accepted by you" : undefined} onclick={() => void act({ action: "move", to: "done", ifRev: task.rev })}><CircleCheckBig size={14} />{merged?.live === false ? "Accept anyway" : "Accept as done"}</button>{/if}
+          {#if merged}<p class="merge" class:bad={merged.live === false} data-merge-label>{merged.label}</p>{/if}
+          {#each merged?.merges.filter(m => m.override !== null) ?? [] as m}
+            <p class="merge bad" data-merge-override>Accepted while not live: {m.override}</p>
+          {/each}
         </dd>
       </div>
       <div><dt>Priority</dt><dd>{PRIORITY_WORDS[task.priority]}</dd></div>
@@ -201,6 +206,10 @@
   .facts dt { font: 400 12px/18px var(--font); color: var(--muted); }
   .facts dd { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 400 13px/20px var(--font); min-width: 0; }
   .facts dd.bad { color: var(--bad-fg); }
+  /* Where the task's merges stand (B11): one quiet line under the status picker, its own row when it wraps; the bad
+     colour only when a merge is not live. */
+  .facts dd .merge { flex-basis: 100%; margin: 0; font: 400 12px/18px var(--font); color: var(--muted); }
+  .facts dd .merge.bad { color: var(--bad-fg); }
   .edit { display: grid; gap: 10px; }
   .row { display: flex; align-items: center; gap: 10px; }
   .other { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }

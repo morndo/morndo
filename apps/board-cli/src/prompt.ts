@@ -23,6 +23,9 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - A task in review is the lane's word, not proof. Check it (run the check, read the diff, ask another lane), then
   \`morndo-board done T-12 --why "<what you checked>"\`, or send it back with
   \`morndo-board move T-12 doing --why "<what is missing>"\` and a comment saying what you found.
+- When a task's PR has merged, record it: \`morndo-board merged T-12 <sha>\`. Done is then refused until the merge is on every
+  node's build; the board says which node is behind. Accept it earlier only with \`--not-live "<why>"\`.
+- A wrong sha: \`morndo-board unmerged T-12 <sha>\`, then record the right one.
 - Never mark a task done on a lane's word alone, and never move a task that the board or its lane will move.
 - Blocked tasks are yours to unblock. Read \`morndo-board list --status blocked\` and act, or ask the principal.
 - Proposals (tasks in the backlog nobody is assigned to) come from lanes. Triage them: assign, or comment why not.
