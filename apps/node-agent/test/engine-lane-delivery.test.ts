@@ -70,7 +70,7 @@ describe("an engine lane takes briefs", () => {
     startLane("codex-long");
     const target: DeliveryTarget = { lane: "codex-long", sticky: false };
     expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-long")?.sessionId != null; })).toBe(true);
-    const brief = 'ü€"\n'.repeat(25_000);                  // exactly maxMessageText, with what a paste must survive
+    const brief = 'ü€"\n'.repeat(24_999) + 'ü€".';                // exactly maxMessageText, with what a paste must survive
     expect(brief).toHaveLength(LIMITS.maxMessageText);
     expect(h.deliverer.enqueue({ id: "lanes:long", target, text: brief })).toMatchObject({ delivery: { state: "queued" } });
     expect(await kickUntil(() => h.deliveries.get("lanes:long")?.state === "delivered", 30_000)).toBe(true);

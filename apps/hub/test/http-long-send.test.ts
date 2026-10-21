@@ -13,7 +13,7 @@ import { fleetRig, steeringFor, type FleetRig } from "./helpers/hub-mode.ts";
 import { ORIGIN, startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 
 const RID = randomUUID();
-const WHOLE = 'ü€"\n'.repeat(25_000);                 // exactly maxMessageText, with what a paste must survive
+const WHOLE = 'ü€"\n'.repeat(24_999) + 'ü€".';               // exactly maxMessageText, with what a paste must survive
 
 let rig: FleetRig | null = null;
 let hub: InProcessHub | null = null;
