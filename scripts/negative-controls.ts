@@ -1745,7 +1745,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/hub/test/manager-queue-main.test.ts"], expect: "expected [] to deeply equal [ 'hub:ep1:r1' ]" },
   // Off, the hub serves only once its cancels at start are answered.
   { id: "fc12-serve-before-cancels", task: "fc12", file: "apps/hub/src/main.ts",
-    find: "      else await first;\n", replace: "",
+    find: "      else await running(first);\n", replace: "",
     run: ["apps/hub/test/manager-queue-main.test.ts"], expect: "serves only once its cancels at start are answered" },
   // Two put()s of one id overlap; the first one's end must not leave the row unguarded.
   { id: "fc12-put-overlap-uncounted", task: "fc12", file: "apps/hub/src/application/manager-queue.ts",

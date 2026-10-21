@@ -7,6 +7,7 @@ import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
 import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, productVersion, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
+import { shutdownStack, type Shutdown } from "./adapters/shutdown.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
 import { startRetention } from "./application/retention.ts";
 import { ReadingService } from "./application/reading-service.ts";
@@ -55,7 +56,7 @@ import { MemoryFromFuture } from "./adapters/memory-migrations.ts";
 import { MemoryService } from "./application/memory-service.ts";
 import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
 import { runMemory } from "./console/memory.ts";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -144,6 +145,15 @@ switch (cmd) {
       log.error(`MORNDO_ENGINE_SESSIONS must be an absolute path to the engine-lane registry, not ${JSON.stringify(config.engineSessions)}; set the full path, or unset it to leave engine-lane status off.`);
       await exitAfterOutput(EXIT_CONFIG);
     }
+    // From here on, a SIGTERM or SIGINT at any moment ends the hub as it ends one that serves: what the start has made so far
+    // is closed (adapters/shutdown.ts), then exit 0. Each resource names its close when it exists; every wait of the start
+    // goes through `shutdown.whileRunning`, so a start that is waiting when the stop begins goes no further.
+    const shutdown = shutdownStack(log);
+    const running = shutdown.whileRunning.bind(shutdown);
+    const stop = () => shutdown.stop().then(() => exitAfterOutput(0));
+    process.on("SIGINT", () => void stop());
+    process.on("SIGTERM", () => void stop());
+    shutdown.onStop(() => store.close());
     const files = fileStore({ dir: config.filesDir, deny: denyRoots(homedir(), config.dataDir, denyConfigWithClaudeDir(denyConfigFromEnv(process.env), config.claudeDir)) });
     // MORNDO_FLEET_SOCKET set: every port goes through the fleet service; unset: this machine's tmux and Claude Code, as
     // before (spec §10). Nothing below this line knows which.
@@ -151,7 +161,7 @@ switch (cmd) {
     // The fleet's alerts in the app; an urgent new one is a push (counts only), told once the notifications exist below.
     let alertPush: (urgent: boolean) => void = () => {};
     const alerts = config.fleetSocket ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
-    const fleet = config.fleetSocket ? await openFleet(config.fleetSocket, files, jobs, alerts) : null;
+    const fleet = config.fleetSocket ? await running(openFleet(config.fleetSocket, files, jobs, alerts, shutdown)) : null;
     const ports: HubPorts = fleet?.ports ?? legacyPorts(config, { files });
     // Engine lanes on this machine, only when MORNDO_ENGINE_SESSIONS names their registry. Off otherwise: nothing is read.
     const engineLanes = engineLanesFor(config);
@@ -161,6 +171,7 @@ switch (cmd) {
       sessions: ports.sessions, transcripts: ports.transcripts, files: ports.files, nodeStates: ports.nodeStates, nodeWaitMs: config.pollMs,
       lanes: engineLanes.lanes, engineNode: engineLanes.engineNode,
     });
+    shutdown.onStop(() => observation.stop());
     // Typing into the manager's pane takes the lock its other typists take, so two pastes never merge into one message.
     // Legacy only: with a fleet, the node's agent takes it (spec §3.1, "Pane lock").
     // The workers as escalations see them: with each one's conflict (two windows claim its name, Task 14).
@@ -203,12 +214,14 @@ switch (cmd) {
     });
     const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
     filed.briefs = briefs;
+    shutdown.onStop(() => escalations.stop());
     if (queue) {
+      shutdown.onStop(() => queue.stop());
       // Off: what is still queued is cancelled here, before any answer (the hub types directly once it serves). On:
       // nothing has to come first; the sticky check and the first round run while the hub serves (review #8).
       const first = queue.start();
       if (queue.on) void first.catch((e: unknown) => log.error("manager queue: its first round failed; each poll tries again", e));
-      else await first;
+      else await running(first);
       log.info(`manager queue: ${queue.on ? "on" : "off (MORNDO_MANAGER_QUEUE)"}`);   // once, at start (reconciliation ruling 39)
     }
     const remote = new RemoteService({
@@ -230,6 +243,7 @@ switch (cmd) {
       muted: id => { const name = nameOf(id); return name !== undefined && reading.state().muted.includes(name); },
       alerts: () => alerts?.urgentSince(reading.state().reads[SEEN_MARK] ?? 0) ?? 0,
     });
+    shutdown.onStop(() => notifications.stop());
     alertPush = urgent => notifications.alert(urgent);
     // ADR-0013: the Engines page, through the engine layer's CLI when MORNDO_ENGINES names it.
     const engines = config.enginesBin ? new EnginesService({ cli: enginesCli(config.enginesBin), store, policy: () => access.policy() }) : null;
@@ -243,10 +257,12 @@ switch (cmd) {
     const following: { projector: BoardProjector | null } = { projector: null };
     const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [] });
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
+    shutdown.onStop(() => { following.projector?.stop(); board.stop(); });
     const agents = new AgentAccess(store, config.managerWindow);
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
     const memoryStore = openMemory(config.dataDir);
+    if (memoryStore) shutdown.onStop(() => memoryStore.close());
     const memory = memoryStore ? new MemoryService({ store: memoryStore }) : null;
     const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
     // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens.
@@ -258,7 +274,8 @@ switch (cmd) {
     void following.projector?.start().catch((e: unknown) => log.error("board: following the runs failed to start", e));
     const txSettings = loadTranscriptionSettings(config.dataDir, line => log.warn(line));
     const machine = openMachineGuard(txSettings.guard);
-    try { await machine.refresh(); }
+    shutdown.onStop(() => machine.close());
+    try { await running(machine.refresh()); }
     catch (e) { log.warn("transcription: machine figure unread", e); }
     // Each probe looks again: a plugin installed while the hub runs turns the feature on, and one removed or turned
     // unsafe turns it off (design §6). The one known path, never PATH.
@@ -285,30 +302,35 @@ switch (cmd) {
       guard: () => guardNow(txSettings.guard, machine.read),
       log: line => log.info(line),
     });
+    shutdown.onStop(() => transcription.close());
     void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
       push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
       transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
     });
+    shutdown.onStop(async () => { await http.idle(); await http.close(); });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
+    shutdown.onStop(() => clearInterval(sweepInbox));
     const syncMemory = memorySync ? setInterval(() => void memorySync.tick(), SYNC_EVERY_MS) : null;
+    if (syncMemory) shutdown.onStop(() => clearInterval(syncMemory));
     // Old pairing tokens and long-ended sessions, on start and daily; never the audit or the decisions (A8).
     const stopRetention = startRetention(store, Date.now,
       r => { if (r.tokens || r.sessions || r.sends) log.info(`retention: pruned ${r.tokens} pairing tokens, ${r.sessions} sessions and ${r.sends} send records`); },
       e => log.warn("retention: pruning failed; trying again tomorrow", e));
-    await http.ready;                                    // report "on" only once the socket really listens
+    shutdown.onStop(stopRetention);
+    await running(http.ready);                                    // report "on" only once the socket really listens
     // What already waits when the hub starts raises no Notification: one complete look first, then only changes count. A
     // look that fails, or isn't complete (the fleet not answering yet, a node's first round slower than a poll), is tried
     // again a few times, since an empty or partial first look would make everything waiting look new (review L4; N2).
     for (let i = 0; i < 5; i++) {
       try {
-        const look = await observation.poll();
+        const look = await running(observation.poll());
         escalations.poll();
         if (look.complete) break;
         log.warn(`first look failed (${i + 1} of 5): incomplete, the fleet or a node hasn't answered yet`);
       } catch (e) { log.warn(`first look failed (${i + 1} of 5)`, e); }
-      await new Promise(r => setTimeout(r, 2000));
+      await running(new Promise(r => setTimeout(r, 2000)));
     }
     notifications.board(escalations.board().items);
     for (const w of observation.snapshot().workers) notifications.worker(w.id, w.needsYou, w.waitingOn, true);
@@ -328,9 +350,6 @@ switch (cmd) {
     void memorySync?.tick();                             // the first round now; then the loop's, every minute
     log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { machine.close(); transcription.close(); clearInterval(sweepInbox); if (syncMemory) clearInterval(syncMemory); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); following.projector?.stop(); board.stop(); fleet?.ports.stop(); await http.idle(); await http.close(); store.close(); memoryStore?.close(); await exitAfterOutput(0); };
-    process.on("SIGINT", () => void stop());
-    process.on("SIGTERM", () => void stop());
     break;
   }
   case "pair": {
@@ -406,16 +425,20 @@ switch (cmd) {
 //   (openStore above);
 // - a fleet that doesn't answer yet is only said: the observation loop keeps asking, and the hub serves meanwhile
 //   (spec §7, "Fleet service down or restarting").
-async function openFleet(socket: string, files: LocalFileStore, jobs: JobsService, alerts: AlertsService | null): Promise<{ ports: FleetPorts; client: FleetClient }> {
+async function openFleet(socket: string, files: LocalFileStore, jobs: JobsService, alerts: AlertsService | null, shutdown: Shutdown): Promise<{ ports: FleetPorts; client: FleetClient }> {
   const client = new FleetClient(socket, { log });
-  const check = await checkFleet(client);
+  const check = await shutdown.whileRunning(checkFleet(client));
   if (check === "unsupported") {
     log.error(`the fleet service at ${socket} doesn't offer client API version ${CLIENT_API}; update morndo-fleet or this hub`);
     await exitAfterOutput(EXIT_CONFIG);
   }
   if (check === "unreachable") log.warn(`the fleet service at ${socket} doesn't answer yet; the hub keeps asking`);
-  const ports = fleetPorts(client, { files, jobs, ...(alerts ? { alerts } : {}), stagingDir: mkdtempSync(join(tmpdir(), "morndo-fleet-files-")) });
-  await ports.start();
+  // The staging dir is named for removal the moment it exists; the ports remove it again when they stop (idempotent).
+  const stagingDir = mkdtempSync(join(tmpdir(), "morndo-fleet-files-"));
+  shutdown.onStop(() => rmSync(stagingDir, { recursive: true, force: true }));
+  const ports = fleetPorts(client, { files, jobs, ...(alerts ? { alerts } : {}), stagingDir });
+  shutdown.onStop(() => ports.stop());
+  await shutdown.whileRunning(ports.start());
   return { ports, client };
 }
 
