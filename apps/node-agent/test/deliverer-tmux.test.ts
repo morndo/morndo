@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { Delivery } from "@morndo/protocol";
+import { LIMITS, type Delivery } from "@morndo/protocol";
 import { ProcessStarts, startFromProcStat } from "../src/deliveries/views.ts";
 import { argsHash } from "../src/ops/done-keys.ts";
 import type { TestHooks } from "../src/test-hooks.ts";
@@ -82,6 +82,17 @@ describe("the deliverer through the executor, on real tmux", () => {
     }
     expect(emitted.some(d => d.id === sent[2]?.id && d.waiting?.reason === "earlier")).toBe(true);
   }, 30_000);
+
+  it("types a whole maxMessageText message, multi-line and single-line, as one paste each; the receipt matches it wrapped (Review Focus 2)", async () => {
+    const multi = 'ü€"\n'.repeat(25_000);                   // exactly maxMessageText, over many lines
+    const single = "ü".repeat(LIMITS.maxMessageText);
+    for (const [id, text] of [["hub:long-m", multi], ["hub:long-s", single]] as const)
+      expect(h.deliverer.enqueue({ id, target: MANAGER, text })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await kickUntil(() => ["hub:long-m", "hub:long-s"].every(id => h.deliveries.get(id)?.state === "delivered"))).toBe(true);
+    expect(submitted()).toEqual([multi, single]);
+    // The bytes the pane received: one bracketed paste per message, each closed before the next opened.
+    expect(brackets(readFileSync(join(box(), "raw.bin"), "latin1"))).toBe("0101");
+  }, 60_000);
 
   it("waits through a draft in the box (draft_present), and types once it is cleared", async () => {
     t.tmux("send-keys", "-t", pane, "-l", "half");
