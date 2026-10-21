@@ -39,7 +39,7 @@ import type { Inbox } from "./uploads.ts";
 import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
-  LinkDecisionBody, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
+  LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
   RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UsageReportBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
@@ -53,6 +53,9 @@ const MAX_BODY = 64 * 1024;
 // A Note's own limits are characters (MEMORY_LIMITS): 20,000 of them can be 120 KB as JSON that escapes every character
 // (\uXXXX), so a Note's body gets room for that, and no more.
 const MEMORY_MAX_BODY = 160 * 1024;
+// A send's text is at most PROTO_LIMITS.maxMessageText characters, each one escaped \uXXXX in JSON (the same reasoning
+// as MEMORY_MAX_BODY), plus the body's other fields.
+const SEND_MAX_BODY = PROTO_LIMITS.maxMessageText * 6 + 16 * 1024;
 // The terminal view's frames: asked every 80 ms; while they are unavailable, at most every 2 s (streamTerminal).
 const FRAME_POLL_MS = 80;
 const FRAME_BACKOFF_MAX_MS = 2000;
@@ -592,13 +595,13 @@ export function startHttp(p: {
     if (send && sendTo === null) throw new HttpError(404, "no such route");
     if (sendTo !== null && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
-      const body = await readBody(req, SendBody);
+      const body = await readBody(req, SendBody, SEND_MAX_BODY);
       return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true));
     }
     // The manager by its role: its window, or, while it has none, the fleet's queue for its sticky lane (steering).
     if (path === "/api/manager/send" && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
-      const body = await readBody(req, SendBody);
+      const body = await readBody(req, SendBody, SEND_MAX_BODY);
       return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true));
     }
     // The principal's cancel of one of his messages to the manager still waiting in the fleet's queue (ruling 83; spec

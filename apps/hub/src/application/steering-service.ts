@@ -64,7 +64,7 @@ export function keepInDoubt(store: Pick<Store, "setSendStore">, key: string, e: 
   if (e.store !== null) store.setSendStore(key, e.store, e.storeSeq);
 }
 
-const MAX_TEXT = LIMITS.maxSendText;
+const MAX_TEXT = LIMITS.maxMessageText;
 
 export class SteeringService {
   #store: Store;

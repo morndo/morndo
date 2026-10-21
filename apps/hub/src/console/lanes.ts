@@ -246,7 +246,7 @@ async function send(client: FleetClient, io: LanesIo, rest: string[], v: Values)
   // From stdin, the one newline a shell's echo or a here-string ends it with is not part of the text.
   const text = arg === "-" ? (await io.stdin()).replace(/\r?\n$/, "") : arg;
   if (!text) throw new Usage("the text is empty");
-  if (text.length > LIMITS.maxSendText) throw new Usage(`the text is over ${LIMITS.maxSendText} characters`);
+  if (text.length > LIMITS.maxMessageText) throw new Usage(`the text is over ${LIMITS.maxMessageText} characters`);
   const id = deliveryId(v.id);
   if (v.direct) {
     if (v.wait !== undefined) throw new Usage("--wait waits for a delivery; --direct types at once");

@@ -491,7 +491,7 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
     const text = typeof b.text === "string" ? b.text : "";
     const lane = typeof b.lane === "string" ? b.lane : null;
     const workerId = typeof b.workerId === "string" ? b.workerId : null;
-    if (!/^[a-z]+:/.test(id) || id.length > LIMITS.maxDeliveryId || !text || text.length > LIMITS.maxSendText || (lane === null) === (workerId === null)) return refused("bad_args");
+    if (!/^[a-z]+:/.test(id) || id.length > LIMITS.maxDeliveryId || !text || text.length > LIMITS.maxMessageText || (lane === null) === (workerId === null)) return refused("bad_args");
     deliveryCalls.push({ id, lane, workerId, text });
     if (refuseDeliver > 0) { refuseDeliver--; return refused("uncertain", "the fleet stopped while the delivery was in flight"); }
     const target = lane !== null ? { lane } : { workerId: workerId ?? "" };
