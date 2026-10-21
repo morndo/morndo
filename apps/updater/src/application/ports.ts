@@ -127,6 +127,10 @@ export interface UpdateStore {
   manifestOf(version: string): string | null;
   /** The last attempts, newest first (§8.1 --status). */
   recentUpdates(limit: number): UpdateHistory[];
+  /** RL12: a rollback here halts that Version's Rollout; the fleet acts on the record (PR 6). */
+  recordHalt(version: string, reason: string, at: number): void;
+  /** Every halt recorded here, newest first. */
+  halts(): { version: string; reason: string; at: number }[];
 }
 
 export interface SettingsSource { read(): UpdateSettings }
@@ -170,3 +174,11 @@ export type AlertKind =
   | "update_rolled_back" | "update_rollback_failed" | "update_rollback_waiting" | "update_deferred"
   | "update_unknown_record";
 export interface AlertSink { raise(kind: AlertKind, detail: string): void }
+
+// RL10, before the journals arrive (PR 5c): a restore must not undo a revocation. During a probation that may restore,
+// the services still take revocations (RL9), and those rows live only in the database the restore would replace.
+export interface Revocations {
+  /** The ids revoked in the live database that are not revoked in this update's Backup of it: what a restore would
+   *  bring back. Empty for a database that holds no revocations, or when there is no Backup to compare. */
+  droppedBy(updateId: string, db: DatabaseName): string[];
+}

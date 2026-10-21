@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { writeFloor } from "@morndo/service-kit";
+import { readHold, writeFloor } from "@morndo/service-kit";
 import {
   A, B, buildApplyWorld, breakBackups, dbFingerprint, holdText, SCHEMAS_A, SCHEMAS_B_FLEET_FLOOR, STALE,
 } from "./helpers/apply-fakes.ts";
@@ -321,4 +321,96 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(out.reason).toContain("hub");
     expect(w.tape.length).toBe(0);
   });
+
+  // ---- the review of 2026-10-21 (md-rev5 on #101)
+
+  it("waits for the services to have seen the hold before it judges the drain", async () => {
+    // The services re-read hold.json every second (service-kit HoldWatch): a safe-point read in the same instant as
+    // the write can pass before a service has stopped taking new work. The first read under the hold comes a full
+    // re-read interval later.
+    const w = await buildApplyWorld(scratch);
+    const sinceHold: number[] = [];
+    w.probe.safePointScript = (s) => {
+      const text = holdText(w.holdPath);
+      if (text !== null) sinceHold.push(w.timeline.now() - Date.parse((JSON.parse(text) as { since: string }).since));
+      return { service: s, blockers: [] };
+    };
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(sinceHold.length, "the drain read the safe point under the hold").toBeGreaterThan(0);
+    expect(Math.min(...sinceHold), "no read under the hold before the services' re-read interval").toBeGreaterThanOrEqual(1_000);
+  });
+
+  it("re-checks the services at the end of probation, and a service that went down rolls back", async () => {
+    const w = await buildApplyWorld(scratch);
+    const answeredAtB = new Map<string, number>();
+    w.probe.healthScript = (s) => {
+      if (w.current() !== B) return { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+      const n = (answeredAtB.get(s) ?? 0) + 1;
+      answeredAtB.set(s, n);
+      // healthy when first asked at B, gone once probation has run
+      return n === 1 || s !== "node" ? { service: s, version: B, checks: { ready: true, database: true } } : null;
+    };
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("node");
+  });
+
+  it("a rollback halts the Version's rollout on record", async () => {
+    const w = await buildApplyWorld(scratch);
+    w.services.restartCounts = { hub: 1 };
+    expect(await w.apply().apply({ now: false })).toMatchObject({ kind: "rolled_back", version: A });
+    expect(w.store.halts().map(h => h.version)).toEqual([B]);
+  });
+
+  it("refuses a restore that would drop a revocation made during probation, with the alert", async () => {
+    // RL10 before the journals (5c): the fleet's nodes table holds a node that is revoked while B is on probation; a
+    // restore of the fleet's Backup would bring it back. The rollback refuses, raises the alert, and touches nothing.
+    const w = await buildApplyWorld(scratch, { bSchemas: SCHEMAS_B_FLEET_FLOOR });
+    const fleet = new Database(w.dbPaths.fleet);
+    fleet.exec("CREATE TABLE nodes (name TEXT PRIMARY KEY, revoked_at INTEGER)");
+    fleet.prepare("INSERT INTO nodes (name, revoked_at) VALUES (?, NULL)").run("node-b");
+    fleet.close();
+    w.services.onStart = (s, current) => {
+      if (s !== "fleet" || current !== B) return;
+      const db = new Database(w.dbPaths.fleet);
+      db.pragma("user_version = 3");
+      writeFloor(db, 3);
+      db.prepare("UPDATE nodes SET revoked_at = ? WHERE name = ?").run(1, "node-b");   // revoked during probation
+      db.close();
+    };
+    w.probe.healthScript = (s) =>
+      s === "hub" && w.current() === B ? null : { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+    const stopsBefore = (): number => w.tape.filter(t => t.startsWith("stop:")).length;
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rollback_failed" });
+    if (out.kind !== "rollback_failed") throw new Error("unreachable");
+    expect(out.reason).toContain("nodes:node-b");
+    expect(w.tape).not.toContain("backup:restore:fleet");
+    expect(w.alerts.raised.some(a => a.kind === "update_rollback_failed" && a.detail.includes("revocation"))).toBe(true);
+    expect(stopsBefore(), "the target was stopped only once, for the update itself").toBe(3);
+    const db = new Database(w.dbPaths.fleet, { readonly: true });
+    try { expect(db.prepare("SELECT revoked_at FROM nodes WHERE name = 'node-b'").get()).toEqual({ revoked_at: 1 }); }
+    finally { db.close(); }
+  });
+
+  it("keeps the probation hold fresh while a rollback waits on tmux", async () => {
+    // §5: a hold older than 10 minutes is ignored. A rollback that waits (RL13) must keep holding the writes a later
+    // restore would drop: each recovery run while it waits takes the hold again.
+    const w = await buildApplyWorld(scratch, { bSchemas: SCHEMAS_B_FLEET_FLOOR });
+    w.probe.healthScript = (s) => {
+      if (s === "hub" && w.current() === B) {
+        w.services.tmuxIn = true;                             // by now tmux sits in the agent's unit
+        return null;
+      }
+      return { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+    };
+    expect(await w.apply().apply({ now: false })).toMatchObject({ kind: "rollback_waiting" });
+    w.timeline.nowMs += 6 * 60_000;
+    expect(await w.recover().recover()).toMatchObject({ kind: "rollback_waiting" });
+    w.timeline.nowMs += 6 * 60_000;                           // 12 minutes after the first hold
+    const view = readHold({ path: w.holdPath, service: "fleet", now: w.timeline.now() });
+    expect(view.kind, "still held, not stale").toBe("held");
+  });
+
 });

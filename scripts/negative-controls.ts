@@ -3168,15 +3168,23 @@ export const CONTROLS: Control[] = [
   // reads the services' safe-point answers; blinded, it stops nothing for work in flight. The rollback's restore loop
   // and the probation's restart count are each skipped the same way. The node's own report of its in-flight work is
   // what the drain waits on, so it too has its control.
+  // The review of 2026-10-21 (md-rev5 on #101): a restore must not drop a revocation, and the drain waits until the
+  // services have seen the hold.
+  { id: "c2a-restore-drops-revocations", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
+    find: "      const dropped = deps.revocations.droppedBy(ctx.u.id, db);", replace: "      const dropped: string[] = [];",
+    run: ["apps/updater/test/apply-service.test.ts"], expect: "nodes:node-b" },
+  { id: "c2a-drain-before-hold-seen", task: "c2a", file: "apps/updater/src/application/apply-service.ts",
+    find: "      await deps.sleeper.sleep(timing.holdSeenMs);\n", replace: "",
+    run: ["apps/updater/test/apply-service.test.ts"], expect: "re-read interval" },
   { id: "c2a-drain-ignores-in-flight", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
     find: "reports.push(report ?? { service: s, blockers: [\"no_answer\"] });", replace: "reports.push({ service: s, blockers: [] });",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "expected 2 to be greater than or equal to 4" },
   { id: "c2a-no-restore-on-rollback", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
-    find: "for (const db of rollbackRestores(plan)) {", replace: "for (const db of rollbackRestores(plan).slice(0, 0)) {",
+    find: "    for (const db of restores) deps.backup.restore(ctx.u.id, db);", replace: "",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "written-by-b" },
   { id: "c2a-probation-ignores-restarts", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
-    find: "const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.startedAt, restarts });",
-    replace: "const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.startedAt, restarts: 0 });",
+    find: "const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.healthyAt, restarts });",
+    replace: "const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.healthyAt, restarts: 0 });",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "rolled_back" },
   { id: "c2a-node-in-flight-unreported", task: "c2a", file: "apps/node-agent/src/agent.ts",
     find: "inFlight: flight.list().slice(0, 100),", replace: "",

@@ -100,6 +100,16 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: "the Rollout halts a rollback records (RL12)",
+    compat: "additive",
+    // A rollback here halts its Version's Rollout (RL12); the fleet reads and acts on the record (PR 6). One row per
+    // halt, kept: a halt is lifted by the principal's word, never by this table.
+    up: db => {
+      db.exec("CREATE TABLE rollout_halts (version TEXT NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL)");
+    },
+  },
 ];
 
 export class UpdateDbFromFuture extends Error {
@@ -201,6 +211,8 @@ export class SqliteUpdateStore implements UpdateStore {
   readonly #writeTrust: Database.Statement;
   readonly #committed: Database.Statement;
   readonly #bad: Database.Statement;
+  readonly #writeHalt: Database.Statement;
+  readonly #halts: Database.Statement;
   readonly #versions: Database.Statement;
   readonly #writeVersion: Database.Statement;
   readonly #insertCheck: Database.Statement;
@@ -236,6 +248,8 @@ export class SqliteUpdateStore implements UpdateStore {
       ON CONFLICT(id) DO UPDATE SET key_set = excluded.key_set, seq_stable = excluded.seq_stable, seq_latest = excluded.seq_latest`);
     this.#committed = this.#db.prepare("SELECT version FROM committed");
     this.#bad = this.#db.prepare("SELECT version FROM bad ORDER BY at");
+    this.#writeHalt = this.#db.prepare("INSERT INTO rollout_halts (version, reason, at) VALUES (?, ?, ?)");
+    this.#halts = this.#db.prepare("SELECT version, reason, at FROM rollout_halts ORDER BY at DESC, rowid DESC");
     this.#versions = this.#db.prepare("SELECT version, manifest_sha256, files_sha256, staged_at, manifest FROM versions");
     this.#writeVersion = this.#db.prepare(`INSERT INTO versions (version, manifest_sha256, files_sha256, staged_at, manifest)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(version) DO UPDATE SET manifest_sha256 = excluded.manifest_sha256,
@@ -368,6 +382,14 @@ export class SqliteUpdateStore implements UpdateStore {
 
   recordBad(version: string, at: number): void {
     this.#writeBad.run(version, at);
+  }
+
+  recordHalt(version: string, reason: string, at: number): void {
+    this.#writeHalt.run(version, reason, at);
+  }
+
+  halts(): { version: string; reason: string; at: number }[] {
+    return this.#halts.all() as { version: string; reason: string; at: number }[];
   }
 
   saveUpdate(u: StoredUpdate): void {

@@ -19,6 +19,7 @@ import type {
 import { SqliteBackup } from "../../src/adapters/backup-sqlite.ts";
 import { HoldFileWriter } from "../../src/adapters/hold-file.ts";
 import { DirsInstaller } from "../../src/adapters/installer-dirs.ts";
+import { SqliteRevocations } from "../../src/adapters/revocations-sqlite.ts";
 import { SqliteSchemas } from "../../src/adapters/schema-sqlite.ts";
 import { openUpdateStore, SqliteUpdateStore } from "../../src/adapters/store-sqlite.ts";
 import { databasePaths, updaterPaths, type DatabasePaths } from "../../src/adapters/paths.ts";
@@ -317,6 +318,7 @@ export type ApplyWorld = {
   probe: FakeProbe;
   schemas: SqliteSchemas;
   backup: TapedBackup;
+  revocations: SqliteRevocations;
   hold: TapedHold;
   timeline: FakeTimeline;
   alerts: AlertRecorder;
@@ -408,23 +410,24 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   const hold = new TapedHold({ tape, die, real: realHold });
   const backup = new TapedBackup({ tape, die, real: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }) });
   const schemas = new SqliteSchemas({ paths: dbPaths });
+  const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") });
   const timeline = new FakeTimeline(NOW);                   // ms since the epoch, as Clock.now answers
   const alerts = new AlertRecorder();
   const verifier = new SshSigVerifier();
 
   return {
     home, releases: paths.releases, holdPath: holdFile(home, {}), updateDb: paths.db, dbPaths,
-    backupsDir: join(paths.state, "backups"), tape, die, store, installer, services, probe, schemas, backup, hold,
+    backupsDir: join(paths.state, "backups"), tape, die, store, installer, services, probe, schemas, backup, revocations, hold,
     timeline, alerts, verifier, a, b,
     apply: () => new ApplyService({
-      services, probe, schemas, backup, hold, installer, store, clock: timeline, sleeper: timeline, alerts, verifier,
+      services, probe, schemas, backup, revocations, hold, installer, store, clock: timeline, sleeper: timeline, alerts, verifier,
       timing: TIMING,
     }),
     recover: () => new RecoveryService({
-      services, probe, backup, hold, installer, store, clock: timeline, sleeper: timeline, alerts, timing: TIMING,
+      services, probe, backup, revocations, hold, installer, store, clock: timeline, sleeper: timeline, alerts, timing: TIMING,
     }),
     recoverWithLockHeld: () => new RecoveryService({
-      services, probe, backup, hold, installer,
+      services, probe, backup, revocations, hold, installer,
       store: new LockHeldStore({ db: paths.db, lock: paths.lock }),
       clock: timeline, sleeper: timeline, alerts, timing: TIMING,
     }),

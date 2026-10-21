@@ -5,11 +5,11 @@
 // not know gets the critical Alert and no action at all — never a guess.
 import { formatVersion, parseVersion, recover as decide } from "@morndo/domain";
 import {
-  ApplyInterrupted, type ApplyDeps, type ApplyTiming, type StepCtx, continueAfterSwap, runCommit, runRollback,
-  startServices, timingOf,
+  ApplyInterrupted, type ApplyDeps, type ApplyTiming, type StepCtx, abandonAttempt, continueAfterSwap, runCommit,
+  runRollback, timingOf,
 } from "./apply-steps.ts";
 import type {
-  AlertSink, Backup, Clock, HoldWriter, Installer, RoleProbe, ServiceManager, Sleeper, UpdateStore,
+  AlertSink, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper, UpdateStore,
 } from "./ports.ts";
 
 export type RecoverOutcome =
@@ -24,21 +24,21 @@ export type RecoverOutcome =
 
 export class RecoveryService {
   readonly #p: {
-    services: ServiceManager; probe: RoleProbe; backup: Backup; hold: HoldWriter; installer: Installer;
-    store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
+    installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink; timing?: Partial<ApplyTiming>;
   };
 
   constructor(p: {
-    services: ServiceManager; probe: RoleProbe; backup: Backup; hold: HoldWriter; installer: Installer;
-    store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
+    installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink; timing?: Partial<ApplyTiming>;
   }) {
     this.#p = p;
   }
 
   async recover(): Promise<RecoverOutcome> {
-    const { services, probe, backup, hold, installer, store, clock, sleeper, alerts } = this.#p;
+    const { services, probe, backup, revocations, hold, installer, store, clock, sleeper, alerts } = this.#p;
     const timing = timingOf(this.#p.timing);
-    const deps: ApplyDeps = { services, probe, backup, hold, installer, store, clock, sleeper, alerts };
+    const deps: ApplyDeps = { services, probe, backup, revocations, hold, installer, store, clock, sleeper, alerts };
     const lock = store.tryLock();                   // §6.6: whatever runs next takes the apply lock first
     if (lock === null) return { kind: "busy" };
     try {
@@ -62,10 +62,9 @@ export class RecoveryService {
           alerts.raise("update_unknown_record", decision.value.unknown);
           return { kind: "unknown_record", detail: decision.value.unknown };
         case "abandon":
-          // Nothing swapped: the hold comes off, the services come back on the old Version, the attempt ends.
-          hold.clear();
-          await startServices(deps, running);
-          store.finishUpdate(open.id, "abandoned", clock.now());
+          // Nothing swapped: the old units back if the swap had begun, the hold off, the services on the old
+          // Version, the attempt ended.
+          await abandonAttempt(ctx, running);
           return { kind: "abandoned" };
         case "continue_apply":
         case "judge_health":
