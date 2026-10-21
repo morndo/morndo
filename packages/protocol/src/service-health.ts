@@ -30,6 +30,7 @@ export type InFlightItem = z.infer<typeof InFlightItem>;
 // Hub GET /api/health and fleet GET /v1/health, read on the machine itself.
 export const ServiceHealth = z.strictObject({
   version: ProductVersion,
+  commit: z.exactOptional(z.string().check(z.regex(/^[0-9a-f]{40}$/))),
   schema: z.number().check(z.int(), z.gte(0)),
   ready: z.boolean(),
   inFlight: z.array(InFlightItem).check(z.maxLength(100)),

@@ -24,12 +24,12 @@ import type { EventHub } from "./events.ts";
 import { BULK_OPS, RESULT_SLACK_MS, Requests, failed, type Outcome, type Res, type StoreSeqs } from "./requests.ts";
 
 export type NodeStatus = "online" | "stale" | "offline";
-export type NodeView = { name: string; status: NodeStatus; health: Health | null; agent: string | null };
+export type NodeView = { name: string; status: NodeStatus; health: Health | null; agent: string | null; commit: string | null };
 
 // What the transport gives for one authenticated socket.
 export type Peer = { send(m: FleetMessage): void; ping(): void; close(code: number, reason: string): void; terminate(): void; open(): boolean };
 export type Admission = {
-  node: string; instanceId: string; streamId: string; peer: Peer; source: string; agentVersion: string; claudeVersion: string | null; caps: string[];
+  node: string; instanceId: string; streamId: string; peer: Peer; source: string; agentVersion: string; agentCommit: string | null; claudeVersion: string | null; caps: string[];
 };
 
 type Live = Admission & {
@@ -326,6 +326,7 @@ export class Connections {
   list(): NodeView[] {
     return this.#nodes.list().filter(n => n.revokedAt === null).map(n => ({
       name: n.name, status: this.status(n.name), health: this.latest(n.name).health, agent: this.#live.get(n.name)?.agentVersion ?? n.agentVersion,
+      commit: this.#live.get(n.name)?.agentCommit ?? null,
     }));
   }
 

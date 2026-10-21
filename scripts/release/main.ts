@@ -85,7 +85,7 @@ function main(argv: string[]): void {
       return;
     case "stage":
       stageRelease({
-        repo: flag(values, "repo"), nodeDir: flag(values, "node"), dest: flag(values, "dest"), version: flag(values, "version"),
+        repo: flag(values, "repo"), nodeDir: flag(values, "node"), dest: flag(values, "dest"), version: flag(values, "version"), commit: flag(values, "commit"),
         ...(typeof values.compiled === "string" ? { compiled: values.compiled } : {}),
       });
       return;
