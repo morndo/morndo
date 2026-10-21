@@ -13,15 +13,23 @@ const hhmm = (minutes: number): string =>
   `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 const windowText = (w: Window | null): string | null => w === null ? null : `${hhmm(w.start)}-${hhmm(w.end)}`;
 
+// The wire caps a check row's detail at 500 (packages/protocol CheckRowSchema). The store clips on write now; a
+// row an older updater wrote at any length is clipped here on its way out, so one long refusal — an unpack reason
+// naming a long path — can never make --status throw where it should speak.
+const DETAIL_MAX = 500;
+const clipped = (detail: string): string => detail.length <= DETAIL_MAX ? detail : `${detail.slice(0, DETAIL_MAX - 1)}…`;
+
 export function readStatus(p: { installer: Installer; store: UpdateStore; settings: SettingsSource }) {
   const layout = p.installer.layout();
   const settings = p.settings.read();
   const trust = p.store.trust();
   const checks = p.store.checks(10);        // newest first, as the store answers
-  // The feed's word: the newest check that carries one. A later refusal leaves the last good word standing (§4.5).
-  const feed = checks.flatMap(row => row.feedSeq !== null && row.feedExpiresAt !== null
-    ? [{ channel: row.channel, seq: row.feedSeq, expiresAt: iso(row.feedExpiresAt) }]
-    : [])[0] ?? null;
+  // The feed's word: the newest check that carries one, however far back among the kept rows — a later refusal
+  // leaves the last good word standing (§4.5), and ten failures in a row must not hide it.
+  const feedRow = p.store.lastFeedCheck();
+  const feed = feedRow !== null && feedRow.feedSeq !== null && feedRow.feedExpiresAt !== null
+    ? { channel: feedRow.channel, seq: feedRow.feedSeq, expiresAt: iso(feedRow.feedExpiresAt) }
+    : null;
   return UpdateStatusSchema.parse({
     installMethod: layout.method,
     channel: settings.channel,
@@ -35,9 +43,9 @@ export function readStatus(p: { installer: Installer; store: UpdateStore; settin
     feed,
     keySet: trust.keySet === null ? null : { version: trust.keySet.version, expiresAt: iso(trust.keySet.expiresAt) },
     lastCheck: checks[0] === undefined ? null : {
-      at: iso(checks[0].at), channel: checks[0].channel, outcome: checks[0].outcome, detail: checks[0].detail, version: checks[0].version,
+      at: iso(checks[0].at), channel: checks[0].channel, outcome: checks[0].outcome, detail: clipped(checks[0].detail), version: checks[0].version,
     },
-    checks: checks.map(row => ({ at: iso(row.at), channel: row.channel, outcome: row.outcome, detail: row.detail, version: row.version })),
+    checks: checks.map(row => ({ at: iso(row.at), channel: row.channel, outcome: row.outcome, detail: clipped(row.detail), version: row.version })),
   });
 }
 

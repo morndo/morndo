@@ -145,6 +145,16 @@ describe("readStatus (§8.1)", () => {
     expect(status.lastCheck!.detail).toBe("check 12");
     expect(status.feed!.seq).toBe(12);
   });
+
+  it("a refusal longer than the wire's cap never breaks --status: the detail is clipped to what it can carry", () => {
+    const w = build();
+    // A row a store older than this code may have written: any length at all (an unpack reason naming a long path).
+    w.store.recordCheck({ at: NOW, channel: "stable", outcome: "refused", detail: "u".repeat(2_000), version: null, feedSeq: null, feedExpiresAt: null });
+    const status = readStatus({ installer: w.installer, store: w.store, settings: w.settings });
+    expect(UpdateStatusSchema.parse(status)).toEqual(status);      // the wire's own shape, whatever the store holds
+    expect(status.lastCheck!.detail.length).toBeLessThanOrEqual(500);
+    expect(status.checks[0]!.detail).toBe(`${"u".repeat(499)}…`);  // the start kept, the cut marked
+  });
 });
 
 describe("formatStatus (§8.1)", () => {
@@ -228,6 +238,18 @@ describe("doctor (§8.1)", () => {
     const staleReport = await stale.doctor();
     expect(staleReport.findings.map(f => f.area)).toEqual(["feed"]);
     expect(staleReport.findings[0]!.detail).toMatch(/expired/);
+  });
+
+  it("the feed's word survives twelve refusals in a row: the status shows it and the doctor stays quiet", async () => {
+    const w = build(undefined, { manual: true });
+    await w.ready;                            // fresh() wrote the one good check: the feed's word, still current
+    for (let n = 1; n <= 12; n++) {
+      w.store.recordCheck({ at: NOW + n * 60_000, channel: "stable", outcome: "refused", detail: `file_list: refused ${n}`, version: null, feedSeq: null, feedExpiresAt: null });
+    }
+    const status = readStatus({ installer: w.installer, store: w.store, settings: w.settings });
+    expect(status.feed).toEqual({ channel: "stable", seq: 1, expiresAt: new Date(NOW + 14 * DAY).toISOString() });
+    const report = await w.doctor();
+    expect(report.findings.filter(f => f.area === "feed")).toEqual([]);   // a refusal is not the feed's word going quiet
   });
 
   it("a previous link to a Version that is not installed is a layout finding", async () => {

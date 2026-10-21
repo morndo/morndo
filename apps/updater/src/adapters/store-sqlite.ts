@@ -70,6 +70,13 @@ const checkRecord = (row: CheckRow): CheckRecord =>
   ({ at: row.at, channel: row.channel as Channel, outcome: row.outcome, detail: row.detail, version: row.version,
     feedSeq: row.feed_seq, feedExpiresAt: row.feed_expires_at });
 
+// The wire's own cap on a check row's detail (packages/protocol CheckRowSchema, 500): a refusal naming a long path
+// is kept to what --status can carry — the start, and "…" where it was cut. Rows written before this cap are
+// clipped again on their way out (status-service), so an old store cannot break a new reader either.
+const DETAIL_MAX = 500;
+const clipDetail = (detail: string): string =>
+  detail.length <= DETAIL_MAX ? detail : `${detail.slice(0, DETAIL_MAX - 1)}…`;
+
 export class SqliteUpdateStore implements UpdateStore {
   readonly #db: Database.Database;
   readonly #lockPath: string;
@@ -82,6 +89,7 @@ export class SqliteUpdateStore implements UpdateStore {
   readonly #insertCheck: Database.Statement;
   readonly #trimChecks: Database.Statement;
   readonly #checks: Database.Statement;
+  readonly #lastFeedCheck: Database.Statement;
   #closed = false;
 
   constructor(o: { db: string; lock: string }) {
@@ -107,6 +115,8 @@ export class SqliteUpdateStore implements UpdateStore {
       VALUES (?, ?, ?, ?, ?, ?, ?)`);
     this.#trimChecks = this.#db.prepare("DELETE FROM checks WHERE id NOT IN (SELECT id FROM checks ORDER BY id DESC LIMIT 100)");
     this.#checks = this.#db.prepare("SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at FROM checks ORDER BY id DESC LIMIT ?");
+    this.#lastFeedCheck = this.#db.prepare(`SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at
+      FROM checks WHERE feed_seq IS NOT NULL AND feed_expires_at IS NOT NULL ORDER BY id DESC LIMIT 1`);
   }
 
   trust(): TrustState {
@@ -167,12 +177,19 @@ export class SqliteUpdateStore implements UpdateStore {
   }
 
   recordCheck(r: CheckRecord): void {
-    this.#insertCheck.run(r.at, r.channel, r.outcome, r.detail, r.version, r.feedSeq, r.feedExpiresAt);
+    this.#insertCheck.run(r.at, r.channel, r.outcome, clipDetail(r.detail), r.version, r.feedSeq, r.feedExpiresAt);
     this.#trimChecks.run();
   }
 
   checks(limit: number): CheckRecord[] {
     return (this.#checks.all(limit) as CheckRow[]).map(checkRecord);
+  }
+
+  // The kept rows in full, not the newest ten: a machine refused twelve times in a row still carries the feed's
+  // last verified word (§4.5), and the status and the doctor both read it from here.
+  lastFeedCheck(): CheckRecord | null {
+    const row = this.#lastFeedCheck.get() as CheckRow | undefined;
+    return row === undefined ? null : checkRecord(row);
   }
 
   // The apply lock (RL4, §5): open the lock file as a SQLite database, hold it exclusively. BEGIN EXCLUSIVE under

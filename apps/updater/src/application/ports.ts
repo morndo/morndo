@@ -90,6 +90,9 @@ export interface UpdateStore {
   recordCheck(r: CheckRecord): void;
   /** Newest first. */
   checks(limit: number): CheckRecord[];
+  /** The newest check that carries the feed's word, however far back among the kept rows, or null. A later
+   *  refusal leaves the last good word standing (§4.5): ten failed checks in a row must not hide it. */
+  lastFeedCheck(): CheckRecord | null;
 }
 
 export interface SettingsSource { read(): UpdateSettings }

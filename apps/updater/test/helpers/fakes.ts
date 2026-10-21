@@ -258,6 +258,11 @@ export class FakeStore implements UpdateStore {
   }
 
   checks(limit: number): CheckRecord[] { return [...this.checkLog].reverse().slice(0, limit); }
+
+  // The newest row with the feed's word, any age: the real store's own query, mirrored.
+  lastFeedCheck(): CheckRecord | null {
+    return [...this.checkLog].reverse().find(row => row.feedSeq !== null && row.feedExpiresAt !== null) ?? null;
+  }
 }
 
 // ---- settings and clock

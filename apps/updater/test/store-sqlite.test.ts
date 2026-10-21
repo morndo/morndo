@@ -93,6 +93,25 @@ describe("the update store (§4.6, §5)", () => {
     store.close();
   });
 
+  it("recordCheck clips a detail to the 500 the wire carries: the start kept, the cut marked", () => {
+    const store = open();
+    store.recordCheck({ at: 10, channel: "stable", outcome: "refused", detail: "d".repeat(2_000), version: null, feedSeq: null, feedExpiresAt: null });
+    const row = store.checks(1)[0]!;
+    expect(row.detail.length).toBeLessThanOrEqual(500);
+    expect(row.detail).toBe(`${"d".repeat(499)}…`);
+    store.close();
+  });
+
+  it("lastFeedCheck(): the newest row with the feed's word, however far back among the kept hundred", () => {
+    const store = open();
+    expect(store.lastFeedCheck()).toBeNull();                     // no row ever carried the feed's word
+    store.recordCheck({ at: 1, channel: "stable", outcome: "staged", detail: "verified", version: "0.2.0", feedSeq: 7, feedExpiresAt: 9_000 });
+    for (let i = 0; i < 12; i++)
+      store.recordCheck({ at: 2 + i, channel: "stable", outcome: "refused", detail: `refused ${i}`, version: null, feedSeq: null, feedExpiresAt: null });
+    expect(store.lastFeedCheck()).toMatchObject({ outcome: "staged", feedSeq: 7, feedExpiresAt: 9_000 });
+    store.close();
+  });
+
   it("staged(): the highest staged Version above every committed one, or null", () => {
     const store = open();
     store.recordStaged({ version: "0.2.0", manifestSha256: "a".repeat(64), filesSha256: "b".repeat(64), at: 10 });

@@ -60,14 +60,15 @@ export async function doctor(p: { installer: Installer; store: UpdateStore; cloc
   }
 
   // The feed's last verified word — a later refusal leaves it standing (§4.5), so staleness is judged from it, not
-  // from the newest row.
-  const feedRow = p.store.checks(10).flatMap(row => row.feedExpiresAt !== null && row.feedSeq !== null
-    ? [{ seq: row.feedSeq, expiresAt: row.feedExpiresAt }]
-    : [])[0] ?? null;
-  if (feedRow === null) {
+  // from the newest row: the store answers from every row it keeps, not only the newest ten.
+  const feedRow = p.store.lastFeedCheck();
+  const word = feedRow !== null && feedRow.feedSeq !== null && feedRow.feedExpiresAt !== null
+    ? { seq: feedRow.feedSeq, expiresAt: feedRow.feedExpiresAt }
+    : null;
+  if (word === null) {
     findings.push({ area: "feed", detail: "the feed has never been verified: this machine has never completed a check" });
-  } else if (feedRow.expiresAt <= p.clock.now()) {
-    findings.push({ area: "feed", detail: `the feed's last verified word (seq ${feedRow.seq}, ${iso(feedRow.expiresAt)}) has expired: no check has verified it since` });
+  } else if (word.expiresAt <= p.clock.now()) {
+    findings.push({ area: "feed", detail: `the feed's last verified word (seq ${word.seq}, ${iso(word.expiresAt)}) has expired: no check has verified it since` });
   }
 
   return { ok: findings.length === 0, findings, freeBytes };
