@@ -5,7 +5,7 @@ import { startWeb, type Web } from "./harness.ts";
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
   import { mount } from "svelte";
   import BoardView from "/src/lib/desktop/BoardView.svelte";
-  const task = { key: "T-1", n: 1, title: "Ship", description: "", status: "doing", assignee: "builder", priority: "normal", blockedReason: null, createdAt: 1, updatedAt: 1, createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0 };
+  const task = { key: "T-1", n: 1, title: "Ship", description: "", status: "doing", assignee: "builder", priority: "normal", blockedReason: null, createdAt: 1, updatedAt: 1, stateChangedAt: 1, createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0 };
   const job = (id, node) => ({ id, node, lane: "builder", name: id, class: "default", state: "exited", outcome: "exited", exit: 0, durationSec: 1, notice: "pending", task: null });
   const pages = [
     { jobs: [job("hidden-a", "pc"), job("hidden-b", "mac")], next: "cursor-1" },

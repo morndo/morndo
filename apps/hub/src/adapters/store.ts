@@ -491,10 +491,10 @@ export class Store {
     this.saveSetting("board_counter", n);
   }
   saveTask(t: Task) {
-    this.db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, blocked_reason, created_at, updated_at, created_by, rev, done_at, comments)
-      VALUES (@key, @n, @title, @description, @status, @assignee, @priority, @blockedReason, @createdAt, @updatedAt, @createdBy, @rev, @doneAt, @comments)
+    this.db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, blocked_reason, created_at, updated_at, state_changed_at, created_by, rev, done_at, comments)
+      VALUES (@key, @n, @title, @description, @status, @assignee, @priority, @blockedReason, @createdAt, @updatedAt, @stateChangedAt, @createdBy, @rev, @doneAt, @comments)
       ON CONFLICT(key) DO UPDATE SET title = excluded.title, description = excluded.description, status = excluded.status, assignee = excluded.assignee,
-        priority = excluded.priority, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at, rev = excluded.rev, done_at = excluded.done_at, comments = excluded.comments`)
+        priority = excluded.priority, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at, state_changed_at = excluded.state_changed_at, rev = excluded.rev, done_at = excluded.done_at, comments = excluded.comments`)
       .run({ ...t, createdBy: JSON.stringify(t.createdBy) });
   }
   saveTaskEvent(e: TaskEvent) {
@@ -615,7 +615,7 @@ export class Store {
 const taskFrom = (r: Row): Task => ({
   key: r.key as Task["key"], n: r.n as number, title: r.title as string, description: r.description as string, status: r.status as Task["status"],
   assignee: (r.assignee as string | null) ?? null, priority: r.priority as Task["priority"], blockedReason: (r.blocked_reason as string | null) ?? null,
-  createdAt: r.created_at as number, updatedAt: r.updated_at as number, createdBy: JSON.parse(r.created_by as string) as Task["createdBy"],
+  createdAt: r.created_at as number, updatedAt: r.updated_at as number, stateChangedAt: (r.state_changed_at as number | null) ?? (r.updated_at as number), createdBy: JSON.parse(r.created_by as string) as Task["createdBy"],
   rev: r.rev as number, doneAt: (r.done_at as number | null) ?? null, comments: r.comments as number,
 });
 const agentTokenFrom = (r: Row): AgentToken => ({
