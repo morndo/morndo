@@ -482,3 +482,46 @@ describe("the manager's window and the fleet's sticky names (Review Focus 5)", (
     expect(said.filter(m => m.includes("stickyLanes"))).toEqual([]);
   });
 });
+
+describe("stopping while a poll waits on the fleet", () => {
+  // A poll asked the fleet about a delivery and has no answer yet when the hub stops: the queue stops, the store closes, and
+  // the answer comes. The poll must end without touching the closed store, so nothing is said of a crash (it was an
+  // unhandled rejection, and the hub exited 1 in the middle of an orderly stop).
+  const waiting = (answer: Delivery | null) => {
+    const stopDir = mkdtempSync(join(tmpdir(), "morndo-manager-queue-stop-"));
+    const own = new Store(stopDir);
+    const row = { deliveryId: "hub:ep1:r1", kind: "command" as const, escalationId: null, ask: null, choice: null, endpointId: "ep1", sessionId: "s1", requestId: "r1", queuedAt: T0 - SENDING_DROP_AFTER_MS - 10, state: "sending" as const, updatedAt: T0 - SENDING_DROP_AFTER_MS - 10 };
+    own.saveManagerDelivery(row);
+    let answerNow: () => void = () => {};
+    const gate = new Promise<void>(resolve => { answerNow = resolve; });
+    const real = fleetDeliveries(new FleetClient(fleet.socketPath));
+    const deliveries: Deliveries = { ...real, get: async () => { await gate; return answer; }, laneNodeOnline: async () => true };
+    const q = new ManagerQueue({ store: own, deliveries, lane: "manager", on: true, now: () => T0, pollMs: 60_000 });
+    queues.push(q);
+    return { q, own, answerNow, stopDir };
+  };
+
+  it("a delivery the fleet does not know, answered after the store closed, drops nothing and rejects nothing", async () => {
+    const { q, own, answerNow, stopDir } = waiting(null);
+    const errors = vi.spyOn(log, "error");
+    const poll = q.poll();
+    q.stop();
+    own.close();
+    answerNow();
+    await expect(poll).resolves.toBeUndefined();
+    expect(errors).not.toHaveBeenCalled();
+    rmSync(stopDir, { recursive: true, force: true });
+  });
+
+  it("a delivery's state, answered after the store closed, is not applied and not logged as an error", async () => {
+    const { q, own, answerNow, stopDir } = waiting({ id: "hub:ep1:r1", node: "pc", target: { lane: "manager" }, state: "delivered", queuedAt: T0, notAfter: T0 + 1000 });
+    const errors = vi.spyOn(log, "error");
+    const poll = q.poll();
+    q.stop();
+    own.close();
+    answerNow();
+    await expect(poll).resolves.toBeUndefined();
+    expect(errors).not.toHaveBeenCalled();
+    rmSync(stopDir, { recursive: true, force: true });
+  });
+});
