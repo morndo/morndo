@@ -2149,11 +2149,15 @@ export const CONTROLS: Control[] = [
   // differently normalised) link target climb out, and two spellings that fold to one name pass as two entries.
   // The rule is the archive's names, not the file system's, so these run on every platform (no platform field).
   { id: "pr4-link-case-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
-    find: "path.normalize(\"NFC\").toLowerCase()", replace: "path",
+    find: "path.normalize(\"NFKC\").toUpperCase().toLowerCase().normalize(\"NFC\")", replace: "path",
     run: ["apps/updater/test/tar-read.test.ts"], expect: "to be an instance of TarRefused" },
   { id: "pr4-link-nfd-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
-    find: ".normalize(\"NFC\")", replace: "",
+    find: ".normalize(\"NFKC\").toUpperCase().toLowerCase().normalize(\"NFC\")", replace: ".toUpperCase().toLowerCase()",
     run: ["apps/updater/test/tar-read.test.ts"], expect: "to be an instance of TarRefused" },
+  // The review of 2026-10-21 (second round): lower case alone keeps ß/ss and ς/σ apart.
+  { id: "pr4-full-case-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
+    find: ".toUpperCase().toLowerCase()", replace: ".toLowerCase()",
+    run: ["apps/updater/test/tar-read.test.ts"], expect: "sharp-s" },
   { id: "pr4-download-cap-ignored", task: "pr4", file: "apps/updater/src/adapters/https-get.ts",
     find: "if (chunk.length > room) overLimit = true;", replace: "if (false) overLimit = true;",
     run: ["apps/updater/test/artifacts-https.test.ts"], expect: "expected false to be true" },
@@ -2173,7 +2177,7 @@ export const CONTROLS: Control[] = [
   // The review of 2026-10-21: a plain error mid-stage (a name the adapter refuses, a full disk) crashed the
   // check instead of recording a refusal.
   { id: "pr4-plain-error-unrecorded", task: "pr4", file: "apps/updater/src/application/check-service.ts",
-    find: 'return refused("error", message);',
+    find: 'return finish({ kind: "failed", detail: message }, `error: ${message}`);',
     replace: "throw error;",
     run: ["apps/updater/test/check-service.test.ts"], expect: "disk full" },
   // ---- Secrets, PR 1 (ADR-0022; design §16): the domain and protocol invariants, each guard removed once.
