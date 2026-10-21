@@ -3164,6 +3164,23 @@ export const CONTROLS: Control[] = [
   { id: "t280-no-long-text-cap-check", task: "280", file: "apps/fleet/src/application/connections.ts",
     find: "!c.caps.includes(CAP_LONG_TEXT)", replace: "false",
     run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  // ---- PR 5a, the apply core (c2a; updates design §6.2–§6.5, §6.3): one guard per step, removed. The drain's round
+  // reads the services' safe-point answers; blinded, it stops nothing for work in flight. The rollback's restore loop
+  // and the probation's restart count are each skipped the same way. The node's own report of its in-flight work is
+  // what the drain waits on, so it too has its control.
+  { id: "c2a-drain-ignores-in-flight", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
+    find: "reports.push(report ?? { service: s, blockers: [\"no_answer\"] });", replace: "reports.push({ service: s, blockers: [] });",
+    run: ["apps/updater/test/apply-service.test.ts"], expect: "expected 2 to be greater than or equal to 4" },
+  { id: "c2a-no-restore-on-rollback", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
+    find: "for (const db of rollbackRestores(plan)) {", replace: "for (const db of rollbackRestores(plan).slice(0, 0)) {",
+    run: ["apps/updater/test/apply-service.test.ts"], expect: "written-by-b" },
+  { id: "c2a-probation-ignores-restarts", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
+    find: "const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.startedAt, restarts });",
+    replace: "const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.startedAt, restarts: 0 });",
+    run: ["apps/updater/test/apply-service.test.ts"], expect: "rolled_back" },
+  { id: "c2a-node-in-flight-unreported", task: "c2a", file: "apps/node-agent/src/agent.ts",
+    find: "inFlight: flight.list().slice(0, 100),", replace: "",
+    run: ["apps/node-agent/test/agent.test.ts"], expect: "expected false to be true" },
 ];
 
 // ---- the runner
