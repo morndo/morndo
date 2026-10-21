@@ -3100,6 +3100,18 @@ export const CONTROLS: Control[] = [
   { id: "t280-no-long-text-cap-check", task: "280", file: "apps/fleet/src/application/connections.ts",
     find: "!c.caps.includes(CAP_LONG_TEXT)", replace: "false",
     run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  { id: "t305-stamp-ignored", task: "305", file: "packages/service-kit/src/version.ts",
+    find: "b = readStamp(dir) ?? { version: pkg.version as string, commit: gitHead(dir) };", replace: "b = { version: pkg.version as string, commit: gitHead(dir) };",
+    run: ["packages/service-kit/test/build.test.ts"], expect: "a stamped tree reports version+commit" },
+  { id: "t305-no-git-head", task: "305", file: "packages/service-kit/src/version.ts",
+    find: "readStamp(dir) ?? { version: pkg.version as string, commit: gitHead(dir) };", replace: "readStamp(dir) ?? { version: pkg.version as string, commit: null };",
+    run: ["packages/service-kit/test/build.test.ts"], expect: "an unstamped checkout reports the git HEAD" },
+  { id: "t305-nodes-without-commit", task: "305", file: "apps/fleet/src/application/connections.ts",
+    find: "commit: this.#live.get(n.name)?.agentCommit ?? null,", replace: "commit: null,",
+    run: ["apps/fleet/test/client-api.test.ts"], expect: "lists each node's build" },
+  { id: "t305-stage-without-stamp", task: "305", file: "scripts/release/stage.ts",
+    find: "files.push({ path: \"app/build.json\"", replace: "void ({ path: \"app/build.json\"",
+    run: ["scripts/release/release.test.ts"], expect: "stages the build stamp" },
 ];
 
 // ---- the runner

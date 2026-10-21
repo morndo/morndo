@@ -283,6 +283,8 @@ export const MEMORY_SKILL_NAME = /^morndo-mem-(?!-)(?!.*--)[a-z0-9-]{1,53}(?<!-)
 const v = z.literal(1);
 const text = () => z.string();                                              // node → fleet: shape only
 const label = () => z.string().check(z.maxLength(200));
+// The commit a build was made from (a stamped tree or a git HEAD). An older agent says none.
+const buildCommit = () => z.string().check(z.regex(/^[0-9a-f]{40}$/));
 const count = () => z.int().check(z.gte(0));
 const nodeName = () => z.string().check(z.regex(NODE_NAME));
 const workerId = () => z.string().check(z.regex(WORKER_ID));
@@ -539,7 +541,7 @@ export const CAP_LONG_TEXT = "long-text";
 // strings: a newer agent's are ignored, not refused).
 export const Hello = z.object({
   v, t: z.literal("hello"), node: nodeName(), instanceId: z.uuid(), streamId: z.uuid(), proto: protoList(),
-  agent: z.object({ version: label() }), claude: z.object({ version: z.nullable(label()) }),
+  agent: z.object({ version: label(), commit: z.exactOptional(buildCommit()) }), claude: z.object({ version: z.nullable(label()) }),
   caps: z.array(label()).check(z.maxLength(64)), clientNonce: nonce(),
 });
 export const Proof = z.object({ v, t: z.literal("proof"), sig: signature() });

@@ -8,7 +8,7 @@ import { formatStatus, readStatus } from "./conn/status-file.ts";
 import { exitOnCrash } from "./crash.ts";
 import { DatabaseFromFuture } from "./db/migrations.ts";
 import { DatabaseUnreadable } from "./db/open.ts";
-import { NotLocalDisk, productVersion } from "@morndo/service-kit";
+import { NotLocalDisk, buildLabel } from "@morndo/service-kit";
 import { hostTmuxServer } from "@morndo/node-ops";
 import { JoinError, join } from "./join.ts";
 import { log } from "./log.ts";
@@ -57,7 +57,7 @@ function ensureUtf8Locale() {
 }
 
 if (cmd === "--version") {
-  print(productVersion());
+  print(buildLabel());
   process.exit(0);
 }
 
