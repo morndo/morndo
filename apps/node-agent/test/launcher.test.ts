@@ -176,6 +176,23 @@ describe("lane.start (spec §5)", () => {
     expect(submitted(dir)).toEqual(["Build the login page"]);
     expect(h.deliveries.get(id)?.state).toBe("typed");
   });
+
+  it("a 20,000-character first prompt reaches a long-text node intact", async () => {
+    const dir = boxIn("long-prompted");
+    const h = harness({ command: [process.execPath, FIXTURE, dir], via: "direct" });
+    const prompt = 'ü€"\n'.repeat(4999) + 'ü€"x';                                     // exactly 20,000 characters, one bracketed paste
+    expect(prompt).toHaveLength(20_000);
+    const r = await start(h, { name: "long-prompted", prompt }, "lanes:p2");
+    const id = promptId("lanes:p2");
+    expect(r.prompt).toBe(id);
+    expect(await showsBox(r.workerId)).toBe(true);
+    const kick = async () => { await h.inventory.refresh(); h.deliverer.kick("status"); await h.deliverer.drain(); };
+    expect(await until(async () => { await kick(); return h.deliveries.get(id)?.waiting?.reason === "no_session"; })).toBe(true);
+    claudeSession({ tmux: t, claudeDir: join(home.home, ".claude"), pane: paneOf(r.workerId) }).status("idle");
+    expect(await until(async () => { await kick(); return submitted(dir).length > 0; })).toBe(true);
+    expect(submitted(dir)).toEqual([prompt]);
+    expect(h.deliveries.get(id)?.state).toBe("typed");
+  });
 });
 
 describe("lane.stop (spec §5)", () => {

@@ -3100,6 +3100,18 @@ export const CONTROLS: Control[] = [
   { id: "t280-no-long-text-cap-check", task: "280", file: "apps/fleet/src/application/connections.ts",
     find: "!c.caps.includes(CAP_LONG_TEXT)", replace: "false",
     run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  // ---- B4 (board T-304): a long first prompt, each guard removed once.
+  { id: "b4-start-prompt-bound", task: "304", file: "packages/protocol/src/fleet.ts",
+    find: "prompt: z.exactOptional(messageText())",
+    replace: "prompt: z.exactOptional(z.string().check(z.minLength(1), z.maxLength(LIMITS.maxSendText)))",
+    run: ["packages/protocol/test/fleet.test.ts", "apps/fleet/test/long-text.test.ts"] },
+  { id: "b4-old-node-long-prompt", task: "304", file: "apps/fleet/src/application/connections.ts",
+    find: '(op === "pane.send" || op === "lane.deliver" || op === "lane.start") && typeof args === "object" && args !== null',
+    replace: '(op === "pane.send" || op === "lane.deliver") && typeof args === "object" && args !== null',
+    run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  { id: "b4-console-prompt-bound", task: "304", file: "apps/hub/src/console/lanes.ts",
+    find: "v.prompt !== undefined && v.prompt.length > LIMITS.maxMessageText", replace: "false",
+    run: ["apps/hub/test/lanes-console.test.ts"] },
 ];
 
 // ---- the runner

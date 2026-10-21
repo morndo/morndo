@@ -326,6 +326,8 @@ async function start(client: FleetClient, io: LanesIo, rest: string[], v: Values
     node = online[0]?.name ?? "";
   }
   if (v.role !== undefined && v.engine !== undefined) throw new Usage("start takes --role or --engine, not both");
+  // Before --task's assignment, so a refused prompt hands out no task (as send's own bound, one line, before the queue).
+  if (v.prompt !== undefined && v.prompt.length > LIMITS.maxMessageText) throw new Usage(`the prompt is over ${LIMITS.maxMessageText} characters`);
   const taskKey = v.task === undefined ? null : parseTaskKey(v.task);
   if (v.task !== undefined && taskKey === null) throw new Usage(`--task is a task's key, such as T-12, not ${JSON.stringify(v.task)}`);
   // Assigned before the lane starts: its first turn is then a run that began after the task's last change, which D4
