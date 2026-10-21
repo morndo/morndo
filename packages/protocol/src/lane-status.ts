@@ -12,9 +12,9 @@ export const WAIT_MAX_MS = 86_400_000;
 const WAITING_ON_MAX = 120;
 
 const STATUS_LINE = /^[\W_]*STATUS[\W_]*:?[\W_]*(DONE|BLOCKED|NEEDS DECISION|WAITING)\b(.*)$/i;
-// B12: the task key, when the line names one right after the word: decoration, then T-<n>, then not a word character or
+// B12: the task key, when the line names one right after the word: decoration, brackets or quotes, then T-<n>, then not a word character or
 // hyphen. `T-285x`, `T-0` and `T-1234567890` name none, and a key anywhere else ("all of T-285") is not a name.
-const KEY_AFTER_WORD = /^[\s*_`~:—–([-]*(T-[1-9]\d{0,8})(?![\w-])/i;
+const KEY_AFTER_WORD = /^[\s*_`~:—–(["'“”‘’-]*(T-[1-9]\d{0,8})(?![\w-])[\])"'`”’]?/i;
 const FOR = /\bfor\s+(\d{1,5})\s*(minutes|minute|mins|min|m|hours|hour|hrs|hr|h)\b/i;
 
 // The first non-blank line of a text, trimmed, at most 200 characters (the rule lane events have always used).

@@ -300,7 +300,7 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[], named:
     if (keyed !== null) {
       // B12: a keyed WAITING that names this task takes it up again (D1). Any other keyed line naming a task not in
       // progress moves nothing, and no other task moves while the line is current.
-      if (keyed.key !== task.key || keyed.status !== "waiting" || run.phase !== "waiting" || mine.some(t => t.status === "doing")) return null;
+      if (keyed.key !== task.key || keyed.status !== "waiting" || mine.some(t => t.status === "doing")) return null;
       return { to: "doing", reason: said, rule: "D1" };
     }
     // D4: the lane's one task to take up, when it has exactly one to do. B12: only to do → in progress; a task in review or
@@ -314,13 +314,15 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[], named:
 }
 
 // B12: a keyed line naming a task that is not one of the lane's open tasks moves nothing (derivedMove); the board leaves one
-// line about it in the history of the lane's own task in progress, or none when there is no such task.
+// line about it, so it is never silent: in the history of the lane's own task in progress, else of the named task. D6: a run
+// that began at or before that task in progress last changed state says nothing new (a stale ended run adds no note).
 export function keyMismatch(run: Run, named: NamedStatus | null, board: readonly Task[]): { key: TaskKey; text: string } | null {
   if (named === null || (run.phase !== "ended" && run.phase !== "waiting")) return null;
   const mine = board.filter(t => t.assignee === run.lane);
   if (mine.some(t => t.key === named.key)) return null;
   const doing = mine.find(t => t.status === "doing");
-  return doing ? { key: doing.key, text: `${run.lane}'s status line at ${new Date(run.since).toISOString()} names ${named.key}, which is not its open task; the board moved nothing` } : null;
+  if (doing && run.since <= doing.stateChangedAt) return null;
+  return { key: (doing ?? { key: named.key }).key, text: `${run.lane}'s status line at ${new Date(run.since).toISOString()} names ${named.key}, which is not its open task; the board moved nothing` };
 }
 
 // B10, D3 for a lane the fleet doesn't list at all (it ended before runs were kept, or its Run dropped): there is no Run to

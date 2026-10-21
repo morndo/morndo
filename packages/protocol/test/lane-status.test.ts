@@ -31,6 +31,14 @@ describe("the status line", () => {
     expect(statusLineOf("status: done t-285")).toEqual({ status: "done", taskKey: "T-285" });
   });
 
+  it("reads a key in brackets, parentheses or quotes right after the word (B12)", () => {
+    for (const l of ["STATUS: DONE [T-285]", "STATUS: DONE (T-285)", 'STATUS: DONE "T-285"', "STATUS: DONE 'T-285'", "STATUS: DONE `T-285`", "STATUS: DONE “T-285”"]) {
+      expect(statusLineOf(l)).toEqual({ status: "done", taskKey: "T-285" });
+    }
+    expect(statusLineOf("STATUS: WAITING [T-12] on CI for 5 min")).toEqual({ status: "waiting", taskKey: "T-12", waitingOn: "CI", forMs: 300_000 });
+    expect(statusLineOf('STATUS: DONE "all of T-285"')).toEqual({ status: "done" });                    // a key later in the line is not a name
+  });
+
   it("names no key unless it is right after the word (B12, negative controls)", () => {
     expect(statusLineOf("STATUS: DONE: all of T-285")).toEqual({ status: "done" });
     expect(statusLineOf("STATUS: DONE T-285x")).toEqual({ status: "done" });

@@ -19,7 +19,7 @@
 // - Safe: nothing here throws into the event loop. A failure is logged, and the next run tries afresh.
 // - The key a line names (B12): a status line may name its task key right after the word ("STATUS: DONE T-285"). A keyed
 //   line moves only that task and only if it is the lane's; a key naming a task that is not its open task moves nothing
-//   and leaves one comment in the history of the lane's own task in progress, once (the memo per run, the record for ever).
+//   and leaves one comment in the history of the lane's own task in progress (else the named task's), once (the memo per run, the record for ever).
 import { derivedMove, isOrphan, keyMismatch, parseTaskKey, unregisteredMove, type NamedStatus, type Task, type TaskKey } from "@morndo/domain";
 import { statusLineOf, type RunView } from "@morndo/protocol";
 import { log as hubLog, type Logger } from "../adapters/log.ts";
@@ -205,7 +205,8 @@ export class BoardProjector {
     if (oldest !== undefined) this.#refused.delete(oldest);
   }
 
-  // B12: the one line about a keyed line that named a task that is not the lane's: a comment on its own task in progress.
+  // B12: the one line about a keyed line that named a task that is not the lane's: a comment on its own task in progress, else
+  // on the named task. A refusal (no such task) is logged, so a mismatch is never silent.
   // Once for that task and run (the memo), and once ever (the task's history, which survives a hub restart).
   #note(note: { key: TaskKey; text: string }, run: RunView) {
     const memo = `${note.key} ${run.lane}@${run.since} mismatch`;

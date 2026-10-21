@@ -291,9 +291,33 @@ describe("the board's own moves (B10, D1 to D6)", () => {
     expect(note?.key).toBe("T-1");
     expect(note?.text).toContain("T-50");
     expect(Array.from(note?.text ?? "").some(c => c < " " || c === "\x7f")).toBe(false);   // one clean line
-    expect(keyMismatch(run(), named, [make(3, { assignee: "builder" })])).toBeNull();            // no task in progress to note it on
+    expect(keyMismatch(run(), named, [make(3, { assignee: "builder" })])?.key).toBe("T-50");     // no task in progress: it goes on the named task, never lost
     expect(keyMismatch(run(), { key: t1.key, status: "done" }, [t1])).toBeNull();                // the lane's own task is no mismatch
     expect(keyMismatch(run({ phase: "working", outcome: undefined }), named, [t1])).toBeNull();  // a working run's line is the last turn's
+  });
+  it("B12: a mismatch note obeys D6 and the phase gate", () => {
+    const named = { key: taskKey(50), status: "done" as const };
+    const t1 = { ...doing(), stateChangedAt: NOW + 10 };
+    expect(keyMismatch(run({ since: NOW + 10 }), named, [t1])).toBeNull();                       // an ended, stale run: the lane's task changed after it
+    expect(keyMismatch(run({ since: NOW + 11 }), named, [t1])?.key).toBe("T-1");
+    expect(keyMismatch(run({ phase: "gone", outcome: undefined }), named, [doing()])).toBeNull();
+  });
+  it("B12: a keyed line counts only as a turn's end or a wait, never while working or gone", () => {
+    const todo = make(4, { assignee: "builder" });
+    const stale = { key: taskKey(9), status: "done" as const };
+    // working: the line is the last turn's, so D4 still takes up the lane's one to do task
+    expect(derivedMove(todo, run({ phase: "working", outcome: undefined }), [todo], stale)).toEqual({ to: "doing", reason: null, rule: "D4" });
+    // gone: D3 puts the task in progress back to to do whatever the old line named
+    expect(derivedMove(doing(), run({ phase: "gone", outcome: undefined }), [doing()], stale)).toMatchObject({ to: "todo", rule: "D3" });
+  });
+  it("B12: a keyed line on a wait without DONE moves nothing in progress; only a keyed WAITING takes a task up", () => {
+    const t1 = doing();
+    const review = { ...make(3, { assignee: "builder" }), status: "review" as const };
+    const job = run({ phase: "waiting", outcome: undefined, line: "STATUS: DONE T-1", wait: { on: "job", jobs: [{ id: "j1", name: "build" }] } });
+    expect(derivedMove(t1, job, [t1], { key: t1.key, status: "done" })).toBeNull();                    // the wait says no outcome: no D1
+    expect(derivedMove(review, job, [review], { key: review.key, status: "done" })).toBeNull();        // a keyed DONE is not a WAITING
+    expect(derivedMove(review, job, [review], { key: review.key, status: "blocked" })).toBeNull();
+    expect(derivedMove(review, job, [review], { key: review.key, status: "waiting" })?.rule).toBe("D1");
   });
   it("B12: a keyed BLOCKED moves only the task it names (D2)", () => {
     const t1 = doing();
