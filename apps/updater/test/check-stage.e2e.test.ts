@@ -6,17 +6,13 @@
 // feed, a manifest or an archive that lies in exactly one place; the assertions are the chain's own word (the JSON
 // outcome), what landed on the disk, and what did not.
 //
-// Two transports host the same feed directory (helpers/e2e-server.ts): where a spawned process can talk to another
-// process's server, the program runs as its own process (src/main.ts spawned exactly as a user runs it); where the
-// machine drops cross-process loopback (this build box: TCP connects, the data never arrives — probed once below,
-// recorded in e2e-mode.txt), helpers/e2e-driver.ts hosts the feed and runs the same runUpdater() main.ts runs, in
-// one process. The cases, the documents and the assertions are the same either way; nothing below the CLI is faked.
+// The test worker hosts the feed directory (helpers/e2e-server.ts) on its own HTTPS server, and the program runs as
+// its own process: src/main.ts spawned exactly as a user runs it. Nothing below the CLI is faked.
 // Nothing here is committed: keys, certificates and homes are made at run time under one scratch directory this
 // file removes.
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -64,7 +60,6 @@ let feedHost!: DiskFeed;                  // the directory that is the host (hel
 let base = "";                            // the feed's own address, the same in every document
 let port = 0;
 let caPath = "";
-let spawnMode = false;                    // decided once in beforeAll by the probe below
 
 type Role = "root1" | "root2" | "release" | "feed" | "stranger";
 const keys = {} as Record<Role, { path: string; fingerprint: string }>;
@@ -212,7 +207,7 @@ const doctoredFeed = (text: string, patch: (doc: Record<string, unknown>) => voi
 type World = { reset(): void };
 let world!: World;
 
-// ---- the transports: a port nobody holds, and the probe that decides who hosts the feed
+// ---- the transport: a port nobody holds
 
 // Pick a free port by asking the kernel, then letting it go: the feed's documents name it, and whichever process
 // hosts the feed binds it for the length of a run. A race for it fails loudly (a bind error), never silently.
@@ -230,40 +225,15 @@ const pickPort = async (): Promise<number> => {
   return port;
 };
 
-// Can a spawned process talk to this process's server? On ordinary machines yes; this build box drops the data
-// (TCP connects, nothing arrives), and then the one-process driver hosts the feed instead (helpers/e2e-driver.ts).
-const crossProcessWorks = async (): Promise<boolean> => {
-  const one = createServer((_req, res) => { res.writeHead(200); res.end("ok"); });
-  const port = await new Promise<number>((resolve, reject) => {
-    one.once("error", reject);
-    one.listen(0, "127.0.0.1", () => {
-      const address = one.address();
-      if (address === null || typeof address === "string") { one.close(); reject(new Error("no port to probe on")); return; }
-      resolve(address.port);
-    });
-  });
-  try {
-    const child = spawnSync(process.execPath, ["--no-warnings", "-e", [
-      `const { request } = require("node:http");`,
-      `const r = request("http://127.0.0.1:${port}/probe", res => { res.resume(); res.on("end", () => process.exit(0)); });`,
-      `r.on("error", () => process.exit(1));`,
-      `r.end();`,
-      `setTimeout(() => process.exit(2), 2500);`,
-    ].join("")], { encoding: "utf8", timeout: 15_000 });
-    return child.status === 0;
-  } finally {
-    await new Promise<void>(done => one.close(() => done()));
-  }
-};
-
-// ---- the program under test: its own process where the machine allows it, the driver where it does not
+// ---- the program under test: its own process, as shipped
 
 const program = join(import.meta.dirname, "../src/main.ts");
-const driver = join(import.meta.dirname, "helpers/e2e-driver.ts");
 
 type RunResult = { status: number | null; stdout: string; stderr: string };
 
-const run = (home: string, args: readonly string[], o: { ca?: boolean; tlsOff?: boolean; disabled?: boolean } = {}): RunResult => {
+// Spawned asynchronously: the feed's server lives in this worker, and spawnSync would block the event loop that
+// serves it, so the program would connect and never get an answer.
+const run = (home: string, args: readonly string[], o: { ca?: boolean; tlsOff?: boolean; disabled?: boolean } = {}): Promise<RunResult> => {
   const env: NodeJS.ProcessEnv = {
     PATH: process.env.PATH ?? "",
     HOME: home,
@@ -272,24 +242,12 @@ const run = (home: string, args: readonly string[], o: { ca?: boolean; tlsOff?: 
     ...(o.tlsOff ? { NODE_TLS_REJECT_UNAUTHORIZED: "0" } : {}),
     ...(o.disabled ? { MORNDO_DISABLE_UPDATES: "1" } : {}),
   };
-  if (spawnMode) {
-    const r = spawnSync(process.execPath, ["--no-warnings", program, ...args], { env, encoding: "utf8", timeout: 60_000 });
-    return { status: r.status, stdout: r.stdout, stderr: r.stderr };
-  }
-  const r = spawnSync(process.execPath, ["--no-warnings", driver, "run", ...args], {
-    env: {
-      ...env,
-      MORNDO_E2E_ROOT: feedHost.root,
-      MORNDO_E2E_PORT: String(port),
-      MORNDO_E2E_TLS_KEY: join(scratch, "tls", "server.key"),
-      MORNDO_E2E_TLS_CERT: join(scratch, "tls", "server.pem"),
-    },
-    encoding: "utf8",
-    timeout: 90_000,
+  return new Promise((resolve, reject) => {
+    execFile(process.execPath, ["--no-warnings", program, ...args], { env, encoding: "utf8", timeout: 60_000 }, (error, stdout, stderr) => {
+      if (error !== null && typeof error.code !== "number") { reject(error); return; }   // not an exit status: a spawn failure or the timeout
+      resolve({ status: error === null ? 0 : (error.code as number), stdout, stderr });
+    });
   });
-  if (r.status === null) return { status: null, stdout: r.stdout, stderr: r.stderr };
-  const back = JSON.parse(r.stdout) as { code: number; out: string; err: string };
-  return { status: back.code, stdout: back.out, stderr: back.err };
 };
 
 type Outcome = { kind: string; step?: string; detail?: string; version?: string; current?: string; already?: boolean };
@@ -309,7 +267,7 @@ const refusedAt = async (step: string, bend: () => void): Promise<void> => {
   const home = makeHome();
   world.reset();
   bend();
-  const r = run(home, ["update", "--check", "--json"]);
+  const r = await run(home, ["update", "--check", "--json"]);
   expect(r.status, `stderr: ${r.stderr}`).toBe(65);
   expect(outcomeOf(r)).toMatchObject({ kind: "refused", step });
   nothingLeft(home);
@@ -337,17 +295,11 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     standardArchive = packWithList(B_TREE, listFiles(B_TREE).json);
     standardManifest = manifestFor(standardArchive);
 
-    spawnMode = await crossProcessWorks();
-    console.log(`e2e transport: ${spawnMode
-      ? "the program as its own process, the test worker hosting the feed"
-      : "one process hosts the feed and runs the program (this machine drops cross-process loopback)"}`);
-    // Where the machine allows it, the test worker hosts the feed and the program is its own process, as shipped.
-    if (spawnMode) {
-      server = await serveHttps({
-        key: tls.serverKey, cert: tls.serverCert, port,
-        handler: (req, res) => feedHost.handler(req, res),
-      });
-    }
+    // The test worker hosts the feed; the program is its own process, as shipped.
+    server = await serveHttps({
+      key: tls.serverKey, cert: tls.serverCert, port,
+      handler: (req, res) => feedHost.handler(req, res),
+    });
 
     const anchorBytes = Buffer.from(anchorText);
     const latest = Buffer.from(publishRelease(null, { channel: "latest", entry: dummyEntry("0.0.1"), now: Date.now(), keySetVersion: 1 }));
@@ -369,10 +321,10 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     wipe(scratch);                                            // read-only trees included: wipe softens before it removes
   });
 
-  it("RL1: a verified release is staged read-only with install.json, recorded, and the doctor is content", () => {
+  it("RL1: a verified release is staged read-only with install.json, recorded, and the doctor is content", async () => {
     const home = makeHome();
     world.reset();
-    const r = run(home, ["update", "--check", "--json"]);
+    const r = await run(home, ["update", "--check", "--json"]);
     expect(r.status, r.stderr).toBe(0);
     expect(outcomeOf(r)).toEqual({ kind: "staged", version: B, already: false });
 
@@ -382,14 +334,14 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     expect(statSync(join(vdir, "install.json")).mode & 0o777).toBe(0o444);
     expect(readdirSync(downloadsOf(home))).toEqual([]);                 // the download went after the staging
 
-    const status = run(home, ["update", "--status", "--json"]);
+    const status = await run(home, ["update", "--status", "--json"]);
     expect(status.status, status.stderr).toBe(0);
     const s = UpdateStatusSchema.parse(JSON.parse(status.stdout));
     expect(s).toMatchObject({ installMethod: "updater", current: A, staged: B, channel: "stable" });
     expect(s.feed?.seq, "the feed's number").toBe(1);
     expect(s.keySet?.version, "the shipped anchor, now the store's own").toBe(1);
 
-    const doc = run(home, ["doctor"]);
+    const doc = await run(home, ["doctor"]);
     expect(doc.status, `${doc.stdout}${doc.stderr}`).toBe(0);
   }, 180_000);
 
@@ -418,7 +370,7 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     });
   }, 300_000);
 
-  it("RL2: an offer at or below current leaves the machine up to date, and a withdrawn offer is no offer", () => {
+  it("RL2: an offer at or below current leaves the machine up to date, and a withdrawn offer is no offer", async () => {
     const home = makeHome();
     // only 0.0.9 and 0.1.0 on stable: nothing newer than what runs, so nothing is fetched beyond the feed
     let feed: string | null = null;
@@ -427,7 +379,7 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     putSignedDoc("/stable.json", feed!, sign(bytes, "feed", FEED_NAMESPACE));
 
     const seen = feedHost.requests().length;                   // what this run asked for, nothing before it
-    const r = run(home, ["update", "--check", "--json"]);
+    const r = await run(home, ["update", "--check", "--json"]);
     expect(r.status, r.stderr).toBe(0);
     expect(outcomeOf(r)).toEqual({ kind: "up_to_date", current: A });
     expect(feedHost.requests().slice(seen).filter(path => path.startsWith("/releases/")), "nothing fetched beyond the feed").toEqual([]);
@@ -438,7 +390,7 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
       doc.releases = [...doc.releases as unknown[], entryFor(Buffer.from(standardManifest))];
     });
     putSignedDoc("/stable.json", withdrawn.bytes.toString(), withdrawn.sig);
-    const again = run(home, ["update", "--check", "--json"]);
+    const again = await run(home, ["update", "--check", "--json"]);
     expect(again.status, again.stderr).toBe(0);
     expect(outcomeOf(again)).toEqual({ kind: "up_to_date", current: A });
   }, 180_000);
@@ -457,13 +409,13 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     let prior: string | null = null;
     for (const version of [A, "0.1.5"]) prior = publishRelease(prior, { channel: "stable", entry: dummyEntry(version), now: Date.now(), keySetVersion: 1 });
     serveRelease(standardManifest, standardArchive, { prior: prior! });       // seq 3, the standard release on top
-    const first = run(home, ["update", "--check", "--json"]);
+    const first = await run(home, ["update", "--check", "--json"]);
     expect(first.status, first.stderr).toBe(0);
     expect(outcomeOf(first)).toEqual({ kind: "staged", version: B, already: false });
     const servedFeed = readFileSync(join(feedHost.root, "stable.json"), "utf8");
     const backToTwo = doctoredFeed(servedFeed, doc => { doc.seq = 2; });
     putSignedDoc("/stable.json", backToTwo.bytes.toString(), backToTwo.sig);
-    const second = run(home, ["update", "--check", "--json"]);
+    const second = await run(home, ["update", "--check", "--json"]);
     expect(second.status, second.stderr).toBe(65);
     expect(outcomeOf(second)).toMatchObject({ kind: "refused", step: "feed_seq" });
 
@@ -475,10 +427,10 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     const bothSides = Buffer.concat([sign(ks3, "root1", KEYS_NAMESPACE), sign(ks3, "root2", KEYS_NAMESPACE)]);
     putSignedDoc("/keys/3.json", ks3.toString(), bothSides);
     serveRelease(standardManifest, standardArchive, { keySetVersion: 3 });
-    const rotatedRun = run(rotated, ["update", "--check", "--json"]);
+    const rotatedRun = await run(rotated, ["update", "--check", "--json"]);
     expect(rotatedRun.status, rotatedRun.stderr).toBe(0);
     expect(outcomeOf(rotatedRun)).toEqual({ kind: "staged", version: B, already: false });
-    const status = run(rotated, ["update", "--status", "--json"]);
+    const status = await run(rotated, ["update", "--status", "--json"]);
     expect(UpdateStatusSchema.parse(JSON.parse(status.stdout)).keySet?.version, "the walk reached v3").toBe(3);
 
     // keys/2.json signed only by a stranger: the walk refuses before anything else moves
@@ -488,40 +440,40 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     });
   }, 300_000);
 
-  it("TLS: an untrusted certificate is unreachable and stages nothing; switching TLS off stops the program first", () => {
+  it("TLS: an untrusted certificate is unreachable and stages nothing; switching TLS off stops the program first", async () => {
     const home = makeHome();
     world.reset();
-    const r = run(home, ["update", "--check", "--json"], { ca: false });
+    const r = await run(home, ["update", "--check", "--json"], { ca: false });
     expect(r.status, r.stderr).toBe(75);
     expect(outcomeOf(r)).toMatchObject({ kind: "unreachable" });
     expect(`${outcomeOf(r).detail}`).toMatch(/certificate|issuer/);
     nothingLeft(home);
 
     const sawBefore = feedHost.requests().length;
-    const off = run(home, ["update", "--check"], { tlsOff: true });
+    const off = await run(home, ["update", "--check"], { tlsOff: true });
     expect(off.status, off.stderr).toBe(78);
     expect(off.stderr).toMatch(/TLS checks are off/);
     expect(feedHost.requests().length, "the server saw none of it").toBe(sawBefore);
   }, 120_000);
 
-  it("RL14: a checkout is not ours to update, and MORNDO_DISABLE_UPDATES refuses for every install", () => {
+  it("RL14: a checkout is not ours to update, and MORNDO_DISABLE_UPDATES refuses for every install", async () => {
     const checkout = makeHome({ install: false });
-    const r = run(checkout, ["update", "--check", "--json"]);
+    const r = await run(checkout, ["update", "--check", "--json"]);
     expect(r.status, r.stderr).toBe(78);
     expect(outcomeOf(r)).toMatchObject({ kind: "not_ours" });
     expect(`${outcomeOf(r).detail}`).toMatch(/checkout/);
 
     const home = makeHome();
-    const off = run(home, ["update", "--check", "--json"], { disabled: true });
+    const off = await run(home, ["update", "--check", "--json"], { disabled: true });
     expect(off.status, off.stderr).toBe(78);
     expect(outcomeOf(r).detail).not.toBe(outcomeOf(off).detail);        // two refusals, each in its own words
     expect(`${outcomeOf(off).detail}`).toMatch(/MORNDO_DISABLE_UPDATES/);
   }, 120_000);
 
-  it("doctor names the changed file in the running Version (§10.4: a same-user edit)", () => {
+  it("doctor names the changed file in the running Version (§10.4: a same-user edit)", async () => {
     const home = makeHome();
     world.reset();
-    const r = run(home, ["update", "--check", "--json"]);
+    const r = await run(home, ["update", "--check", "--json"]);
     expect(r.status, r.stderr).toBe(0);
 
     const current = join(releasesOf(home), A, "bin/morndo");
@@ -529,7 +481,7 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     appendFileSync(current, "#");
     chmodSync(current, 0o555);
 
-    const doc = run(home, ["doctor"]);
+    const doc = await run(home, ["doctor"]);
     expect(doc.status, `${doc.stdout}${doc.stderr}`).toBe(1);
     expect(`${doc.stdout}${doc.stderr}`).toMatch(/bin\/morndo: changed/);
   }, 180_000);

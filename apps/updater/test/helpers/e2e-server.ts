@@ -1,8 +1,7 @@
 // The e2e feed's host, as a directory (design §13): documents, signatures and archives are plain files under one
 // root, a cut list names the transfers that promise more than they send, and a request log records every path asked
-// for. The same directory serves the test whichever process hosts it — the test worker's own HTTPS server on
-// ordinary machines, or the one-process driver where a spawned process cannot reach another process's server — so
-// both transports see exactly the same world, bends included: a bend is a file rewritten before the next request.
+// for. The test worker's HTTPS server serves it to the spawned program; a bend is a file rewritten before the next
+// request.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { IncomingMessage, ServerResponse } from "node:http";
