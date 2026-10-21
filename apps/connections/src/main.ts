@@ -9,7 +9,7 @@ if (argvWantsVersion(process.argv)) {
 }
 
 // Commands that take no input on stdin, by the command word (argv[2]) only: `add usage …` is an add, and reads its key.
-const NO_STDIN = new Set(["helper", "run", "lease", "usage", "pool"]);
+const NO_STDIN = new Set(["helper", "run", "lease", "pin-claude", "usage", "pool"]);
 const readStdin = process.stdin.isTTY || NO_STDIN.has(process.argv[2] ?? "");
 const stdin = readStdin ? Promise.resolve("") : new Promise<string>(resolve => {
   const chunks: Buffer[] = [];
@@ -28,6 +28,7 @@ const code = await run(process.argv.slice(2), process.env, {
   stdout: text => process.stdout.write(text),
   stderr: text => process.stderr.write(text),
   gone: readerGone.signal,
+  tty: process.stdin.isTTY === true && process.stdout.isTTY === true,
 });
 // Leave once the output is out (a pipe drains first, none is waited for after it); see service-kit's exit-after-output.ts.
 await exitAfterOutput(code);

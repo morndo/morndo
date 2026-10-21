@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { parsePin, pinFor, settingsProof, verifyClaudeParent, type Pin, type ProcReader, type Wanted } from "../src/adapters/caller-proof.ts";
+import { SANDBOX_WEAKENERS, parsePin, pinFor, settingsProof, sha256Of, verifyClaudeParent, type Pin, type ProcReader, type Wanted } from "../src/adapters/caller-proof.ts";
 import { claudeSettings } from "../src/adapters/runtime-claude.ts";
 
 const dirs: string[] = [];
@@ -14,7 +14,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 const DENIED = ["/node/cfg/vault", "/node/cfg/connections.db", "/node/cfg/identity"];
 const WANT: Wanted = { denied: DENIED, writeProtected: [...DENIED, "/node/cfg/claude-pin.json"] };
 const plan = { lease: "l1", connection: "zai", ref: null, configDir: null, model: "m", effort: "low", workspace: "/w", deny: DENIED, reservation: 0, probe: true };
-const PIN: Pin = { path: "/bin/claude", resolved: "/real/claude/2.1.306" };
+const PIN: Pin = { path: "/bin/claude", resolved: "/real/claude/2.1.306", sha256: "a".repeat(64), size: 1000, mtimeMs: 5000, ino: 77 };
 type Body = Record<string, any>;
 const good = (): Body => JSON.parse(claudeSettings(plan, "ulimit -c 0; exec morndo-keys lease --connection zai")) as Body;
 const START = 1_800_000_000_000;
@@ -23,6 +23,10 @@ type Fake = {
   exe?: string | null; args?: string[] | null; cwd?: string | null; started?: number | null;
   files?: Record<string, { body: string; mtimeMs: number; ctimeMs: number }>; links?: Record<string, string>;
   now?: { exe?: string | null; started?: number | null };       // what a second read of the parent answers
+  identity?: { size: number; mtimeMs: number; ino: number } | null;   // the running binary's inode, as the pin has it by default
+  sha?: string | null;                                                // its content hash, when it is asked for
+  symlinked?: string[];                                               // paths that are, or go through, a symlink
+  hashed?: { count: number };                                         // counts the reads of the binary's content
 };
 // A fake /proc: the parent is pid 50, a claude of the pinned version started at START with inline sandbox settings.
 function reader(over: Fake = {}): ProcReader {
@@ -36,6 +40,9 @@ function reader(over: Fake = {}): ProcReader {
     ticks: () => (over.started === null ? null : ++tickReads > 1 && over.now?.started !== undefined ? over.now.started : 4242),
     file: path => over.files?.[path] ?? null,
     real: path => over.links?.[path] ?? path,
+    linked: path => over.symlinked?.includes(path) ?? false,
+    exeIdentity: () => (over.identity === undefined ? { size: PIN.size, mtimeMs: PIN.mtimeMs, ino: PIN.ino } : over.identity),
+    exeSha256: () => { if (over.hashed) over.hashed.count++; return over.sha === undefined ? PIN.sha256 : over.sha; },
   };
 }
 const verify = (over: Fake = {}, pin: Pin | null = PIN, ppid: () => number = () => 50) => verifyClaudeParent({ ppid, pin, want: WANT, read: reader(over) });
@@ -59,15 +66,27 @@ describe("the lease's caller proof (check 2)", () => {
     expect(verify({ args: null })).toMatchObject({ ok: false });
   });
 
-  it("follows the pinned path to the version an update installed, and refuses a binary from somewhere else", () => {
-    expect(verify({ exe: "/real/claude/2.1.307", links: { "/bin/claude": "/real/claude/2.1.307" } })).toEqual({ ok: true });
-    expect(verify({ exe: "/real/claude/2.1.307", links: { "/bin/claude": "/real/claude/2.1.308" } })).toMatchObject({ ok: false });
+  it("an update is a new file: refused until the owner pins it again", () => {
+    expect(verify({ exe: "/real/claude/2.1.307", links: { "/bin/claude": "/real/claude/2.1.307" } })).toMatchObject({ ok: false, why: "parent is not the pinned claude" });
   });
 
-  it("accepts a deleted binary only when it is the version that was pinned", () => {
-    expect(verify({ exe: `${PIN.resolved} (deleted)`, links: { "/bin/claude": "/real/claude/2.1.307" } })).toEqual({ ok: true });
-    expect(verify({ exe: "/real/claude/2.1.305 (deleted)", links: { "/bin/claude": "/real/claude/2.1.305" } })).toMatchObject({ ok: false });
+  it("accepts a deleted binary only when it is the file that was pinned", () => {
+    expect(verify({ exe: `${PIN.resolved} (deleted)` })).toEqual({ ok: true });
     expect(verify({ exe: "/real/claude/2.1.305 (deleted)" })).toMatchObject({ ok: false });
+  });
+
+  it("binds the pin to the file's content: the same inode is not read again, a changed one is hashed, a swapped one is refused", () => {
+    const hashed = { count: 0 };
+    expect(verify({ hashed })).toEqual({ ok: true });
+    expect(hashed.count).toBe(0);                                                            // size, mtime and inode as pinned: no hash
+    const touched = { size: PIN.size, mtimeMs: PIN.mtimeMs + 1, ino: PIN.ino };
+    expect(verify({ identity: touched, hashed })).toEqual({ ok: true });                     // same bytes, new mtime: the hash says so
+    expect(hashed.count).toBe(1);
+    for (const identity of [{ ...touched, size: PIN.size + 1 }, { ...touched, ino: PIN.ino + 1 }, touched]) {
+      expect(verify({ identity, sha: "b".repeat(64) }), JSON.stringify(identity)).toMatchObject({ ok: false, why: "the claude binary is not the one that was pinned" });
+    }
+    expect(verify({ identity: touched, sha: null })).toMatchObject({ ok: false });
+    expect(verify({ identity: null })).toMatchObject({ ok: false });
   });
 
   it("requires --setting-sources with an empty value, once", () => {
@@ -184,6 +203,33 @@ describe("the lease's caller proof (check 2)", () => {
     expect(verify({}, PIN, () => 50)).toEqual({ ok: true });
   });
 
+  it("refuses a settings path that is, or goes through, a symlink", () => {
+    const args = ["claude", "--strict-mcp-config", "--setting-sources", "", "--settings", "/settings/s.json"];
+    const s = good();
+    s.sandbox.filesystem.denyWrite = ["/settings"];
+    const files = { "/settings/s.json": { body: JSON.stringify(s), mtimeMs: START - 1000, ctimeMs: START - 1000 } };
+    expect(verify({ args, files })).toEqual({ ok: true });
+    expect(verify({ args, files, symlinked: ["/settings/s.json"] })).toMatchObject({ ok: false, why: "settings path goes through a symlink" });
+  });
+
+  it("refuses every known weakening of the sandbox, and takes the off values of them", () => {
+    for (const path of SANDBOX_WEAKENERS) {
+      const set = good();
+      let node = set.sandbox;
+      path.slice(0, -1).forEach(key => { node = node[key] ??= {}; });
+      node[path.at(-1) as string] = path.at(-1) === "ignoreViolations" ? { "*": ["/x"] } : path.at(-1)?.startsWith("allowUnix") || path.at(-1) === "allowMachLookup" ? ["/x"] : true;
+      expect(settingsProof(set, WANT), path.join(".")).toMatchObject({ ok: false, why: `sandbox weakened by ${path.join(".")}` });
+      for (const off of [false, null, [], {}]) {
+        const quiet = good();
+        let at = quiet.sandbox;
+        path.slice(0, -1).forEach(key => { at = at[key] ??= {}; });
+        at[path.at(-1) as string] = off;
+        expect(settingsProof(quiet, WANT), `${path.join(".")} = ${JSON.stringify(off)}`).toEqual({ ok: true });
+      }
+    }
+    expect(SANDBOX_WEAKENERS.map(path => path.join("."))).toEqual(expect.arrayContaining(["enableWeakerNestedSandbox", "enableWeakerNetworkIsolation", "network.allowAllUnixSockets", "network.allowUnixSockets", "network.allowLocalBinding", "filesystem.disabled"]));
+  });
+
   it("pins a binary by its real path, and reads a pin back", () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-pin-"));
     dirs.push(dir);
@@ -193,12 +239,18 @@ describe("the lease's caller proof (check 2)", () => {
     const pin = pinFor("claude", join(dir, "bin"));
     expect(pin?.path).toBe(join(dir, "bin", "claude"));
     expect(pin?.resolved.endsWith("real-claude")).toBe(true);
+    expect(pin?.sha256).toBe(sha256Of(join(dir, "real-claude")));
+    expect(pin).toMatchObject({ size: 0, ino: expect.any(Number), mtimeMs: expect.any(Number) });
+    writeFileSync(join(dir, "real-claude"), "changed");
+    expect(pinFor("claude", join(dir, "bin"))?.sha256).not.toBe(pin?.sha256);              // another content is another pin
+    expect(sha256Of(join(dir, "nowhere"))).toBeNull();
     expect(pinFor(join(dir, "bin", "claude"), undefined)?.resolved.endsWith("real-claude")).toBe(true);
     expect(pinFor("claude", join(dir, "nowhere"))).toBeNull();
     expect(pinFor(dir, undefined)).toBeNull();                                                 // a directory is no binary
     expect(parsePin(JSON.stringify(pin))).toEqual(pin);
     expect(parsePin("not json")).toBeNull();
     expect(parsePin("{}")).toBeNull();
+    expect(parsePin(JSON.stringify({ path: "/a", resolved: "/b" }))).toBeNull();            // a pin from before the content was bound
     expect(parsePin(null)).toBeNull();
   });
 });

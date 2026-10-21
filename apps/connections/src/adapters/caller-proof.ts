@@ -2,12 +2,13 @@
 // served only to a Claude Code process that was started with a sandbox that is on, fail-closed and denies the vault and the
 // key files. The caller is the helper's parent, and everything is read from /proc, from the node's own pin and from the
 // settings the parent was started with, never from the caller's environment:
-//  - /proc/<ppid>/exe is the claude binary the owner pinned (`morndo-keys pin-claude`, a file in the connections home);
+//  - /proc/<ppid>/exe is the claude binary the owner pinned (`morndo-keys pin-claude`, a file in the connections home) and its
+//    content is what was pinned: size, mtime and inode as pinned, else the sha256 of the running binary;
 //  - its command line has --strict-mcp-config and no --mcp-config (no MCP server, which would run outside the sandbox), exactly
 //    one --settings, and --setting-sources with an empty value (so no user, project or local
 //    settings file merges its arrays into the sandbox: https://code.claude.com/docs/en/cli-reference, read 2026-10-21);
-//  - a settings FILE has not changed since the parent started, and the sandbox denies writing it; inline JSON is in the
-//    parent's argv and needs neither;
+//  - a settings FILE has not changed since the parent started, is reached through no symlink, and the sandbox denies writing
+//    it; inline JSON is in the parent's argv and needs none of that;
 //  - the sandbox is on and fail-closed, runs every command inside it (no excludedCommands), denies reading the vault, the
 //    database and the identity to Bash and to the Read tool, and does not re-open reading or opens writing there;
 //  - the parent is still the same process when the checks are done (a reused pid is refused).
@@ -15,7 +16,8 @@
 // What this is: a check that stops a mistake and the agent's own tool calls (their parent is a shell the sandbox started,
 // never claude). What it is not: a boundary against another process of the same user, which can start a claude-shaped
 // process of its own; same-user is not a boundary in Morndo (ADR-0004).
-import { readFileSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, lstatSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
 import { sandboxReady } from "./runtime-claude.ts";
 
@@ -28,7 +30,12 @@ export type ProcReader = {
   ticks(pid: number): number | null;                                    // its start time as the kernel states it: the process's identity
   file(path: string): { body: string; mtimeMs: number; ctimeMs: number } | null;
   real(path: string): string;                                           // the real path, or the path itself when it is not there
+  linked(path: string): boolean;                                        // the path is, or goes through, a symlink (or cannot be read)
+  exeIdentity(pid: number): Identity | null;                            // the running binary's inode, whatever its name (it may be deleted)
+  exeSha256(pid: number): string | null;                                // the content of the running binary
 };
+
+export type Identity = { size: number; mtimeMs: number; ino: number };
 
 const text = <T>(read: () => T): T | null => { try { return read(); } catch { return null; } };
 
@@ -61,17 +68,52 @@ export const procReader: ProcReader = {
     return info.isFile() ? { body: readFileSync(path, "utf8"), mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs } : null;
   }),
   real: path => text(() => realpathSync(path)) ?? resolve(path),
+  linked: path => {
+    let at = "/";
+    for (const part of resolve(path).split("/").filter(Boolean)) {
+      at = join(at, part);
+      const info = text(() => lstatSync(at));
+      if (info === null || info.isSymbolicLink()) return true;
+    }
+    return false;
+  },
+  exeIdentity: pid => {
+    const info = text(() => statSync(`/proc/${pid}/exe`));                  // follows the link to the inode the process runs
+    return info === null ? null : { size: info.size, mtimeMs: info.mtimeMs, ino: info.ino };
+  },
+  exeSha256: pid => sha256Of(`/proc/${pid}/exe`),
 };
 
-// The claude binary the owner pinned: where it was found (a link may move with an update) and what that was then.
-export type Pin = { path: string; resolved: string };
+// The sha256 of a file, read in chunks (a claude binary is large), or null when it can't be read.
+export function sha256Of(path: string): string | null {
+  let fd: number;
+  try { fd = openSync(path, "r"); } catch { return null; }
+  try {
+    const hash = createHash("sha256");
+    const chunk = Buffer.allocUnsafe(1 << 20);
+    for (;;) {
+      const n = readSync(fd, chunk, 0, chunk.length, null);
+      if (n === 0) break;
+      hash.update(chunk.subarray(0, n));
+    }
+    return hash.digest("hex");
+  } catch { return null; } finally { closeSync(fd); }
+}
+
+// The claude binary the owner pinned: where it was found, the real path it had then, and what it was: its content hash,
+// and the size, mtime and inode that tell at lease time whether it is still the same file (the hash is read again only when
+// one of them differs, since a claude binary is large). An update is a new file: it is pinned again by the owner.
+export type Pin = { path: string; resolved: string; sha256: string; size: number; mtimeMs: number; ino: number };
 
 // The pin to write for `path` (a file, or a name found on `pathVar`), or null when there is no such file.
 export function pinFor(path: string, pathVar: string | undefined): Pin | null {
   const candidates = path.includes("/") ? [resolve(path)] : (pathVar ?? "").split(delimiter).filter(Boolean).map(dir => join(dir, path));
   for (const candidate of candidates) {
     const resolved = text(() => realpathSync(candidate));
-    if (resolved !== null && text(() => statSync(resolved).isFile())) return { path: candidate, resolved };
+    const info = resolved === null ? null : text(() => statSync(resolved));
+    if (resolved === null || info === null || !info.isFile()) continue;
+    const sha256 = sha256Of(resolved);
+    if (sha256 !== null) return { path: candidate, resolved, sha256, size: info.size, mtimeMs: info.mtimeMs, ino: info.ino };
   }
   return null;
 }
@@ -79,7 +121,9 @@ export function pinFor(path: string, pathVar: string | undefined): Pin | null {
 export function parsePin(body: string | null): Pin | null {
   if (body === null) return null;
   const pin = text(() => JSON.parse(body) as Partial<Pin>);
-  return typeof pin?.path === "string" && typeof pin.resolved === "string" ? { path: pin.path, resolved: pin.resolved } : null;
+  if (pin === null || typeof pin.path !== "string" || typeof pin.resolved !== "string" || typeof pin.sha256 !== "string") return null;
+  if (typeof pin.size !== "number" || typeof pin.mtimeMs !== "number" || typeof pin.ino !== "number") return null;
+  return { path: pin.path, resolved: pin.resolved, sha256: pin.sha256, size: pin.size, mtimeMs: pin.mtimeMs, ino: pin.ino };
 }
 
 export type Proof = { ok: true } | { ok: false; why: string };
@@ -100,9 +144,31 @@ type Settings = {
   sandbox?: {
     enabled?: unknown; failIfUnavailable?: unknown; allowUnsandboxedCommands?: unknown; excludedCommands?: unknown;
     filesystem?: { denyRead?: unknown; allowRead?: unknown; allowWrite?: unknown; denyWrite?: unknown };
-  };
+  } & Record<string, unknown>;
   permissions?: { deny?: unknown };
 };
+
+// Every sandbox key that weakens the sandbox, in one place (https://code.claude.com/docs/en/sandboxing, read 2026-10-21,
+// "weaken" list and the sections on unix sockets, filesystem isolation and ignoreViolations). Each is refused when it is set
+// to anything but false, null, an empty list or an empty object. `excludedCommands` and `allowUnsandboxedCommands` have
+// their own checks above; network.allowedDomains is not here: the lane needs its API host.
+export const SANDBOX_WEAKENERS: readonly (readonly string[])[] = [
+  ["enableWeakerNestedSandbox"],
+  ["enableWeakerNetworkIsolation"],
+  ["allowAppleEvents"],
+  ["ignoreViolations"],
+  ["filesystem", "disabled"],
+  ["network", "allowAllUnixSockets"],
+  ["network", "allowUnixSockets"],
+  ["network", "allowLocalBinding"],
+  ["network", "allowMachLookup"],
+];
+
+const isSet = (value: unknown): boolean =>
+  !(value === undefined || value === null || value === false || (Array.isArray(value) && value.length === 0)
+    || (typeof value === "object" && !Array.isArray(value) && Object.keys(value as object).length === 0));
+
+const at = (root: unknown, path: readonly string[]): unknown => path.reduce<unknown>((node, key) => (typeof node === "object" && node !== null ? (node as Record<string, unknown>)[key] : undefined), root);
 
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : []);
 
@@ -114,6 +180,9 @@ export function settingsProof(settings: unknown, want: Wanted, real: (path: stri
   if (!sandboxReady(sandbox as { enabled?: boolean; failIfUnavailable?: boolean; allowUnsandboxedCommands?: boolean })) return no("sandbox is not on and fail-closed");
   const excluded = sandbox.excludedCommands;
   if (excluded !== undefined && (!Array.isArray(excluded) || excluded.length > 0)) return no("commands may run outside the sandbox");
+  for (const weakener of SANDBOX_WEAKENERS) {
+    if (isSet(at(sandbox, weakener))) return no(`sandbox weakened by ${weakener.join(".")}`);
+  }
   const files = sandbox.filesystem ?? {};
   const denyRead = strings(files.denyRead).map(real);
   // permissions.deny blocks the Read tool, denyRead only sandboxed Bash: both must name every path (runtime-claude.ts).
@@ -155,11 +224,15 @@ export function verifyClaudeParent(check: Check): Proof {
   const args = read.cmdline(parent);
   if (started === null || ticks === null || exe === null) return no("parent unreadable");
   if (args === null) return no("parent command line unreadable");
-  // The binary: the pinned one now, or the one that was pinned, which after an update reads "(deleted)" while it runs.
-  const gone = exe.endsWith(DELETED);
-  const path = gone ? exe.slice(0, -DELETED.length) : exe;
-  const pinnedNow = gone ? null : read.real(check.pin.path);
-  if (!(path === check.pin.resolved || (pinnedNow !== null && read.real(path) === pinnedNow))) return no("parent is not the pinned claude");
+  // The binary: the pinned file, which after an update reads "(deleted)" while that version still runs; and what it is: the
+  // inode the process runs has the pinned size, mtime and inode, or else the pinned content hash.
+  const path = exe.endsWith(DELETED) ? exe.slice(0, -DELETED.length) : exe;
+  if (path !== check.pin.resolved) return no("parent is not the pinned claude");
+  const running = read.exeIdentity(parent);
+  if (running === null) return no("parent binary unreadable");
+  if (running.size !== check.pin.size || running.mtimeMs !== check.pin.mtimeMs || running.ino !== check.pin.ino) {
+    if (read.exeSha256(parent) !== check.pin.sha256) return no("the claude binary is not the one that was pinned");
+  }
   const flag = (name: string): string[] => args.flatMap((arg, i) => (arg === name ? [args[i + 1] ?? ""] : arg.startsWith(`${name}=`) ? [arg.slice(name.length + 1)] : []));
   const sources = flag("--setting-sources");
   if (sources.length !== 1 || sources[0] !== "") return no("setting sources are not limited to none");
@@ -175,8 +248,11 @@ export function verifyClaudeParent(check: Check): Proof {
     // A file: it must not have changed since the parent started, and the sandbox must not let a command write it.
     const cwd = read.cwd(parent);
     const file = isAbsolute(value) ? value : cwd === null ? null : join(cwd, value);
-    const seen = file === null ? null : read.file(file);
-    if (file === null || seen === null) return no("settings unreadable");
+    if (file === null) return no("settings unreadable");
+    // A symlink in the path could be swapped without the file's own ctime moving: none is accepted.
+    if (read.linked(file)) return no("settings path goes through a symlink");
+    const seen = read.file(file);
+    if (seen === null) return no("settings unreadable");
     if (seen.mtimeMs > started + START_SLACK_MS || seen.ctimeMs > started + START_SLACK_MS) return no("settings changed after the parent started");
     source = seen.body;
     protectedWrite.push(file);

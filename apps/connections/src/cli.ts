@@ -35,7 +35,8 @@ const PIN_FILE = "claude-pin.json";
 const USAGE_WORDS = new Set(["missing argument", "isolation"]);
 
 // `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
-export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal };
+// `tty`: the command runs at an interactive terminal (stdin and stdout), which only pin-claude asks for.
+export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal; tty?: boolean };
 
 export type Parsed = { cmd: string; positionals: string[]; rest: string[]; get(name: string): string | undefined; all(name: string): string[] };
 
@@ -61,16 +62,19 @@ morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [-
   the TTL). One call is one lease — the gate runs, a KeyServed audit line is written, the lease closes; a call killed
   before that is swept at the next lease, run or check. A refusal names its reason on stderr and exits 1, or 75 when the
   gate refuses (off, terms, expired, repo, isolation, dialect, leases, budget).
-  morndo-keys pin-claude [--path P] pins the claude binary a lease may be served to (once, by the owner, in a terminal).
+  morndo-keys pin-claude [--path P] pins the claude binary a lease may be served to: its real path and its content (sha256,
+  size, mtime, inode). Once, by the owner, at a terminal (an agent's tool call has none); an update needs a new pin.
   The helper line is: ulimit -c 0; exec morndo-keys lease --connection <name> --lane <lane> --workspace <dir> --isolation os
   The ulimit keeps a crash from dumping the key (Node can neither wipe a string nor set its own core limit); the exec makes
   Claude Code the lease's parent, which is what it checks. For a connection whose floor is os (Z.ai today) the parent must
-  be the pinned binary (its real path, read from /proc), started with --strict-mcp-config (and no --mcp-config), one
+  be the pinned binary (its path and content, read from /proc), started with --strict-mcp-config (and no --mcp-config), one
   --settings (a file or inline JSON) and
   --setting-sources "" (no user, project or local settings merge in), whose sandbox is enabled, failIfUnavailable true,
   allowUnsandboxedCommands false and excludedCommands empty, with this node's vault, connections.db and identity in
   sandbox.filesystem.denyRead and as Read rules in permissions.deny, not re-opened by allowRead or opened by allowWrite;
-  a settings file must not have changed since the parent started and must be in sandbox.filesystem.denyWrite. Anything else
+  a settings file must not have changed since the parent started, be reached through no symlink and be in
+  sandbox.filesystem.denyWrite; and no sandbox-weakening key may be set (enableWeaker*, allowAppleEvents, ignoreViolations,
+  filesystem.disabled, network.allow{AllUnixSockets,UnixSockets,LocalBinding,MachLookup}). Anything else
   is refused with isolation.
   --workspace are the caller's claims. run keeps its own helper, \`helper --lease <id>\`.
 `;
@@ -362,8 +366,11 @@ async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
 }
 
 // `morndo-keys pin-claude [--path P]`: the owner says which claude binary a lease may be served to (P, else `claude` on this
-// shell's PATH), once, from a terminal. It is written to the connections home, which an agent's sandbox denies.
+// shell's PATH), once, at a terminal: an agent's tool call has none, so it can't pin the binary it wants. It pins the file
+// itself, not its name: the real path, the sha256 of its content, and its size, mtime and inode. The pin goes to the
+// connections home, which an agent's sandbox denies, and what it pins is printed.
 function pinClaude(home: Opened, parsed: Parsed, io: Io): number {
+  if (io.tty !== true) return fail(io, "tty");
   const pin = pinFor(parsed.get("path") ?? "claude", home.env.PATH);
   if (pin === null) return fail(io, "missing");
   writeFileSync(join(home.dir, PIN_FILE), `${JSON.stringify(pin)}\n`, { mode: 0o600 });

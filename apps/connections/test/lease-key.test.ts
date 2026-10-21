@@ -7,13 +7,14 @@
 // `pin-claude` (here node itself), started with --settings and --setting-sources "", which runs the helper line through
 // `sh -c` as Claude Code does.
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { claudeSettings } from "../src/adapters/runtime-claude.ts";
 import { selfHolder } from "../src/adapters/processes.ts";
+import { run } from "../src/cli.ts";
 import { openHome } from "../src/compose.ts";
 
 const KEY = "sk-ant-synthetic-test-key-0001";
@@ -27,7 +28,7 @@ afterEach(() => {
 });
 
 function homeDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "morndo-lease-"));
+  const dir = mkdtempSync(join(realpathSync(tmpdir()), "morndo-lease-"));   // no symlink in it: a settings file is refused behind one
   dirs.push(dir);
   mkdirSync(join(dir, "work"));
   return dir;
@@ -120,11 +121,19 @@ child.on("close", code => process.exit(code ?? 1));
 
 const lease = (dir: string, extra: string[] = [], via: Via = {}) => viaClaude(dir, ["--connection", "zai", ...extra], via);
 
+// The owner's one-time step, at a terminal: in process, since a spawned child has none (and is refused: see below).
+async function pinClaude(env: NodeJS.ProcessEnv, path = process.execPath): Promise<Out> {
+  let stdout = "";
+  let stderr = "";
+  const code = await run(["pin-claude", "--path", path], env, { stdin: "", tty: true, stdout: text => { stdout += text; }, stderr: text => { stderr += text; } });
+  return { code, stdout, stderr };
+}
+
 async function zaiReady(dir: string, env: NodeJS.ProcessEnv): Promise<void> {
   const added = await cli(["add", "zai", "--vendor", "zai", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, KEY);
   expect(added.code, added.stderr).toBe(0);
   expect((await cli(["ack", "zai", "--by", "owner"], env)).code).toBe(0);
-  const pinned = await cli(["pin-claude", "--path", process.execPath], env);          // the owner's one-time step
+  const pinned = await pinClaude(env);
   expect(pinned.code, pinned.stderr).toBe(0);
 }
 
@@ -240,6 +249,9 @@ describe("keys lease", () => {
       { what: "the identity is readable to the Read tool", run: () => lease(dir, [], { settings: changed(s => { s.permissions.deny = s.permissions.deny.filter((rule: string) => !rule.includes("/identity")); }) }) },
       { what: "allowRead re-opens the vault", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.filesystem.allowRead = [join(dir, "vault")]; }) }) },
       { what: "allowWrite opens the pin", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.filesystem.allowWrite = [dir]; }) }) },
+      { what: "the sandbox lets a command use unix sockets", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.network = { allowUnixSockets: ["/run/x.sock"] }; }) }) },
+      { what: "the sandbox is the weaker nested one", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.enableWeakerNestedSandbox = true; }) }) },
+      { what: "a settings file reached through a symlink", run: () => { const real = join(dir, "real-settings"); mkdirSync(real, { recursive: true }); symlinkSync(real, join(dir, "linked-settings")); const file = join(dir, "linked-settings", "s.json"); writeFileSync(join(real, "s.json"), settingsJson(dir, s => { s.sandbox.filesystem.denyWrite = [real]; })); return lease(dir, [], { file }); } },
       { what: "a settings file changed after claude started", run: () => { const file = settingsFile(dir); return lease(dir, [], { file, touch: file }); } },
       { what: "a settings file the sandbox may write", run: () => lease(dir, [], { file: settingsFile(dir, s => { s.sandbox.filesystem.denyWrite = []; }) }) },
     ];
@@ -253,14 +265,18 @@ describe("keys lease", () => {
     // the parent is the node's pinned binary, not whatever the caller says: another pin, or none, refuses the right parent
     const pinFile = join(dir, "claude-pin.json");
     const pin = readFileSync(pinFile, "utf8");
-    expect((await cli(["pin-claude", "--path", "/bin/sh"], env)).code).toBe(0);
+    expect((await pinClaude(env, "/bin/sh")).code).toBe(0);
     const wrong = await lease(dir);
     expect([wrong.code, wrong.stdout, wrong.stderr.includes("isolation")], "pinned to another binary").toEqual([75, "", true]);
     rmSync(pinFile);
     const none = await lease(dir);
     expect([none.code, none.stdout, none.stderr.includes("isolation")], "no pin").toEqual([75, "", true]);
+    // a pin of the same path whose content is not the running binary's: a swapped binary
+    writeFileSync(pinFile, JSON.stringify({ ...JSON.parse(pin) as object, sha256: "0".repeat(64), ino: 1 }));
+    const swapped = await lease(dir);
+    expect([swapped.code, swapped.stdout, swapped.stderr.includes("isolation")], "swapped binary").toEqual([75, "", true]);
     const all = await events(env, "zai");
-    expect(all.filter(e => e.type === "LeaseRefused" && e.reason === "isolation")).toHaveLength(rows.length + 2);
+    expect(all.filter(e => e.type === "LeaseRefused" && e.reason === "isolation")).toHaveLength(rows.length + 3);
     expect(all.some(e => e.type === "KeyServed")).toBe(false);
     // and the right parent, once more, is served: the refusals above were the settings, not the setup
     writeFileSync(pinFile, pin);
@@ -272,6 +288,19 @@ describe("keys lease", () => {
     expect(file.code, file.stderr).toBe(0);
     expect(file.stdout).toBe(`${KEY}\n`);
   }, 300_000);
+
+  it("pin-claude needs a terminal, and says what it pins", async () => {
+    const dir = homeDir();
+    const env = envOf(dir);
+    const noTerminal = await cli(["pin-claude", "--path", process.execPath], env);       // a child process here has no tty, as an agent's tool call has none
+    expect([noTerminal.code, noTerminal.stdout, noTerminal.stderr]).toEqual([1, "", "tty\n"]);
+    expect(readdirSync(dir)).not.toContain("claude-pin.json");
+    const pinned = await pinClaude(env);
+    expect(pinned.code, pinned.stderr).toBe(0);
+    const said = JSON.parse(pinned.stdout) as { path: string; resolved: string; sha256: string; size: number; ino: number };
+    expect(said).toMatchObject({ path: process.execPath, resolved: realpathSync(process.execPath), sha256: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    expect(JSON.parse(readFileSync(join(dir, "claude-pin.json"), "utf8"))).toEqual(said);
+  }, 60_000);
 
   it("a connection that needs less than os is served on the caller's claim, and the audit says claimed", async () => {
     const dir = homeDir();
