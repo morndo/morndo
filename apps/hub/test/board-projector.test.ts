@@ -107,6 +107,7 @@ describe("the board follows its assignee's run (B10)", () => {
 
   it("DONE with background work left moves doing to review (D1), though a comment came during the turn", async () => {
     const t = task("Ship it", "builder", T0, "doing");
+    source.list = [run("builder", "working", T0)];                     // listed, as a lane with a task in progress is: D3 leaves it be
     await projector.start();
     now = T0 + 30_000;
     source.tell(run("builder", "working", T0 + 20_000, { source: "session" }));
@@ -122,6 +123,20 @@ describe("the board follows its assignee's run (B10)", () => {
     // the same run, told again, moves nothing further (D6 on the move's own change)
     source.tell(run("builder", "waiting", T0 + 45_000, { source: "hook", outcome: "done", wait: { on: "background", tasks: [] } }));
     expect(boardMoves().map(e => e.change)).toEqual(["moved"]);
+    expect(boardMoves().map(e => e.actor.rule)).toEqual(["D1"]);       // exactly one move, and it is D1's
+  });
+
+  it("a task in progress whose lane the list does not hold is put back (D3), taken again when its run appears (D4), and finished by D1: three moves, each by its rule", async () => {
+    const t = task("Ship it", "builder", T0, "doing");
+    await projector.start();                                           // an empty list: builder is not registered
+    expect(shown(t.key)?.status).toBe("todo");
+    now = T0 + 30_000;
+    source.tell(run("builder", "working", T0 + 20_000, { source: "session" }));
+    expect(shown(t.key)?.status).toBe("doing");
+    now = T0 + 50_000;
+    source.tell(run("builder", "ended", T0 + 45_000, { source: "hook", outcome: "done", line: "STATUS: DONE pushed" }));
+    expect(shown(t.key)?.status).toBe("review");
+    expect(boardMoves().map(e => e.actor.rule)).toEqual(["D3", "D4", "D1"]);
   });
 
   it("D3: a lane gone while its task is in progress puts the task back to to do, with GONE_REASON", async () => {
