@@ -3163,6 +3163,31 @@ export const CONTROLS: Control[] = [
   { id: "b11-checkpoint-is-needs-decision", task: "311", file: "apps/board-cli/src/prompt.ts",
     find: "STATUS: NEEDS DECISION checkpoint:", replace: "STATUS: DONE checkpoint:",
     run: ["apps/board-cli/test/prompt-doc.test.ts"], expect: "checkpoint" },
+  // ---- T-340: one lease serves one key to an apiKeyHelper, each guard removed once.
+  { id: "t340-lease-claude-only", task: "T-340", file: "apps/connections/src/cli.ts",
+    find: `connection.runtime !== "claude" || `, replace: "",
+    run: ["apps/connections/test/lease-key.test.ts"], expect: "refusals print nothing on stdout" },
+  { id: "t340-lease-failed-word", task: "T-340", file: "apps/connections/src/cli.ts",
+    find: `  } catch {
+    io.stderr("failed\\n");
+    return 1;
+  }`, replace: `  } catch (error) {
+    io.stderr(String(error));
+    return 1;
+  }`,
+    run: ["apps/connections/test/lease-key.test.ts"], expect: "a vault that fails says only failed" },
+  { id: "t340-serve-closed-lease", task: "T-340", file: "packages/domain/src/connections.ts",
+    find: `  const row = c.leases.find(l => l.id === id);
+  if (!row || row.authority === "ended") return refuse("closed");
+  return ok(replace(dir, c, { type: "KeyServed", name, lease: id, at: now, caller }));`,
+    replace: `  const row = c.leases.find(l => l.id === id);
+  if (!row) return refuse("closed");
+  return ok(replace(dir, c, { type: "KeyServed", name, lease: id, at: now, caller }));`,
+    run: ["packages/domain/test/connections.test.ts"], expect: "serveKey: refuses" },
+  { id: "t340-lease-isolation-vouched", task: "T-340", file: "apps/connections/src/cli.ts",
+    find: `isolation: () => vouched, dialects: () => ["anthropic"]`,
+    replace: `isolation: () => "os" as const, dialects: () => ["anthropic"]`,
+    run: ["apps/connections/test/lease-key.test.ts"], expect: "refusals print nothing on stdout" },
 ];
 
 // ---- the runner

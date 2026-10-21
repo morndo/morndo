@@ -50,6 +50,16 @@ morndo-keys pool exec --runtime codex [--lane L] [--account A] -- exec … <prom
   A reader that is gone is noticed only when the bin writes to it. An agent that prints once at the end (claude with
   --output-format json) or goes quiet is not stopped before its next output, so its turn can be paid for in full: Node 24 has
   no way to see a pipe's reader close without a write. Use a streaming output format where this matters.
+
+morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [--isolation none|rules|os]
+  lease prints a key connection's key on stdout and nothing else, so it can be an apiKeyHelper: Claude Code runs the
+  command through the shell and reads its stdout as the credential (a non-zero exit is failure, the output is cached for
+  the TTL). One call is one lease — the gate runs, a KeyServed audit line is written, the lease closes. A refusal names
+  its reason on stderr and exits 1, or 75 when the gate refuses (off, terms, expired, repo, isolation, dialect, leases,
+  budget). Morndo cannot see the caller's sandbox: the isolation the gate checks is the one --isolation vouches for (default
+  none), so a connection whose floor is os is refused unless the caller says os, which it may only say when it runs the
+  agent with the sandbox enforced. run keeps its own helper,
+  \`helper --lease <id>\`.
 `;
 
 export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
@@ -91,6 +101,7 @@ async function dispatch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     case "models": return models(home, need(name), io);
     case "check": return check(home, need(parsed.get("connection") ?? name), parsed, io);
     case "run": return launch(home, parsed, io);
+    case "lease": return leaseKey(home, parsed, io);
     case "spend": return spend(home, need(name), io);
     case "usage": return usage(home, parsed, io);
     case "pool": return poolCommand(home, parsed, io);
@@ -280,6 +291,40 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
   // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
   return status === 70 || status === 75 || status === 78 ? 1 : status;
+}
+
+// `morndo-keys lease --connection <name>`: one call is one lease, as an apiKeyHelper takes it — the gate runs, the key
+// is printed once and nothing else, a KeyServed audit line is written, the lease closes. Morndo did not start this agent
+// and cannot see its sandbox, so the isolation the gate sees is the one the caller vouches for (--isolation, default none)
+// and the audit line records it: a connection whose floor is os (ADR-0018 Q3) is refused unless the caller says os.
+async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
+  const name = need(parsed.get("connection"));
+  const connection = findConnection(home.store.load().directory, name);
+  if (!connection) return fail(io, "missing");
+  if (connection.status === "revoked") return fail(io, "revoked");
+  if (connection.custody !== "morndo" || connection.kind !== "api-key" || connection.runtime !== "claude" || loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return fail(io, "not_leasable");
+  const holder = selfHolder(parsed.get("lane") ?? null);
+  if (!holder) return fail(io, "holder");
+  const vouched = isolationOf(parsed.get("isolation") ?? "none");
+  home.runtime.current = { isolation: () => vouched, dialects: () => ["anthropic"], loginStatus: () => Promise.resolve("unknown" as const), launch: () => Promise.resolve({ id: "" }) };
+  const granted = home.leases.lease(name, {
+    role: parsed.get("role") ?? "lease", entry: "lease", holder,
+    workspacePath: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
+    limit: LEASES, reserve: 0, margin: 0, probe: true,
+  });
+  if (!granted.ok) return fail(io, granted.error.problem, granted.error.exit);
+  let outcome = "failed";
+  try {
+    const secret = await home.open(connection.ref);
+    const served = home.leases.serve(name, granted.value.id, { pid: process.pid, ppid: process.ppid, lane: holder.lane, isolation: vouched });
+    if (!served.ok) return fail(io, served.error.problem);
+    io.stdout(`${secret}\n`);
+    outcome = "done";
+    return 0;
+  } catch {
+    io.stderr("failed\n");
+    return 1;
+  } finally { home.leases.close(name, granted.value.id, outcome, null); }
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {

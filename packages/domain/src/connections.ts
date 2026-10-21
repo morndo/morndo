@@ -41,6 +41,9 @@ export type KeyConnection = Common & {
 export type LayerConnection = Common & { custody: "engine-layer"; kind: Kind };
 export type Connection = SubscriptionConnection | KeyConnection | LayerConnection;
 
+// Who a served key went to: the helper's pid, its parent's, its lane, and the isolation it vouched for (T-340).
+export type KeyCaller = { pid: number; ppid: number | null; lane: string | null; isolation: Isolation };
+
 export type ConnEvent =
   | { type: "ConnectionAdded"; name: string; at: number; command: string }
   | { type: "ConnectionRotated"; name: string; at: number; command: string; fingerprint: string }
@@ -60,6 +63,7 @@ export type ConnEvent =
   | { type: "LeaseClosed"; name: string; lease: string; at: number; outcome: string; amount: number; source: SpendSource; duration: number | null }
   | { type: "LeaseLost"; name: string; lease: string; at: number }
   | { type: "AuthorityEnded"; name: string; lease: string; at: number; reason: "helper_limit" }
+  | { type: "KeyServed"; name: string; lease: string; at: number; caller: KeyCaller }
   | { type: "SpendRecorded"; name: string; at: number; amount: number; source: "estimate" }
   | { type: "SpendReconciled"; name: string; at: number; amount: number; source: "provider" | "manual" | "balance" }
   | { type: "ThresholdCrossed"; name: string; at: number; threshold: string };
@@ -456,6 +460,16 @@ export function noteHelper(
   }
   const next = { ...c, leases: c.leases.map(l => l.id === id ? { ...l, calls, windowStart: inWindow ? l.windowStart : now } : l) };
   return ok({ ...dir, connections: dir.connections.map(x => x.name === name ? next : x) });
+}
+
+// One served key is one audit line with its caller, never a value (T-340): the bytes go only to the caller's stdout.
+export function serveKey(dir: Directory, name: string, id: string, caller: KeyCaller, now: number): Result<Directory, Refusal> {
+  const c = findConnection(dir, name);
+  if (!c) return refuse("missing");
+  if (!isKey(c)) return refuse("custody");
+  const row = c.leases.find(l => l.id === id);
+  if (!row || row.authority === "ended") return refuse("closed");
+  return ok(replace(dir, c, { type: "KeyServed", name, lease: id, at: now, caller }));
 }
 
 // CN12. A check run warns every key from spend and from the clock, including a key with no lease.

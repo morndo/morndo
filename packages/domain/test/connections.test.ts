@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   LEASE_REFUSED,   acknowledge, addKey, addLayer, addSubscription, availability, check, closeLease, effectiveIsolation,
   emptyDirectory, findConnection, gate, isKey, lease, loseLease, noteHelper, recordSpend, refresh, repoAdmits,
-  repoWidens, revoke, reviseTerms, rotate, setBudget, setExpiry, setIsolation, setRepo, spentOf, turnOff, turnOn,
+  repoWidens, revoke, reviseTerms, rotate, serveKey, setBudget, setExpiry, setIsolation, setRepo, spentOf, turnOff, turnOn,
   type Actor, type Connection, type Directory, type Holder, type Isolation, type LeaseAsk, type Workspace,
 } from "../src/index.ts";
 
@@ -486,5 +486,32 @@ describe("isolation ranks", () => {
   it("effective isolation is the strongest of the stored value, the floor and a repo list", () => {
     const dir = key(emptyDirectory());
     expect(floors.map(f => effectiveIsolation(conn(dir, "credit1"), f))).toEqual(["rules", "rules", "os"]);
+  });
+});
+
+describe("a key served to a helper", () => {
+  const caller = { pid: 42, ppid: 7, lane: "lane-b", isolation: "os" as const };
+  it("serveKey: records one KeyServed event with the caller and no value, and changes no connection", () => {
+    let dir = ack(key(emptyDirectory()));
+    dir = value(lease(dir, "credit1", ask()));
+    const id = dir.events.find(e => e.type === "LeaseGranted");
+    if (id?.type !== "LeaseGranted") throw new Error("no grant");
+    const served = value(serveKey(dir, "credit1", id.lease, caller, T + 1));
+    expect(served.events.filter(e => e.type === "KeyServed")).toHaveLength(1);
+    const event = served.events.at(-1);
+    expect(event).toMatchObject({ type: "KeyServed", name: "credit1", lease: id.lease, at: T + 1, caller });
+    expect(event?.type === "KeyServed" && Object.keys(event).sort()).toEqual(["at", "caller", "lease", "name", "type"]);
+    expect(served.connections).toEqual(dir.connections);
+    expect(conn(served, "credit1")).toEqual(conn(dir, "credit1"));
+  });
+  it("serveKey: refuses a missing connection, a connection that is not a Morndo key, and a closed or ended lease", () => {
+    const both = sub(key(emptyDirectory()));
+    expect(problem(serveKey(both, "nope", "l1", caller, T))).toBe("missing");
+    expect(problem(serveKey(both, "sub-a", "l1", caller, T))).toBe("custody");
+    let dir = value(lease(ack(key(emptyDirectory(), "credit2", FP2), "credit2"), "credit2", ask()));
+    expect(problem(serveKey(dir, "credit2", "l0", caller, T))).toBe("closed");
+    dir = value(revoke(dir, "credit2", principal(), T + 1));
+    expect(problem(serveKey(dir, "credit2", "l1", caller, T + 2))).toBe("closed");
+    expect(dir.events.some(e => e.type === "KeyServed")).toBe(false);
   });
 });
