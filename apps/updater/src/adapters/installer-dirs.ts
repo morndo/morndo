@@ -5,7 +5,7 @@
 // SSH-signature verifier, node:crypto's one door (§4.7); this adapter adds no crypto of its own.
 import { execFile } from "node:child_process";
 import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statfsSync, writeFileSync, type Dirent } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseVersion } from "@morndo/domain";
 import { FileListSchema } from "@morndo/protocol";
 import type { Installer, Layout, TreeFinding } from "../application/ports.ts";
@@ -213,8 +213,20 @@ export class DirsInstaller implements Installer {
   }
 
   freeBytes(): number {
-    const stats = statfsSync(this.releases);
-    return Number(stats.bavail) * Number(stats.bsize);   // blocks an unprivileged user may fill × block size
+    // A machine with nothing installed yet has no releases directory (a checkout, a fresh first check): the file
+    // system that would hold it is the nearest one up the tree that exists — the root always does.
+    let dir = this.releases;
+    for (;;) {
+      try {
+        const stats = statfsSync(dir);
+        return Number(stats.bavail) * Number(stats.bsize);   // blocks an unprivileged user may fill × block size
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        const parent = dirname(dir);
+        if (parent === dir) throw error;
+        dir = parent;
+      }
+    }
   }
 
   // Adds the owner's write bit through a tree, so a read-only Version (files 0444, directories 0555) can be

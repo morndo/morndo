@@ -246,4 +246,10 @@ describe("DirsInstaller", () => {
   it("freeBytes(): a positive number from the file system holding the releases directory", () => {
     expect(new DirsInstaller({ releases }).freeBytes()).toBeGreaterThan(0);
   });
+
+  it("freeBytes(): a machine with no releases directory yet still gets its number", () => {
+    // a checkout's doctor runs before any release lands; the next beforeEach puts the directory back
+    rmSync(releases, { recursive: true, force: true });
+    expect(new DirsInstaller({ releases }).freeBytes()).toBeGreaterThan(0);
+  });
 });

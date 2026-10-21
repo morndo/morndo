@@ -56,6 +56,7 @@ import { MemoryFromFuture } from "./adapters/memory-migrations.ts";
 import { MemoryService } from "./application/memory-service.ts";
 import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
 import { runMemory } from "./console/memory.ts";
+import { runUpdaterProgram } from "./console/update.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +103,11 @@ const crash = exitOnCrash(log);
 // `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
 // on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
 if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
+// `morndo update` and `morndo doctor` (design §4.8) run here too, before the hub's settings and database are read:
+// they need neither, and a machine with no hub still updates. The hub runs the updater's program, as it runs the
+// engines CLI, and leaves with its exit code.
+if (process.argv[2] === "update" || process.argv[2] === "doctor")
+  await exitAfterOutput(await runUpdaterProgram(process.argv.slice(2)));
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
 const EXIT_DATABASE_FROM_FUTURE = EXIT_CONFIG;          // see openStore below
 const config = loadConfig();
