@@ -10,7 +10,7 @@ import { agentPaths, type AgentPaths } from "../src/paths.ts";
 import { RelayFiles } from "../src/relay/relay-files.ts";
 import { HOOK_BODY_MAX, startRelay, type Relay } from "../src/relay/server.ts";
 import { Spool } from "../src/relay/spool.ts";
-import { windowResolver } from "../src/relay/window-of.ts";
+import { foreignStop, windowResolver } from "../src/relay/window-of.ts";
 import { captureLog, tempHome } from "./helpers.ts";
 
 let home: { home: string; cleanup: () => void };
@@ -33,6 +33,7 @@ beforeEach(async () => {
   relay = await startRelay({
     port: 0, spool, files, log: captureLog().log, onAppended: () => { kicks++; }, now: () => now,
     windowOf: windowResolver({ windowOfPane: p => windows.get(p) ?? null, sessions: () => sessions }),
+    foreign: foreignStop({ sessions: () => sessions }),
   });
 });
 afterEach(async () => { await relay.close(); adb.close(); home.cleanup(); });
@@ -79,6 +80,30 @@ describe("answers (spec §5.5)", () => {
     expect((await post("/notify", big)).status).toBe(413);
     expect(rows()).toEqual([]);
     expect(spool.drops).toBe(1);
+  });
+});
+
+// B6: a headless run started in a lane's pane posts its Stop as the lane (the pane's window); the relay answers it and
+// drops it, so the lane's turn is not ended by it.
+describe("a Stop from another session (B6)", () => {
+  it("a Stop from another session in the lane's pane is not a lane finish", async () => {
+    const before = kicks;
+    const stop = await post("/hook/stop", { TMUX_PANE: "%7", session_id: "sess-headless", last: "x" });
+    expect(stop.status).toBe(200);
+    expect(await stop.json()).toEqual({ ok: true, queued: false });
+    expect(rows()).toEqual([]);
+    expect(kicks).toBe(before);
+  });
+  it("the lane's own Stop still is", async () => {
+    const stop = await post("/hook/stop", { TMUX_PANE: "%7", session_id: "sess-web" });
+    expect(stop.status).toBe(200);
+    expect(await stop.json()).toEqual({ ok: true, queued: true });
+    expect(rows().map(r => [r.path, r.window])).toEqual([["/hook/stop", "web"]]);
+  });
+  it("only a Stop is judged: a notice from the same foreign session is still kept", async () => {
+    const note = await post("/notify", { TMUX_PANE: "%7", session_id: "sess-headless", text: "hi" });
+    expect(note.status).toBe(202);
+    expect(rows().map(r => r.path)).toEqual(["/notify"]);
   });
 });
 

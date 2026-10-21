@@ -3100,6 +3100,19 @@ export const CONTROLS: Control[] = [
   { id: "t280-no-long-text-cap-check", task: "280", file: "apps/fleet/src/application/connections.ts",
     find: "!c.caps.includes(CAP_LONG_TEXT)", replace: "false",
     run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  // ---- B6 (board T-306): only the lane's own session posts lane events, each guard removed once.
+  { id: "b6-foreign-stop-kept", task: "306", file: "apps/node-agent/src/relay/server.ts",
+    find: "if (path === \"/hook/stop\" && d.foreign?.(body)) {", replace: "if (false && d.foreign?.(body)) {",
+    run: ["apps/node-agent/test/relay-server.test.ts"], expect: "not a lane finish" },
+  { id: "b6-own-alias-not-foreign", task: "306", file: "apps/node-agent/src/relay/window-of.ts",
+    find: "s.sessionId === id || (s.aliases?.includes(id) ?? false)", replace: "s.sessionId === id",
+    run: ["apps/node-agent/test/window-of.test.ts"], expect: "one of its aliases" },
+  { id: "b6-no-fresh-read", task: "306", file: "apps/node-agent/src/relay/window-of.ts",
+    find: "const fresh = (o.refresh ? o.refresh() : o.sessions()).get(b.TMUX_PANE);", replace: "const fresh = own;",
+    run: ["apps/node-agent/test/window-of.test.ts"], expect: "reads the registry again" },
+  { id: "b6-unknown-pane-not-foreign", task: "306", file: "apps/node-agent/src/relay/window-of.ts",
+    find: "if (own === undefined || named(own, b.session_id)) return false;", replace: "if (own !== undefined && named(own, b.session_id)) return false;",
+    run: ["apps/node-agent/test/window-of.test.ts"], expect: "never foreign on unknown" },
 ];
 
 // ---- the runner

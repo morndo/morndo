@@ -10,6 +10,8 @@
 //   {"decision":"block","reason":…}; the turn goes on, and its next Stop is the one that counts. The asked one, either
 //   way, is spooled with `statusAsked: true` added to its body, so subscribers still get the answer it carried, and the
 //   fleet makes no lane event of it;
+// - /hook/stop from a session that is not the one registered for the pane it names (B6; window-of.ts foreignStop): 200
+//   {"ok":true,"queued":false}, not spooled, never asked for a status; a lane's own Stop and every unknown case go on as above;
 // - /file {path, …}: the file is copied under today's confinement rules into relay-files and the event carries
 //   {…, ref, name, size} instead of the path; 413 over 25 MiB, 403 where files are never shared, 404 when missing, 503
 //   when the node's disk budget can't hold the copy (counted as a drop, like a spool that can't be written).
@@ -32,6 +34,8 @@ export type RelayDeps = {
   files: RelayFiles;
   windowOf: (body: unknown) => string | null;
   ask?: (body: unknown, window: string | null) => string | null;
+  // B6: a Stop from a session that is not the one registered for its pane, answered and dropped.
+  foreign?: (body: unknown) => boolean;
   onAppended: () => void;
   log: Logger;
   now?: () => number;
@@ -83,6 +87,11 @@ export async function startRelay(d: RelayDeps): Promise<Relay> {
     if (raw === "too_large") { answer(res, 413); return; }
     let body = parse(raw);
     if (Buffer.byteLength(JSON.stringify(body)) > HOOK_BODY_MAX) { answer(res, 413); return; }
+    if (path === "/hook/stop" && d.foreign?.(body)) {
+      d.log.info("a Stop from another session in a lane's pane is not a lane finish: not passed on (B6)");
+      res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true,"queued":false}');
+      return;
+    }
     const session = field(body, "session_id");
     const event = { path: path as "/hook/stop" | "/hook/failure" | "/notify" | "/file", at: now(), session: typeof session === "string" ? session : null, window: d.windowOf(body) };
     const asked = path === "/hook/stop" ? d.ask?.(body, event.window) ?? null : null;
