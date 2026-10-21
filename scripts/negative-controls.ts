@@ -3144,6 +3144,18 @@ export const CONTROLS: Control[] = [
   { id: "t303-stop-window-gone-after-look", task: "303", file: "apps/node-agent/src/ops/lane-ops.ts",
     find: "catch (e) { if (tmuxFailure(e) !== \"absent\") throw e; }", replace: "catch (e) { throw e; }",
     run: ["apps/node-agent/test/launcher.test.ts"], expect: "closed itself after the look" },
+  // ---- B4 (board T-304): a long first prompt, each guard removed once.
+  { id: "b4-start-prompt-bound", task: "304", file: "packages/protocol/src/fleet.ts",
+    find: "prompt: z.exactOptional(messageText())",
+    replace: "prompt: z.exactOptional(z.string().check(z.minLength(1), z.maxLength(LIMITS.maxSendText)))",
+    run: ["packages/protocol/test/fleet.test.ts", "apps/fleet/test/long-text.test.ts"] },
+  { id: "b4-old-node-long-prompt", task: "304", file: "apps/fleet/src/application/connections.ts",
+    find: '(op === "pane.send" || op === "lane.deliver" || op === "lane.start") && typeof args === "object" && args !== null',
+    replace: '(op === "pane.send" || op === "lane.deliver") && typeof args === "object" && args !== null',
+    run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  { id: "b4-console-prompt-bound", task: "304", file: "apps/hub/src/console/lanes.ts",
+    find: "v.prompt !== undefined && v.prompt.length > LIMITS.maxMessageText", replace: "false",
+    run: ["apps/hub/test/lanes-console.test.ts"] },
   { id: "t305-stamp-ignored", task: "305", file: "packages/service-kit/src/version.ts",
     find: "b = readStamp(dir) ?? { version: pkg.version as string, commit: gitHead(dir) };", replace: "b = { version: pkg.version as string, commit: gitHead(dir) };",
     run: ["packages/service-kit/test/build.test.ts"], expect: "a stamped tree reports version+commit" },
@@ -3261,6 +3273,16 @@ export const CONTROLS: Control[] = [
   { id: "t340-proof-read-deny", task: "T-340", file: "apps/connections/src/adapters/caller-proof.ts",
     find: "    if (!rules.some(entry => covers(entry, path))) return no(`Read is not denied for ${path}`);\n", replace: "",
     run: ["apps/connections/test/caller-proof.test.ts"], expect: "refuses settings that leave the vault" },
+  // ---- B13: a lane waiting on its own background work is listed under Working (the sidebar's sections, the phone's status).
+  { id: "b13-partition-no-background", task: "B13", file: "apps/web/src/lib/lanes.ts",
+    find: "w.needsYou || inBackground(w, runs)", replace: "w.needsYou",
+    run: ["apps/web/test/lanes.test.ts"], expect: "a lane waiting on its own background work is listed under Working" },
+  { id: "b13-background-offline-needs-you-win", task: "B13", file: "apps/web/src/lib/lanes.ts",
+    find: '!w.offline && !w.needsYou && w.state !== "active"', replace: 'w.state !== "active"',
+    run: ["apps/web/test/lanes.test.ts"], expect: "offline wins" },
+  { id: "b13-status-no-background", task: "B13", file: "apps/web/src/lib/phone/chat/rows.ts",
+    find: 'run && onOwnWork(run) && (s.kind === "idle" || s.kind === "finished")', replace: "false",
+    run: ["apps/web/test/phone-chat.test.ts"], expect: "is listed under Working" },
 ];
 
 // ---- the runner
