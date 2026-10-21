@@ -3192,6 +3192,16 @@ export const CONTROLS: Control[] = [
   { id: "b11-checkpoint-is-needs-decision", task: "311", file: "apps/board-cli/src/prompt.ts",
     find: "STATUS: NEEDS DECISION checkpoint:", replace: "STATUS: DONE checkpoint:",
     run: ["apps/board-cli/test/prompt-doc.test.ts"], expect: "checkpoint" },
+  // ---- B13: a lane waiting on its own background work is listed under Working (the sidebar's sections, the phone's status).
+  { id: "b13-partition-no-background", task: "B13", file: "apps/web/src/lib/lanes.ts",
+    find: "w.needsYou || inBackground(w, runs)", replace: "w.needsYou",
+    run: ["apps/web/test/lanes.test.ts"], expect: "a lane waiting on its own background work is listed under Working" },
+  { id: "b13-background-offline-needs-you-win", task: "B13", file: "apps/web/src/lib/lanes.ts",
+    find: '!w.offline && !w.needsYou && w.state !== "active"', replace: 'w.state !== "active"',
+    run: ["apps/web/test/lanes.test.ts"], expect: "offline wins" },
+  { id: "b13-status-no-background", task: "B13", file: "apps/web/src/lib/phone/chat/rows.ts",
+    find: 'run && onOwnWork(run) && (s.kind === "idle" || s.kind === "finished")', replace: "false",
+    run: ["apps/web/test/phone-chat.test.ts"], expect: "is listed under Working" },
 ];
 
 // ---- the runner
