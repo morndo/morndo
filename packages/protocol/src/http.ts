@@ -1,6 +1,7 @@
 // The JSON bodies the app posts to the hub (ADR-0004, ADR-0006). Unknown fields are dropped; a body that doesn't fit
 // is refused with 400 before any service sees it.
 import * as z from "./z.ts";
+import { LIMITS } from "./fleet.ts";
 
 const text = (max: number) => z.string().check(z.maxLength(max));
 // What a browser's WebAuthn call returned; the passkey library checks the rest.
@@ -25,7 +26,7 @@ export const LinkDecisionBody = z.object({
   code: z.exactOptional(code()),                                     // what the approver typed of the new device's code
 });
 export const SendBody = z.object({
-  text: text(100_000),
+  text: text(LIMITS.maxMessageText),
   requestId,
   // S6: what the principal saw the worker wait for when he wrote it: "none", or a question or menu identity.
   seen: text(2000),

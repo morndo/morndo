@@ -3,7 +3,7 @@
 import { generateKeyPairSync, randomBytes, sign, verify } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  ALERT_KINDS, AgentFrames, AgentMessage, CLOSE, ERROR_EXECUTED, FleetFrames, FleetMessage, KEYED_OPS, LIMITS, OP_ARGS, OP_NAMES, OP_RESULTS, STEP_UP_OPS,
+  ALERT_KINDS, AgentFrames, AgentMessage, CAP_LONG_TEXT, CLOSE, ERROR_EXECUTED, FleetFrames, FleetMessage, KEYED_OPS, LIMITS, OP_ARGS, OP_NAMES, OP_RESULTS, STEP_UP_OPS, SendBody,
   decode, fleetSigPayload, fleetUrlOk, formatJoinString, nodeSigPayload, parseJoinString, type ErrorCode, type JoinString, type OpName,
 } from "../src/index.ts";
 import * as z from "../src/z.ts";
@@ -21,7 +21,7 @@ const health = { memTotal: 1, memAvailable: 1, psiSome10: null, psiFull10: 0.5, 
 describe("limits", () => {
   it("are the spec's numbers", () => {
     expect(LIMITS).toMatchObject({
-      maxMessageBytes: 512 << 10, maxPayload: 1 << 20, chunkBytes: 256 << 10, maxFileBytes: 25 << 20, maxSendText: 8000, maxKeys: 4096,
+      maxMessageBytes: 512 << 10, maxPayload: 1 << 20, chunkBytes: 256 << 10, maxFileBytes: 25 << 20, maxSendText: 8000, maxMessageText: 100_000, maxKeys: 4096,
       captureManyMax: 64, captureBytesPerPane: 6 << 10, replayWindow: 256, pingMs: 15_000, agentPingTimeoutMs: 35_000, healthMs: 30_000,
       inventoryPollMs: 2000, instancePongMs: 3000, conflictRetryMs: 5 * 60_000, inventoryWaitMs: 300, bulkQueueMax: 8, eventsBufferBytes: 8 << 20,
       handshakeBurst: 10, handshakeRefillMs: 6000, joinCodeTtlMs: 10 * 60_000, doneKeyTtlMs: 7 * 86_400_000, outboxKeepMs: 86_400_000,
@@ -36,6 +36,16 @@ describe("limits", () => {
     expect(Buffer.byteLength(many)).toBeLessThanOrEqual(LIMITS.maxMessageBytes);
     const chunk = JSON.stringify({ v: 1, t: "res", id: "r1", invVersion: 1, store: UUID, ok: true, result: { bytes: Buffer.alloc(LIMITS.chunkBytes, 0xff).toString("base64"), size: LIMITS.maxFileBytes, eof: false } });
     expect(Buffer.byteLength(chunk)).toBeLessThanOrEqual(LIMITS.maxMessageBytes);
+  });
+  it("a whole maxMessageText message fits one op message", () => {
+    const req = JSON.stringify({ v: 1, t: "req", id: "r1", op: "pane.send", timeoutMs: 10_000, key: "hub:ep1:req-1",
+      args: { workerId: W, text: "ü".repeat(LIMITS.maxMessageText), expect: expectArgs } });
+    expect(Buffer.byteLength(req)).toBeLessThanOrEqual(LIMITS.maxMessageBytes);
+  });
+  it("the HTTP SendBody's text bound is LIMITS.maxMessageText, the same the ops take", () => {
+    const body = (text: string) => ({ text, requestId: UUID, seen: "none" });
+    expect(z.safeParse(SendBody, body("x".repeat(LIMITS.maxMessageText))).success).toBe(true);
+    expect(z.safeParse(SendBody, body("x".repeat(LIMITS.maxMessageText + 1))).success).toBe(false);
   });
 });
 
@@ -76,6 +86,9 @@ describe("messages, agent → fleet", () => {
       expect(kind(decode(AgentFrames, JSON.stringify(m))), m.t).toBe("ok");
       expect(z.safeParse(AgentMessage, m).success, m.t).toBe(true);
     }
+  });
+  it("a hello may say it takes long messages (CAP_LONG_TEXT, beside its ops)", () => {
+    expect(z.safeParse(AgentMessage, { ...msgs[1], caps: ["pane.send", CAP_LONG_TEXT] }).success).toBe(true);
   });
   it("tells a t it doesn't know from a malformed message, so the first can be answered with an error", () => {
     expect(decode(AgentFrames, JSON.stringify({ v: 1, t: "ev.desktop", x: 1 }))).toEqual({ kind: "unknown", t: "ev.desktop" });
@@ -150,6 +163,17 @@ describe("op arguments (what the agent acts on: strict)", () => {
     expect(ok("file.put", { upload: "u1", offset: 0, bytes: Buffer.from("png").toString("base64"), final: true, name: "shot ü.png" })).toBe(true);
     expect(ok("lane.start", { name: "fix: a/b ü.2", cwd: "/w/repo", account: "acct2", resume: UUID })).toBe(true);
     expect(ok("worktree.add", { repo: "/w/repo", name: "fix/login", base: "main" })).toBe(true);
+  });
+  it("takes a message of up to maxMessageText in pane.send and lane.deliver; lane.start's prompt stays at maxSendText", () => {
+    const deliver = (text: string) => ok("lane.deliver", { id: "hub:k1", target: { lane: "w", sticky: false }, text });
+    expect(ok("pane.send", { workerId: W, text: "ü".repeat(LIMITS.maxMessageText), expect: expectArgs })).toBe(true);
+    expect(deliver("ü".repeat(LIMITS.maxMessageText))).toBe(true);
+    expect(ok("pane.send", { workerId: W, text: "x".repeat(LIMITS.maxMessageText + 1), expect: expectArgs })).toBe(false);
+    expect(deliver("x".repeat(LIMITS.maxMessageText + 1))).toBe(false);
+    expect(ok("pane.send", { workerId: W, text: "", expect: expectArgs })).toBe(false);                    // a message is never empty
+    expect(deliver("")).toBe(false);
+    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(LIMITS.maxSendText) })).toBe(true);
+    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(LIMITS.maxSendText + 1) })).toBe(false);
   });
   it("refuses what is too long, not a path, or could escape (negative controls)", () => {
     expect(ok("inventory.get", { all: true })).toBe(false);
