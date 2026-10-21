@@ -1,6 +1,6 @@
 // The principal's route for the console's one-time approval code (ADR-0031, docs/design/memory/README.md "App"; M8):
 // POST /api/memory/notes/:id/approval-code, a Command under step-up (AC7) answered once with the code that
-// `morndo memory approve <id> --code` spends. A real server on a random port, fake passkeys for a signed-in session, a
+// `morndo memory approve <id>` spends, the code read from stdin. A real server on a random port, fake passkeys for a signed-in session, a
 // controllable clock, synthetic notes. The code itself is said once on the wire and never logged; only its hash is kept.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -137,10 +137,10 @@ describe("POST /api/memory/notes/:id/approval-code", () => {
     expect(minted.status).toBe(200);
     const code = String(minted.body.code);
     const said: string[] = [];
-    const io = { env: { HOME: h.dir }, out: async (t: string) => { said.push(t); }, err: async (t: string) => { said.push(t); } };
-    expect(await runMemory(["approve", id, "--code", code], io, { dataDir: h.dir, now: () => now })).toBe(MEMORY_EXIT.ok);
+    const io = { env: { HOME: h.dir }, out: async (t: string) => { said.push(t); }, err: async (t: string) => { said.push(t); }, readCode: async () => code };
+    expect(await runMemory(["approve", id], io, { dataDir: h.dir, now: () => now })).toBe(MEMORY_EXIT.ok);
     expect(said.join("\n")).toContain(`approved ${id}`);
-    expect(await runMemory(["approve", id, "--code", code], io, { dataDir: h.dir, now: () => now })).toBe(MEMORY_EXIT.refused);
+    expect(await runMemory(["approve", id], io, { dataDir: h.dir, now: () => now })).toBe(MEMORY_EXIT.refused);
     expect(said.join("\n")).toContain("that code is wrong, already used or expired");
   });
 });

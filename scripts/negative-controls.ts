@@ -3197,6 +3197,12 @@ export const CONTROLS: Control[] = [
     find: "await withStepUp(() => api.post<{ code: string; expiresAt: number }>(`/api/memory/notes/${encodeURIComponent(noteId)}/approval-code`), at => (verifiedAt = at));",
     replace: "await api.post<{ code: string; expiresAt: number }>(`/api/memory/notes/${encodeURIComponent(noteId)}/approval-code`);",
     run: ["apps/web/test/memory-code-flow.test.ts"], expect: "data-memory-code" },
+  { id: "b9-console-argv-code-refused", task: "309", file: "apps/hub/src/console/memory.ts",
+    find: 'if (sub === "approve" && extra.includes("code")) {', replace: 'if (false) {',
+    run: ["apps/hub/test/memory-console.test.ts"] },
+  { id: "b9-console-reads-stdin", task: "309", file: "apps/hub/src/console/memory.ts",
+    find: 'const code = (await io.readCode?.()) ?? "";', replace: 'const code = "";',
+    run: ["apps/hub/test/memory-console.test.ts", "apps/hub/test/memory-approval-http.test.ts"] },
 ];
 
 // ---- the runner

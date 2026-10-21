@@ -733,7 +733,7 @@ export function startHttp(p: {
     }
     // ADR-0031 (M8): the console's one-time approval code, minted in the app for one Note that waits. A Command under
     // step-up, like the approval itself; the code is said once here and never logged or stored but its hash — the
-    // console spends it (`morndo memory approve <id> --code …`). No body to read. Not an agent route: only a session
+    // console spends it (`morndo memory approve <id>`, the code read from stdin). No body to read. Not an agent route: only a session
     // reaches it (the agents' door has no such path).
     const approvalCode = /^\/api\/memory\/notes\/(N-\d{1,9})\/approval-code$/.exec(path);
     if (approvalCode && method === "POST") {

@@ -9,7 +9,7 @@ import { startWeb, type Web } from "./harness.ts";
 const NOW = Date.parse("2026-10-21T12:00:00Z");
 const CODE = "K7M2-9QPX-4TWB";
 const CODE2 = "VR72-M4XK-9QTB";
-const COMMAND = `morndo memory approve N-12 --code ${CODE}`;
+const COMMAND = "morndo memory approve N-12";
 
 type Item = Record<string, unknown>;
 

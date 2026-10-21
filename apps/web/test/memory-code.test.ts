@@ -27,7 +27,7 @@ describe("noteIdOfAsk", () => {
 
 describe("consoleCommand", () => {
   it("is the exact line the console takes", () => {
-    expect(consoleCommand("N-12", CODE)).toBe(`morndo memory approve N-12 --code ${CODE}`);
+    expect(consoleCommand("N-12")).toBe("morndo memory approve N-12");     // the code is never part of the command (argv shows in ps)
   });
 });
 
@@ -52,7 +52,7 @@ describe("the reveal", () => {
   it("shownFor keeps what was asked for, with the command; a refusal keeps only its words", () => {
     expect(shownFor("N-12", minted)).toEqual({
       kind: "shown", noteId: "N-12", code: CODE, expiresAt: NOW + 600_000,
-      command: `morndo memory approve N-12 --code ${CODE}`,
+      command: "morndo memory approve N-12",
     });
     expect(shownFor("N-12", { ok: false, text: "This note is gone." })).toEqual({ kind: "failed", text: "This note is gone." });
   });

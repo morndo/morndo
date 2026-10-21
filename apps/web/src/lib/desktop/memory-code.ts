@@ -12,8 +12,9 @@ export function noteIdOfAsk(id: string): string | null {
   return m === null ? null : `N-${m[1]}`;
 }
 
-// The line the console takes (the code is spent by `morndo memory approve`, never by the app itself).
-export const consoleCommand = (noteId: string, code: string): string => `morndo memory approve ${noteId} --code ${code}`;
+// The line that spends the code at the console. The code is typed at its prompt (or piped on stdin), never part of the
+// command: an argument shows in the process list, and `morndo memory approve` refuses `--code`.
+export const consoleCommand = (noteId: string): string => `morndo memory approve ${noteId}`;
 
 export type CodeOutcome = { ok: true; code: string; expiresAt: number } | { ok: false; text: string };
 
@@ -43,7 +44,7 @@ export const CLOSED: Reveal = { kind: "idle" };
 
 export function shownFor(noteId: string, outcome: CodeOutcome): Reveal {
   return outcome.ok
-    ? { kind: "shown", noteId, code: outcome.code, expiresAt: outcome.expiresAt, command: consoleCommand(noteId, outcome.code) }
+    ? { kind: "shown", noteId, code: outcome.code, expiresAt: outcome.expiresAt, command: consoleCommand(noteId) }
     : { kind: "failed", text: outcome.text };
 }
 

@@ -55,7 +55,7 @@ import { MemoryStore } from "./adapters/memory-store.ts";
 import { MemoryFromFuture } from "./adapters/memory-migrations.ts";
 import { MemoryService } from "./application/memory-service.ts";
 import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
-import { runMemory } from "./console/memory.ts";
+import { readCodeLine, runMemory } from "./console/memory.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -426,7 +426,9 @@ switch (cmd) {
   }
   // ADR-0031: Memory at the console, which acts for the principal; it opens memory.db itself (console/memory.ts).
   case "memory": {
-    const code = await runMemory(args, processIo(), { dataDir: config.dataDir });
+    // The one-time code is read from stdin (a prompt on a terminal, one line when piped), never from argv (console/memory.ts).
+    const stdin = process.stdin;
+    const code = await runMemory(args, { ...processIo(), readCode: () => readCodeLine(stdin, stdin.isTTY === true, text => void process.stderr.write(text)) }, { dataDir: config.dataDir });
     store.close();
     await exitAfterOutput(code);
     break;

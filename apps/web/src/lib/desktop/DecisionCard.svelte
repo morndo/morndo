@@ -228,7 +228,7 @@
     <div class="memcode" role="group" aria-label="One-time console code" data-memory-reveal>
       <code data-memory-code>{r.code}</code>
       <p>Valid for {validUntil(r.expiresAt, now)}. It works once, for this note only.</p>
-      <p class="how">At the console: <code data-memory-command>{r.command}</code></p>
+      <p class="how">At the console run <code data-memory-command>{r.command}</code> and enter the code when asked.</p>
       <div class="row">
         <button type="button" class="btn" onclick={() => void copyCommand(r.command)}>Copy command</button>
         <button type="button" class="link" onclick={closeCode}>Close</button>

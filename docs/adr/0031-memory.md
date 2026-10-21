@@ -82,8 +82,10 @@ Round 2 (2026-10-21) ships the app side: a pending Note files an Ask on the Deci
 by the hub (E14), at most ten at a time, the oldest first — whose Approve/Reject answer under step-up approves or
 invalidates the Note and is recorded as the Decision (E8); nothing is typed and no queue is touched (M1). Minting the
 code has a route of its own, `POST /api/memory/notes/:id/approval-code`: a Command under step-up, answered once with
-`{ code, expiresAt }`, never logged; `morndo memory approve <id> --code` spends it. The app has no button for the route
+`{ code, expiresAt }`, never logged; `morndo memory approve <id>` spends it, reading the code from stdin: an `--code` argument would show the live code in `ps`, so it is refused. The app has no button for the route
 yet: the Ask answers approval, the code is for the console.
 
 Round 3 (2026-10-21, board T-309) ships that button: the Ask's card in the app offers "Console code…", which mints the
 code under step-up and shows it once — with its expiry and the exact console command — until it is closed or expires.
+
+Rejecting is the safe direction, so `morndo memory invalidate` at the console needs no code: it can only keep a note out of the lanes' skills, never let one in.

@@ -10,7 +10,7 @@ import { fakeFeed, startWeb, type FeedWin, type Web } from "./harness.ts";
 
 const NOW = Date.now();
 const CODE = "K7M2-9QPX-4TWB";
-const COMMAND = `morndo memory approve N-12 --code ${CODE}`;
+const COMMAND = "morndo memory approve N-12";
 
 // The Ask a pending Note files (memory-asks.ts shape): mem-n-12 from the note N-12, asker "memory", tracking "hub".
 const ask: Ask = {

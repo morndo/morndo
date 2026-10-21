@@ -68,12 +68,13 @@ The console's one-time code is minted in the app, for one note, under the same s
 
 `POST /api/memory/notes/:id/approval-code` — 200 `{ code, expiresAt }` (with `Cache-Control: no-store`); 401 without a
 session, 403 `step_up` on a stale passkey check, 404 `not_found`, 409 `not_pending`, 404 `memory_off`. The code is said
-once on the wire, never logged, and only its hash is stored; `morndo memory approve <id> --code …` spends it at the
-console.
+once on the wire, never logged, and only its hash is stored; `morndo memory approve <id>` spends it at the
+console: it asks for the code on stdin (a prompt on a terminal, one line when piped), and refuses `--code`, because an
+argument shows in the process list (`ps`).
 
 The Ask's card in the app has a **Console code…** button: it calls the route for that one note under step-up and shows
-the code once — the code itself, how long it stays valid, and the exact `morndo memory approve <id> --code …` line to
-copy. The code is held only in the card's own state, never in storage, the URL or a log, and it is gone when it is
+the code once — the code itself, how long it stays valid, and the exact `morndo memory approve <id>` line to
+copy (the code is typed at its prompt, not put in the command). The code is held only in the card's own state, never in storage, the URL or a log, and it is gone when it is
 closed, when it expires, or when the note is decided; asking again mints a new code. The phone's card has no button:
 there is no console to type the command into.
 
@@ -82,7 +83,7 @@ there is no console to type the command into.
 `morndo memory <list|show|approve|invalidate|import|sync> ...` opens `memory.db` directly, like the other console
 commands open the hub's database.
 
-- `approve <id> --code CODE` acts as `{kind: "principal", via: "console"}`. The one-time code comes from the app, minted
+- `approve <id>` asks for the one-time code on stdin and acts as `{kind: "principal", via: "console"}`. The one-time code comes from the app, minted
   for that note by a step-up session (M8); without it, or with a wrong, used or expired one, the approval is refused.
 - `import --dir D --scope S [--procedure FILE]...` loads an agent's own markdown notes (frontmatter `name`,
   `description`) as `{kind: "import", label}`. That makes them tier 3: facts by default, procedures only as named, and a
