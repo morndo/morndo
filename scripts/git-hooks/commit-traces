@@ -13,12 +13,18 @@
 # history whose address cannot be rewritten; only its address is spared, by an
 # exact match of the whole id. Nothing sets it but a proof (pre-push-proof.sh
 # pins the one commit this repository has); never set it in CI or a hook.
+# mails and range read the whole range with one git log into a temp file and
+# judge it with one awk pass per concern, not a set of forks per commit. The
+# per-commit rules stay in check_commit, run only for the candidates that the
+# awk pass finds.
 set -eu
 
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
 robot=$(printf '\360\237\244\226')
+fs=$(printf '\037')
 err=$(mktemp)
-trap 'rm -f "$err"' EXIT
+out=$(mktemp)
+trap 'rm -f "$err" "$out"' EXIT
 
 fail() {
   echo "commit-traces: $*" >&2
@@ -88,23 +94,96 @@ check_commit() {
   check_mails "$sha"
 }
 
-walk() {
-  action=$1
+# The whole range in one git log, into the out file. A failing git log (a
+# missing sha, a bad range) must not look like a clean check.
+log_all() {
+  fmt=$1
   shift
-  [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
-  # A failing rev-list (a missing sha, a bad range) must not look like a clean check.
   status=0
-  list=$(git rev-list "$@" 2>"$err") || status=$?
+  git -c log.showSignature=false log --no-color --format="$fmt" "$@" >"$out" 2>"$err" || status=$?
   if [ "$status" -ne 0 ]; then
     cat "$err" >&2
     fail "revision range"
   fi
-  while IFS= read -r sha; do
-    [ -n "$sha" ] || continue
-    "$action" "$sha"
-  done <<EOF
-$list
-EOF
+}
+
+# One pass of both noreply rules and the legacy pin, in git's order, over a log
+# of exactly id, author address and committer address, one line each, split at
+# the unit separator. A name or an address that holds the separator shifts the
+# fields, so a record that is not exactly three fields refuses (fail closed).
+# The addresses are always read from this log, never from the one that also
+# holds names and messages, where a crafted name could shift them.
+scan_mails() {
+  LC_ALL=C awk -v legacy=" ${COMMIT_TRACES_LEGACY:-} " -v fs="$fs" '
+    BEGIN { FS = fs }
+    {
+      sub(/^[[:space:]]+/, "", $0)
+      if ($0 == "") next
+      if (NF != 3) {
+        printf "commit-traces: %s record does not read as id, author and committer address\n", substr($0, 1, 40) > "/dev/stderr"
+        exit 1
+      }
+      if (index(legacy, " " $1 " ")) next
+      if (tolower($2) !~ /^[^@[:space:]]+@users[.]noreply[.]github[.]com$/) {
+        printf "commit-traces: %s author email is not @users.noreply.github.com\n", $1 > "/dev/stderr"
+        exit 1
+      }
+      if (tolower($3) !~ /^[^@[:space:]]+@users[.]noreply[.]github[.]com$/ &&
+          tolower($3) != "noreply@github.com") {
+        printf "commit-traces: %s committer email is not a noreply address\n", $1 > "/dev/stderr"
+        exit 1
+      }
+    }' "$1"
+}
+
+# The ids bad_message or bad_ident can refuse: everything they match (a name,
+# a vendor domain, generated with or by, their urls, trailers, [bot], the
+# emoji) holds one of these markers, so a record holding none is clean by
+# both. A record that does not start with a commit id (a message holding the
+# record separator) refuses: fail closed, never skip.
+candidates() {
+  LC_ALL=C awk '
+    BEGIN {
+      FS = "\037"; RS = "\036"
+      split("claude anthropic cursor codex copilot gpt gemini glm generated openai [bot] co-authored-by signed-off-by \360\237\244\226", mark, " ")
+    }
+    {
+      sub(/^[[:space:]]+/, "", $0)
+      if ($0 == "") next
+      id = substr($0, 1, 40)
+      if (length($0) < 40 || id ~ /[^0-9a-f]/) {
+        printf "commit-traces: %s record is not a commit\n", id > "/dev/stderr"
+        exit 1
+      }
+      text = tolower($0)
+      for (m in mark) {
+        if (index(text, mark[m])) {
+          print id
+          break
+        }
+      }
+    }
+' "$1"
+}
+
+# The mails mode: both noreply rules over the whole range in one pass.
+mails() {
+  [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
+  log_all '%H%x1f%ae%x1f%ce' "$@"
+  scan_mails "$out"
+}
+
+# The range mode: one pass finds the candidates, check_commit judges each
+# one, then the mails mode's own log and pass cover the whole range.
+range() {
+  [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
+  log_all '%H%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%B%x1e' "$@"
+  list=$(candidates "$out")
+  for sha in $list; do
+    check_commit "$sha"
+  done
+  log_all '%H%x1f%ae%x1f%ce' "$@"
+  scan_mails "$out"
 }
 
 [ "$#" -ge 1 ] || fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"
@@ -120,10 +199,10 @@ case "$mode" in
     check_message "$(awk '/^# -+ >8 -+/ { exit } /^#/ { next } { print }' "$1")"
     ;;
   range)
-    walk check_commit "$@"
+    range "$@"
     ;;
   mails)
-    walk check_mails "$@"
+    mails "$@"
     ;;
   *)
     fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"
