@@ -160,14 +160,14 @@ export class FakeAgent {
   // hello → challenge (the fleet's signature checked against the pinned key) → proof → welcome.
   async connect(o: {
     proto?: number[]; autoPong?: boolean; headers?: Record<string, string>; proof?: "good" | "tampered" | "other-key"; pinned?: string; node?: string;
-    caps?: string[];
+    caps?: string[]; commit?: string;
   } = {}): Promise<Connected> {
     const node = o.node ?? this.node;
     if (!(await this.#open(o))) return { ok: false, closed: await this.#closed, fleetSigOk: null };
     const clientNonce = randomBytes(32).toString("base64url");
     this.send({
       v: 1, t: "hello", node, instanceId: this.instanceId, streamId: this.streamId, proto: o.proto ?? [FLEET_PROTO],
-      agent: { version: "test-agent/1" }, claude: { version: null }, caps: o.caps ?? ["inventory.get"], clientNonce,
+      agent: { version: "test-agent/1", ...(o.commit !== undefined ? { commit: o.commit } : {}) }, claude: { version: null }, caps: o.caps ?? ["inventory.get"], clientNonce,
     });
     const challenge = await this.next(m => (m.t === "challenge" ? m : undefined));
     if (!challenge) return { ok: false, closed: await this.#closed, fleetSigOk: null };

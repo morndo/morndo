@@ -54,9 +54,20 @@ describe("the client API", () => {
     await fleet.joined("mac");
     await vi.waitFor(() => expect(fleet.connections.latest("pc").health).not.toBeNull());
     expect((await client(fleet.config.socketPath).get("/v1/nodes"))?.body).toEqual([
-      { name: "mac", status: "offline", health: null, agent: null },
-      { name: "pc", status: "online", health: expect.objectContaining({ load1: 2 }), agent: "test-agent/1" },
+      { name: "mac", status: "offline", health: null, agent: null, commit: null },
+      { name: "pc", status: "online", health: expect.objectContaining({ load1: 2 }), agent: "test-agent/1", commit: null },
     ]);
+  });
+
+  it("/v1/nodes lists each node's build", async () => {
+    const fleet = await startTestFleet();
+    const old = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    const fresh = "0123456789abcdef0123456789abcdef01234567";
+    await fleet.online("pc", { commit: old });
+    await fleet.online("mac", { commit: fresh });
+    await fleet.online("vm");                                      // an older agent: its hello has no commit
+    const body = (await client(fleet.config.socketPath).get("/v1/nodes"))?.body as { name: string; agent: string | null; commit: string | null }[];
+    expect(body.map(n => [n.name, n.agent, n.commit])).toEqual([["mac", "test-agent/1", fresh], ["pc", "test-agent/1", old], ["vm", "test-agent/1", null]]);
   });
 
   it("lane names with spaces, unicode, dots and slashes survive the list, their own URL and an op by lane", async () => {

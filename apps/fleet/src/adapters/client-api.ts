@@ -39,7 +39,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery } from "@morndo/protocol";
-import { Flight, productVersion } from "@morndo/service-kit";
+import { Flight, productStamp } from "@morndo/service-kit";
 import type { Connections } from "../application/connections.ts";
 import type { Deliveries } from "../application/deliveries.ts";
 import type { LaneEvents } from "../application/lane-events.ts";
@@ -182,7 +182,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     const method = req.method ?? "GET";
     const [first, second, third] = s;
     if (method === "GET" && s.length === 1 && first === "health") {
-      return json(res, 200, { version: productVersion(), schema, ready: true, inFlight: flight.list() });
+      return json(res, 200, { ...productStamp(), schema, ready: true, inFlight: flight.list() });
     }
     if (method === "GET" && s.length === 1 && first === "caps") return json(res, 200, { api: API_VERSIONS, stickyLanes: d.deliveries.stickyLanes });
     if (method === "GET" && s.length === 1 && first === "nodes") return json(res, 200, d.connections.list());
