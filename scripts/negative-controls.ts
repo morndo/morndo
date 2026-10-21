@@ -3112,6 +3112,9 @@ export const CONTROLS: Control[] = [
   { id: "t305-stage-without-stamp", task: "305", file: "scripts/release/stage.ts",
     find: "files.push({ path: \"app/build.json\"", replace: "void ({ path: \"app/build.json\"",
     run: ["scripts/release/release.test.ts"], expect: "stages the build stamp" },
+  { id: "t305-hello-without-commit", task: "305", file: "apps/node-agent/src/conn/connection.ts",
+    find: "...(AGENT_COMMIT !== null ? { commit: AGENT_COMMIT } : {})", replace: "",
+    run: ["apps/node-agent/test/agent.test.ts"], expect: "its hello carries the build it runs" },
 ];
 
 // ---- the runner
