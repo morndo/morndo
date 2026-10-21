@@ -62,4 +62,21 @@ describe("SqliteRevocations", () => {
     expect(r.droppedBy("upd-3", "connections")).toEqual(["secret_versions:vendor-key#1", "secrets:vendor-key"]);
   });
 
+
+  it("names a connection revoked in the directory the connections store keeps as JSON", () => {
+    // The connections store keeps its Connections in one row, directory.body, as JSON (apps/connections'
+    // store-migrations.ts): a revoked Connection is status "revoked" there, not a row of its own.
+    const home = join(scratch, "d");
+    const paths = databasePaths(home, {});
+    const backups = join(home, "backups");
+    const directory = (status: string) => JSON.stringify({
+      connections: [{ name: "vendor-a", status }, { name: "vendor-b", status: "on" }], events: [], seq: 3,
+    });
+    const table = "CREATE TABLE directory (id INTEGER PRIMARY KEY CHECK (id = 1), body TEXT NOT NULL);";
+    db(join(backups, "upd-4", "connections.db"), `${table} INSERT INTO directory VALUES (1, '${directory("on")}');`);
+    db(paths.connections, `${table} INSERT INTO directory VALUES (1, '${directory("revoked")}');`);
+    const r = new SqliteRevocations({ paths, backups });
+    expect(r.droppedBy("upd-4", "connections")).toEqual(["directory:vendor-a"]);
+  });
+
 });

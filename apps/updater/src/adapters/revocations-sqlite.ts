@@ -4,7 +4,8 @@
 // rollback asks which ids are revoked in the live database and not in this update's Backup of it. Both files are
 // opened read-only. The tables are the services' own: the hub's endpoints and agent_tokens (apps/hub's migrations),
 // the fleet's nodes (apps/fleet's migrations), and the connections store's secrets and secret versions (its
-// store-migrations.ts: status or state 'revoked'); a table a schema doesn't have yet holds no revocations.
+// store-migrations.ts: status or state 'revoked') and its Connections, kept as JSON in the one-row directory table
+// (body.connections[].status 'revoked'); a table a schema doesn't have yet holds no revocations.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -24,7 +25,7 @@ const REVOKED: Partial<Record<DatabaseName, readonly RevokedRows[]>> = {
   ],
 };
 
-function revokedIn(path: string, tables: readonly RevokedRows[]): Set<string> {
+function revokedIn(path: string, tables: readonly RevokedRows[], directory: boolean): Set<string> {
   const out = new Set<string>();
   const db = new Database(path, { readonly: true, fileMustExist: true });
   try {
@@ -35,10 +36,27 @@ function revokedIn(path: string, tables: readonly RevokedRows[]): Set<string> {
         out.add(`${table}:${row.id}`);
       }
     }
+    if (directory) {
+      const known = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'directory'").get();
+      const row = known === undefined ? undefined : db.prepare("SELECT body FROM directory WHERE id = 1").get() as { body: string } | undefined;
+      for (const name of revokedConnections(row?.body)) out.add(`directory:${name}`);
+    }
   } finally {
     db.close();
   }
   return out;
+}
+
+// The Connections the directory JSON names revoked. A body that is not the shape the store writes counts as holding
+// none here; the store itself refuses such a file when it opens it.
+function revokedConnections(body: string | undefined): string[] {
+  if (body === undefined) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(body); } catch { return []; }
+  const list = typeof parsed === "object" && parsed !== null && "connections" in parsed ? parsed.connections : null;
+  if (!Array.isArray(list)) return [];
+  return list.flatMap(c => typeof c === "object" && c !== null && "name" in c && "status" in c
+    && typeof c.name === "string" && c.status === "revoked" ? [c.name] : []);
 }
 
 export class SqliteRevocations implements Revocations {
@@ -55,7 +73,8 @@ export class SqliteRevocations implements Revocations {
     const tables = REVOKED[db];
     const backup = join(this.#backups, updateId, `${db}.db`);
     if (tables === undefined || !existsSync(backup) || !existsSync(this.#paths[db])) return [];
-    const kept = revokedIn(backup, tables);
-    return [...revokedIn(this.#paths[db], tables)].filter(id => !kept.has(id)).sort();
+    const directory = db === "connections";
+    const kept = revokedIn(backup, tables, directory);
+    return [...revokedIn(this.#paths[db], tables, directory)].filter(id => !kept.has(id)).sort();
   }
 }

@@ -479,4 +479,31 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(after.filter(t => t.startsWith("start:")).length, "the target's services started again").toBe(3);
   });
 
+
+  it("refuses to restore a connections store whose backup is older than a revocation of a connection", async () => {
+    // B migrates the connections store with a raised floor, so a rollback would restore its backup; a connection
+    // revoked during probation lives only in the live store's directory JSON. The restore is refused.
+    const w = await buildApplyWorld(scratch, { bSchemas: { ...SCHEMAS_A, connections: { version: 2, floor: 2 } } });
+    const directory = (status: string) => JSON.stringify({ connections: [{ name: "vendor-a", status }], events: [], seq: 2 });
+    const store = new Database(w.dbPaths.connections);
+    store.exec("CREATE TABLE directory (id INTEGER PRIMARY KEY CHECK (id = 1), body TEXT NOT NULL)");
+    store.prepare("INSERT INTO directory (id, body) VALUES (1, ?)").run(directory("on"));
+    store.close();
+    w.services.onStart = (s, current) => {
+      if (s !== "fleet" || current !== B) return;                   // B is up: its helper migrated the store, then a revoke
+      const db = new Database(w.dbPaths.connections);
+      db.pragma("user_version = 2");
+      writeFloor(db, 2);
+      db.prepare("UPDATE directory SET body = ? WHERE id = 1").run(directory("revoked"));
+      db.close();
+    };
+    w.probe.healthScript = (s) =>
+      s === "hub" && w.current() === B ? null : { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rollback_failed" });
+    if (out.kind !== "rollback_failed") throw new Error("unreachable");
+    expect(out.reason).toContain("directory:vendor-a");
+    expect(w.tape).not.toContain("backup:restore:connections");
+  });
+
 });

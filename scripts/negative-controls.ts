@@ -3185,6 +3185,10 @@ export const CONTROLS: Control[] = [
     find: "    deps.store.recordBad(formatVersion(ctx.u.target), deps.clock.now());\n    deps.store.recordHalt(formatVersion(ctx.u.target), reason, deps.clock.now());\n",
     replace: "",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "records the target bad" },
+  // The third review of 2026-10-21: a revoked Connection lives in the connections store's directory JSON.
+  { id: "c2a-directory-revocations-unread", task: "c2a", file: "apps/updater/src/adapters/revocations-sqlite.ts",
+    find: "    const directory = db === \"connections\";", replace: "    const directory = false;",
+    run: ["apps/updater/test/revocations-sqlite.test.ts"], expect: "directory:vendor-a" },
   { id: "c2a-drain-ignores-in-flight", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
     find: "reports.push(report ?? { service: s, blockers: [\"no_answer\"] });", replace: "reports.push({ service: s, blockers: [] });",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "expected 2 to be greater than or equal to 4" },
