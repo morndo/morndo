@@ -2166,6 +2166,11 @@ export const CONTROLS: Control[] = [
   { id: "pr4-pack-fold", task: "pr4", file: "scripts/release/archive.ts",
     find: "const next = foldStep(key);", replace: "const next = key;",
     run: ["scripts/release/release.test.ts"], expect: "folded names" },
+  // The review of 2026-10-21 (fourth round): an I/O error while unpacking must be thrown on, not returned as a refusal.
+  { id: "pr4-unpack-io-rethrown", task: "pr4", file: "apps/updater/src/adapters/installer-dirs.ts",
+    find: "      if (error instanceof TarRefused) return { ok: false, reason: error.reason };\n      throw error;",
+    replace: "      return { ok: false, reason: error instanceof TarRefused ? error.reason : String(error) };",
+    run: ["apps/updater/test/installer-dirs.test.ts"], expect: "thrown, not returned" },
   { id: "pr4-download-cap-ignored", task: "pr4", file: "apps/updater/src/adapters/https-get.ts",
     find: "if (chunk.length > room) overLimit = true;", replace: "if (false) overLimit = true;",
     run: ["apps/updater/test/artifacts-https.test.ts"], expect: "expected false to be true" },
