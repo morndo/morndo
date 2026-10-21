@@ -12,8 +12,9 @@ No private key is ever stored here.
 
 ## Signing `keys.json` (root key, owner only)
 
-The root key signs only through the owner's password manager SSH agent. `keys.json.sig` is not in the tree until
-then. Any edit to `keys.json` (its `expiresAt` included) makes an earlier signature invalid.
+The root key signs only through the owner's password manager SSH agent. `keys.json.sig` holds the owner's root
+signature over the current `keys.json`. Any edit to `keys.json` (its `expiresAt` included) makes it invalid, so
+it must be redone after every change.
 
 On the machine with the agent (point `SSH_AUTH_SOCK` at the agent's socket if it is not the default), from the
 repository root:
