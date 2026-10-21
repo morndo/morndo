@@ -102,6 +102,25 @@ describe("the board follows its assignee's run (B10)", () => {
     expect(shown(c.key)).toMatchObject({ status: "blocked", blockedReason: "needs_decision" });   // no line: the outcome names it
   });
 
+  it("DONE with background work left moves doing to review (D1), though a comment came during the turn", async () => {
+    const t = task("Ship it", "builder", T0, "doing");
+    await projector.start();
+    now = T0 + 30_000;
+    source.tell(run("builder", "working", T0 + 20_000, { source: "session" }));
+    expect(shown(t.key)?.status).toBe("doing");
+    now = T0 + 40_000;                                                // the lane comments during its turn
+    expect(board.act(t.key, { action: "comment", text: "pushed, CI is running" }, { ...BUILDER, name: "builder" }).ok).toBe(true);
+    now = T0 + 50_000;
+    source.tell(run("builder", "waiting", T0 + 45_000, {
+      source: "hook", outcome: "done", line: "STATUS: DONE pushed", wait: { on: "background", tasks: [{ type: "shell", label: "gh run watch" }] }, deadline: T0 + 900_000,
+    }));
+    expect(shown(t.key)?.status).toBe("review");
+    expect(lastEvent(t.key)).toMatchObject({ actor: { kind: "board", rule: "D1", lane: "builder" }, change: { kind: "moved", from: "doing", to: "review", reason: "background work still running" } });
+    // the same run, told again, moves nothing further (D6 on the move's own change)
+    source.tell(run("builder", "waiting", T0 + 45_000, { source: "hook", outcome: "done", wait: { on: "background", tasks: [] } }));
+    expect(boardMoves().map(e => e.change)).toEqual(["moved"]);
+  });
+
   it("D3: a lane gone while its task is in progress puts the task back to to do, with GONE_REASON", async () => {
     const t = task("Ship it", "builder", T0, "doing");
     await projector.start();
@@ -230,7 +249,7 @@ describe("safe and idempotent", () => {
 describe("the store keeps the board's and the console's actors (ADR-0032 §6)", () => {
   it("a task made by the console and an event of the board read back as written", () => {
     const made = { key: "T-7", n: 7, title: "From the console", description: "", status: "todo", assignee: "builder", priority: "normal", blockedReason: null,
-      createdAt: T0, updatedAt: T0, createdBy: { kind: "console" }, rev: 1, doneAt: null, comments: 0 } as unknown as Task;
+      createdAt: T0, updatedAt: T0, stateChangedAt: T0, createdBy: { kind: "console" }, rev: 1, doneAt: null, comments: 0 } as unknown as Task;
     store.saveTask(made);
     const e: TaskEvent = { key: made.key, rev: 2, at: T0 + 1, actor: { kind: "board", rule: "D3", lane: "builder" }, change: { kind: "moved", from: "doing", to: "todo", reason: GONE_REASON } };
     store.saveTaskEvent(e);

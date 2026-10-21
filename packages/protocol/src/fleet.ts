@@ -158,7 +158,7 @@ export type OpArgs = {
   // role or engine, at most one (reliable lanes §3.3): what the lane runs on; reason: why an engine was named instead of the
   // node's default role, for the audit.
   "lane.start": { name: string; cwd: string; account?: string; resume?: string; prompt?: string; role?: string; engine?: string; reason?: string };
-  "lane.stop": { name: string; mode?: "exit" | "kill" };
+  "lane.stop": { name: string; mode?: "exit" | "kill"; keepWindow?: boolean };
   "worktree.list": { repo: string };
   "worktree.add": { repo: string; name: string; base: string };
   "pane.capture": { workerId: string; lines: number; attributes?: boolean; join?: boolean };   // join: tmux -J, default true
@@ -283,6 +283,8 @@ export const MEMORY_SKILL_NAME = /^morndo-mem-(?!-)(?!.*--)[a-z0-9-]{1,53}(?<!-)
 const v = z.literal(1);
 const text = () => z.string();                                              // node → fleet: shape only
 const label = () => z.string().check(z.maxLength(200));
+// The commit a build was made from (a stamped tree or a git HEAD). An older agent says none.
+const buildCommit = () => z.string().check(z.regex(/^[0-9a-f]{40}$/));
 const count = () => z.int().check(z.gte(0));
 const nodeName = () => z.string().check(z.regex(NODE_NAME));
 const workerId = () => z.string().check(z.regex(WORKER_ID));
@@ -378,7 +380,7 @@ export const OP_ARGS = {
   "lane.start": z.object({ name: windowName(), cwd: absolutePath(), account: z.exactOptional(account()), resume: z.exactOptional(z.uuid()),
     prompt: z.exactOptional(sendText()), role: z.exactOptional(roleName()), engine: z.exactOptional(engineEntry()), reason: z.exactOptional(reason()),
   }).check(z.refine(a => a.role === undefined || a.engine === undefined, "role or engine, not both")),
-  "lane.stop": z.object({ name: windowName(), mode: z.exactOptional(z.enum(["exit", "kill"])) }),
+  "lane.stop": z.object({ name: windowName(), mode: z.exactOptional(z.enum(["exit", "kill"])), keepWindow: z.exactOptional(z.boolean()) }),
   "worktree.list": z.object({ repo: absolutePath() }),
   "worktree.add": z.object({ repo: absolutePath(), name: refName(), base: refName() }),
   "pane.capture": z.object({
@@ -539,7 +541,7 @@ export const CAP_LONG_TEXT = "long-text";
 // strings: a newer agent's are ignored, not refused).
 export const Hello = z.object({
   v, t: z.literal("hello"), node: nodeName(), instanceId: z.uuid(), streamId: z.uuid(), proto: protoList(),
-  agent: z.object({ version: label() }), claude: z.object({ version: z.nullable(label()) }),
+  agent: z.object({ version: label(), commit: z.exactOptional(buildCommit()) }), claude: z.object({ version: z.nullable(label()) }),
   caps: z.array(label()).check(z.maxLength(64)), clientNonce: nonce(),
 });
 export const Proof = z.object({ v, t: z.literal("proof"), sig: signature() });

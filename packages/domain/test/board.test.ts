@@ -2,7 +2,7 @@
 // work and never to Done, one task in progress per lane, every change an event with provenance and a revision.
 import { describe, expect, it } from "vitest";
 import {
-  DONE_SHOWN_MS, GONE_REASON, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, mayMove, parseTaskKey, sessionId, taskKey, workingOn,
+  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, mayMove, parseTaskKey, sessionId, taskKey, workingOn,
   type BoardActor, type Run, type Task, type TaskAction, type TaskActor,
 } from "../src/index.ts";
 
@@ -213,6 +213,28 @@ describe("the board's own moves (B10, D1 to D6)", () => {
     expect(derivedMove(doing(), run({ outcome: "blocked", line: "STATUS: BLOCKED on the API key" }), [doing()])).toMatchObject({ to: "blocked", rule: "D2", reason: "STATUS: BLOCKED on the API key" });
     expect(derivedMove(doing(), run({ outcome: "needs_decision", line: "" }), [doing()])).toMatchObject({ to: "blocked", rule: "D2", reason: "needs_decision" });
   });
+  it("DONE with background work left moves doing to review (D1)", () => {
+    const waiting = run({ phase: "waiting", wait: { on: "background", tasks: [{ type: "shell", label: "npm test" }] } });
+    expect(derivedMove(doing(), waiting, [doing()])).toEqual({ to: "review", reason: BACKGROUND_REASON, rule: "D1" });
+    // a wait that said nothing of DONE, and a wait on something else, still move nothing
+    expect(derivedMove(doing(), run({ ...waiting, outcome: undefined }), [doing()])).toBeNull();
+    expect(derivedMove(doing(), run({ ...waiting, wait: { on: "declared", what: "CI" } }), [doing()])).toBeNull();
+  });
+  it("a comment after the turn end does not stop D1", () => {
+    const commented = value(apply(doing(), { action: "comment", text: "pushed, waiting on CI" }, builder, [doing()], NOW + 20)).task;
+    expect(commented.updatedAt).toBe(NOW + 20);
+    expect(commented.stateChangedAt).toBe(NOW);
+    expect(derivedMove(commented, run({ since: NOW + 10 }), [commented])).toMatchObject({ to: "review", rule: "D1" });
+  });
+  it("a change of status, assignee or description after the turn end does stop it (D6)", () => {
+    const retitled = value(apply(doing(), { action: "edit", title: "Renamed", priority: "high" }, manager, [doing()], NOW + 20)).task;
+    expect(derivedMove(retitled, run({ since: NOW + 10 }), [retitled])?.to).toBe("review");
+    const redescribed = value(apply(doing(), { action: "edit", description: "New scope" }, manager, [doing()], NOW + 20)).task;
+    expect(redescribed.stateChangedAt).toBe(NOW + 20);
+    expect(derivedMove(redescribed, run({ since: NOW + 10 }), [redescribed])).toBeNull();
+    const reassigned = value(apply(doing(), { action: "assign", to: "builder2" }, manager, [doing()], NOW + 20)).task;
+    expect(reassigned.stateChangedAt).toBe(NOW + 20);
+  });
   it("D1's reason is one clean line: a control character in the status line is a space, never a refused move", () => {
     const moved = derivedMove(doing(), run({ line: "STATUS: DONE\u001b[0m pushed\ttwice" }), [doing()]);
     expect(moved?.reason).toBe("STATUS: DONE [0m pushed twice");
@@ -238,7 +260,7 @@ describe("the board's own moves (B10, D1 to D6)", () => {
     expect(derivedMove(review, working, [review])?.to).toBe("doing");           // taken up again
   });
   it("D6: a run whose phase began at or before the task's last change moves nothing", () => {
-    const t = { ...doing(), updatedAt: NOW + 10 };
+    const t = { ...doing(), stateChangedAt: NOW + 10 };
     expect(derivedMove(t, run({ since: NOW + 10 }), [t])).toBeNull();          // negative control: without D6 a person's move is undone
     expect(derivedMove(t, run({ since: NOW + 11 }), [t])?.to).toBe("review");
   });
