@@ -1,7 +1,8 @@
-// `morndo update` and `morndo doctor` through the hub (design §4.8): the hub runs the updater's program with an
-// argument list and no shell, before its own settings and database are read — these commands need neither, and a
-// machine with no hub still updates — and leaves with the updater's exit code. The scratch HOME has no install, so
-// this is exactly a developer's checkout: a status that says so (exit 0) and a doctor that names it (exit 78).
+// `morndo update`, `morndo doctor` and `morndo install` through the hub (design §4.8, §10.3): the hub runs the
+// updater's program with an argument list and no shell, before its own settings and database are read — these
+// commands need neither, and a machine with no hub still updates and installs — and leaves with the updater's
+// exit code. The scratch HOME has no install, so this is exactly a developer's checkout: a status that says so
+// (exit 0) and a doctor that names it (exit 78).
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,5 +30,11 @@ describe("the hub runs the updater's program (§4.8)", () => {
     const r = run("doctor");
     expect(r.status, r.stderr).toBe(78);
     expect(r.stderr).toMatch(/checkout/);
+  });
+
+  it("morndo install is forwarded too, and answers before any hub runs: no tree, exit 65", () => {
+    const r = run("install", "--role", "node");
+    expect(r.status, r.stderr).toBe(65);
+    expect(r.stderr).toMatch(/no app\/VERSION above it|does not run from an unpacked release tree/);
   });
 });

@@ -812,12 +812,15 @@ describe("install.sh", () => {
     expect(run.status).toBe(78);
   });
 
-  it("fails loudly, and creates nothing, while the release has no `morndo install`", () => {
+  it("fails loudly, and creates nothing, when the flag says this release has no `morndo install`", () => {
     const dir = temp();
     const home = join(dir, "home");
     mkdirSync(home);
     const script = join(dir, "install.sh");
-    writeFileSync(script, stampVersion(readFileSync(join(import.meta.dirname, "../../install.sh"), "utf8"), "0.1.0"), { mode: 0o755 });
+    // The shipped script says 'yes' (the hub forwards install); a release that could not ships 'no', and the
+    // guard must still fire there — a hub without the command would print help, exit 0, install nothing.
+    writeFileSync(script, stampVersion(readFileSync(join(import.meta.dirname, "../../install.sh"), "utf8"), "0.1.0")
+      .replace("MORNDO_HAS_INSTALL='yes'", "MORNDO_HAS_INSTALL='no'"), { mode: 0o755 });
     const signers = join(dir, "allowed");
     writeFileSync(signers, "x\n");
     const run = spawnSync("sh", [script, "--role", "control-plane", "--signers", signers], {
