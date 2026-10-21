@@ -785,6 +785,7 @@ What lanes, the manager and the principal learned about a scope, kept as Notes i
 | M5 | A Note's trust tier is set by where it came from and never rises on its own: an agent's Note rises only with evidence it did not produce, and a Note marked untrusted (it came from outside content: a mail, a web page, a comment) rises only by the principal's approval. |
 | M6 | The index a lane receives has a size limit. |
 | M7 | A Note past its re-check date is shown as stale, never silently dropped. |
+| M8 | Approval is the principal's: an Endpoint under step-up, or the console with a one-time code that only an Endpoint under step-up can mint (single use, bound to one Note, short-lived). |
 
 Events: NoteProposed, NoteApproved, NoteConfirmed, NoteSuperseded, NoteInvalidated (Memory's own record, `note_events`).
 
@@ -871,7 +872,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Secrets stands beside Authority*: a Use is not a Mandate (SC10).
 - *Knowledge stands beside Engines*. An SOP step names a Role and a Model class; the Role's chain and auto routing decide what runs, and nothing in Knowledge ranks or excludes an engine (K9). A Gate is answered through Escalation as a Decision; a run starts as a Job.
 - *Fleet supplies Memory* (customer and supplier). Lanes write through the hub's agents' door with an agent token. Memory's Skill files reach each node as one typed operation, `memory.sync`, sent in parts with a key, with no command and no path (FL14); a node's policy may deny it.
-- *Memory is a customer of Authority and Escalation*: only the principal approves a Procedure or an untrusted Note (M4, M5). Slice 1 takes the approval at the control plane's console, which already acts for the principal (`pair`, `revoke`); an Ask in the app is next.
+- *Memory is a customer of Authority and Escalation*: only the principal approves a Procedure or an untrusted Note (M4, M5, M8). The approval at the control plane's console needs a one-time code minted under step-up in the app; the app side (an Ask on the note, approve with step-up) follows.
 - *Verification supplies Memory*: only evidence the author did not produce raises a Note to tier 2 (M5, V1).
 - *Memory stands beside Knowledge*: both hand agents Agent Skills and show a stale note as stale (K6, M7). They share no data: Knowledge ships what to plan with; Memory keeps what this user's lanes learned.
 

@@ -2,7 +2,8 @@
 // for the principal ({kind: "principal", via: "console"}), as `pair` and `revoke` do. It opens memory.db directly, as
 // the other console commands open the hub's database, so it works whether the hub runs or not.
 // - list, show: the Notes, as the principal sees them (every one, the pending and the invalidated among them);
-// - approve: M4, M5, the principal's approval of a Procedure or an untrusted Note;
+// - approve: M4, M5, M8, the principal's approval of a Procedure or an untrusted Note — at the console it needs a
+//   one-time code (XXXX-XXXX-XXXX) that only the app, under step-up, can mint for the note;
 // - invalidate: M2, with the reason;
 // - import: an agent's own markdown notes (frontmatter `name`, `description`) as {kind: "import", label}: tier 3, facts
 //   unless named with --procedure, and a procedure still waits for approve;
@@ -29,22 +30,24 @@ export type MemoryIo = { env: NodeJS.ProcessEnv; out(text: string): Promise<void
 
 export const MEMORY_USAGE = `usage: morndo memory list [--scope S] [--pending] [--all]
        morndo memory show <id>
-       morndo memory approve <id>
+       morndo memory approve <id> --code CODE
        morndo memory invalidate <id> --reason R
        morndo memory import --dir D --scope S [--label L] [--procedure FILE]...
        morndo memory sync
 A scope is repo:<name>, project:<name>, user or org. import reads D's *.md files with YAML frontmatter (name,
-description); the files named by --procedure become procedures, which wait for approve. sync pushes the skills to every
-online node now, through MORNDO_FLEET_SOCKET (default ~/.local/state/morndo-fleet/fleet.sock).`;
+description); the files named by --procedure become procedures, which wait for approve. Approving at the console needs a
+one-time code from the app (M8). sync pushes the skills to every online node now, through MORNDO_FLEET_SOCKET (default
+~/.local/state/morndo-fleet/fleet.sock).`;
 
 const OPTIONS = {
   scope: { type: "string" }, pending: { type: "boolean" }, all: { type: "boolean" }, reason: { type: "string" },
-  dir: { type: "string" }, label: { type: "string" }, procedure: { type: "string", multiple: true }, help: { type: "boolean", short: "h" },
+  dir: { type: "string" }, label: { type: "string" }, procedure: { type: "string", multiple: true }, code: { type: "string" },
+  help: { type: "boolean", short: "h" },
 } as const;
-type Values = { scope?: string; pending?: boolean; all?: boolean; reason?: string; dir?: string; label?: string; procedure?: string[]; help?: boolean };
+type Values = { scope?: string; pending?: boolean; all?: boolean; reason?: string; dir?: string; label?: string; procedure?: string[]; code?: string; help?: boolean };
 // The options and the positionals each command takes; anything else is a usage error.
 const COMMANDS: Record<string, { options: readonly string[]; ids: number }> = {
-  list: { options: ["scope", "pending", "all"], ids: 0 }, show: { options: [], ids: 1 }, approve: { options: [], ids: 1 },
+  list: { options: ["scope", "pending", "all"], ids: 0 }, show: { options: [], ids: 1 }, approve: { options: ["code"], ids: 1 },
   invalidate: { options: ["reason"], ids: 1 }, import: { options: ["dir", "scope", "label", "procedure"], ids: 0 }, sync: { options: [], ids: 0 },
 };
 
@@ -110,7 +113,15 @@ export async function runMemory(argv: string[], io: MemoryIo, o: { dataDir: stri
         return MEMORY_EXIT.ok;
       }
       case "approve": {
-        const r = service.approve(id);
+        const r = service.approve("console", id, v.code === undefined ? {} : { code: v.code });
+        if (!r.ok && r.problem === "code_needed") {
+          await io.err(`approving at the console needs a one-time code from the app (ask for one on the note, then: morndo memory approve ${id} --code XXXX-XXXX-XXXX)`);
+          return MEMORY_EXIT.refused;
+        }
+        if (!r.ok && r.problem === "bad_code") {
+          await io.err("that code is wrong, already used or expired; ask the app for a new one");
+          return MEMORY_EXIT.refused;
+        }
         if (!r.ok && r.problem === "replaced_meanwhile") {
           await io.err(`${id}: the note it replaces was replaced by another successor first; look at both (morndo memory show) and, if this one should win, have it proposed again against the version that holds now`);
           return MEMORY_EXIT.refused;

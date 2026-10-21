@@ -266,7 +266,7 @@ switch (cmd) {
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
     const memoryStore = openMemory(config.dataDir);
     if (memoryStore) shutdown.onStop(() => memoryStore.close());
-    const memory = memoryStore ? new MemoryService({ store: memoryStore }) : null;
+    const memory = memoryStore ? new MemoryService({ store: memoryStore, policy: () => access.policy() }) : null;
     const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
     // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens.
     const usage = new UsageService({ store });

@@ -1,18 +1,20 @@
 // `morndo memory` at the console (ADR-0031, docs/design/memory/README.md "Console"): import an agent's own markdown
 // notes as {kind: "import", label} (tier 3; facts unless named procedures, which wait for approve), deduplicated by
-// title and scope; list, show, approve and invalidate as the principal; sync now through the fleet. The command run in
-// this process with a fake fleet, and once through the real main.ts. Temporary directories, synthetic notes.
+// title and scope; list, show and invalidate as the principal; approve with the one-time code a step-up session minted
+// in the app (M8); sync now through the fleet. The command run in this process with a fake fleet, and once through the
+// real main.ts. Temporary directories, synthetic notes.
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FleetUnavailable } from "@morndo/fleet-client";
-import { MEMORY_LIMITS } from "@morndo/domain";
+import { MEMORY_LIMITS, endpointId, sessionId } from "@morndo/domain";
 import { MemoryStore } from "../src/adapters/memory-store.ts";
 import { MemoryService } from "../src/application/memory-service.ts";
+import type { Authenticated } from "../src/application/access-service.ts";
 import type { MemoryFleet } from "../src/application/memory-sync.ts";
-import { memoryFile, runMemory } from "../src/console/memory.ts";
+import { MEMORY_EXIT, memoryFile, runMemory } from "../src/console/memory.ts";
 
 const MAIN = join(import.meta.dirname, "../src/main.ts");
 const MTIME = Date.UTC(2026, 8, 1, 9, 30);
@@ -43,6 +45,21 @@ function look<T>(fn: (m: MemoryService, s: MemoryStore) => T): T {
   const store = new MemoryStore(data);
   try { return fn(new MemoryService({ store }), store); } finally { store.close(); }
 }
+// The principal's signed-in Endpoint under step-up (the service here uses its default policy, so now is fresh enough),
+// as the app that mints the console's one-time code would be (M8).
+const auth = (): Authenticated => {
+  const at = Date.now();
+  return {
+    session: { id: sessionId("s1"), endpointId: endpointId("ep1"), startedAt: at, lastSeenAt: at, verifiedAt: at, endedAt: null, endReason: null },
+    endpoint: { id: endpointId("ep1"), name: "Mac", credential: { id: "c", publicKey: new Uint8Array([1]), counter: 0, transports: [] }, pairedAt: 0, pairedWith: "t" as never, lastSeenAt: at, revokedAt: null },
+  };
+};
+// The one-time code the app minted for the note, as `morndo memory approve --code` takes it.
+const codeFor = (id: string): string => {
+  const r = look(m => m.issueApprovalCode(auth(), id));
+  if (!r.ok) throw new Error(r.problem);
+  return r.code;
+};
 
 describe("morndo memory import", () => {
   beforeEach(() => {
@@ -70,7 +87,7 @@ describe("morndo memory import", () => {
     expect(all.find(n => n.kind === "procedure")).toMatchObject({ summary: "How a release goes out", body: "1. Tag.\n2. Push the tag.", approvedAt: null });
   });
 
-  it("a procedure waits for approve: no search finds it and no node receives it until the console approves it", async () => {
+  it("a procedure waits for approve: no search finds it and no node receives it until the principal approves it with a one-time code", async () => {
     await run(["import", "--dir", notes, "--scope", "repo:shop-api", "--procedure", join(notes, "deploy.md")]);
     const deploy = look(m => { const l = m.list({ pending: true }); return l.ok ? l.notes : []; });
     expect(deploy.map(n => n.title)).toEqual(["Deploy the api"]);
@@ -79,13 +96,16 @@ describe("morndo memory import", () => {
     expect(hidden.found).toEqual({ ok: true, notes: [] });
     expect(hidden.files.some(f => f.includes("deploy"))).toBe(false);
     expect((await run(["list", "--pending"])).out).toMatch(new RegExp(`${id} +procedure .*waits for approve +Deploy the api`));
-    const approved = await run(["approve", id]);
+    const code = codeFor(id);
+    const approved = await run(["approve", id, "--code", code]);
     expect(approved.code, approved.err).toBe(0);
     expect(approved.out).toContain(`approved ${id}`);
     const shown = look(m => ({ found: m.search({ q: "tag" }), files: m.bundle().parts.flat().map(f => f.name) }));
     expect(shown.found.ok && shown.found.notes.map(n => n.id)).toEqual([id]);
     expect(shown.files.some(f => f.includes("deploy"))).toBe(true);
-    expect((await run(["approve", id])).err).toContain(`${id}: already_approved`);
+    const spent = await run(["approve", id, "--code", code]);                                        // single use (M8)
+    expect(spent.code).toBe(MEMORY_EXIT.refused);
+    expect(spent.err).toContain("that code is wrong, already used or expired; ask the app for a new one");
     expect((await run(["list", "--pending"])).out).toBe("no notes\n");
   });
 
@@ -148,6 +168,27 @@ describe("list, show, approve, invalidate", () => {
     expect((await run(["invalidate", "N-1", "--reason", "again"])).err).toContain("N-1: invalidated");
     expect((await run(["show", "N-9"])).code).toBe(1);
     expect((await run(["approve", "N-9"])).err).toContain("N-9: not_found");
+  });
+
+  it("a console call without the code is refused", async () => {
+    md("deploy.md", "---\nname: Deploy the api\n---\n1. Tag.\n2. Push the tag.\n");
+    await run(["import", "--dir", notes, "--scope", "org", "--label", "box", "--procedure", "deploy.md"]);
+    const id = "N-1";
+    const bare = await run(["approve", id]);
+    expect(bare.code, bare.err).toBe(MEMORY_EXIT.refused);
+    expect(bare.err).toContain("approving at the console needs a one-time code from the app");
+    expect((await run(["list", "--pending"])).out).toContain("Deploy the api");   // still waiting
+    const wrong = await run(["approve", id, "--code", "7YYY-7YYY-7YYY"]);
+    expect(wrong.code, wrong.err).toBe(MEMORY_EXIT.refused);
+    expect(wrong.err).toContain("that code is wrong, already used or expired; ask the app for a new one");
+    expect((await run(["list", "--pending"])).out).toContain("Deploy the api");
+    const code = codeFor(id);
+    const right = await run(["approve", id, "--code", code]);
+    expect(right.code, right.err).toBe(MEMORY_EXIT.ok);
+    expect(right.out).toContain(`approved ${id}`);
+    const again = await run(["approve", id, "--code", code]);
+    expect(again.code).toBe(MEMORY_EXIT.refused);                                // single use (M8)
+    expect(again.err).toContain("that code is wrong, already used or expired; ask the app for a new one");
   });
 
   it("refuses an unknown command, a stray option or a missing id with the usage", async () => {

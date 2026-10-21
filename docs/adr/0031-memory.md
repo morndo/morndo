@@ -65,3 +65,16 @@ The design, in short:
 - Wang et al., "MemPoison: Bypassing Selective Memory Mechanisms to Plant Backdoors in LLM Agents", arXiv 2605.29960: https://arxiv.org/abs/2605.29960
 - Gutiérrez et al., "HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models", arXiv 2405.14831: https://arxiv.org/abs/2405.14831
 - Kumaran, Hassabis and McClelland, "What Learning Systems do Intelligent Agents Need? Complementary Learning Systems Theory Updated", Trends in Cognitive Sciences 20(7):512-534, 2016, https://doi.org/10.1016/j.tics.2016.05.004. A fast store of episodes beside slowly consolidated knowledge: here, lane reports stay where they are, and Facts and Procedures are written and approved apart from them.
+
+## Amendment: approval is the principal's (2026-10-21, board T-309)
+
+Decision 3 had the console approve a Procedure or an untrusted Note by itself, and any process on the box that could run
+`morndo memory approve` approved — a lane that proposed a Procedure could have approved it. Approval is now the
+principal's answer under step-up (AC7, M8): either a signed-in Endpoint through the existing step-up check
+(`mayCommand`, as the board takes it), or the console with a one-time code that only an Endpoint under step-up can mint
+for that one note (`MemoryService.issueApprovalCode`). The code is 12 characters of Crockford base32 shown as
+`XXXX-XXXX-XXXX`, valid ten minutes, single use, one live code per note, burned after five wrong tries; only a SHA-256
+hash of it is stored, and it is compared with `timingSafeEqual`. The app side — an Ask that offers the approval and
+mints the code, and the HTTP route — is the next round. The limit is ADR-0004's: the console runs as the same OS user
+as the hub, so a process of that user that can read or write `memory.db` directly is out of scope; the code raises the
+bar from running one command to editing the database file.
