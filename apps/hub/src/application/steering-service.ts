@@ -46,6 +46,14 @@ const LASTING = new Set<string>(["unknown_upload", "not_yours", "expired", "too_
 // Text with nothing left once control characters other than newline and tab go (an ESC[201~ would end a bracketed
 // paste early) and it is trimmed: empty (review B9). CRLF counts as one newline.
 const kept = (c: string) => { const n = c.charCodeAt(0); return n === 9 || n === 10 || (n >= 32 && n !== 127); };
+// What the agent pastes (tmux send drops every C0 control but newline and tab, and DEL): the body is that, so what is
+// counted and sent is what is typed, and one message stays under the agent's 512 KiB message cap (a control character
+// is six bytes as JSON, anything else at most three). CRLF is one newline; a lone CR goes, as it does there.
+export function pasteText(s: string): string {
+  let out = "";
+  for (const c of s.replace(/\r\n/g, "\n")) if (kept(c)) out += c;
+  return out;
+}
 export function cleanText(s: string): string {
   let out = "";
   for (const c of s.replace(/\r\n?/g, "\n")) if (kept(c)) out += c;
@@ -171,7 +179,7 @@ export class SteeringService {
     if (inDoubt) {
       // Typed there after all: audited now (ADR-0006, every send), as its first attempt couldn't be (it was in doubt). Its
       // body is the repeat's text; the notes naming its images, if any, aren't known again, so only their count is.
-      const audited = (typedAt: number) => this.#store.record([this.#commandSent(a, workerId, commandText(text.replace(/\r\n/g, "\n"), []), uploads.length, typedAt)]);
+      const audited = (typedAt: number) => this.#store.record([this.#commandSent(a, workerId, commandText(pasteText(text), []), uploads.length, typedAt)]);
       const settled = await this.#settle(key, workerId, audited);
       if (settled) return settled;                       // still in doubt, or typed after all; null: never started, judged anew
     }
@@ -254,7 +262,7 @@ export class SteeringService {
       }
       notes.push(ownerFileNote(staged.path));
     }
-    const body = commandText(text.replace(/\r\n/g, "\n"), notes);
+    const body = commandText(pasteText(text), notes);
     if (!body || !cleanText(body)) return { ok: false, problem: "empty" };   // nothing left once control characters go
     if (body.length > MAX_TEXT) return { ok: false, problem: "too_long" };
     return { ok: true, body };

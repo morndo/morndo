@@ -35,6 +35,21 @@ describe("a long message through the hub's HTTP", () => {
     expect(backend.typed[0]?.text).toBe(WHOLE);
   });
 
+  it("control characters are dropped before sending, as the agent would: text that is mostly them is typed, not too_large", async () => {
+    // Six bytes each as JSON: 99,000 of them would be over the 512 KiB message cap if they went to the agent as they are.
+    const backend = memoryBackend({ "%1": { name: "alpha", cwd: "/w/alpha", screen: "❯ " } });
+    const made = await fleetRig([localNode("pc", "aaaaaaaa", backend)]);
+    rig = made;
+    hub = await startInProcessHub({ steering: store => steeringFor(made.ports, { store }) });
+    await made.ports.tmux.listWorkers();
+    const cookie = await hub.cookie();
+    const text = `${"\u0001".repeat(99_000)}line one\r\nline two\rend${"\u007f".repeat(500)}`;
+    const r = await hub.post("/api/workers/pc.aaaaaaaa.1/send", { text, requestId: RID, seen: "none" }, { cookie: `__Host-morndo=${cookie}` });
+    expect(r.status, await r.text()).toBe(200);
+    await until(() => backend.typed.length === 1);
+    expect(backend.typed[0]?.text).toBe("line one\nline twoend");
+  });
+
   it("the manager's route queues the whole message for its lane", async () => {
     const made = await startFakeFleet({ nodes: [localNode("pc", "aaaaaaaa", memoryBackend({ "%0": { name: "manager", cwd: "/w/m", screen: "❯ ", sessionId: "s-m" } }))] });
     fleet = made;
