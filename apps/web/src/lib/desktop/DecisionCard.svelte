@@ -87,6 +87,9 @@
   const canAskCode = $derived(!!onMemoryCode && noteIdOfAsk(item.id) !== null && open && canAnswer);
   const revealNow = $derived(current(reveal, now));
   $effect(() => { if (!open) reveal = CLOSED; });
+  // A code past its expiry is dropped from the state itself, not only from the view: `current` alone would bring it back
+  // if the clock went back (a device clock set right), and the string would stay in memory until the card is gone.
+  $effect(() => { if (reveal.kind === "shown" && revealNow.kind !== "shown") reveal = revealNow; });
   async function askCode() {
     const noteId = noteIdOfAsk(item.id);
     if (!noteId || !onMemoryCode || (revealNow.kind !== "idle" && revealNow.kind !== "failed")) return;

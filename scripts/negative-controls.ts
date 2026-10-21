@@ -3203,6 +3203,12 @@ export const CONTROLS: Control[] = [
   { id: "b9-console-reads-stdin", task: "309", file: "apps/hub/src/console/memory.ts",
     find: 'const code = (await io.readCode?.()) ?? "";', replace: 'const code = "";',
     run: ["apps/hub/test/memory-console.test.ts", "apps/hub/test/memory-approval-http.test.ts"] },
+  { id: "b9-console-no-echo", task: "309", file: "apps/hub/src/console/memory.ts",
+    find: "const rl = createInterface({ input, terminal: tty });", replace: "const rl = createInterface({ input, output: process.stdout, terminal: tty });",
+    run: ["apps/hub/test/memory-console.test.ts"] },
+  { id: "b9-ui-expired-state-cleared", task: "309", file: "apps/web/src/lib/desktop/DecisionCard.svelte",
+    find: '$effect(() => { if (reveal.kind === "shown" && revealNow.kind !== "shown") reveal = revealNow; });', replace: "",
+    run: ["apps/web/test/memory-code-desktop.test.ts"] },
 ];
 
 // ---- the runner

@@ -34,6 +34,9 @@ export type MemoryIo = { env: NodeJS.ProcessEnv; out(text: string): Promise<void
 // The first line of `input`, trimmed: what is typed at the prompt on a terminal, or piped in. On a terminal it asks first
 // (`ask` writes the prompt, to stderr, so a pipe's stdout stays clean). No input at all is the empty code.
 export async function readCodeLine(input: Readable, tty: boolean, ask: (text: string) => void): Promise<string> {
+  // No `output`, on purpose: on a terminal readline then puts the input in raw mode (the tty driver echoes nothing) and has
+  // nowhere to echo to, so the typed code is never shown (checked on a real pseudo-terminal, 2026-10-21; Node 24
+  // readline `terminal` and `output`, https://nodejs.org/api/readline.html). The prompt goes through `ask`, not readline.
   const rl = createInterface({ input, terminal: tty });
   try {
     if (tty) ask("One-time code: ");

@@ -145,6 +145,21 @@ describe("the console code on a memory Ask's card", () => {
     expect(errors).toEqual([]);
   }, 60_000);
 
+  it("an expired code is dropped from the card's state, not only hidden: the clock going back does not bring it back", async () => {
+    await ready();
+    await show([memory()]);
+    const card = tab.locator('[data-decision="mem-n-12"]');
+    await card.getByRole("button", { name: "Console code…" }).click();
+    await card.locator("[data-memory-code]").waitFor();
+    await setNow(NOW + 600_001);
+    await card.getByText("The code expired. Ask for a new one.").waitFor();
+    await setNow(NOW);                                            // a device clock set back: before expiresAt again
+    await card.getByText("The code expired. Ask for a new one.").waitFor();
+    expect(await card.locator("[data-memory-code]").count()).toBe(0);
+    await nowhere(CODE);
+    expect(errors).toEqual([]);
+  }, 60_000);
+
   it("a refusal is said in words and shows no code", async () => {
     await ready();
     await mint({ ok: false, text: "Verify with your passkey first, then ask again." });

@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FleetUnavailable } from "@morndo/fleet-client";
 import { MEMORY_LIMITS, endpointId, sessionId } from "@morndo/domain";
 import { MemoryStore } from "../src/adapters/memory-store.ts";
@@ -307,6 +307,24 @@ describe("readCodeLine: the one-time code, from stdin", () => {
     const shown: string[] = [];
     expect(await readCodeLine(fed("  K7M2-9QPX-4TWB \nsecond line\n"), false, s => shown.push(s))).toBe("K7M2-9QPX-4TWB");
     expect(shown).toEqual([]);
+  });
+  it("on a terminal the typed code is not echoed: raw mode, nothing written back but the prompt", async () => {
+    const code = "K7M2-9QPX-4TWB";
+    const modes: boolean[] = [];
+    const input = Object.assign(new PassThrough(), { isTTY: true, setRawMode: (on: boolean) => { modes.push(on); return input; } });
+    const written: string[] = [];
+    const out = vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => { written.push(String(chunk)); return true; });
+    const errw = vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => { written.push(String(chunk)); return true; });
+    const shown: string[] = [];
+    try {
+      const p = readCodeLine(input, true, s => shown.push(s));
+      for (const ch of `${code}\r`) input.write(ch);                   // typed key by key, as a terminal delivers it
+      expect(await p).toBe(code);
+    } finally { out.mockRestore(); errw.mockRestore(); }
+    expect(modes[0]).toBe(true);                                         // raw: the tty driver echoes nothing
+    expect(modes.at(-1)).toBe(false);                                    // and the terminal is given back as it was
+    expect(shown).toEqual(["One-time code: "]);                          // the prompt only, never the code
+    expect(written.join("").replace(/\u001b\[[0-9;?]*[A-Za-z]/g, "")).not.toContain("K7M2");   // nothing was echoed to either stream
   });
   it("on a terminal it asks first; no input at all is the empty code", async () => {
     const shown: string[] = [];
