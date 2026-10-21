@@ -3100,6 +3100,10 @@ export const CONTROLS: Control[] = [
   { id: "t280-no-long-text-cap-check", task: "280", file: "apps/fleet/src/application/connections.ts",
     find: "!c.caps.includes(CAP_LONG_TEXT)", replace: "false",
     run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  // ---- B11 (board T-311): a checkpoint is not DONE, the guard removed once.
+  { id: "b11-checkpoint-is-needs-decision", task: "311", file: "apps/board-cli/src/prompt.ts",
+    find: "STATUS: NEEDS DECISION checkpoint:", replace: "STATUS: DONE checkpoint:",
+    run: ["apps/board-cli/test/prompt-doc.test.ts"], expect: "checkpoint" },
 ];
 
 // ---- the runner
