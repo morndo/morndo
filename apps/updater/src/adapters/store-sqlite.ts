@@ -1,5 +1,6 @@
 // The UpdateStore adapter (design §4.6, §5): one private SQLite file for the trust state, the staged Versions,
-// the committed and bad ones and the newest hundred checks, plus the apply lock on a file of its own (RL4). The
+// the committed and bad ones, the newest hundred checks and the feed's last verified word in a row of its own,
+// plus the apply lock on a file of its own (RL4). The
 // lock is an exclusive SQLite lock — the operating system releases it when the process dies, which is the whole
 // recovery story (SQLite's locks are POSIX advisory locks; https://www.sqlite.org/lockingv3.html and
 // https://www.sqlite.org/pragma.html#pragma_locking_mode, read 2026-10-21). update.db's migrations are additive
@@ -47,6 +48,31 @@ const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: "last_feed: the feed's last verified word, past the kept checks",
+    compat: "additive",
+    // checks keeps its newest hundred rows only; after a hundred checks without the feed's word — a long outage, a
+    // stale feed — that word would leave with the trim. One row of its own keeps it, filled from what checks already
+    // holds, so an update.db written before keeps its word across the upgrade.
+    up: db => {
+      db.exec(`
+        CREATE TABLE last_feed (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          at INTEGER NOT NULL,
+          channel TEXT NOT NULL,
+          outcome TEXT NOT NULL,
+          detail TEXT NOT NULL,
+          version TEXT,
+          feed_seq INTEGER NOT NULL,
+          feed_expires_at INTEGER NOT NULL
+        );
+      `);
+      db.prepare(`INSERT INTO last_feed (id, at, channel, outcome, detail, version, feed_seq, feed_expires_at)
+        SELECT 1, at, channel, outcome, detail, version, feed_seq, feed_expires_at FROM checks
+        WHERE feed_seq IS NOT NULL AND feed_expires_at IS NOT NULL ORDER BY id DESC LIMIT 1`).run();
+    },
+  },
 ];
 
 export class UpdateDbFromFuture extends Error {
@@ -88,6 +114,8 @@ export class SqliteUpdateStore implements UpdateStore {
   readonly #writeVersion: Database.Statement;
   readonly #insertCheck: Database.Statement;
   readonly #trimChecks: Database.Statement;
+  readonly #writeLastFeed: Database.Statement;
+  readonly #recordCheckTx: (r: CheckRecord) => void;
   readonly #checks: Database.Statement;
   readonly #lastFeedCheck: Database.Statement;
   #closed = false;
@@ -114,9 +142,19 @@ export class SqliteUpdateStore implements UpdateStore {
     this.#insertCheck = this.#db.prepare(`INSERT INTO checks (at, channel, outcome, detail, version, feed_seq, feed_expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`);
     this.#trimChecks = this.#db.prepare("DELETE FROM checks WHERE id NOT IN (SELECT id FROM checks ORDER BY id DESC LIMIT 100)");
+    this.#writeLastFeed = this.#db.prepare(`INSERT INTO last_feed (id, at, channel, outcome, detail, version, feed_seq, feed_expires_at)
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET at = excluded.at, channel = excluded.channel,
+      outcome = excluded.outcome, detail = excluded.detail, version = excluded.version, feed_seq = excluded.feed_seq,
+      feed_expires_at = excluded.feed_expires_at`);
+    this.#recordCheckTx = this.#db.transaction((r: CheckRecord) => {
+      this.#insertCheck.run(r.at, r.channel, r.outcome, clipDetail(r.detail), r.version, r.feedSeq, r.feedExpiresAt);
+      this.#trimChecks.run();
+      // the feed's word moves to its own row in the same step as the trim that would otherwise drop it
+      if (r.feedSeq !== null && r.feedExpiresAt !== null)
+        this.#writeLastFeed.run(r.at, r.channel, r.outcome, clipDetail(r.detail), r.version, r.feedSeq, r.feedExpiresAt);
+    });
     this.#checks = this.#db.prepare("SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at FROM checks ORDER BY id DESC LIMIT ?");
-    this.#lastFeedCheck = this.#db.prepare(`SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at
-      FROM checks WHERE feed_seq IS NOT NULL AND feed_expires_at IS NOT NULL ORDER BY id DESC LIMIT 1`);
+    this.#lastFeedCheck = this.#db.prepare("SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at FROM last_feed WHERE id = 1");
   }
 
   trust(): TrustState {
@@ -177,16 +215,16 @@ export class SqliteUpdateStore implements UpdateStore {
   }
 
   recordCheck(r: CheckRecord): void {
-    this.#insertCheck.run(r.at, r.channel, r.outcome, clipDetail(r.detail), r.version, r.feedSeq, r.feedExpiresAt);
-    this.#trimChecks.run();
+    this.#recordCheckTx(r);
   }
 
   checks(limit: number): CheckRecord[] {
     return (this.#checks.all(limit) as CheckRow[]).map(checkRecord);
   }
 
-  // The kept rows in full, not the newest ten: a machine refused twelve times in a row still carries the feed's
-  // last verified word (§4.5), and the status and the doctor both read it from here.
+  // The feed's last verified word from its own row (§4.5), not from the kept hundred checks: a machine refused a
+  // hundred times in a row — a long outage, a stale feed — still carries it, and the status and the doctor both
+  // read it from here.
   lastFeedCheck(): CheckRecord | null {
     const row = this.#lastFeedCheck.get() as CheckRow | undefined;
     return row === undefined ? null : checkRecord(row);

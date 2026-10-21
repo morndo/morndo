@@ -14,6 +14,7 @@ import { CheckService, CHECKOUT_SENTENCE } from "../src/application/check-servic
 import { doctor, type DoctorReport } from "../src/application/doctor-service.ts";
 import { formatStatus, readStatus } from "../src/application/status-service.ts";
 import { SshSigVerifier } from "../src/adapters/verifier-sshsig.ts";
+import { openUpdateStore } from "../src/adapters/store-sqlite.ts";
 import { FakeArtifacts, FakeClock, FakeFeed, FakeInstaller, FakeSettings, FakeStore, wipe } from "./helpers/fakes.ts";
 import { feedFixture, keySetDocument, makeKeys, manifestSignature, releaseFixture, signed, type Keys, type ReleaseFixture } from "./helpers/release-fixtures.ts";
 
@@ -250,6 +251,29 @@ describe("doctor (§8.1)", () => {
     expect(status.feed).toEqual({ channel: "stable", seq: 1, expiresAt: new Date(NOW + 14 * DAY).toISOString() });
     const report = await w.doctor();
     expect(report.findings.filter(f => f.area === "feed")).toEqual([]);   // a refusal is not the feed's word going quiet
+  });
+
+  it("the feed's word outlives the kept check rows of the real store: the status shows it, the doctor stays quiet", async () => {
+    // The real SQLite store, not the fake: a healthy machine's state in it, then a hundred and one refusals without
+    // the feed's word — past the hundred rows the store keeps — must not read as a feed nobody ever verified.
+    const w = build(undefined, { manual: true });
+    await w.ready;
+    const state = join(scratch, "state-last-feed");
+    const store = openUpdateStore({ db: join(state, "update.db"), lock: join(state, "apply.lock") });
+    try {
+      store.saveTrust({ keySet: w.ks1.decoded, highestFeedSeq: { stable: 1, latest: 0 } });
+      store.recordStaged({ version: OFFERED, manifestSha256: w.rel.manifestSha256, filesSha256: w.rel.filesSha256, at: NOW });
+      store.recordCheck({ at: NOW, channel: "stable", outcome: "staged", detail: "manual", version: OFFERED, feedSeq: 1, feedExpiresAt: NOW + 14 * DAY });
+      for (let n = 1; n <= 101; n++) {
+        store.recordCheck({ at: NOW + n * 60_000, channel: "stable", outcome: "refused", detail: `file_list: refused ${n}`, version: null, feedSeq: null, feedExpiresAt: null });
+      }
+      const status = readStatus({ installer: w.installer, store, settings: w.settings });
+      expect(status.feed).toEqual({ channel: "stable", seq: 1, expiresAt: new Date(NOW + 14 * DAY).toISOString() });
+      const report = await doctor({ installer: w.installer, store, clock: w.clock });
+      expect(report.findings.filter(f => f.area === "feed")).toEqual([]);   // the word is still current, not gone
+    } finally {
+      store.close();
+    }
   });
 
   it("a previous link to a Version that is not installed is a layout finding", async () => {

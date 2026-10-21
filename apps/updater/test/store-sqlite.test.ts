@@ -2,7 +2,7 @@
 // backwards whatever it is given (RL3), the staged Version above every committed one, the last hundred checks,
 // and an apply lock (RL4) another process cannot take and the operating system drops when its holder dies.
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,6 +109,62 @@ describe("the update store (§4.6, §5)", () => {
     for (let i = 0; i < 12; i++)
       store.recordCheck({ at: 2 + i, channel: "stable", outcome: "refused", detail: `refused ${i}`, version: null, feedSeq: null, feedExpiresAt: null });
     expect(store.lastFeedCheck()).toMatchObject({ outcome: "staged", feedSeq: 7, feedExpiresAt: 9_000 });
+    store.close();
+  });
+
+  it("the feed's word outlives the kept check rows: a row of its own, past the hundred", () => {
+    const store = open();
+    store.recordCheck({ at: 1, channel: "stable", outcome: "staged", detail: "verified", version: "0.2.0", feedSeq: 7, feedExpiresAt: 9_000 });
+    // a hundred and one checks without the feed's word — a long outage, a stale feed — take its row out of checks
+    for (let i = 0; i < 101; i++)
+      store.recordCheck({ at: 2 + i, channel: "stable", outcome: "refused", detail: `refused ${i}`, version: null, feedSeq: null, feedExpiresAt: null });
+    const kept = store.checks(100);
+    expect(kept).toHaveLength(100);
+    expect(kept.some(row => row.feedSeq !== null)).toBe(false);    // the trim really dropped the feed's own row
+    expect(store.lastFeedCheck()).toMatchObject({ outcome: "staged", feedSeq: 7, feedExpiresAt: 9_000 });
+    store.close();
+  });
+
+  it("an update.db from before the last_feed table keeps its feed word", () => {
+    // A database as the updater before migration 2 left it: migration 1's tables, version 1, the feed's word still
+    // only in checks. Written here by hand, so the copy runs against the shape an old updater really wrote.
+    mkdirSync(state, { recursive: true });
+    const old = new Database(join(state, "old.db"));
+    old.exec(`
+      CREATE TABLE trust (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        key_set TEXT,
+        seq_stable INTEGER NOT NULL DEFAULT 0,
+        seq_latest INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE versions (
+        version TEXT PRIMARY KEY,
+        manifest_sha256 TEXT NOT NULL,
+        files_sha256 TEXT NOT NULL,
+        staged_at INTEGER NOT NULL
+      );
+      CREATE TABLE committed (version TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE bad (version TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE checks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at INTEGER NOT NULL,
+        channel TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        version TEXT,
+        feed_seq INTEGER,
+        feed_expires_at INTEGER
+      );
+      INSERT INTO checks (at, channel, outcome, detail, version, feed_seq, feed_expires_at)
+        VALUES (40, 'stable', 'staged', 'verified 0.2.0', '0.2.0', 9, 12_000);
+      INSERT INTO checks (at, channel, outcome, detail, version, feed_seq, feed_expires_at)
+        VALUES (41, 'stable', 'refused', 'no word', NULL, NULL, NULL);
+    `);
+    old.pragma("user_version = 1");
+    old.close();
+
+    const store = openUpdateStore({ db: join(state, "old.db"), lock: join(state, "apply.lock") });
+    expect(store.lastFeedCheck()).toMatchObject({ at: 40, outcome: "staged", feedSeq: 9, feedExpiresAt: 12_000 });
     store.close();
   });
 
