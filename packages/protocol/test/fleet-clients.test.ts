@@ -142,6 +142,10 @@ describe("lane.start's first prompt and lane.stop's mode (§5)", () => {
     for (const mode of ["exit", "kill", undefined]) expect(ok("lane.stop", { name: "x", ...(mode ? { mode } : {}) }), String(mode)).toBe(true);
     expect(ok("lane.stop", { name: "x", mode: "force" })).toBe(false);
   });
+  it("lane.stop takes keepWindow as a boolean", () => {
+    expect(ok("lane.stop", { name: "x", keepWindow: true })).toBe(true);
+    expect(ok("lane.stop", { name: "x", keepWindow: "yes" })).toBe(false);
+  });
 });
 
 describe("session state on each pane (§5)", () => {

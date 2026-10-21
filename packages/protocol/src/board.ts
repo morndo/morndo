@@ -29,7 +29,7 @@ export const TaskActorSchema = z.union([
 export const BoardTaskSchema = z.object({
   key: taskKey(), n: z.int().check(z.gte(1)), title: text(), description: text(),
   status: z.enum(STATUSES), assignee: z.nullable(text()), priority: orElse(z.enum(PRIORITIES), "normal"),
-  blockedReason: z.nullable(text()), createdAt: count(), updatedAt: count(), createdBy: TaskActorSchema,
+  blockedReason: z.nullable(text()), createdAt: count(), updatedAt: count(), stateChangedAt: count(), createdBy: TaskActorSchema,
   rev: z.int().check(z.gte(1)), doneAt: z.nullable(count()), comments: count(),
 });
 export const TaskChangeSchema = z.discriminatedUnion("kind", [
@@ -44,9 +44,11 @@ export const TaskEventSchema = z.object({ key: taskKey(), rev: z.int().check(z.g
 // The whole board, as the hub holds it (boardOrder): sent after every hello and on every change, like the decisions.
 // `lanes`: the lane names the hub lists now, so the app can mark an assignee that isn't running. `runs` (ADR-0032): each
 // lane's Run as the fleet derived it (RunViewSchema, decoded one by one: one this build can't read is dropped); absent
-// from a hub that has none.
+// from a hub that has none. `orphans`: the keys of the to do tasks whose lane the fleet no longer lists; absent from a
+// hub that has none.
 export const BoardFrameSchema = z.object({
   t: z.literal("board"), tasks: z.array(z.unknown()), lanes: z.array(text()), at: count(), runs: z.exactOptional(z.array(z.unknown())),
+  orphans: z.exactOptional(z.array(text())),
 });
 
 // A new task, from the app or an agent. A worker's lands in the backlog whatever it says (B2).

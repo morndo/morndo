@@ -71,11 +71,12 @@ export const USAGE = `usage: morndo lanes [--json]
        morndo lanes keys <lane | worker id> <key>...
        morndo lanes start <name> --cwd DIR [--node NODE] [--role ROLE | --engine PROVIDER:MODEL[@EFFORT] --reason TEXT]
                           [--account A] [--resume SESSION] [--prompt TEXT] [--task T-12] [--json]
-       morndo lanes stop <lane | worker id> [--kill]
+       morndo lanes stop <lane | worker id> [--kill | --keep-window]
        morndo lanes status <delivery id> [--json]
        morndo lanes events [--json]
        morndo lanes brief [--json]
 send - reads the text from stdin. Keys are tmux key names: ${KEY_NAMES.join(" ")}.
+stop closes the lane's window once its agent has exited; --keep-window leaves it at its shell. The manager is refused.
 start --task assigns that task to the new lane first (the hub's board, MORNDO_HOME); its first turn moves it into progress.
 Exit codes: 0 accepted (with --wait: delivered; stop: stopped), 3 not delivered in time (stop: not seen to stop),
 4 given up, refused or uncertain, 5 in doubt (the fleet was reached and never answered: run it again with the same
@@ -84,14 +85,14 @@ Exit codes: 0 accepted (with --wait: delivered; stop: stopped), 3 not delivered 
 
 const OPTIONS = {
   json: { type: "boolean" }, lines: { type: "string" }, id: { type: "string" }, wait: { type: "string" }, direct: { type: "boolean" },
-  kill: { type: "boolean" }, prompt: { type: "string" }, cwd: { type: "string" }, account: { type: "string" }, resume: { type: "string" },
+  kill: { type: "boolean" }, "keep-window": { type: "boolean" }, prompt: { type: "string" }, cwd: { type: "string" }, account: { type: "string" }, resume: { type: "string" },
   node: { type: "string" }, role: { type: "string" }, engine: { type: "string" }, reason: { type: "string" }, task: { type: "string" },
   help: { type: "boolean", short: "h" },
 } as const;
 // The options each command takes; any other is a usage error.
 const ALLOWED: Record<string, readonly string[]> = {
   list: ["json"], peek: ["lines", "json"], send: ["id", "wait", "direct", "json"], keys: [], status: ["json"], events: ["json"],
-  start: ["cwd", "node", "role", "engine", "reason", "account", "resume", "prompt", "task", "json"], stop: ["kill"], brief: ["json"],
+  start: ["cwd", "node", "role", "engine", "reason", "account", "resume", "prompt", "task", "json"], stop: ["kill", "keep-window"], brief: ["json"],
 };
 const DEFAULT_LINES = 40;
 const WAIT_STEP_MS = 250;
@@ -393,10 +394,11 @@ async function stop(client: FleetClient, io: LanesIo, rest: string[], v: Values)
   const [name, ...more] = rest;
   if (!name) throw new Usage("stop needs a lane");
   none(more, "stop");
+  if (v.kill && v["keep-window"]) throw new Usage("--kill closes the window: it takes no --keep-window");
   const mode = v.kill ? "kill" : "exit";
   // By worker ID: routed to its node, which stops its window of that name.
   const lane = isWorkerId(name) ? await laneNamed(client, name) : null;
-  const r = await client.op(lane ? { workerId: lane.workerId } : { lane: name }, "lane.stop", { name: lane?.window ?? name, mode },
+  const r = await client.op(lane ? { workerId: lane.workerId } : { lane: name }, "lane.stop", { name: lane?.window ?? name, mode, ...(v["keep-window"] ? { keepWindow: true } : {}) },
     { key: `lanes:stop:${randomUUID()}`, timeoutMs: LIMITS.laneStopWaitMs + 15_000 });
   // Not seen to close or reach its shell within its 30 s: it may still be stopping. --kill may follow (a new key).
   if (!r.ok && r.error.code === "uncertain") {

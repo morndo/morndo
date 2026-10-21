@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-import { argvWantsVersion, exitAfterOutput, isReaderGone, productVersion, quietBrokenPipe } from "@morndo/service-kit";
+import { argvWantsVersion, exitAfterOutput, isReaderGone, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { run } from "./cli.ts";
 
 quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
-  process.stdout.write(`${productVersion()}\n`);
+  process.stdout.write(`${buildLabel()}\n`);
   process.exit(0);
 }
 
