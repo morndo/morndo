@@ -40,7 +40,7 @@ const SEPARATOR = /[\u{2028}\u{2029}]/u;
 const HIDDEN = /[\u{202A}-\u{202E}\u{2066}-\u{2069}\u{200B}-\u{200D}\u{FEFF}]/u;
 // A placeholder left from the blank: "<…>" with no line break of its own inside.
 const PLACEHOLDER = /<[^<>\n]*>/;
-// What shown() escapes: the union of CONTROL, SEPARATOR and HIDDEN, so a draft value echoed into a problem's text can
+// What quoted() escapes: the union of CONTROL, SEPARATOR and HIDDEN, so a draft value echoed into a problem's text can
 // neither add a line of its own nor hide inside one.
 const ESCAPE = /[\u{0}-\u{1F}\u{7F}-\u{9F}\u{2028}\u{2029}\u{202A}-\u{202E}\u{2066}-\u{2069}\u{200B}-\u{200D}\u{FEFF}]/gu;
 // Jargon the principal cannot read on a phone card: a tracker number, a commit hash, an ask id (T-307). A hash needs
@@ -59,7 +59,7 @@ const oneLine = (s: string) => !CONTROL.test(s) && !SEPARATOR.test(s) && !HIDDEN
 // A draft value echoed into a problem's text, made safe to print (T-307): JSON-quoted, and every character that could
 // break the line or hide in it comes back as its \uXXXX escape.
 const escapeCode = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`;
-export function shown(value: string): string {
+export function quoted(value: string): string {
   return JSON.stringify(value).replace(ESCAPE, escapeCode);
 }
 
@@ -143,7 +143,7 @@ export function lintCard(draft: unknown): { card: ShortCard | null; problems: Br
   if (!isText(draft.recommend) || draft.recommend.trim() === "") {
     error("no_recommendation", "recommend", "a card without a recommendation is refused; say which option you recommend");
   } else if (!optionsBroken && !options.some(o => o.key === rec)) {
-    error("recommend_unknown", "recommend", `${shown(rec)} is not one of the option keys (${options.map(o => o.key).join(", ")})`);
+    error("recommend_unknown", "recommend", `${quoted(rec)} is not one of the option keys (${options.map(o => o.key).join(", ")})`);
   } else if (!optionsBroken && options[0]!.key !== rec) {
     error("recommend_not_first", "recommend", "the recommended option goes first, as the buttons line puts it first");
   } else if (!optionsBroken) {
@@ -156,7 +156,7 @@ export function lintCard(draft: unknown): { card: ShortCard | null; problems: Br
   if (given === "") error("no_default", "default", "say what applies if he does not answer");
   const defOpt = optionsBroken || given === "" ? undefined : options.find(o => o.key === given);
   if (!optionsBroken && given !== "" && defOpt === undefined) {
-    error("default_unknown", "default", `${shown(given)} is not one of the option keys (${options.map(o => o.key).join(", ")})`);
+    error("default_unknown", "default", `${quoted(given)} is not one of the option keys (${options.map(o => o.key).join(", ")})`);
   } else if (defOpt !== undefined) {
     def = given;
   }

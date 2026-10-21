@@ -2,7 +2,7 @@
 // Label | kind". It reads only that card format, by hand. It is not a general markdown parser. A problem here is one
 // the draft cannot say (a line that is no field of the card, a field twice); the domain lints the draft it returns.
 // JSON callers skip this adapter. The blank itself is the guide's fence, byte for byte.
-import { shown, type BriefProblem, type CardOption } from "@morndo/domain";
+import { quoted, type BriefProblem, type CardOption } from "@morndo/domain";
 
 export const CARD_TEMPLATE: string = "Id: ny-80\nOutcome: <one plain line: what is asked or what happened, no ids>\nRecommend: <key of the recommended option>\nOptions:\n- <key>: <Label> | stop\n- <key>: <Label> | continue\nDefault: <key of the option that applies if he does not answer>\nRisk: <optional: the live risk this touches, if there is one>\n";
 
@@ -40,7 +40,7 @@ export function parseCardMarkdown(raw: string): { draft: Record<string, unknown>
     if (inOptions && line.startsWith("-")) {
       const option = OPTION.exec(line);
       if (option === null) {
-        problems.push(problem("bad_option_line", `line ${n}`, `an option line is "- key: Label", not ${shown(line)}`));
+        problems.push(problem("bad_option_line", `line ${n}`, `an option line is "- key: Label", not ${quoted(line)}`));
         continue;
       }
       // The kind, when the asker marks it (T-307): everything after the first "|" — a label holds no "|" of its own,
@@ -54,13 +54,13 @@ export function parseCardMarkdown(raw: string): { draft: Record<string, unknown>
       }
       const kind = rest.slice(bar + 1).trim();
       if (kind !== "stop" && kind !== "continue") {
-        problems.push(problem("bad_option_kind", `line ${n}`, `an option's kind is stop or continue, not ${shown(kind)}`));
+        problems.push(problem("bad_option_kind", `line ${n}`, `an option's kind is stop or continue, not ${quoted(kind)}`));
         continue;
       }
       options.push({ key: option[1] ?? "", label, kind });
       continue;
     }
-    problems.push(problem("unknown_line", `line ${n}`, `${shown(line)} is no field of the card; the fields are Id, Outcome, Recommend, Options, Default and Risk`));
+    problems.push(problem("unknown_line", `line ${n}`, `${quoted(line)} is no field of the card; the fields are Id, Outcome, Recommend, Options, Default and Risk`));
   }
   return { draft, problems };
 }
