@@ -5,7 +5,7 @@ import { startWeb, type Web } from "./harness.ts";
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
   import { mount } from "svelte";
   import TaskCard from "/src/lib/desktop/TaskCard.svelte";
-  const task = { key: "T-5", n: 5, title: "Ship", description: "", status: "doing", assignee: "builder", priority: "normal", blockedReason: null, createdAt: 1, updatedAt: 1, createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0 };
+  const task = { key: "T-5", n: 5, title: "Ship", description: "", status: "doing", assignee: "builder", priority: "normal", blockedReason: null, createdAt: 1, updatedAt: 1, stateChangedAt: 1, createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0 };
   const job = (node) => ({ id: "build", node, lane: "builder", name: "build", class: "default", state: "running", outcome: null, exit: null, durationSec: null, notice: "none", task: "T-5" });
   globalThis.__opened = [];
   mount(TaskCard, { target: document.body, props: {

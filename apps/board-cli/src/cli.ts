@@ -163,6 +163,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       case "list": {
         const d = await call("GET", "/api/agent/board");
         let tasks = d.tasks as Task[];
+        const orphans = new Set((d.orphans as string[] | undefined) ?? []);
         const me = lane;
         if (flags.mine === true) {
           const w = await call("GET", "/api/agent/whoami");
@@ -174,14 +175,15 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
           if (!STATUSES.has(status)) throw new Usage(`--status takes one of ${LIST_ORDER.join(", ")}`);
           tasks = tasks.filter(t => t.status === status);
         }
-        if (flags.json === true) { io.out(JSON.stringify(tasks)); return 0; }
+        if (flags.json === true) { io.out(JSON.stringify(tasks.map(t => orphans.has(t.key) ? { ...t, orphan: true } : t))); return 0; }
         if (!tasks.length) { io.out(flags.mine === true ? `nothing assigned to ${me ?? "you"}` : "the board is empty"); return 0; }
         const lanes = new Set(d.lanes as string[]);
         for (const s of LIST_ORDER) {
           const rows = tasks.filter(t => t.status === s);
           if (!rows.length) continue;
           io.out(`${STATUS_WORDS[s]} (${rows.length})`);
-          for (const t of rows) io.out(`  ${line(t)}${t.assignee && lanes.size && !lanes.has(t.assignee) ? "  [lane not running]" : ""}`);
+          // An orphan's lane is gone for good, not merely not running: the marker says which is which.
+          for (const t of rows) io.out(`  ${line(t)}${orphans.has(t.key) ? "  [orphan: its lane is gone; reassign it]" : t.assignee && lanes.size && !lanes.has(t.assignee) ? "  [lane not running]" : ""}`);
         }
         return 0;
       }

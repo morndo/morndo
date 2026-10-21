@@ -164,7 +164,7 @@ It also remembers the node that last had each sticky lane name (`sticky_lanes`, 
 - **Folder trust.** A lane started in a folder Claude Code doesn't trust yet waits at its trust dialog: `lane.start` answers `{ workerId, waiting: "trust" }` when it sees it. Accepting it stays the client's decision: the owner's `lanes` asks `claude-pool accept-trust` for his known folders, then sends the keys.
 - **A first prompt.** `lane.start` takes `prompt?`: it becomes a delivery to the new pane (id `<key>:prompt`), which waits for Claude Code to start (`no_session`, §4.1) and is typed once it can take it. So `lanes start … PROMPT` and kira's `/new` don't race Claude Code's startup.
 - **Stopping.** `lane.stop { name, mode? }`:
-  - `mode: "exit"`, the default, types `/exit` the way a delivery is typed (never into a menu or over text), answers Claude Code's exit prompt when it asks ("Exit and stop tasks": 1, as `claude-pool` does), then answers once the window has closed or is back at its shell, or `uncertain` after 30 s;
+  - `mode: "exit"`, the default, types `/exit` the way a delivery is typed (never into a menu or over text), answers Claude Code's exit prompt when it asks ("Exit and stop tasks": 1, as `claude-pool` does), then answers once the window has closed or is back at its shell (and closes that window, unless `keepWindow: true`), or `uncertain` after 30 s;
   - `mode: "kill"` closes the window.
 
   The policy's `protected` names (default `["manager"]`) are refused `denied`.
@@ -251,7 +251,7 @@ A subcommand of the `morndo` console, for any user, over the fleet socket (`MORN
 | `morndo lanes send <lane> <text \| ->` | a delivery (`--id` to choose it); waits for `delivered` up to `--wait <s>` (default 0: print the state and return); `--direct` types at once (`pane.send`), for a lane without Claude Code |
 | `morndo lanes keys <lane> <key…>` | `pane.keys` by key name |
 | `morndo lanes start <name> --cwd <dir> [--account <a>] [--resume <session>] [--prompt <text>]` | `lane.start`, with a first prompt typed once the lane can take it |
-| `morndo lanes stop <lane> [--kill]` | `lane.stop` |
+| `morndo lanes stop <lane> [--kill \| --keep-window]` | `lane.stop` |
 | `morndo lanes status <delivery id>` | a delivery's state |
 | `morndo lanes events` | lane events as they happen |
 

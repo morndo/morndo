@@ -68,7 +68,7 @@ describe("Runs in the fleet (ADR-0032)", () => {
     r.at(T0 + MIN);
     await vi.waitFor(() => expect(r.run()).toEqual({
       lane: "alpha", node: "pc", sessionId: SID, phase: "waiting", wait: { on: "background", tasks: [{ type: "shell", label: "Watch the CI run" }] },
-      deadline: T0 + 30 * MIN, overdue: false, line: "STATUS: DONE", since: T0, source: "hook",
+      outcome: "done", deadline: T0 + 30 * MIN, overdue: false, line: "STATUS: DONE", since: T0, source: "hook",
     }));
     expect(await r.runs()).toEqual([r.run()]);
     const wire = JSON.stringify([await r.runs(), r.events, r.fleet.db.prepare("SELECT body FROM lane_events").all()]);
