@@ -50,12 +50,13 @@ export function makeTestCa(dir: string): TestCa {
 
 export type TestServer = { url: string; close(): Promise<void> };
 
-/** `https.createServer({ key, cert }, handler)` on 127.0.0.1 and an ephemeral port; `url` ends in "/" like a feed base. */
-export function serveHttps(o: { key: string; cert: string; handler: (req: IncomingMessage, res: ServerResponse) => void }): Promise<TestServer> {
+/** `https.createServer({ key, cert }, handler)` on 127.0.0.1, ephemeral port or `port` when the documents name one
+ * (the e2e feed embeds its own address, so its host must sit exactly there); `url` ends in "/" like a feed base. */
+export function serveHttps(o: { key: string; cert: string; handler: (req: IncomingMessage, res: ServerResponse) => void; port?: number }): Promise<TestServer> {
   const server: Server = createServer({ key: o.key, cert: o.cert }, o.handler);
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(o.port ?? 0, "127.0.0.1", () => {
       const address = server.address();
       if (address === null || typeof address === "string") { server.close(); reject(new Error("no port to listen on")); return; }
       resolve({
