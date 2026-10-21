@@ -25,7 +25,7 @@ export class BoardService {
   #policy: () => AccessPolicy;
   #lanes: () => string[];
   #runs: () => RunView[];
-  #orphans: (tasks: readonly Task[]) => string[];
+  #orphans: (tasks: readonly Task[], now: number) => string[];
   #runsEveryMs: number;
   #runsTimer: NodeJS.Timeout | null = null;
   #toldAt = -Infinity;                                   // performance.now() of the last push, for the runs' throttle
@@ -34,7 +34,7 @@ export class BoardService {
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
   // fleet no longer lists (BoardProjector.orphans; none without a fleet). `runsEveryMs`: the runs' throttle.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[]) => string[]; runsEveryMs?: number }) {
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
   }
@@ -63,7 +63,7 @@ export class BoardService {
   view(): BoardView {
     const now = this.#now();
     const tasks = boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now);
-    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks) };
+    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now) };
   }
   task(key: string): { task: Task; events: TaskEvent[] } | null {
     const task = this.#store.task(key);

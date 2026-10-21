@@ -10,7 +10,7 @@ import { DEFAULT_POLICY, GONE_REASON, type Task, type TaskEvent } from "@morndo/
 import type { RunView } from "@morndo/protocol";
 import { Store } from "../src/adapters/store.ts";
 import { BoardService } from "../src/application/board-service.ts";
-import { BoardProjector } from "../src/application/board-projector.ts";
+import { BoardProjector, ORPHAN_GRACE_MS } from "../src/application/board-projector.ts";
 import type { RunsSource } from "../src/application/ports.ts";
 
 const T0 = 1_800_000_000_000;
@@ -45,7 +45,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "morndo-projector-"));
   store = new Store(dir);
   now = T0;
-  board = new BoardService({ store, now: () => now, policy: () => DEFAULT_POLICY, orphans: ts => projector.orphans(ts) });
+  board = new BoardService({ store, now: () => now, policy: () => DEFAULT_POLICY, orphans: (ts, at) => projector.orphans(ts, at) });
   source = fakeRuns();
   logged = [];
   const at = (level: "info" | "warn" | "error") => (line: string) => { logged.push({ level, line }); };
@@ -182,10 +182,51 @@ describe("a lane the fleet does not list is gone (D3, orphans)", () => {
     const listed = task("B", "builder", T0);
     source.list = [run("builder", "working", T0)];                     // D6: the run began at the task's last change
     await projector.start();
+    now = T0 + ORPHAN_GRACE_MS;
     expect(shown(ghost.key)?.status).toBe("todo");
     expect(shown(listed.key)?.status).toBe("todo");
     expect(boardMoves()).toEqual([]);
     expect(board.view().orphans).toEqual([ghost.key]);
+  });
+
+  it("a task just assigned to a lane the fleet has no run for yet is not flagged until the grace has passed", async () => {
+    const t = task("A", "starting", T0);                               // `lanes start --task` assigned it; the lane has no Run yet
+    source.list = [run("builder", "working", T0)];
+    await projector.start();
+    now = T0 + ORPHAN_GRACE_MS - 1;
+    expect(board.view().orphans).toEqual([]);
+    now = T0 + ORPHAN_GRACE_MS;
+    expect(board.view().orphans).toEqual([t.key]);
+  });
+
+  it("the first run of a lane just started keeps its task unflagged (and a flagged one stops being flagged)", async () => {
+    const t = task("A", "starting", T0);
+    source.list = [run("builder", "working", T0)];
+    await projector.start();
+    now = T0 + ORPHAN_GRACE_MS;
+    expect(board.view().orphans).toEqual([t.key]);
+    source.tell(run("starting", "working", T0 + ORPHAN_GRACE_MS + 1000));   // its first Run
+    expect(board.view().orphans).toEqual([]);
+  });
+
+  it("a Run the fleet drops raises no event: the next list read moves the doing task and flags the to do one (eventual)", async () => {
+    const a = task("A", "builder", T0, "doing");
+    const b = task("B", "builder", T0);
+    source.list = [run("builder", "working", T0)];                     // moves nothing (D6: it began at the task's last change)
+    await projector.start();
+    expect(shown(a.key)?.status).toBe("doing");
+    expect(board.view().orphans).toEqual([]);
+    source.list = [];                                                  // the fleet dropped the lane; no event is sent
+    now = T0 + 10 * 60_000;
+    expect(shown(a.key)?.status).toBe("doing");                        // nothing is read yet
+    expect(board.view().orphans).toEqual([]);
+    expect(boardMoves()).toEqual([]);
+    await projector.refresh();
+    expect(shown(a.key)?.status).toBe("todo");
+    expect(lastEvent(a.key)).toMatchObject({ actor: { kind: "board", rule: "D3", lane: "builder" }, change: { kind: "moved", from: "doing", to: "todo", reason: GONE_REASON } });
+    expect(board.view().orphans).toEqual([b.key]);                     // A was just moved, so it is inside its grace
+    now += ORPHAN_GRACE_MS;
+    expect([...board.view().orphans].sort()).toEqual([a.key, b.key].sort());
   });
 
   it("nothing is moved or flagged while the fleet's list can't be read", async () => {
@@ -193,8 +234,9 @@ describe("a lane the fleet does not list is gone (D3, orphans)", () => {
     task("B", "ghost", T0);                                           // a to do task on the same lane: not flagged blind either
     source.list = new Error("fleet down");
     await projector.start();
+    now = T0 + ORPHAN_GRACE_MS;
     expect(shown(t.key)?.status).toBe("doing");
-    expect(projector.orphans(board.view().tasks)).toEqual([]);
+    expect(projector.orphans(board.view().tasks, now)).toEqual([]);
     expect(board.view().orphans).toEqual([]);
   });
 

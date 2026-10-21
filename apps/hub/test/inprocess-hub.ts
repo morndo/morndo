@@ -74,7 +74,7 @@ export async function startInProcessHub(o: {
   watch?: Watch; ledger?: (() => LedgerRead) | null;
   send?: (pane: string, text: string, key: string) => Promise<SendOutcome>;
   runs?: () => RunView[];
-  orphans?: (tasks: readonly Task[]) => string[];
+  orphans?: (tasks: readonly Task[], now: number) => string[];
 } = {}): Promise<InProcessHub> {
   const dir = mkdtempSync(join(tmpdir(), "morndo-inproc-"));
   const web = join(dir, "web");

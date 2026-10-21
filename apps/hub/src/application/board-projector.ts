@@ -11,7 +11,8 @@
 //   (D6 refuses those anyway: the run began before the change). Never while the fleet can't be asked: until a list is
 //   read, and after a list fails, nothing moves; a run event then asks for the list again, at most every RETRY_MS.
 // - A lane the fleet's list doesn't hold (no Run at all) is gone too (D3): its task in progress goes back to to do, once;
-//   its to do tasks are only flagged (orphans(), never moved: D5).
+//   its to do tasks are only flagged (orphans(), never moved: D5). The fleet's drops (a gone lane after a day, a revoked
+//   node) are no event, so they are read at the next list read (start, reconnect): eventual by design.
 // - Idempotent: a move made changes the task (rev, updatedAt), so the same run moves it no further (D6). A refusal (the
 //   task changed meanwhile, B5's one_doing, a reason the domain won't take) is logged once for that task's revision and
 //   that run, and not tried again for them; a new run or another change of the task may try again.
@@ -26,6 +27,8 @@ export type ProjectorBoard = Pick<BoardService, "openTasksOf" | "tasksInProgress
 
 // A list that failed is asked for again on the next run event, but not more often than this.
 export const RETRY_MS = 5000;
+// A task assigned by `lanes start --task` waits this long for its lane's first Run before it is flagged.
+export const ORPHAN_GRACE_MS = 120_000;
 // The refusals kept, so each is logged and tried once; the oldest goes first (a refusal names a revision and a run, which
 // newer ones replace).
 const REFUSALS_KEPT = 500;
@@ -54,11 +57,12 @@ export class BoardProjector {
   runs(): RunView[] { return [...this.#runs.values()].sort((a, b) => a.lane.localeCompare(b.lane)); }
 
   // B2: the to do tasks whose lane the fleet's list doesn't hold, for the board frame (BoardView.orphans). Flagged only,
-  // never moved (D5); and never while the fleet can't be asked: a list that couldn't be read says nothing about who is gone.
-  orphans(tasks: readonly Task[]): string[] {
+  // never moved (D5); and never while the fleet can't be asked: a list that couldn't be read says nothing about who is
+  // gone. Flagged only after the grace from the task's last update (a comment on it extends it; harmless).
+  orphans(tasks: readonly Task[], now: number): string[] {
     if (!this.#live) return [];
     const registered = new Set(this.#runs.keys());
-    return tasks.filter(t => isOrphan(t, registered)).map(t => t.key);
+    return tasks.filter(t => now - t.updatedAt >= ORPHAN_GRACE_MS && isOrphan(t, registered)).map(t => t.key);
   }
 
   // At hub start: the runs followed from now on, and the list read once, which applies what is due (a lane that ended
