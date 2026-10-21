@@ -137,6 +137,7 @@ Any other value matches only itself. An answer may hold no field that its exampl
 - `status` is `online`, `stale` (a missed ping) or `offline`.
 - `health` is the node's latest report: memory, load, disk, the clock, the depth of its hook spool. It is null until the node has sent one.
 - `agent` is the version its agent last reported.
+- `commit` is the commit its agent runs, from its live connection: null while the node is offline, or for an agent that does not report one.
 
 ```example nodes
 GET /v1/nodes
@@ -144,9 +145,9 @@ GET /v1/nodes
 200
 
 [
-  { "name": "n1", "status": "online", "health": "{{any}}", "agent": "{{string}}" },
-  { "name": "n2", "status": "offline", "health": null, "agent": "{{any}}" },
-  { "name": "n3", "status": "offline", "health": null, "agent": "{{any}}" }
+  { "name": "n1", "status": "online", "health": "{{any}}", "agent": "{{string}}", "commit": "{{any}}" },
+  { "name": "n2", "status": "offline", "health": null, "agent": "{{any}}", "commit": null },
+  { "name": "n3", "status": "offline", "health": null, "agent": "{{any}}", "commit": null }
 ]
 ```
 
@@ -784,7 +785,7 @@ Its `phase`, the first that applies, in this order:
 | `waiting` | a job of the lane is not ended (`wait.on: "job"`), or the last turn end left background tasks (`background`) or a wake-up (`wakeup`), or said `STATUS: WAITING` with nothing pending (`declared`) | `job`, `hook` or `status` |
 | `ended` | none of those: the last turn end's `outcome` is its status (`done`, `blocked`, `needs_decision`), else `no_status` | `status`, `hook` or `session` |
 
-A turn end that leaves background work or a wake-up is never `ended`, whatever its status line says: the lane waits on its own work until its next turn. A job counts when it is the lane's own, or its notice goes to `lane:<the lane>`, queued, starting or running.
+A turn end that leaves background work or a wake-up is never `ended`, whatever its status line says: the lane waits on its own work until its next turn. A Run waiting on background tasks keeps the turn's `outcome` (`done`, `blocked`, `needs_decision`), so a client can tell a DONE with work left from a turn with no status. A job counts when it is the lane's own, or its notice goes to `lane:<the lane>`, queued, starting or running.
 
 `GET /v1/runs` answers `{ runs: { lane, node, sessionId?, phase, wait?, deadline, overdue, outcome?, line?, question?, since, source }[] }`, by lane, then node:
 - `wait`, for a `waiting` Run: `{ on: "background", tasks }` (the `tasks` of §7), `{ on: "wakeup", next }` (the next fire time, null when its node's UTC offset or its schedule can't be read), `{ on: "job", jobs: { id, name }[] }`, or `{ on: "declared", what }` (what the WAITING line names, or null): nothing will wake it.
@@ -842,7 +843,7 @@ Each change to a Run is a `run` event on `/v1/events` (§9), `{ t: "run", node, 
 | `file.get` | `{ path \| ref, offset, max }` | `{ bytes (base64), size, eof }` | none |
 | `file.put` | `{ upload, offset, bytes (base64), final, name }` | `{ path \| null }`: the file's place once final | yes |
 | `lane.start` | `{ name, cwd, account?, resume?, prompt?, role?, engine?, reason? }` | `{ workerId, waiting?: "trust", prompt?, engine? }` (below) | yes |
-| `lane.stop` | `{ name, mode?: "exit" \| "kill" }` | `{ ok: true }` (below) | yes |
+| `lane.stop` | `{ name, mode?: "exit" \| "kill", keepWindow?: boolean }` | `{ ok: true }` (below) | yes |
 | `worktree.list` | `{ repo }` | `{ worktrees: { path, branch \| null }[] }` | none |
 | `worktree.add` | `{ repo, name, base }` | `{ path }`: beside the repository, `<repo>-worktrees/<name>` | yes |
 | `memory.sync` | `{ version, part, parts, files: { name, content }[] }`: Memory's skills (ADR-0031), each name `morndo-mem-…` | `{ committed, written, removed, skillDirs, conflicts }`: `committed` once every part of the version is on the node, which then holds exactly these skills in its skill directories (the node agent's README) | yes |
@@ -861,7 +862,7 @@ Each change to a Run is a `run` event on `/v1/events` (§9), `{ t: "run", node, 
 - It never falls back to `launch` quietly. A node without engines, a role nothing can fill now, a provider with no launch command there, or the engine layer switched off: `denied`, nothing started. An unknown role: `bad_args`.
 - The answer's `engine` says what ran: `{ entry, role?, skipped? }`. `skipped` lists what the resolver passed over first, each with its reason; when it isn't empty, the fleet raises `engine_fallback` (§14). The audit row of the start keeps the `role` or `engine`, the `reason` and the entry that ran (`ran`).
 
-**`lane.stop`.** The default, `exit`, types `/exit` the way a delivery is typed and answers Claude Code's exit prompt. It then answers once the window has closed or is back at its shell, or with `uncertain` after 30 s. `kill` closes the window. Names in the policy's `protected` list (default `["manager"]`) are refused with `denied`.
+**`lane.stop`.** The default, `exit`, types `/exit` the way a delivery is typed and answers Claude Code's exit prompt. It then answers once the window has closed or is back at its shell, or with `uncertain` after 30 s. A window left at its shell is closed before the answer unless `keepWindow` is `true`. `kill` closes the window. Names in the policy's `protected` list (default `["manager"]`) are refused with `denied`.
 
 ```example op-inventory
 POST /v1/op
@@ -1256,7 +1257,7 @@ These were sent while the examples above ran:
 That turn end said DONE with a background task still running, so `w1`'s Run waited on it:
 
 ```example events-run events
-{"t":"run","node":"n1","body":{"lane":"w1","node":"n1","sessionId":"{{uuid:w1-session}}","phase":"waiting","wait":{"on":"background","tasks":[{"type":"shell","label":"Check the docs links"}]},"deadline":"{{time}}","overdue":false,"line":"STATUS: DONE","since":"{{time}}","source":"hook"}}
+{"t":"run","node":"n1","body":{"lane":"w1","node":"n1","sessionId":"{{uuid:w1-session}}","phase":"waiting","wait":{"on":"background","tasks":[{"type":"shell","label":"Check the docs links"}]},"deadline":"{{time}}","overdue":false,"outcome":"done","line":"STATUS: DONE","since":"{{time}}","source":"hook"}}
 ```
 
 ## 10. Errors

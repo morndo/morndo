@@ -43,6 +43,7 @@ export type Task = {
   blockedReason: string | null;           // while blocked: why, in the mover's words
   createdAt: number;
   updatedAt: number;
+  stateChangedAt: number;                 // the last change of status, assignee or description; a comment or a title or priority edit leaves it (D6)
   createdBy: TaskActor;
   rev: number;                            // one more per event (B6); a change may name the rev it saw
   doneAt: number | null;
@@ -163,7 +164,7 @@ export function createTask(input: NewTask, actor: BoardActor | { kind: "console"
   const key = taskKey(n);
   const task: Task = {
     key, n, title: title.value, description: description.value, status, assignee, priority: input.priority ?? "normal", blockedReason: null,
-    createdAt: now, updatedAt: now, createdBy: actor, rev: 1, doneAt: null, comments: 0,
+    createdAt: now, updatedAt: now, stateChangedAt: now, createdBy: actor, rev: 1, doneAt: null, comments: 0,
   };
   return ok({ task, event: { key, rev: 1, at: now, actor, change: { kind: "created", status, assignee } } });
 }
@@ -172,9 +173,9 @@ export function createTask(input: NewTask, actor: BoardActor | { kind: "console"
 export function applyAction(task: Task, action: TaskAction, actor: TaskActor, now: number, board: readonly Task[]): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
   if ("ifRev" in action && action.ifRev !== undefined && action.ifRev !== task.rev) return refuse("changed");
   const mine = laneOf(actor) !== null && task.assignee === laneOf(actor);
-  const next = (t: Task, change: TaskChange): Result<{ task: Task; event: TaskEvent }, BoardRefusal> => {
+  const next = (t: Task, change: TaskChange, state = true): Result<{ task: Task; event: TaskEvent }, BoardRefusal> => {
     const rev = task.rev + 1;
-    return ok({ task: { ...t, rev, updatedAt: now }, event: { key: task.key, rev, at: now, actor, change } });
+    return ok({ task: { ...t, rev, updatedAt: now, stateChangedAt: state ? now : task.stateChangedAt }, event: { key: task.key, rev, at: now, actor, change } });
   };
   switch (action.action) {
     case "move": {
@@ -230,12 +231,12 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       }
       if (action.priority !== undefined && action.priority !== task.priority) { t.priority = action.priority; change.priority = action.priority; }
       if (Object.keys(change).length === 1) return refuse("same");
-      return next(t, change);
+      return next(t, change, change.description !== undefined);
     }
     case "comment": {
       const r = text(action.text, COMMENT_MAX);
       if (!r.ok) return r;
-      return next({ ...task, comments: task.comments + 1 }, { kind: "commented", text: r.value });
+      return next({ ...task, comments: task.comments + 1 }, { kind: "commented", text: r.value }, false);
     }
   }
 }
@@ -268,16 +269,19 @@ export const boardChanged = (e: TaskEvent): BoardChanged => ({
 });
 
 // B10, D1 to D6: the move the board makes by itself for `task`, following its assignee's Run, or null. D6: a Run whose
-// phase began at or before the task's last change moves nothing, so the board never undoes what a person or a lane did
-// after it. D5: never to Done, never an assignment (the board's actor can't: runsTheBoard is false for it).
+// phase began at or before the task's last change of state (status, assignee, description; a comment is not one) moves
+// nothing, so the board never undoes what a person or a lane did after it. D5: never to Done, never an assignment (the board's actor can't: runsTheBoard is false for it).
 export const GONE_REASON = "its lane stopped without DONE";
+export const BACKGROUND_REASON = "background work still running";
 export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
-  if (task.assignee === null || task.assignee !== run.lane || run.since <= task.updatedAt) return null;
+  if (task.assignee === null || task.assignee !== run.lane || run.since <= task.stateChangedAt) return null;
   // The reason is the run's status line as one clean line: a control character in it (a lane's odd output) is a space,
   // never a refused move (line(), bad_text).
   const said = (run.line ?? "").replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, REASON_MAX) || null;
   if (task.status === "doing") {
+    // D1: DONE is the turn's word even while its background work runs (the Run keeps the outcome; phase is waiting).
     if (run.phase === "ended" && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
+    if (run.phase === "waiting" && run.wait?.on === "background" && run.outcome === "done") return { to: "review", reason: BACKGROUND_REASON, rule: "D1" };
     if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) return { to: "blocked", reason: said ?? run.outcome, rule: "D2" };
     if (run.phase === "gone") return { to: "todo", reason: GONE_REASON, rule: "D3" };
     return null;
@@ -295,3 +299,15 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to:
   }
   return null;
 }
+
+// B10, D3 for a lane the fleet doesn't list at all (it ended before runs were kept, or its Run dropped): there is no Run to
+// read, so its task in progress goes back to to do, once (the move leaves "doing", so the same reading moves nothing more).
+// D5: never to Done, never an assignment.
+export function unregisteredMove(task: Task, registered: ReadonlySet<string>): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
+  if (task.status !== "doing" || task.assignee === null || registered.has(task.assignee)) return null;
+  return { to: "todo", reason: GONE_REASON, rule: "D3" };
+}
+// A task to do whose assignee is not a registered lane is an orphan: it waits for a lane that will not come. It is only
+// flagged, never moved or reassigned by the board (D5); the manager reassigns it.
+export const isOrphan = (task: Task, registered: ReadonlySet<string>): boolean =>
+  task.status === "todo" && task.assignee !== null && !registered.has(task.assignee);

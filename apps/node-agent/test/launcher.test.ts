@@ -176,6 +176,23 @@ describe("lane.start (spec §5)", () => {
     expect(submitted(dir)).toEqual(["Build the login page"]);
     expect(h.deliveries.get(id)?.state).toBe("typed");
   });
+
+  it("a 20,000-character first prompt reaches a long-text node intact", async () => {
+    const dir = boxIn("long-prompted");
+    const h = harness({ command: [process.execPath, FIXTURE, dir], via: "direct" });
+    const prompt = 'ü€"\n'.repeat(4999) + 'ü€"x';                                     // exactly 20,000 characters, one bracketed paste
+    expect(prompt).toHaveLength(20_000);
+    const r = await start(h, { name: "long-prompted", prompt }, "lanes:p2");
+    const id = promptId("lanes:p2");
+    expect(r.prompt).toBe(id);
+    expect(await showsBox(r.workerId)).toBe(true);
+    const kick = async () => { await h.inventory.refresh(); h.deliverer.kick("status"); await h.deliverer.drain(); };
+    expect(await until(async () => { await kick(); return h.deliveries.get(id)?.waiting?.reason === "no_session"; })).toBe(true);
+    claudeSession({ tmux: t, claudeDir: join(home.home, ".claude"), pane: paneOf(r.workerId) }).status("idle");
+    expect(await until(async () => { await kick(); return submitted(dir).length > 0; })).toBe(true);
+    expect(submitted(dir)).toEqual([prompt]);
+    expect(h.deliveries.get(id)?.state).toBe("typed");
+  });
 });
 
 describe("lane.stop (spec §5)", () => {
@@ -185,6 +202,13 @@ describe("lane.stop (spec §5)", () => {
     expect(await h.call("lane.stop", { name: "manager" }, { key: "lanes:x1" })).toMatchObject({ ok: false, error: { code: "denied", executed: "no" } });
     expect(await h.call("lane.stop", { name: "manager", mode: "kill" }, { key: "lanes:x2" })).toMatchObject({ ok: false, error: { code: "denied", executed: "no" } });
     expect(h.doneKeys.status("lanes:x1")).toEqual({ state: "unknown" });
+    expect(windows()).toContain("manager");
+  });
+
+  it("the manager is refused, with keepWindow too, and its window stays", async () => {
+    const h = harness({ command: ["claude"], via: "direct" });
+    t.tmux("new-window", "-d", "-t", "=main:", "-n", "manager", SHELL);
+    expect(await h.call("lane.stop", { name: "manager", keepWindow: true }, { key: "lanes:x3" })).toMatchObject({ ok: false, error: { code: "denied", executed: "no" } });
     expect(windows()).toContain("manager");
   });
 
@@ -198,13 +222,44 @@ describe("lane.stop (spec §5)", () => {
     expect(submitted(dir)).toEqual(["/exit"]);
   });
 
-  it("mode exit on a lane started from the shell answers once the pane is back at its shell, and the window stays", async () => {
+  it("stop closes the window after the agent exits (the pane back at its shell)", async () => {
     const dir = boxIn("plain");
     const h = harness({ command: [process.execPath, FIXTURE, dir], via: "shell" }, { shellMs: 5000 });
     const r = await start(h, { name: "shell-lane" }, "lanes:e3");
     expect(await showsBox(r.workerId)).toBe(true);
     expect(await h.call("lane.stop", { name: "shell-lane" }, { key: "lanes:e4", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
-    expect(windows()).toContain("shell-lane");
+    expect(windows()).not.toContain("shell-lane");
+    expect(submitted(dir)).toEqual(["/exit"]);
+  });
+
+  it("stop does not fail when the window closed itself after the look (nothing is left to close)", async () => {
+    const dir = boxIn("closing");
+    const h = harness({ command: [process.execPath, FIXTURE, dir], via: "shell" }, { shellMs: 5000 });
+    const r = await start(h, { name: "closing-lane" }, "lanes:e5");
+    expect(await showsBox(r.workerId)).toBe(true);
+    // The look that finds the pane back at its shell ends with a capture-pane of it; tmux runs this hook right after that
+    // capture, so the window is gone by the time the stop closes it. (A flag file arms the hook: no earlier capture counts.)
+    const pane = paneOf(r.workerId);
+    const looked = join(dir, "looked");
+    const refresh = h.inventory.refresh.bind(h.inventory);
+    vi.spyOn(h.inventory, "refresh").mockImplementation(async () => {
+      const snap = await refresh();
+      if (snap.rows.some(row => row.pane === pane && row.currentCommand === "bash")) writeFileSync(looked, "");
+      return snap;
+    });
+    t.tmux("set-hook", "-g", "after-capture-pane", `if-shell 'test -e ${looked}' 'kill-window -t ${pane}'`);
+    expect(await h.call("lane.stop", { name: "closing-lane" }, { key: "lanes:e6", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
+    expect(windows()).not.toContain("closing-lane");
+    expect(submitted(dir)).toEqual(["/exit"]);
+  });
+
+  it("--keep-window leaves it: keepWindow leaves the window at its shell after the exit", async () => {
+    const dir = boxIn("kept");
+    const h = harness({ command: [process.execPath, FIXTURE, dir], via: "shell" }, { shellMs: 5000 });
+    const r = await start(h, { name: "kept-lane" }, "lanes:k1");
+    expect(await showsBox(r.workerId)).toBe(true);
+    expect(await h.call("lane.stop", { name: "kept-lane", keepWindow: true }, { key: "lanes:k2", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
+    expect(windows()).toContain("kept-lane");
     expect(show("display-message", "-p", "-t", paneOf(r.workerId), "#{pane_current_command}")).toBe("bash");
     expect(submitted(dir)).toEqual(["/exit"]);
   });
@@ -233,7 +288,7 @@ describe("lane.stop (spec §5)", () => {
     expect(windows()).toContain("running");
   });
 
-  it("mode exit on a pane at a ❯ prompt with the shell in the foreground answers at once and types nothing", async () => {
+  it("mode exit on a pane at a ❯ prompt with the shell in the foreground answers at once, types nothing and closes the window", async () => {
     const h = harness({ command: ["claude"], via: "direct" });
     const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-n", "starship", SHELL).trim();
     t.tmux("send-keys", "-t", pane, "PS1='❯ '", "Enter");
@@ -243,8 +298,7 @@ describe("lane.stop (spec §5)", () => {
     })).toBe(true);
     expect(show("display-message", "-p", "-t", pane, "#{pane_current_command}")).toBe("bash");
     expect(await h.call("lane.stop", { name: "starship" }, { key: "lanes:star" })).toMatchObject({ ok: true, result: { ok: true } });
-    expect(windows()).toContain("starship");
-    expect(t.tmux("capture-pane", "-p", "-t", pane)).not.toContain("/exit");
+    expect(windows()).not.toContain("starship");
   });
 
   it("mode exit does not treat a blank starting screen as back at its shell", async () => {
@@ -255,13 +309,12 @@ describe("lane.stop (spec §5)", () => {
     expect(t.tmux("capture-pane", "-p", "-t", pane)).not.toContain("/exit");
   });
 
-  it("mode exit on a pane already at its shell answers at once and types nothing", async () => {
+  it("mode exit on a pane already at its shell answers at once, types nothing and closes the window", async () => {
     const h = harness({ command: ["claude"], via: "direct" });
     const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-n", "bare", SHELL).trim();
     expect(await until(() => t.tmux("capture-pane", "-p", "-t", pane).includes("$"))).toBe(true);
     expect(await h.call("lane.stop", { name: "bare" }, { key: "lanes:b1" })).toMatchObject({ ok: true, result: { ok: true } });
-    expect(windows()).toContain("bare");
-    expect(t.tmux("capture-pane", "-p", "-t", pane)).not.toContain("/exit");
+    expect(windows()).not.toContain("bare");
   });
 });
 

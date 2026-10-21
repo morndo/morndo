@@ -49,3 +49,39 @@ describe("session registry", () => {
     }
   });
 });
+
+// B6: a session is headless only when its own live file says so (entrypoint "sdk…", a `claude -p` run; "cli" is a lane's —
+// the field is internal, sessions.ts). Fail open: no file, no entrypoint, an interactive one, a dead process — none is
+// headless, so a lane's own Stop is never dropped; and an interactive file naming the same id (a headless resume of the
+// lane's own session) makes it the lane's, whatever another file says.
+describe("headless()", () => {
+  const write = (name: string, fields: Record<string, unknown>) => writeFileSync(join(dir, "sessions", name), JSON.stringify(fields));
+  it("a session whose only live file has an sdk entrypoint is headless", () => {
+    mkdirSync(join(dir, "sessions"));
+    for (const entrypoint of ["sdk-cli", "sdk-ts"]) {
+      write("1.json", { pid: process.pid, sessionId: "sess-h", tmux: "qa:@0.%3", entrypoint });
+      expect(sessionRegistry(dir).headless("sess-h"), entrypoint).toBe(true);
+    }
+  });
+  it("is not headless: an interactive file, no entrypoint, an unknown id, a dead process, no sessions directory", () => {
+    mkdirSync(join(dir, "sessions"));
+    write("1.json", { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3", entrypoint: "cli" });
+    expect(sessionRegistry(dir).headless("sess-lane")).toBe(false);
+    write("1.json", { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3" });
+    expect(sessionRegistry(dir).headless("sess-lane")).toBe(false);
+    expect(sessionRegistry(dir).headless("sess-nobody")).toBe(false);
+    write("1.json", { pid: 999_999_999, sessionId: "sess-gone", tmux: "qa:@0.%3", entrypoint: "sdk-cli" });
+    expect(sessionRegistry(dir).headless("sess-gone")).toBe(false);
+    expect(sessionRegistry(join(dir, "absent")).headless("sess-lane")).toBe(false);
+  });
+  it("a session id an interactive file also names is the lane's (a headless resume of the lane's own session)", () => {
+    mkdirSync(join(dir, "sessions"));
+    const interactive = { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3", entrypoint: "cli" };
+    const headless = { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3", entrypoint: "sdk-cli" };
+    for (const [first, second] of [[interactive, headless], [headless, interactive]] as const) {
+      write("1.json", first);
+      write("2.json", second);
+      expect(sessionRegistry(dir).headless("sess-lane")).toBe(false);
+    }
+  });
+});
