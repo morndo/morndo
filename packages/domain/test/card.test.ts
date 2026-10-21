@@ -211,6 +211,37 @@ describe("lintCard", () => {
     }
   });
 
+  // The invisible and look-alike characters beyond the first set (T-307 review): each group on its own, in each field the
+  // card prints, and echoed escaped in a problem's text, the astral ones whole as \u{...}.
+  const INVISIBLE: [string, string[], string[]][] = [
+    ["the left-to-right and right-to-left marks", ["\u{200E}", "\u{200F}"], ["\\u200e", "\\u200f"]],
+    ["the Arabic letter mark", ["\u{061C}"], ["\\u061c"]],
+    ["the word joiner", ["\u{2060}"], ["\\u2060"]],
+    ["the soft hyphen", ["\u{00AD}"], ["\\u00ad"]],
+    ["the Hangul fillers", ["\u{115F}", "\u{1160}", "\u{3164}", "\u{FFA0}"], ["\\u115f", "\\u1160", "\\u3164", "\\uffa0"]],
+    ["the tag characters", ["\u{E0000}", "\u{E0001}", "\u{E0041}", "\u{E007F}"], ["\\u{e0000}", "\\u{e0001}", "\\u{e0041}", "\\u{e007f}"]],
+  ];
+  it.each(INVISIBLE)("%s: refused in every text field, and echoed escaped", (_group, chars, escapes) => {
+    const fields = [
+      ["outcome", "outcome_not_one_line", "outcome", (c: string) => ({ outcome: `a${c}b` })],
+      ["option label", "bad_option_label", "option merge", (c: string) => ({ options: [{ key: "merge", label: `a${c}b` }, { key: "hold", label: "Hold until Monday" }] })],
+      ["risk", "risk_not_one_line", "risk", (c: string) => ({ risk: `a${c}b` })],
+    ] as const;
+    chars.forEach((c, i) => {
+      const name = `U+${c.codePointAt(0)!.toString(16)}`;
+      for (const [field, code, where, over] of fields) {
+        const lint = lintCard(card(over(c)));
+        expect(lint.problems.map(p => `${p.code} ${p.where}`), `${field} holds ${name}`).toContain(`${code} ${where}`);
+        expect(lint.card, `${field} holds ${name}`).toBeNull();
+      }
+      // Echoed in a problem (an unknown recommended option): escaped, never raw, and the problem stays one visible line.
+      const echo = lintCard(card({ recommend: `go${c}ahead` }));
+      const text = echo.problems.map(p => p.text).join(" ");
+      expect(text, `echo of ${name}`).toContain(escapes[i]!);
+      expect(text.includes(c), `echo of ${name} is not raw`).toBe(false);
+    });
+  });
+
   it("every problem is one line, whatever the draft holds", () => {
     // A hostile draft: echoed values and keys that would put their own lines into the refusal if it echoed them raw.
     const echoed = lintCard(card({ recommend: "go\nahead", default: "go\non" }));

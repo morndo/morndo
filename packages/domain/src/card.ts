@@ -34,15 +34,18 @@ const CONTROL = /[\u0000-\u001F\u007F-\u009F]/;
 // Where a card is posted they end a line as a newline does, so every one-line field refuses them too — a draft from
 // --json could otherwise add lines of its own to the printed card, a fake buttons line among them.
 const SEPARATOR = /[\u{2028}\u{2029}]/u;
-// The characters that reorder or hide what the principal reads (T-307): the bidirectional overrides and isolates and
-// the zero-width ones — a bidi override can make `merge` look like `hold` on a phone card. (The file is already in
-// .oxlintrc.json's no-control-regex override.)
-const HIDDEN = /[\u{202A}-\u{202E}\u{2066}-\u{2069}\u{200B}-\u{200D}\u{FEFF}]/u;
+// The characters that reorder or hide what the principal reads (T-307): the bidirectional overrides and isolates, the
+// marks (LRM, RLM, ALM), the zero-width ones, the word joiner, the soft hyphen, the Hangul fillers (blank letters) and the
+// tag characters (an invisible alphabet) — a bidi override can make `merge` look like `hold` on a phone card. One list,
+// so what a field refuses and what the echo escapes cannot drift apart. (The file is already in .oxlintrc.json's
+// no-control-regex override.)
+const HIDDEN_CLASS = "\\u{202A}-\\u{202E}\\u{2066}-\\u{2069}\\u{200B}-\\u{200F}\\u{FEFF}\\u{061C}\\u{2060}\\u{00AD}\\u{115F}\\u{1160}\\u{3164}\\u{FFA0}\\u{E0000}-\\u{E007F}";
+const HIDDEN = new RegExp(`[${HIDDEN_CLASS}]`, "u");
 // A placeholder left from the blank: "<…>" with no line break of its own inside.
 const PLACEHOLDER = /<[^<>\n]*>/;
 // What quoted() escapes: the union of CONTROL, SEPARATOR and HIDDEN, so a draft value echoed into a problem's text can
 // neither add a line of its own nor hide inside one.
-const ESCAPE = /[\u{0}-\u{1F}\u{7F}-\u{9F}\u{2028}\u{2029}\u{202A}-\u{202E}\u{2066}-\u{2069}\u{200B}-\u{200D}\u{FEFF}]/gu;
+const ESCAPE = new RegExp(`[\\u{0}-\\u{1F}\\u{7F}-\\u{9F}\\u{2028}\\u{2029}${HIDDEN_CLASS}]`, "gu");
 // Jargon the principal cannot read on a phone card: a tracker number, a commit hash, an ask id (T-307). A hash needs
 // both a digit and a letter, so a word of letters alone ("defaced") and a plain number ("1234567") stay prose.
 const JARGON = [
@@ -58,7 +61,11 @@ const oneLine = (s: string) => !CONTROL.test(s) && !SEPARATOR.test(s) && !HIDDEN
 
 // A draft value echoed into a problem's text, made safe to print (T-307): JSON-quoted, and every character that could
 // break the line or hide in it comes back as its \uXXXX escape.
-const escapeCode = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`;
+// A character above U+FFFF (a tag character) is one escape, \u{e0041}, not its two surrogate halves.
+const escapeCode = (c: string) => {
+  const cp = c.codePointAt(0) ?? 0;
+  return cp > 0xffff ? `\\u{${cp.toString(16)}}` : `\\u${cp.toString(16).padStart(4, "0")}`;
+};
 export function quoted(value: string): string {
   return JSON.stringify(value).replace(ESCAPE, escapeCode);
 }

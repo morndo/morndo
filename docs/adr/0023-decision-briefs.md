@@ -86,3 +86,8 @@ is one of the options, and no placeholder left from the blank; with a live Risk 
 continue (`| stop`) and the default must be a stop, and ids only the manager can read (#12, a commit hash, an ask id)
 warn. The kinds are declared by the asker, and lint checks they are there and that the default is a stop under a live
 risk; the jargon patterns are lint — shape, not judgement of truth: whether the risk is real stays with the manager.
+
+Lint cannot catch two mistakes, and the card says nothing of them. A wrong stop or continue declaration passes whenever the
+default is marked stop: the asker says which option stops, and whether that is true is the manager's to judge. A card whose
+Risk line was dropped is valid, because a card with no Risk line is: lint cannot know a risk existed. Both stay with the
+manager's review of the draft.

@@ -3122,8 +3122,12 @@ export const CONTROLS: Control[] = [
     find: "if (kind !== \"stop\" && kind !== \"continue\") {", replace: "if (false && kind !== \"stop\" && kind !== \"continue\") {",
     run: ["packages/protocol/test/card.test.ts"], expect: "bad_option_kind" },
   { id: "b7-card-hidden-chars", task: "307", file: "packages/domain/src/card.ts",
-    find: String.raw`/[\u{202A}-\u{202E}\u{2066}-\u{2069}\u{200B}-\u{200D}\u{FEFF}]/u`, replace: "/(?!)/u",
+    find: 'const HIDDEN = new RegExp(`[${HIDDEN_CLASS}]`, "u");', replace: 'const HIDDEN = /(?!)/u;',
+    // (also breaks the new groups: marks, joiner, soft hyphen, fillers, tag characters)
     run: ["packages/domain/test/card.test.ts"], expect: "outcome_not_one_line" },
+  { id: "b7-card-echo-astral-whole", task: "307", file: "packages/domain/src/card.ts",
+    find: 'return cp > 0xffff ? `\\\\u{${cp.toString(16)}}` : `\\\\u${cp.toString(16).padStart(4, "0")}`;', replace: 'return `\\\\u${(c.charCodeAt(0) ?? 0).toString(16).padStart(4, "0")}`;',
+    run: ["packages/domain/test/card.test.ts"], expect: "the tag characters" },
   { id: "b7-card-echo-escaped", task: "307", file: "packages/domain/src/card.ts",
     find: ".replace(ESCAPE, escapeCode);", replace: ";",
     run: ["packages/domain/test/card.test.ts"], expect: "\\u202e" },
