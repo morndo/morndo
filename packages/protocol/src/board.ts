@@ -1,7 +1,7 @@
 // The board on the wire (ADR-0015): the tasks the hub pushes to the app (the `board` feed frame) and answers to the
 // agents' CLI, and the bodies a change is sent with, from the app (a Command, AC7) or from an agent (a bearer token).
 // Types are the domain's own; a task this build can't read is dropped from the list, never guessed.
-import type { EndpointId, SessionId, Task, TaskActor, TaskChange, TaskEvent, TASK_PRIORITIES, TASK_STATUSES } from "@morndo/domain";
+import type { EndpointId, MergeRecord, MergedView, SessionId, Task, TaskActor, TaskChange, TaskEvent, TASK_PRIORITIES, TASK_STATUSES } from "@morndo/domain";
 import * as z from "./z.ts";
 
 const str = (max: number) => z.string().check(z.maxLength(max));
@@ -34,19 +34,27 @@ export const BoardTaskSchema = z.object({
 });
 export const TaskChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("created"), status: z.enum(STATUSES), assignee: z.nullable(text()) }),
-  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()) }),
+  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()) }),
   z.object({ kind: z.literal("assigned"), from: z.nullable(text()), to: z.nullable(text()) }),
   z.object({ kind: z.literal("edited"), title: z.exactOptional(text()), description: z.exactOptional(text()), priority: z.exactOptional(z.enum(PRIORITIES)) }),
   z.object({ kind: z.literal("commented"), text: text() }),
+  z.object({ kind: z.literal("merged"), repo: text(), sha: text() }),
 ]);
 export const TaskEventSchema = z.object({ key: taskKey(), rev: z.int().check(z.gte(1)), at: count(), actor: TaskActorSchema, change: TaskChangeSchema });
+
+// A task's recorded merges and their liveness (B11): `merged` in the board frame carries these, decoded one by one by
+// whoever reads it (as `runs`); a merge's `override` is the reason done was accepted while it was not live.
+export const MergeRecordSchema = z.object({ repo: text(), sha: text(), at: count(), by: text(), override: z.nullable(text()) });
+export const MergedViewSchema = z.object({ key: taskKey(), merges: z.array(MergeRecordSchema), live: z.nullable(z.boolean()), label: text() });
 
 // The whole board, as the hub holds it (boardOrder): sent after every hello and on every change, like the decisions.
 // `lanes`: the lane names the hub lists now, so the app can mark an assignee that isn't running. `runs` (ADR-0032): each
 // lane's Run as the fleet derived it (RunViewSchema, decoded one by one: one this build can't read is dropped); absent
-// from a hub that has none.
+// from a hub that has none. `merged` (B11): each shown task's MergedView, decoded the same way; absent from a hub that
+// has none.
 export const BoardFrameSchema = z.object({
   t: z.literal("board"), tasks: z.array(z.unknown()), lanes: z.array(text()), at: count(), runs: z.exactOptional(z.array(z.unknown())),
+  merged: z.exactOptional(z.array(z.unknown())),
 });
 
 // A new task, from the app or an agent. A worker's lands in the backlog whatever it says (B2).
@@ -57,10 +65,12 @@ export const BoardCreateBody = z.object({
 // One change to one task: the same body from the app and from an agent; the hub decides by who sent it.
 const ifRev = z.exactOptional(z.int().check(z.gte(1)));
 export const BoardActionBody = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("move"), to: z.enum(STATUSES), reason: z.exactOptional(str(2000)), ifRev }),
+  z.object({ action: z.literal("move"), to: z.enum(STATUSES), reason: z.exactOptional(str(2000)), notLive: z.exactOptional(str(2000)), ifRev }),
   z.object({ action: z.literal("assign"), to: z.nullable(str(200)), ifRev }),
   z.object({ action: z.literal("edit"), title: z.exactOptional(str(1000)), description: z.exactOptional(str(20_000)), priority: z.exactOptional(z.enum(PRIORITIES)), ifRev }),
   z.object({ action: z.literal("comment"), text: str(20_000) }),
+  // B11: recording a task's PR merged. No ifRev (like a comment): it changes no state, so it races with nothing.
+  z.object({ action: z.literal("merged"), sha: str(100), repo: z.exactOptional(str(300)) }),
 ]);
 export type BoardCreateBody = z.output<typeof BoardCreateBody>;
 export type BoardActionBody = z.output<typeof BoardActionBody>;
@@ -72,3 +82,5 @@ check<Same<z.output<typeof BoardTaskSchema>, Task>>(true);
 check<Same<z.output<typeof TaskChangeSchema>, TaskChange>>(true);
 check<Same<z.output<typeof TaskEventSchema>, TaskEvent>>(true);
 check<Same<z.output<typeof TaskActorSchema>, TaskActor>>(true);
+check<Same<z.output<typeof MergeRecordSchema>, MergeRecord>>(true);
+check<Same<z.output<typeof MergedViewSchema>, MergedView>>(true);

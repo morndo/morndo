@@ -8,12 +8,14 @@ import { startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 import { frameText } from "./http-crash-fixture.ts";
 import { ObservationService } from "../src/application/observation-service.ts";
 import type { RunView } from "@morndo/protocol";
+import type { Liveness } from "@morndo/domain";
 
 let hub: InProcessHub;
 let now: number;
 let managerToken: string;
 let workerToken: string;
 let runs: RunView[];                                              // the lanes' runs, as the projector would hold them
+let live: (sha: string) => Liveness;                              // each merge's liveness, as the fleet's builds would tell it
 const HOUR = 3_600_000;
 
 function frames(ws: WebSocket) {
@@ -54,7 +56,8 @@ beforeEach(async () => {
   const observation = new ObservationService(tmux, 1000, () => now);
   await observation.poll();
   runs = [];
-  hub = await startInProcessHub({ now: () => now, observation, runs: () => runs });
+  live = () => ({ live: false, blockers: [] });                   // the hub that cannot tell: never live (B11)
+  hub = await startInProcessHub({ now: () => now, observation, runs: () => runs, liveness: sha => live(sha) });
   managerToken = hub.agents.issue("manager", "manager").secret;
   workerToken = hub.agents.issue("lanes", "worker").secret;
 });
@@ -227,5 +230,106 @@ describe("the principal's side (AC7) and the feed", () => {
     const r = await hub.post("/api/board/tasks", { title: "one more" }, { cookie: `__Host-morndo=${cookie}` });
     expect(r.status).toBe(429);
     expect(r.headers.get("retry-after")).toMatch(/^\d+$/);
+  });
+});
+
+describe("merged, not live (B11)", () => {
+  const SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
+  const BUILD = "abc1234deadbeef0123456789abcdef012345678";
+  const REASON = "npm test: 14 passed";
+  const WHY_NOT_LIVE = "srv01 lags one build; the change is behind its flag";
+  // One node behind, on a build the merge is not in.
+  const behind = (_sha: string): Liveness => ({ live: false, blockers: [{ node: "pc", on: BUILD }] });
+  // A task offered for review, ready for the manager's Done.
+  const atReview = async () => {
+    await agent(managerToken).post("/api/agent/board/tasks", { title: "Ship it", assignee: "builder" });
+    const builder = agent(workerToken, "builder");
+    await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+  };
+
+  it("done is refused while the merge is not live", async () => {
+    live = behind;
+    await atReview();
+    const m = agent(managerToken);
+    const recorded = await json(await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA }));
+    expect(recorded.event).toMatchObject({ change: { kind: "merged", repo: "morndo/morndo", sha: SHA } });
+    expect(recorded.task).toMatchObject({ status: "review", rev: 4 });   // an event more, no change of state
+    const r = await m.post("/api/agent/board/tasks/T-1", { action: "move", to: "done", reason: REASON });
+    expect(r.status).toBe(409);
+    expect(await json(r)).toEqual({ error: "not_live", detail: "merged, not live: pc on abc1234" });
+    expect((await json(await m.get("/api/agent/board/tasks/T-1"))).task).toMatchObject({ status: "review" });
+  });
+
+  it("it becomes live when all nodes report a descendant build", async () => {
+    live = () => ({ live: true });
+    await atReview();
+    const m = agent(managerToken);
+    await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA });
+    const done = await json(await m.post("/api/agent/board/tasks/T-1", { action: "move", to: "done", reason: REASON }));
+    expect(done.task).toMatchObject({ status: "done" });
+  });
+
+  it("done with a not-live reason is accepted and recorded as an override", async () => {
+    live = behind;
+    await atReview();
+    const m = agent(managerToken);
+    await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA });
+    const done = await json(await m.post("/api/agent/board/tasks/T-1", { action: "move", to: "done", reason: REASON, notLive: WHY_NOT_LIVE }));
+    expect(done.task).toMatchObject({ status: "done" });
+    expect(done.event).toMatchObject({ change: { kind: "moved", to: "done", notLive: WHY_NOT_LIVE } });
+    const record = await json(await m.get("/api/agent/board/tasks/T-1"));
+    expect(record.merged).toEqual({
+      key: "T-1", live: false, label: "merged, not live: pc on abc1234",
+      merges: [{ repo: "morndo/morndo", sha: SHA, at: now, by: "manager", override: WHY_NOT_LIVE }],
+    });
+    // The whole board carries each task's merges with their label, for the agents and every feed.
+    expect((await json(await m.get("/api/agent/board"))).merged).toEqual([record.merged]);
+    const cookie = await hub.cookie();
+    const ws = await hub.socket("/api/feed", cookie);
+    const f = frames(ws);
+    ws.send(JSON.stringify({ t: "hello" }));
+    expect(await f.next("board")).toMatchObject({ merged: [record.merged] });
+    ws.close();
+  });
+
+  it("unknown fails closed: a hub that cannot tell holds done", async () => {
+    await atReview();                                                // no liveness that says live: the default
+    const m = agent(managerToken);
+    await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA });
+    const r = await m.post("/api/agent/board/tasks/T-1", { action: "move", to: "done", reason: REASON });
+    expect(r.status).toBe(409);
+    expect(await json(r)).toEqual({ error: "not_live", detail: "merged, not live: no node reports a build" });
+  });
+
+  it("a merge in another repo leaves done unchanged", async () => {
+    live = behind;
+    await atReview();
+    const m = agent(managerToken);
+    const recorded = await json(await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA, repo: "acme/other" }));
+    expect(recorded.event).toMatchObject({ change: { kind: "merged", repo: "acme/other" } });
+    const done = await json(await m.post("/api/agent/board/tasks/T-1", { action: "move", to: "done", reason: REASON }));
+    expect(done.task).toMatchObject({ status: "done" });
+    expect((await json(await m.get("/api/agent/board/tasks/T-1"))).merged).toMatchObject({ live: null, label: "merged in acme/other" });
+  });
+
+  it("the merge record names who and when; only the board's hands or the task's own lane may record one", async () => {
+    await atReview();
+    // A worker lane that isn't the assignee may not.
+    const other = agent(workerToken, "manager");
+    expect(await json(await other.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA }))).toEqual({ error: "not_yours" });
+    expect((await other.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA })).status).toBe(403);
+    // The task's own lane may; the sha is kept as git writes it, lower case.
+    expect((await agent(workerToken, "builder").post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA.toUpperCase() })).status).toBe(200);
+    // The principal may, from the app.
+    const cookie = await hub.cookie();
+    expect((await hub.post("/api/board/tasks/T-1", { action: "merged", sha: "b".repeat(40) }, { cookie: `__Host-morndo=${cookie}` })).status).toBe(200);
+    const record = await json(await agent(managerToken).get("/api/agent/board/tasks/T-1"));
+    expect(record.merged).toMatchObject({
+      merges: [
+        { repo: "morndo/morndo", sha: SHA, at: now, by: "builder", override: null },
+        { repo: "morndo/morndo", sha: "b".repeat(40), at: now, by: "principal", override: null },
+      ],
+    });
   });
 });

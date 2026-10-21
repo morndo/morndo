@@ -7,7 +7,7 @@ import { migrate } from "./migrations.ts";
 import type { DeliveryState } from "@morndo/protocol";
 import {
   endpointId, pairingTokenId, sessionId,
-  type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
+  type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type MergeRecord, type NotificationEvent, type PairingToken,
   type Session, type Task, type TaskEvent, type Transcription, type Upload,
 } from "@morndo/domain";
 
@@ -519,6 +519,30 @@ export class Store {
       .map(r => ({ key: r.key as Task["key"], rev: r.rev as number, at: r.at as number, actor: JSON.parse(r.actor as string) as TaskEvent["actor"], change: JSON.parse(r.change as string) as TaskEvent["change"] }));
   }
 
+  // The board's merge records (B11): one row per recorded merge of a task's PR. The same record again (a replayed
+  // action) changes nothing; the row as it was first written stands.
+  saveMerge(key: string, m: MergeRecord) {
+    this.db.prepare("INSERT OR IGNORE INTO board_merges (key, repo, sha, at, by, override) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(key, m.repo, m.sha, m.at, m.by, m.override);
+  }
+  mergesOf(key: string): MergeRecord[] {
+    return (this.db.prepare("SELECT repo, sha, at, by, override FROM board_merges WHERE key = ? ORDER BY at, sha").all(key) as Row[]).map(mergeFrom);
+  }
+  allMerges(): Map<string, MergeRecord[]> {
+    const all = new Map<string, MergeRecord[]>();
+    for (const r of this.db.prepare("SELECT key, repo, sha, at, by, override FROM board_merges ORDER BY key, at, sha").all() as Row[]) {
+      const list = all.get(r.key as string) ?? [];
+      list.push(mergeFrom(r));
+      all.set(r.key as string, list);
+    }
+    return all;
+  }
+  // Done accepted while a merge was not live (B11): the reason lands on that task's morndo/morndo merges that carry no
+  // override yet. Other repositories' rows are never touched: their merges never held done.
+  overrideMerges(key: string, reason: string) {
+    this.db.prepare("UPDATE board_merges SET override = ? WHERE key = ? AND lower(repo) = 'morndo/morndo' AND override IS NULL").run(reason, key);
+  }
+
   // Agent tokens (ADR-0015, B1).
   saveAgentToken(t: AgentToken) {
     this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, created_at, last_used_at, revoked_at) VALUES (@id, @name, @role, @secretHash, @createdAt, @lastUsedAt, @revokedAt)
@@ -635,6 +659,9 @@ const taskFrom = (r: Row): Task => ({
 const agentTokenFrom = (r: Row): AgentToken => ({
   id: r.id as string, name: r.name as string, role: r.role as AgentToken["role"], secretHash: r.secret_hash as string,
   createdAt: r.created_at as number, lastUsedAt: (r.last_used_at as number | null) ?? null, revokedAt: (r.revoked_at as number | null) ?? null,
+});
+const mergeFrom = (r: Row): MergeRecord => ({
+  repo: r.repo as string, sha: r.sha as string, at: r.at as number, by: r.by as string, override: (r.override as string | null) ?? null,
 });
 const briefFrom = (r: Row): BriefRecord => ({
   id: r.id as string, version: r.version as number, ref: (r.ref as string | null) ?? null,

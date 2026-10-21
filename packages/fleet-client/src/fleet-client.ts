@@ -32,7 +32,8 @@ const stderrLog = (level: "warn" | "error") => (message: string, error?: unknown
   process.stderr.write(`${redactText(`[fleet-client] ${level}: ${message}${error === undefined ? "" : `\n${toLogFormat(error)}`}`, homedir())}\n`);
 };
 const STDERR_LOG: FleetLog = { warn: stderrLog("warn"), error: stderrLog("error") };
-export type FleetNode = { name: string; status: NodeStatus; health: Health | null; agent: string | null };
+// `commit`: the commit the node's build reports (B11, for the board's "merged, not live"); absent or null when it names none.
+export type FleetNode = { name: string; status: NodeStatus; health: Health | null; agent: string | null; commit?: string | null };
 export type FleetLane = { name: string; node: string; workerId: string | null; conflict: boolean };
 // `alert`: its body is an Alert, and `node` is the alert's node or "". `delivery`, `lane` (fleet clients §4.4, §7) and
 // `run` (a lane's Run, ADR-0032): their bodies are checked here, so they come typed.
@@ -124,7 +125,8 @@ const opErrorOf = (v: unknown): OpError | null =>
     ? readOpError(v.code, v.executed, v.message) : null;
 const isNode = (v: unknown): v is FleetNode =>
   isRecord(v) && typeof v.name === "string" && typeof v.status === "string" && STATUSES.has(v.status)
-  && (v.health === null || isRecord(v.health)) && (v.agent === null || typeof v.agent === "string");
+  && (v.health === null || isRecord(v.health)) && (v.agent === null || typeof v.agent === "string")
+  && (v.commit === undefined || v.commit === null || typeof v.commit === "string");
 const isLane = (v: unknown): v is FleetLane =>
   isRecord(v) && typeof v.name === "string" && typeof v.node === "string" && (v.workerId === null || typeof v.workerId === "string")
   && typeof v.conflict === "boolean";

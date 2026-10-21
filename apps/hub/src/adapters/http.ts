@@ -318,9 +318,9 @@ export function startHttp(p: {
   // console is the whole identity (agent-access.ts), and a worker token says which lane it acts as (X-Morndo-Lane).
   // A refusal spends the caller's refusal bucket; a call spends the token's.
   const boardProblemStatus = (problem: string) =>
-    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" ? 409 : 400;
+    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
-    r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}) });
+    r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}), ...(r.detail ? { detail: r.detail } : {}) });
 
   // ADR-0023: file, restate, list and close a decision brief. Same door as the board (a bearer token, no cookie).
   const briefStatus = (problem: string) =>

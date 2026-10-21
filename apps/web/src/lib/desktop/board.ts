@@ -116,6 +116,7 @@ export function eventLine(e: TaskEvent): { who: string; text: string; comment: s
     case "assigned": return { who: w, text: c.to ? `assigned it to ${c.to}` : "unassigned it", comment: null };
     case "edited": return { who: w, text: `edited the ${Object.keys(c).filter(k => k !== "kind").join(", ")}`, comment: null };
     case "commented": return { who: w, text: "commented", comment: c.text };
+    case "merged": return { who: w, text: `recorded its merge in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };   // B11; the later round words this
   }
 }
 export const ago = (t: number, now: number) => {
