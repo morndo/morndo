@@ -3,7 +3,7 @@
 // wall-clock jump (plan Review Focus 4).
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Delivery, OpName } from "@morndo/protocol";
+import { LIMITS, type Delivery, type OpName } from "@morndo/protocol";
 import { Flight } from "@morndo/service-kit";
 import { ALL_OPS } from "../src/config.ts";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
@@ -49,13 +49,14 @@ describe("the shared rules", () => {
     for (const args of [
       { ...sendArgs(), workerId: "%3" },                               // a legacy pane id is not a worker id
       { ...sendArgs(), workerId: "pc.0a1b2c3d.04" },                    // a leading zero: not the pane's one worker ID
-      { ...sendArgs(), text: "x".repeat(8001) },                        // over LIMITS.maxSendText
+      { ...sendArgs(), text: "x".repeat(LIMITS.maxMessageText + 1) },  // over LIMITS.maxMessageText
       { ...sendArgs(), text: "" },
       { ...sendArgs(), expect: { server: "XYZ", window: "api" } },
       { ...sendArgs(), expect: { server: "0a1b2c3d", window: "a\tb" } },  // a control character in the window name
     ]) {
       expect(await call("pane.send", args, { key: "hub:k" })).toMatchObject({ ok: false, error: { code: "bad_args" } });
     }
+    expect(await call("pane.send", sendArgs("ü".repeat(LIMITS.maxMessageText)), { key: "hub:long" })).toMatchObject({ ok: true });   // a whole message, to the new bound
   });
   it("refuses a key on an op that takes none, as the fleet does (plan Contracts)", async () => {
     const { call } = executor({
