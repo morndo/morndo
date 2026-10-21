@@ -20,7 +20,9 @@
 // process of its own; same-user is not a boundary in Morndo (ADR-0004).
 import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, statSync } from "node:fs";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { CLAUDE_RELEASE_FINGERPRINT } from "./claude-release-key.ts";
+import { compareVersions, isVersion, type ReleasePin } from "./release-manifest.ts";
 import { sandboxReady } from "./runtime-claude.ts";
 
 // What the check reads about a process and the file system; injectable so the cases are shown without a process each.
@@ -235,7 +237,10 @@ export function settingsProof(settings: unknown, want: Wanted, real: (path: stri
 
 export type Check = {
   ppid: () => number;                  // the live parent: process.ppid reads it again each time
-  pin: Pin | null;
+  pin: Pin | null;                     // the one claude binary the owner pinned, or
+  release: ReleasePin | null;          // the signed releases the owner pinned (T-346): either admits the binary
+  // Is this sha256 in the signed manifest cached for this version? Offline (release-manifest.ts); the proof calls it, never the network.
+  verifyRelease?: (version: string, sha256: string) => Promise<Proof>;
   connection: string;                  // the connection the key is for: its API host is looked up in the pin
   want: Wanted;
   read?: ProcReader;
@@ -259,9 +264,33 @@ function sameBase(given: string | undefined, pinned: string): boolean | null {
 // Process start times come in ticks of 10 ms: a settings file written just before the fork can read as just after.
 const START_SLACK_MS = 20;
 
-export function verifyClaudeParent(check: Check): Proof {
+// The binary is the one pinned: this file, with the pinned content (size, mtime, ctime and inode as pinned, else the hash).
+function pinnedBinary(pin: Pin, path: string, read: ProcReader, parent: number): Proof {
+  if (path !== pin.resolved) return no("parent is not the pinned claude");
+  const running = read.exeIdentity(parent);
+  if (running === null) return no("parent binary unreadable");
+  if (running.size !== pin.size || running.mtimeMs !== pin.mtimeMs || running.ctimeMs !== pin.ctimeMs || running.ino !== pin.ino) {
+    if (read.exeSha256(parent) !== pin.sha256) return no("the claude binary is not the one that was pinned");
+  }
+  return { ok: true };
+}
+
+// Or the binary is a signed release: a file named by its version in the pinned directory, at or above the pinned floor, whose
+// sha256 (read from the running inode) a verified, cached manifest lists. The owner pinned the key, once; an update needs
+// nothing more, since the update's manifest is signed by the same key.
+async function signedRelease(release: ReleasePin, verify: Check["verifyRelease"], path: string, read: ProcReader, parent: number): Promise<Proof> {
+  if (release.fingerprint.toLowerCase() !== CLAUDE_RELEASE_FINGERPRINT) return no("the pinned release key is not the compiled-in one");
+  if (verify === undefined) return no("no release verifier");
+  if (read.real(dirname(path)) !== read.real(release.versionsDir)) return no("the parent binary is outside the pinned releases directory");
+  const version = basename(path);
+  if (!isVersion(version) || compareVersions(version, release.floor) < 0) return no("the parent binary is not a release at or above the pinned floor");
+  const sha256 = read.exeSha256(parent);
+  if (sha256 === null) return no("parent binary unreadable");
+  return verify(version, sha256);
+}
+
+export async function verifyClaudeParent(check: Check): Promise<Proof> {
   const read = check.read ?? procReader;
-  if (check.pin === null) return no("no pinned claude binary");
   const parent = check.ppid();
   const started = read.startMs(parent);
   const ticks = read.ticks(parent);
@@ -269,18 +298,22 @@ export function verifyClaudeParent(check: Check): Proof {
   const args = read.cmdline(parent);
   if (started === null || ticks === null || exe === null) return no("parent unreadable");
   if (args === null) return no("parent command line unreadable");
-  // The binary: the pinned file, which after an update reads "(deleted)" while that version still runs; and what it is: the
-  // inode the process runs has the pinned size, mtime, ctime and inode, or else the pinned content hash.
+  // The binary: the pinned file or a signed release; after an update it reads "(deleted)" while that version still runs.
   const path = exe.endsWith(DELETED) ? exe.slice(0, -DELETED.length) : exe;
-  if (path !== check.pin.resolved) return no("parent is not the pinned claude");
-  const running = read.exeIdentity(parent);
-  if (running === null) return no("parent binary unreadable");
-  if (running.size !== check.pin.size || running.mtimeMs !== check.pin.mtimeMs || running.ctimeMs !== check.pin.ctimeMs || running.ino !== check.pin.ino) {
-    if (read.exeSha256(parent) !== check.pin.sha256) return no("the claude binary is not the one that was pinned");
+  let baseUrls: Record<string, string> | null = null;
+  let refused: Proof = no("no pinned claude binary");
+  if (check.release !== null) {
+    const proof = await signedRelease(check.release, check.verifyRelease, path, read, parent);
+    if (proof.ok) baseUrls = check.release.baseUrls; else refused = proof;
   }
+  if (baseUrls === null && check.pin !== null) {
+    const proof = pinnedBinary(check.pin, path, read, parent);
+    if (proof.ok) baseUrls = check.pin.baseUrls; else if (check.release === null) refused = proof;
+  }
+  if (baseUrls === null) return refused;
   // The API host: the parent's own environment, read from /proc, names the host the owner pinned for this connection.
   const entries = read.environ(parent);
-  const pinned = check.pin.baseUrls[check.connection];
+  const pinned = baseUrls[check.connection];
   if (entries === null || pinned === undefined) return no("the parent is not pointed at the pinned API host");
   // A name that occurs twice could be read one way here and taken the other way by the process: refused, for every name
   // that is checked.
