@@ -8,7 +8,7 @@
 // the agent sends none.
 import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { LIMITS } from "@morndo/protocol";
+import { CAP_LONG_TEXT, LIMITS } from "@morndo/protocol";
 import type { Req } from "./helpers/fake-agent.ts";
 import { startTestFleet } from "./helpers/fleet.ts";
 import { tempDir } from "./helpers/temp.ts";
@@ -48,7 +48,7 @@ describe("requests to an agent", () => {
 
   it("every answer carries its store: the agent's own on its answers, the connection's on the fleet's after sending, null before", async () => {
     const fleet = await startTestFleet({ resultSlackMs: 20 });
-    const a = await fleet.online("pc");
+    const a = await fleet.online("pc", { caps: [CAP_LONG_TEXT] });
     a.store = randomUUID();                                                        // the agent says where its keys are
     a.answer = req => (req.op === "pane.send" ? { ok: false, error: { code: "busy", executed: "no", message: "locked" } }
       : req.op === "inventory.get" ? { ok: true, result: { panes: "none" } } : req.op === "op.status" ? { ok: true, result: { state: "unknown" } } : "never");
@@ -123,7 +123,7 @@ describe("requests to an agent", () => {
 
   it("a request over 512 KiB is refused too_large (executed: no) and never sent: it would close the node's connection", async () => {
     const fleet = await startTestFleet();
-    const a = await fleet.online("pc");
+    const a = await fleet.online("pc", { caps: [CAP_LONG_TEXT] });
     expect(await fleet.connections.request("pc", "pane.send", { text: "x".repeat(LIMITS.maxMessageBytes) }, { key: "hub:k", timeoutMs: 1000 }))
       .toMatchObject({ ok: false, error: { code: "too_large", executed: "no" } });
     expect(a.reqs).toEqual([]);
