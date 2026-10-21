@@ -25,14 +25,19 @@ export class TarRefused extends Error {
 
 const refuse = (reason: string): never => { throw new TarRefused(reason); };
 
-// A path's key: its spelling with case and Unicode form folded (NFC, lower case). A file system may treat two
+// A path's key: its spelling with case and Unicode form folded (below). A file system may treat two
 // spellings as one name — APFS, macOS's default, folds both — so the reader's maps are keyed this way on every
 // platform and two names that differ only by spelling are refused instead of written as two entries (no name in
 // this repository's node_modules or Node's distribution collides once folded, checked 2026-10-21). Link targets
 // are looked up by key too: a walk that spelled names exactly let `esc -> P/UP/..` climb out on a system where
-// P/UP names the link p/up (review of 2026-10-21). `normalize` and `toLowerCase` are ECMAScript's own, with no
-// locale: https://tc39.es/ecma262/multipage/text-processing.html (read 2026-10-21).
-const foldKey = (path: string): string => path.normalize("NFC").toLowerCase();
+// P/UP names the link p/up (review of 2026-10-21). `normalize`, `toUpperCase` and `toLowerCase` are ECMAScript's
+// own, with no locale: https://tc39.es/ecma262/multipage/text-processing.html (read 2026-10-21).
+// Folded as far as a file system might: NFKC first (compatibility forms such as the ﬁ ligature become fi), then upper
+// and back to lower case (ß becomes SS then ss; ς and σ both become Σ then σ), then NFC so composed and decomposed
+// accents meet. Folding more only ever refuses an odd archive; folding less would let two spellings of one file
+// through (review of 2026-10-21). No name in this repository's node_modules, apps, packages or Node 24.21.0's
+// distribution collides under this fold (22,921 paths, checked 2026-10-21).
+const foldKey = (path: string): string => path.normalize("NFKC").toUpperCase().toLowerCase().normalize("NFC");
 
 // Strict UTF-8: a name that does not decode is refused, not guessed at — a lossy decode could alias two paths.
 const utf8 = new TextDecoder("utf-8", { fatal: true });

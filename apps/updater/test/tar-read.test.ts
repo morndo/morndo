@@ -166,6 +166,16 @@ describe("extractTar", () => {
       { name: "café", body: Buffer.from("one") },
       { name: "café", body: Buffer.from("two") },
     ]), "nfd-collision", /collide/));
+  // Full case folding, not only lower case (review of 2026-10-21): ß/ss, ﬁ/fi and ς/σ are one name to a folding file
+  // system and to Unicode's case folding, so they fold to one key here too. Folding more refuses an odd archive at
+  // worst; folding less lets two spellings of one file through.
+  for (const [a, b, label] of [["stra\u00dfe", "strasse", "sharp-s"], ["\ufb01le", "file", "fi-ligature"], ["\u03bb\u03bf\u03b3\u03bf\u03c2", "\u03bb\u03bf\u03b3\u03bf\u03c3", "final-sigma"]] as const) {
+    it(`refuses two names that fold to one under full case folding (${label})`, () =>
+      refuse(evilGz([
+        { name: a, body: Buffer.from("one") },
+        { name: b, body: Buffer.from("two") },
+      ]), `fold-${label}`, /collide/));
+  }
   it("accepts two names whose folded forms differ", async () => {
     const archive = dir("folded-ok.tar.gz");
     writeFileSync(archive, evilGz([
