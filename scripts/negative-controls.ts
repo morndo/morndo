@@ -2130,6 +2130,10 @@ export const CONTROLS: Control[] = [
     find: "const fileMode = z.string().check(z.regex(/^0[0-7]{3}$/));", replace: "const fileMode = z.string();",
     run: ["packages/protocol/test/releases-wire.test.ts"], expect: "expected true to be false" },
   // ---- PR 4, check and stage (design §6.1, §10.2, §13): each guard of the chain and its edges, removed once.
+  // CI on #94 (2026-10-22): the switch off gave up on a cancel answered busy, and the drill timed out waiting for it.
+  { id: "pr4-hub-cancel-busy-once", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
+    find: "const CANCEL_BUSY_TRIES = 8;", replace: "const CANCEL_BUSY_TRIES = 1;",
+    run: ["apps/hub/test/manager-queue.test.ts"], expect: "answered busy" },
   { id: "pr4-feed-namespace-unchecked", task: "pr4", file: "apps/updater/src/application/check-service.ts",
     find: "facts.feed_namespace = feedFact !== undefined && feedFact.namespace === FEED_NAMESPACE;",
     replace: "facts.feed_namespace = true;",

@@ -34,6 +34,9 @@ const DELIVERY_MIRROR_SLACK_MS = 2_000;
 export const SENDING_DROP_AFTER_MS = LIMITS.deliveryOpTimeoutMs + DELIVERY_MIRROR_SLACK_MS;
 const KEEP_MS = 7 * 24 * 3_600_000;              // the node keeps a final delivery 7 days (spec §4.3); the hub its row as long
 const COMMANDS_SHOWN_MS = 24 * 3_600_000;         // a device's messages the feed lists after its hello: the outbox's day
+// The switch off asks again when a cancel is answered busy (the node typing it this moment): this often, this long apart.
+const CANCEL_BUSY_TRIES = 8;
+const CANCEL_BUSY_WAIT_MS = 250;
 // How far a state is on: an older word (an event that crossed a newer answer) never moves a delivery back. The node's
 // one retype is the exception: held, then typed again after an interrupt dropped it.
 const RANK: Record<DeliveryState, number> = { queued: 0, typed: 1, held: 2, delivered: 3, uncertain: 3, given_up: 3 };
@@ -265,7 +268,19 @@ export class ManagerQueue {
   // as the fleet waits for its node, and the hub serves only once every one is answered (review #8).
   async #cancelQueued() {
     const open = this.#store.openManagerDeliveries().filter(r => r.state === "queued" || r.state === "sending");
-    await Promise.all(open.map(r => this.cancel(r.deliveryId)));
+    await Promise.all(open.map(r => this.#cancelAtStart(r.deliveryId)));
+  }
+
+  // A cancel answered busy means the node is typing that delivery this very moment — its deliverer tries a delivery
+  // that waits for a menu to close every few seconds — and "ask again in a moment" (spec §4.3, delivery.cancel). Asked
+  // again a few times, it ends cancelled (still queued) or already_typed (followed to its end). Given up on, it was
+  // followed and could be typed after the hub began typing directly, which the switch off exists to prevent.
+  async #cancelAtStart(id: string): Promise<void> {
+    for (let attempt = 1; ; attempt += 1) {
+      const r = await this.cancel(id);
+      if (r.ok || r.problem !== "busy" || attempt >= CANCEL_BUSY_TRIES) return;
+      await new Promise<void>(resolve => setTimeout(resolve, CANCEL_BUSY_WAIT_MS));
+    }
   }
 
   #safeApply(d: Delivery) {

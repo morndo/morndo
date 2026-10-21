@@ -426,6 +426,29 @@ describe("the switch off (spec §9.1; step 2's rollback, §13)", () => {
     expect(["r1", "r2", "r3"].map(r => fleet.deliveries.get(`hub:ep1:${r}`)?.delivery.state)).toEqual(["given_up", "given_up", "given_up"]);
   });
 
+  // A cancel answered busy (the node is typing that delivery this very moment, as its deliverer tries it while it waits
+  // for a menu to close) means "ask again in a moment" (spec §4.3, delivery.cancel). At the switch off the hub asks
+  // again rather than following a delivery that would then be typed after it began typing directly.
+  it("asks again when a cancel at start is answered busy, and the delivery ends cancelled", async () => {
+    const on = queue();
+    await on.q.put(command("r1"), "one");
+    on.q.stop();
+    const real = fleetDeliveries(new FleetClient(fleet.socketPath));
+    let busy = 2;
+    const deliveries: Deliveries = {
+      ...real,
+      async cancel(id) {
+        if (busy > 0) { busy -= 1; return { ok: false, refused: "busy" }; }
+        return real.cancel(id);
+      },
+    };
+    const off = new ManagerQueue({ store, deliveries, lane: "manager", on: false, now: () => T0, pollMs: 60_000 });
+    queues.push(off);
+    await off.start();
+    expect(busy).toBe(0);
+    expect(fleet.deliveries.get("hub:ep1:r1")?.delivery).toMatchObject({ state: "given_up", why: "cancelled" });
+  });
+
   it("cancels what is still queued, first, and follows what was typed already to its end", async () => {
     const on = queue();
     await on.q.put(command("r1"), "one");
