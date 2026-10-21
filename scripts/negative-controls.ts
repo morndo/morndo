@@ -2155,6 +2155,18 @@ export const CONTROLS: Control[] = [
     find: `    const keySet = stored.keySet !== null && (t.keySet === null || t.keySet.version < stored.keySet.version)\n      ? stored.keySet\n      : t.keySet;`,
     replace: "    const keySet = t.keySet;",
     run: ["apps/updater/test/store-sqlite.test.ts"], expect: "version" },
+  // The review of 2026-10-21: a Version directory left without its record (a crash after the rename) blocked
+  // staging forever, because promote refuses to overwrite it.
+  { id: "pr4-leftover-version-not-adopted", task: "pr4", file: "apps/updater/src/application/check-service.ts",
+    find: "if (installer.has(best.text) && store.versionRecord(best.text) === null) {",
+    replace: "if (false) {",
+    run: ["apps/updater/test/check-service.test.ts"], expect: "already installed" },
+  // The review of 2026-10-21: a plain error mid-stage (a name the adapter refuses, a full disk) crashed the
+  // check instead of recording a refusal.
+  { id: "pr4-plain-error-unrecorded", task: "pr4", file: "apps/updater/src/application/check-service.ts",
+    find: 'return refused("error", message);',
+    replace: "throw error;",
+    run: ["apps/updater/test/check-service.test.ts"], expect: "disk full" },
   // ---- Secrets, PR 1 (ADR-0022; design §16): the domain and protocol invariants, each guard removed once.
   { id: "sp1-default-deny", task: "secrets-pr1", file: "packages/domain/src/secrets.ts",
     find: 'if (live.length === 0) return err({ problem: "not_granted" });', replace: 'if (live.length === 0) return ok({ subject: { kind: "node" }, modes: [mode], until: { kind: "open" } });',
