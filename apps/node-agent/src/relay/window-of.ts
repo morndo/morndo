@@ -55,10 +55,11 @@ export function cachedFor<T>(ms: number, read: () => T, now: () => number = () =
   return Object.assign(() => readIfOlderThan(ms), { fresh: () => readIfOlderThan(Math.min(REFRESH_MS, ms)) });
 }
 
-// B6: a Stop from a session that is not the one registered for the pane it names (a headless run started inside a lane's
-// pane inherits its TMUX_PANE, and would end the lane's turn). Unknown is never foreign: a pane with no registered session,
-// a body without a pane or a session. The registry may be a moment behind (/clear, a resume), so a mismatch reads it again
-// once, as windowResolver does for an unknown id.
+// B6: a Stop or a StopFailure (/hook/failure) from a session that is not the one registered for the pane it names (a
+// headless run started inside a lane's pane inherits its TMUX_PANE, and would end the lane's turn or report its failure
+// as the lane's). Unknown is never foreign: a pane with no registered session, a body without a pane or a session. The
+// registry may be a moment behind (/clear, a resume), so a mismatch reads it again once, as windowResolver does for an
+// unknown id.
 export function foreignStop(o: { sessions(): Map<string, SessionInfo>; refresh?: () => Map<string, SessionInfo> }): (body: unknown) => boolean {
   const named = (s: SessionInfo, id: string) => s.sessionId === id || (s.aliases?.includes(id) ?? false);
   return body => {

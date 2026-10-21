@@ -1,8 +1,10 @@
 // The hook relay over real HTTP (spec §5.5): each path's answer, window identity, coalescing, /file copies, and what
 // happens when the spool can't be written (a full disk, simulated by a database that refuses writes).
-import { existsSync, mkdirSync, readFileSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { sessionRegistry } from "@morndo/node-ops";
 import { LIMITS } from "@morndo/protocol";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { nodeOpener } from "../src/ops/node-files.ts";
@@ -83,8 +85,8 @@ describe("answers (spec §5.5)", () => {
   });
 });
 
-// B6: a headless run started in a lane's pane posts its Stop as the lane (the pane's window); the relay answers it and
-// drops it, so the lane's turn is not ended by it.
+// B6: a headless run started in a lane's pane posts its Stop and its failures as the lane (the pane's window); the relay
+// answers them and drops them, so the lane's turn is not ended by them.
 describe("a Stop from another session (B6)", () => {
   it("a Stop from another session in the lane's pane is not a lane finish", async () => {
     const before = kicks;
@@ -100,7 +102,54 @@ describe("a Stop from another session (B6)", () => {
     expect(await stop.json()).toEqual({ ok: true, queued: true });
     expect(rows().map(r => [r.path, r.window])).toEqual([["/hook/stop", "web"]]);
   });
-  it("only a Stop is judged: a notice from the same foreign session is still kept", async () => {
+  it("a headless Stop, then the lane's own Stop, in a pane whose registry holds both: the lane's is still a lane finish", async () => {
+    const lane = { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%7", entrypoint: "cli", startedAt: 1_000, updatedAt: 5 };
+    const headless = { pid: process.pid, sessionId: "sess-headless", tmux: "qa:@0.%7", entrypoint: "sdk-cli", startedAt: 2_000, updatedAt: 9 };
+    const claude = mkdtempSync(join(tmpdir(), "morndo-claude-"));
+    mkdirSync(join(claude, "sessions"));
+    const windows = new Map([["%3", "api lane"], ["%7", "web"]]);
+    const postAt = (port: number, path: string, body: unknown) =>
+      fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    try {
+      for (const [first, second] of [[lane, headless], [headless, lane]] as const) {
+        writeFileSync(join(claude, "sessions", "1.json"), JSON.stringify(first));
+        writeFileSync(join(claude, "sessions", "2.json"), JSON.stringify(second));
+        const reg = sessionRegistry(claude);
+        const registryRelay = await startRelay({
+          port: 0, spool, files, log: captureLog().log, onAppended: () => {}, now: () => now,
+          windowOf: windowResolver({ windowOfPane: p => windows.get(p) ?? null, sessions: () => reg.byPane() }),
+          foreign: foreignStop({ sessions: () => reg.byPane() }),
+        });
+        try {
+          const before = rows().length;
+          const headlessStop = await postAt(registryRelay.port, "/hook/stop", { TMUX_PANE: "%7", session_id: "sess-headless" });
+          expect(headlessStop.status).toBe(200);
+          expect(await headlessStop.json()).toEqual({ ok: true, queued: false });
+          expect(rows().length).toBe(before);
+          const ownStop = await postAt(registryRelay.port, "/hook/stop", { TMUX_PANE: "%7", session_id: "sess-lane" });
+          expect(ownStop.status).toBe(200);
+          expect(await ownStop.json()).toEqual({ ok: true, queued: true });
+          expect(rows().slice(before).map(r => [r.path, r.window])).toEqual([["/hook/stop", "web"]]);
+        } finally {
+          await registryRelay.close();
+        }
+      }
+    } finally {
+      rmSync(claude, { recursive: true, force: true });
+    }
+  });
+  it("a headless run's failure is not the lane's: /hook/failure from another session in the pane is answered 202 and not spooled; the lane's own is kept", async () => {
+    const before = kicks;
+    const foreign = await post("/hook/failure", { TMUX_PANE: "%7", session_id: "sess-headless", error: "x" });
+    expect(foreign.status).toBe(202);
+    expect(await foreign.text()).toBe("");
+    expect(rows()).toEqual([]);
+    expect(kicks).toBe(before);
+    const own = await post("/hook/failure", { TMUX_PANE: "%7", session_id: "sess-web", error: "x" });
+    expect(own.status).toBe(202);
+    expect(rows().map(r => [r.path, r.window])).toEqual([["/hook/failure", "web"]]);
+  });
+  it("only a Stop or a failure is judged: a notice from the same foreign session is still kept", async () => {
     const note = await post("/notify", { TMUX_PANE: "%7", session_id: "sess-headless", text: "hi" });
     expect(note.status).toBe(202);
     expect(rows().map(r => r.path)).toEqual(["/notify"]);

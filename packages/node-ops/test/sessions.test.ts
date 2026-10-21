@@ -48,4 +48,30 @@ describe("session registry", () => {
       expect(sessionRegistry(dir).byPane().get("%3")?.status, String(status)).toBe(kept);
     }
   });
+  // B6 (T-306): a headless run started inside a lane writes its own session file naming the lane's pane. Whichever file
+  // readdirSync lists last must not decide who owns the pane, or the lane's own Stop is judged foreign and dropped.
+  describe("two live sessions in one pane (B6)", () => {
+    const lane = { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3", entrypoint: "cli", startedAt: 1_000, updatedAt: 5 };
+    const headless = { pid: process.pid, sessionId: "sess-headless", tmux: "qa:@0.%3", entrypoint: "sdk-cli", startedAt: 2_000, updatedAt: 9 };
+    const bothOrders = (a: Record<string, unknown>, b: Record<string, unknown>, keep: () => void) => {
+      for (const [first, second] of [[a, b], [b, a]] as const) {
+        rmSync(join(dir, "sessions"), { recursive: true, force: true });
+        mkdirSync(join(dir, "sessions"));
+        writeFileSync(join(dir, "sessions", "1.json"), JSON.stringify(first));
+        writeFileSync(join(dir, "sessions", "2.json"), JSON.stringify(second));
+        keep();
+      }
+    };
+    it("a pane holding the lane's own session and a headless run's keeps the lane's, in either file order", () => {
+      bothOrders(lane, headless, () => expect(sessionRegistry(dir).byPane().get("%3")?.sessionId).toBe("sess-lane"));
+    });
+    it("with no entrypoint the earlier startedAt wins, either order; a headless run older than the lane's own still loses", () => {
+      const early = { pid: process.pid, sessionId: "sess-early", tmux: "qa:@0.%3", startedAt: 1_000, updatedAt: 9 };   // the later updatedAt must not win
+      const late = { pid: process.pid, sessionId: "sess-late", tmux: "qa:@0.%3", startedAt: 2_000, updatedAt: 1 };
+      bothOrders(early, late, () => expect(sessionRegistry(dir).byPane().get("%3")?.sessionId).toBe("sess-early"));
+      const noStart = { pid: process.pid, sessionId: "sess-nostart", tmux: "qa:@0.%3", updatedAt: 1 };
+      bothOrders(noStart, early, () => expect(sessionRegistry(dir).byPane().get("%3")?.sessionId).toBe("sess-early"));   // no startedAt counts as later
+      bothOrders({ ...headless, startedAt: 500 }, lane, () => expect(sessionRegistry(dir).byPane().get("%3")?.sessionId).toBe("sess-lane"));   // rank before age
+    });
+  });
 });
