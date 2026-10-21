@@ -3,7 +3,8 @@
 // revocations (RL9), and those rows live only in the database the restore would replace — so before any restore the
 // rollback asks which ids are revoked in the live database and not in this update's Backup of it. Both files are
 // opened read-only. The tables are the services' own: the hub's endpoints and agent_tokens (apps/hub's migrations),
-// the fleet's nodes (apps/fleet's migrations); a table a schema doesn't have yet holds no revocations.
+// the fleet's nodes (apps/fleet's migrations), and the connections store's secrets and secret versions (its
+// store-migrations.ts: status or state 'revoked'); a table a schema doesn't have yet holds no revocations.
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -11,19 +12,26 @@ import type { DatabaseName } from "@morndo/domain";
 import type { Revocations } from "../application/ports.ts";
 import type { DatabasePaths } from "./paths.ts";
 
-const REVOKED: Partial<Record<DatabaseName, readonly { table: string; id: string }[]>> = {
-  hub: [{ table: "endpoints", id: "id" }, { table: "agent_tokens", id: "id" }],
-  fleet: [{ table: "nodes", id: "name" }],
+// Each revocation table: the id it is named by, and what marks a row revoked. Fixed SQL, no input in it.
+type RevokedRows = { table: string; id: string; revoked: string };
+const BY_TIME = "revoked_at IS NOT NULL";
+const REVOKED: Partial<Record<DatabaseName, readonly RevokedRows[]>> = {
+  hub: [{ table: "endpoints", id: "id", revoked: BY_TIME }, { table: "agent_tokens", id: "id", revoked: BY_TIME }],
+  fleet: [{ table: "nodes", id: "name", revoked: BY_TIME }],
+  connections: [
+    { table: "secrets", id: "reference", revoked: "status = 'revoked'" },
+    { table: "secret_versions", id: "reference || '#' || version", revoked: "state = 'revoked'" },
+  ],
 };
 
-function revokedIn(path: string, tables: readonly { table: string; id: string }[]): Set<string> {
+function revokedIn(path: string, tables: readonly RevokedRows[]): Set<string> {
   const out = new Set<string>();
   const db = new Database(path, { readonly: true, fileMustExist: true });
   try {
-    for (const { table, id } of tables) {
+    for (const { table, id, revoked } of tables) {
       const known = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
       if (known === undefined) continue;
-      for (const row of db.prepare(`SELECT ${id} AS id FROM ${table} WHERE revoked_at IS NOT NULL`).all() as { id: string }[]) {
+      for (const row of db.prepare(`SELECT ${id} AS id FROM ${table} WHERE ${revoked}`).all() as { id: string }[]) {
         out.add(`${table}:${row.id}`);
       }
     }

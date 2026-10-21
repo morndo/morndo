@@ -136,6 +136,8 @@ export class FakeServices implements ServiceManager {
   /** Runs when a service starts, told the Version that is current: a test's stand-in for the service's own startup
    *  code — B's fleet migration, a crash on start. */
   onStart: ((s: UpdateService, current: string | null) => void) | null = null;
+  /** Runs as a stop lands: what a service still did in its last moment (a revocation that came in, say). */
+  onStop: ((s: UpdateService, current: string | null) => void) | null = null;
   readonly calls: { op: string; service?: UpdateService; version?: string }[] = [];
   readonly tape: string[];
   readonly die: Die;
@@ -154,6 +156,7 @@ export class FakeServices implements ServiceManager {
     this.die.check("stop");
     this.calls.push({ op: "stop", service: s });
     this.tape.push(`stop:${s}`);
+    this.onStop?.(s, this.#currentOf());
   }
 
   async start(s: UpdateService): Promise<void> {
@@ -191,6 +194,10 @@ export class FakeProbe implements RoleProbe {
   healthScript: (s: UpdateService, call: number) => HealthReport | null =
     s => ({ service: s, version: this.currentOf() ?? "0.0.0", checks: { ready: true, database: true } });
   readonly safePointCalls: { service: UpdateService; call: number }[] = [];
+  /** Whether the service has read the hold (its health's `held`). The world sets a realistic default: a service sees
+   *  the hold one re-read interval (1 s of the timeline) after it was written. */
+  seesHoldScript: (s: UpdateService, call: number) => boolean | null = () => true;
+  readonly seesHoldCalls: { service: UpdateService; call: number }[] = [];
   readonly healthCalls: { service: UpdateService; call: number }[] = [];
   readonly tape: string[];
   readonly die: Die;
@@ -200,6 +207,14 @@ export class FakeProbe implements RoleProbe {
     this.tape = o.tape;
     this.die = o.die;
     this.currentOf = o.currentOf;
+  }
+
+  async seesHold(s: UpdateService): Promise<boolean | null> {
+    const call = this.seesHoldCalls.filter(c => c.service === s).length + 1;
+    this.seesHoldCalls.push({ service: s, call });
+    const answer = this.seesHoldScript(s, call);
+    this.tape.push(`ack:${s}:${String(answer)}`);
+    return answer;
   }
 
   async safePoint(s: UpdateService): Promise<SafePointReport | null> {
@@ -406,12 +421,17 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   const current = (): string | null => installer.layout().current;
   const services = new FakeServices({ tape, die, currentOf: current, running: o.running });
   const probe = new FakeProbe({ tape, die, currentOf: current });
+  const holdPathOf = holdFile(home, {});
   const realHold = new HoldFileWriter({ home, env: {} });
   const hold = new TapedHold({ tape, die, real: realHold });
   const backup = new TapedBackup({ tape, die, real: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }) });
   const schemas = new SqliteSchemas({ paths: dbPaths });
   const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") });
   const timeline = new FakeTimeline(NOW);                   // ms since the epoch, as Clock.now answers
+  probe.seesHoldScript = () => {                            // HoldWatch re-reads hold.json every second
+    const text = holdText(holdPathOf);
+    return text !== null && timeline.now() - Date.parse((JSON.parse(text) as { since: string }).since) >= 1_000;
+  };
   const alerts = new AlertRecorder();
   const verifier = new SshSigVerifier();
 
