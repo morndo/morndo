@@ -67,6 +67,28 @@ describe("the manager's day", () => {
     expect(JSON.parse(json.out)).toMatchObject([{ key: "T-1", status: "blocked" }]);
     expect((await asManager("list", "--status", "sideways")).code).toBe(2);
   });
+  it("list marks an orphan task, in text and in --json", async () => {
+    // B2: a to do task whose lane the fleet no longer lists. A hub of its own, whose board flags "ghost" as gone.
+    const orphanHub = await startInProcessHub({ orphans: ts => ts.filter(t => t.assignee === "ghost").map(t => t.key) });
+    try {
+      const here = orphanHub.agents.issue("manager", "manager").secret;
+      const out: string[] = [], err: string[] = [];
+      const call = async (argv: string[]) => {
+        const mark = out.length;
+        const code = await run(argv, { MORNDO_HUB: orphanHub.base, MORNDO_AGENT_TOKEN: here }, { fetch, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+        return { code, out: out.slice(mark).join("\n") };
+      };
+      await call(["new", "A", "--assign", "builder"]);
+      await call(["new", "B", "--assign", "ghost"]);
+      const list = await call(["list"]);
+      expect(list.out.split("\n").find(l => l.includes("T-1"))).toBe("  T-1    builder        A");
+      expect(list.out.split("\n").find(l => l.includes("T-2"))).toBe("  T-2    ghost          B  [orphan: its lane is gone; reassign it]");
+      expect(list.out).not.toContain("[lane not running]");
+      const json = JSON.parse((await call(["list", "--json"])).out) as { key: string; orphan?: boolean }[];
+      expect(json.find(t => t.key === "T-2")?.orphan).toBe(true);
+      expect("orphan" in (json.find(t => t.key === "T-1") ?? {})).toBe(false);
+    } finally { await orphanHub.close(); }
+  });
 });
 
 describe("a lane's day", () => {

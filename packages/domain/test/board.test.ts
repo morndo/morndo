@@ -2,7 +2,7 @@
 // work and never to Done, one task in progress per lane, every change an event with provenance and a revision.
 import { describe, expect, it } from "vitest";
 import {
-  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, keyMismatch, mayMove, parseTaskKey, sessionId, taskKey, workingOn,
+  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, isOrphan, keyMismatch, mayMove, parseTaskKey, sessionId, taskKey, unregisteredMove, workingOn,
   type BoardActor, type Run, type Task, type TaskAction, type TaskActor,
 } from "../src/index.ts";
 
@@ -242,6 +242,23 @@ describe("the board's own moves (B10, D1 to D6)", () => {
   });
   it("D3: in progress to to do when the assignee's lane is gone", () => {
     expect(derivedMove(doing(), run({ phase: "gone", outcome: undefined }), [doing()])).toEqual({ to: "todo", reason: GONE_REASON, rule: "D3" });
+  });
+  it("D3: in progress to to do when the assignee is not a registered lane, with GONE_REASON; a registered lane, or any other status, moves nothing", () => {
+    expect(unregisteredMove(doing(), new Set())).toEqual({ to: "todo", reason: GONE_REASON, rule: "D3" });
+    expect(unregisteredMove(doing(), new Set(["builder"]))).toBeNull();
+    expect(unregisteredMove({ ...make(2, { assignee: "builder" }), status: "todo" as const }, new Set())).toBeNull();
+    expect(unregisteredMove({ ...make(3, { assignee: "builder" }), status: "review" as const }, new Set())).toBeNull();
+    expect(unregisteredMove({ ...doing(), assignee: null }, new Set())).toBeNull();
+    // The domain takes the move it returns, as the board's own actor (B10: only its assignee's task).
+    expect(apply(doing(), { action: "move", to: "todo", reason: GONE_REASON }, boardActor("builder", "D3")).ok).toBe(true);
+  });
+  it("isOrphan: a to do task whose assignee is not registered; not one in another status, unassigned, or on a registered lane", () => {
+    const todo = make(4, { assignee: "builder" });
+    expect(isOrphan(todo, new Set())).toBe(true);
+    expect(isOrphan(todo, new Set(["builder"]))).toBe(false);
+    expect(isOrphan(doing(), new Set())).toBe(false);
+    expect(isOrphan({ ...make(5, { assignee: "builder" }), status: "review" as const }, new Set())).toBe(false);
+    expect(isOrphan(make(6), new Set())).toBe(false);
   });
   it("D4: the lane's one to do task goes into progress when its run works or waits", () => {
     const todo = make(2, { assignee: "builder" });

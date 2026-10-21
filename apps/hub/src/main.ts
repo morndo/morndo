@@ -258,7 +258,7 @@ switch (cmd) {
     // ADR-0032: with a fleet, the board also follows the lanes' Runs (the projector, on the fleet client the alerts and
     // the deliveries use): each lane's run goes out with the board, and its tasks move by D1 to D4 as actor "board".
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [] });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [] });
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); board.stop(); });
     const agents = new AgentAccess(store, config.managerWindow);
