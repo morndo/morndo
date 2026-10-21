@@ -137,6 +137,7 @@ Any other value matches only itself. An answer may hold no field that its exampl
 - `status` is `online`, `stale` (a missed ping) or `offline`.
 - `health` is the node's latest report: memory, load, disk, the clock, the depth of its hook spool. It is null until the node has sent one.
 - `agent` is the version its agent last reported.
+- `commit` is the commit its agent runs, from its live connection: null while the node is offline, or for an agent that does not report one.
 
 ```example nodes
 GET /v1/nodes
@@ -144,9 +145,9 @@ GET /v1/nodes
 200
 
 [
-  { "name": "n1", "status": "online", "health": "{{any}}", "agent": "{{string}}" },
-  { "name": "n2", "status": "offline", "health": null, "agent": "{{any}}" },
-  { "name": "n3", "status": "offline", "health": null, "agent": "{{any}}" }
+  { "name": "n1", "status": "online", "health": "{{any}}", "agent": "{{string}}", "commit": "{{any}}" },
+  { "name": "n2", "status": "offline", "health": null, "agent": "{{any}}", "commit": null },
+  { "name": "n3", "status": "offline", "health": null, "agent": "{{any}}", "commit": null }
 ]
 ```
 

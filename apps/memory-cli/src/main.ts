@@ -9,12 +9,12 @@
 // tree, report an error").
 import { execFile } from "node:child_process";
 import { hostname } from "node:os";
-import { argvWantsVersion, exitAfterOutput, productVersion, quietBrokenPipe } from "@morndo/service-kit";
+import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { run, type GitPlace } from "./cli.ts";
 
 quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
-  process.stdout.write(`${productVersion()}\n`);
+  process.stdout.write(`${buildLabel()}\n`);
   process.exit(0);
 }
 

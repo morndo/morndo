@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, productVersion, quietBrokenPipe } from "@morndo/service-kit";
+import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { shutdownStack, type Shutdown } from "./adapters/shutdown.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
@@ -94,7 +94,7 @@ protocol-1 plugin; otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcr
 // function is not async, and says one sentence.
 quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
-  process.stdout.write(`${productVersion()}\n`);
+  process.stdout.write(`${buildLabel()}\n`);
   await exitAfterOutput(0);
 }
 
@@ -355,7 +355,7 @@ switch (cmd) {
     observation.start(config.pollMs);
     escalations.start(Math.max(config.pollMs, 1000));
     void memorySync?.tick();                             // the first round now; then the loop's, every minute
-    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
+    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${buildLabel()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
     crash.beforeExit(null);
     break;

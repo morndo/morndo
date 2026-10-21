@@ -148,7 +148,7 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
         // order (it waits for its welcome).
         state = { kind: "admitting" };
         d.connections.admit({
-          node: hello.node, instanceId: hello.instanceId, streamId: hello.streamId, peer, source: d.source, agentVersion: hello.agent.version,
+          node: hello.node, instanceId: hello.instanceId, streamId: hello.streamId, peer, source: d.source, agentVersion: hello.agent.version, agentCommit: hello.agent.commit ?? null,
           claudeVersion: hello.claude.version, caps: hello.caps,
         }, epoch => {
           clearTimeout(handshake);

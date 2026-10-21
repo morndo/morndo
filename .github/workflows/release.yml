@@ -153,7 +153,7 @@ jobs:
           node scripts/release/main.ts compile --repo "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/compiled"
           npm prune --omit=dev
           mtime=$(git log -1 --format=%ct "$RELEASE_SHA")
-          node scripts/release/main.ts stage --repo "$GITHUB_WORKSPACE" --node "$RUNNER_TEMP/node" --dest "$RUNNER_TEMP/stage" --version "$VERSION" --compiled "$RUNNER_TEMP/compiled"
+          node scripts/release/main.ts stage --repo "$GITHUB_WORKSPACE" --node "$RUNNER_TEMP/node" --dest "$RUNNER_TEMP/stage" --version "$VERSION" --commit "$RELEASE_SHA" --compiled "$RUNNER_TEMP/compiled"
           ( cd "$RUNNER_TEMP/stage/app" && "$RUNNER_TEMP/node/bin/node" -e "require('better-sqlite3')(':memory:').close()" )
           for name in morndo morndo-fleet morndo-node morndo-job morndo-board morndo-keys; do
             "$RUNNER_TEMP/stage/bin/$name" --version

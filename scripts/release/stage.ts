@@ -13,7 +13,7 @@ import { thirdPartyNotice } from "./notice.ts";
 const SKIP_DIR = new Set(["test", "e2e", ".cache"]);
 const APP_TOP = ["package.json", "package-lock.json", "apps", "packages", "node_modules"];
 
-export function stageRelease(p: { repo: string; nodeDir: string; dest: string; version: string; compiled?: string }): void {
+export function stageRelease(p: { repo: string; nodeDir: string; dest: string; version: string; commit: string; compiled?: string }): void {
   refuseEscapingLinks(p.repo);
   mkdirSync(p.dest, { recursive: true });
   const files: TreeFile[] = [];
@@ -29,6 +29,8 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
   for (const [name, entry] of Object.entries(launchersFrom(p.repo))) {
     files.push({ path: `bin/${name}`, bytes: Buffer.from(launcherSource(entry)), mode: "0555" });
   }
+  // The build stamp (packages/service-kit/src/version.ts, BUILD_STAMP) every service reads at start: the Release's Version and the commit it was built from.
+  files.push({ path: "app/build.json", bytes: Buffer.from(`${JSON.stringify({ version: p.version, commit: p.commit })}\n`), mode: "0444" });
   files.push({ path: "app/VERSION", bytes: Buffer.from(`${p.version}\n`), mode: "0444" });
   const license = readFileSync(join(p.repo, "LICENSE.md"));
   files.push({ path: "LICENSES/LICENSE.md", bytes: license, mode: "0444" });
