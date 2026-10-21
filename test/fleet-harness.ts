@@ -243,7 +243,7 @@ export type Fleet = {
 // How long a fleet may take to open its client API. It is a deadline on an event, not a pace: a fleet that exits is
 // seen at once (Fatal below), so only a hung one waits it out. A fleet started beside a dozen other processes on a loaded
 // machine printed nothing for over 15 s (ENOENT on its socket, 2 of 20 runs of drills-deliveries under load).
-const FLEET_START_MS = 60_000;
+const FLEET_START_MS = 45_000;   // below the fleet project's hookTimeout (60 s, vitest.config.ts): a hung start fails with this message, not the hook's
 export async function startFleet(o: {
   subscribers?: FleetConfig["subscribers"]; stickyLanes?: string[]; laneEvents?: Partial<FleetConfig["laneEvents"]>;
   laneWatch?: Partial<FleetConfig["laneWatch"]>;
