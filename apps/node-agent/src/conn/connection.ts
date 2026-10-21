@@ -25,7 +25,7 @@ import { WebSocket } from "ws";
 import { CLOSE, FleetMessage, LIMITS, fleetSigPayload, fleetUrlOk, nodeSigPayload, parseBody, type AgentMessage } from "@morndo/protocol";
 import { signedBy } from "../identity.ts";
 import type { Logger } from "../log.ts";
-import { AGENT_VERSION, PROTO_VERSIONS } from "../version.ts";
+import { AGENT_COMMIT, AGENT_VERSION, PROTO_VERSIONS } from "../version.ts";
 import { wsText } from "../ws-text.ts";
 import { RetrySchedule, type RetryOptions } from "./retry.ts";
 import { SendQueue, type Lane } from "./send-queue.ts";
@@ -152,7 +152,7 @@ export class FleetConnection {
       this.#arm(ws);
       raw({
         v: 1, t: "hello", node: o.node, instanceId: o.instanceId, streamId: o.streamId, proto: PROTO_VERSIONS,
-        agent: { version: AGENT_VERSION }, claude: { version: o.claudeVersion() }, caps: o.caps, clientNonce,
+        agent: { version: AGENT_VERSION, ...(AGENT_COMMIT !== null ? { commit: AGENT_COMMIT } : {}) }, claude: { version: o.claudeVersion() }, caps: o.caps, clientNonce,
       });
     });
     ws.on("ping", () => this.#arm(ws));

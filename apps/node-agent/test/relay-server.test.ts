@@ -1,8 +1,10 @@
 // The hook relay over real HTTP (spec §5.5): each path's answer, window identity, coalescing, /file copies, and what
 // happens when the spool can't be written (a full disk, simulated by a database that refuses writes).
-import { existsSync, mkdirSync, readFileSync, readdirSync, truncateSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { sessionRegistry } from "@morndo/node-ops";
 import { LIMITS } from "@morndo/protocol";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { nodeOpener } from "../src/ops/node-files.ts";
@@ -10,7 +12,7 @@ import { agentPaths, type AgentPaths } from "../src/paths.ts";
 import { RelayFiles } from "../src/relay/relay-files.ts";
 import { HOOK_BODY_MAX, startRelay, type Relay } from "../src/relay/server.ts";
 import { Spool } from "../src/relay/spool.ts";
-import { windowResolver } from "../src/relay/window-of.ts";
+import { foreignStop, windowResolver } from "../src/relay/window-of.ts";
 import { captureLog, tempHome } from "./helpers.ts";
 
 let home: { home: string; cleanup: () => void };
@@ -33,6 +35,7 @@ beforeEach(async () => {
   relay = await startRelay({
     port: 0, spool, files, log: captureLog().log, onAppended: () => { kicks++; }, now: () => now,
     windowOf: windowResolver({ windowOfPane: p => windows.get(p) ?? null, sessions: () => sessions }),
+    foreign: foreignStop({ headless: () => false }),                     // none of these bodies is headless; the (B6) describe uses a real registry
   });
 });
 afterEach(async () => { await relay.close(); adb.close(); home.cleanup(); });
@@ -79,6 +82,111 @@ describe("answers (spec §5.5)", () => {
     expect((await post("/notify", big)).status).toBe(413);
     expect(rows()).toEqual([]);
     expect(spool.drops).toBe(1);
+  });
+});
+
+// B6: a headless run started in a lane's pane posts its Stop and its failures as the lane (the pane's window); the relay
+// answers them and drops them, so the lane's turn is not ended by them. Judged by the poster's own session file alone
+// (sessions.ts headless, read again per event); every other Stop is the lane's (fail open).
+describe("a Stop from another session (B6)", () => {
+  const windows = new Map([["%3", "api lane"], ["%7", "web"]]);
+  // A relay over a real session registry: `sessionFiles` as `<name>.json` → fields, writable again while it runs.
+  const claudeRig = async (sessionFiles: [string, Record<string, unknown>][]) => {
+    const claude = mkdtempSync(join(tmpdir(), "morndo-claude-"));
+    mkdirSync(join(claude, "sessions"));
+    for (const [name, fields] of sessionFiles) writeFileSync(join(claude, "sessions", name), JSON.stringify(fields));
+    const reg = sessionRegistry(claude);
+    const relay = await startRelay({
+      port: 0, spool, files, log: captureLog().log, onAppended: () => { kicks++; }, now: () => now,
+      windowOf: windowResolver({ windowOfPane: p => windows.get(p) ?? null, sessions: () => reg.byPane() }),
+      foreign: foreignStop({ headless: id => reg.headless(id) }),
+    });
+    return {
+      post: (path: string, body: unknown) =>
+        fetch(`http://127.0.0.1:${relay.port}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+      write: (name: string, fields: Record<string, unknown>) => writeFileSync(join(claude, "sessions", name), JSON.stringify(fields)),
+      close: async () => { await relay.close(); rmSync(claude, { recursive: true, force: true }); },
+    };
+  };
+  const lane = { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%7", entrypoint: "cli", startedAt: 1_000 };
+  const headless = { pid: process.pid, sessionId: "sess-headless", tmux: "qa:@0.%7", entrypoint: "sdk-cli", startedAt: 2_000 };
+  it("a headless Stop is not a lane finish; the lane's own Stop is", async () => {
+    for (const [first, second] of [[lane, headless], [headless, lane]] as const) {
+      const rig = await claudeRig([["1.json", first], ["2.json", second]]);
+      try {
+        const before = rows().length;
+        const kicksBefore = kicks;
+        const dropped = await rig.post("/hook/stop", { TMUX_PANE: "%7", session_id: "sess-headless", last: "x" });
+        expect(dropped.status).toBe(200);
+        expect(await dropped.json()).toEqual({ ok: true, queued: false });
+        expect(rows().length).toBe(before);
+        expect(kicks).toBe(kicksBefore);
+        const kept = await rig.post("/hook/stop", { TMUX_PANE: "%7", session_id: "sess-lane" });
+        expect(kept.status).toBe(200);
+        expect(await kept.json()).toEqual({ ok: true, queued: true });
+        expect(rows().slice(before).map(r => [r.path, r.window])).toEqual([["/hook/stop", "web"]]);
+      } finally {
+        await rig.close();
+      }
+    }
+  });
+  it("the lane's Stop after /clear and after a resume is a lane finish", async () => {
+    // /clear gives the same process a new session id; a resume leaves a headless run in the pane that is the older one.
+    // Neither drops the lane's own Stop: only a session that positively says headless is dropped (fail open).
+    const rig = await claudeRig([["1.json", lane]]);
+    try {
+      rig.write("1.json", { ...lane, sessionId: "sess-cleared" });
+      const cleared = await rig.post("/hook/stop", { TMUX_PANE: "%7", session_id: "sess-cleared" });
+      expect(cleared.status).toBe(200);
+      expect(await cleared.json()).toEqual({ ok: true, queued: true });
+      rig.write("1.json", { ...lane, sessionId: "sess-resumed", startedAt: 3_000 });
+      rig.write("2.json", { ...headless, startedAt: 500 });             // older than the lane's, the same pane
+      const dropped = await rig.post("/hook/stop", { TMUX_PANE: "%7", session_id: "sess-headless" });
+      expect(await dropped.json()).toEqual({ ok: true, queued: false });
+      const resumed = await rig.post("/hook/stop", { TMUX_PANE: "%7", session_id: "sess-resumed" });
+      expect(resumed.status).toBe(200);
+      expect(await resumed.json()).toEqual({ ok: true, queued: true });
+      expect(rows().map(r => [r.path, r.window])).toEqual([["/hook/stop", "web"], ["/hook/stop", "web"]]);
+    } finally {
+      await rig.close();
+    }
+  });
+  it("an unknown session's Stop is a lane finish", async () => {
+    const rig = await claudeRig([["1.json", lane]]);
+    try {
+      const stop = await rig.post("/hook/stop", { TMUX_PANE: "%7", session_id: "sess-nobody" });
+      expect(stop.status).toBe(200);
+      expect(await stop.json()).toEqual({ ok: true, queued: true });
+      expect(rows().map(r => [r.path, r.window])).toEqual([["/hook/stop", "web"]]);
+    } finally {
+      await rig.close();
+    }
+  });
+  it("a headless run's failure is not the lane's: /hook/failure from a headless session is answered 202 and not spooled; the lane's own is kept", async () => {
+    const rig = await claudeRig([["1.json", lane], ["2.json", headless]]);
+    try {
+      const kicksBefore = kicks;
+      const foreign = await rig.post("/hook/failure", { TMUX_PANE: "%7", session_id: "sess-headless", error: "x" });
+      expect(foreign.status).toBe(202);
+      expect(await foreign.text()).toBe("");
+      expect(rows()).toEqual([]);
+      expect(kicks).toBe(kicksBefore);
+      const own = await rig.post("/hook/failure", { TMUX_PANE: "%7", session_id: "sess-lane", error: "x" });
+      expect(own.status).toBe(202);
+      expect(rows().map(r => [r.path, r.window])).toEqual([["/hook/failure", "web"]]);
+    } finally {
+      await rig.close();
+    }
+  });
+  it("only a Stop or a failure is judged: a notice from the same foreign session is still kept", async () => {
+    const rig = await claudeRig([["1.json", lane], ["2.json", headless]]);
+    try {
+      const note = await rig.post("/notify", { TMUX_PANE: "%7", session_id: "sess-headless", text: "hi" });
+      expect(note.status).toBe(202);
+      expect(rows().map(r => [r.path, r.window])).toEqual([["/notify", "web"]]);
+    } finally {
+      await rig.close();
+    }
   });
 });
 

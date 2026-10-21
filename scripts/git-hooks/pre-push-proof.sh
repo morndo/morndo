@@ -160,14 +160,36 @@ set -e
 cd "$root"
 
 # First push of this tree: drop remote-tracking refs so the hook scans every file.
+# One commit of this history, merge ed72e63 (PR #9, 2026-10-11), was made on the web with an author address that is not a
+# noreply one. It is in the published history and cannot be rewritten, so commit-traces is told to spare the address of
+# exactly this commit (COMMIT_TRACES_LEGACY, the whole id) and no other. Do not add to this list: a new commit with such an
+# address must fail, as the planted commit below shows.
+legacy=ed72e6361e2af11910696ecd8df7eaadf36ac89b
 git clone --quiet --local "$root" "$scratch/tree"
 git -C "$scratch/tree" remote remove origin
 tip=$(git -C "$scratch/tree" rev-parse HEAD)
 set +e
-printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | (cd "$scratch/tree" && sh "$root/$hook")
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | (cd "$scratch/tree" && COMMIT_TRACES_LEGACY=$legacy sh "$root/$hook")
 code=$?
 set -e
 [ "$code" -eq 0 ] || fail "first push of this tree should exit 0, got $code"
+# The same push without the pin fails on that one commit, and with the pin it still fails on any other commit whose
+# address is not a noreply one.
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | (cd "$scratch/tree" && sh "$root/$hook") >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "first push of this tree without the pin should exit 1 on the historic commit, got $code"
+tree_tip=$tip
+env GIT_AUTHOR_EMAIL=planted@example.invalid git -C "$scratch/tree" -c user.name=Ada -c user.email=ada@users.noreply.github.com \
+  commit -q --allow-empty -m 'chore: planted author address'
+tip=$(git -C "$scratch/tree" rev-parse HEAD)
+set +e
+printf '%s %s %s %s\n' refs/heads/main "$tip" refs/heads/main "$zero" | (cd "$scratch/tree" && COMMIT_TRACES_LEGACY=$legacy sh "$root/$hook") >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a planted non-noreply commit should fail even with the historic one pinned, got $code"
+git -C "$scratch/tree" reset -q --hard "$tree_tip"
 
 # A later edit of a test must not fail on a key header that was already there.
 # A new header in a test file is a fixture. The same header outside a test,
