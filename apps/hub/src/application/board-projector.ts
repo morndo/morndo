@@ -10,17 +10,19 @@
 //   time (a move changes what the next may do: D4 reads B5). Never on what it only holds, so never on a board change
 //   (D6 refuses those anyway: the run began before the change). Never while the fleet can't be asked: until a list is
 //   read, and after a list fails, nothing moves; a run event then asks for the list again, at most every RETRY_MS.
+// - A lane the fleet's list doesn't hold (no Run at all) is gone too (D3): its task in progress goes back to to do, once;
+//   its to do tasks are only flagged (orphans(), never moved: D5).
 // - Idempotent: a move made changes the task (rev, updatedAt), so the same run moves it no further (D6). A refusal (the
 //   task changed meanwhile, B5's one_doing, a reason the domain won't take) is logged once for that task's revision and
 //   that run, and not tried again for them; a new run or another change of the task may try again.
 // - Safe: nothing here throws into the event loop. A failure is logged, and the next run tries afresh.
-import { derivedMove, type Task } from "@morndo/domain";
+import { derivedMove, isOrphan, unregisteredMove, type Task } from "@morndo/domain";
 import type { RunView } from "@morndo/protocol";
 import { log as hubLog, type Logger } from "../adapters/log.ts";
 import type { BoardService } from "./board-service.ts";
 import type { RunsSource } from "./ports.ts";
 
-export type ProjectorBoard = Pick<BoardService, "openTasksOf" | "follow" | "runsChanged">;
+export type ProjectorBoard = Pick<BoardService, "openTasksOf" | "tasksInProgress" | "follow" | "runsChanged">;
 
 // A list that failed is asked for again on the next run event, but not more often than this.
 export const RETRY_MS = 5000;
@@ -50,6 +52,14 @@ export class BoardProjector {
 
   // Every lane's latest Run, by lane name: what the board frame carries (BoardView.runs).
   runs(): RunView[] { return [...this.#runs.values()].sort((a, b) => a.lane.localeCompare(b.lane)); }
+
+  // B2: the to do tasks whose lane the fleet's list doesn't hold, for the board frame (BoardView.orphans). Flagged only,
+  // never moved (D5); and never while the fleet can't be asked: a list that couldn't be read says nothing about who is gone.
+  orphans(tasks: readonly Task[]): string[] {
+    if (!this.#live) return [];
+    const registered = new Set(this.#runs.keys());
+    return tasks.filter(t => isOrphan(t, registered)).map(t => t.key);
+  }
 
   // At hub start: the runs followed from now on, and the list read once, which applies what is due (a lane that ended
   // DONE or stopped while the hub was away). Never throws: a fleet that can't be asked is logged, and asked again.
@@ -87,6 +97,7 @@ export class BoardProjector {
     this.#runs = new Map(list.map(r => [r.lane, r]));
     this.#tellRuns();
     for (const r of this.#runs.values()) this.#follow(r);
+    this.#followUnregistered();
   }
 
   #take(run: RunView) {
@@ -127,6 +138,30 @@ export class BoardProjector {
       }
     } catch (e) {
       this.#log.error(`board: following ${run.lane}'s run failed; its next run tries again`, e);
+    }
+  }
+
+  // B10, D3 without a Run to read: a lane the fleet's list doesn't hold at all is gone too, its task in progress put back
+  // once. Only a list read reaches here — the fleet's whole answer, which is authoritative — never a run event (a lane one
+  // names is registered by definition), and never a list that couldn't be read.
+  #followUnregistered() {
+    try {
+      const registered = new Set(this.#runs.keys());
+      for (const task of this.#board.tasksInProgress()) {
+        const move = unregisteredMove(task, registered);
+        if (!move || task.assignee === null) continue;
+        const memo = `${task.key}@${task.rev} ${task.assignee}@unregistered D3`;
+        if (this.#refused.has(memo)) continue;
+        const r = this.#board.follow(task.key, move, task.assignee, task.rev);
+        if (r.ok) {
+          this.#log.info(`board: D3 moved ${task.key} doing → todo, ${task.assignee} is not a registered lane`);
+          continue;
+        }
+        this.#remember(memo);
+        this.#log.warn(`board: ${move.rule} would move ${task.key} ${task.status} → ${move.to} for ${task.assignee}, refused (${r.problem}${r.other ? ` ${r.other}` : ""}); it stays where it is`);
+      }
+    } catch (e) {
+      this.#log.error("board: following the unregistered lanes failed; the next list read tries again", e);
     }
   }
 

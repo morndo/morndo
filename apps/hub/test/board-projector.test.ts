@@ -45,7 +45,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "morndo-projector-"));
   store = new Store(dir);
   now = T0;
-  board = new BoardService({ store, now: () => now, policy: () => DEFAULT_POLICY });
+  board = new BoardService({ store, now: () => now, policy: () => DEFAULT_POLICY, orphans: ts => projector.orphans(ts) });
   source = fakeRuns();
   logged = [];
   const at = (level: "info" | "warn" | "error") => (line: string) => { logged.push({ level, line }); };
@@ -91,6 +91,9 @@ describe("the board follows its assignee's run (B10)", () => {
     const a = task("A", "builder", T0, "doing");
     const b = task("B", "reviewer", T0, "doing");
     const c = task("C", "tester", T0, "doing");
+    // All three lanes listed, each with a run that moves nothing yet (D6: it began at the task's last change), so the
+    // list reads them as registered and only the ended runs below move their tasks.
+    source.list = [run("builder", "working", T0), run("reviewer", "working", T0), run("tester", "working", T0)];
     await projector.start();
     now = T0 + 120_000;
     source.tell(run("builder", "ended", T0 + 60_000, { outcome: "done", line: "STATUS: DONE npm test: 14 passed" }));
@@ -104,6 +107,7 @@ describe("the board follows its assignee's run (B10)", () => {
 
   it("D3: a lane gone while its task is in progress puts the task back to to do, with GONE_REASON", async () => {
     const t = task("Ship it", "builder", T0, "doing");
+    source.list = [run("builder", "working", T0)];                     // listed, and a run that moves nothing (D6)
     await projector.start();
     now = T0 + 120_000;
     source.tell(run("builder", "gone", T0 + 60_000, { source: "session", line: "half way" }));
@@ -138,6 +142,7 @@ describe("the board follows its assignee's run (B10)", () => {
     const b = task("B", "builder", T0);
     const c = task("C", "reviewer", T0, "doing");
     const d = task("D", "reviewer", T0);
+    source.list = [run("builder", "working", T0), run("reviewer", "working", T0)];   // listed; D6 holds both still
     await projector.start();
     now = T0 + 60_000;
     source.tell(run("builder", "working", T0 + 30_000));
@@ -148,6 +153,7 @@ describe("the board follows its assignee's run (B10)", () => {
 
   it("a run of another lane, or a phase with no edge, moves nothing (B10: only the assignee's run)", async () => {
     const t = task("A", "builder", T0, "doing");
+    source.list = [run("builder", "working", T0)];                     // listed, so its doing task isn't unregistered
     await projector.start();
     now = T0 + 60_000;
     source.tell(run("reviewer", "gone", T0 + 30_000));
@@ -155,6 +161,49 @@ describe("the board follows its assignee's run (B10)", () => {
     source.tell(run("builder", "unknown", T0 + 40_000));
     expect(shown(t.key)?.status).toBe("doing");
     expect(boardMoves()).toEqual([]);
+  });
+});
+
+describe("a lane the fleet does not list is gone (D3, orphans)", () => {
+  it("doing on an unregistered lane moves to todo once", async () => {
+    const t = task("Ship it", "ghost", T0, "doing");
+    source.list = [run("builder", "working", T0)];                     // another lane is listed; "ghost" is not
+    await projector.start();
+    expect(shown(t.key)?.status).toBe("todo");
+    expect(lastEvent(t.key)).toMatchObject({ actor: { kind: "board", rule: "D3", lane: "ghost" }, change: { kind: "moved", from: "doing", to: "todo", reason: GONE_REASON } });
+    expect(boardMoves()).toHaveLength(1);
+    await projector.refresh();                                         // a second list read: the same reading again
+    expect(boardMoves()).toHaveLength(1);
+    expect(shown(t.key)?.status).toBe("todo");
+  });
+
+  it("todo on an unregistered lane is flagged orphan, not moved", async () => {
+    const ghost = task("A", "ghost", T0);
+    const listed = task("B", "builder", T0);
+    source.list = [run("builder", "working", T0)];                     // D6: the run began at the task's last change
+    await projector.start();
+    expect(shown(ghost.key)?.status).toBe("todo");
+    expect(shown(listed.key)?.status).toBe("todo");
+    expect(boardMoves()).toEqual([]);
+    expect(board.view().orphans).toEqual([ghost.key]);
+  });
+
+  it("nothing is moved or flagged while the fleet's list can't be read", async () => {
+    const t = task("A", "ghost", T0, "doing");
+    source.list = new Error("fleet down");
+    await projector.start();
+    expect(shown(t.key)?.status).toBe("doing");
+    expect(projector.orphans(board.view().tasks)).toEqual([]);
+    expect(board.view().orphans).toEqual([]);
+  });
+
+  it("a lane that is listed (any phase) keeps its doing task", async () => {
+    const t = task("A", "ghost", T0, "doing");
+    source.list = [run("ghost", "ended", T0 - 1, { outcome: "no_status" })];   // listed, and a phase with no edge (D6 holds too)
+    await projector.start();
+    expect(shown(t.key)?.status).toBe("doing");
+    expect(boardMoves()).toEqual([]);
+    expect(board.view().orphans).toEqual([]);
   });
 });
 
@@ -173,6 +222,7 @@ describe("safe and idempotent", () => {
 
   it("a refusal is logged once and not tried again for the same task and run", async () => {
     const t = task("A", "builder", T0, "doing");
+    source.list = [run("builder", "working", T0)];                     // listed; the refused D2 below is the only move tried
     await projector.start();
     const follow = vi.spyOn(board, "follow");
     // The board refuses the move once, as it does when the task changed between the read and the write (B6).

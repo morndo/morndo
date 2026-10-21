@@ -3100,6 +3100,23 @@ export const CONTROLS: Control[] = [
   { id: "t280-no-long-text-cap-check", task: "280", file: "apps/fleet/src/application/connections.ts",
     find: "!c.caps.includes(CAP_LONG_TEXT)", replace: "false",
     run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  // ---- B2 (board T-302): a lane the fleet doesn't list is gone, each guard removed once.
+  { id: "b2-unregistered-only-doing", task: "302", file: "packages/domain/src/board.ts",
+    find: "if (task.status !== \"doing\" || task.assignee === null || registered.has(task.assignee)) return null;",
+    replace: "if (task.assignee === null || registered.has(task.assignee)) return null;",
+    run: ["packages/domain/test/board.test.ts"], expect: "D3" },
+  { id: "b2-orphan-only-todo", task: "302", file: "packages/domain/src/board.ts",
+    find: "task.status === \"todo\" && task.assignee !== null && !registered.has(task.assignee)",
+    replace: "task.assignee !== null && !registered.has(task.assignee)",
+    run: ["packages/domain/test/board.test.ts"] },
+  { id: "b2-orphans-not-while-blind", task: "302", file: "apps/hub/src/application/board-projector.ts",
+    find: "if (!this.#live) return [];",
+    replace: "",
+    run: ["apps/hub/test/board-projector.test.ts"] },
+  { id: "b2-list-only-registered-moves", task: "302", file: "apps/hub/src/application/board-projector.ts",
+    find: "const move = unregisteredMove(task, registered);",
+    replace: "const move = unregisteredMove(task, new Set());",
+    run: ["apps/hub/test/board-projector.test.ts"] },
 ];
 
 // ---- the runner
