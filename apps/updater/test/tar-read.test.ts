@@ -1,8 +1,9 @@
 // The tar reader's contract (design §6.1 step 4, §10.4 "a crafted archive"): it reads exactly what
 // scripts/release/archive.ts packTree writes and refuses everything else — paths that leave the tree, links that
-// point out, anything written through a link, device nodes and GNU extensions, a bad checksum, a truncated body,
+// point out (straight or through another link of the archive), anything written through a link, device nodes and
+// GNU extensions, a bad checksum, a truncated body,
 // unbounded expansion. Every refusal also checks that nothing landed outside dest: the reader's one write rule.
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -78,6 +79,35 @@ describe("extractTar", () => {
   it("refuses a climb back out (a/../../b)", () => refuse(evilGz([{ name: "a/../../b", body: Buffer.from("out") }]), "climb", /a\/\.\.\/\.\.\/b/));
   it("refuses a link that leaves the tree (l -> ../../out)", () => refuse(evilGz([{ name: "l", type: "2", link: "../../out" }]), "link-out", /l|\.\.\/\.\.\/out/));
   it("refuses an absolute link target (l -> /etc)", () => refuse(evilGz([{ name: "l", type: "2", link: "/etc" }]), "link-abs", /\/etc/));
+  // "x/l1/.." passes the lexical rule on its own, but x/l1 is itself a link: walking dest/l2 — the kernel, e.g.
+  // chdir(2) through it — lands on the parent of dest, so the reader resolves each target through the archive's
+  // own links before any of them can be walked.
+  it("refuses a link that climbs out through another link (x/l1 -> .., l2 -> x/l1/..)", () =>
+    refuse(evilGz([
+      { name: "x", type: "5" },
+      { name: "x/l1", type: "2", link: ".." },
+      { name: "l2", type: "2", link: "x/l1/.." },
+    ]), "link-through-link", /l2/));
+  it("accepts a link chain that stays inside (x/l1 -> .., l3 -> x/l1/x)", async () => {
+    const archive = dir("chain.tar.gz");
+    writeFileSync(archive, evilGz([
+      { name: "x", type: "5" },
+      { name: "x/l1", type: "2", link: ".." },
+      { name: "l3", type: "2", link: "x/l1/x" },
+    ]));
+    const dest = dir("chain-dest");
+    mkdirSync(dest);
+    const entries = await extractTar(archive, dest, { maxBytes: 10 * 1024 * 1024 });
+    expect(entries.filter(e => e.type === "symlink").map(e => e.path).sort()).toEqual(["l3", "x/l1"]);
+    // the kernel agrees the chain stays inside: walking l3 lands on x, not on anything past dest
+    expect(realpathSync(join(dest, "l3"))).toBe(realpathSync(join(dest, "x")));
+  });
+  it("refuses a link loop (a -> b, b -> a, c -> a/z)", () =>
+    refuse(evilGz([
+      { name: "a", type: "2", link: "b" },
+      { name: "b", type: "2", link: "a" },
+      { name: "c", type: "2", link: "a/z" },
+    ]), "link-loop", /loop/));
   it("refuses a file written through a symlink (l -> d, then l/x)", () =>
     refuse(evilGz([{ name: "l", type: "2", link: "d" }, { name: "l/x", body: Buffer.from("pwn") }]), "through-link", /l/));
 

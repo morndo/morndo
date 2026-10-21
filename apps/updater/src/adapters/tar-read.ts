@@ -1,8 +1,9 @@
 // The archive reader (design §6.1 step 4, §10.2 step 6, §10.4 "a crafted archive"): a streaming reader for
 // exactly what scripts/release/archive.ts packTree writes — gzip, ustar headers, and a POSIX pax `x` record
 // carrying `path` for a long name — and a refusal for everything else: a path that leaves the tree, a link that
-// points out, anything written through a link, device nodes and GNU extensions, a duplicate path, a bad
-// checksum, a truncated body, unbounded expansion. It writes only inside `dest`, under its own modes (files
+// points out (straight or by climbing through another link of the archive), anything written through a link,
+// device nodes and GNU extensions, a duplicate path, a bad checksum, a truncated body, unbounded expansion. It
+// writes only inside `dest`, under its own modes (files
 // 0600, directories 0700): the installer sets the final modes from the signed file list, never from the archive.
 // Format sources: POSIX pax, "ustar Interchange Format" and "pax Interchange Format",
 // https://pubs.opengroup.org/onlinepubs/9799919799/utilities/pax.html (read 2026-10-21); Node 24 zlib
@@ -79,6 +80,7 @@ const pathFault = (path: string): string | null => {
 export async function extractTar(gzPath: string, dest: string, o: { maxBytes: number }): Promise<TarEntry[]> {
   const entries: TarEntry[] = [];
   const seen = new Map<string, "dir" | "file" | "symlink">();   // every path this archive has put in dest
+  const links = new Map<string, string>();                      // every symlink's path -> target, for the check at the end
   const pax = new Map<string, string>();                        // records waiting for the entry they describe
 
   let buf: Buffer = Buffer.alloc(0);
@@ -135,6 +137,36 @@ export async function extractTar(gzPath: string, dest: string, o: { maxBytes: nu
     ensureParents(path);
     symlinkSync(target, join(dest, path));
     seen.set(path, "symlink");
+    links.set(path, target);
+  };
+
+  // The lexical rule above cannot see through another link: "x/l1/.." looks harmless on its own while x/l1 is
+  // itself a link, yet the kernel resolves a link l2 -> x/l1/.. to the parent of dest, because each ".." applies
+  // after the link before it was substituted. So once the whole archive is known, every link's target is walked
+  // again the way the kernel would inside this archive: a segment whose path so far names a link of this archive
+  // gives way to that link's own target, resolved from that link's own directory. Linux caps one lookup at 40
+  // link traversals (ELOOP, path_resolution(7)); more substitutions than that is a loop. Returns the refusal
+  // reason, or null when the target ends inside the tree (existing or not).
+  const LINK_STEPS = 40;
+  const linkThroughLinks = (path: string, target: string): string | null => {
+    const stack = path.split("/").slice(0, -1);   // where the walk stands: the link's own directory at first
+    let rest = target.split("/");
+    let steps = 0;
+    while (rest.length > 0) {
+      const part = rest.shift()!;
+      if (part === "." || part === "") continue;
+      if (part === "..") {
+        if (stack.length === 0) return `refusing link ${path} -> ${target}: it leaves the tree through another link`;
+        stack.pop();
+        continue;
+      }
+      const own = links.get([...stack, part].join("/"));
+      if (own === undefined) { stack.push(part); continue; }
+      steps += 1;
+      if (steps > LINK_STEPS) return `refusing link ${path} -> ${target}: a link loop`;
+      rest = own.split("/").concat(rest);   // the substituted target walks from the stack as it stands: its link's own directory
+    }
+    return null;
   };
 
   // A pax body is `<len> <key>=<value>\n` records, each length counting the whole record, itself included.
@@ -274,6 +306,10 @@ export async function extractTar(gzPath: string, dest: string, o: { maxBytes: nu
     gunzip.on("end", () => {
       try {
         if (!ended) refuse("a truncated archive");
+        for (const [path, target] of links) {
+          const escape = linkThroughLinks(path, target);
+          if (escape !== null) refuse(escape);
+        }
         closeFile();
         settled = true;
         resolve();

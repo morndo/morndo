@@ -169,6 +169,12 @@ describe("DirsInstaller", () => {
     expect(readdirSync(releases)).toEqual([]);
   });
 
+  it("sweep() does nothing when the releases directory does not exist", () => {
+    // a machine with nothing installed yet has no releases directory; the next beforeEach puts it back
+    rmSync(releases, { recursive: true, force: true });
+    expect(() => new DirsInstaller({ releases }).sweep()).not.toThrow();
+  });
+
   it("selftest passes for the staged Version and fails for another", async () => {
     const { installer, archive, filesSha256 } = good();
     expect(await installer.unpack(archive, VERSION, { filesSha256, maxBytes: 1 << 20 })).toEqual({ ok: true });

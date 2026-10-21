@@ -56,7 +56,14 @@ export class DirsInstaller implements Installer {
   }
 
   sweep(): void {
-    for (const entry of readdirSync(this.releases, { withFileTypes: true })) {
+    let entries: Dirent[];
+    try { entries = readdirSync(this.releases, { withFileTypes: true }); }
+    catch (error) {
+      // a machine with nothing installed yet has no releases directory: nothing to sweep, never a failure
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
       if (!entry.name.startsWith(".staging-")) continue;
       this.removeTree(join(this.releases, entry.name));
     }
