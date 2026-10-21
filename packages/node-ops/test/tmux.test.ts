@@ -17,6 +17,9 @@ describe("a paste that did not submit", () => {
   it("a collapsed multi-line paste left as Claude's placeholder is not submitted", () => {
     expect(notSubmitted("one\ntwo\nthree\nfour", "[Pasted text #1 +3 lines]")).toBe(true);
     expect(notSubmitted("one line", "[Pasted text #1 +3 lines]")).toBe(false);
+    // A long single-line paste is folded without a line count (real Claude Code 2.1.305: "❯ [Pasted text #1]").
+    expect(notSubmitted("x".repeat(100_000), "[Pasted text #1]")).toBe(true);
+    expect(notSubmitted("one\ntwo", "[Pasted text #1]")).toBe(false);          // a multi-line paste shows its lines
     expect(notSubmitted("hello world this is a long draft", "hello world this is a long draft")).toBe(true);
     expect(notSubmitted("hello world this is a long draft", "hello world this is")).toBe(false);   // one cell short: not this paste
   });

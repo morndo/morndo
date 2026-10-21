@@ -95,13 +95,16 @@ const targetKey = (t: Delivery["target"]): string => ("lane" in t ? `lane:${t.la
 
 const flat = (s: string) => s.replace(/\s+/g, " ").trim();
 const PASTED = /^\[Pasted text #\d+ \+\d+ lines\]$/;
+const PASTED_LINE = /^\[Pasted text #\d+\]$/;                   // a long single line: no line count
 // The box shows this delivery's own line: exactly its text; or, for a text longer than the box shows on its first line,
-// a start of it at least 20 characters long; or Claude Code's placeholder for a pasted text of several lines.
+// a start of it at least 20 characters long; or Claude Code's placeholder for a pasted text of several lines (with its
+// line count) or of one long line (without).
 export function ownLine(draft: string, text: string): boolean {
   const d = flat(draft);
   const t = flat(text);
   if (d === "") return false;
   if (PASTED.test(d)) return text.includes("\n");
+  if (PASTED_LINE.test(d)) return !text.includes("\n");
   return t.startsWith(d) && d.length >= Math.min(t.length, 20);
 }
 

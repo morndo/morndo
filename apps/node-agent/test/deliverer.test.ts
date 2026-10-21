@@ -341,6 +341,8 @@ describe("Enter again (spec §4.3)", () => {
     expect(ownLine(long.slice(0, 10), long)).toBe(false);
     expect(ownLine("[Pasted text #1 +3 lines]", "a\nb\nc\nd")).toBe(true);
     expect(ownLine("[Pasted text #1 +3 lines]", "one line")).toBe(false);
+    expect(ownLine("[Pasted text #1]", "x".repeat(100_000))).toBe(true);     // a long single line: a chip without a line count
+    expect(ownLine("[Pasted text #1]", "a\nb\nc\nd")).toBe(false);
     expect(ownLine("someone else's words", "ship it")).toBe(false);
     expect(ownLine("", "ship it")).toBe(false);
   });
