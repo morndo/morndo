@@ -44,3 +44,20 @@ export function gitAncestry(repo: string | null, o: { run?: GitRun; timeoutMs?: 
       .then(r => (r.code === 0 ? "ancestor" : r.code === 1 ? "not_ancestor" : "unknown"));
   };
 }
+
+// Whether the checkout holds a commit (B11): `git rev-parse --verify --quiet <name>^{commit}` exits 0 for one it has and
+// non-zero, silently, for a name that is no commit there (https://git-scm.com/docs/git-rev-parse, "--verify" and
+// "--quiet", read 2026-10-21: the page says "non-zero", not which). The status git gives is 1, which the real-git test pins;
+// it is "no". Any other failure (128 for a path that is no repository, no git, the timeout) is "unknown", never a no: the
+// hub only turns a lane's record away on a "no". Same clean environment, same -C as the ancestry check.
+export type CommitAnswer = "yes" | "no" | "unknown";
+export function gitHasCommit(repo: string | null, o: { run?: GitRun; timeoutMs?: number } = {}): (sha: string) => Promise<CommitAnswer> {
+  if (repo === null) return () => Promise.resolve("unknown");
+  const doRun = o.run ?? runGit;
+  return sha => {
+    if (!COMMIT.test(sha)) return Promise.resolve("unknown");
+    return doRun(["-C", repo, "rev-parse", "--verify", "--quiet", `${sha}^{commit}`],
+      { env: env(), timeout: o.timeoutMs ?? 5000, maxBuffer: 64 * 1024 })
+      .then(r => (r.code === 0 ? "yes" : r.code === 1 ? "no" : "unknown"));
+  };
+}

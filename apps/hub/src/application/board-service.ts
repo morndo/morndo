@@ -33,6 +33,7 @@ export class BoardService {
   #lanes: () => string[];
   #runs: () => RunView[];
   #liveness: (sha: string) => Liveness;
+  #knows: ((sha: string) => Promise<"yes" | "no" | "unknown">) | null;
   #orphans: (tasks: readonly Task[], now: number) => string[];
   #runsEveryMs: number;
   #runsTimer: NodeJS.Timeout | null = null;
@@ -42,11 +43,13 @@ export class BoardService {
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
   // fleet no longer lists (BoardProjector.orphans; none without a fleet). `runsEveryMs`: the runs' throttle.
-  // `liveness` (B11): a merge's liveness over the nodes' builds; without one nothing is ever live, so Done waits.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness }) {
+  // `liveness` (B11): a merge's liveness over the nodes' builds; without one nothing is ever live, so Done waits. `knows`:
+  // whether the hub's checkout holds a commit, asked once for a lane's merge record (actChecked); without one none is asked.
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown"> }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
     this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
+    this.#knows = p.knows ?? null;
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
@@ -129,6 +132,19 @@ export class BoardService {
     if (!r.ok) return { ok: false, ...r.error };
     this.#tell();
     return { ok: true, ...r.value };
+  }
+
+  // `act`, for the agents' door (B11): a lane's merge record is first checked against the hub's checkout, once, and turned
+  // away (`no_commit`) when the checkout says it has no such commit, so a lane cannot make the hub run git for any sha it
+  // invents. The manager's, the principal's and the console's records are not asked: they may come before the operator
+  // brings the checkout up to date, and a refused record would leave the task with no merge to hold done for. "unknown"
+  // (no checkout, git failing) takes the record.
+  async actChecked(key: string, action: TaskAction, actor: TaskActor): Promise<BoardResult> {
+    if (action.action === "merged" && actor.kind === "worker" && this.#knows) {
+      const sha = action.sha.trim().toLowerCase();
+      if (/^[0-9a-f]{7,40}$/.test(sha) && await this.#knows(sha) === "no") return { ok: false, problem: "no_commit" };
+    }
+    return this.act(key, action, actor);
   }
 
   // B10: the board's own move of `key`, following `lane`'s Run (derivedMove's answer: D1 to D4), as that rule. `rev`: the

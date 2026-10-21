@@ -265,6 +265,18 @@ describe("a task's merge and the done gate (B11)", () => {
     expect(await managerSays("merged", "T-1", "nope")).toMatchObject({ code: 1, err: "refused: that isn't a commit hash (7 to 40 hex characters)" });
     expect(await managerSays("merged", "T-1", "abc1234", "--repo", "acme")).toMatchObject({ code: 1, err: "refused: that isn't a repo name (owner/name)" });
   });
+  it("too_many and no_commit are explained", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    for (let i = 0; i < 5; i++) expect((await managerSays("merged", "T-1", String(i).repeat(40))).code).toBe(0);
+    expect(await managerSays("merged", "T-1", "a".repeat(40))).toMatchObject({ code: 1, err: "refused: a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>" });
+    const err: string[] = [];
+    const code = await run(["merged", "T-1", "abc1234"], { MORNDO_HUB: "https://hub.example.test", MORNDO_AGENT_TOKEN: "mat_stub" }, {
+      fetch: async () => new Response(JSON.stringify({ error: "no_commit" }), { status: 409, headers: { "content-type": "application/json" } }),
+      lane: async () => null, out: () => {}, err: l => err.push(l),
+    });
+    expect(code).toBe(1);
+    expect(err.join("\n")).toBe("refused: the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout");
+  });
   it("merged then done: refused while not live, done once the reason is given", async () => {
     await taskMerged();
     expect((await managerSays("done", "T-1", "--why", "ran the checks")).code).toBe(1);

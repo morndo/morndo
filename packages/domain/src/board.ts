@@ -81,6 +81,8 @@ export type BoardProblem =
   | "not_live"          // done waits for the task's merges to be live on every node (B11)
   | "bad_sha" | "bad_repo"  // a merge record's commit or repository isn't one (B11)
   | "no_merge"          // the merge named to clear is not on the task (B11)
+  | "too_many"          // the task already holds MAX_MERGES merge records (B11)
+  | "no_commit"         // a lane named a commit the hub's checkout does not hold (B11; judged by the hub, which has the checkout)
   | "empty" | "too_long" | "bad_name" | "bad_text";
 // `other`: the task in the way (one_doing); `from`: where the task is (bad_transition), so a refusal can say so;
 // `detail`: the not_live label, so a refusal can say what the board sees (B11).
@@ -158,6 +160,8 @@ export const MORNDO_REPO = "morndo/morndo";
 export const REPO_NAME = /^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
 export const MERGE_SHA = /^[0-9a-f]{7,40}$/;
 export const PRINCIPAL_NOT_LIVE = "accepted by the principal";
+// A task holds this many merge records at most: each one is a git check per node, and a lane can record any sha it likes.
+export const MAX_MERGES = 5;
 export const isMorndoRepo = (repo: string) => repo.toLowerCase() === MORNDO_REPO;
 
 // One recorded merge of a task's PR. `by`: the name of who recorded it ("principal", "console", or the manager's/lane's
@@ -337,6 +341,7 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       const repo = (action.repo ?? MORNDO_REPO).trim();
       if (!REPO_NAME.test(repo)) return refuse("bad_repo");
       if (gate?.merges.some(m => m.repo.toLowerCase() === repo.toLowerCase() && m.sha === sha)) return refuse("same");
+      if ((gate?.merges.length ?? 0) >= MAX_MERGES) return refuse("too_many");
       return next(task, { kind: "merged", repo, sha }, false);
     }
     case "unmerged": {

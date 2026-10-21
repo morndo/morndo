@@ -15,6 +15,7 @@ let now: number;
 let managerToken: string;
 let workerToken: string;
 let runs: RunView[];                                              // the lanes' runs, as the projector would hold them
+let knows: (sha: string) => Promise<"yes" | "no" | "unknown">;   // whether the checkout holds a commit (a lane's merge record asks)
 let live: (sha: string) => Liveness;                              // each merge's liveness, as the fleet's builds would tell it
 const HOUR = 3_600_000;
 
@@ -57,7 +58,8 @@ beforeEach(async () => {
   await observation.poll();
   runs = [];
   live = () => ({ live: false, blockers: [] });                   // the hub that cannot tell: never live (B11)
-  hub = await startInProcessHub({ now: () => now, observation, runs: () => runs, liveness: sha => live(sha) });
+  knows = async () => "unknown";                                   // no checkout to ask: a lane's record is taken
+  hub = await startInProcessHub({ now: () => now, observation, runs: () => runs, liveness: sha => live(sha), knows: sha => knows(sha) });
   managerToken = hub.agents.issue("manager", "manager").secret;
   workerToken = hub.agents.issue("lanes", "worker").secret;
 });
@@ -247,6 +249,36 @@ describe("merged, not live (B11)", () => {
     await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
     await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
   };
+
+  it("a lane's merge record is refused when the checkout has no such commit; the manager's is not asked", async () => {
+    await atReview();
+    knows = async () => "no";
+    const builder = agent(workerToken, "builder");
+    const refused = await builder.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA });
+    expect(refused.status).toBe(409);
+    expect(await json(refused)).toEqual({ error: "no_commit" });
+    expect((await json(await builder.get("/api/agent/board/tasks/T-1"))).merged).toBeNull();   // nothing was recorded
+    const m = agent(managerToken);                                  // the manager may record a merge the checkout lacks yet
+    expect((await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA })).status).toBe(200);
+  });
+
+  it("a lane's merge record passes when the checkout has the commit, or cannot say", async () => {
+    await atReview();
+    const builder = agent(workerToken, "builder");
+    knows = async () => "yes";
+    expect((await builder.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA })).status).toBe(200);
+    knows = async () => "unknown";
+    expect((await builder.post("/api/agent/board/tasks/T-1", { action: "merged", sha: "b".repeat(40) })).status).toBe(200);
+  });
+
+  it("a task holds at most five merge records", async () => {
+    await atReview();
+    const m = agent(managerToken);
+    for (let i = 0; i < 5; i++) expect((await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: String(i).repeat(40) })).status).toBe(200);
+    const sixth = await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: "a".repeat(40) });
+    expect(sixth.status).toBe(409);
+    expect(await json(sixth)).toEqual({ error: "too_many" });
+  });
 
   it("done is refused while the merge is not live", async () => {
     live = behind;

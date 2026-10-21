@@ -2,7 +2,7 @@
 // work and never to Done, one task in progress per lane, every change an event with provenance and a revision.
 import { describe, expect, it } from "vitest";
 import {
-  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, MORNDO_REPO, PRINCIPAL_NOT_LIVE, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, isOrphan, livenessOf, mayMove, mergeLabel, mergedView, parseTaskKey, sessionId, taskKey, unregisteredMove, workingOn,
+  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, MAX_MERGES, MORNDO_REPO, PRINCIPAL_NOT_LIVE, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, isOrphan, livenessOf, mayMove, mergeLabel, mergedView, parseTaskKey, sessionId, taskKey, unregisteredMove, workingOn,
   type AncestryAnswer, type BoardActor, type DoneGate, type Liveness, type MergeRecord, type NodeBuild, type Run, type Task, type TaskAction, type TaskActor,
 } from "../src/index.ts";
 
@@ -389,6 +389,17 @@ describe("merged, not live (B11)", () => {
     expect(problem(act(value(r).task, { action: "merged", sha: SHA }, manager, gate([merge()], () => notLive())))).toBe("same");
     expect(problem(act(t, { action: "merged", sha: "xyz" }, manager))).toBe("bad_sha");
     expect(problem(act(t, { action: "merged", sha: "abc123" }, manager))).toBe("bad_sha");   // 6 hex
+  });
+
+  it("a task holds at most MAX_MERGES merge records, whoever records them; clearing one frees a slot", () => {
+    const t = make(1, { assignee: "builder" });
+    const held = (n: number) => Array.from({ length: n }, (_, i) => merge({ sha: String(i).repeat(40) }));
+    const lane: TaskActor = { kind: "worker", name: "builder", token: "tok-b" };
+    expect(MAX_MERGES).toBe(5);
+    expect(value(act(t, { action: "merged", sha: "a".repeat(40) }, manager, gate(held(MAX_MERGES - 1), () => notLive()))).event.change).toMatchObject({ kind: "merged" });
+    expect(problem(act(t, { action: "merged", sha: "a".repeat(40) }, manager, gate(held(MAX_MERGES), () => notLive())))).toBe("too_many");
+    expect(problem(act(t, { action: "merged", sha: "a".repeat(40) }, lane, gate(held(MAX_MERGES), () => notLive())))).toBe("too_many");
+    expect(value(act(t, { action: "unmerged", sha: "0".repeat(40) }, manager, gate(held(MAX_MERGES), () => notLive()))).event.change).toMatchObject({ kind: "unmerged" });
   });
 
   it("a bad repo is refused, and only the board's hands or the task's own lane may record a merge", () => {

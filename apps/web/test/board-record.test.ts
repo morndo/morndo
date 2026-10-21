@@ -88,5 +88,7 @@ describe("where a task's merges stand (BoardFrameSchema.merged, B11)", () => {
     expect(REFUSALS.bad_sha).toBe("That isn't a commit hash.");
     expect(REFUSALS.bad_repo).toBe("That isn't a repo name (owner/name).");
     expect(REFUSALS.no_merge).toBe("That merge isn't recorded on this task.");
+    expect(REFUSALS.too_many).toBe("A task holds at most 5 merge records.");
+    expect(REFUSALS.no_commit).toBe("The hub's checkout doesn't have that commit yet.");
   });
 });

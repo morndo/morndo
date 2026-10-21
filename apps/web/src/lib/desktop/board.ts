@@ -98,6 +98,8 @@ export const REFUSALS: Record<string, string> = {
   bad_sha: "That isn't a commit hash.",
   bad_repo: "That isn't a repo name (owner/name).",
   no_merge: "That merge isn't recorded on this task.",
+  too_many: "A task holds at most 5 merge records.",
+  no_commit: "The hub's checkout doesn't have that commit yet.",
 };
 
 // Who made a change, in the record's words: you, a lane or the manager by its name, the control plane's console

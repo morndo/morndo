@@ -66,6 +66,8 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "not_live": return `its merge is not live${detail ? `: ${detail}` : ""}; if you accept it anyway: done T-12 --why "…" --not-live "<reason>"`;
     case "bad_sha": return "that isn't a commit hash (7 to 40 hex characters)";
     case "bad_repo": return "that isn't a repo name (owner/name)";
+    case "too_many": return "a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>";
+    case "no_commit": return "the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout";
     case "no_merge": return "that merge isn't recorded on this task (see show)";
     default: return error;
   }

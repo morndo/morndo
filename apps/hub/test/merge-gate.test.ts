@@ -17,7 +17,9 @@ import { NodeBuilds } from "../src/application/node-builds.ts";
 
 let dirs: string[] = [];
 let stores: Store[] = [];
-afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); for (const s of stores.splice(0)) s.close(); });
+// Stores close first, then every directory made here goes: the repository and each store's own.
+afterEach(() => { for (const s of stores.splice(0)) s.close(); for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+const tmp = (prefix: string) => { const d = mkdtempSync(join(tmpdir(), prefix)); dirs.push(d); return d; };
 
 // A hermetic git: no global or system config, a made-up author (the same as git-ancestry.test.ts).
 const git = (dir: string, args: string[]) => {
@@ -42,8 +44,7 @@ const commits = (dir: string, n: number): string[] => {
 describe("the merge gate over a real git checkout (B11)", () => {
   it("done waits for the merge on every node, and a node that names no build holds it", async () => {
     const now = 1_800_000_000_000;
-    const repo = mkdtempSync(join(tmpdir(), "morndo-merge-gate-"));
-    dirs.push(repo);
+    const repo = tmp("morndo-merge-gate-");
     const [old = "", merged = "", head = ""] = commits(repo, 3);    // the merge, and one commit more on top of it
     // The fleet's listing, as the test moves it: pc always on the newest build, srv01 behind, then gone for a node that
     // names no build.
@@ -52,7 +53,7 @@ describe("the merge gate over a real git checkout (B11)", () => {
       { name: "srv01", commit: old, status: "online" },
     ];
     const builds = new NodeBuilds({ source: async () => listing });
-    const store = new Store(mkdtempSync(join(tmpdir(), "morndo-merge-gate-store-")));
+    const store = new Store(tmp("morndo-merge-gate-store-"));
     stores.push(store);
     const liveness = new MergeLiveness({ builds: () => builds.list(), ancestry: gitAncestry(repo) });
     const board = new BoardService({ store, now: () => now, policy: () => DEFAULT_POLICY, liveness: sha => liveness.of(sha) });
@@ -91,11 +92,10 @@ describe("the merge gate over a real git checkout (B11)", () => {
 
   it("a cold cache holds done once: the first is refused with unknown, the next passes once the checks land", async () => {
     const now = 1_800_000_000_000;
-    const repo = mkdtempSync(join(tmpdir(), "morndo-merge-gate-"));
-    dirs.push(repo);
+    const repo = tmp("morndo-merge-gate-");
     const [, merged = "", head = ""] = commits(repo, 3);
     const builds = new NodeBuilds({ source: async () => [{ name: "pc", commit: head, status: "online" }] });
-    const store = new Store(mkdtempSync(join(tmpdir(), "morndo-merge-gate-store-")));
+    const store = new Store(tmp("morndo-merge-gate-store-"));
     stores.push(store);
     const liveness = new MergeLiveness({ builds: () => builds.list(), ancestry: gitAncestry(repo) });
     const board = new BoardService({ store, now: () => now, policy: () => DEFAULT_POLICY, liveness: sha => liveness.of(sha) });

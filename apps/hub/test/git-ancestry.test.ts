@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { gitAncestry, type GitRun } from "../src/adapters/git-ancestry.ts";
+import { gitAncestry, gitHasCommit, type GitRun } from "../src/adapters/git-ancestry.ts";
 
 const dirs: string[] = [];
 const tempDir = () => { const d = mkdtempSync(join(tmpdir(), "morndo-ancestry-")); dirs.push(d); return d; };
@@ -113,5 +113,28 @@ describe("git ancestry (B11)", () => {
       if (was === undefined) delete process.env.GIT_DIR;
       else process.env.GIT_DIR = was;
     }
+  });
+  it("gitHasCommit: a commit the checkout holds is yes, one it lacks is no, anything else is unknown", async () => {
+    const dir = tempDir();
+    const [first = ""] = commits(dir);
+    const has = gitHasCommit(dir);
+    expect(await has(first)).toBe("yes");
+    expect(await has(first.slice(0, 9))).toBe("yes");                  // an abbreviation names it too
+    expect(await has("a".repeat(40))).toBe("no");                     // well-formed, not in this history
+    expect(await has("--help")).toBe("unknown");                      // never reaches git
+    expect(await gitHasCommit(join(dir, "nowhere"))(first)).toBe("unknown");   // not a repository
+    expect(await gitHasCommit(null)(first)).toBe("unknown");          // no checkout configured
+  });
+
+  it("gitHasCommit runs in the same clean environment, asking git to peel the name to a commit", async () => {
+    const seen: { args: readonly string[]; env: Record<string, string> }[] = [];
+    const run: GitRun = async (args, opts) => { seen.push({ args, env: opts.env }); return { code: 0, killed: false }; };
+    expect(await gitHasCommit("/srv/checkouts/morndo", { run })("abc1234")).toBe("yes");
+    expect(seen[0]?.args).toEqual(["-C", "/srv/checkouts/morndo", "rev-parse", "--verify", "--quiet", "abc1234^{commit}"]);
+    expect(Object.keys(seen[0]?.env ?? {}).sort()).toEqual(["GIT_TERMINAL_PROMPT", "HOME", "LANG", "PATH"]);
+    const code = (c: number | null, killed = false): GitRun => async () => ({ code: c, killed });
+    expect(await gitHasCommit("/srv/checkouts/morndo", { run: code(1) })("abc1234")).toBe("no");
+    expect(await gitHasCommit("/srv/checkouts/morndo", { run: code(128) })("abc1234")).toBe("unknown");
+    expect(await gitHasCommit("/srv/checkouts/morndo", { run: code(null, true) })("abc1234")).toBe("unknown");
   });
 });
