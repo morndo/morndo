@@ -66,6 +66,7 @@ export class ManagerQueue {
   #timer: NodeJS.Timeout | null = null;
   #unsubscribe: () => void = () => {};
   #polling: Promise<void> | null = null;
+  #stopped = false;                               // stop() was called: a poll still waiting on the fleet touches nothing when it answers
   // Delivery ids whose put() is still waiting on the fleet, in this process, and how many: the app sends a message again
   // under the same id when one attempt goes unanswered, so two put()s of one id may overlap.
   #inFlight = new Map<string, number>();
@@ -198,14 +199,17 @@ export class ManagerQueue {
   async #sendingNeverArrived(row: ManagerDeliveryRow): Promise<boolean> {
     if (row.state !== "sending" || this.#inFlight.has(row.deliveryId)) return false;
     if (this.#now() - row.updatedAt <= SENDING_DROP_AFTER_MS) return false;
-    return (await this.#deliveries.laneNodeOnline(this.lane)) === true;
+    const online = await this.#deliveries.laneNodeOnline(this.lane);
+    return !this.#stopped && online === true;                            // stopped: the store may be closed, drop nothing
   }
 
-  // Asks the fleet about every delivery not final yet; one round at a time.
+  // Asks the fleet about every delivery not final yet; one round at a time. A queue that was stopped ends the round at its
+  // next answer: the hub closes the store right after it stops the queue, and an answer that comes later must not use it.
   poll(): Promise<void> {
     this.#polling ??= (async () => {
       for (const row of this.#store.openManagerDeliveries()) {
         const d = await this.#deliveries.get(row.deliveryId);
+        if (this.#stopped) return;
         if (d === "unavailable") return;                                 // the fleet can't be asked now: the next round
         if (d === "unreadable") {                                        // this one only: the rest are still asked (review #5)
           if (!this.#unreadable.has(row.deliveryId)) log.warn(`${row.deliveryId}: the fleet's answer about it doesn't read; asked again each round`);
@@ -227,6 +231,7 @@ export class ManagerQueue {
   // round: off, every delivery still queued cancelled first (spec §9.1), then one poll; on, the sticky check, then one
   // poll. main.ts waits for it only when the switch is off: on, the hub serves meanwhile (review #8).
   start(): Promise<void> {
+    this.#stopped = false;
     const pruned = this.#store.pruneManagerDeliveries(this.#now() - KEEP_MS);
     if (pruned) log.info(`manager deliveries: pruned ${pruned} rows older than 7 days`);
     this.#unsubscribe = this.#deliveries.subscribe(d => this.#safeApply(d), () => { void this.poll(); });
@@ -238,7 +243,14 @@ export class ManagerQueue {
       await this.poll();
     })();
   }
-  stop() { if (this.#timer) clearInterval(this.#timer); this.#timer = null; this.#unsubscribe(); }
+  // Idempotent: the hub stops the queue before it drains and again with the rest.
+  stop() {
+    this.#stopped = true;
+    if (this.#timer) clearInterval(this.#timer);
+    this.#timer = null;
+    this.#unsubscribe();
+    this.#unsubscribe = () => {};
+  }
 
   // Review Focus 5: the manager's window under a name the fleet doesn't keep sticky (MORNDO_MANAGER_WINDOW renamed, the
   // fleet's stickyLanes not) still gets its deliveries, but not through a manager restart. Said once, at start.
