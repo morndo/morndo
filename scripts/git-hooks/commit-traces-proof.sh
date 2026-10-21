@@ -154,6 +154,42 @@ code=$?
 set -e
 [ "$code" -eq 0 ] || fail "a bad commit the pushed-to remote holds should pass through the hook, got $code"
 
+# A commit whose mail is not a noreply address can be pinned as legacy (COMMIT_TRACES_LEGACY, full ids, exact match): it
+# cannot be rewritten once it is in the published history, and only it is spared. A prefix of its id spares nothing, and
+# another bad commit in the same range still fails. The pre-push proof pins the one such commit this repository has.
+git init -q "$scratch/legacy"
+cd "$scratch/legacy"
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'legacy base'
+legacy_base=$(git rev-parse HEAD)
+env GIT_AUTHOR_EMAIL=ada@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'legacy old'
+legacy_old=$(git rev-parse HEAD)
+git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'legacy clean'
+legacy_mid=$(git rev-parse HEAD)
+expect_code() {
+  want=$1; label=$2; shift 2
+  set +e
+  "$@" >/dev/null 2>&1
+  code=$?
+  set -e
+  [ "$code" -eq "$want" ] || fail "$label: expected $want, got $code"
+}
+expect_code 1 "no list: the old commit fails" sh "$checker" range "$legacy_base..$legacy_mid"
+expect_code 0 "its full id pinned: it passes" env COMMIT_TRACES_LEGACY="$legacy_old" sh "$checker" range "$legacy_base..$legacy_mid"
+expect_code 0 "its full id pinned: mails passes" env COMMIT_TRACES_LEGACY="$legacy_old" sh "$checker" mails "$legacy_base..$legacy_mid"
+expect_code 1 "a short id spares nothing" env COMMIT_TRACES_LEGACY="$(printf '%s' "$legacy_old" | cut -c1-12)" sh "$checker" range "$legacy_base..$legacy_mid"
+expect_code 1 "an id with a character cut spares nothing" env COMMIT_TRACES_LEGACY="${legacy_old%?}" sh "$checker" mails "$legacy_base..$legacy_mid"
+expect_code 1 "another commit's id spares nothing" env COMMIT_TRACES_LEGACY="$legacy_mid" sh "$checker" range "$legacy_base..$legacy_mid"
+env GIT_AUTHOR_EMAIL=other@example.invalid git -c user.name=Ada -c user.email=ada@users.noreply.github.com commit -q --allow-empty -m 'legacy planted'
+legacy_planted=$(git rev-parse HEAD)
+expect_code 1 "a planted bad commit fails beside the pinned one" env COMMIT_TRACES_LEGACY="$legacy_old" sh "$checker" range "$legacy_base..$legacy_planted"
+expect_code 1 "a planted bad commit fails beside the pinned one (mails)" env COMMIT_TRACES_LEGACY="$legacy_old" sh "$checker" mails "$legacy_base..$legacy_planted"
+expect_code 0 "both pinned: both pass" env COMMIT_TRACES_LEGACY="$legacy_old $legacy_planted" sh "$checker" mails "$legacy_base..$legacy_planted"
+# The pin spares the mail check only: a bot name in a pinned commit still fails.
+git reset -q --hard "$legacy_mid"
+git -c user.name='review[bot]' -c user.email=bot@example.invalid commit -q --allow-empty -m 'legacy bot'
+legacy_bot=$(git rev-parse HEAD)
+expect_code 1 "a bot name in a pinned commit still fails" env COMMIT_TRACES_LEGACY="$legacy_bot" sh "$checker" range "$legacy_mid..$legacy_bot"
+
 cd "$root"
 set +e
 out=$(sh "$checker" range deadbeef..HEAD 2>&1)

@@ -29,7 +29,7 @@ export const TaskActorSchema = z.union([
 export const BoardTaskSchema = z.object({
   key: taskKey(), n: z.int().check(z.gte(1)), title: text(), description: text(),
   status: z.enum(STATUSES), assignee: z.nullable(text()), priority: orElse(z.enum(PRIORITIES), "normal"),
-  blockedReason: z.nullable(text()), createdAt: count(), updatedAt: count(), createdBy: TaskActorSchema,
+  blockedReason: z.nullable(text()), createdAt: count(), updatedAt: count(), stateChangedAt: count(), createdBy: TaskActorSchema,
   rev: z.int().check(z.gte(1)), doneAt: z.nullable(count()), comments: count(),
 });
 export const TaskChangeSchema = z.discriminatedUnion("kind", [

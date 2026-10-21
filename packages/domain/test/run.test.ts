@@ -35,6 +35,13 @@ describe("R2: a turn end with work pending is never ended", () => {
     expect(r.wait).toEqual({ on: "background", tasks: [{ type: "shell", label: "gh run watch" }] });
     expect(r.source).toBe("hook");
   });
+  it("the turn's own outcome stays on the Run while background work is pending", () => {
+    const tasks = [{ type: "shell", label: "gh run watch" }];
+    expect(deriveRun(facts({ turn: turn({ status: "done", tasks }) })).outcome).toBe("done");
+    expect(deriveRun(facts({ turn: turn({ status: "blocked", tasks }) })).outcome).toBe("blocked");
+    expect(deriveRun(facts({ turn: turn({ status: "waiting", tasks }) })).outcome).toBeUndefined();
+    expect(deriveRun(facts({ turn: turn({ status: null, tasks }) })).outcome).toBeUndefined();
+  });
   it("a later turn start makes it working; a later turn end with nothing pending ends it", () => {
     expect(deriveRun(facts({ session: "busy", turn: turn({ tasks: [{ type: "shell", label: "x" }] }), activity: { first: T0 + 2 * MIN, last: T0 + 3 * MIN } })).phase).toBe("working");
     expect(deriveRun(facts({ turn: turn({ at: T0 + 5 * MIN }) })).phase).toBe("ended");

@@ -9,7 +9,7 @@ const NOW = new Date(2026, 9, 20, 14, 30).getTime();            // local time: t
 const run = (o: Partial<Run> = {}): Run => ({ lane: "builder", node: "pc", phase: "working", deadline: null, overdue: false, since: NOW - 3 * MIN, source: "session", ...o });
 const task = (n: number, status: TaskStatus, assignee: string | null, updatedAt = 1): Task => ({
   key: `T-${n}` as Task["key"], n, title: `task ${n}`, description: "", status, assignee, priority: "normal", blockedReason: null,
-  createdAt: 1, updatedAt, createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0,
+  createdAt: 1, updatedAt, stateChangedAt: updatedAt, createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0,
 });
 
 describe("runLook: every phase", () => {
