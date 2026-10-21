@@ -119,7 +119,7 @@ describe("POST /v1/deliveries", () => {
       expect(await post(fleet, body), JSON.stringify(body)).toMatchObject({ status: 400, body: { ok: false, error: { code: "bad_args", executed: "no" } } });
     }
     for (const body of [{ id: "no-namespace", lane: "api", text: "x" }, { id: `k:${"a".repeat(200)}`, lane: "api", text: "x" },
-      { id: "k:1", lane: "api", text: "" }, { id: "k:1", lane: "api", text: "x".repeat(8001) }, { id: "k:1#2", lane: "api", text: "x" }]) {
+      { id: "k:1", lane: "api", text: "" }, { id: "k:1", lane: "api", text: "x".repeat(100_001) }, { id: "k:1#2", lane: "api", text: "x" }]) {
       expect(await post(fleet, body), JSON.stringify(body).slice(0, 60)).toMatchObject({ status: 400, body: { ok: false, error: { code: "bad_args", executed: "no" } } });
     }
     const r = await client(fleet.config.socketPath).raw("/v1/deliveries", { method: "POST", body: "{}" });
@@ -138,7 +138,7 @@ describe("POST /v1/deliveries", () => {
       [{ id: `k:${"a".repeat(200)}`, lane: "api", text: "x" }, "id is at most 200 characters"],
       [{ id: "k:1#2", lane: "api", text: "x" }, "must not end in \"#\" and digits"],
       [{ id: "k:1", lane: "api", text: "" }, "text is empty"],
-      [{ id: "k:1", lane: "api", text: "x".repeat(8001) }, "text is at most 8000 characters"],
+      [{ id: "k:1", lane: "api", text: "x".repeat(100_001) }, "text is at most 100000 characters"],
       [{ id: "k:1", lane: "api", text: "x", ttlMs: 0 }, "ttlMs is from 1 to"],
       [{ id: "k:1", workerId: "nope", text: "x" }, "workerId isn't a worker ID"],
     ];

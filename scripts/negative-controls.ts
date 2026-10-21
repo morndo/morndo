@@ -3091,6 +3091,9 @@ export const CONTROLS: Control[] = [
   { id: "rf-watch-activity-after", task: "ADR-0032", file: "apps/fleet/src/application/lane-watch.ts",
     find: "const after = t.recent.filter(x => x > end.at);", replace: "const after = t.recent;",
     run: ["apps/fleet/test/lane-watch.test.ts"], expect: "one the fleet took before its turn end counts" },
+  { id: "t280-no-long-text-cap-check", task: "280", file: "apps/fleet/src/application/connections.ts",
+    find: "!c.caps.includes(CAP_LONG_TEXT)", replace: "false",
+    run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
 ];
 
 // ---- the runner
