@@ -175,6 +175,11 @@ export class FakeInstaller implements Installer {
     this.real.swap(pair);
   }
 
+  swapBack(pair: { current: string; previous: string | null }): void {
+    this.calls.push({ op: "swapBack", version: pair.current });
+    this.real.swapBack(pair);
+  }
+
   setGood(version: string): void {
     this.calls.push({ op: "setGood", version });
     this.real.setGood(version);

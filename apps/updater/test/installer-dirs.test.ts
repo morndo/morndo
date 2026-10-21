@@ -320,6 +320,30 @@ describe("DirsInstaller", () => {
     expect(readlinkSync(join(releases, "current"))).toBe(VERSION);
   });
 
+  it("swapBack(): current first, then previous — a previous that cannot land leaves current already on the old Version", async () => {
+    const { installer } = await installGood();
+    // the apply's swap left the machine on the new Version with the old one as previous
+    symlinkSync("0.1.0", join(releases, "current"));
+    symlinkSync(VERSION, join(releases, "previous"));
+    mkdirSync(join(releases, ".previous.new"));   // the temp name blocked: the previous link cannot land
+    expect(() => installer.swapBack({ current: "0.1.0", previous: "0.0.9" })).toThrow();
+    expect(readlinkSync(join(releases, "current"))).toBe("0.1.0");   // current went first (§6.5 step 2)
+    expect(readlinkSync(join(releases, "previous"))).toBe(VERSION);  // and previous never moved
+    rmSync(join(releases, ".previous.new"), { recursive: true, force: true });
+    installer.swapBack({ current: "0.1.0", previous: "0.0.9" });
+    expect(readlinkSync(join(releases, "current"))).toBe("0.1.0");
+    expect(readlinkSync(join(releases, "previous"))).toBe("0.0.9");  // the recorded pair, not the bad Version
+  });
+
+  it("swapBack(): previous null removes the previous link (there was none before the update)", async () => {
+    const { installer } = await installGood();
+    symlinkSync(VERSION, join(releases, "current"));
+    symlinkSync("0.1.0", join(releases, "previous"));
+    installer.swapBack({ current: "0.1.0", previous: null });
+    expect(readlinkSync(join(releases, "current"))).toBe("0.1.0");
+    expect(existsSync(join(releases, "previous"))).toBe(false);
+  });
+
   it("swap(): a reader resolving current through 2,000 swaps never finds it missing", async () => {
     const { installer, archive, filesSha256 } = good();
     for (const v of ["0.1.0", VERSION]) {   // both ends of every swap, installed from the same archive

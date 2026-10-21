@@ -70,6 +70,10 @@ export interface Installer {
    *  releases directory synced after each. A crash between the two leaves both links on the old Version.
    *  `previous: null` removes the previous link (a first install has none to keep). */
   swap(pair: { current: string; previous: string | null }): void;
+  /** §6.5 step 2: the recorded pre-update pair goes back, `current` first, then `previous`, each the same
+   *  atomic relink as swap's. A crash between the two leaves both links on the pre-update Version.
+   *  `previous: null` removes the previous link (there was none before the update). */
+  swapBack(pair: { current: string; previous: string | null }): void;
   /** Points `good` at the last committed Version (§5), the same atomic way. */
   setGood(version: string): void;
   /** Removes every installed <version>/ not named — never the ones current, previous or good point at (§6.2 step 10). */
@@ -162,5 +166,7 @@ export interface HoldWriter {
   clear(): void;
 }
 export interface Sleeper { sleep(ms: number): Promise<void> }
-export type AlertKind = "update_rolled_back" | "update_rollback_failed" | "update_deferred" | "update_unknown_record";
+export type AlertKind =
+  | "update_rolled_back" | "update_rollback_failed" | "update_rollback_waiting" | "update_deferred"
+  | "update_unknown_record";
 export interface AlertSink { raise(kind: AlertKind, detail: string): void }

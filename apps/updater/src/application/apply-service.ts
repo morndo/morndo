@@ -24,6 +24,7 @@ export type ApplyOutcome =
   | { kind: "abandoned"; reason: string }                      // nothing swapped; the old Version runs again
   | { kind: "rolled_back"; version: string; reason: string }   // exit 1
   | { kind: "rollback_failed"; reason: string }                // exit 70
+  | { kind: "rollback_waiting"; reason: string }               // exit 75: tmux in the agent's unit; recovery retries
   | { kind: "busy" }
   | { kind: "nothing_staged" }
   | { kind: "not_ours"; detail: string };                      // RL14

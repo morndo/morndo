@@ -232,13 +232,15 @@ export function holdForProbation(
 
 export type RollbackOutcome =
   | { kind: "rolled_back"; version: string; reason: string }
-  | { kind: "rollback_failed"; reason: string };
+  | { kind: "rollback_failed"; reason: string }
+  | { kind: "rollback_waiting"; reason: string };
 
 // The machine goes back to the pair it came from. Every step is one the record can stand on again — a recovery
-// re-runs this from rolling_back — and the one thing it never does is stop the node agent's tmux: when this
-// updater runs inside it, there is nothing safe to stop, and the failure is the answer (RL13). A rollback that
-// cannot put the old Version back healthy is the loudest outcome there is, and it stops there: no loop, and the
-// services are left to the service manager (§4.4).
+// re-runs this from rolling_back — and the one thing it never does is stop the node agent's tmux: when the server
+// sits inside the agent's unit, stopping it is not ours to do, and the rollback waits — the record stays open at
+// rolling_back for the recovery unit to pick up again, with the critical Alert (RL13). A rollback that cannot put
+// the old Version back healthy is the loudest outcome there is, and it stops there: no loop, and the services are
+// left to the service manager (§4.4).
 export async function runRollback(ctx: StepCtx, o: {
   running: readonly UpdateService[];
   cause: string;
@@ -256,12 +258,21 @@ export async function runRollback(ctx: StepCtx, o: {
   const oldText = formatVersion(ctx.u.preUpdate.current);
   try {
     if (await deps.services.tmuxInAgentUnit()) {
-      return failed(`cannot roll back from inside the node agent's unit (${o.cause})`);
+      // §6.5 step 1 (RL13): the tmux server sits inside the agent's unit, so the agent is not stopped and nothing
+      // else moves either. The record stays open at rolling_back, never finished: the recovery unit (every
+      // 5 minutes) walks this again once tmux no longer sits there.
+      const reason = `tmux inside the node agent's unit; the rollback from ${targetText} waits (${o.cause})`;
+      deps.alerts.raise("update_rollback_waiting", reason);
+      return { kind: "rollback_waiting", reason };
     }
     await stopServices(deps, o.running);
-    // The pair goes back the way it came: the units, then the links — previous first (§6.2 step 6's order, again).
+    // The pair goes back as it was recorded (§6.5 step 2): the units, then the links — current first, then
+    // previous, so a crash in between leaves both links on the known-good Version.
     await deps.services.renderUnits(oldText);
-    deps.installer.swap({ current: oldText, previous: targetText });
+    deps.installer.swapBack({
+      current: oldText,
+      previous: ctx.u.preUpdate.previous === null ? null : formatVersion(ctx.u.preUpdate.previous),
+    });
     // RL8: only what a migration changed goes back, and only when the old Version truly cannot open it — and a
     // restore with the Backup gone is refused, never forced.
     const plan = planOf(ctx.u.migrations);

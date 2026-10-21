@@ -19,6 +19,7 @@ export type RecoverOutcome =
   | { kind: "committed"; version: string }
   | { kind: "rolled_back"; version: string; reason: string }
   | { kind: "rollback_failed"; reason: string }
+  | { kind: "rollback_waiting"; reason: string }
   | { kind: "unknown_record"; detail: string };
 
 export class RecoveryService {

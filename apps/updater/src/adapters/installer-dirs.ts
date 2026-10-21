@@ -185,6 +185,15 @@ export class DirsInstaller implements Installer {
     this.relink("current", pair.current);
   }
 
+  // §6.5 step 2, the rollback's own order: `current` first, then `previous`, so a crash between the two renames
+  // leaves both links on the pre-update Version — the known-good one — and the pair goes back as it was recorded,
+  // not as the update's swap had left it.
+  swapBack(pair: { current: string; previous: string | null }): void {
+    this.relink("current", pair.current);
+    if (pair.previous === null) rmSync(join(this.releases, "previous"), { force: true });
+    else this.relink("previous", pair.previous);
+  }
+
   setGood(version: string): void {
     this.relink("good", version);
   }

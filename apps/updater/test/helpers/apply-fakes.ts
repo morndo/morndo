@@ -113,6 +113,11 @@ export class TapedInstaller implements Installer {
     this.real.swap(pair);
     this.die.checkAfter("swap");
   }
+  swapBack(pair: { current: string; previous: string | null }): void {
+    this.die.check("swapBack");
+    this.real.swapBack(pair);
+    this.die.checkAfter("swapBack");
+  }
   setGood(version: string): void { this.real.setGood(version); }
   prune(keep: readonly string[]): void { this.real.prune(keep); }
   async verifyTree(version: string, filesSha256: string | null) { return this.real.verifyTree(version, filesSha256); }
@@ -332,6 +337,9 @@ export type ApplyWorld = {
 export type WorldOptions = {
   /** B's Manifest's schemas (the migration cases). */
   bSchemas?: Record<DatabaseName, SchemaInfo>;
+  /** What the previous link points at before the update (default: nothing, a first update) — the pair a rollback
+   *  must put back whole (§6.5 step 2). */
+  preUpdatePrevious?: string;
   /** The machine's services (default: all three, a control plane). */
   running?: UpdateService[];
   /** Floors higher than A's own Manifest says, as a newer service's leftovers would be (a target below one is refused). */
@@ -366,7 +374,7 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
     realInstaller.promote(fixture.version, { manifestSha256: fixture.manifestSha256, filesSha256: fixture.filesSha256, at: NOW });
     rmSync(archive, { force: true });
   }
-  realInstaller.swap({ current: A, previous: null });
+  realInstaller.swap({ current: A, previous: o.preUpdatePrevious ?? null });
   realInstaller.setGood(A);
 
   // The databases at A's schemas, each with a row a backup and a restore can be seen to move (§11.3).

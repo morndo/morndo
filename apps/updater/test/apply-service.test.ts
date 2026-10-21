@@ -9,7 +9,7 @@ import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { writeFloor } from "@morndo/service-kit";
 import {
-  A, B, buildApplyWorld, breakBackups, dbFingerprint, holdText, SCHEMAS_A, SCHEMAS_B_FLEET_FLOOR,
+  A, B, buildApplyWorld, breakBackups, dbFingerprint, holdText, SCHEMAS_A, SCHEMAS_B_FLEET_FLOOR, STALE,
 } from "./helpers/apply-fakes.ts";
 import { wipe } from "./helpers/fakes.ts";
 
@@ -175,6 +175,19 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(w.tape.filter(entry => entry.startsWith("backup:")), "nothing migrated, nothing backed up").toEqual([]);
   });
 
+  it("a rollback puts back the recorded pre-update pair: current on A, previous where it was", async () => {
+    // A current with Z previous before the update (§6.5 step 2): after the rollback the pair is exactly that again —
+    // previous is not left pointing at the Version that just failed.
+    const w = await buildApplyWorld(scratch, { preUpdatePrevious: STALE });
+    w.probe.healthScript = (s) =>
+      s === "hub" && w.current() === B
+        ? { service: s, version: A, checks: { ready: true, database: true } }   // a restart that never took
+        : { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    expect(w.installer.layout()).toMatchObject({ current: A, previous: STALE });
+  });
+
   it("a restart during probation rolls back", async () => {
     const w = await buildApplyWorld(scratch);
     w.services.restartCounts = { node: 1 };                  // the manager restarted the node since the start
@@ -210,6 +223,42 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(w.tape.filter(entry => entry === "stop:fleet").length).toBe(2);
     expect(w.store.recentUpdates(1)[0]!.state).toBe("rollback_failed");
     expect(w.current()).toBe(A);                             // the swap back stands; the services are the manager's
+  });
+
+  it("tmux in the agent's unit at rollback time waits, with the alert, and recovery finishes it once tmux is out", async () => {
+    const w = await buildApplyWorld(scratch);
+    w.probe.healthScript = (s) => {
+      const at = w.current();
+      if (at === B) {
+        // While B runs, the agent's tmux server comes to sit inside its unit: stopping the agent is not ours to do.
+        w.services.tmuxIn = true;
+        return s === "hub" ? { service: s, version: A, checks: { ready: true, database: true } }   // roll it back
+          : { service: s, version: B, checks: { ready: true, database: true } };
+      }
+      return { service: s, version: at ?? A, checks: { ready: true, database: true } };
+    };
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rollback_waiting" });
+    if (out.kind !== "rollback_waiting") throw new Error("unreachable");
+    expect(out.reason).toContain("tmux");
+    expect(w.alerts.raised.some(x => x.kind === "update_rollback_waiting")).toBe(true);
+    expect(w.alerts.raised.some(x => x.kind === "update_rollback_failed")).toBe(false);
+    // the machine still runs B's services: the apply's own stop round is the only one, and nothing swapped back
+    expect(w.tape.filter(entry => entry.startsWith("stop:"))).toEqual(["stop:hub", "stop:node", "stop:fleet"]);
+    expect(w.tape).toContain("tmux:true");
+    expect(w.current()).toBe(B);
+    // the record stays open at rolling_back (§6.5 step 1): the recovery unit picks the rollback up again
+    expect(w.store.openUpdate()).toMatchObject({ state: "rolling_back", mark: "rolling_back" });
+    expect(w.store.recentUpdates(1)[0]!.finishedAt).toBeNull();
+    // tmux moves out of the unit; the recovery finishes what the apply could not
+    w.services.tmuxIn = false;
+    const recovered = await w.recover().recover();
+    expect(recovered).toMatchObject({ kind: "rolled_back", version: A });
+    expect(w.current()).toBe(A);
+    expect(w.installer.layout()).toMatchObject({ current: A, previous: null });   // the pair there was before
+    expect(w.store.openUpdate()).toBeNull();
+    expect(w.store.recentUpdates(1)[0]!.state).toBe("rolled_back");
+    expect(w.store.badVersions()).toContain(B);
   });
 
   it("commit sets good, records the commit and prunes", async () => {
