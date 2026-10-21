@@ -50,11 +50,11 @@ The Fleet supplies the Board (customer and supplier). The Board reads runs and n
 
 | # | Invariant |
 |---|---|
-| B10 | The board moves a task by itself, as actor `board`, only along these edges. The record names the rule and the run it read. |
-| D1 | In progress to in review: the assignee's turn ended `done` after the task's last change of state, even while its background work is still running (the run keeps the turn's outcome). The reason is its status line, or "background work still running" while that work runs. |
+| B10 | The board moves a task by itself, as actor `board`, only along these edges. The record names the rule and the run it read. A status line may name its task key right after the word (`STATUS: DONE T-285`); D1 and D2 with a key move only that task, and only if it is the lane's. |
+| D1 | In progress to in review: the assignee's turn ended `done` after the task's last change of state, even while its background work is still running (the run keeps the turn's outcome). The reason is its status line, or "background work still running" while that work runs. A keyed WAITING that names a task in review or blocked takes it into progress. |
 | D2 | In progress to blocked: the run ended `blocked` or `needs_decision`. The reason is its status line. |
 | D3 | In progress to to do: the assignee's run is `gone`. The reason is "its lane stopped without DONE". |
-| D4 | To do, blocked or in review to in progress: the assignee's run is `working` or `waiting` since after the task's last change, the lane has no other task in progress (B5), and this is its only open task. |
+| D4 | To do to in progress: the assignee's run is `working` or `waiting` since after the task's last change, the lane has no other task in progress (B5), and this is its only to do task. A task in review or blocked is taken up again only by a keyed WAITING that names it (D1). |
 | D5 | The board never moves a task to done, and never assigns or edits one (B2, B3, B9 hold). |
 | D6 | A run whose phase began before the task's last change of state (status, assignee or description; a comment is not one) moves nothing, so the board never undoes a move a person or a lane made after it. |
 

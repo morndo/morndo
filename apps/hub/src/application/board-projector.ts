@@ -14,13 +14,16 @@
 //   task changed meanwhile, B5's one_doing, a reason the domain won't take) is logged once for that task's revision and
 //   that run, and not tried again for them; a new run or another change of the task may try again.
 // - Safe: nothing here throws into the event loop. A failure is logged, and the next run tries afresh.
-import { derivedMove, type Task } from "@morndo/domain";
-import type { RunView } from "@morndo/protocol";
+// - The key a line names (B12): a status line may name its task key right after the word ("STATUS: DONE T-285"). A keyed
+//   line moves only that task and only if it is the lane's; a key naming a task that is not its open task moves nothing
+//   and leaves one comment in the history of the lane's own task in progress, once (the memo per run, the record for ever).
+import { derivedMove, keyMismatch, parseTaskKey, type NamedStatus, type Task, type TaskKey } from "@morndo/domain";
+import { statusLineOf, type RunView } from "@morndo/protocol";
 import { log as hubLog, type Logger } from "../adapters/log.ts";
 import type { BoardService } from "./board-service.ts";
 import type { RunsSource } from "./ports.ts";
 
-export type ProjectorBoard = Pick<BoardService, "openTasksOf" | "follow" | "runsChanged">;
+export type ProjectorBoard = Pick<BoardService, "openTasksOf" | "follow" | "runsChanged" | "act" | "task">;
 
 // A list that failed is asked for again on the next run event, but not more often than this.
 export const RETRY_MS = 5000;
@@ -30,6 +33,14 @@ const REFUSALS_KEPT = 500;
 // Each of a lane's tasks moves at most once for one run (D6), and a lane has one task in progress (B5): a bound, not a
 // budget.
 const MOVES_PER_RUN = 8;
+
+// B12: the task the run's status line names right after the word ("STATUS: DONE T-285"), as the domain's NamedStatus, or
+// null when the line names none. The protocol parses the line; the domain judges the move.
+const namedOf = (run: RunView): NamedStatus | null => {
+  const s = statusLineOf(run.line ?? "");
+  const key = s?.taskKey !== undefined ? parseTaskKey(s.taskKey) : null;
+  return s !== null && key !== null ? { key, status: s.status } : null;
+};
 
 export class BoardProjector {
   #source: RunsSource;
@@ -104,11 +115,16 @@ export class BoardProjector {
   // B10: what is due for `run`'s lane, applied one move at a time, its open tasks read again after each.
   #follow(run: RunView) {
     try {
+      // B12: a keyed line naming a task that is not the lane's open task moves nothing; one comment in the history of its
+      // own task in progress says so.
+      const named = namedOf(run);
+      const note = keyMismatch(run, named, this.#board.openTasksOf(run.lane));
+      if (note !== null) this.#note(note, run);
       for (let i = 0; i < MOVES_PER_RUN; i++) {
         const tasks = this.#board.openTasksOf(run.lane);
         let due: { task: Task; move: NonNullable<ReturnType<typeof derivedMove>>; memo: string } | null = null;
         for (const task of tasks) {
-          const move = derivedMove(task, run, tasks);
+          const move = derivedMove(task, run, tasks, named);
           if (!move) continue;
           const memo = `${task.key}@${task.rev} ${run.lane}@${run.since} ${move.rule}`;
           if (this.#refused.has(memo)) continue;
@@ -135,5 +151,16 @@ export class BoardProjector {
     if (this.#refused.size <= REFUSALS_KEPT) return;
     const oldest = this.#refused.values().next().value;
     if (oldest !== undefined) this.#refused.delete(oldest);
+  }
+
+  // B12: the one line about a keyed line that named a task that is not the lane's: a comment on its own task in progress.
+  // Once for that task and run (the memo), and once ever (the task's history, which survives a hub restart).
+  #note(note: { key: TaskKey; text: string }, run: RunView) {
+    const memo = `${note.key} ${run.lane}@${run.since} mismatch`;
+    if (this.#refused.has(memo)) return;
+    if (this.#board.task(note.key)?.events.some(e => e.change.kind === "commented" && e.change.text === note.text)) { this.#remember(memo); return; }
+    const r = this.#board.act(note.key, { action: "comment", text: note.text }, { kind: "board", rule: "D1", lane: run.lane });
+    this.#remember(memo);
+    if (!r.ok) this.#log.warn(`board: noting ${run.lane}'s keyed status line on ${note.key} failed (${r.problem}); it is not noted`);
   }
 }

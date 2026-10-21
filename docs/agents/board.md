@@ -41,7 +41,8 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
   the new lane's before it starts. When a lane that runs needs a task, assign it: `morndo-board assign T-12 <lane>`.
 - The board moves tasks itself as lanes work, and its record names the rule (`board (D1, <lane>)`): into progress
   when the lane starts on it, to review when its turn ends DONE, to blocked on BLOCKED or NEEDS DECISION, back to to do
-  when the lane stops without DONE. It never marks a task done and never assigns one.
+  when the lane stops without DONE. It never marks a task done and never assigns one. A task in review or blocked stays
+  there until you or its lane moves it (`resume`), or its lane's status line names it (`STATUS: WAITING T-12`).
 - A lane has one task in progress at a time. If a lane must switch, move its current task first (`todo` or `block`).
 - A task in review is the lane's word, not proof. Check it (run the check, read the diff, ask another lane), then
   `morndo-board done T-12 --why "<what you checked>"`, or send it back with
@@ -63,8 +64,10 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 Your work is on the team's board. Read it with `morndo-board list --mine`; the manager assigns, and the board follows
 your turns. The principal reads the board instead of asking you.
 
-- End every turn with a status line, the first line of your answer: `STATUS: DONE`, `STATUS: BLOCKED <what you need,
-  from whom>`, `STATUS: NEEDS DECISION <which>` or `STATUS: WAITING <on what> for <N> min`. The board reads it.
+- End every turn with a status line, the first line of your answer, naming the task key right after the word:
+  `STATUS: DONE T-12`, `STATUS: BLOCKED T-12 <what you need, from whom>`, `STATUS: NEEDS DECISION T-12 <which>` or
+  `STATUS: WAITING T-12 <on what> for <N> min`. The board reads it and moves only the task you name; a line without a
+  key falls back to your task in progress. A question or a thank-you does not take a task out of review or blocked.
 - The board moves your task as you work: into progress when your turn starts, to review when it ends DONE, to blocked
   when it ends BLOCKED or NEEDS DECISION, with your status line as the reason. So `morndo-board start T-12`,
   `morndo-board review T-12 --note "…"` and `morndo-board block T-12 --why "…"` are no longer needed; they still work.
@@ -90,9 +93,11 @@ your turns. The principal reads the board instead of asking you.
   reason, so the worker's block asks for the need in that line.
 - **The board moves, not the lane.** Agents forgot to move their tasks: half the turns in a week ran in lanes with no
   task, and tasks outlived their lanes (ADR-0032). The hub now moves a task by itself, as actor `board`, along four
-  edges that follow the assignee's run (B10, D1 to D4): into progress when it works, to review on DONE, to blocked on
-  BLOCKED or NEEDS DECISION, to to do when the lane is gone. It never moves to done, never assigns, and never undoes a
-  move made after the run began (D6). `morndo lanes start <name> --task T-12` assigns at the lane's birth, as the
-  console, so its first turn takes the task up. A lane's own moves still work, and say more than the board can.
+  edges that follow the assignee's run (B10, D1 to D4): into progress (from to do) when it works, to review on DONE, to
+  blocked on BLOCKED or NEEDS DECISION, to to do when the lane is gone. A lane's status line may name the task key
+  right after the word (`STATUS: DONE T-12`), and a keyed line moves only that task. It never moves to done, never
+  assigns, and never undoes a move made after the run began (D6). `morndo lanes start <name> --task T-12` assigns at
+  the lane's birth, as the console, so its first turn takes the task up. A lane's own moves still work, and say more
+  than the board can.
 - **Comments as a log, one fact per line.** The record is read by the principal on the desktop and by the next
   lane that picks the task up; prose written for a chat doesn't survive that.

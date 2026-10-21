@@ -54,6 +54,20 @@ Agent boards that stay true keep the task apart from the run, and derive the run
 - **Weaker for other engines:** a Codex lane has no `background_tasks`, so its runs rest on the session state, its status line and its jobs. Long waits should go through `morndo job` on every engine.
 - **Not yet:** attaching review lanes to their parent task, filing tasks for lanes without one, and evidence on reviews (#58).
 
+## Amendment, 2026-10-21 (B12): the board moves the task a turn is about
+
+The moves followed the run, and the run follows the lane — but a lane's turn is about one task, and on 2026-10-21 the
+board misfired four times, among them: a DONE for one task moved another, a read-only question pulled a blocked task
+back into progress, and a task in review flipped three times in two minutes as short messages came. So the lane's own
+word now says which task the turn is about:
+
+- A status line may name its task key right after the word: `STATUS: DONE T-285`, `STATUS: WAITING T-12 on CI`. D1 and
+  D2 with a key move only that task, and only if it is the lane's. A key naming a task that is not the lane's open task
+  moves nothing; the board leaves one line about it in the history of the lane's own task in progress.
+- Without a key, the rules are unchanged: the line falls back to the lane's task in progress.
+- D4 moves only to do → in progress. A task in review or blocked leaves its column only by an explicit move (the
+  manager's, or the lane's `resume`) or by a keyed WAITING that names it (D1).
+
 ## Sources (read 2026-10-20)
 
 - https://code.claude.com/docs/en/hooks: the Stop input fields `background_tasks` and `session_crons`; `UserPromptSubmit` on a fired schedule and on a background subagent reporting back.

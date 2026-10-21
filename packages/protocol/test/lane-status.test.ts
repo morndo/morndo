@@ -18,6 +18,22 @@ describe("the status line", () => {
     expect(statusLineOf(`STATUS: WAITING on ${"x".repeat(300)}`)?.waitingOn).toHaveLength(120);
   });
 
+  it("reads the task key right after the word, in all four forms (B12)", () => {
+    expect(statusLineOf("STATUS: DONE T-285 npm test: 14 passed")).toEqual({ status: "done", taskKey: "T-285" });
+    expect(statusLineOf("STATUS: WAITING T-12 on CI for 20 min")).toEqual({ status: "waiting", taskKey: "T-12", waitingOn: "CI", forMs: 20 * 60_000 });
+    expect(statusLineOf("STATUS: BLOCKED T-7 needs the API key")).toEqual({ status: "blocked", taskKey: "T-7" });
+    expect(statusLineOf("STATUS: NEEDS DECISION T-9 which plan")).toEqual({ status: "needs_decision", taskKey: "T-9" });
+    expect(statusLineOf("**STATUS: DONE T-285**")).toEqual({ status: "done", taskKey: "T-285" });
+    expect(statusLineOf("status: done t-285")).toEqual({ status: "done", taskKey: "T-285" });
+  });
+
+  it("names no key unless it is right after the word (B12, negative controls)", () => {
+    expect(statusLineOf("STATUS: DONE: all of T-285")).toEqual({ status: "done" });
+    expect(statusLineOf("STATUS: DONE T-285x")).toEqual({ status: "done" });
+    expect(statusLineOf("STATUS: DONE T-0")).toEqual({ status: "done" });
+    expect(statusLineOf("STATUS: DONE T-1234567890")).toEqual({ status: "done" });
+  });
+
   it("states no status unless the line says one (negative controls)", () => {
     expect(statusLineOf("All done, the tests pass.")).toBeNull();
     expect(statusLineOf("The status is DONE")).toBeNull();
