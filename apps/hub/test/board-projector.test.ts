@@ -18,13 +18,16 @@ const MANAGER = { kind: "manager", name: "manager", token: "tok-m" } as const;
 const BUILDER = { kind: "worker", name: "builder", token: "tok-w" } as const;
 
 // The fleet as the projector sees it: a list to read (or a failure), and the events it is told.
-type FakeRuns = RunsSource & { list: RunView[] | Error; reads: number; tell(r: RunView): void; reopen(): void };
+type FakeRuns = RunsSource & { list: RunView[] | Error; reads: number; tell(r: RunView): void; reopen(): void; hold(): () => void };
 function fakeRuns(): FakeRuns {
   let on: ((r: RunView) => void) | null = null;
   let opened: (() => void) | null = null;
+  let gate: Promise<void> | null = null;
   const s: FakeRuns = {
     list: [], reads: 0,
-    async runs() { s.reads++; if (s.list instanceof Error) throw s.list; return s.list; },
+    // A held read answers with the list as it stood when the read began, once released: what a slow fleet does.
+    async runs() { s.reads++; if (s.list instanceof Error) throw s.list; const asked = s.list; if (gate) await gate; return asked; },
+    hold() { let go!: () => void; gate = new Promise<void>(r => { go = r; }); return () => { gate = null; go(); }; },
     subscribe(o, onOpen) { on = o; opened = onOpen; return () => { on = null; opened = null; }; },
     tell: r => on?.(r),
     reopen: () => opened?.(),
@@ -137,6 +140,52 @@ describe("the board follows its assignee's run (B10)", () => {
     source.tell(run("builder", "ended", T0 + 45_000, { source: "hook", outcome: "done", line: "STATUS: DONE pushed" }));
     expect(shown(t.key)?.status).toBe("review");
     expect(boardMoves().map(e => e.actor.rule)).toEqual(["D3", "D4", "D1"]);
+  });
+
+  it("a run told while the list is being read is kept: its lane is not gone (no D3), and its later phases still move its task", async () => {
+    const t = task("Ship it", "builder", T0, "doing");
+    source.list = [];                                                  // read before builder's run existed
+    const release = source.hold();
+    const starting = projector.start();
+    now = T0 + 30_000;
+    source.tell(run("builder", "working", T0 + 20_000, { source: "session" }));   // told while the read is in flight
+    release();
+    await starting;
+    expect(shown(t.key)?.status).toBe("doing");
+    expect(boardMoves()).toEqual([]);                                  // no D3: builder is registered, as the event said
+    now = T0 + 50_000;
+    source.tell(run("builder", "ended", T0 + 45_000, { source: "hook", outcome: "done", line: "STATUS: DONE pushed" }));
+    expect(shown(t.key)?.status).toBe("review");
+    expect(boardMoves().map(e => e.actor.rule)).toEqual(["D1"]);
+  });
+
+  it("the same for a later read (a reconnect): a lane learned from an event during the read is not dropped by the older list", async () => {
+    const t = task("Fix it", "tester", T0, "doing");
+    source.list = [run("builder", "working", T0), run("tester", "working", T0)];
+    await projector.start();
+    expect(boardMoves()).toEqual([]);
+    source.list = [run("builder", "working", T0)];                    // the list as the fleet answers it: tester's run not in it yet
+    const release = source.hold();
+    source.reopen();                                                   // the read starts and waits
+    now = T0 + 40_000;
+    source.tell(run("tester", "working", T0 + 30_000, { source: "session" }));
+    release();
+    await new Promise(r => setTimeout(r, 0));
+    expect(shown(t.key)?.status).toBe("doing");
+    expect(boardMoves()).toEqual([]);
+  });
+
+  it("an event told during a read that is older than the list's run for the lane does not replace it", async () => {
+    const t = task("Ship it", "builder", T0, "doing");
+    source.list = [run("builder", "ended", T0 + 20_000, { source: "hook", outcome: "done", line: "STATUS: DONE ok" })];
+    const release = source.hold();
+    const starting = projector.start();
+    now = T0 + 30_000;
+    source.tell(run("builder", "working", T0 + 10_000, { source: "session" }));    // older than the list's run: the list's wins
+    release();
+    await starting;
+    expect(shown(t.key)?.status).toBe("review");
+    expect(boardMoves().map(e => e.actor.rule)).toEqual(["D1"]);
   });
 
   it("D3: a lane gone while its task is in progress puts the task back to to do, with GONE_REASON", async () => {

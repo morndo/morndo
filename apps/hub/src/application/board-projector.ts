@@ -47,6 +47,7 @@ export class BoardProjector {
   #refreshing: Promise<void> | null = null;
   #again = false;
   #triedAt = -Infinity;                                  // performance.now() of the last list asked for
+  #told: Map<string, RunView> | null = null;            // the runs told while a list read is in flight, merged into it when it lands
   #unsubscribe: (() => void) | null = null;
 
   constructor(p: { source: RunsSource; board: ProjectorBoard; log?: Pick<Logger, "info" | "warn" | "error"> }) {
@@ -86,9 +87,11 @@ export class BoardProjector {
 
   async #read() {
     this.#triedAt = performance.now();
+    this.#told = new Map();                                  // the runs told from here until the read lands
     let list: RunView[];
     try { list = await this.#source.runs(); }
     catch (e) {
+      this.#told = null;
       this.#live = false;
       if (!this.#said) {
         this.#said = true;
@@ -98,13 +101,23 @@ export class BoardProjector {
     }
     if (this.#said) { this.#said = false; this.#log.info("board: the fleet's runs are read again; the board follows them"); }
     this.#live = true;
-    this.#runs = new Map(list.map(r => [r.lane, r]));
+    // The list is the fleet's answer as of when the read began, so a run told since is as new or newer: a lane an event
+    // named while the read was in flight stays registered (else D3 would move its task back, and D6 would keep the same
+    // phase from taking it again), and for a lane both name, the one whose phase began later stands.
+    const runs = new Map(list.map(r => [r.lane, r]));
+    for (const [lane, told] of this.#told ?? []) {
+      const listed = runs.get(lane);
+      if (!listed || told.since >= listed.since) runs.set(lane, told);
+    }
+    this.#told = null;
+    this.#runs = runs;
     this.#tellRuns();
     for (const r of this.#runs.values()) this.#follow(r);
     this.#followUnregistered();
   }
 
   #take(run: RunView) {
+    this.#told?.set(run.lane, run);
     this.#runs.set(run.lane, run);
     this.#tellRuns();
     if (this.#live) this.#follow(run);
