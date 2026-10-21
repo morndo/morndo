@@ -41,8 +41,10 @@ export type KeyConnection = Common & {
 export type LayerConnection = Common & { custody: "engine-layer"; kind: Kind };
 export type Connection = SubscriptionConnection | KeyConnection | LayerConnection;
 
-// Who a served key went to: the helper's pid, its parent's, its lane, and the isolation it vouched for (T-340).
-export type KeyCaller = { pid: number; ppid: number | null; lane: string | null; isolation: Isolation };
+// Who a served key went to (T-340): the helper's pid and its parent's, and the isolation it was served under, with how that
+// is known: `verified` (the parent was read, check 2) or `claimed` (the caller said so; the gate only guards a mistake).
+// `lane` and `workspace` are always the caller's claims.
+export type KeyCaller = { pid: number; ppid: number | null; lane: string | null; workspace: string; isolation: Isolation; proof: "verified" | "claimed" };
 
 export type ConnEvent =
   | { type: "ConnectionAdded"; name: string; at: number; command: string }

@@ -490,7 +490,7 @@ describe("isolation ranks", () => {
 });
 
 describe("a key served to a helper", () => {
-  const caller = { pid: 42, ppid: 7, lane: "lane-b", isolation: "os" as const };
+  const caller = { pid: 42, ppid: 7, lane: "lane-b", workspace: "/w", isolation: "os" as const, proof: "verified" as const };
   it("serveKey: records one KeyServed event with the caller and no value, and changes no connection", () => {
     let dir = ack(key(emptyDirectory()));
     dir = value(lease(dir, "credit1", ask()));

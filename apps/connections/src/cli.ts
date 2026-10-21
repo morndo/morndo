@@ -2,9 +2,9 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
+import { effectiveIsolation, engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
-import { findPreset as presetOf, firstPartyHost } from "./application/catalog.ts";
+import { findPreset as presetOf, firstPartyHost, floorOf } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
@@ -24,11 +24,13 @@ import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
 import { FileRefused } from "./adapters/file-mode.ts";
+import { verifyClaudeParent } from "./adapters/caller-proof.ts";
 import { DatabaseFromFuture } from "./adapters/store-migrations.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
 const GATE = new Set(["off", "terms", "expired", "repo", "isolation", "dialect", "leases", "budget"]);
 const LEASES = 8;
+const USAGE_WORDS = new Set(["missing argument", "isolation"]);
 
 // `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
 export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal };
@@ -54,12 +56,16 @@ morndo-keys pool exec --runtime codex [--lane L] [--account A] -- exec … <prom
 morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [--isolation none|rules|os]
   lease prints a key connection's key on stdout and nothing else, so it can be an apiKeyHelper: Claude Code runs the
   command through the shell and reads its stdout as the credential (a non-zero exit is failure, the output is cached for
-  the TTL). One call is one lease — the gate runs, a KeyServed audit line is written, the lease closes. A refusal names
-  its reason on stderr and exits 1, or 75 when the gate refuses (off, terms, expired, repo, isolation, dialect, leases,
-  budget). Morndo cannot see the caller's sandbox: the isolation the gate checks is the one --isolation vouches for (default
-  none), so a connection whose floor is os is refused unless the caller says os, which it may only say when it runs the
-  agent with the sandbox enforced. run keeps its own helper,
-  \`helper --lease <id>\`.
+  the TTL). One call is one lease — the gate runs, a KeyServed audit line is written, the lease closes; a call killed
+  before that is swept at the next lease, run or check. A refusal names its reason on stderr and exits 1, or 75 when the
+  gate refuses (off, terms, expired, repo, isolation, dialect, leases, budget).
+  The helper line is: ulimit -c 0; exec morndo-keys lease --connection <name> --lane <lane> --workspace <dir> --isolation os
+  The ulimit keeps a crash from dumping the key (Node can neither wipe a string nor set its own core limit); the exec makes
+  Claude Code the lease's parent, which is what it checks. For a connection whose floor is os (Z.ai today) the parent must
+  be the claude binary (MORNDO_CLAUDE_BIN, else claude on PATH) started with --settings (a file or JSON) whose sandbox is
+  enabled, failIfUnavailable true and allowUnsandboxedCommands false, with this node's vault, connections.db and identity
+  in sandbox.filesystem.denyRead and in permissions.deny as Read rules; anything else is refused with isolation. --lane and
+  --workspace are the caller's claims. run keeps its own helper, \`helper --lease <id>\`.
 `;
 
 export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
@@ -72,7 +78,8 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
     // A store from a newer helper is a configuration the caller must fix, not a crash to retry into: EX_CONFIG (78),
     // the exit the hub's main gives the same refusal. A file this helper refuses to touch keeps 70.
     if (parsed.cmd === "helper") return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
-    io.stderr(error instanceof Error ? error.message : "failed");
+    // A lease prints a reason word only: an error's message can carry a path (T-340).
+    io.stderr(parsed.cmd === "lease" ? `${error instanceof Error && USAGE_WORDS.has(error.message) ? error.message : "failed"}\n` : error instanceof Error ? error.message : "failed");
     return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
   }
 }
@@ -80,6 +87,8 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
 async function command(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
   const home = openHome(env);
   try {
+    // A call killed with SIGKILL never closes its lease: the next lease, run or check ends the ones whose holder is gone.
+    if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") home.leases.sweep();
     const code = await dispatch(home, parsed, io);
     return code;
   } finally { home.close(); }
@@ -294,29 +303,42 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
 }
 
 // `morndo-keys lease --connection <name>`: one call is one lease, as an apiKeyHelper takes it — the gate runs, the key
-// is printed once and nothing else, a KeyServed audit line is written, the lease closes. Morndo did not start this agent
-// and cannot see its sandbox, so the isolation the gate sees is the one the caller vouches for (--isolation, default none)
-// and the audit line records it: a connection whose floor is os (ADR-0018 Q3) is refused unless the caller says os.
+// is printed once and nothing else, a KeyServed audit line is written, the lease closes.
+// Isolation: for a connection that has to run under os (its floor, ADR-0018 Q3), the caller's parent is read and must be a
+// Claude Code process started with a sandbox that is on, fail-closed and denies the vault and the key files
+// (adapters/caller-proof.ts); a bare --isolation never lifts it, and without the proof the gate refuses (`isolation`). For
+// a lower need, --isolation (default none) is the caller's claim and the audit line says `claimed`. --lane and --workspace
+// are claims too: the repo gate guards a mistake, not a lie. The key is in this process's memory for as long as it takes to
+// print it; Node can neither wipe a string nor set its own core limit, so the helper line sets `ulimit -c 0` and `exec`s.
 async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const name = need(parsed.get("connection"));
   const connection = findConnection(home.store.load().directory, name);
   if (!connection) return fail(io, "missing");
   if (connection.status === "revoked") return fail(io, "revoked");
   if (connection.custody !== "morndo" || connection.kind !== "api-key" || connection.runtime !== "claude" || loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return fail(io, "not_leasable");
+  const preset = presetOf(home.catalog, connection.vendor);
+  if (!preset) return fail(io, "missing");
   const holder = selfHolder(parsed.get("lane") ?? null);
   if (!holder) return fail(io, "holder");
   const vouched = isolationOf(parsed.get("isolation") ?? "none");
-  home.runtime.current = { isolation: () => vouched, dialects: () => ["anthropic"], loginStatus: () => Promise.resolve("unknown" as const), launch: () => Promise.resolve({ id: "" }) };
+  let seen = vouched;
+  let proof: "verified" | "claimed" = "claimed";
+  if (effectiveIsolation(connection, floorOf(preset)) === "os") {
+    const checked = verifyClaudeParent(process.ppid, home.env.MORNDO_CLAUDE_BIN ?? "claude", home.env.PATH, [home.vaultDir, home.db, home.identity]);
+    seen = checked.ok ? "os" : "none";
+    proof = checked.ok ? "verified" : "claimed";
+  }
+  home.runtime.current = { isolation: () => seen, dialects: () => ["anthropic"], loginStatus: () => Promise.resolve("unknown" as const), launch: () => Promise.resolve({ id: "" }) };
+  const workspace = parsed.get("workspace") ?? home.env.PWD ?? process.cwd();
   const granted = home.leases.lease(name, {
-    role: parsed.get("role") ?? "lease", entry: "lease", holder,
-    workspacePath: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
+    role: parsed.get("role") ?? "lease", entry: "lease", holder, workspacePath: workspace,
     limit: LEASES, reserve: 0, margin: 0, probe: true,
   });
   if (!granted.ok) return fail(io, granted.error.problem, granted.error.exit);
   let outcome = "failed";
   try {
     const secret = await home.open(connection.ref);
-    const served = home.leases.serve(name, granted.value.id, { pid: process.pid, ppid: process.ppid, lane: holder.lane, isolation: vouched });
+    const served = home.leases.serve(name, granted.value.id, { pid: process.pid, ppid: process.ppid, lane: holder.lane, workspace, isolation: seen, proof });
     if (!served.ok) return fail(io, served.error.problem);
     io.stdout(`${secret}\n`);
     outcome = "done";

@@ -3201,10 +3201,21 @@ export const CONTROLS: Control[] = [
   if (!row) return refuse("closed");
   return ok(replace(dir, c, { type: "KeyServed", name, lease: id, at: now, caller }));`,
     run: ["packages/domain/test/connections.test.ts"], expect: "serveKey: refuses" },
-  { id: "t340-lease-isolation-vouched", task: "T-340", file: "apps/connections/src/cli.ts",
-    find: `isolation: () => vouched, dialects: () => ["anthropic"]`,
-    replace: `isolation: () => "os" as const, dialects: () => ["anthropic"]`,
-    run: ["apps/connections/test/lease-key.test.ts"], expect: "refusals print nothing on stdout" },
+  { id: "t340-lease-parent-proof", task: "T-340", file: "apps/connections/src/cli.ts",
+    find: `seen = checked.ok ? "os" : "none";`, replace: `seen = "os";`,
+    run: ["apps/connections/test/lease-key.test.ts"], expect: "check 2: a connection that has to run under os" },
+  { id: "t340-lease-sweep", task: "T-340", file: "apps/connections/src/cli.ts",
+    find: `if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") home.leases.sweep();`, replace: "",
+    run: ["apps/connections/test/lease-key.test.ts"], expect: "a lease killed before it closes is swept" },
+  { id: "t340-lease-error-word", task: "T-340", file: "apps/connections/src/cli.ts",
+    find: `io.stderr(parsed.cmd === "lease" ? `, replace: `io.stderr(false ? `,
+    run: ["apps/connections/test/lease-key.test.ts"], expect: "prints only the reason word, never a path" },
+  { id: "t340-proof-parent-exe", task: "T-340", file: "apps/connections/src/adapters/caller-proof.ts",
+    find: `  if (read.exe(ppid) !== wanted) return no("parent is not claude");\n`, replace: "",
+    run: ["apps/connections/test/caller-proof.test.ts"], expect: "refuses a parent that is not the claude binary" },
+  { id: "t340-proof-read-deny", task: "T-340", file: "apps/connections/src/adapters/caller-proof.ts",
+    find: "    if (!rules.some(entry => covers(entry, path))) return no(`Read is not denied for ${path}`);\n", replace: "",
+    run: ["apps/connections/test/caller-proof.test.ts"], expect: "refuses settings that leave the vault" },
 ];
 
 // ---- the runner
