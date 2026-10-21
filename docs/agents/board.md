@@ -71,6 +71,9 @@ your turns. The principal reads the board instead of asking you.
 - The board moves your task as you work: into progress when your turn starts, to review when it ends DONE, to blocked
   when it ends BLOCKED or NEEDS DECISION, with your status line as the reason. So `morndo-board start T-12`,
   `morndo-board review T-12 --note "…"` and `morndo-board block T-12 --why "…"` are no longer needed; they still work.
+- A checkpoint, a stage reached with the task not finished, is not DONE: end the turn with
+  `STATUS: NEEDS DECISION checkpoint: <what>`, which the board moves to blocked with that line as the reason; the
+  manager decides whether you go on.
 - Work on one task at a time; the board refuses a second in progress. When a block clears: `morndo-board resume T-12`.
 - Work only on tasks assigned to you. If you find work that isn't on the board, file it as a proposal:
   `morndo-board new "<what>" --desc "<why>"`. It lands in the backlog for the manager; don't start it yourself.

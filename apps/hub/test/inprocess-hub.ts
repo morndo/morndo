@@ -2,6 +2,7 @@
 // and a synthetic terminal for pane %1. For tests that need the HTTP and WebSocket edges but no crash isolation
 // (crash tests use http-crash-fixture.ts). Synthetic data only.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import type { Task } from "@morndo/domain";
 import type { RunView, Transcriber, TranscriberProbe } from "@morndo/protocol";
 import type { Liveness } from "@morndo/domain";
 import { tmpdir } from "node:os";
@@ -63,6 +64,8 @@ export type InProcessHub = {
 // over this hub's empty tmux.
 // `watch`, `ledger`, `send`: what the escalation service sees and how it types an answer (a test's own; default none).
 // `runs`: each lane's Run the board frame carries (ADR-0032; default none), as the projector would hold them.
+// `orphans`: the to do tasks the board frame flags as waiting for a lane the fleet no longer lists (B2; default none),
+// as the projector would flag them.
 export async function startInProcessHub(o: {
   limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService;
   engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
@@ -73,6 +76,7 @@ export async function startInProcessHub(o: {
   send?: (pane: string, text: string, key: string) => Promise<SendOutcome>;
   runs?: () => RunView[];
   liveness?: (sha: string) => Liveness;
+  orphans?: (tasks: readonly Task[], now: number) => string[];
 } = {}): Promise<InProcessHub> {
   const dir = mkdtempSync(join(tmpdir(), "morndo-inproc-"));
   const web = join(dir, "web");
@@ -124,7 +128,7 @@ export async function startInProcessHub(o: {
   const vapid = loadOrCreateVapid(dir, "mailto:test@example.test");
   // ADR-0015: the board, with the lanes a test's observation lists (none by default). `liveness`: a merge's liveness as
   // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
-  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.liveness ? { liveness: o.liveness } : {}) });
+  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}) });
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}) });
   const queue = o.queue ? o.queue(store) : null;

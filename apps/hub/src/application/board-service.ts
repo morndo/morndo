@@ -5,8 +5,8 @@
 // or a Decision.
 // ADR-0032: the board's own moves (B10, D1 to D4) come through `follow`, as actor { kind: "board", rule, lane }, and the
 // console's (`morndo lanes start --task`) as { kind: "console" }: the same transaction, record and push as any change.
-// The view carries each lane's Run as the Fleet derived it (the projector's, board-projector.ts), and a change of runs
-// is pushed too, at most about once a second.
+// The view carries each lane's Run as the Fleet derived it and the to do tasks whose lane the fleet no longer lists
+// (orphans; the projector's, board-projector.ts), and a change of runs is pushed too, at most about once a second.
 // B11: each task's merges are kept with their liveness (merge-liveness.ts over the fleet's node builds), Done is judged
 // against them, and the view says for each task with merges where they stand ("merged, not live: pc on abc1234").
 import { DONE_SHOWN_MS, applyAction, boardChanged, boardOrder, createTask, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
@@ -14,9 +14,10 @@ import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
 
-// `runs` (ADR-0032 §6, BoardFrameSchema.runs): each lane's latest Run; empty without a fleet. `merged` (B11): one view
-// per shown task that has merges.
-export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; merged: MergedView[] };
+// `runs` (ADR-0032 §6, BoardFrameSchema.runs): each lane's latest Run; empty without a fleet. `orphans`: the to do tasks
+// whose lane the fleet no longer lists (BoardProjector.orphans); empty without a fleet. `merged` (B11): one view per
+// shown task that has merges.
+export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[] };
 // A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
 export const RUNS_EVERY_MS = 1000;
 export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus; detail?: string };
@@ -32,17 +33,19 @@ export class BoardService {
   #lanes: () => string[];
   #runs: () => RunView[];
   #liveness: (sha: string) => Liveness;
+  #orphans: (tasks: readonly Task[], now: number) => string[];
   #runsEveryMs: number;
   #runsTimer: NodeJS.Timeout | null = null;
   #toldAt = -Infinity;                                   // performance.now() of the last push, for the runs' throttle
   #listeners = new Set<(b: BoardView) => void>();
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
-  // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `runsEveryMs`: the runs' throttle.
+  // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
+  // fleet no longer lists (BoardProjector.orphans; none without a fleet). `runsEveryMs`: the runs' throttle.
   // `liveness` (B11): a merge's liveness over the nodes' builds; without one nothing is ever live, so Done waits.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness }) {
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
-    this.#runs = p.runs ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
+    this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
     this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
   }
 
@@ -70,7 +73,7 @@ export class BoardService {
   view(): BoardView {
     const now = this.#now();
     const tasks = boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now);
-    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), merged: this.#merged(tasks) };
+    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks) };
   }
   task(key: string): { task: Task; events: TaskEvent[]; merged: MergedView | null } | null {
     const task = this.#store.task(key);
@@ -80,6 +83,7 @@ export class BoardService {
   }
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }
   openTasksOf(lane: string): Task[] { return this.#store.openTasksOf(lane); }
+  tasksInProgress(): Task[] { return this.#store.tasksInProgress(); }
 
   // The principal's own changes are Commands (AC7): past the step-up window they are refused until he verifies again.
   principal(a: Authenticated): BoardActor | { problem: "step_up" } {

@@ -280,7 +280,7 @@ switch (cmd) {
       onChange: () => held.board?.runsChanged(),
     });
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], liveness: sha => liveness.of(sha) });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha) });
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });

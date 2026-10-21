@@ -10,6 +10,10 @@ describe("the status line", () => {
     expect(statusLineOf("STATUS: WAITING")).toEqual({ status: "waiting" });
   });
 
+  it("reads a checkpoint line as NEEDS DECISION, which the board maps to blocked (B11)", () => {
+    expect(statusLineOf("STATUS: NEEDS DECISION checkpoint: the schema is in, the migration is not")).toEqual({ status: "needs_decision" });
+  });
+
   it("reads what a wait is on and for how long, a day at most", () => {
     expect(statusLineOf("STATUS: WAITING on CI for 20 min")).toEqual({ status: "waiting", waitingOn: "CI", forMs: 20 * 60_000 });
     expect(statusLineOf("STATUS: WAITING — the deploy to finish, for 2h.")).toEqual({ status: "waiting", waitingOn: "the deploy to finish", forMs: 2 * 3_600_000 });

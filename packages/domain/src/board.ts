@@ -412,3 +412,15 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to:
   }
   return null;
 }
+
+// B10, D3 for a lane the fleet doesn't list at all (it ended before runs were kept, or its Run dropped): there is no Run to
+// read, so its task in progress goes back to to do, once (the move leaves "doing", so the same reading moves nothing more).
+// D5: never to Done, never an assignment.
+export function unregisteredMove(task: Task, registered: ReadonlySet<string>): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
+  if (task.status !== "doing" || task.assignee === null || registered.has(task.assignee)) return null;
+  return { to: "todo", reason: GONE_REASON, rule: "D3" };
+}
+// A task to do whose assignee is not a registered lane is an orphan: it waits for a lane that will not come. It is only
+// flagged, never moved or reassigned by the board (D5); the manager reassigns it.
+export const isOrphan = (task: Task, registered: ReadonlySet<string>): boolean =>
+  task.status === "todo" && task.assignee !== null && !registered.has(task.assignee);

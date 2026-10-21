@@ -51,10 +51,11 @@ export const MergedViewSchema = z.object({ key: taskKey(), merges: z.array(Merge
 // The whole board, as the hub holds it (boardOrder): sent after every hello and on every change, like the decisions.
 // `lanes`: the lane names the hub lists now, so the app can mark an assignee that isn't running. `runs` (ADR-0032): each
 // lane's Run as the fleet derived it (RunViewSchema, decoded one by one: one this build can't read is dropped); absent
-// from a hub that has none. `merged` (B11): each shown task's MergedView, decoded the same way; absent from a hub that
-// has none.
+// from a hub that has none. `orphans`: the keys of the to do tasks whose lane the fleet no longer lists; absent from a
+// hub that has none. `merged` (B11): each shown task's MergedView, decoded the same way; absent from a hub that has none.
 export const BoardFrameSchema = z.object({
   t: z.literal("board"), tasks: z.array(z.unknown()), lanes: z.array(text()), at: count(), runs: z.exactOptional(z.array(z.unknown())),
+  orphans: z.exactOptional(z.array(text())),
   merged: z.exactOptional(z.array(z.unknown())),
 });
 
