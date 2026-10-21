@@ -251,7 +251,7 @@ A subcommand of the `morndo` console, for any user, over the fleet socket (`MORN
 | `morndo lanes send <lane> <text \| ->` | a delivery (`--id` to choose it); waits for `delivered` up to `--wait <s>` (default 0: print the state and return); `--direct` types at once (`pane.send`), for a lane without Claude Code |
 | `morndo lanes keys <lane> <key…>` | `pane.keys` by key name |
 | `morndo lanes start <name> --cwd <dir> [--account <a>] [--resume <session>] [--prompt <text>]` | `lane.start`, with a first prompt typed once the lane can take it |
-| `morndo lanes stop <lane> [--kill]` | `lane.stop` |
+| `morndo lanes stop <lane> [--kill \| --keep-window]` | `lane.stop` |
 | `morndo lanes status <delivery id>` | a delivery's state |
 | `morndo lanes events` | lane events as they happen |
 

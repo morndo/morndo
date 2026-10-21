@@ -215,6 +215,27 @@ describe("lane.stop (spec §5)", () => {
     expect(submitted(dir)).toEqual(["/exit"]);
   });
 
+  it("stop does not fail when the window closed itself after the look (nothing is left to close)", async () => {
+    const dir = boxIn("closing");
+    const h = harness({ command: [process.execPath, FIXTURE, dir], via: "shell" }, { shellMs: 5000 });
+    const r = await start(h, { name: "closing-lane" }, "lanes:e5");
+    expect(await showsBox(r.workerId)).toBe(true);
+    // The look that finds the pane back at its shell ends with a capture-pane of it; tmux runs this hook right after that
+    // capture, so the window is gone by the time the stop closes it. (A flag file arms the hook: no earlier capture counts.)
+    const pane = paneOf(r.workerId);
+    const looked = join(dir, "looked");
+    const refresh = h.inventory.refresh.bind(h.inventory);
+    vi.spyOn(h.inventory, "refresh").mockImplementation(async () => {
+      const snap = await refresh();
+      if (snap.rows.some(row => row.pane === pane && row.currentCommand === "bash")) writeFileSync(looked, "");
+      return snap;
+    });
+    t.tmux("set-hook", "-g", "after-capture-pane", `if-shell 'test -e ${looked}' 'kill-window -t ${pane}'`);
+    expect(await h.call("lane.stop", { name: "closing-lane" }, { key: "lanes:e6", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
+    expect(windows()).not.toContain("closing-lane");
+    expect(submitted(dir)).toEqual(["/exit"]);
+  });
+
   it("--keep-window leaves it: keepWindow leaves the window at its shell after the exit", async () => {
     const dir = boxIn("kept");
     const h = harness({ command: [process.execPath, FIXTURE, dir], via: "shell" }, { shellMs: 5000 });

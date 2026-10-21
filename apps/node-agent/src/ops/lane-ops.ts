@@ -41,7 +41,7 @@ import { createHash } from "node:crypto";
 import { realpathSync, statSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { LIMITS, formatWorkerId, parseWorkerId, type OpArgs, type OpError, type OpResult } from "@morndo/protocol";
-import { deniedBy, denyConfigFromEnv, denyRoots, engineLaneBoxOnScreen, exactSession, hostTmuxServer, inputBoxOnScreen, menuOnScreen, resolvedRoots, tmuxLiteral, type PanePids, type SessionInfo, type Tmux } from "@morndo/node-ops";
+import { deniedBy, denyConfigFromEnv, denyRoots, engineLaneBoxOnScreen, exactSession, hostTmuxServer, inputBoxOnScreen, menuOnScreen, resolvedRoots, tmuxFailure, tmuxLiteral, type PanePids, type SessionInfo, type Tmux } from "@morndo/node-ops";
 import type { Policy } from "../config.ts";
 import { engineLayer, laneLaunch, type EngineLayer } from "./lane-engine.ts";
 import { effect, fail, ok, type EffectContext, type OpTable, type Outcome, type Reply, type Request } from "./executor.ts";
@@ -179,7 +179,8 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
   // The exit is confirmed, with the window gone or the pane at its shell: the shell's window is closed unless it is kept.
   async function settle(lane: Lane, seen: "gone" | boolean, keepWindow: boolean | undefined): Promise<Outcome<"lane.stop">> {
     if (seen === true && keepWindow !== true) {
-      await tmuxRun(socket, ["kill-window", "-t", lane.windowId]);
+      try { await tmuxRun(socket, ["kill-window", "-t", lane.windowId]); }
+      catch (e) { if (tmuxFailure(e) !== "absent") throw e; }   // it closed itself since the look: nothing is left to close
       await d.inventory.refresh();
     }
     return ok<"lane.stop">({ ok: true });

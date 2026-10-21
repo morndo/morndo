@@ -3106,6 +3106,9 @@ export const CONTROLS: Control[] = [
   { id: "t303-keep-window-ignored", task: "303", file: "apps/node-agent/src/ops/lane-ops.ts",
     find: "    if (seen === true && keepWindow !== true) {", replace: "    if (seen === true) {",
     run: ["apps/node-agent/test/launcher.test.ts"], expect: "--keep-window leaves it" },
+  { id: "t303-stop-window-gone-after-look", task: "303", file: "apps/node-agent/src/ops/lane-ops.ts",
+    find: "catch (e) { if (tmuxFailure(e) !== \"absent\") throw e; }", replace: "catch (e) { throw e; }",
+    run: ["apps/node-agent/test/launcher.test.ts"], expect: "closed itself after the look" },
 ];
 
 // ---- the runner
