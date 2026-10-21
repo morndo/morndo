@@ -69,8 +69,13 @@ The console's one-time code is minted in the app, for one note, under the same s
 `POST /api/memory/notes/:id/approval-code` — 200 `{ code, expiresAt }` (with `Cache-Control: no-store`); 401 without a
 session, 403 `step_up` on a stale passkey check, 404 `not_found`, 409 `not_pending`, 404 `memory_off`. The code is said
 once on the wire, never logged, and only its hash is stored; `morndo memory approve <id> --code …` spends it at the
-console. The app does not yet have a button that calls this route — the Ask answers approval in the app, and the code
-is for the console — so today the code can be minted only through the route.
+console.
+
+The Ask's card in the app has a **Console code…** button: it calls the route for that one note under step-up and shows
+the code once — the code itself, how long it stays valid, and the exact `morndo memory approve <id> --code …` line to
+copy. The code is held only in the card's own state, never in storage, the URL or a log, and it is gone when it is
+closed, when it expires, or when the note is decided; asking again mints a new code. The phone's card has no button:
+there is no console to type the command into.
 
 ## Console (on the control plane)
 

@@ -3176,6 +3176,27 @@ export const CONTROLS: Control[] = [
   { id: "b9-answer-verifies-ask", task: "309", file: "apps/hub/src/application/escalation-service.ts",
     find: 'if (!note || e.asker.name !== "memory" || this.#version(e) !== askVersion(memoryAsk(note))) return', replace: "if (!note) return",
     run: ["apps/hub/test/escalation-memory.test.ts"] },
+  // ---- B9 (board T-309): the app's side of the code, each guard removed once.
+  { id: "b9-ui-note-id", task: "309", file: "apps/web/src/lib/desktop/memory-code.ts",
+    find: String.raw`  const m = /^mem-n-([1-9]\d{0,8})$/.exec(id);`,
+    replace: String.raw`  const m = /^mem-n-(.+)$/.exec(id);`,
+    run: ["apps/web/test/memory-code.test.ts"], expect: "N-0" },
+  { id: "b9-ui-expiry-drops-code", task: "309", file: "apps/web/src/lib/desktop/memory-code.ts",
+    find: '  if (r.kind === "shown" && r.expiresAt <= now) return { kind: "failed", text: "The code expired. Ask for a new one." };',
+    replace: '  if (r.kind === "shown" && r.expiresAt <= now && false) return { kind: "failed", text: "The code expired. Ask for a new one." };',
+    run: ["apps/web/test/memory-code.test.ts"], expect: "The code expired" },
+  { id: "b9-ui-close-forgets", task: "309", file: "apps/web/src/lib/desktop/DecisionCard.svelte",
+    find: "  function closeCode() { reveal = CLOSED; }",
+    replace: "  function closeCode() { /* the code stays */ }",
+    run: ["apps/web/test/memory-code-desktop.test.ts"], expect: "data-memory-reveal" },
+  { id: "b9-ui-only-memory-asks", task: "309", file: "apps/web/src/lib/desktop/DecisionCard.svelte",
+    find: "noteIdOfAsk(item.id) !== null && open && canAnswer",
+    replace: "open && canAnswer",
+    run: ["apps/web/test/memory-code-desktop.test.ts"], expect: "data-memory-code-ask" },
+  { id: "b9-ui-step-up-retry", task: "309", file: "apps/web/src/lib/desktop/Desktop.svelte",
+    find: "await withStepUp(() => api.post<{ code: string; expiresAt: number }>(`/api/memory/notes/${encodeURIComponent(noteId)}/approval-code`), at => (verifiedAt = at));",
+    replace: "await api.post<{ code: string; expiresAt: number }>(`/api/memory/notes/${encodeURIComponent(noteId)}/approval-code`);",
+    run: ["apps/web/test/memory-code-flow.test.ts"], expect: "data-memory-code" },
 ];
 
 // ---- the runner
