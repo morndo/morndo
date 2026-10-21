@@ -55,6 +55,25 @@ export function sessionRegistry(configDir: string) {
       }
       return out;
     },
+    // B6: does a LIVE session file positively say this session is a headless run? Fail open: a session no file names, a file with
+    // no entrypoint, an interactive one, or a dead process is not headless. A session id that an interactive file ALSO names (a
+    // headless `claude -p --resume <the lane's session>`) is the lane's: only a session every live file for which is "sdk…" counts.
+    headless(sessionId: string): boolean {
+      if (!existsSync(dir)) return false;
+      let files: string[];
+      try { files = readdirSync(dir); } catch { return false; }         // not a directory, or not ours to read: no sessions
+      let sdk = false;                                                  // a live file named this session with an sdk entrypoint
+      for (const f of files) {
+        if (!f.endsWith(".json")) continue;
+        let d: Record<string, unknown>;
+        try { d = JSON.parse(readFileSync(join(dir, f), "utf8")); } catch { continue; }
+        if (d === null || typeof d !== "object") continue;
+        if (d.sessionId !== sessionId || !processAlive(Number(d.pid))) continue;
+        if (!(typeof d.entrypoint === "string" && d.entrypoint.startsWith("sdk"))) return false;   // interactive, or none: the lane's
+        sdk = true;
+      }
+      return sdk;
+    },
     transcriptPath(sessionId: string): string | null {
       const cached = transcripts.get(sessionId);
       if (cached && existsSync(cached)) return cached;

@@ -2,13 +2,13 @@
 // morndo job: start, list, show, logs and cancel on this node (ADR-0017). The node asks the hub. The command
 // stays on the local socket.
 import { homedir } from "node:os";
-import { argvWantsVersion, exitAfterOutput, productVersion, quietBrokenPipe } from "@morndo/service-kit";
+import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { callNode, runJob, type NodeRequest, type NodeResult } from "./job-cli.ts";
 import { agentPaths } from "./paths.ts";
 
 quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
-  process.stdout.write(`${productVersion()}\n`);
+  process.stdout.write(`${buildLabel()}\n`);
   process.exit(0);
 }
 

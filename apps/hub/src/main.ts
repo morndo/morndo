@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, productVersion, quietBrokenPipe } from "@morndo/service-kit";
+import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { shutdownStack, type Shutdown } from "./adapters/shutdown.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
@@ -94,7 +94,7 @@ protocol-1 plugin; otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcr
 // function is not async, and says one sentence.
 quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
-  process.stdout.write(`${productVersion()}\n`);
+  process.stdout.write(`${buildLabel()}\n`);
   await exitAfterOutput(0);
 }
 
@@ -265,7 +265,7 @@ switch (cmd) {
     // ADR-0032: with a fleet, the board also follows the lanes' Runs (the projector, on the fleet client the alerts and
     // the deliveries use): each lane's run goes out with the board, and its tasks move by D1 to D4 as actor "board".
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [] });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [] });
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); board.stop(); });
     const agents = new AgentAccess(store, config.managerWindow);
@@ -363,7 +363,7 @@ switch (cmd) {
     observation.start(config.pollMs);
     escalations.start(Math.max(config.pollMs, 1000));
     void memorySync?.tick();                             // the first round now; then the loop's, every minute
-    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
+    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${buildLabel()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
     crash.beforeExit(null);
     break;
