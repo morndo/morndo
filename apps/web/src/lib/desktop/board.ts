@@ -1,10 +1,10 @@
 // How the board is shown (ADR-0015): the columns in work order, the words for each status and refusal, and what the
 // app may do from where. The rules live in the domain and the hub; this presents their results and asks the hub.
-import { workingOn, type AuthorKind, type BoardRule, type Run, type Task, type TaskActor, type TaskEvent, type TaskPriority, type TaskStatus } from "@morndo/domain";
-import { BoardTaskSchema, RunViewSchema, parseBody } from "@morndo/protocol";
+import { workingOn, type AuthorKind, type BoardRule, type MergedView, type Run, type Task, type TaskActor, type TaskEvent, type TaskPriority, type TaskStatus } from "@morndo/domain";
+import { BoardTaskSchema, MergedViewSchema, RunViewSchema, parseBody } from "@morndo/protocol";
 import { saidOf } from "./run-words.ts";
 
-export type { Run, Task, TaskEvent, TaskPriority, TaskStatus };
+export type { MergedView, Run, Task, TaskEvent, TaskPriority, TaskStatus };
 export { workingOn };                                   // the domain's B5 lookup, one definition
 
 export const COLUMNS: { status: TaskStatus; label: string; hint: string }[] = [
@@ -56,6 +56,21 @@ export function decodeRuns(raw: readonly unknown[] | undefined): { runs: Readonl
   return { runs, dropped };
 }
 
+// Where each task's merges stand (B11, BoardFrameSchema.merged), keyed by task: each decoded on its own, one this
+// build can't read dropped, as a Run is. `null` when the frame has none (a hub from before B11), so a task shows no
+// merge line rather than a wrong one.
+export function decodeMerged(raw: readonly unknown[] | undefined): { merged: ReadonlyMap<string, MergedView> | null; dropped: number } {
+  if (raw === undefined) return { merged: null, dropped: 0 };
+  const merged = new Map<string, MergedView>();
+  let dropped = 0;
+  for (const x of raw) {
+    const m = parseBody(MergedViewSchema, x);
+    if (m) merged.set(m.key, m);
+    else dropped++;
+  }
+  return { merged, dropped };
+}
+
 export const byStatus = (tasks: readonly Task[]) => {
   const m = new Map<TaskStatus, Task[]>(COLUMNS.map(c => [c.status, []]));
   for (const t of tasks) m.get(t.status)?.push(t);
@@ -78,6 +93,13 @@ export const REFUSALS: Record<string, string> = {
   unknown: "The hub doesn't know this task any more.",
   step_up: "Verify with your passkey first.",
   board_off: "The hub has no board.",
+  // B11: the merge gate's refusals.
+  not_live: "Its merge is not live on every node yet.",
+  bad_sha: "That isn't a commit hash.",
+  bad_repo: "That isn't a repo name (owner/name).",
+  no_merge: "That merge isn't recorded on this task.",
+  too_many: "A task holds at most 5 merge records.",
+  no_commit: "The hub's checkout doesn't have that commit yet.",
 };
 
 // Who made a change, in the record's words: you, a lane or the manager by its name, the control plane's console
@@ -116,6 +138,8 @@ export function eventLine(e: TaskEvent): { who: string; text: string; comment: s
     case "assigned": return { who: w, text: c.to ? `assigned it to ${c.to}` : "unassigned it", comment: null };
     case "edited": return { who: w, text: `edited the ${Object.keys(c).filter(k => k !== "kind").join(", ")}`, comment: null };
     case "commented": return { who: w, text: "commented", comment: c.text };
+    case "merged": return { who: w, text: `recorded its merge in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };   // B11; the later round words this
+    case "unmerged": return { who: w, text: `cleared its merge record in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };
   }
 }
 export const ago = (t: number, now: number) => {

@@ -3,7 +3,7 @@
 // window name or nothing.
 import { describe, expect, it } from "vitest";
 import type { SessionInfo } from "@morndo/node-ops";
-import { cachedFor, windowResolver } from "../src/relay/window-of.ts";
+import { cachedFor, foreignStop, windowResolver } from "../src/relay/window-of.ts";
 
 const resolve = windowResolver({ windowOfPane: p => (p === "%3" ? "api lane" : null), sessions: () => new Map<string, SessionInfo>() });
 
@@ -99,6 +99,28 @@ describe("how often a hook makes the registry be read", () => {
     expect(c.fresh()).toBe(2);                                           // the plain cache would have read again at 100 ms
     clock = 200;
     expect(c()).toBe(2);
+  });
+});
+
+// B6: a headless `claude -p` started in a lane's pane inherits its TMUX_PANE but has a session_id of its own; its Stop
+// must not end the lane's turn. Foreign ONLY when the poster's own session positively says it is headless (sessions.ts);
+// everything else is the lane's — an unknown session, a lane after /clear or a resume (its session id is new), no pane,
+// no session id — so a lane's own finish is never dropped on a guess (fail open).
+describe("a Stop from another session in the lane's pane (B6)", () => {
+  it("a headless run's Stop is foreign", () => {
+    const isForeign = foreignStop({ headless: id => id === "sess-headless" });
+    expect(isForeign({ TMUX_PANE: "%3", session_id: "sess-headless" })).toBe(true);
+  });
+  it("an unknown session's Stop is a lane finish, as is any without a pane or a session id, and any non-object", () => {
+    const unknown = foreignStop({ headless: () => false });
+    expect(unknown({ TMUX_PANE: "%3", session_id: "sess-nobody" })).toBe(false);
+    const headless = foreignStop({ headless: () => true });              // even a session that says headless needs the rest
+    expect(headless({ session_id: "sess-headless" })).toBe(false);       // no pane: windowOf looks the session up instead
+    expect(headless({ TMUX_PANE: "3", session_id: "sess-headless" })).toBe(false);
+    expect(headless({ TMUX_PANE: "%3" })).toBe(false);
+    expect(headless(null)).toBe(false);
+    expect(headless("plain words")).toBe(false);
+    expect(headless([{ TMUX_PANE: "%3", session_id: "sess-headless" }])).toBe(false);
   });
 });
 
