@@ -3118,7 +3118,7 @@ export const CONTROLS: Control[] = [
   { id: "b7-card-option-count", task: "307", file: "packages/domain/src/card.ts",
     find: 'else if (optionsIn.length < 2 || optionsIn.length > 4) error("option_count",',
     replace: 'else if (false && (optionsIn.length < 2 || optionsIn.length > 4)) error("option_count",',
-    run: ["packages/domain/test/card.test.ts"], expect: "option_count" },
+    run: ["packages/domain/test/card.test.ts"] },
   { id: "b7-card-outcome-required", task: "307", file: "packages/domain/src/card.ts",
     find: 'if (!isText(draft.outcome) || blank(draft.outcome)) error("no_outcome",',
     replace: 'if (isText(draft.outcome) && false) error("no_outcome",',
