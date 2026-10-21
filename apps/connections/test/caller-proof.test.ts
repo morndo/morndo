@@ -177,6 +177,22 @@ describe("the lease's caller proof (check 2)", () => {
     expect(settingsProof(fine, WANT)).toEqual({ ok: true });
   });
 
+  it("refuses a parent whose environment can put another party on the line: a proxy, an extra CA, TLS checks off", () => {
+    const base = { ANTHROPIC_BASE_URL: BASE, PATH: "/usr/bin" };
+    const families: Record<string, Record<string, string>[]> = {
+      proxy: [{ HTTPS_PROXY: "http://127.0.0.1:3128" }, { https_proxy: "http://127.0.0.1:3128" }, { HTTP_PROXY: "http://127.0.0.1:3128" }, { Http_Proxy: "x" }, { ALL_PROXY: "socks5://127.0.0.1:1080" }, { all_proxy: "socks5://127.0.0.1:1080" }],
+      ca: [{ NODE_EXTRA_CA_CERTS: "/tmp/ca.pem" }, { SSL_CERT_FILE: "/tmp/ca.pem" }, { SSL_CERT_DIR: "/tmp/certs" }],
+      tls: [{ NODE_TLS_REJECT_UNAUTHORIZED: "0" }],
+    };
+    for (const [family, envs] of Object.entries(families)) {
+      for (const extra of envs) {
+        expect(verify({ env: { ...base, ...extra } }), `${family}: ${JSON.stringify(extra)}`).toMatchObject({ ok: false, why: expect.stringContaining(Object.keys(extra)[0] as string) });
+      }
+    }
+    expect(verify({ env: { ...base, NODE_TLS_REJECT_UNAUTHORIZED: "1" } })).toEqual({ ok: true });   // Node's own default is not a switch
+    expect(verify({ env: { ...base, NO_PROXY: "localhost", HTTPS_PROXY_NOTE: "x" } })).toEqual({ ok: true });   // not a proxy, and no lookalike counts
+  });
+
   it("takes the parent's API host from its own environment, pinned for the connection, never from the lease's", () => {
     expect(verify({ env: { ANTHROPIC_BASE_URL: `${BASE}/` } })).toEqual({ ok: true });                 // a trailing slash is the same place
     expect(verify({ env: { ANTHROPIC_BASE_URL: "HTTPS://API.EXAMPLE.TEST/anthropic" } })).toEqual({ ok: true });

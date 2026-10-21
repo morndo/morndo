@@ -77,7 +77,9 @@ morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [-
   sandbox.filesystem.denyWrite; the settings carry only the keys a lane turn may (apiKeyHelper, permissions.deny, and under
   sandbox: enabled, failIfUnavailable, allowUnsandboxedCommands, filesystem.{denyRead,allowWrite,denyWrite},
   network.allowedDomains): no hooks, env, statusLine, plugins, proxy or weakening key; and the parent's environment has
-  ANTHROPIC_BASE_URL set to the API host pinned for the connection (pin-claude records it from the preset). Anything else
+  ANTHROPIC_BASE_URL set to the API host pinned for the connection (pin-claude records it from the preset), and no proxy
+  (HTTPS_PROXY, HTTP_PROXY, ALL_PROXY, any case), NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, SSL_CERT_DIR or
+  NODE_TLS_REJECT_UNAUTHORIZED=0. Anything else
   is refused with isolation.
   --workspace are the caller's claims. run keeps its own helper, \`helper --lease <id>\`.
 `;

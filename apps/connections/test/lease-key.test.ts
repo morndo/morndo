@@ -38,9 +38,11 @@ function homeDir(): string {
 }
 
 // No key variable in this env: a lane that samples the child's environ must find the key nowhere it was put.
+// A proxy or CA the host's own environment carries would be refused by design, so none of them is inherited.
+const INTERCEPTING = /^(https?_proxy|all_proxy|node_extra_ca_certs|ssl_cert_file|ssl_cert_dir|node_tls_reject_unauthorized)$/i;
 function envOf(dir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return {
-    ...process.env, MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: catalogPath,
+    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !INTERCEPTING.test(name))), MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: catalogPath,
     PWD: join(dir, "work"), ...extra,
   };
 }
@@ -83,7 +85,7 @@ function settingsFile(dir: string, change: (body: Body) => void = () => {}): str
 // `settings`: inline JSON (what the lane passes), or `file` a path; `sources` the --setting-sources value (null: the flag
 // is left out); `touch` a file the "claude" parent changes after it started; `keepShell` leaves a shell between the lease and
 // the parent, as an agent's own shell command has; `sample` collects /proc/<pid>/{cmdline,environ} of the whole tree.
-type Via = { baseUrl?: string | null; strictMcp?: boolean; settings?: string | null; file?: string; sources?: string | null; touch?: string; keepShell?: boolean; sample?: Buffer[]; isolation?: string | null };
+type Via = { env?: Record<string, string>; baseUrl?: string | null; strictMcp?: boolean; settings?: string | null; file?: string; sources?: string | null; touch?: string; keepShell?: boolean; sample?: Buffer[]; isolation?: string | null };
 
 // Runs `lease` as an apiKeyHelper: a "claude" parent (this node binary, which `pin-claude` pinned) that runs the helper line
 // through `sh -c`. With `exec`, as the documented line has, the lease's parent is the claude process.
@@ -101,7 +103,7 @@ child.on("close", code => process.exit(code ?? 1));
   const command = via.keepShell ? `${lease}; code=$?; exit $code` : `ulimit -c 0; exec ${lease}`;
   const sources = [...(via.strictMcp === false ? [] : ["--strict-mcp-config"]), ...(via.sources === null ? [] : ["--setting-sources", via.sources ?? ""])];
   const settings = via.file !== undefined ? ["--settings", via.file] : via.settings === null ? [] : ["--settings", via.settings ?? settingsJson(dir)];
-  const env = envOf(dir, { LEASE_CMD: command, ...(via.touch ? { TOUCH: via.touch } : {}), ...(via.baseUrl === null ? {} : { ANTHROPIC_BASE_URL: via.baseUrl ?? ZAI_BASE }) });
+  const env = envOf(dir, { ...via.env, LEASE_CMD: command, ...(via.touch ? { TOUCH: via.touch } : {}), ...(via.baseUrl === null ? {} : { ANTHROPIC_BASE_URL: via.baseUrl ?? ZAI_BASE }) });
   if (via.baseUrl === null) delete env.ANTHROPIC_BASE_URL;
   return new Promise(resolve => {
     const child = spawn(process.execPath, [script, ...sources, ...settings], { env });
@@ -257,6 +259,9 @@ describe("keys lease", () => {
       { what: "the sandbox lets a command use unix sockets", run: () => lease(dir, [], { settings: changed(s => { s.sandbox.network = { allowUnixSockets: ["/run/x.sock"] }; }) }) },
       { what: "claude started against another API host", run: () => lease(dir, [], { baseUrl: "https://elsewhere.example.test/api/anthropic" }) },
       { what: "claude started without an API host: its own default", run: () => lease(dir, [], { baseUrl: null }) },
+      { what: "a proxy in claude's environment", run: () => lease(dir, [], { env: { HTTPS_PROXY: "http://127.0.0.1:3128" } }) },
+      { what: "an extra CA in claude's environment", run: () => lease(dir, [], { env: { NODE_EXTRA_CA_CERTS: join(dir, "ca.pem") } }) },
+      { what: "TLS verification off in claude's environment", run: () => lease(dir, [], { env: { NODE_TLS_REJECT_UNAUTHORIZED: "0" } }) },
       { what: "settings that carry enabledPlugins", run: () => lease(dir, [], { settings: changed(s => { s.enabledPlugins = { "x@y": true }; }) }) },
       { what: "settings that add directories", run: () => lease(dir, [], { settings: changed(s => { s.permissions.additionalDirectories = ["/tmp"]; }) }) },
       { what: "settings that allow a tool", run: () => lease(dir, [], { settings: changed(s => { s.permissions.allow = ["Bash(*)"]; }) }) },

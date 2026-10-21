@@ -4,7 +4,8 @@
 // settings the parent was started with, never from the caller's environment:
 //  - /proc/<ppid>/exe is the claude binary the owner pinned (`morndo-keys pin-claude`, a file in the connections home) and its
 //    content is what was pinned: size, mtime and inode as pinned, else the sha256 of the running binary;
-//  - its environment (/proc/<ppid>/environ) names, as ANTHROPIC_BASE_URL, the API host the owner pinned for this connection;
+//  - its environment (/proc/<ppid>/environ) names, as ANTHROPIC_BASE_URL, the API host the owner pinned for this connection,
+//    and carries no proxy, extra CA or TLS-verification switch that could put another party between claude and that host;
 //  - its command line has --strict-mcp-config and no --mcp-config (no MCP server, which would run outside the sandbox), exactly
 //    one --settings, and --setting-sources with an empty value (so no user, project or local
 //    settings file merges its arrays into the sandbox: https://code.claude.com/docs/en/cli-reference, read 2026-10-21);
@@ -238,6 +239,10 @@ export type Check = {
 
 const DELETED = " (deleted)";
 
+// Environment variables that route claude's traffic through another party, or change whom it trusts: any proxy (in any case),
+// an extra or replaced CA, and NODE_TLS_REJECT_UNAUTHORIZED=0 (tested apart: any other value is Node's default).
+const INTERCEPTING_ENV = /^(https?_proxy|all_proxy|node_extra_ca_certs|ssl_cert_file|ssl_cert_dir)$/i;
+
 // Two base URLs name the same place: scheme, host, port and path, the host in lower case, without a trailing slash.
 function sameBase(given: string | undefined, pinned: string): boolean | null {
   const norm = (url: string): string | null => {
@@ -273,6 +278,8 @@ export function verifyClaudeParent(check: Check): Proof {
   const env = read.environ(parent);
   const pinned = check.pin.baseUrls[check.connection];
   if (env === null || pinned === undefined || sameBase(env.ANTHROPIC_BASE_URL, pinned) !== true) return no("the parent is not pointed at the pinned API host");
+  const intercepts = Object.entries(env).find(([name, value]) => INTERCEPTING_ENV.test(name) || (name === "NODE_TLS_REJECT_UNAUTHORIZED" && value === "0"));
+  if (intercepts !== undefined) return no(`the parent's environment can put another party on the line: ${intercepts[0]}`);
   const flag = (name: string): string[] => args.flatMap((arg, i) => (arg === name ? [args[i + 1] ?? ""] : arg.startsWith(`${name}=`) ? [arg.slice(name.length + 1)] : []));
   const sources = flag("--setting-sources");
   if (sources.length !== 1 || sources[0] !== "") return no("setting sources are not limited to none");
