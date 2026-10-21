@@ -219,10 +219,24 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     const db = new Database(join(tempDir(), "morndo.db"));
     migrate(db, MIGRATIONS.slice(0, 21));
     expect(columns(db, "sends")).not.toContain("label");
-    expect(migrate(db)).toEqual({ from: 21, to: 22 });
+    expect(migrate(db, MIGRATIONS.slice(0, 22))).toEqual({ from: 21, to: 22 });
     expect(columns(db, "sends")).toContain("label");
     expect(version(db)).toBe(22);
     expect(() => MIGRATIONS[21]?.up(db)).not.toThrow();
+  });
+
+  // The last change of a task's state (D6): a task already on the board takes its updated_at, so no run of before is
+  // read as newer than it.
+  it("migration 23 gives a task already on the board the time it was last updated as its last change of state", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 22));
+    expect(columns(db, "board_tasks")).not.toContain("state_changed_at");
+    db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, created_at, updated_at, created_by, rev)
+      VALUES ('T-1', 1, 'Old task', '', 'doing', 'builder', 'normal', 100, 250, '{"kind":"console"}', 3)`).run();
+    expect(migrate(db, MIGRATIONS.slice(0, 23))).toEqual({ from: 22, to: 23 });
+    expect(db.prepare("SELECT state_changed_at AS s FROM board_tasks WHERE key = 'T-1'").get()).toEqual({ s: 250 });
+    expect(version(db)).toBe(23);
+    expect(() => MIGRATIONS[22]?.up(db)).not.toThrow();
   });
 
   it("the Store migrates the database it opens", () => {
