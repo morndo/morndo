@@ -1,4 +1,5 @@
-// A voice note that does not fit the send cap goes out as a markdown upload (design §10, §13).
+// A voice note that does not fit the short send cap (maxSendText, 8000: what an agent without CAP_LONG_TEXT takes) goes
+// out as a markdown upload (design §10, §13), though pane.send now takes a longer message.
 import { describe, expect, it } from "vitest";
 import { LIMITS, OP_ARGS } from "@morndo/protocol";
 import { ownerFileNote } from "../src/adapters/attachment-note.ts";
@@ -25,6 +26,5 @@ describe("voice command", () => {
     expect(long.command).toBe(`${ownerFileNote("/inbox/voice-v1.md")}\n${ownerFileNote(audio)}`);
     expect(long.command.length).toBeLessThanOrEqual(LIMITS.maxSendText);
     expect(send(long.command).success).toBe(true);
-    expect(send(`${text}\n${ownerFileNote(audio)}`).success).toBe(false);
   });
 });
