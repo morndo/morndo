@@ -385,6 +385,26 @@ describe("merged, not live (B11)", () => {
     expect(problem(act(t, { action: "merged", sha: SHA }, boardActor("builder")))).toBe("not_allowed");
   });
 
+  it("a manager or the principal clears a merge record; a worker, the board and a missing record are refused", () => {
+    const t = inReview();
+    const g = gate([merge()], () => notLive({ node: "pc", on: BUILD }));
+    const r = act(t, { action: "unmerged", sha: SHA.toUpperCase() }, manager, g);
+    expect(value(r).event.change).toEqual({ kind: "unmerged", repo: MORNDO_REPO, sha: SHA });
+    expect(value(r).task).toMatchObject({ rev: t.rev + 1, stateChangedAt: t.stateChangedAt, updatedAt: NOW + 1, status: "review" });
+    expect(value(act(t, { action: "unmerged", sha: SHA }, principal, g)).event.change).toMatchObject({ kind: "unmerged" });
+    // a lane may not, not even on its own task; the board's own actor never does
+    expect(problem(act(t, { action: "unmerged", sha: SHA }, builder, g))).toBe("not_allowed");
+    expect(problem(act(t, { action: "unmerged", sha: SHA }, boardActor("builder"), g))).toBe("not_allowed");
+    // a record the task doesn't hold, by sha or by repo (the repo matches without regard to case)
+    expect(problem(act(t, { action: "unmerged", sha: "1234567890123456789012345678901234567890" }, manager, g))).toBe("no_merge");
+    expect(problem(act(t, { action: "unmerged", sha: SHA, repo: "acme/other" }, manager, g))).toBe("no_merge");
+    expect(value(act(t, { action: "unmerged", sha: SHA, repo: "MORNDO/MORNDO" }, manager, g)).event.change).toMatchObject({ kind: "unmerged" });
+    // a wrong sha or repo name, and nothing to clear with no gate at all
+    expect(problem(act(t, { action: "unmerged", sha: "xyz" }, manager, g))).toBe("bad_sha");
+    expect(problem(act(t, { action: "unmerged", sha: SHA, repo: "not a repo" }, manager, g))).toBe("bad_repo");
+    expect(problem(act(t, { action: "unmerged", sha: SHA }, manager))).toBe("no_merge");
+  });
+
   it("mergeLabel and mergedView: the one-line label, and live null for merges in other repos", () => {
     expect(mergeLabel([{ live: true }])).toBe("merged, live");
     expect(mergeLabel([{ live: true }, notLive({ node: "pc", on: BUILD }, { node: "srv01", on: null })]))

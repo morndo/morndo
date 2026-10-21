@@ -66,4 +66,19 @@ describe("board merges (migration 24)", () => {
     expect(store.mergesOf("T-2")).toEqual([]);
     store.close();
   });
+
+  it("deleteMerge removes one row only", () => {
+    const store = new Store(tempDir());
+    const mine = merge({ sha: "1111111", at: 100 });
+    const otherRepo = merge({ repo: "acme/other", sha: "2222222", at: 100 });
+    store.saveMerge("T-1", mine);
+    store.saveMerge("T-1", otherRepo);
+    store.saveMerge("T-2", merge({ sha: "3333333", at: 100 }));
+    store.deleteMerge("T-1", "MORNDO/MORNDO", "1111111");              // the repo matches without regard to case
+    expect(store.mergesOf("T-1")).toEqual([otherRepo]);
+    expect(store.mergesOf("T-2")).toHaveLength(1);                      // another task's row stays
+    store.deleteMerge("T-1", "morndo/morndo", "1111111");               // nothing left to delete: no error
+    expect(store.mergesOf("T-1")).toEqual([otherRepo]);
+    store.close();
+  });
 });

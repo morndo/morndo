@@ -39,6 +39,7 @@ export const TaskChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("edited"), title: z.exactOptional(text()), description: z.exactOptional(text()), priority: z.exactOptional(z.enum(PRIORITIES)) }),
   z.object({ kind: z.literal("commented"), text: text() }),
   z.object({ kind: z.literal("merged"), repo: text(), sha: text() }),
+  z.object({ kind: z.literal("unmerged"), repo: text(), sha: text() }),
 ]);
 export const TaskEventSchema = z.object({ key: taskKey(), rev: z.int().check(z.gte(1)), at: count(), actor: TaskActorSchema, change: TaskChangeSchema });
 
@@ -69,8 +70,10 @@ export const BoardActionBody = z.discriminatedUnion("action", [
   z.object({ action: z.literal("assign"), to: z.nullable(str(200)), ifRev }),
   z.object({ action: z.literal("edit"), title: z.exactOptional(str(1000)), description: z.exactOptional(str(20_000)), priority: z.exactOptional(z.enum(PRIORITIES)), ifRev }),
   z.object({ action: z.literal("comment"), text: str(20_000) }),
-  // B11: recording a task's PR merged. No ifRev (like a comment): it changes no state, so it races with nothing.
+  // B11: recording a task's PR merged, and clearing a wrong record (only the board's hands may). No ifRev (like a
+  // comment): neither changes state, so each races with nothing.
   z.object({ action: z.literal("merged"), sha: str(100), repo: z.exactOptional(str(300)) }),
+  z.object({ action: z.literal("unmerged"), sha: str(100), repo: z.exactOptional(str(300)) }),
 ]);
 export type BoardCreateBody = z.output<typeof BoardCreateBody>;
 export type BoardActionBody = z.output<typeof BoardActionBody>;

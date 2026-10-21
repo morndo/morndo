@@ -185,6 +185,20 @@ describe("a task's merge and the done gate (B11)", () => {
     expect(await managerSays("merged", "T-1")).toMatchObject({ code: 2, err: "usage: morndo-board merged T-12 <sha> [--repo owner/name]" });
     expect(await managerSays("merged", "T-1", "abc1234", "--repo")).toMatchObject({ code: 2, err: "usage: morndo-board merged T-12 <sha> [--repo owner/name]" });
   });
+  it("unmerged clears a record, and its usage needs a sha", async () => {
+    const cleared = await stubCli({ task: shipIt, event: { ...mergedIn, change: { kind: "unmerged", repo: "morndo/morndo", sha: "abc1234" } } }, ["unmerged", "T-1", "abc1234"]);
+    expect(cleared.code).toBe(0);
+    expect(cleared.out).toContain("cleared its merge record: morndo/morndo abc1234");
+    expect(cleared.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "unmerged", sha: "abc1234" } }]);
+    await taskMerged();
+    const again = await managerSays("unmerged", "T-1", "abc1234");
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("cleared its merge record: morndo/morndo abc1234");
+    expect((await managerSays("show", "T-1")).out).not.toContain("Merged:");
+    expect((await managerSays("list")).out).not.toContain("merged, not live");
+    expect(await managerSays("unmerged", "T-1")).toMatchObject({ code: 2, err: "usage: morndo-board unmerged T-12 <sha> [--repo owner/name]" });
+    expect(await managerSays("unmerged", "T-1", "abc1234", "--repo")).toMatchObject({ code: 2, err: "usage: morndo-board unmerged T-12 <sha> [--repo owner/name]" });
+  });
   it("done is refused while the merge is not live", async () => {
     await taskMerged();
     const refused = await managerSays("done", "T-1", "--why", "ran the checks at the merge");

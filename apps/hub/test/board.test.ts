@@ -332,4 +332,24 @@ describe("merged, not live (B11)", () => {
       ],
     });
   });
+
+  it("clearing a merge record removes it and keeps the history", async () => {
+    live = behind;
+    await atReview();
+    const m = agent(managerToken);
+    await m.post("/api/agent/board/tasks/T-1", { action: "merged", sha: SHA });
+    const cleared = await json(await m.post("/api/agent/board/tasks/T-1", { action: "unmerged", sha: SHA.toUpperCase() }));
+    expect(cleared.event).toMatchObject({ change: { kind: "unmerged", repo: "morndo/morndo", sha: SHA } });
+    const record = await json(await m.get("/api/agent/board/tasks/T-1"));
+    expect(record.merged).toBeNull();                                   // no merge left, so no view either
+    expect((record.events as Body[]).map(e => (e.change as Body).kind)).toEqual(["created", "moved", "moved", "merged", "unmerged"]);
+    // Done is no longer held by it: the not-live liveness still stands, but there is no merge to wait for.
+    const done = await json(await m.post("/api/agent/board/tasks/T-1", { action: "move", to: "done", reason: REASON }));
+    expect(done.task).toMatchObject({ status: "done" });
+    // A merge the task doesn't hold can't be cleared, and a lane may not clear one at all.
+    expect(await json(await m.post("/api/agent/board/tasks/T-1", { action: "unmerged", sha: SHA }))).toEqual({ error: "no_merge" });
+    const builder = agent(workerToken, "builder");
+    expect(await json(await builder.post("/api/agent/board/tasks/T-1", { action: "unmerged", sha: SHA }))).toEqual({ error: "not_allowed" });
+    expect((await builder.post("/api/agent/board/tasks/T-1", { action: "unmerged", sha: SHA })).status).toBe(403);
+  });
 });

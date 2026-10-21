@@ -542,6 +542,11 @@ export class Store {
   overrideMerges(key: string, reason: string) {
     this.db.prepare("UPDATE board_merges SET override = ? WHERE key = ? AND lower(repo) = 'morndo/morndo' AND override IS NULL").run(reason, key);
   }
+  // A wrong record cleared (B11): the one row this (task, repo, sha) names, and no other; the repo matches without
+  // regard to case, as the domain matches it.
+  deleteMerge(key: string, repo: string, sha: string) {
+    this.db.prepare("DELETE FROM board_merges WHERE key = ? AND lower(repo) = lower(?) AND sha = ?").run(key, repo, sha);
+  }
 
   // Agent tokens (ADR-0015, B1).
   saveAgentToken(t: AgentToken) {

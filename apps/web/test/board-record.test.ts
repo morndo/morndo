@@ -1,8 +1,9 @@
 // The board's record and frame in the app (ADR-0015, ADR-0032): the record's line for each actor (a lane, you, the
-// console, the board itself by D1 to D4), and the Runs of a `board` frame, decoded one by one and keyed by lane.
+// console, the board itself by D1 to D4), the Runs of a `board` frame, decoded one by one and keyed by lane, and where
+// a task's merges stand (B11), decoded the same way.
 import { describe, expect, it } from "vitest";
 import { GONE_REASON, type TaskActor, type TaskChange, type TaskEvent, type TaskStatus } from "@morndo/domain";
-import { avatarOf, decodeRuns, eventLine, whoOf } from "../src/lib/desktop/board.ts";
+import { avatarOf, decodeMerged, decodeRuns, eventLine, REFUSALS, whoOf } from "../src/lib/desktop/board.ts";
 
 const ev = (actor: TaskActor, change: TaskChange): TaskEvent => ({ key: "T-1" as TaskEvent["key"], rev: 2, at: 1, actor, change });
 const moved = (from: TaskStatus, to: TaskStatus, reason: string | null = null): TaskChange => ({ kind: "moved", from, to, reason });
@@ -32,6 +33,10 @@ describe("the record's words", () => {
     expect([avatarOf({ kind: "console" }), avatarOf(board("D1")), avatarOf({ kind: "worker", name: "b", token: "t" }), avatarOf({ kind: "manager", name: "manager", token: "t" }), avatarOf({ kind: "principal", endpointId: "e" as never, sessionId: "s" as never })])
       .toEqual(["system", "system", "agent", "peer", "principal"]);
   });
+  it("a merge recorded and one cleared read in the record's words (B11)", () => {
+    expect(line(ev({ kind: "worker", name: "builder", token: "t" }, { kind: "merged", repo: "morndo/morndo", sha: "abc1234deadbeef" }))).toBe("builder recorded its merge in morndo/morndo (abc1234)");
+    expect(line(ev({ kind: "manager", name: "manager", token: "t" }, { kind: "unmerged", repo: "morndo/morndo", sha: "abc1234deadbeef" }))).toBe("manager cleared its merge record in morndo/morndo (abc1234)");
+  });
 });
 
 describe("the Runs of a board frame (BoardFrameSchema.runs)", () => {
@@ -57,5 +62,31 @@ describe("the Runs of a board frame (BoardFrameSchema.runs)", () => {
     expect(there?.node).toBe("mac");
     const later = decodeRuns([good({ node: "mac", phase: "ended", outcome: "done", since: 5 }), good({ node: "pc", phase: "working", since: 50 })]).runs?.get("builder");
     expect(later?.node).toBe("pc");
+  });
+});
+
+describe("where a task's merges stand (BoardFrameSchema.merged, B11)", () => {
+  const good = (o: Record<string, unknown> = {}) => ({
+    key: "T-1", merges: [{ repo: "morndo/morndo", sha: "a".repeat(40), at: 1, by: "builder", override: null }],
+    live: false, label: "merged, not live: pc on abc1234", ...o,
+  });
+  it("decodeMerged keeps the readable views by task key and drops the rest; null when the frame has none", () => {
+    const { merged, dropped } = decodeMerged([
+      good(),
+      good({ key: "T-2", live: true, label: "merged, live" }),
+      good({ key: "T-3", live: "yes" }),                        // live is a boolean or null, never a word
+      "not a view",
+    ]);
+    expect(dropped).toBe(2);
+    expect([...(merged?.keys() ?? [])]).toEqual(["T-1", "T-2"]);
+    expect(merged?.get("T-1")).toMatchObject({ live: false, label: "merged, not live: pc on abc1234" });
+    expect(merged?.get("T-2")?.merges[0]?.repo).toBe("morndo/morndo");
+    expect(decodeMerged(undefined)).toEqual({ merged: null, dropped: 0 });
+  });
+  it("the words for the merge gate's refusals (B11)", () => {
+    expect(REFUSALS.not_live).toBe("Its merge is not live on every node yet.");
+    expect(REFUSALS.bad_sha).toBe("That isn't a commit hash.");
+    expect(REFUSALS.bad_repo).toBe("That isn't a repo name (owner/name).");
+    expect(REFUSALS.no_merge).toBe("That merge isn't recorded on this task.");
   });
 });

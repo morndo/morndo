@@ -56,7 +56,8 @@ export type TaskChange =
   | { kind: "assigned"; from: string | null; to: string | null }
   | { kind: "edited"; title?: string; description?: string; priority?: TaskPriority }
   | { kind: "commented"; text: string }
-  | { kind: "merged"; repo: string; sha: string };
+  | { kind: "merged"; repo: string; sha: string }
+  | { kind: "unmerged"; repo: string; sha: string };
 export type TaskEvent = { key: TaskKey; rev: number; at: number; actor: TaskActor; change: TaskChange };
 
 export type NewTask = { title: string; description?: string; assignee?: string | null; priority?: TaskPriority; status?: TaskStatus };
@@ -65,7 +66,8 @@ export type TaskAction =
   | { action: "assign"; to: string | null; ifRev?: number }
   | { action: "edit"; title?: string; description?: string; priority?: TaskPriority; ifRev?: number }
   | { action: "comment"; text: string }
-  | { action: "merged"; sha: string; repo?: string };
+  | { action: "merged"; sha: string; repo?: string }
+  | { action: "unmerged"; sha: string; repo?: string };
 
 export type BoardProblem =
   | "not_allowed"       // a worker tried what only the manager or the principal may (B2, B3)
@@ -78,6 +80,7 @@ export type BoardProblem =
   | "same"              // the change changes nothing
   | "not_live"          // done waits for the task's merges to be live on every node (B11)
   | "bad_sha" | "bad_repo"  // a merge record's commit or repository isn't one (B11)
+  | "no_merge"          // the merge named to clear is not on the task (B11)
   | "empty" | "too_long" | "bad_name" | "bad_text";
 // `other`: the task in the way (one_doing); `from`: where the task is (bad_transition), so a refusal can say so;
 // `detail`: the not_live label, so a refusal can say what the board sees (B11).
@@ -335,6 +338,18 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       if (!REPO_NAME.test(repo)) return refuse("bad_repo");
       if (gate?.merges.some(m => m.repo.toLowerCase() === repo.toLowerCase() && m.sha === sha)) return refuse("same");
       return next(task, { kind: "merged", repo, sha }, false);
+    }
+    case "unmerged": {
+      // B11: clearing a merge record is the board's hands' alone (a lane may record one, never erase it): the record is
+      // what done was held for, so who may drop it is who runs the board. Replacing a wrong sha is an unmerged of it
+      // then a merged of the right one.
+      if (!runsTheBoard(actor)) return refuse("not_allowed");
+      const sha = action.sha.trim().toLowerCase();
+      if (!MERGE_SHA.test(sha)) return refuse("bad_sha");
+      const repo = (action.repo ?? MORNDO_REPO).trim();
+      if (!REPO_NAME.test(repo)) return refuse("bad_repo");
+      if (!gate?.merges.some(m => m.repo.toLowerCase() === repo.toLowerCase() && m.sha === sha)) return refuse("no_merge");
+      return next(task, { kind: "unmerged", repo, sha }, false);
     }
   }
 }

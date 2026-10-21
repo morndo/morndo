@@ -1,11 +1,13 @@
 // git ancestry (B11): `git merge-base --is-ancestor` read from a real checkout in a temp dir, the only ground truth of
-// a merge being in a build. The checkout is only read: its HEAD never moves, nothing is fetched.
+// a merge being in a build — run out of band, with a timeout, and in a clean environment so nothing of the hub's own
+// git settings can pick the repository or change the answer. The checkout is only read: its HEAD never moves, nothing
+// is fetched.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { gitAncestry } from "../src/adapters/git-ancestry.ts";
+import { gitAncestry, type GitRun } from "../src/adapters/git-ancestry.ts";
 
 const dirs: string[] = [];
 const tempDir = () => { const d = mkdtempSync(join(tmpdir(), "morndo-ancestry-")); dirs.push(d); return d; };
@@ -30,23 +32,86 @@ const commits = (dir: string): string[] => {
   }
   return shas;
 };
+const SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
+const OTHER = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 describe("git ancestry (B11)", () => {
-  it("answers from a real checkout: ancestor, not ancestor, and unknown for what it cannot know", () => {
+  it("answers from a real checkout: ancestor, not ancestor, and unknown for what it cannot know", async () => {
     const dir = tempDir();
     const [first = "", second = "", head = ""] = commits(dir);
     const ancestry = gitAncestry(dir);
-    expect(ancestry(first, second)).toBe("ancestor");                    // older in newer's history
-    expect(ancestry(second, first)).toBe("not_ancestor");
-    expect(ancestry(second, second)).toBe("ancestor");                   // equal counts
-    expect(ancestry(first, head)).toBe("ancestor");
-    expect(ancestry(first, "f".repeat(40))).toBe("unknown");             // a sha the checkout doesn't hold
-    expect(gitAncestry(join(dir, "not-a-repo"))(first, second)).toBe("unknown");
-    expect(gitAncestry(null)(first, second)).toBe("unknown");            // no checkout configured
-    expect(ancestry("--help", second)).toBe("unknown");                  // never handed to git as an argument
-    expect(ancestry(first, "ABC1234")).toBe("unknown");
+    expect(await ancestry(first, second)).toBe("ancestor");                // older in newer's history
+    expect(await ancestry(second, first)).toBe("not_ancestor");
+    expect(await ancestry(second, second)).toBe("ancestor");               // equal counts
+    expect(await ancestry(first, head)).toBe("ancestor");
+    expect(await ancestry(first, "f".repeat(40))).toBe("unknown");         // a sha the checkout doesn't hold
+    expect(await gitAncestry(join(dir, "not-a-repo"))(first, second)).toBe("unknown");
+    expect(await gitAncestry(null)(first, second)).toBe("unknown");        // no checkout configured
+    expect(await ancestry("--help", second)).toBe("unknown");              // never handed to git as an argument
+    expect(await ancestry(first, "ABC1234")).toBe("unknown");
     // The checkout is only read: HEAD as it was, and no fetch happened.
     expect(git(dir, ["rev-parse", "HEAD"])).toBe(head);
     expect(existsSync(join(dir, ".git", "FETCH_HEAD"))).toBe(false);
+  });
+
+  it("a git that fails, is killed or never ran answers unknown; only 0 and 1 speak", async () => {
+    const results: { code: number | null; killed: boolean }[] = [
+      { code: 0, killed: false },      // ancestor
+      { code: 1, killed: false },      // not an ancestor
+      { code: 128, killed: false },    // a commit the checkout doesn't hold
+      { code: null, killed: true },    // cut by the timeout
+      { code: null, killed: false },   // no git at all (a spawn error carries no exit status)
+    ];
+    let n = 0;
+    const ancestry = gitAncestry("/srv/checkouts/morndo", { run: async () => results[n++] ?? { code: 0, killed: false } });
+    expect(await ancestry(SHA, OTHER)).toBe("ancestor");
+    expect(await ancestry(SHA, OTHER)).toBe("not_ancestor");
+    expect(await ancestry(SHA, OTHER)).toBe("unknown");                     // any other exit status never says yes
+    expect(await ancestry(SHA, OTHER)).toBe("unknown");                     // cut by the timeout
+    expect(await ancestry(SHA, OTHER)).toBe("unknown");                     // no git at all
+  });
+
+  it("git runs in a clean environment: four keys, and the repo only by -C", async () => {
+    const dir = tempDir();
+    commits(dir);
+    const seen: { args: string[]; env: Record<string, string>; timeout: number; maxBuffer: number }[] = [];
+    const run: GitRun = async (args, opts) => {
+      seen.push({ args: [...args], env: { ...opts.env }, timeout: opts.timeout, maxBuffer: opts.maxBuffer });
+      return { code: 0, killed: false };
+    };
+    const was = process.env.GIT_DIR;
+    process.env.GIT_DIR = "/srv/checkouts/somewhere-else";       // none of the hub's own git settings may reach it
+    process.env.GIT_WORK_TREE = "/srv/other";
+    try {
+      await gitAncestry(dir, { run })(SHA, OTHER);
+    } finally {
+      if (was === undefined) { delete process.env.GIT_DIR; delete process.env.GIT_WORK_TREE; }
+      else { process.env.GIT_DIR = was; delete process.env.GIT_WORK_TREE; }
+    }
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.args).toEqual(["-C", dir, "merge-base", "--is-ancestor", SHA, OTHER]);
+    expect(Object.keys(seen[0]?.env ?? {}).sort()).toEqual(["GIT_TERMINAL_PROMPT", "HOME", "LANG", "PATH"]);
+    expect(seen[0]?.env.GIT_TERMINAL_PROMPT).toBe("0");
+    expect(seen[0]?.env.GIT_DIR).toBeUndefined();
+    expect(seen[0]?.timeout).toBe(5000);
+    expect(seen[0]?.maxBuffer).toBe(64 * 1024);
+  });
+
+  it("a stray GIT_DIR in the hub's environment never picks the repository: -C does", async () => {
+    const dir = tempDir();
+    const [first = "", second = ""] = commits(dir);
+    const other = tempDir();                                     // a repo the stray GIT_DIR points at
+    commits(other);
+    const was = process.env.GIT_DIR;
+    process.env.GIT_DIR = join(other, ".git");
+    try {
+      const ancestry = gitAncestry(dir);
+      // first is not in the other repo's history: read there, the answer would be unknown (128), not ancestor.
+      expect(await ancestry(first, second)).toBe("ancestor");
+      expect(await ancestry(second, first)).toBe("not_ancestor");
+    } finally {
+      if (was === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = was;
+    }
   });
 });

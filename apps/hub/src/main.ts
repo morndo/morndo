@@ -271,11 +271,19 @@ switch (cmd) {
     // Morndo checkout (MORNDO_REPO). Without either, nothing is live: done waits, or is accepted with an override.
     const builds = fleet ? new NodeBuilds({ source: () => fleet.client.nodes(), log }) : null;
     builds?.start();
-    const liveness = new MergeLiveness({ builds: () => builds?.list() ?? [], ancestry: gitAncestry(config.morndoRepo ?? null) });
+    // When a background check settles what a merge's liveness is, the board says so at once: the frames wait for no
+    // next look. `board` is made below, so it is reached through a holder, as the projector is.
+    const held: { board: BoardService | null } = { board: null };
+    const liveness = new MergeLiveness({
+      builds: () => builds?.list() ?? [],
+      ancestry: gitAncestry(config.morndoRepo ?? null),
+      onChange: () => held.board?.runsChanged(),
+    });
     const following: { projector: BoardProjector | null } = { projector: null };
     const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], liveness: sha => liveness.of(sha) });
+    held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
-    shutdown.onStop(() => { following.projector?.stop(); board.stop(); builds?.stop(); });
+    shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
     const agents = new AgentAccess(store, config.managerWindow);
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.

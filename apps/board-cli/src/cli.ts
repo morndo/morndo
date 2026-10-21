@@ -25,6 +25,7 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
   merged T-12 <sha> [--repo owner/name]   record the commit its PR merged as (default repo morndo/morndo; manager, or the task's lane)
+  unmerged T-12 <sha> [--repo …]   clear a wrong merge record (manager only); to replace one, unmerged then merged
   done T-12 --why "…" [--not-live "<reason>"]  accept it, naming what you checked; refused while its morndo/morndo merge is not live on every node (manager only)
   todo T-12                             put it back
   move T-12 <status> [--why "…"]        any move the rules allow
@@ -65,6 +66,7 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "not_live": return `its merge is not live${detail ? `: ${detail}` : ""}; if you accept it anyway: done T-12 --why "…" --not-live "<reason>"`;
     case "bad_sha": return "that isn't a commit hash (7 to 40 hex characters)";
     case "bad_repo": return "that isn't a repo name (owner/name)";
+    case "no_merge": return "that merge isn't recorded on this task (see show)";
     default: return error;
   }
 }
@@ -82,6 +84,7 @@ function changeText(e: TaskEvent): string {
     case "edited": return `edited ${Object.keys(c).filter(k => k !== "kind").join(", ")}`;
     case "commented": return c.text.includes("\n") ? `commented:\n      ${c.text.replace(/\n/g, "\n      ")}` : `commented: ${c.text}`;
     case "merged": return `recorded its merge: ${c.repo} ${c.sha.slice(0, 7)}`;
+    case "unmerged": return `cleared its merge record: ${c.repo} ${c.sha.slice(0, 7)}`;
   }
 }
 const line = (t: Task) =>
@@ -255,6 +258,14 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const repo = flags.repo;                        // --repo with no value parses as true: it must name one
         if (!sha || repo === true) throw new Usage("usage: morndo-board merged T-12 <sha> [--repo owner/name]");
         await act(k, { action: "merged", sha, ...(repo !== undefined ? { repo } : {}) });
+        return 0;
+      }
+      case "unmerged": {
+        const k = key(rest[0]);
+        const sha = rest[1];
+        const repo = flags.repo;                        // --repo with no value parses as true: it must name one
+        if (!sha || repo === true) throw new Usage("usage: morndo-board unmerged T-12 <sha> [--repo owner/name]");
+        await act(k, { action: "unmerged", sha, ...(repo !== undefined ? { repo } : {}) });
         return 0;
       }
       case "move": {

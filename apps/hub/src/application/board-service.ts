@@ -138,10 +138,11 @@ export class BoardService {
   #write(task: Task, event: TaskEvent) {
     this.#store.saveTask(task);
     this.#store.saveTaskEvent(event);
-    // B11: a merge is kept as a record with its event, and an accepted not-live Done sets the override on the task's
-    // morndo/morndo merges — in the same transaction as the change itself.
+    // B11: a merge is kept as a record with its event, an unmerged one drops that record, and an accepted not-live Done
+    // sets the override on the task's morndo/morndo merges — all in the same transaction as the change itself.
     const change = event.change;
     if (change.kind === "merged") this.#store.saveMerge(task.key, { repo: change.repo, sha: change.sha, at: event.at, by: actorName(event.actor), override: null });
+    if (change.kind === "unmerged") this.#store.deleteMerge(task.key, change.repo, change.sha);
     if (change.kind === "moved" && change.to === "done" && change.notLive !== undefined) this.#store.overrideMerges(task.key, change.notLive);
     this.#store.record([boardChanged(event)]);
   }
