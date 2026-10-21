@@ -832,6 +832,36 @@ describe("install.sh", () => {
     expect(() => packTree([{ path: "node/bin/npm", mode: "0555", link: "../lib/npm-cli.js" }], 1_700_000_000)).not.toThrow();
   });
 
+  // The reader's rule of 2026-10-21 (apps/updater/src/adapters/tar-read.ts): names are keyed by their folded form
+  // (case and NFC/NFD), and a link is walked through the tree's own links. A tree the reader would refuse must
+  // never be packed: P/UP names p/up on a file system that folds case, and two spellings of one folded name are
+  // two entries here but one file on such a system.
+  it("refuses a packed link that climbs out through another link, and folded names", () => {
+    const composed = "café";        // é as one character
+    const decomposed = "café";    // the same name as e + combining acute
+    expect(() => packTree([
+      { path: "p/up", mode: "0555", link: ".." },
+      { path: "esc", mode: "0555", link: "P/UP/.." },
+    ], 1_700_000_000)).toThrow(/through another link/);
+    expect(() => packTree([
+      { path: `${composed}/up`, mode: "0555", link: ".." },
+      { path: "esc", mode: "0555", link: `${decomposed}/up/..` },
+    ], 1_700_000_000)).toThrow(/through another link/);
+    expect(() => packTree([
+      { path: "README", mode: "0444", bytes: new Uint8Array([1]) },
+      { path: "readme", mode: "0444", bytes: new Uint8Array([2]) },
+    ], 1_700_000_000)).toThrow(/fold/);
+    expect(() => packTree([
+      { path: "a", mode: "0444", bytes: new Uint8Array([1]) },
+      { path: "a/b", mode: "0444", bytes: new Uint8Array([2]) },
+    ], 1_700_000_000)).toThrow(/duplicate/);
+    expect(() => packTree([
+      { path: "node/lib/x.js", mode: "0444", bytes: new Uint8Array([1]) },
+      { path: "node/lib/up", mode: "0555", link: ".." },
+      { path: "node/bin/npm", mode: "0555", link: "../lib/x.js" },
+    ], 1_700_000_000)).not.toThrow();
+  });
+
   it("refuses a dot-segment path and a name that contains a space", () => {
     for (const [name, link] of [["app/././x", "../../../outside"], ["../ x", ""]] as const) {
       const bad = fixture({ archive: craftArchive(name, link) });
