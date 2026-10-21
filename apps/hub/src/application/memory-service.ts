@@ -37,6 +37,8 @@ export type ImportOutcome = { file: string } & (
 
 // memory.sync's own cap on the files of one part (the protocol's op arguments).
 const FILES_PER_PART = 400;
+// How many pending Notes file an Ask at once (round 2): the board shows the oldest ten; the rest wait their turn.
+export const MEMORY_ASKS_MAX = 10;
 const normalBody = (s: string) => s.replace(/\r\n/g, "\n").trim();
 
 // M8: the console's one-time code, 12 characters of Crockford base32 (no I L O U, https://crockford.com/base32.html,
@@ -200,7 +202,7 @@ export class MemoryService {
   }
 
   // M8: mint the console's one-time code: only a step-up session can, only for a Note that waits for approval. The
-  // code is returned once and never stored; the app that asked shows it to the principal (the Ask is a later slice).
+  // code is returned once and never stored; the app's Ask on the note is what asks for it.
   issueApprovalCode(a: Authenticated, id: string): { ok: true; code: string; expiresAt: number } | { ok: false; problem: "step_up" | "not_found" | "not_pending" } {
     const who = this.principal(a);
     if ("problem" in who) return { ok: false, problem: who.problem };
@@ -211,6 +213,28 @@ export class MemoryService {
     const expiresAt = this.#now() + APPROVAL_CODE_TTL_MS;
     this.#store.putApprovalCode(n.id, codeHash(code), expiresAt);   // one live code per note: this replaces it
     return { ok: true, code, expiresAt };
+  }
+
+  // The app's answer to the Ask a pending Note files (M4, M5, M8), as EscalationService.answer hands it here after its
+  // own step-up check; `principal(a)` judges it again. A Note that is gone is not_found; one that no longer waits
+  // (approved or invalidated meanwhile) is changed — the Ask no longer says what the principal was shown (E12).
+  decide(a: Authenticated, id: string, decision: "approve" | "reject"): { ok: true } | { ok: false; problem: "step_up" | "not_found" | "changed" } {
+    const who = this.principal(a);
+    if ("problem" in who) return { ok: false, problem: "step_up" };
+    const n = this.#store.get(id);
+    if (!n) return { ok: false, problem: "not_found" };
+    if (!waitsForApproval(n)) return { ok: false, problem: "changed" };
+    const r = decision === "approve" ? this.approve(who, id) : this.invalidate(who, id, "rejected in the app");
+    return r.ok ? { ok: true } : { ok: false, problem: "changed" };
+  }
+
+  // The Notes that file an Ask on the Decisions board: what waits for the principal, oldest first, at most
+  // MEMORY_ASKS_MAX — a flood of proposals must not flood the board; the rest wait in order.
+  pendingApprovals(): Note[] {
+    const listed = this.list({ pending: true });
+    return (listed.ok ? listed.notes : [])
+      .sort((a, b) => a.createdAt - b.createdAt || Number(a.id.slice(2)) - Number(b.id.slice(2)))
+      .slice(0, MEMORY_ASKS_MAX);
   }
 
   // The console's list: live Notes in index order; `pending`, only those waiting for the principal's approval (a
@@ -261,11 +285,12 @@ export class MemoryService {
     return { version: bundleVersion(files), parts: bundleParts(files) };
   }
 
-  // The console sees every Note. An agent sees a deliverable one, or one it wrote (its label is the provenance, M3).
+  // The console and the principal's signed-in Endpoint see every Note. An agent sees a deliverable one, or one it wrote
+  // (its label is the provenance, M3) — which is why the principal's reject of a pending lane Note reaches it (M2).
   #visible(caller: MemoryCaller, id: string): Note | null {
     if (!parseNoteId(id)) return null;
     const n = this.#store.get(id);
-    if (!n || caller === "console") return n;
+    if (!n || caller === "console" || caller.kind === "principal") return n;
     return isDeliverable(n) || n.provenance.by === actorLabel(memoryActor(caller)) ? n : null;
   }
 

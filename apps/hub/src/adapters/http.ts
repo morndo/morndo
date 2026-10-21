@@ -731,6 +731,18 @@ export function startHttp(p: {
       if (q.get("hidden") === "1" || q.has("before")) return json(res, 200, p.jobs.page(q.get("before")));
       return json(res, 200, p.jobs.view());
     }
+    // ADR-0031 (M8): the console's one-time approval code, minted in the app for one Note that waits. A Command under
+    // step-up, like the approval itself; the code is said once here and never logged or stored but its hash — the
+    // console spends it (`morndo memory approve <id> --code …`). No body to read. Not an agent route: only a session
+    // reaches it (the agents' door has no such path).
+    const approvalCode = /^\/api\/memory\/notes\/(N-\d{1,9})\/approval-code$/.exec(path);
+    if (approvalCode && method === "POST") {
+      if (!p.memory) return json(res, 404, { error: "memory_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const r = p.memory.service.issueApprovalCode(a, approvalCode[1] ?? "");
+      if (r.ok) return json(res, 200, { code: r.code, expiresAt: r.expiresAt });
+      return json(res, r.problem === "step_up" ? 403 : r.problem === "not_found" ? 404 : 409, { error: r.problem });
+    }
     // ADR-0015: the board. Reading is a look; a change is a Command (AC7).
     if (path.startsWith("/api/board")) {
       if (!p.board) return json(res, 404, { error: "board_off" });

@@ -224,6 +224,38 @@ describe("approval is the principal's (M8)", () => {
   });
 });
 
+describe("the app's answer (decide) and the Asks it answers (M8)", () => {
+  it("decide is the principal's answer under step-up: approve makes the note live, reject invalidates it", () => {
+    const proc = made(memory.remember(apiFix, fact({ kind: "procedure", title: "Deploy steps" })));
+    expect(memory.decide(auth(now - 2 * 60 * 60_000), proc.id, "approve")).toEqual({ ok: false, problem: "step_up" });
+    expect(memory.decide(auth(), proc.id, "approve")).toEqual({ ok: true });
+    expect(store.get(proc.id)).toMatchObject({ tier: 1, approvedBy: "principal:endpoint" });
+    const untrusted = made(memory.remember(apiFix, fact({ title: "A mail's claim", untrusted: true })));
+    expect(memory.decide(auth(), untrusted.id, "reject")).toEqual({ ok: true });
+    expect(store.get(untrusted.id)).toMatchObject({ invalidatedBy: "principal:endpoint", invalidReason: "rejected in the app" });
+  });
+
+  it("a note that is gone is not_found; one that no longer waits is changed", () => {
+    const proc = made(memory.remember(apiFix, fact({ kind: "procedure", title: "Gone steps" })));
+    expect(memory.decide(auth(), "N-99", "approve")).toEqual({ ok: false, problem: "not_found" });
+    made(memory.approve(answer(), proc.id));
+    expect(memory.decide(auth(), proc.id, "approve")).toEqual({ ok: false, problem: "changed" });
+    const factNote = made(memory.remember(apiFix, fact({ title: "A plain fact" })));
+    expect(memory.decide(auth(), factNote.id, "approve")).toEqual({ ok: false, problem: "changed" });   // never waited
+  });
+
+  it("pendingApprovals lists only what waits, oldest first, at most ten", () => {
+    const proc = made(memory.remember(apiFix, fact({ kind: "procedure", title: "First procedure" })));
+    const plain = made(memory.remember(apiFix, fact({ title: "A plain fact" })));
+    for (let i = 2; i <= 12; i++) { now += 1000; made(memory.remember(apiFix, fact({ kind: "procedure", title: `Procedure ${i}` }))); }
+    const ids = memory.pendingApprovals().map(n => n.id);
+    expect(ids).toHaveLength(10);
+    expect(ids[0]).toBe(proc.id);
+    expect(ids).not.toContain(plain.id);
+    expect(ids.at(-1)).toBe("N-11");                                // N-12 waits its turn, in order
+  });
+});
+
 describe("search (M4, M5)", () => {
   it("returns deliverable notes only: no unapproved procedure, no untrusted note, nothing invalidated", () => {
     const ok = made(memory.remember(apiFix, fact({ title: "Ports", body: "The api listens on 8080." })));

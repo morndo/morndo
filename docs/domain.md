@@ -872,7 +872,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Secrets stands beside Authority*: a Use is not a Mandate (SC10).
 - *Knowledge stands beside Engines*. An SOP step names a Role and a Model class; the Role's chain and auto routing decide what runs, and nothing in Knowledge ranks or excludes an engine (K9). A Gate is answered through Escalation as a Decision; a run starts as a Job.
 - *Fleet supplies Memory* (customer and supplier). Lanes write through the hub's agents' door with an agent token. Memory's Skill files reach each node as one typed operation, `memory.sync`, sent in parts with a key, with no command and no path (FL14); a node's policy may deny it.
-- *Memory is a customer of Authority and Escalation*: only the principal approves a Procedure or an untrusted Note (M4, M5, M8). The approval at the control plane's console needs a one-time code minted under step-up in the app; the app side (an Ask on the note, approve with step-up) follows.
+- *Memory is a customer of Authority and Escalation*: only the principal approves a Procedure or an untrusted Note (M4, M5, M8). In the app, a pending Note files an Ask on the Decisions board (id `mem-n-<k>`, at most ten at a time); the principal's answer under step-up approves or rejects it and is recorded as the Decision (E8). The approval at the control plane's console needs a one-time code minted under step-up in the app.
 - *Verification supplies Memory*: only evidence the author did not produce raises a Note to tier 2 (M5, V1).
 - *Memory stands beside Knowledge*: both hand agents Agent Skills and show a stale note as stale (K6, M7). They share no data: Knowledge ships what to plan with; Memory keeps what this user's lanes learned.
 

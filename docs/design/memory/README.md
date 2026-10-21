@@ -15,8 +15,9 @@ skill files. Invariants M1-M8 are in the domain doc and in that file's header.
 - **Memory is a customer of Authority and Escalation**: only the principal approves a Procedure or an untrusted Note
   (M4, M5, M8) — an Endpoint under step-up, or the console with a one-time code (`XXXX-XXXX-XXXX`, 12 characters of
   Crockford base32) that only a step-up session can mint for that one note. The code is single use, valid ten minutes,
-  one live code per note, burned after five wrong tries, and only its hash is stored. The app side (an Ask on the note,
-  approve with step-up) is the next slice.
+  one live code per note, burned after five wrong tries, and only its hash is stored. A pending Note files an Ask on
+  the Decisions board (id `mem-n-<k>`, at most ten at a time, the oldest first); the principal's answer under step-up
+  approves or rejects it.
 - **Verification supplies Memory**: only evidence the author did not produce raises a Note to tier 2 (M5).
 - **Memory stands beside Knowledge**: both hand agents Agent Skills and show a stale note as stale (K6, M7). They share
   no data. Knowledge ships what to plan with; Memory keeps what this user's lanes learned.
@@ -54,6 +55,22 @@ a worker's as the lane it names.
 
 Refusals answer 400 (bad body or field), 403 (`not_principal`, `not_yours`), 404 (`not_found`), 409 (`invalidated`,
 `already_*`, `mismatch`), with `{ error: <problem> }`. The rate buckets are the agent door's.
+
+## App
+
+A pending Procedure or untrusted Note files an Ask on the Decisions board, which the hub itself holds open (E14): id
+`mem-n-<k>` from the note's own id, at most ten Asks at a time (the oldest first; the rest wait their turn), the note's
+provenance and body as its context. The Ask offers **Approve** and **Reject**; the principal's answer needs step-up
+like any Command (AC7), approves or invalidates the note, and is recorded as the Decision (E8). An agent has no path to
+it: answering takes a session.
+
+The console's one-time code is minted in the app, for one note, under the same step-up:
+
+`POST /api/memory/notes/:id/approval-code` — 200 `{ code, expiresAt }` (with `Cache-Control: no-store`); 401 without a
+session, 403 `step_up` on a stale passkey check, 404 `not_found`, 409 `not_pending`, 404 `memory_off`. The code is said
+once on the wire, never logged, and only its hash is stored; `morndo memory approve <id> --code …` spends it at the
+console. The app does not yet have a button that calls this route — the Ask answers approval in the app, and the code
+is for the console — so today the code can be minted only through the route.
 
 ## Console (on the control plane)
 

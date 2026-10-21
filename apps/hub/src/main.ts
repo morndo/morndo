@@ -24,7 +24,7 @@ import { AccessService } from "./application/access-service.ts";
 import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
-import { EscalationService, managerOf } from "./application/escalation-service.ts";
+import { EscalationService, managerOf, type MemoryAsks } from "./application/escalation-service.ts";
 import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { ManagerQueue } from "./application/manager-queue.ts";
@@ -201,6 +201,9 @@ switch (cmd) {
       id => observation.nameOf(id), ports.uploads, ports.sendStatus, queue ? { queue, isManager: id => id === managerPane() } : null,
       () => managerPane() ?? null, config.managerWindow);
     const filed: { briefs: BriefService | null } = { briefs: null };
+    // Memory is opened below, after Decisions: its pending Notes reach the board through this holder once it exists
+    // (ADR-0031 round 2); a hub without Memory never files an Ask.
+    const memoryHolder: { service: MemoryService | null } = { service: null };
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -214,6 +217,10 @@ switch (cmd) {
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
       queue,
       briefs: () => filed.briefs?.sightings() ?? [],
+      memory: () => {
+        const m = memoryHolder.service;
+        return m && { pending: () => m.pendingApprovals(), decide: (a, id, d) => m.decide(a, id, d) } satisfies MemoryAsks;
+      },
     });
     const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
     filed.briefs = briefs;
@@ -267,6 +274,7 @@ switch (cmd) {
     const memoryStore = openMemory(config.dataDir);
     if (memoryStore) shutdown.onStop(() => memoryStore.close());
     const memory = memoryStore ? new MemoryService({ store: memoryStore, policy: () => access.policy() }) : null;
+    memoryHolder.service = memory;                              // Memory off (null): the board files no Ask
     const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
     // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens.
     const usage = new UsageService({ store });

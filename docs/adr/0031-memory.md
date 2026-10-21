@@ -74,7 +74,13 @@ principal's answer under step-up (AC7, M8): either a signed-in Endpoint through 
 (`mayCommand`, as the board takes it), or the console with a one-time code that only an Endpoint under step-up can mint
 for that one note (`MemoryService.issueApprovalCode`). The code is 12 characters of Crockford base32 shown as
 `XXXX-XXXX-XXXX`, valid ten minutes, single use, one live code per note, burned after five wrong tries; only a SHA-256
-hash of it is stored, and it is compared with `timingSafeEqual`. The app side — an Ask that offers the approval and
-mints the code, and the HTTP route — is the next round. The limit is ADR-0004's: the console runs as the same OS user
+hash of it is stored, and it is compared with `timingSafeEqual`. The limit is ADR-0004's: the console runs as the same OS user
 as the hub, so a process of that user that can read or write `memory.db` directly is out of scope; the code raises the
 bar from running one command to editing the database file.
+
+Round 2 (2026-10-21) ships the app side: a pending Note files an Ask on the Decisions board — id `mem-n-<k>`, held open
+by the hub (E14), at most ten at a time, the oldest first — whose Approve/Reject answer under step-up approves or
+invalidates the Note and is recorded as the Decision (E8); nothing is typed and no queue is touched (M1). Minting the
+code has a route of its own, `POST /api/memory/notes/:id/approval-code`: a Command under step-up, answered once with
+`{ code, expiresAt }`, never logged; `morndo memory approve <id> --code` spends it. The app has no button for the route
+yet: the Ask answers approval, the code is for the console.
