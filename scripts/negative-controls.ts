@@ -3150,6 +3150,10 @@ export const CONTROLS: Control[] = [
   { id: "t305-hello-without-commit", task: "305", file: "apps/node-agent/src/conn/connection.ts",
     find: "...(AGENT_COMMIT !== null ? { commit: AGENT_COMMIT } : {})", replace: "",
     run: ["apps/node-agent/test/agent.test.ts"], expect: "its hello carries the build it runs" },
+  // ---- B11 (board T-311): a checkpoint is not DONE, the guard removed once.
+  { id: "b11-checkpoint-is-needs-decision", task: "311", file: "apps/board-cli/src/prompt.ts",
+    find: "STATUS: NEEDS DECISION checkpoint:", replace: "STATUS: DONE checkpoint:",
+    run: ["apps/board-cli/test/prompt-doc.test.ts"], expect: "checkpoint" },
 ];
 
 // ---- the runner
