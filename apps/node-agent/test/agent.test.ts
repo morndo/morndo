@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CAP_LONG_TEXT, LIMITS, NodeStatusHealth } from "@morndo/protocol";
-import { Flight, holdFile } from "@morndo/service-kit";
+import { Flight, holdFile, productBuild } from "@morndo/service-kit";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
 import { agentPaths } from "../src/paths.ts";
 import { openAgentDb } from "../src/db/open.ts";
@@ -65,6 +65,14 @@ describe("over the connection", () => {
     stops.push(() => agent.stop());
     const hello = await fleet.waitFor(m => m.t === "hello");
     expect((hello as Msg & { caps: string[] }).caps).toEqual([...config.policy.ops, CAP_LONG_TEXT]);
+  });
+
+  it("its hello carries the build it runs: the version and the commit (the fleet's /v1/nodes shows it)", async () => {
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    const hello = (await fleet.waitFor(m => m.t === "hello")) as Msg & { agent: { version: string; commit?: string } };
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: join(import.meta.dirname, "..", "..", ".."), encoding: "utf8" }).trim();
+    expect(hello.agent).toEqual({ version: productBuild().version, commit: head });
   });
 
   it("sends the full inventory and health after welcome, then inventory again when tmux changes", async () => {

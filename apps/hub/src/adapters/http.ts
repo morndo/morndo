@@ -8,7 +8,7 @@ import { extname, join, normalize, sep } from "node:path";
 import { hostname } from "node:os";
 import { WebSocketServer, type WebSocket } from "ws";
 import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type BoardActor, type FeedEvent, type Transcription } from "@morndo/domain";
-import { Flight, HoldWatch, productVersion } from "@morndo/service-kit";
+import { Flight, HoldWatch, productStamp } from "@morndo/service-kit";
 import { catchUp } from "../application/catchup.ts";
 import { chats, digest } from "../application/chats.ts";
 import type { PresenceService } from "../application/presence-service.ts";
@@ -291,7 +291,7 @@ export function startHttp(p: {
       authenticated: auth(req) !== null,
     });
     if (detail === "ready") return json(res, 200, { ready: true });
-    return json(res, 200, { version: productVersion(), schema: schemaVersion, ready: true, held: watch.held, inFlight: flight.list() });
+    return json(res, 200, { ...productStamp(), schema: schemaVersion, ready: true, held: watch.held, inFlight: flight.list() });
   }
 
   // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).

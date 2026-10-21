@@ -155,7 +155,7 @@ describe("health", () => {
     expect(res.status).toBe(200);
     expect(ServiceHealth.safeParse(body).success).toBe(true);
     const root = JSON.parse(readFileSync(join(import.meta.dirname, "../../../package.json"), "utf8")) as { version: string };
-    expect(body).toMatchObject({ version: root.version, schema: SCHEMA_VERSION, ready: true, held: false, inFlight: [{ kind: "http", id: "POST /api/workers/%1/send" }] });
+    expect(body).toMatchObject({ version: root.version, commit: expect.stringMatching(/^[0-9a-f]{40}$/), schema: SCHEMA_VERSION, ready: true, held: false, inFlight: [{ kind: "http", id: "POST /api/workers/%1/send" }] });
   });
   it("through the proxy, with no session, reports ready and nothing else", async () => {
     const res = await req("/api/health");

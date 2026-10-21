@@ -133,13 +133,18 @@ describe("lane.start's first prompt and lane.stop's mode (§5)", () => {
   it("lane.start takes a prompt as a delivery's text, and answers the trust dialog and the prompt's delivery id", () => {
     expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "begin" })).toBe(true);
     expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "" })).toBe(false);
-    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(8001) })).toBe(false);
+    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(LIMITS.maxMessageText) })).toBe(true);   // a message, not a lane-event part
+    expect(ok("lane.start", { name: "x", cwd: "/w", prompt: "x".repeat(LIMITS.maxMessageText + 1) })).toBe(false);
     expect(z.safeParse(OP_RESULTS["lane.start"], { workerId: W, waiting: "trust", prompt: "lanes:k1:prompt" }).success).toBe(true);
     expect(z.safeParse(OP_RESULTS["lane.start"], { workerId: W, waiting: "menu" }).success).toBe(false);
   });
   it("lane.stop exits gracefully by default, or kills", () => {
     for (const mode of ["exit", "kill", undefined]) expect(ok("lane.stop", { name: "x", ...(mode ? { mode } : {}) }), String(mode)).toBe(true);
     expect(ok("lane.stop", { name: "x", mode: "force" })).toBe(false);
+  });
+  it("lane.stop takes keepWindow as a boolean", () => {
+    expect(ok("lane.stop", { name: "x", keepWindow: true })).toBe(true);
+    expect(ok("lane.stop", { name: "x", keepWindow: "yes" })).toBe(false);
   });
 });
 

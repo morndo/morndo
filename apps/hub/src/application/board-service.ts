@@ -5,15 +5,16 @@
 // or a Decision.
 // ADR-0032: the board's own moves (B10, D1 to D4) come through `follow`, as actor { kind: "board", rule, lane }, and the
 // console's (`morndo lanes start --task`) as { kind: "console" }: the same transaction, record and push as any change.
-// The view carries each lane's Run as the Fleet derived it (the projector's, board-projector.ts), and a change of runs
-// is pushed too, at most about once a second.
+// The view carries each lane's Run as the Fleet derived it and the to do tasks whose lane the fleet no longer lists
+// (orphans; the projector's, board-projector.ts), and a change of runs is pushed too, at most about once a second.
 import { DONE_SHOWN_MS, applyAction, boardChanged, boardOrder, createTask, mayCommand, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
 
-// `runs` (ADR-0032 §6, BoardFrameSchema.runs): each lane's latest Run; empty without a fleet.
-export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[] };
+// `runs` (ADR-0032 §6, BoardFrameSchema.runs): each lane's latest Run; empty without a fleet. `orphans`: the to do tasks
+// whose lane the fleet no longer lists (BoardProjector.orphans); empty without a fleet.
+export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[] };
 // A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
 export const RUNS_EVERY_MS = 1000;
 export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus };
@@ -24,16 +25,18 @@ export class BoardService {
   #policy: () => AccessPolicy;
   #lanes: () => string[];
   #runs: () => RunView[];
+  #orphans: (tasks: readonly Task[], now: number) => string[];
   #runsEveryMs: number;
   #runsTimer: NodeJS.Timeout | null = null;
   #toldAt = -Infinity;                                   // performance.now() of the last push, for the runs' throttle
   #listeners = new Set<(b: BoardView) => void>();
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
-  // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `runsEveryMs`: the runs' throttle.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; runsEveryMs?: number }) {
+  // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
+  // fleet no longer lists (BoardProjector.orphans; none without a fleet). `runsEveryMs`: the runs' throttle.
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
-    this.#runs = p.runs ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
+    this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
@@ -59,7 +62,8 @@ export class BoardService {
   // The open tasks and Done for a week, read as such: never the whole table of done tasks.
   view(): BoardView {
     const now = this.#now();
-    return { tasks: boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now), lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs() };
+    const tasks = boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now);
+    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now) };
   }
   task(key: string): { task: Task; events: TaskEvent[] } | null {
     const task = this.#store.task(key);
@@ -67,6 +71,7 @@ export class BoardService {
   }
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }
   openTasksOf(lane: string): Task[] { return this.#store.openTasksOf(lane); }
+  tasksInProgress(): Task[] { return this.#store.tasksInProgress(); }
 
   // The principal's own changes are Commands (AC7): past the step-up window they are refused until he verifies again.
   principal(a: Authenticated): BoardActor | { problem: "step_up" } {
