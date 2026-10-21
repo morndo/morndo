@@ -3,13 +3,14 @@
 // point out (straight or through another link of the archive), anything written through a link, device nodes and
 // GNU extensions, a bad checksum, a truncated body,
 // unbounded expansion. Every refusal also checks that nothing landed outside dest: the reader's one write rule.
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { packTree, type TreeFile } from "../../../scripts/release/archive.ts";
-import { extractTar, TarRefused, type TarEntry } from "../src/adapters/tar-read.ts";
+import { extractTar, foldKey, TarRefused, type TarEntry } from "../src/adapters/tar-read.ts";
+import { foldKey as packFoldKey } from "../../../scripts/release/archive.ts";
 import { evilGz, paxBody, rawTar } from "./helpers/tar-fixtures.ts";
 
 let root = "";
@@ -154,6 +155,31 @@ describe("extractTar", () => {
   it("refuses a path seen twice", () =>
     refuse(evilGz([{ name: "a", body: Buffer.from("1") }, { name: "a", body: Buffer.from("2") }]), "duplicate", /duplicate.*a|a.*duplicate/));
 
+  // An I/O error is no verdict on the archive (review of 2026-10-21, second round): it comes back as itself, to be
+  // tried again later, never dressed as a refusal of the data. A corrupt gzip stream still is one.
+  it("an I/O error while writing comes back as itself, not as a refusal", async () => {
+    const dest = dir("read-only-dest");
+    mkdirSync(dest);
+    chmodSync(dest, 0o500);
+    const archive = dir("io.tar.gz");
+    writeFileSync(archive, evilGz([{ name: "a", body: Buffer.from("1") }]));
+    try {
+      const failure = await extractTar(archive, dest, { maxBytes: 1 << 20 }).then(() => null, (error: unknown) => error);
+      expect(failure).not.toBeInstanceOf(TarRefused);
+      expect((failure as NodeJS.ErrnoException).code).toBe("EACCES");
+    } finally { chmodSync(dest, 0o700); }
+  });
+  it("a missing archive is an I/O error too; a corrupt gzip stream is still refused", async () => {
+    const dest = dir("io-missing");
+    mkdirSync(dest);
+    const missing = await extractTar(dir("no-such.tar.gz"), dest, { maxBytes: 1 << 20 }).then(() => null, (error: unknown) => error);
+    expect(missing).not.toBeInstanceOf(TarRefused);
+    expect((missing as NodeJS.ErrnoException).code).toBe("ENOENT");
+    const corrupt = dir("corrupt.tar.gz");
+    writeFileSync(corrupt, Buffer.concat([gzipSync(Buffer.alloc(1024)).subarray(0, 10), Buffer.from("not deflate data at all")]));
+    await expect(extractTar(corrupt, dir("io-corrupt-dest"), { maxBytes: 1 << 20 })).rejects.toBeInstanceOf(TarRefused);
+  });
+
   // Two spellings one file system would treat as one name are refused on every platform: written as two entries
   // they are two files here and one file there, so the tree the signed list describes would not be the tree on disk.
   it("refuses two names that differ only by case", () =>
@@ -169,13 +195,42 @@ describe("extractTar", () => {
   // Full case folding, not only lower case (review of 2026-10-21): ß/ss, ﬁ/fi and ς/σ are one name to a folding file
   // system and to Unicode's case folding, so they fold to one key here too. Folding more refuses an odd archive at
   // worst; folding less lets two spellings of one file through.
-  for (const [a, b, label] of [["stra\u00dfe", "strasse", "sharp-s"], ["\ufb01le", "file", "fi-ligature"], ["\u03bb\u03bf\u03b3\u03bf\u03c2", "\u03bb\u03bf\u03b3\u03bf\u03c3", "final-sigma"]] as const) {
+  for (const [a, b, label] of [["stra\u00dfe", "strasse", "sharp-s"], ["\ufb01le", "file", "fi-ligature"], ["\u03bb\u03bf\u03b3\u03bf\u03c2", "\u03bb\u03bf\u03b3\u03bf\u03c3", "final-sigma"],
+    ["gro\u1e9e", "gross", "capital-sharp-s"], ["\u212aey", "key", "kelvin-sign"], ["\u0130d", "i\u0307d", "dotted-capital-i"]] as const) {
     it(`refuses two names that fold to one under full case folding (${label})`, () =>
       refuse(evilGz([
         { name: a, body: Buffer.from("one") },
         { name: b, body: Buffer.from("two") },
       ]), `fold-${label}`, /collide/));
   }
+  // NFKC on its own (review of 2026-10-21, second round): a superscript two and a full-width letter are the same
+  // name as their plain forms once compatibility forms are folded, with no case involved.
+  it("refuses two names that fold to one only by compatibility form (NFKC)", () =>
+    refuse(evilGz([
+      { name: "v\u00b2", body: Buffer.from("one") },
+      { name: "v2", body: Buffer.from("two") },
+    ]), "nfkc-collision", /collide/));
+
+  // The fold is a fixed point: folding a key again changes nothing, for every code point sampled and for short
+  // mixed strings, and the reader and the packer fold alike (the same rule written twice must not drift).
+  it("folds to a fixed point, the same way in the reader and the packer", () => {
+    const samples: string[] = [];
+    for (let c = 0; c < 0x30000; c += 1) {
+      if (c >= 0xd800 && c <= 0xdfff) continue;
+      if (c < 0x3000 || c % 17 === 0) samples.push(String.fromCodePoint(c));
+    }
+    let seed = 7;
+    const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+    for (let n = 0; n < 3000; n += 1) {
+      let word = "";
+      for (let k = 0; k < 1 + (next() % 4); k += 1) word += samples[next() % samples.length];
+      samples.push(word);
+    }
+    const unstable = samples.filter(x => foldKey(foldKey(x)) !== foldKey(x));
+    expect(unstable.map(x => Array.from(x, ch => ch.codePointAt(0)!.toString(16)).join(" "))).toEqual([]);
+    expect(samples.filter(x => foldKey(x) !== packFoldKey(x))).toEqual([]);
+  });
+
   it("accepts two names whose folded forms differ", async () => {
     const archive = dir("folded-ok.tar.gz");
     writeFileSync(archive, evilGz([

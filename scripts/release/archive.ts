@@ -105,12 +105,25 @@ export function linkLeaves(path: string, target: string): boolean {
 // A path's key: its spelling with case and Unicode form folded (below), the reader's rule of
 // 2026-10-21. A file system may treat two spellings as one name — APFS, macOS's default, folds both — so names
 // are compared by key here too, whatever system the archive is later unpacked on.
-// Folded as far as a file system might: NFKC first (compatibility forms such as the ﬁ ligature become fi), then upper
-// and back to lower case (ß becomes SS then ss; ς and σ both become Σ then σ), then NFC so composed and decomposed
-// accents meet. Folding more only ever refuses an odd archive; folding less would let two spellings of one file
-// through (review of 2026-10-21). No name in this repository's node_modules, apps, packages or Node 24.21.0's
-// distribution collides under this fold (22,921 paths, checked 2026-10-21).
-const foldKey = (path: string): string => path.normalize("NFKC").toUpperCase().toLowerCase().normalize("NFC");
+// Folded as far as a file system might, to a fixed point (review of 2026-10-21, second round): compatibility forms
+// first (NFKC: the ﬁ ligature becomes fi, a superscript two becomes 2), then lower, upper and lower case again (ẞ and
+// ß become ss, ς and σ become σ, the Kelvin sign becomes k), NFKC again, repeated until nothing changes, then NFC.
+// On Node 24.21.0 one round already settles every code point up to U+2FFFF; the bound is insurance for mixed
+// strings. Folding more only ever refuses an odd archive; folding less would let two spellings of one file
+// through. No name in this repository's node_modules, apps, packages or Node 24.21.0's distribution collides
+// under this fold (checked 2026-10-21).
+const FOLD_FORM = "NFKC";
+const FOLD_ROUNDS = 8;
+const foldStep = (s: string): string => s.toLowerCase().toUpperCase().toLowerCase().normalize(FOLD_FORM);
+export const foldKey = (path: string): string => {
+  let key = path.normalize(FOLD_FORM);
+  for (let round = 0; round < FOLD_ROUNDS; round += 1) {
+    const next = foldStep(key);
+    if (next === key) break;
+    key = next;
+  }
+  return key.normalize("NFC");
+};
 
 // The walk the reader (apps/updater/src/adapters/tar-read.ts) does once the archive is known: the target is
 // followed through the tree's own links, each ".." applying after the link before it was substituted (the

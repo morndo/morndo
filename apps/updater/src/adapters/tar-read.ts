@@ -32,12 +32,25 @@ const refuse = (reason: string): never => { throw new TarRefused(reason); };
 // are looked up by key too: a walk that spelled names exactly let `esc -> P/UP/..` climb out on a system where
 // P/UP names the link p/up (review of 2026-10-21). `normalize`, `toUpperCase` and `toLowerCase` are ECMAScript's
 // own, with no locale: https://tc39.es/ecma262/multipage/text-processing.html (read 2026-10-21).
-// Folded as far as a file system might: NFKC first (compatibility forms such as the ﬁ ligature become fi), then upper
-// and back to lower case (ß becomes SS then ss; ς and σ both become Σ then σ), then NFC so composed and decomposed
-// accents meet. Folding more only ever refuses an odd archive; folding less would let two spellings of one file
-// through (review of 2026-10-21). No name in this repository's node_modules, apps, packages or Node 24.21.0's
-// distribution collides under this fold (22,921 paths, checked 2026-10-21).
-const foldKey = (path: string): string => path.normalize("NFKC").toUpperCase().toLowerCase().normalize("NFC");
+// Folded as far as a file system might, to a fixed point (review of 2026-10-21, second round): compatibility forms
+// first (NFKC: the ﬁ ligature becomes fi, a superscript two becomes 2), then lower, upper and lower case again (ẞ and
+// ß become ss, ς and σ become σ, the Kelvin sign becomes k), NFKC again, repeated until nothing changes, then NFC.
+// On Node 24.21.0 one round already settles every code point up to U+2FFFF; the bound is insurance for mixed
+// strings. Folding more only ever refuses an odd archive; folding less would let two spellings of one file
+// through. No name in this repository's node_modules, apps, packages or Node 24.21.0's distribution collides
+// under this fold (checked 2026-10-21).
+const FOLD_FORM = "NFKC";
+const FOLD_ROUNDS = 8;
+const foldStep = (s: string): string => s.toLowerCase().toUpperCase().toLowerCase().normalize(FOLD_FORM);
+export const foldKey = (path: string): string => {
+  let key = path.normalize(FOLD_FORM);
+  for (let round = 0; round < FOLD_ROUNDS; round += 1) {
+    const next = foldStep(key);
+    if (next === key) break;
+    key = next;
+  }
+  return key.normalize("NFC");
+};
 
 // Strict UTF-8: a name that does not decode is refused, not guessed at — a lossy decode could alias two paths.
 const utf8 = new TextDecoder("utf-8", { fatal: true });
@@ -326,7 +339,16 @@ export async function extractTar(gzPath: string, dest: string, o: { maxBytes: nu
       closeFile();
       source.destroy();
       gunzip.destroy();
-      reject(error instanceof TarRefused ? error : new TarRefused(`reading the archive: ${error instanceof Error ? error.message : String(error)}`));
+      // A refusal stays one, and so does a gzip stream zlib cannot inflate (its codes start with Z_): both are the
+      // archive's fault. Anything else — a full disk, a read-only directory, an archive that vanished — is the
+      // machine's, and comes back as itself, so the check tries again later instead of refusing the release.
+      if (error instanceof TarRefused) { reject(error); return; }
+      const code = (error as { code?: unknown } | null)?.code;
+      if (typeof code === "string" && code.startsWith("Z_")) {
+        reject(new TarRefused(`reading the archive: ${error instanceof Error ? error.message : String(error)}`));
+        return;
+      }
+      reject(error);
     };
     source.on("error", fail);
     gunzip.on("error", fail);
