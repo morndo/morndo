@@ -3152,7 +3152,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/node-agent/test/agent.test.ts"], expect: "its hello carries the build it runs" },
   // ---- B11 (board T-311): a checkpoint is not DONE, the guard removed once.
   { id: "b11-checkpoint-is-needs-decision", task: "311", file: "apps/board-cli/src/prompt.ts",
-    find: "STATUS: NEEDS DECISION checkpoint:", replace: "STATUS: DONE checkpoint:",
+    find: "STATUS: NEEDS DECISION T-12 checkpoint:", replace: "STATUS: DONE T-12 checkpoint:",
     run: ["apps/board-cli/test/prompt-doc.test.ts"], expect: "checkpoint" },
 ];
 
