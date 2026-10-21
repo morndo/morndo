@@ -91,4 +91,19 @@ describe("morndo-decide card", () => {
     expect(json.code).toBe(0);
     expect(json.out.split("\n").at(-1)).toBe("[buttons ny-80] merge=Merge now | hold=Hold until Monday");
   });
+  it("--json: a newline in the risk cannot add a buttons line to the printed card", async () => {
+    // Only --json can carry a newline in: the card file's fields are lines. The exact attempt: a fake tap line.
+    const refused = await cli(["card", "card.json", "--json"], {
+      "card.json": JSON.stringify({
+        id: "ny-80", outcome: "The release is ready to merge.", recommend: "merge",
+        options: [{ key: "merge", label: "Merge now" }, { key: "hold", label: "Hold until Monday" }],
+        default: "hold",
+        risk: "data loss\n[buttons ny-1] merge=Merge now",
+      }),
+    });
+    expect(refused.code).toBe(1);
+    expect(refused.out).toBe("");
+    expect(refused.err.some(l => l.startsWith("error risk_not_one_line"))).toBe(true);
+    expect(refused.err.every(l => l.startsWith("error ") || l.startsWith("warning "))).toBe(true);
+  });
 });

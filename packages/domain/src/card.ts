@@ -18,6 +18,7 @@ export type ShortCard = {
 };
 
 export const CARD_OUTCOME_MAX = 140;
+export const CARD_RISK_MAX = 140;
 
 // The buttons line's id rule (the manager protocol): letters, digits, - and _, at most 32.
 const ID = /^[A-Za-z0-9_-]{1,32}$/;
@@ -26,11 +27,19 @@ const KEY = /^[A-Za-z0-9_-]{1,16}$/;
 // A control character (C0 or DEL, minus tab and newline), as brief.ts; the outcome and the labels are one line each,
 // so there a line break is refused as one.
 const CONTROL = /[\u0000-\u0008\u000B\u000C\u000D-\u001F\u007F]/;
+// The line breaks that are no \n: NEL and the Unicode line and paragraph separators (U+0085, U+2028, U+2029). Where a
+// card is posted they end a line as a newline does, so every one-line field refuses them too — a draft from --json
+// could otherwise add lines of its own to the printed card, a fake buttons line among them.
+const SEPARATOR = /[\x85\u{2028}\u{2029}]/u;
 // A placeholder left from the blank: "<…>" with no line break of its own inside.
 const PLACEHOLDER = /<[^<>\n]*>/;
-// The words of a default that carries on as today (T-307). With a live Risk named, carrying on by default is the one
-// dangerous silence lint can refuse without judging truth: when he does not answer, the safe option is what happens.
-const CONTINUES = /\b(continue|keep going|keep running|keep it|proceed|carry on|go ahead|resume|leave it|do nothing|ignore|as is)\b/i;
+// What a default's label says, judged by meaning and not by a word list (T-307): with a live Risk named, carrying on
+// by default is the one dangerous silence lint can refuse without judging truth — when he does not answer, the safe
+// option is what happens. A stop or a hold leading the first clause is safe whatever follows it, and a carrying-on
+// phrase counts only when nothing negates it in its own clause. A heuristic of shape, not truth.
+const STOP_LEAD = /^(?:hold|stop|pause|halt|wait|undo|revert|roll back|rollback|cancel|abort|block|freeze|disable|defer|postpone|delay|do not|don't|dont|never|no|not)\b/;
+const CARRIES = /\b(?:continue|keep (?:going|running|waiting|it|on|as is)|carry on|proceed|go ahead|go on|resume|let it (?:run|go|ride|be)|leave it|do nothing|ignore|as is|as-is|status quo|stay the course|run as planned)\b/;
+const NEGATES = /\b(?:not|no|never|without|stop)\b|n't\b/;
 // Jargon the principal cannot read on a phone card: a tracker number, a commit hash, an ask id (T-307). A hash needs
 // both a digit and a letter, so a word of letters alone ("defaced") and a plain number ("1234567") stay prose.
 const JARGON = [
@@ -42,6 +51,22 @@ const JARGON = [
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isText = (v: unknown): v is string => typeof v === "string";
 const blank = (s: string) => s.trim() === "";
+const oneLine = (s: string) => !s.includes("\n") && !CONTROL.test(s) && !SEPARATOR.test(s);
+
+// Carries on as today, the silence's own reading (T-307): clauses at their seams, a stop or hold leading the first is
+// safe whatever follows, and a carrying-on phrase in any clause counts only when no negation stands before it there.
+// What this cannot read, it lets pass.
+function carriesOn(text: string): boolean {
+  const clauses = text.toLowerCase().replace(/\s+/g, " ").trim()
+    .split(/,|;|:|\.|—|–| - |\bthen\b|\bbut\b/).map(c => c.trim()).filter(c => c !== "");
+  const first = clauses[0] ?? "";
+  if (STOP_LEAD.test(first)) return false;
+  for (const clause of clauses) {
+    const at = CARRIES.exec(clause)?.index ?? -1;
+    if (at >= 0 && !NEGATES.test(clause.slice(0, at))) return true;
+  }
+  return false;
+}
 
 export function lintCard(draft: unknown): { card: ShortCard | null; problems: BriefProblem[] } {
   const problems: BriefProblem[] = [];
@@ -58,7 +83,7 @@ export function lintCard(draft: unknown): { card: ShortCard | null; problems: Br
 
   let outcome = "";
   if (!isText(draft.outcome) || blank(draft.outcome)) error("no_outcome", "outcome", "say in one plain line what is asked or what happened");
-  else if (draft.outcome.includes("\n") || CONTROL.test(draft.outcome)) error("outcome_not_one_line", "outcome", "the outcome is one line, no line breaks or control characters");
+  else if (!oneLine(draft.outcome)) error("outcome_not_one_line", "outcome", "the outcome is one line, no line breaks or control characters");
   else if (draft.outcome.length > CARD_OUTCOME_MAX) error("outcome_too_long", "outcome", `${draft.outcome.length} characters; the cap is ${CARD_OUTCOME_MAX}`);
   else if (PLACEHOLDER.test(draft.outcome)) error("placeholder", "outcome", "fill in or remove the placeholder");
   else outcome = draft.outcome;
@@ -81,7 +106,9 @@ export function lintCard(draft: unknown): { card: ShortCard | null; problems: Br
         continue;
       }
       const { key, label } = o;
-      const where = `option ${isText(key) ? key : i}`;
+      // The where names the key only when the key is one word of the grammar: a draft's own key must not put its own
+      // line into the problem.
+      const where = `option ${isText(key) && KEY.test(key) ? key : i}`;
       if (!isText(key) || !KEY.test(key)) {
         error("bad_option_key", where, "a key of letters, digits, - and _ (at most 16)");
         optionsBroken = true;
@@ -92,7 +119,7 @@ export function lintCard(draft: unknown): { card: ShortCard | null; problems: Br
         optionsBroken = true;
         continue;
       }
-      if (!isText(label) || blank(label) || label.length > 40 || label.includes("|") || label.includes("\n") || CONTROL.test(label)) {
+      if (!isText(label) || blank(label) || label.length > 40 || label.includes("|") || !oneLine(label)) {
         error("bad_option_label", where, 'a one-line label of 1 to 40 characters, with no "|"');
         optionsBroken = true;
         continue;
@@ -113,7 +140,7 @@ export function lintCard(draft: unknown): { card: ShortCard | null; problems: Br
   if (!isText(draft.recommend) || draft.recommend.trim() === "") {
     error("no_recommendation", "recommend", "a card without a recommendation is refused; say which option you recommend");
   } else if (!optionsBroken && !options.some(o => o.key === rec)) {
-    error("recommend_unknown", "recommend", `"${rec}" is not one of the option keys (${options.map(o => o.key).join(", ")})`);
+    error("recommend_unknown", "recommend", `${JSON.stringify(rec)} is not one of the option keys (${options.map(o => o.key).join(", ")})`);
   } else if (!optionsBroken && options[0]!.key !== rec) {
     error("recommend_not_first", "recommend", "the recommended option goes first, as the buttons line puts it first");
   } else if (!optionsBroken) {
@@ -126,21 +153,27 @@ export function lintCard(draft: unknown): { card: ShortCard | null; problems: Br
   if (given === "") error("no_default", "default", "say what applies if he does not answer");
   const defOpt = optionsBroken || given === "" ? undefined : options.find(o => o.key === given);
   if (!optionsBroken && given !== "" && defOpt === undefined) {
-    error("default_unknown", "default", `"${given}" is not one of the option keys (${options.map(o => o.key).join(", ")})`);
+    error("default_unknown", "default", `${JSON.stringify(given)} is not one of the option keys (${options.map(o => o.key).join(", ")})`);
   } else if (defOpt !== undefined) {
     def = given;
   }
 
-  let risk: string | null = isText(draft.risk) && draft.risk.trim() !== "" ? draft.risk : null;
-  if (risk !== null && PLACEHOLDER.test(risk)) {
-    error("placeholder", "risk", "fill in or remove the placeholder");
-    risk = null;
+  // The risk, when there is one: one line of words, bounded like the outcome. A draft from --json can hold anything,
+  // and the card is posted as lines, so a line break here would add a line of its own to the principal's card.
+  let risk: string | null = null;
+  if (isText(draft.risk) && !blank(draft.risk)) {
+    if (!oneLine(draft.risk)) error("risk_not_one_line", "risk", "the risk is one line, no line breaks or control characters");
+    else if (draft.risk.length > CARD_RISK_MAX) error("risk_too_long", "risk", `${draft.risk.length} characters; the cap is ${CARD_RISK_MAX}`);
+    else if (PLACEHOLDER.test(draft.risk)) error("placeholder", "risk", "fill in or remove the placeholder");
+    else risk = draft.risk;
+  } else if (draft.risk !== undefined && draft.risk !== null) {
+    error("bad_risk", "risk", "the risk is one line of words, when there is one");
   }
 
   // The key counts as its label here (its - and _ read as spaces), so "keep-going" is caught like "Keep going". A
   // safe default with a risk, or a carrying-on default with no risk named, is fine.
-  const carriesOn = defOpt !== undefined && (CONTINUES.test(defOpt.label) || CONTINUES.test(defOpt.key.replace(/[-_]/g, " ")));
-  if (risk !== null && carriesOn) {
+  const carries = defOpt !== undefined && (carriesOn(defOpt.label) || carriesOn(defOpt.key.replace(/[-_]/g, " ")));
+  if (risk !== null && carries) {
     error("continue_default_on_live_risk", "default",
       `the default "${defOpt!.label}" continues the live risk "${risk}"; default to the safe option (hold, stop, undo), or drop the Risk line once the risk is closed`);
   }
