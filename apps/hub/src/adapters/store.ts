@@ -105,8 +105,22 @@ export class Store {
     // never corrupt (https://www.sqlite.org/pragma.html#pragma_synchronous); fleet core §16.4.
     this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
-    try { migrate(this.db); }                            // numbered migrations (migrations.ts); refuses a newer database
+    try { migrate(this.db); this.mendStateChangedAt(); }  // numbered migrations (migrations.ts); refuses a newer database
     catch (e) { this.db.close(); throw e; }
+  }
+
+  // A hub from before migration 23 opens a database at 23 as it is and saves a task without naming state_changed_at, so
+  // after a rollback and an upgrade again a task can stand at a later updated_at with an older state_changed_at than
+  // its last change of state (D6 would let a Run undo that move). The events say when status, assignee or description
+  // last changed (a comment, a title or a priority edit is none), and both hubs write them: a task whose updated_at is
+  // past its state_changed_at takes that time. A task with no such event keeps what it has.
+  private mendStateChangedAt() {
+    this.db.exec(`UPDATE board_tasks SET state_changed_at = COALESCE((
+        SELECT MAX(e.at) FROM board_events e WHERE e.key = board_tasks.key AND (
+          json_extract(e.change, '$.kind') IN ('created', 'moved', 'assigned')
+          OR (json_extract(e.change, '$.kind') = 'edited' AND json_extract(e.change, '$.description') IS NOT NULL))
+      ), state_changed_at)
+      WHERE state_changed_at IS NULL OR updated_at > state_changed_at`);
   }
 
   transaction<T>(fn: () => T): T { return this.db.transaction(fn)(); }

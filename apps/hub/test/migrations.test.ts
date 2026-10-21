@@ -239,6 +239,41 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     expect(() => MIGRATIONS[22]?.up(db)).not.toThrow();
   });
 
+  // A hub from before migration 23 opens a database at 23 as it is (the floor is additive), and its saves leave
+  // state_changed_at as it was. Opened again by this hub, no Run may read as newer than a move made meanwhile (D6).
+  it("the Store takes state_changed_at from the task's events when a hub that does not know it saved the task since", () => {
+    const dir = tempDir();
+    const db = new Database(join(dir, "morndo.db"));
+    migrate(db);
+    const task = db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, created_at, updated_at, state_changed_at, created_by, rev)
+      VALUES (?, ?, 'A task', '', ?, 'builder', 'normal', 100, ?, ?, '{"kind":"console"}', ?)`);
+    const event = db.prepare("INSERT INTO board_events (key, rev, at, actor, change) VALUES (?, ?, ?, '{\"kind\":\"console\"}', ?)");
+    // T-1: this hub's own save of a comment after the move: updated_at is later, state_changed_at is right.
+    task.run("T-1", 1, "doing", 300, 250, 3);
+    event.run("T-1", 1, 100, '{"kind":"created","status":"todo","assignee":"builder"}');
+    event.run("T-1", 2, 250, '{"kind":"moved","from":"todo","to":"doing","reason":null}');
+    event.run("T-1", 3, 300, '{"kind":"commented","text":"Halfway"}');
+    // T-2: the older hub moved it to review (event at 400) and a person's comment came after (500); state_changed_at is still 250.
+    task.run("T-2", 2, "review", 500, 250, 5);
+    event.run("T-2", 1, 100, '{"kind":"created","status":"todo","assignee":"builder"}');
+    event.run("T-2", 2, 250, '{"kind":"moved","from":"todo","to":"doing","reason":null}');
+    event.run("T-2", 3, 300, '{"kind":"commented","text":"Halfway"}');
+    event.run("T-2", 4, 400, '{"kind":"moved","from":"doing","to":"review","reason":"done"}');
+    event.run("T-2", 5, 500, '{"kind":"commented","text":"Looks fine"}');
+    // T-3: the older hub edited the description (600), then the title (700): only the description is a change of state.
+    task.run("T-3", 3, "doing", 700, 250, 4);
+    event.run("T-3", 1, 100, '{"kind":"created","status":"todo","assignee":"builder"}');
+    event.run("T-3", 2, 250, '{"kind":"moved","from":"todo","to":"doing","reason":null}');
+    event.run("T-3", 3, 600, '{"kind":"edited","description":"More"}');
+    event.run("T-3", 4, 700, '{"kind":"edited","title":"Renamed"}');
+    // T-4: a task with no events keeps what it has.
+    task.run("T-4", 4, "doing", 900, 800, 1);
+    db.close();
+    const store = new Store(dir);
+    expect(store.tasks().map(t => [t.key, t.stateChangedAt])).toEqual([["T-1", 250], ["T-2", 400], ["T-3", 600], ["T-4", 800]]);
+    store.close();
+  });
+
   it("the Store migrates the database it opens", () => {
     const dir = tempDir();
     legacyDb(dir).close();
