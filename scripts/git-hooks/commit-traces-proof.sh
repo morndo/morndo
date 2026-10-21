@@ -3,6 +3,9 @@
 # git command, inside this throwaway repository. One check runs the pre-push
 # hook itself, so its own selection, not a hand-written rev-list, decides
 # which commits are re-checked.
+# The long-history cases plant each bad kind alone in 61 clean commits and
+# count the forks the checker makes over 150 clean ones: a few for the whole
+# range, not one set per commit.
 set -eu
 
 root=$(git rev-parse --show-toplevel)
@@ -189,6 +192,212 @@ git reset -q --hard "$legacy_mid"
 git -c user.name='review[bot]' -c user.email=bot@example.invalid commit -q --allow-empty -m 'legacy bot'
 legacy_bot=$(git rev-parse HEAD)
 expect_code 1 "a bot name in a pinned commit still fails" env COMMIT_TRACES_LEGACY="$legacy_bot" sh "$checker" range "$legacy_mid..$legacy_bot"
+
+# A long history, built without a working tree: one commit-tree per commit.
+# one prints the id of a commit with the given identity and subject, on the
+# empty tree, so every chain below is a chain of empty commits.
+git init -q "$scratch/long"
+cd "$scratch/long"
+tree=$(git mktree </dev/null)
+one() {
+  # one <parent or -> <author name> <author mail> <committer name> <committer mail> <subject>
+  if [ "$1" = - ]; then
+    printf '%s\n' "$6" | env GIT_AUTHOR_NAME="$2" GIT_AUTHOR_EMAIL="$3" \
+      GIT_COMMITTER_NAME="$4" GIT_COMMITTER_EMAIL="$5" git commit-tree "$tree"
+  else
+    printf '%s\n' "$6" | env GIT_AUTHOR_NAME="$2" GIT_AUTHOR_EMAIL="$3" \
+      GIT_COMMITTER_NAME="$4" GIT_COMMITTER_EMAIL="$5" git commit-tree "$tree" -p "$1"
+  fi
+}
+
+# history <pos> <identity and subject of the planted commit>: 61 commits in a
+# fresh chain, the pos-th (first, middle or last) planted with the given
+# identity and subject, the rest clean; sets tip and planted.
+history() {
+  pos=$1
+  shift
+  parent=-
+  planted=
+  i=1
+  while [ "$i" -le 61 ]; do
+    if [ "$i" -eq "$pos" ]; then
+      parent=$(one "$parent" "$@")
+      planted=$parent
+    else
+      parent=$(one "$parent" Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com "note $i")
+    fi
+    i=$((i + 1))
+  done
+  tip=$parent
+}
+
+# plant <label> <pos> <mails bad or clean> <identity and subject...>: the
+# planted commit alone must fail the whole history, named by its full id, and
+# mails fails with it only when the plant is a bad mail.
+plant() {
+  label=$1
+  pos=$2
+  mails=$3
+  shift 3
+  history "$pos" "$@"
+  set +e
+  out=$(sh "$checker" range "$tip" 2>&1 >/dev/null)
+  code=$?
+  set -e
+  [ "$code" -eq 1 ] || fail "$label: range should exit 1, got $code"
+  printf '%s\n' "$out" | grep -q "$planted" || fail "$label: range should name the planted commit, got: $out"
+  if [ "$mails" = bad ]; then
+    set +e
+    out=$(sh "$checker" mails "$tip" 2>&1 >/dev/null)
+    code=$?
+    set -e
+    [ "$code" -eq 1 ] || fail "$label: mails should exit 1, got $code"
+    printf '%s\n' "$out" | grep -q "$planted" || fail "$label: mails should name the planted commit, got: $out"
+  else
+    sh "$checker" mails "$tip" >/dev/null 2>&1 || fail "$label: mails should exit 0"
+  fi
+}
+
+plant 'an assistant trailer, first' 1 clean Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com \
+  "$(printf 'note\n\nCo-authored-by: Claude <a@example.invalid>')"
+plant 'a vendor mail in the message' 23 clean Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com \
+  'note dev@anthropic.com'
+plant 'generated with, middle' 31 clean Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com \
+  "$(printf 'note\n\nGenerated with Example')"
+plant 'a robot emoji' 47 clean Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com \
+  "note $(printf '\360\237\244\226')"
+plant 'a bot author' 12 clean 'review[bot]' bot@users.noreply.github.com Ada ada@users.noreply.github.com 'note'
+plant 'an assistant author name' 55 clean Claude ada@users.noreply.github.com Ada ada@users.noreply.github.com 'note'
+plant 'a plain author mail' 7 bad Ada dev@example.invalid Ada ada@users.noreply.github.com 'note'
+plant 'a plain committer mail' 40 bad Ada ada@users.noreply.github.com Ada dev@example.invalid 'note'
+plant 'a web-flow author, last' 61 bad Ada noreply@github.com Ada ada@users.noreply.github.com 'note'
+
+# A web-flow committer is the one allowed exception; it passes both modes.
+history 18 Ada ada@users.noreply.github.com Ada noreply@github.com 'note'
+sh "$checker" range "$tip" >/dev/null 2>&1 || fail "a web-flow committer should pass range"
+sh "$checker" mails "$tip" >/dev/null 2>&1 || fail "a web-flow committer should pass mails"
+
+# A message holding the record separator (0x1e) is judged the same way twice
+# and never hangs; with a bad word in it, it is not silently skipped.
+sep=$(printf '\036')
+history 33 Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com "note ${sep} tail"
+set +e
+timeout 60 sh "$checker" range "$tip" >/dev/null 2>&1
+one_code=$?
+timeout 60 sh "$checker" range "$tip" >/dev/null 2>&1
+two_code=$?
+set -e
+[ "$one_code" -eq "$two_code" ] || fail "a record separator in a message: judged differently, $one_code then $two_code"
+[ "$one_code" -le 1 ] || fail "a record separator in a message should exit 0 or 1, got $one_code"
+history 26 Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com \
+  "$(printf 'note %s tail\n\nGenerated with Example' "$sep")"
+set +e
+timeout 60 sh "$checker" range "$tip" >/dev/null 2>&1
+code=$?
+set -e
+[ "$code" -eq 1 ] || fail "a record separator with a bad word should exit 1, got $code"
+
+# The whole range is a few forks, not one set per commit: 150 clean commits
+# under shims that write down every git, grep, awk and sed run.
+git init -q "$scratch/many"
+cd "$scratch/many"
+tree=$(git mktree </dev/null)
+parent=-
+i=1
+while [ "$i" -le 150 ]; do
+  parent=$(one - Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com "note $i")
+  i=$((i + 1))
+done
+many=$parent
+
+real_git=$(command -v git)
+real_grep=$(command -v grep)
+real_awk=$(command -v awk)
+real_sed=$(command -v sed)
+flog="$scratch/forks"
+mkdir -p "$flog" "$scratch/bin"
+cat > "$scratch/bin/git" <<EOF
+#!/bin/sh
+echo x >> "$flog/git"
+exec "$real_git" "$@"
+EOF
+cat > "$scratch/bin/grep" <<EOF
+#!/bin/sh
+echo x >> "$flog/grep"
+exec "$real_grep" "$@"
+EOF
+cat > "$scratch/bin/awk" <<EOF
+#!/bin/sh
+echo x >> "$flog/awk"
+exec "$real_awk" "$@"
+EOF
+cat > "$scratch/bin/sed" <<EOF
+#!/bin/sh
+echo x >> "$flog/sed"
+exec "$real_sed" "$@"
+EOF
+chmod +x "$scratch/bin/git" "$scratch/bin/grep" "$scratch/bin/awk" "$scratch/bin/sed"
+
+shimmed() {
+  # shimmed <mode>: run the checker under the counting shims, counts reset
+  rm -f "$flog/git" "$flog/grep" "$flog/awk" "$flog/sed"
+  PATH="$scratch/bin:$PATH" sh "$checker" "$1" "$many" >/dev/null 2>&1
+}
+counts() { wc -l < "$flog/$1" | tr -d ' '; }
+
+shimmed mails || fail "mails over 150 clean commits should exit 0"
+gits=$(counts git)
+greps=$(counts grep)
+awks=$(counts awk)
+seds=$(counts sed)
+[ "$gits" -le 3 ] || fail "mails makes at most 3 git runs, it made $gits"
+[ "$greps" -le 5 ] || fail "mails makes at most 5 grep runs, it made $greps"
+[ "$awks" -le 3 ] || fail "mails makes at most 3 awk runs, it made $awks"
+[ "$seds" -le 1 ] || fail "mails makes at most 1 sed run, it made $seds"
+shimmed range || fail "range over 150 clean commits should exit 0"
+gits=$(counts git)
+greps=$(counts grep)
+awks=$(counts awk)
+seds=$(counts sed)
+[ "$gits" -le 4 ] || fail "range makes at most 4 git runs, it made $gits"
+[ "$greps" -le 8 ] || fail "range makes at most 8 grep runs, it made $greps"
+[ "$awks" -le 3 ] || fail "range makes at most 3 awk runs, it made $awks"
+[ "$seds" -le 1 ] || fail "range makes at most 1 sed run, it made $seds"
+
+# A failing awk, or a git log that fails, must refuse: a clean pass would
+# hide a broken tool behind a good verdict.
+git init -q "$scratch/fail"
+cd "$scratch/fail"
+tree=$(git mktree </dev/null)
+fail_root=$(one - Ada ada@users.noreply.github.com Ada ada@users.noreply.github.com 'note 1')
+fail_bad=$(one "$fail_root" 'review[bot]' bot@users.noreply.github.com Ada ada@users.noreply.github.com 'note 2')
+
+cat > "$scratch/bin/awk" <<'EOF'
+#!/bin/sh
+exit 3
+EOF
+set +e
+PATH="$scratch/bin:$PATH" sh "$checker" mails "$fail_bad" >/dev/null 2>&1
+code=$?
+PATH="$scratch/bin:$PATH" sh "$checker" range "$fail_bad" >/dev/null 2>&1
+two_code=$?
+set -e
+cat > "$scratch/bin/git" <<EOF
+#!/bin/sh
+case " \$* " in
+  *" log "*) exit 1 ;;
+esac
+exec "$real_git" "\$@"
+EOF
+PATH="$scratch/bin:$PATH" sh "$checker" mails "$fail_bad" >/dev/null 2>&1
+code=$?
+PATH="$scratch/bin:$PATH" sh "$checker" range "$fail_bad" >/dev/null 2>&1
+two_code=$?
+set -e
+[ "$code" -ne 0 ] || fail "a failing awk should fail mails"
+[ "$two_code" -ne 0 ] || fail "a failing awk should fail range"
+[ "$code" -ne 0 ] || fail "a failing git log should fail mails"
+[ "$two_code" -ne 0 ] || fail "a failing git log should fail range"
 
 cd "$root"
 set +e
