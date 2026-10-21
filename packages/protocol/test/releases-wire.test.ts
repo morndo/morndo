@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { ChannelFeed, KeySet, Manifest } from "@morndo/domain";
 import {
   ChannelFeedSchema, FeedEntrySchema, FileListSchema, FleetHealthSchema, HealthReportSchema, HubHealthSchema,
-  KeySetSchema, ManifestSchema, NodeStatusSchema, SafePointReportSchema,
+  KeySetSchema, ManifestSchema, NodeStatusSchema, SafePointReportSchema, UpdateConfigSchema, UpdateStatusSchema,
 } from "../src/releases.ts";
 
 const parse = <S extends { safeParse: (d: unknown) => { success: boolean } }>(schema: S, doc: unknown) =>
@@ -139,5 +139,66 @@ describe("health and safe-point shapes (§6.3, §6.4)", () => {
     expect(SafePointReportSchema.safeParse({ service: "hub" }).success).toBe(false);
     expect(HealthReportSchema.safeParse({ service: "hub", version: "0.5.0", checks: { "/api/health": true, schema: true } }).success).toBe(true);
     expect(parse(HealthReportSchema, { service: "hub", version: "0.5.0", checks: { "/api/health": "yes" } })).toBe(false);
+  });
+});
+
+describe("~/.config/morndo-update/config.json (§8.3)", () => {
+  const full = { channel: "latest", mode: "stage", window: "02:00-06:00", pin: "1.2.3-rc.1", soakMinutes: 45 };
+  it("a full config and an empty file both decode, every field on its own", () => {
+    const r = UpdateConfigSchema.safeParse(full);
+    expect(r.success).toBe(true);
+    if (r.success) expect(r.data).toEqual(full);
+    const empty = UpdateConfigSchema.safeParse({});
+    expect(empty.success).toBe(true);
+    if (empty.success) expect(empty.data).toEqual({});
+    for (const field of ["channel", "mode", "window", "pin", "soakMinutes"] as const)
+      expect(parse(UpdateConfigSchema, { [field]: full[field] }), field).toBe(true);
+  });
+  it("negative control: an hour that isn't one, a mode the domain doesn't know, an unknown field, a soak over a week", () => {
+    expect(parse(UpdateConfigSchema, { ...full, window: "25:00-06:00" })).toBe(false);
+    expect(parse(UpdateConfigSchema, { ...full, window: "02:00-2:00" })).toBe(false);
+    expect(parse(UpdateConfigSchema, { ...full, mode: "auto" })).toBe(false);
+    expect(parse(UpdateConfigSchema, { ...full, extra: true })).toBe(false);
+    expect(parse(UpdateConfigSchema, { soakMinutes: -1 })).toBe(false);
+    expect(parse(UpdateConfigSchema, { soakMinutes: 10081 })).toBe(false);
+    expect(parse(UpdateConfigSchema, { soakMinutes: 0 })).toBe(true);
+    expect(parse(UpdateConfigSchema, { soakMinutes: 10080 })).toBe(true);
+  });
+});
+
+describe("morndo update --status --json (§8.1)", () => {
+  const check = (at: string, outcome: string) => ({ at, channel: "stable" as const, outcome, detail: `check ${outcome}`, version: null });
+  const doc = {
+    installMethod: "updater", channel: "stable", mode: "apply", pin: "1.2.3", window: "02:00-06:00",
+    current: "0.4.3", previous: "0.4.2", good: "0.4.3", staged: "0.5.0",
+    feed: { channel: "stable", seq: 42, expiresAt: "2026-11-16T10:05:00Z" },
+    keySet: { version: 1, expiresAt: "2027-11-02T10:00:00Z" },
+    lastCheck: check("2026-11-02T10:05:00Z", "ok"),
+    checks: [check("2026-11-02T10:05:00Z", "ok"), check("2026-11-01T10:05:00Z", "skipped_not_newer")],
+  };
+  it("a status sample decodes, its times the ISO strings as printed, not numbers", () => {
+    const r = UpdateStatusSchema.safeParse(doc);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.installMethod).toBe("updater");
+      expect(r.data.feed?.seq).toBe(42);
+      expect(r.data.feed?.expiresAt).toBe("2026-11-16T10:05:00Z");
+      expect(r.data.keySet?.expiresAt).toBe("2027-11-02T10:00:00Z");
+      expect(r.data.lastCheck?.at).toBe("2026-11-02T10:05:00Z");
+      expect(r.data.checks).toHaveLength(2);
+    }
+  });
+  it("a machine with no feed, no key set and no checks yet is all nulls", () => {
+    const bare = { ...doc, pin: null, window: null, current: null, previous: null, good: null, staged: null,
+      feed: null, keySet: null, lastCheck: null, checks: [] };
+    expect(UpdateStatusSchema.safeParse(bare).success).toBe(true);
+    expect(parse(UpdateStatusSchema, { ...doc, installMethod: "apt" })).toBe(false);
+    expect(parse(UpdateStatusSchema, { ...doc, lastCheck: { ...doc.lastCheck, outcome: "" } })).toBe(false);
+    expect(parse(UpdateStatusSchema, { ...doc, lastCheck: { ...doc.lastCheck, at: "2026-11-02T12:05:00+02:00" } })).toBe(false);
+  });
+  it("negative control: an unknown field, or eleven checks, is refused", () => {
+    expect(parse(UpdateStatusSchema, { ...doc, extra: true })).toBe(false);
+    expect(parse(UpdateStatusSchema, { ...doc, checks: Array.from({ length: 11 }, () => doc.checks[0]) })).toBe(false);
+    expect(parse(UpdateStatusSchema, { ...doc, checks: Array.from({ length: 10 }, () => doc.checks[0]) })).toBe(true);
   });
 });
