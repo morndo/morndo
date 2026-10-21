@@ -31,6 +31,8 @@
 //     recorded, RECONCILIATION.md ruling 19);
 //   - answers once the window has closed or the pane is back at its shell, or `uncertain` after 30 s
 //     (LIMITS.laneStopWaitMs).
+//   Once the exit is confirmed with the pane back at its shell, the window is closed too (a window left at a dead lane's
+//   shell is clutter), unless `keepWindow` is true. A window that closed itself needs nothing.
 //   A pane already at its shell (no live Claude Code session there, whatever a session's `status` said: ruling 11; no box
 //   and no menu, and the pane's foreground process is the shell) is answered at once. A blank or loading screen is
 //   still starting, so /exit is typed. The prompt's last character is not the test: starship and pure end in ❯,
@@ -174,8 +176,18 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
     return shellInForeground(command);
   }
 
-  async function exit(lane: Lane, ctx: EffectContext): Promise<Outcome<"lane.stop">> {
-    if ((await standing(lane.windowId)) !== false) return ok<"lane.stop">({ ok: true });   // closed, or no Claude Code there
+  // The exit is confirmed, with the window gone or the pane at its shell: the shell's window is closed unless it is kept.
+  async function settle(lane: Lane, seen: "gone" | boolean, keepWindow: boolean | undefined): Promise<Outcome<"lane.stop">> {
+    if (seen === true && keepWindow !== true) {
+      await tmuxRun(socket, ["kill-window", "-t", lane.windowId]);
+      await d.inventory.refresh();
+    }
+    return ok<"lane.stop">({ ok: true });
+  }
+
+  async function exit(lane: Lane, ctx: EffectContext, keepWindow: boolean | undefined): Promise<Outcome<"lane.stop">> {
+    const first = await standing(lane.windowId);
+    if (first !== false) return settle(lane, first, keepWindow);   // closed, or no Claude Code there
     const ref = parseWorkerId(lane.workerId);
     if (ref === null || ctx.key === undefined) return fail("internal", "lane.stop could not name the pane to type /exit into");
     const expect = { server: ref.server, window: lane.window };
@@ -188,7 +200,8 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
     let answered = false;
     while (performance.now() < end) {
       await sleep(w.pollMs);
-      if ((await standing(lane.windowId)) !== false) return ok<"lane.stop">({ ok: true });
+      const seen = await standing(lane.windowId);
+      if (seen !== false) return settle(lane, seen, keepWindow);
       if (answered) continue;
       const shown = await screen(lane.pane);
       if (shown === null || !EXIT_PROMPT.test(shown)) continue;
@@ -260,7 +273,7 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
         await d.inventory.refresh();
         return ok<"lane.stop">({ ok: true });
       }
-      return exit(lanes[0] as Lane, ctx);
+      return exit(lanes[0] as Lane, ctx, a.keepWindow);
     }),
   };
 }

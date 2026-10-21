@@ -188,6 +188,13 @@ describe("lane.stop (spec §5)", () => {
     expect(windows()).toContain("manager");
   });
 
+  it("the manager is refused, with keepWindow too, and its window stays", async () => {
+    const h = harness({ command: ["claude"], via: "direct" });
+    t.tmux("new-window", "-d", "-t", "=main:", "-n", "manager", SHELL);
+    expect(await h.call("lane.stop", { name: "manager", keepWindow: true }, { key: "lanes:x3" })).toMatchObject({ ok: false, error: { code: "denied", executed: "no" } });
+    expect(windows()).toContain("manager");
+  });
+
   it("mode exit types /exit, answers Claude Code's 'Exit and stop tasks' with 1, and answers once the window has closed", async () => {
     const dir = boxIn("tasks");
     const h = harness({ command: [process.execPath, FIXTURE, dir, "--tasks"], via: "direct" });
@@ -198,13 +205,23 @@ describe("lane.stop (spec §5)", () => {
     expect(submitted(dir)).toEqual(["/exit"]);
   });
 
-  it("mode exit on a lane started from the shell answers once the pane is back at its shell, and the window stays", async () => {
+  it("stop closes the window after the agent exits (the pane back at its shell)", async () => {
     const dir = boxIn("plain");
     const h = harness({ command: [process.execPath, FIXTURE, dir], via: "shell" }, { shellMs: 5000 });
     const r = await start(h, { name: "shell-lane" }, "lanes:e3");
     expect(await showsBox(r.workerId)).toBe(true);
     expect(await h.call("lane.stop", { name: "shell-lane" }, { key: "lanes:e4", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
-    expect(windows()).toContain("shell-lane");
+    expect(windows()).not.toContain("shell-lane");
+    expect(submitted(dir)).toEqual(["/exit"]);
+  });
+
+  it("--keep-window leaves it: keepWindow leaves the window at its shell after the exit", async () => {
+    const dir = boxIn("kept");
+    const h = harness({ command: [process.execPath, FIXTURE, dir], via: "shell" }, { shellMs: 5000 });
+    const r = await start(h, { name: "kept-lane" }, "lanes:k1");
+    expect(await showsBox(r.workerId)).toBe(true);
+    expect(await h.call("lane.stop", { name: "kept-lane", keepWindow: true }, { key: "lanes:k2", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
+    expect(windows()).toContain("kept-lane");
     expect(show("display-message", "-p", "-t", paneOf(r.workerId), "#{pane_current_command}")).toBe("bash");
     expect(submitted(dir)).toEqual(["/exit"]);
   });
@@ -233,7 +250,7 @@ describe("lane.stop (spec §5)", () => {
     expect(windows()).toContain("running");
   });
 
-  it("mode exit on a pane at a ❯ prompt with the shell in the foreground answers at once and types nothing", async () => {
+  it("mode exit on a pane at a ❯ prompt with the shell in the foreground answers at once, types nothing and closes the window", async () => {
     const h = harness({ command: ["claude"], via: "direct" });
     const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-n", "starship", SHELL).trim();
     t.tmux("send-keys", "-t", pane, "PS1='❯ '", "Enter");
@@ -243,8 +260,7 @@ describe("lane.stop (spec §5)", () => {
     })).toBe(true);
     expect(show("display-message", "-p", "-t", pane, "#{pane_current_command}")).toBe("bash");
     expect(await h.call("lane.stop", { name: "starship" }, { key: "lanes:star" })).toMatchObject({ ok: true, result: { ok: true } });
-    expect(windows()).toContain("starship");
-    expect(t.tmux("capture-pane", "-p", "-t", pane)).not.toContain("/exit");
+    expect(windows()).not.toContain("starship");
   });
 
   it("mode exit does not treat a blank starting screen as back at its shell", async () => {
@@ -255,13 +271,12 @@ describe("lane.stop (spec §5)", () => {
     expect(t.tmux("capture-pane", "-p", "-t", pane)).not.toContain("/exit");
   });
 
-  it("mode exit on a pane already at its shell answers at once and types nothing", async () => {
+  it("mode exit on a pane already at its shell answers at once, types nothing and closes the window", async () => {
     const h = harness({ command: ["claude"], via: "direct" });
     const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-n", "bare", SHELL).trim();
     expect(await until(() => t.tmux("capture-pane", "-p", "-t", pane).includes("$"))).toBe(true);
     expect(await h.call("lane.stop", { name: "bare" }, { key: "lanes:b1" })).toMatchObject({ ok: true, result: { ok: true } });
-    expect(windows()).toContain("bare");
-    expect(t.tmux("capture-pane", "-p", "-t", pane)).not.toContain("/exit");
+    expect(windows()).not.toContain("bare");
   });
 });
 
