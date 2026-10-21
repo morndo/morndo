@@ -36,6 +36,7 @@ EOF
 cat > "$scratch/bin/grep" <<EOF
 #!/bin/sh
 echo x >> "$log/grep"
+case " \$* " in *" -n -o "*) [ -z "\${FAIL_GREP:-}" ] || exit 2 ;; esac
 exec "$real_grep" "\$@"
 EOF
 cat > "$scratch/bin/gitleaks" <<EOF
@@ -43,7 +44,20 @@ cat > "$scratch/bin/gitleaks" <<EOF
 case "\$1" in detect) echo "\$*" >> "$log/gitleaks" ;; esac
 exec "$real_gitleaks" "\$@"
 EOF
-chmod +x "$scratch/bin/git" "$scratch/bin/grep" "$scratch/bin/gitleaks"
+# awk, sort and grep fail when asked (FAIL_AWK, FAIL_SORT, FAIL_GREP): awk only for the hook's join of matches to files.
+real_awk=$(command -v awk)
+real_sort=$(command -v sort)
+cat > "$scratch/bin/awk" <<EOF
+#!/bin/sh
+case "\$1" in *'NR == FNR'*) [ -z "\${FAIL_AWK:-}" ] || exit 3 ;; esac
+exec "$real_awk" "\$@"
+EOF
+cat > "$scratch/bin/sort" <<EOF
+#!/bin/sh
+[ -z "\${FAIL_SORT:-}" ] || exit 3
+exec "$real_sort" "\$@"
+EOF
+chmod +x "$scratch/bin/git" "$scratch/bin/grep" "$scratch/bin/gitleaks" "$scratch/bin/awk" "$scratch/bin/sort"
 
 zero=0000000000000000000000000000000000000000
 repo="$scratch/repo"
@@ -105,20 +119,58 @@ leaks=$(wc -l < "$log/gitleaks" | tr -d ' ')
 greps=$(wc -l < "$log/grep" | tr -d ' ')
 [ "$greps" -lt 60 ] || fail "$greps greps for 600 added lines: the searches follow the lines"
 
-# A home path in a commit both refs share still fails, once.
+# A home path in a commit two refs with different tips share still fails: the
+# refs are a (the planted commit) and d (one commit more on top of it).
 git checkout -q a
 printf '/%s/%s/notes\n' home example-user > planted-note.txt
 git add planted-note.txt
 commit_ok -m 'feat: planted'
-git checkout -q -b c
-git checkout -q a
 a=$(git rev-parse a)
-b=$(git rev-parse c)
+git checkout -q -b d
+printf 'after\n' > after.txt
+git add after.txt
+commit_ok -m 'feat: after'
+b=$(git rev-parse d)
+[ "$a" != "$b" ] || fail "the two refs need different tips"
 set +e
 push > "$scratch/out" 2>&1
 code=$?
 set -e
 [ "$code" -eq 1 ] || fail "a planted path in a shared commit should exit 1, got $code"
 "$real_grep" -q 'planted-note.txt' "$scratch/out" || fail "the hook names the planted file"
+
+# Every step of the search fails closed: an awk, sort or grep that fails must
+# refuse the push that has a planted path in it, not let it through.
+for tool in AWK SORT GREP; do
+  export "FAIL_$tool=1"
+  set +e
+  push > "$scratch/out" 2>&1
+  code=$?
+  set -e
+  unset "FAIL_$tool"
+  [ "$code" -ne 0 ] || fail "a failing $tool let a planted path through (exit 0)"
+done
+
+# A local leak pattern matches a non-ASCII character as it does in the user's
+# locale: with a UTF-8 locale, a dot in the pattern is one letter, ü included.
+if printf 'ü' | LC_ALL=C.UTF-8 "$real_grep" -q '^.$' 2>/dev/null; then
+  git checkout -q -b e main
+  printf 'Müller wrote this\n' > name-note.txt
+  git add name-note.txt
+  commit_ok -m 'feat: a name'
+  a=$(git rev-parse e)
+  b=$(git rev-parse e)
+  mkdir -p "$repo/.git/info"
+  printf '%s\n' 'M.ller' > "$repo/.git/info/leak-patterns"
+  set +e
+  LC_ALL=C.UTF-8 push > "$scratch/out" 2>&1
+  code=$?
+  set -e
+  rm -f "$repo/.git/info/leak-patterns"
+  [ "$code" -eq 1 ] || fail "a pattern M.ller should reject Müller in a UTF-8 locale, got $code"
+  "$real_grep" -q 'name-note.txt' "$scratch/out" || fail "the hook names the file with the local pattern"
+else
+  echo "skipped: no C.UTF-8 locale for the non-ASCII case"
+fi
 
 echo "pre-push once proof: ok"

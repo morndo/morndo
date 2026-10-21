@@ -41,13 +41,14 @@ patterns=$(mktemp)
 paths=$(mktemp)
 patch=$(mktemp)
 hits=$(mktemp)
+pairs=$(mktemp)
 joined=$(mktemp)
 all=$(mktemp)
 plain=$(mktemp)
 merges=$(mktemp)
 addf=$(mktemp)
 addt=$(mktemp)
-trap 'rm -f "$patterns" "$paths" "$patch" "$hits" "$joined" "$all" "$plain" "$merges" "$addf" "$addt"' EXIT
+trap 'rm -f "$patterns" "$paths" "$patch" "$hits" "$pairs" "$joined" "$all" "$plain" "$merges" "$addf" "$addt"' EXIT
 tab=$(printf '\t')
 # The rev-list arguments that select the commits the push adds, set by scan_push.
 range=''
@@ -161,15 +162,20 @@ search_failed() {
 # files, one line each: the file it is in ($addf) and its text ($addt). One
 # pass over the texts finds the matches; only the matches are looked at one by
 # one. An allowlisted or fixture match does not hide a later match, or a local
-# pattern, on that same line. A search error aborts.
+# pattern, on that same line. A search error aborts. The searches run in the
+# caller's locale, as they always did: a dot in a local pattern is one
+# character there, ü included.
 check_added() {
   [ -s "$addt" ] || return 0
   status=0
-  LC_ALL=C grep -a -n -o -E -e "$home_re" -e "$key_re" -e "$token_re" "$addt" > "$hits" || status=$?
+  grep -a -n -o -E -e "$home_re" -e "$key_re" -e "$token_re" "$addt" > "$hits" || status=$?
   [ "$status" -le 1 ] || search_failed
   if [ "$status" -eq 0 ]; then
-    # "<file><tab><match>", each pair once.
-    awk 'NR == FNR { f[FNR] = $0; next } { i = index($0, ":"); printf "%s\t%s\n", f[substr($0, 1, i - 1) + 0], substr($0, i + 1) }' "$addf" "$hits" | LC_ALL=C sort -u > "$joined"
+    # "<file><tab><match>", each pair once. No pipe: a pipeline answers with its last command, and a failing awk
+    # would leave nothing to look at and let the push through. sort compares bytes, so two matches are one only when
+    # they are the same bytes.
+    awk 'NR == FNR { f[FNR] = $0; next } { i = index($0, ":"); printf "%s\t%s\n", f[substr($0, 1, i - 1) + 0], substr($0, i + 1) }' "$addf" "$hits" > "$pairs" || search_failed
+    LC_ALL=C sort -u "$pairs" > "$joined" || search_failed
     while IFS= read -r rec || [ -n "$rec" ]; do
       file=${rec%%"$tab"*}
       one=${rec#*"$tab"}
@@ -181,7 +187,7 @@ check_added() {
   fi
   [ -s "$patterns" ] || return 0
   status=0
-  first=$(LC_ALL=C grep -a -n -m 1 -E -f "$patterns" "$addt") || status=$?
+  first=$(grep -a -n -m 1 -E -f "$patterns" "$addt") || status=$?
   [ "$status" -ne 0 ] || reject "local leak pattern in $(sed -n "${first%%:*}p" "$addf")"
   [ "$status" -eq 1 ] || search_failed
 }
@@ -208,12 +214,13 @@ scan_file() {
   [ "$status" -eq 1 ] || search_failed
 }
 
-# New-file length from a hunk header. Omitted count means one line.
+# One added line, for check_added: its file on fd 3, its text on fd 4 (collect_patch opens both).
 add_line() {
   printf '%s\n' "$1" >&3
   printf '%s\n' "$2" >&4
 }
 
+# New-file length from a hunk header. Omitted count means one line.
 hunk_new_lines() {
   rest=${1#*+}
   rest=${rest%% @@*}
