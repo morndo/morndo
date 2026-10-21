@@ -40,9 +40,12 @@ export type ServiceHealth = z.infer<typeof ServiceHealth>;
 export const ReadyOnlyHealth = z.strictObject({ ready: z.boolean() });
 
 // The agent's status.json: version, ready, and the fleet connection state, plus the fields it already writes.
+// inFlight is optional: an older agent's status file has none, and an updater reading one then answers no_answer for
+// the node's safe point — it cannot vouch that nothing is in flight — instead of guessing quiet.
 export const NodeStatusHealth = z.looseObject({
   version: ProductVersion,
   ready: z.boolean(),
   state: z.enum(["stopped", "connecting", "online", "backoff", "refused", "conflict", "unsupported"]),
+  inFlight: z.exactOptional(z.array(InFlightItem).check(z.maxLength(100))),
 });
 export type NodeStatusHealth = z.infer<typeof NodeStatusHealth>;

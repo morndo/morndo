@@ -107,7 +107,10 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   const budget = o.diskBudgetBytes ?? LIMITS.spoolMaxBytes;
   const held = (): number => files.bytes() + ops.inbox.bytes();
   const room = (): number => budget - spool.bytes() - held();
-  const flight = o.flight ?? new Flight();
+  // The agent's in-flight work lands in status.json the moment it changes (updates design §6.3): an updater watching
+  // for a safe point reads it while the work runs, not at the next health tick. saveStatus never throws (its write is
+  // caught), so a failing disk cannot disturb the op that began or ended the item.
+  const flight = o.flight ?? new Flight({ onChange: () => saveStatus() });
   const watch = new HoldWatch({
     path: holdFile(config.home),
     service: "node",
@@ -155,6 +158,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     ...(conn?.status() ?? { state: "stopped", since: Date.now(), connEpoch: null, lastClose: null, retryInMs: null }),
     node: config.node, instanceId, pid: process.pid, spoolDepth: spool.depth(), drops: spool.drops,
     version: productVersion(), ready: true,
+    inFlight: flight.list().slice(0, 100),               // the protocol's cap; what a restart would interrupt
     ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
   });
   const saveStatus = () => {

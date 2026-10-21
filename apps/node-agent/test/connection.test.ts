@@ -95,7 +95,7 @@ describe("close codes", () => {
     expect(fleet.connections()).toBe(1);
     const s = c.conn.status();
     expect(s.retryInMs).toBeGreaterThan(200_000);                           // 5 minutes ± 20 % away
-    const text = formatStatus({ node: "pc", fleetUrl: fleet.url }, { ...s, node: "pc", instanceId: INSTANCE, pid: process.pid, spoolDepth: 0, drops: 0 });
+    const text = formatStatus({ node: "pc", fleetUrl: fleet.url }, { ...s, node: "pc", instanceId: INSTANCE, pid: process.pid, spoolDepth: 0, drops: 0, inFlight: [] });
     expect(text).toMatch(/conflict: another agent with this node's key is connected \(4409\)\. This one tries again every 5 minutes/);
     expect(text).toMatch(/retry in\s+\d+ s/);
   });
@@ -190,7 +190,7 @@ describe("status text", () => {
   it("shows jobs disabled by a config error, with the reason", () => {
     const text = formatStatus({ node: "pc", fleetUrl: "ws://127.0.0.1/agent" }, {
       state: "online", since: Date.now(), connEpoch: 1, lastClose: null, retryInMs: null,
-      node: "pc", instanceId: INSTANCE, pid: process.pid, spoolDepth: 0, drops: 0,
+      node: "pc", instanceId: INSTANCE, pid: process.pid, spoolDepth: 0, drops: 0, inFlight: [],
       jobs: "disabled by config error: policy.json: jobs.classes.default: limit must be a whole number from 1 to 1000",
     });
     expect(text).toMatch(/jobs\s+disabled by config error: policy\.json: jobs\.classes\.default: limit/);

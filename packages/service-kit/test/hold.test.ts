@@ -91,4 +91,13 @@ describe("Flight", () => {
     end();
     expect(flight.list()).toEqual([]);
   });
+  it("calls onChange after an item begins and after it ends, with the list already moved", () => {
+    const sizes: number[] = [];
+    const flight = new Flight({ onChange: () => sizes.push(flight.list().length) });
+    const end = flight.begin({ kind: "pane.send", id: "hub:1" });
+    expect(sizes).toEqual([1]);
+    end();
+    end();                                            // a second end of the same item changes nothing
+    expect(sizes).toEqual([1, 0]);
+  });
 });

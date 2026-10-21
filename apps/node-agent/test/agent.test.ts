@@ -5,7 +5,8 @@
 import Database from "better-sqlite3";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CAP_LONG_TEXT, LIMITS, NodeStatusHealth } from "@morndo/protocol";
@@ -477,6 +478,90 @@ describe("test hooks over the connection (test-hooks.ts)", () => {
     expect((await post("/cc", { session_id: "s" })).status).toBe(204);
     expect(agent.spool.depth()).toBe(0);
     expect(await fleet.waitFor(m => m.t === "ev.health" && (m.health as { drops: number }).drops === 2)).toBeTruthy();
+  });
+});
+
+// §6.3's node blocker, made visible: the agent's status.json lists its in-flight work as it changes, and a stop begun
+// mid-paste (what SIGTERM calls) finishes the paste, types it exactly once and refuses new work as `updating`. The
+// wrapper stands in for `tmux` on PATH, as pane-ops.test.ts's does: it holds every paste (load-buffer) ~300 ms and
+// counts it, so a stop can begin while one runs.
+describe("in-flight work, in status.json and across a stop (§6.3)", () => {
+  const wrappers: string[] = [];
+  afterEach(() => { for (const w of wrappers.splice(0)) rmSync(w, { recursive: true, force: true }); });
+
+  // A lane "api" running the stand-in for Claude Code's input box, and what was submitted in it.
+  async function claudeLane() {
+    const dir = join(home.home, "lane");
+    mkdirSync(dir);
+    t.tmux("new-session", "-d", "-s", "main", "-n", "api", "-x", "100", "-y", "20", `${process.execPath} ${FIXTURE} ${dir}`);
+    expect(await until(() => t.tmux("capture-pane", "-p", "-t", "=main:0").includes("❯"))).toBe(true);
+    const file = join(dir, "submitted.jsonl");
+    return () => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+  }
+  // The fake tmux: each paste sleeps ~300 ms before the real binary runs, and is counted.
+  function slowTmux() {
+    const bin = mkdtempSync(join(tmpdir(), "morndo-wrap-"));
+    wrappers.push(bin);
+    const pastes = join(bin, "pastes");
+    const real = execFileSync("which", ["tmux"], { encoding: "utf8" }).trim();
+    writeFileSync(join(bin, "tmux"), `#!/bin/sh\ncase " $* " in *" load-buffer "*) echo x >> "${pastes}"; sleep 0.3 ;; esac\nexec ${real} "$@"\n`);
+    chmodSync(join(bin, "tmux"), 0o755);
+    return { bin, pasteCount: () => (existsSync(pastes) ? readFileSync(pastes, "utf8").trim().split("\n").filter(Boolean).length : 0) };
+  }
+  const inFlightOf = () => {
+    try {
+      const body = JSON.parse(readFileSync(agentPaths(home.home).statusFile, "utf8")) as { inFlight?: { kind: string; id: string }[] };
+      return body.inFlight ?? [];
+    } catch { return []; }
+  };
+  const sendPaste = (id: string, key: string, workerId: string, text: string) =>
+    fleet.send({ t: "req", id, op: "pane.send", args: { workerId, text, expect: { server: workerId.split(".")[1], window: "api" } }, timeoutMs: 10_000, key });
+
+  it("status.json lists the paste while it is typed, and nothing after", async () => {
+    const submitted = await claudeLane();
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    const workerId = ((await fleet.waitFor(m => m.t === "ev.inventory")).panes as { workerId: string }[])[0]?.workerId ?? "";
+    const text = `a paste the status outlasts\n${"mid-paste line\n".repeat(6)}`;
+    const slow = slowTmux();
+    const saved = process.env.PATH;
+    process.env.PATH = `${slow.bin}:${saved}`;
+    try {
+      sendPaste("paste", "hub:listed-1", workerId, text);
+      expect(await until(() => inFlightOf().some(i => i.kind === "pane.send" && i.id === "hub:listed-1"), 2000, 5)).toBe(true);
+      expect(await fleet.waitFor(m => m.t === "res" && m.id === "paste", 10_000)).toMatchObject({ ok: true, result: { problem: null } });
+    } finally { process.env.PATH = saved; }
+    expect(inFlightOf()).toEqual([]);                 // the end is saved too, before the answer even travels
+    expect(submitted()).toEqual([text]);
+  });
+
+  it("a SIGTERM mid-paste finishes it", async () => {
+    const submitted = await claudeLane();
+    const { agent } = await runAgent(config);
+    let stopping: Promise<void> | null = null;
+    stops.push(() => { stopping ??= agent.stop(); return stopping; });
+    const workerId = ((await fleet.waitFor(m => m.t === "ev.inventory")).panes as { workerId: string }[])[0]?.workerId ?? "";
+    const text = `typed while the agent stops\n${"and finished once\n".repeat(6)}`;
+    const slow = slowTmux();
+    const saved = process.env.PATH;
+    process.env.PATH = `${slow.bin}:${saved}`;
+    try {
+      sendPaste("paste", "hub:sigterm-1", workerId, text);
+      expect(await until(() => inFlightOf().some(i => i.kind === "pane.send"), 2000, 5)).toBe(true);
+      stopping = agent.stop();                        // what SIGTERM calls, begun while the paste is in flight
+      fleet.send({ t: "req", id: "during", op: "lane.start", args: { name: "late", cwd: join(home.home, "w") }, timeoutMs: 5000, key: "hub:during" });
+      expect(await fleet.waitFor(m => m.t === "res" && m.id === "during", 2000)).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
+      let resolved = false;
+      void stopping.then(() => { resolved = true; });
+      expect(inFlightOf().some(i => i.id === "hub:sigterm-1"), "the paste is still in flight").toBe(true);
+      expect(resolved, "the stop waits for it").toBe(false);
+      await stopping;
+      expect(submitted()).toEqual([text]);            // typed exactly once
+      expect(slow.pasteCount()).toBe(1);              // the fake tmux saw the text once
+    } finally { process.env.PATH = saved; }
+    const db = new Database(config.dbPath, { readonly: true });
+    try { expect((db.prepare("SELECT state FROM done_keys WHERE key = 'hub:sigterm-1'").get() as { state: string }).state).toBe("done"); }
+    finally { db.close(); }
   });
 });
 
