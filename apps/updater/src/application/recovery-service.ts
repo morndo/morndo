@@ -9,7 +9,8 @@ import {
   runRollback, timingOf,
 } from "./apply-steps.ts";
 import type {
-  AlertSink, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper, UpdateStore,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper,
+  UpdateStore,
 } from "./ports.ts";
 
 export type RecoverOutcome =
@@ -25,25 +26,33 @@ export type RecoverOutcome =
 export class RecoveryService {
   readonly #p: {
     services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
-    installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
+    alerts: AlertSink; timing?: Partial<ApplyTiming>;
   };
 
   constructor(p: {
     services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
-    installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
+    alerts: AlertSink; timing?: Partial<ApplyTiming>;
   }) {
     this.#p = p;
   }
 
   async recover(): Promise<RecoverOutcome> {
-    const { services, probe, backup, revocations, hold, installer, store, clock, sleeper, alerts } = this.#p;
+    const { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts } = this.#p;
     const timing = timingOf(this.#p.timing);
-    const deps: ApplyDeps = { services, probe, backup, revocations, hold, installer, store, clock, sleeper, alerts };
+    const deps: ApplyDeps = { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts };
     const lock = store.tryLock();                   // §6.6: whatever runs next takes the apply lock first
     if (lock === null) return { kind: "busy" };
     try {
       const open = store.openUpdate();
-      if (open === null) return { kind: "nothing_open" };
+      if (open === null) {
+        // The lock in hand and nothing open: no apply is standing, so a mark still on disk is the window a dead
+        // process left between its record's end and the mark's own removal (§5). It comes off here, or the
+        // recovery unit — which runs only while the mark exists — would run forever with nothing to do.
+        applying.clear();
+        return { kind: "nothing_open" };
+      }
       const layout = installer.layout();
       const current = layout.method === "updater" && layout.current !== null ? parseVersion(layout.current) : null;
       if (current === null) {

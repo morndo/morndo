@@ -169,6 +169,14 @@ export interface HoldWriter {
   write(h: { services: UpdateService[]; reason: "drain" | "probation"; version: string; since: number }): void;
   clear(): void;
 }
+// §5's `applying` mark: present from the drain until the Update ends in a terminal state — committed, abandoned,
+// rolled back, rollback_failed — and the only thing the recovery unit runs for. What keeps the mark is what keeps
+// the record open: a rollback waiting on tmux, and an attempt a dead process left mid-step.
+export interface ApplyingMarker {
+  set(updateId: string): void;
+  clear(): void;
+  present(): boolean;
+}
 export interface Sleeper { sleep(ms: number): Promise<void> }
 export type AlertKind =
   | "update_rolled_back" | "update_rollback_failed" | "update_rollback_waiting" | "update_deferred"

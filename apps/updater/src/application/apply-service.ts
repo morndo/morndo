@@ -11,11 +11,11 @@ import { ManifestSchema } from "@morndo/protocol";
 import { CHECKOUT_SENTENCE } from "./check-service.ts";
 import {
   ApplyInterrupted, type ApplyDeps, type ApplyTiming, type StepCtx, abandonAttempt, baselineBefore, continueAfterSwap,
-  done, mark, runRollback, startServices, stopServices, takeBackups, timingOf, waitSafePoint,
+  done, finish, mark, runRollback, startServices, stopServices, takeBackups, timingOf, waitSafePoint,
 } from "./apply-steps.ts";
 import type {
-  AlertSink, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, SchemaInspector, ServiceManager, Sleeper,
-  StoredUpdate, UpdateStore, Verifier,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, SchemaInspector,
+  ServiceManager, Sleeper, StoredUpdate, UpdateStore, Verifier,
 } from "./ports.ts";
 
 export type ApplyOutcome =
@@ -46,22 +46,22 @@ const decode = <T>(schema: Decoder<T>, text: string): T | null => {
 export class ApplyService {
   readonly #p: {
     services: ServiceManager; probe: RoleProbe; schemas: SchemaInspector; backup: Backup; revocations: Revocations;
-    hold: HoldWriter; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
-    verifier: Pick<Verifier, "sha256">; timing?: Partial<ApplyTiming>;
+    hold: HoldWriter; applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock;
+    sleeper: Sleeper; alerts: AlertSink; verifier: Pick<Verifier, "sha256">; timing?: Partial<ApplyTiming>;
   };
 
   constructor(p: {
     services: ServiceManager; probe: RoleProbe; schemas: SchemaInspector; backup: Backup; revocations: Revocations;
-    hold: HoldWriter; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
-    verifier: Pick<Verifier, "sha256">; timing?: Partial<ApplyTiming>;
+    hold: HoldWriter; applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock;
+    sleeper: Sleeper; alerts: AlertSink; verifier: Pick<Verifier, "sha256">; timing?: Partial<ApplyTiming>;
   }) {
     this.#p = p;
   }
 
   async apply(o: { now: boolean }): Promise<ApplyOutcome> {
-    const { services, probe, schemas, backup, revocations, hold, installer, store, clock, sleeper, alerts, verifier } = this.#p;
+    const { services, probe, schemas, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts, verifier } = this.#p;
     const timing = timingOf(this.#p.timing);
-    const deps: ApplyDeps = { services, probe, backup, revocations, hold, installer, store, clock, sleeper, alerts };
+    const deps: ApplyDeps = { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts };
 
     // §6.2 step 1, the plan — nothing below touches the machine. Only an install this updater made is ours (RL14).
     const layout = installer.layout();
@@ -124,17 +124,20 @@ export class ApplyService {
       // the poll ends at the drain's wall and the answer is deferred, with nothing written and nothing stopped.
       const blockers = await waitSafePoint(ctx, running, { now: o.now });
       if (blockers !== null) {
-        store.finishUpdate(ctx.u.id, "abandoned", clock.now());
+        finish(ctx, "abandoned");
         return { kind: "deferred", reason: "the safe point never came", blockers };
       }
       if (await services.tmuxInAgentUnit()) {        // RL13: this updater never saws off its own branch
-        store.finishUpdate(ctx.u.id, "abandoned", clock.now());
+        finish(ctx, "abandoned");
         return { kind: "deferred", reason: "tmux_in_agent_unit", blockers: [] };
       }
 
       // Step 3: the hold goes on, and the last of the in-flight work drains inside its wall. A drain that never
       // finishes is a deferral, not a failure: the hold comes off and the attempt ends, to try again later.
       mark(ctx, "draining");
+      // §5's `applying` mark, before the hold it belongs beside: from the drain to the end, its presence is what
+      // the recovery unit runs on, so a process that dies past this point is always somebody's to finish.
+      applying.set(ctx.u.id);
       hold.write({ services: [...running], reason: "drain", version: staged.version, since: clock.now() });
       // The services re-read the hold every second; the drain is judged only once each has had a full interval to
       // see it and stop taking new work (review of 2026-10-21).
@@ -142,7 +145,7 @@ export class ApplyService {
       const drainBlockers = await waitSafePoint(ctx, running, { now: o.now });
       if (drainBlockers !== null) {
         hold.clear();
-        store.finishUpdate(ctx.u.id, "abandoned", clock.now());
+        finish(ctx, "abandoned");
         return { kind: "deferred", reason: "the drain did not finish", blockers: drainBlockers };
       }
       done(ctx, "draining");
@@ -158,7 +161,7 @@ export class ApplyService {
       const abandon = async (reason: string): Promise<ApplyOutcome> => {
         hold.clear();
         await startServices(deps, running);
-        store.finishUpdate(ctx.u.id, "abandoned", clock.now());
+        finish(ctx, "abandoned");
         return { kind: "abandoned", reason };
       };
       mark(ctx, "backing_up");

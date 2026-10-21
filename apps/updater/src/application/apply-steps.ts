@@ -9,8 +9,8 @@ import {
   type Update, type UpdateMark, type UpdateService, type UpdateState, type Version,
 } from "@morndo/domain";
 import type {
-  AlertSink, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper, StoredUpdate,
-  UpdateStore,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper,
+  StoredUpdate, UpdateStore,
 } from "./ports.ts";
 
 // What the tests kill with: an interruption, not a failure. Every catch below lets it through — a dead process
@@ -25,7 +25,8 @@ export class ApplyInterrupted extends Error {
 // The ports every shared step needs; the apply and the recovery services each hold their own view of these.
 export type ApplyDeps = {
   services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
-  installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
+  applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
+  alerts: AlertSink;
 };
 
 // §6.2's walls: the drain's patience, the polls, §6.4's health deadline and probation.
@@ -73,6 +74,15 @@ export function moveTo(ctx: StepCtx, state: UpdateState): void {
   if (!moved.ok) throw new Error(`cannot move ${ctx.u.state} to ${state}`);
   ctx.u = withKept(ctx.u, moved.value);
   ctx.deps.store.saveUpdate(ctx.u);
+}
+
+// The attempt's one ending: the record closes, then the `applying` mark comes off (§5) — the recovery unit runs
+// only while the mark exists, so every terminal state takes it along. What keeps the mark is what keeps the record
+// open: a rollback waiting on tmux, and an attempt a dead process left mid-step. The record closes first: a crash
+// in between leaves nothing open under a mark, which the next recovery clears with nothing left to do.
+export function finish(ctx: StepCtx, state: "committed" | "abandoned" | "rolled_back" | "rollback_failed"): void {
+  ctx.deps.store.finishUpdate(ctx.u.id, state, ctx.deps.clock.now());
+  ctx.deps.applying.clear();
 }
 
 // A record that predates its plan (or a hand-made one) plans nothing: no database migrates, nothing is held or
@@ -263,7 +273,7 @@ export async function runRollback(ctx: StepCtx, o: {
   const failed = (reason: string): RollbackOutcome => {
     deps.alerts.raise("update_rollback_failed", reason);
     done(ctx, "rolling_back");
-    deps.store.finishUpdate(ctx.u.id, "rollback_failed", deps.clock.now());
+    finish(ctx, "rollback_failed");
     return { kind: "rollback_failed", reason };
   };
   mark(ctx, "rolling_back");
@@ -318,7 +328,7 @@ export async function runRollback(ctx: StepCtx, o: {
     deps.store.recordHalt(targetText, o.cause, deps.clock.now());      // RL12: the fleet halts the Rollout (PR 6)
     deps.alerts.raise("update_rolled_back", `${targetText} rolled back to ${oldText}: ${o.cause}`);
     done(ctx, "rolling_back");
-    deps.store.finishUpdate(ctx.u.id, "rolled_back", deps.clock.now());
+    finish(ctx, "rolled_back");
     return { kind: "rolled_back", version: oldText, reason: o.cause };
   } catch (error) {
     if (error instanceof ApplyInterrupted) throw error;
@@ -336,7 +346,7 @@ export async function abandonAttempt(ctx: StepCtx, running: readonly UpdateServi
   if (ctx.u.mark === "swapping") await deps.services.renderUnits(formatVersion(ctx.u.preUpdate.current));
   deps.hold.clear();
   await startServices(deps, running);
-  deps.store.finishUpdate(ctx.u.id, "abandoned", deps.clock.now());
+  finish(ctx, "abandoned");
 }
 
 // ---- the commit (§6.2 step 10)
@@ -353,7 +363,7 @@ export async function runCommit(ctx: StepCtx): Promise<{ kind: "committed"; vers
   deps.installer.setGood(targetText);
   deps.store.recordCommitted(targetText, deps.clock.now());
   done(ctx, "committing");
-  deps.store.finishUpdate(ctx.u.id, "committed", deps.clock.now());
+  finish(ctx, "committed");
   const layout = deps.installer.layout();
   deps.installer.prune([targetText, oldText, layout.good ?? targetText]);
   const committedIds = deps.store.recentUpdates(50)

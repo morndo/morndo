@@ -43,6 +43,22 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(w.store.recentUpdates(1)[0]!.doneMarks).toEqual(["draining", "stopping", "backing_up", "swapping", "starting", "committing"]);
   });
 
+  it("carries the applying mark from the drain to the commit (§5)", async () => {
+    // §5: the mark exists from the drain until the Update commits, and the recovery unit runs only while it does.
+    // The probe stands where a service would: what it observes under the drain's hold is what the machine saw.
+    const w = await buildApplyWorld(scratch);
+    const seen: boolean[] = [];
+    w.probe.safePointScript = (s) => {
+      if (holdText(w.holdPath) !== null) seen.push(w.applying.present());
+      return { service: s, blockers: [] };
+    };
+    expect(w.applying.present(), "nothing is marked before the drain").toBe(false);
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(seen.length, "the drain read the safe point under the hold").toBeGreaterThan(0);
+    expect(seen.every(present => present), "the mark stood through the drain").toBe(true);
+    expect(w.applying.present(), "the mark is gone once committed").toBe(false);
+  });
+
   it("apply waits for in-flight deliveries", async () => {
     // A delivery being typed on the node: the probe reports it for the first three polls, then nothing.
     const first = await buildApplyWorld(scratch);
@@ -77,6 +93,7 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(third.tape.some(entry => entry.startsWith("stop:")), "nothing was stopped").toBe(false);
     expect(third.tape).toContain("hold:drain");              // the hold had been written…
     expect(holdText(third.holdPath)).toBeNull();             // …and is lifted again
+    expect(third.applying.present(), "a deferred attempt leaves no mark (§5)").toBe(false);
     expect(third.current()).toBe(A);
     expect(third.store.openUpdate(), "the attempt ended, not left open").toBeNull();
     expect(third.store.recentUpdates(1)[0]!.state).toBe("abandoned");
@@ -133,6 +150,7 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(out).toMatchObject({ kind: "deferred", reason: "tmux_in_agent_unit" });
     expect(w.tape.some(entry => entry.startsWith("stop:"))).toBe(false);
     expect(w.tape).not.toContain("hold:drain");
+    expect(w.applying.present(), "the drain never began, so no mark (§5)").toBe(false);
     expect(w.current()).toBe(A);
     expect(w.store.openUpdate()).toBeNull();
   });
@@ -156,6 +174,7 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(w.tape.some(entry => entry.startsWith("renderUnits:")), "nothing was swapped").toBe(false);
     expect(w.current()).toBe(A);
     expect(holdText(w.holdPath)).toBeNull();
+    expect(w.applying.present(), "an abandoned attempt leaves no mark (§5)").toBe(false);
     expect(w.store.recentUpdates(1)[0]!.state).toBe("abandoned");
   });
 
@@ -172,6 +191,7 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(out.reason).toContain("hub");
     expect(w.current()).toBe(A);
     expect(w.store.badVersions()).toContain(B);
+    expect(w.applying.present(), "a rolled-back attempt leaves no mark (§5)").toBe(false);
     expect(w.tape.filter(entry => entry.startsWith("backup:")), "nothing migrated, nothing backed up").toEqual([]);
   });
 
@@ -222,6 +242,7 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(w.tape.filter(entry => entry === "stop:node").length).toBe(2);
     expect(w.tape.filter(entry => entry === "stop:fleet").length).toBe(2);
     expect(w.store.recentUpdates(1)[0]!.state).toBe("rollback_failed");
+    expect(w.applying.present(), "a failed rollback still ended, so no mark (§5)").toBe(false);
     expect(w.current()).toBe(A);                             // the swap back stands; the services are the manager's
   });
 
@@ -250,12 +271,14 @@ describe("the apply service (§6.2–§6.5)", () => {
     // the record stays open at rolling_back (§6.5 step 1): the recovery unit picks the rollback up again
     expect(w.store.openUpdate()).toMatchObject({ state: "rolling_back", mark: "rolling_back" });
     expect(w.store.recentUpdates(1)[0]!.finishedAt).toBeNull();
+    expect(w.applying.present(), "a waiting rollback keeps its mark: recovery must run again (§5)").toBe(true);
     // tmux moves out of the unit; the recovery finishes what the apply could not
     w.services.tmuxIn = false;
     const recovered = await w.recover().recover();
     expect(recovered).toMatchObject({ kind: "rolled_back", version: A });
     expect(w.current()).toBe(A);
     expect(w.installer.layout()).toMatchObject({ current: A, previous: null });   // the pair there was before
+    expect(w.applying.present(), "the mark is gone once the rollback ended").toBe(false);
     expect(w.store.openUpdate()).toBeNull();
     expect(w.store.recentUpdates(1)[0]!.state).toBe("rolled_back");
     expect(w.store.badVersions()).toContain(B);

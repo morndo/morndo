@@ -14,8 +14,10 @@ import { ApplyInterrupted } from "../../src/application/apply-steps.ts";
 import { ApplyService } from "../../src/application/apply-service.ts";
 import { RecoveryService } from "../../src/application/recovery-service.ts";
 import type {
-  AlertKind, AlertSink, Backup, Clock, HoldWriter, Installer, Layout, RoleProbe, ServiceManager, Sleeper,
+  AlertKind, AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Layout, RoleProbe, ServiceManager,
+  Sleeper,
 } from "../../src/application/ports.ts";
+import { ApplyingFileMarker } from "../../src/adapters/applying-file.ts";
 import { SqliteBackup } from "../../src/adapters/backup-sqlite.ts";
 import { HoldFileWriter } from "../../src/adapters/hold-file.ts";
 import { DirsInstaller } from "../../src/adapters/installer-dirs.ts";
@@ -320,6 +322,9 @@ export type ApplyWorld = {
   backup: TapedBackup;
   revocations: SqliteRevocations;
   hold: TapedHold;
+  /** The `applying` mark (§5), real like the hold: the recovery unit runs only while it exists. */
+  applying: ApplyingMarker;
+  applyingPath: string;
   timeline: FakeTimeline;
   alerts: AlertRecorder;
   verifier: SshSigVerifier;
@@ -408,6 +413,7 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   const probe = new FakeProbe({ tape, die, currentOf: current });
   const realHold = new HoldFileWriter({ home, env: {} });
   const hold = new TapedHold({ tape, die, real: realHold });
+  const applying = new ApplyingFileMarker({ state: paths.state });
   const backup = new TapedBackup({ tape, die, real: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }) });
   const schemas = new SqliteSchemas({ paths: dbPaths });
   const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") });
@@ -418,16 +424,18 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   return {
     home, releases: paths.releases, holdPath: holdFile(home, {}), updateDb: paths.db, dbPaths,
     backupsDir: join(paths.state, "backups"), tape, die, store, installer, services, probe, schemas, backup, revocations, hold,
+    applying, applyingPath: join(paths.state, "applying"),
     timeline, alerts, verifier, a, b,
     apply: () => new ApplyService({
-      services, probe, schemas, backup, revocations, hold, installer, store, clock: timeline, sleeper: timeline, alerts, verifier,
-      timing: TIMING,
+      services, probe, schemas, backup, revocations, hold, applying, installer, store, clock: timeline, sleeper: timeline,
+      alerts, verifier, timing: TIMING,
     }),
     recover: () => new RecoveryService({
-      services, probe, backup, revocations, hold, installer, store, clock: timeline, sleeper: timeline, alerts, timing: TIMING,
+      services, probe, backup, revocations, hold, applying, installer, store, clock: timeline, sleeper: timeline, alerts,
+      timing: TIMING,
     }),
     recoverWithLockHeld: () => new RecoveryService({
-      services, probe, backup, revocations, hold, installer,
+      services, probe, backup, revocations, hold, applying, installer,
       store: new LockHeldStore({ db: paths.db, lock: paths.lock }),
       clock: timeline, sleeper: timeline, alerts, timing: TIMING,
     }),
