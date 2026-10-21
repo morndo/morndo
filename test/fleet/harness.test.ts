@@ -4,6 +4,7 @@
 // - stopAll leaves no socket file behind for a tmux server it started (Task 17 runs it after each test).
 // - a fleet whose child exits at once rejects within seconds, with the child's log, not after the 15 s wait.
 import { existsSync } from "node:fs";
+import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanEnv, startFleet, stopAll, tmuxServer } from "../fleet-harness.ts";
@@ -53,5 +54,19 @@ describe("the harness", () => {
     const start = performance.now();
     await expect(startFleet({ subscribers: bad })).rejects.toThrow(/the fleet exited during startup/);
     expect(performance.now() - start).toBeLessThan(5000);
+  });
+  it("startFleet asks for another port, and serves, when the one it was handed was taken in between", async () => {
+    // The port freePort() answers is free only until something else binds it (main CI run 39673017200: EADDRINUSE).
+    const taken = createServer();
+    await new Promise<void>(resolve => taken.listen(0, "127.0.0.1", resolve));
+    const busy = (taken.address() as AddressInfo).port;
+    try {
+      const fleet = await startFleet({ port: async () => busy });
+      expect(fleet.portsTried).toHaveLength(2);
+      expect(fleet.portsTried[0]).toBe(busy);
+      expect(fleet.port).not.toBe(busy);
+      expect(fleet.config.publicUrl).toBe(`ws://127.0.0.1:${fleet.port}/agent`);
+      expect((await fleet.client.caps()).api).toContain(1);
+    } finally { await new Promise<void>(resolve => taken.close(() => resolve())); }
   });
 });
