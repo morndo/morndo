@@ -1,0 +1,10 @@
+# One apply, as its own unit (design §5): started by the tick, by `morndo update`, or by the fleet's
+# update.apply operation, so that no service this apply stops is its parent — a parent's stop would take the
+# apply with it. Started on demand, so it carries no [Install] section. %i is the instance (systemd.unit(5),
+# systemd 255): the Version to apply.
+[Unit]
+Description=Apply a staged Morndo release (%i)
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/morndo-update update apply --version %i

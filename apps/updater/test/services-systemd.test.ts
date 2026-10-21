@@ -1,0 +1,167 @@
+// The systemd ServiceManager's contract (design §4.6, §5, §6.2 step 6, RL13): every machine action is one
+// `systemctl --user` argument list, scripted here with no real systemd in sight; the restart count probation
+// judges is what systemd counted since this adapter's own start, not systemd's lifetime counter; renderUnits
+// lands a Version's units whole (temp, rename), drops the Morndo units that Version no longer ships, and
+// reloads; and the tmux guard walks a fake control-group tree against a fake /proc — the one thing a unit test
+// must never need a real cgroup for.
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { SystemdServices, type Run } from "../src/adapters/services-systemd.ts";
+
+let scratch = "";
+beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), "morndo-upd-")); });
+afterAll(() => { rmSync(scratch, { recursive: true, force: true }); });
+
+type Answer = { code?: number; stdout?: string; stderr?: string };
+
+// systemctl as a tape: every call recorded, each answer scripted by the test.
+class Systemctl {
+  readonly calls: { file: string; args: string[] }[] = [];
+  reply: (args: string[]) => Answer = () => ({});
+  readonly run: Run = async (file, args) => {
+    this.calls.push({ file, args });
+    const a = this.reply(args);
+    return { code: a.code ?? 0, stdout: a.stdout ?? "", stderr: a.stderr ?? "" };
+  };
+}
+
+// A machine: a home with a units directory, a release tree, and the adapter over a scripted systemctl.
+const machine = (o: {
+  installed?: string[];                       // unit files already in ~/.config/systemd/user
+  releaseUnits?: Record<string, string>;      // <version>/units/<name> → text ("launchd/x" makes a directory)
+  reply?: (args: string[]) => Answer;
+} = {}) => {
+  const home = mkdtempSync(join(scratch, "home-"));
+  const units = join(home, ".config/systemd/user");
+  mkdirSync(units, { recursive: true });
+  for (const name of o.installed ?? []) writeFileSync(join(units, name), "# installed before\n");
+  if (o.releaseUnits) {
+    const from = join(home, ".local/share/morndo-releases/0.2.0/units");
+    mkdirSync(from, { recursive: true });
+    for (const [name, text] of Object.entries(o.releaseUnits)) {
+      const dest = join(from, name);
+      mkdirSync(join(dest, ".."), { recursive: true });
+      writeFileSync(dest, text);
+    }
+  }
+  const sys = new Systemctl();
+  if (o.reply) sys.reply = o.reply;
+  return { home, units, sys, manager: new SystemdServices({ home, units, run: sys.run }) };
+};
+
+// A fake cgroup tree and a fake /proc: pid lists in <group>/cgroup.procs, process names in <pid>/comm.
+const fakeMachine = (o: { procs: Record<string, string[]>; comm: Record<string, string> }) => {
+  const root = mkdtempSync(join(scratch, "machine-"));
+  const cgroupRoot = join(root, "cgroup");
+  const procRoot = join(root, "proc");
+  for (const [group, pids] of Object.entries(o.procs)) {
+    const dir = join(cgroupRoot, group);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "cgroup.procs"), `${pids.join("\n")}\n`);
+  }
+  for (const [pid, name] of Object.entries(o.comm)) {
+    mkdirSync(join(procRoot, pid), { recursive: true });
+    writeFileSync(join(procRoot, pid, "comm"), `${name}\n`);
+  }
+  return { cgroupRoot, procRoot };
+};
+
+describe("SystemdServices (§4.6, §5, §6.2 step 6)", () => {
+  it("services() names the installed Morndo units, in the domain's order", () => {
+    expect(machine({ installed: ["morndo-node.service", "morndo-hub.service"] }).manager.services())
+      .toEqual(["hub", "node"]);
+    expect(machine().manager.services()).toEqual([]);
+  });
+
+  it("stops and starts through systemctl --user, and a failing call throws its stderr", async () => {
+    const m = machine();
+    await m.manager.stop("hub");
+    await m.manager.start("hub");
+    expect(m.sys.calls).toEqual([
+      { file: "systemctl", args: ["--user", "stop", "morndo-hub.service"] },
+      { file: "systemctl", args: ["--user", "start", "morndo-hub.service"] },
+      // start records its own baseline right after (restarts is "since our start")
+      { file: "systemctl", args: ["--user", "show", "-p", "NRestarts", "--value", "morndo-hub.service"] },
+    ]);
+    const failing = machine({ reply: a => a.includes("stop")
+      ? { code: 1, stderr: "Unit morndo-fleet.service not loaded.\n" } : {} });
+    await expect(failing.manager.stop("fleet")).rejects.toThrow(/not loaded/);
+  });
+
+  it("restarts() counts what systemd counted since this adapter's own start", async () => {
+    let nRestarts = 7;
+    const m = machine({ reply: a => a.includes("NRestarts") ? { stdout: `${nRestarts}\n` } : {} });
+    await m.manager.start("node");                 // the baseline reads 7
+    nRestarts = 9;                                 // two crashes while probation watches (§6.2 step 9)
+    await expect(m.manager.restarts("node")).resolves.toBe(2);
+  });
+
+  it("restarts() of a service this process never started counts from zero", async () => {
+    const m = machine({ reply: a => a.includes("NRestarts") ? { stdout: "4\n" } : {} });
+    await expect(m.manager.restarts("fleet")).resolves.toBe(4);
+  });
+
+  it("renderUnits lands a Version's units whole, drops what it no longer ships, and reloads", async () => {
+    const m = machine({
+      installed: ["morndo-hub.service", "morndo-gone.service", "morndo-gone.timer", "unrelated.service",
+        ".morndo-gone.service.new"],
+      releaseUnits: {
+        "morndo-hub.service": "[Unit]\nDescription=hub 0.2.0\n",
+        "morndo-update.timer": "[Timer]\nOnBootSec=5min\n",
+        "morndo-update-apply@.service": "[Service]\nType=oneshot\n",
+        "launchd/com.morndo.hub.plist": "<plist version=\"1.0\"/>\n",   // the launchd half is not systemd's
+      },
+    });
+    await m.manager.renderUnits("0.2.0");
+    expect(readdirSync(m.units).sort()).toEqual([
+      ".morndo-gone.service.new",         // a crashed render's temp is not one of ours; it stays
+      "morndo-hub.service",
+      "morndo-update-apply@.service",
+      "morndo-update.timer",
+      "unrelated.service",                // only Morndo's own files are ever removed
+    ]);
+    expect(readFileSync(join(m.units, "morndo-hub.service"), "utf8")).toBe("[Unit]\nDescription=hub 0.2.0\n");
+    expect(m.sys.calls).toEqual([{ file: "systemctl", args: ["--user", "daemon-reload"] }]);
+  });
+
+  it("refuses to render a Version that ships no units rather than uninstall them", async () => {
+    const m = machine();
+    mkdirSync(join(m.home, ".local/share/morndo-releases/0.2.0/units"), { recursive: true });
+    await expect(m.manager.renderUnits("0.2.0")).rejects.toThrow(/ships no units/);
+    expect(m.sys.calls).toEqual([]);     // nothing was reloaded, so nothing changed
+  });
+
+  it("tmuxInAgentUnit() walks the node unit's whole control group for a tmux server (RL13)", async () => {
+    const f = fakeMachine({
+      procs: { "user.slice/morndo-node.service": ["200"], "user.slice/morndo-node.service/lanes": ["300"] },
+      comm: { "200": "morndo-node", "300": "tmux: server" },
+    });
+    const m = machine({ reply: a => a.includes("ControlGroup")
+      ? { stdout: "/user.slice/morndo-node.service\n" } : {} });
+    const manager = new SystemdServices({ home: m.home, units: m.units, run: m.sys.run,
+      cgroupRoot: f.cgroupRoot, procRoot: f.procRoot });
+    await expect(manager.tmuxInAgentUnit()).resolves.toBe(true);
+    expect(m.sys.calls).toEqual([
+      { file: "systemctl", args: ["--user", "show", "-p", "ControlGroup", "--value", "morndo-node.service"] },
+    ]);
+  });
+
+  it("tmuxInAgentUnit() is false when only the agent's own processes are in the group", async () => {
+    const f = fakeMachine({
+      procs: { "user.slice/morndo-node.service": ["200"], "user.slice/morndo-node.service/job": ["301"] },
+      comm: { "200": "morndo-node", "301": "node" },
+    });
+    const m = machine({ reply: a => a.includes("ControlGroup")
+      ? { stdout: "/user.slice/morndo-node.service\n" } : {} });
+    const manager = new SystemdServices({ home: m.home, units: m.units, run: m.sys.run,
+      cgroupRoot: f.cgroupRoot, procRoot: f.procRoot });
+    await expect(manager.tmuxInAgentUnit()).resolves.toBe(false);
+  });
+
+  it("tmuxInAgentUnit() is false when the unit has no control group (not loaded)", async () => {
+    const m = machine({ reply: a => a.includes("ControlGroup") ? { stdout: "\n" } : {} });
+    await expect(m.manager.tmuxInAgentUnit()).resolves.toBe(false);
+  });
+});

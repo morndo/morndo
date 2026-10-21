@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -579,6 +579,9 @@ describe("stage, launchers, node pin, notice", () => {
     writeFileSync(join(repo, "apps/hub/package.json"), '{"name":"@morndo/hub","bin":{"morndo":"./src/main.ts"}}\n');
     writeFileSync(join(repo, "apps/hub/src/main.test.ts"), "nope\n");
     writeFileSync(join(repo, "docs/notes.md"), "not in the archive\n");
+    mkdirSync(join(repo, "apps/updater/units/launchd"), { recursive: true });
+    writeFileSync(join(repo, "apps/updater/units/morndo-hub.service"), "[Unit]\nDescription=fixture hub\n");
+    writeFileSync(join(repo, "apps/updater/units/launchd/com.morndo.hub.plist"), "<plist version=\"1.0\"/>\n");
     writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
     const outside = join(temp(), "outside");
     writeFileSync(outside, "nope\n");
@@ -595,6 +598,9 @@ describe("stage, launchers, node pin, notice", () => {
     expect(files(destA)).toContain("bin/morndo");
     expect(files(destA)).toContain("units");
     expect(files(destA)).toContain("trust");
+    expect(files(destA)).toContain("units/morndo-hub.service");
+    expect(files(destA)).toContain("units/launchd/com.morndo.hub.plist");
+    expect(readFileSync(join(destA, "units/morndo-hub.service"), "utf8")).toBe("[Unit]\nDescription=fixture hub\n");
     expect(files(destA)).toContain("LICENSES/LICENSE.md");
     expect(readFileSync(join(destA, "bin/morndo"), "utf8")).toBe(launcherSource("app/apps/hub/src/main.ts"));
     const packedA = packTree(readStaged(destA), 1_700_000_000);
@@ -603,6 +609,35 @@ describe("stage, launchers, node pin, notice", () => {
     const listed = spawnSync("tar", ["-tzf", "-"], { input: packedA, encoding: "utf8" });
     expect(listed.stdout).toContain("units/");
     expect(listed.stdout).toContain("trust/");
+  });
+
+  it("stages the updater's own unit templates into units/, read-only and in the signed file list", () => {
+    const repo = temp();
+    const nodeDir = temp();
+    mkdirSync(join(repo, "apps/hub/src"), { recursive: true });
+    mkdirSync(join(nodeDir, "bin"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0"}\n');
+    writeFileSync(join(repo, "package-lock.json"), '{"name":"morndo","lockfileVersion":3,"packages":{}}\n');
+    writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+    writeFileSync(join(repo, "apps/hub/src/main.ts"), "export {}\n");
+    writeFileSync(join(repo, "apps/hub/package.json"), '{"name":"@morndo/hub","bin":{"morndo":"./src/main.ts"}}\n');
+    writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n");
+    cpSync(join(import.meta.dirname, "../../apps/updater/units"), join(repo, "apps/updater/units"), { recursive: true });
+    const dest = join(temp(), "out");
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0" });
+    const listed = FileListSchema.parse(JSON.parse(readFileSync(join(dest, "files.json"), "utf8")));
+    const templates = (dir: string, prefix = ""): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+        e.isDirectory() ? templates(join(dir, e.name), `${prefix}${e.name}/`) : [`${prefix}${e.name}`]);
+    const names = templates(join(repo, "apps/updater/units"));
+    expect(names.length).toBeGreaterThan(10);              // the design's whole set, not a stub
+    for (const name of names) {
+      expect(listed, name).toContainEqual({
+        path: `units/${name}`, mode: "0444", sha256: sha256(readFileSync(join(dest, "units", name))),
+      });
+      expect(readFileSync(join(dest, "units", name), "utf8"))
+        .toBe(readFileSync(join(repo, "apps/updater/units", name), "utf8"));
+    }
   });
 
   it("keeps an in-tree symlink and ships a workspace package as JavaScript", () => {

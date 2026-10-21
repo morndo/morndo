@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The recovery watch (design §5, §6.6): at load and every 5 minutes. launchd has no ConditionPathExists,
+     so the command itself checks the `applying` mark and is a quick no-op without one. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.morndo.update-recover</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/morndo-update</string>
+    <string>update</string>
+    <string>recover</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>300</integer>
+</dict>
+</plist>

@@ -1,0 +1,10 @@
+# The recovery watch (design §5): a crashed apply is noticed within five minutes of boot, and of any run.
+[Unit]
+Description=Watch for a half-applied Morndo update
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

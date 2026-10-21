@@ -1,0 +1,14 @@
+# The node agent's user unit (design §5): the same rules as the hub's. The updater never restarts it while
+# the tmux server sits inside this unit's control group (RL13) — systemd's stop would empty the group.
+[Unit]
+Description=Morndo node agent
+
+[Service]
+ExecStart=%h/.local/bin/morndo-node run
+Restart=on-failure
+RestartSec=5
+# Exit 78 is "fix the setup, don't restart" in every Morndo service (EX_CONFIG, §8.4).
+RestartPreventExitStatus=78
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,14 @@
+# The tick's schedule (design §5): 5 minutes after boot, then every 6 hours, spread by up to an hour so a
+# fleet does not check as one. Persistent=true (systemd.timer(5), systemd 255) fires a run a sleeping machine
+# missed, on its next start.
+[Unit]
+Description=Run the Morndo update tick every six hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=6h
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The updater's tick (design §5): at load and every 6 hours (StartInterval is seconds; launchd has no
+     random delay, so the spread the systemd timer gains from RandomizedDelaySec is simply absent here). A
+     tick that exits non-zero is not kept alive: the next interval is the retry. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.morndo.update</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/morndo-update</string>
+    <string>update</string>
+    <string>tick</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>21600</integer>
+</dict>
+</plist>

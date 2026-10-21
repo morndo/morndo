@@ -3,7 +3,7 @@
 // A symlink is judged against the tree root, not the link's parent. One that stays inside is stored
 // as a symlink (Node's bin/npm -> ../lib/...). A workspace package is the exception: Node will not
 // strip types under node_modules, so the staged copy is the compiled JavaScript when --compiled is set.
-import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import type { TreeFile } from "./archive.ts";
 import { listFiles } from "./files.ts";
@@ -40,7 +40,7 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     const lock: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
     if (isLock(lock)) files.push({ path: "LICENSES/NOTICE", bytes: Buffer.from(thirdPartyNotice(lock)), mode: "0444" });
   } catch { /* a fixture may omit the lock */ }
-  files.push({ path: "units", mode: "0555", directory: true }, { path: "trust", mode: "0555", directory: true });
+  files.push({ path: "units", mode: "0555", directory: true }, ...unitTemplates(p.repo), { path: "trust", mode: "0555", directory: true });
   const listed = listFiles(files);
   files.push({ path: "files.json", bytes: Buffer.from(listed.json), mode: "0444" });
   for (const file of files) {
@@ -50,6 +50,21 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     else if ("link" in file) symlinkSync(file.link, dest);
     else writeFileSync(dest, file.bytes, { mode: file.mode === "0555" ? 0o555 : 0o444 });
   }
+}
+
+// The service templates (design §5): apps/updater/units/** ships inside every Version as units/, read-only
+// like the rest of the tree, so the signed file list covers what renderUnits writes for the service manager.
+// A fixture repository without the directory keeps the empty units/ this function always made.
+function unitTemplates(repo: string): TreeFile[] {
+  const dir = join(repo, "apps/updater/units");
+  if (!existsSync(dir)) return [];
+  const walk = (from: string, prefix: string): TreeFile[] =>
+    readdirSync(from).sort().flatMap(name => {
+      const abs = join(from, name);
+      return lstatSync(abs).isDirectory() ? walk(abs, `${prefix}${name}/`)
+        : [{ path: `${prefix}${name}`, bytes: readFileSync(abs), mode: "0444" as const }];
+    });
+  return walk(dir, "units/");
 }
 
 function walkCopied(
