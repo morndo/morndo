@@ -93,7 +93,7 @@
               onclick={() => onSelect(w.id)} oncontextmenu={ctx(w)} title={w.title ?? w.location}>
               <span class="ic">{#if w.offline}<Unplug size={16} />{:else if w.state === "active"}<i class="spin"></i>{:else}<Hash size={16} />{/if}</span>
               <span class="nm">{w.name}</span>
-              {#if tagged(s.key, w)}<span class="off" title={BACKGROUND_LABEL}>background</span>{/if}
+              {#if tagged(s.key, w)}<span class="bg" title={BACKGROUND_LABEL}>background</span>{/if}
               {#if w.offline}<span class="off">offline</span>{/if}
               {#if w.needsYou}<span class="badge">!</span>{/if}
             </button>
@@ -157,6 +157,8 @@
   /* Muted text, which a tinted row turns to full text (COLOR.md 8); a needs-you badge follows it. */
   .off { margin-left: auto; font: 400 12px/18px var(--font); color: var(--muted); flex: none; }
   .off + .badge { margin-left: 0; }
+  /* Working in the background is a quiet note, not a fault: its own class, not the offline tag's. */
+  .bg { margin-left: auto; font: 400 12px/18px var(--font); font-style: italic; color: var(--muted); flex: none; }
   .presence { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--sidebar-bg); background: var(--idle-dot); }
   .presence.on { background: var(--working); }
   .spin {

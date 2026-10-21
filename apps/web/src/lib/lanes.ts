@@ -10,10 +10,11 @@ export const phoneOrder = (workers: readonly RosterEntry[]): RosterEntry[] =>
 // list says so.
 export const BACKGROUND_LABEL = "Working (background)";
 
-// True when the lane is not mid-turn and its Run says it waits on its own work.
+// True when the lane is not mid-turn and its Run says it waits on its own work. A lane whose machine doesn't answer is
+// offline, and one that waits for him waits for him, whatever its last Run says: both win, as on the phone's status.
 export const inBackground = (w: RosterEntry, runs: ReadonlyMap<string, Run> | null | undefined): boolean => {
   const r = runs?.get(w.name);
-  return w.state !== "active" && r !== undefined && onOwnWork(r);
+  return !w.offline && !w.needsYou && w.state !== "active" && r !== undefined && onOwnWork(r);
 };
 
 // The sidebar's sections: starred lanes apart, then who works — mid-turn, waiting for him, or on its own background work —

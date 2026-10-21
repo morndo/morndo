@@ -46,6 +46,19 @@ describe("the sidebar's sections", () => {
     expect(inBackground(w("busy", { state: "active" }), busy)).toBe(false);
     expect(partitionAgents([w("busy", { state: "active" })], busy, () => false).working.map(x => x.name)).toEqual(["busy"]);
   });
+  it("a lane that is offline is not in the background, whatever its last Run says: offline wins", () => {
+    const runs = new Map([["builder", waiting("builder", { on: "background", tasks: [{ type: "shell", label: "gh run watch" }] })]]);
+    expect(inBackground(w("builder", { offline: true }), runs)).toBe(false);
+    const parts = partitionAgents([w("builder", { offline: true })], runs, () => false);
+    expect(parts.working).toEqual([]);
+    expect(parts.idle.map(x => x.name)).toEqual(["builder"]);
+  });
+  it("a lane that needs him is not tagged as in the background either: needs-you wins, and it is still working", () => {
+    const runs = new Map([["builder", waiting("builder", { on: "background", tasks: [] })]]);
+    const needs = w("builder", { needsYou: true });
+    expect(inBackground(needs, runs)).toBe(false);
+    expect(partitionAgents([needs], runs, () => false).working.map(x => x.name)).toEqual(["builder"]);
+  });
   it("starred lanes stay in starred whatever their run says, and each section is sorted by name", () => {
     const runs = new Map([["zeta", waiting("zeta", { on: "background", tasks: [] })], ["alpha", waiting("alpha", { on: "wakeup", next: null })]]);
     const parts = partitionAgents([w("zeta"), w("alpha"), w("mid", { needsYou: true }), w("beta")], runs, x => x.name === "alpha");
