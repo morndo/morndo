@@ -160,6 +160,16 @@ export const CheckRowSchema = z.strictObject({
   version: z.nullable(version()),
 });
 
+// One row of the status's updates (§8.1): an attempt, its target and state, and when it began and ended — the
+// state a word of the domain's own state machine, kept as text here so a state a reader does not know still reads.
+export const UpdateRowSchema = z.strictObject({
+  id: z.string().check(z.minLength(1), z.maxLength(100)),
+  target: version(),
+  state: z.string().check(z.minLength(1), z.maxLength(64)),
+  startedAt: instantText(),
+  finishedAt: z.nullable(instantText()),
+});
+
 // What `morndo update --status --json` prints (§8.1): the machine as the hub and the web app read it. The links'
 // names (current, previous, good, staged) are Versions or null; the Feed and the Key set are what was last verified.
 export const UpdateStatusSchema = z.strictObject({
@@ -176,6 +186,8 @@ export const UpdateStatusSchema = z.strictObject({
   keySet: z.nullable(z.strictObject({ version: z.int().check(z.gte(1)), expiresAt: instantText() })),
   lastCheck: z.nullable(CheckRowSchema),
   checks: z.array(CheckRowSchema).check(z.maxLength(10)),
+  // The last ten updates, newest first (§8.1): what was applied, what rolled back, what never finished.
+  updates: z.exactOptional(z.array(UpdateRowSchema).check(z.maxLength(10))),
 });
 
 // The decoded shapes are the domain's own (checked at compile time).

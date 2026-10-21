@@ -305,7 +305,7 @@ describe("the apply service (§6.2–§6.5)", () => {
 
   it("answers nothing_staged when no staged Version stands above the committed one", async () => {
     const w = await buildApplyWorld(scratch);
-    w.store.recordCommitted(B, w.timeline.now());            // B is already the committed ceiling
+    w.store.recordCommitted(B, w.timeline.now(), null);      // B is already the committed ceiling
     expect(await w.apply().apply({ now: false })).toEqual({ kind: "nothing_staged" });
     expect(w.tape.length).toBe(0);
   });

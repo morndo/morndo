@@ -1,30 +1,35 @@
-// The apply service (design §6.2–§6.5; RL4–RL9, RL13): what `morndo update` runs once a Version stands staged. The
-// walk is recorded step by step, each mark on record before the step it names runs (RL4); it waits for the
-// machine's own safe point (§6.3), and either commits or puts the machine back exactly as it was. Every outcome is
-// one of §8.1's answers, and the CLI maps them to exits (§8.4: 75 for a deferred, 1 for a rolled back, 70 for a
+// The apply service (design §6.2–§6.5, §6.7; RL4–RL9, RL13): what `morndo update` runs once a Version stands
+// staged — the whole walk, or the boot's own half of one — and what `morndo update --rollback` runs against a
+// commit. The walk is recorded step by step, each mark on record before the step it names runs (RL4); it waits for
+// the machine's own safe point (§6.3), and either commits or puts the machine back exactly as it was. Every outcome
+// is one of §8.1's answers, and the CLI maps them to exits (§8.4: 75 for a deferred, 1 for a rolled back, 70 for a
 // rollback that failed). Only an install this updater made is ever touched (RL14).
 import {
-  DATABASES, DEFAULT_CHANNEL, DEFAULT_MODE, RECORD_FORMAT, beginUpdate, formatVersion, higherOf, parseVersion,
-  planMigrations, maySwap, type DatabaseName, type DbState, type Installation, type UpdateService, type Version,
+  DATABASES, DEFAULT_CHANNEL, DEFAULT_MODE, RECORD_FORMAT, beginRollback, beginUpdate, formatVersion, higherOf,
+  parseVersion, planMigrations, maySwap, type DatabaseName, type DbState, type Installation, type MigrationStep,
+  type UpdateService, type Version, type Window,
 } from "@morndo/domain";
 import { ManifestSchema } from "@morndo/protocol";
 import { CHECKOUT_SENTENCE } from "./check-service.ts";
 import {
   ApplyInterrupted, type ApplyDeps, type ApplyTiming, type StepCtx, abandonAttempt, baselineBefore, continueAfterSwap,
-  done, finish, mark, runRollback, startServices, stopServices, takeBackups, timingOf, waitHoldSeen, waitSafePoint,
+  done, finish, holdForProbation, mark, runRollback, startServices, stopServices, takeBackups, timingOf, waitHoldSeen,
+  waitSafePoint,
 } from "./apply-steps.ts";
 import type {
-  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, SchemaInspector,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Layout, Revocations, RoleProbe, SchemaInspector,
   ServiceManager, Sleeper, StoredUpdate, UpdateStore, Verifier,
 } from "./ports.ts";
 
 export type ApplyOutcome =
   | { kind: "committed"; version: string }
+  | { kind: "boot_started"; version: string }                  // §6.7: swapped, recorded at starting, services start on their own
   | { kind: "deferred"; reason: string; blockers: string[] }   // exit 75: nothing was stopped that runs
   | { kind: "abandoned"; reason: string }                      // nothing swapped; the old Version runs again
   | { kind: "rolled_back"; version: string; reason: string }   // exit 1
   | { kind: "rollback_failed"; reason: string }                // exit 70
   | { kind: "rollback_waiting"; reason: string }               // exit 75: tmux in the agent's unit; recovery retries
+  | { kind: "no_previous" }                                    // §8.1's rollback with nothing to go back to: exit 78
   | { kind: "busy" }
   | { kind: "nothing_staged" }
   | { kind: "not_ours"; detail: string };                      // RL14
@@ -58,10 +63,13 @@ export class ApplyService {
     this.#p = p;
   }
 
-  async apply(o: { now: boolean }): Promise<ApplyOutcome> {
+  async apply(o: { now: boolean; automatic?: boolean; window?: Window | null; boot?: boolean }): Promise<ApplyOutcome> {
     const { services, probe, schemas, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts, verifier } = this.#p;
     const timing = timingOf(this.#p.timing);
     const deps: ApplyDeps = { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts };
+    // §8.3: only the automatic walk (the tick's) waits for its window; a person's ask never does.
+    const automatic = o.automatic ?? false;
+    const window = o.window ?? null;
 
     // §6.2 step 1, the plan — nothing below touches the machine. Only an install this updater made is ours (RL14).
     const layout = installer.layout();
@@ -86,7 +94,6 @@ export class ApplyService {
         return { kind: "abandoned", reason: "the staged manifest changed since it was recorded" };
       }
       const oldText = layout.current;
-      const current = parseVersion(oldText)!;
       const previousText = store.versionRecord(oldText)?.manifest ?? null;
       const previousManifest = previousText === null ? null : decode(ManifestSchema, previousText);
       // What the databases say, a missing one included as the nothing it is (schema 0, floor 0): a first update on
@@ -97,32 +104,25 @@ export class ApplyService {
       if (!plan.ok) return { kind: "abandoned", reason: `${plan.error.database}: ${plan.error.reason}` };
 
       // The record (RL4), begun with the machine as it stands and the plan inside it: a recovery reads both back.
-      const committed = store.highestCommitted();
-      const machine: Installation = {
-        current,
-        previous: layout.previous === null ? null : parseVersion(layout.previous),
-        staged: target,
-        badVersions: store.badVersions().map(parseVersion).filter((v): v is Version => v !== null),
-        highestCommitted: higherOf(current, committed === null ? current : parseVersion(committed) ?? current),
-        keySet: store.trust().keySet,
-        highestFeedSeq: store.trust().highestFeedSeq,
-        installMethod: "updater",
-        settings: { channel: DEFAULT_CHANNEL, mode: DEFAULT_MODE, pin: null, window: null },
-      };
+      const machine = this.#installation(layout, store, target);
       const firstSave: StoredUpdate = {
         ...beginUpdate({ id: `upd-${clock.now()}`, target, machine }),
         migrations: plan.value,
         format: RECORD_FORMAT,
         startedAt: clock.now(),
         doneMarks: [],
+        judgeBaseline: null,
+        backupOf: null,
       };
       const ctx: StepCtx = { deps, timing, u: firstSave };
       store.saveUpdate(firstSave);
       running = services.services();
 
+      if (o.boot === true) return await bootApply(ctx, { staged: staged.version, oldText, plan: plan.value, running });
+
       // §6.3: the machine's own word that nothing is in flight. Work in flight is never skipped, `--now` or not;
       // the poll ends at the drain's wall and the answer is deferred, with nothing written and nothing stopped.
-      const blockers = await waitSafePoint(ctx, running, { now: o.now });
+      const blockers = await waitSafePoint(ctx, running, { now: o.now, automatic, window });
       if (blockers !== null) {
         finish(ctx, "abandoned");
         return { kind: "deferred", reason: "the safe point never came", blockers };
@@ -147,7 +147,7 @@ export class ApplyService {
         finish(ctx, "abandoned");
         return { kind: "deferred", reason: "a service did not acknowledge the hold", blockers: unseen };
       }
-      const drainBlockers = await waitSafePoint(ctx, running, { now: o.now });
+      const drainBlockers = await waitSafePoint(ctx, running, { now: o.now, automatic, window });
       if (drainBlockers !== null) {
         hold.clear();
         finish(ctx, "abandoned");
@@ -202,5 +202,120 @@ export class ApplyService {
     } finally {
       lock.release();
     }
+  }
+
+  // The principal's rollback of the running Version (§8.1): its own Update, §6.5's walk against the commit that
+  // put this Version here. The plan and the Backups are that commit's own (the record's backupOf names it);
+  // without one — a Version installed by hand, a record too old — the swap still goes back, and nothing restores.
+  async rollback(): Promise<ApplyOutcome> {
+    const { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts } = this.#p;
+    const timing = timingOf(this.#p.timing);
+    const deps: ApplyDeps = { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts };
+    const layout = installer.layout();
+    if (layout.method !== "updater" || layout.current === null || parseVersion(layout.current) === null) {
+      return { kind: "not_ours", detail: CHECKOUT_SENTENCE };
+    }
+    const lock = store.tryLock();
+    if (lock === null) return { kind: "busy" };
+    try {
+      const machine = this.#installation(layout, store, parseVersion(store.staged()?.version ?? layout.current)!);
+      const begun = beginRollback({ id: `upd-${clock.now()}`, machine });
+      if (!begun.ok) return { kind: "no_previous" };
+      const owner = store.recentUpdates(200)
+        .find(row => row.state === "committed" && formatVersion(row.target) === layout.current) ?? null;
+      const firstSave: StoredUpdate = {
+        ...begun.value,
+        migrations: owner?.migrations ?? null,
+        backupOf: owner?.id ?? null,
+        format: RECORD_FORMAT,
+        startedAt: clock.now(),
+        doneMarks: [],
+        judgeBaseline: null,
+      };
+      const ctx: StepCtx = { deps, timing, u: firstSave };
+      store.saveUpdate(firstSave);
+      // §5's `applying` mark before anything moves: a death past this point is the recovery unit's to finish.
+      applying.set(ctx.u.id);
+      const running = services.services();
+      return await runRollback(ctx, { running, cause: "the principal asked for the previous Version", baseline: null });
+    } catch (error) {
+      if (error instanceof ApplyInterrupted) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      // The record stays open at rolling_back on purpose: the recovery unit walks it again (§6.6), and the Alert
+      // is the critical one — this machine needs a person.
+      alerts.raise("update_rollback_failed", `a rollback could not run: ${message}`);
+      return { kind: "rollback_failed", reason: message };
+    } finally {
+      lock.release();
+    }
+  }
+
+  // The machine as the record's walk needs it (§6.2 step 1): the links and the store as they stand. The settings
+  // here are the domain's defaults — the walk itself never reads them; the tick reads the real ones outside.
+  #installation(layout: Layout, store: UpdateStore, staged: Version): Installation {
+    const current = parseVersion(layout.current!)!;
+    const committed = store.highestCommitted();
+    return {
+      current,
+      previous: layout.previous === null ? null : parseVersion(layout.previous),
+      staged,
+      badVersions: store.badVersions().map(parseVersion).filter((v): v is Version => v !== null),
+      highestCommitted: higherOf(current, committed === null ? current : parseVersion(committed) ?? current),
+      keySet: store.trust().keySet,
+      highestFeedSeq: store.trust().highestFeedSeq,
+      installMethod: "updater",
+      settings: { channel: DEFAULT_CHANNEL, mode: DEFAULT_MODE, pin: null, window: null },
+    };
+  }
+}
+
+// §6.7's boot apply: the half of the walk a starting machine runs. Nothing is running yet, so there is no safe
+// point to wait for — the machine is at one by construction — nothing to hold for a drain and nothing to stop.
+// The marks are §6.2's own, so the record stands where a recovery expects it; the backups and the gate are the
+// same ones; and at `starting` this returns: the services start on their own (the boot unit is ordered Before
+// them), and the recovery unit, ordered after, judges health and commits or rolls back (§6.6).
+async function bootApply(ctx: StepCtx, o: {
+  staged: string; oldText: string; plan: Record<DatabaseName, MigrationStep>; running: readonly UpdateService[];
+}): Promise<ApplyOutcome> {
+  const { deps } = ctx;
+  try {
+    mark(ctx, "draining");
+    mark(ctx, "stopping");
+    mark(ctx, "backing_up");
+    // §5's `applying` mark, as in the whole walk: from here the recovery unit owns this attempt.
+    deps.applying.set(ctx.u.id);
+    const taken = await takeBackups(ctx, o.plan);
+    if (!taken.ok) { finish(ctx, "abandoned"); return { kind: "abandoned", reason: taken.reason }; }
+    const gate = maySwap(o.plan, ctx.u.backups);
+    if (!gate.ok) { finish(ctx, "abandoned"); return { kind: "abandoned", reason: `${gate.error.database}: ${gate.error.reason}` }; }
+    done(ctx, "backing_up");
+    mark(ctx, "swapping");
+    await deps.services.renderUnits(o.staged);
+    deps.installer.swap({ current: o.staged, previous: o.oldText });
+    done(ctx, "swapping");
+    mark(ctx, "starting");
+    // The probation hold goes on before any service can start reading it (RL9): if the recovery's rollback would
+    // restore a database, every write but a revocation is held from the first start.
+    holdForProbation(deps, o.running, { plan: o.plan, version: o.staged });
+    // What the recovery judges against from here (§6.7): the last commit's recorded baseline, not a fresh read —
+    // nothing answers yet, and what passed at the last commit is what must pass after this one. It travels in the
+    // record, so the commit the recovery writes carries it on (§6.7's commit).
+    ctx.u = { ...ctx.u, judgeBaseline: deps.store.commitBaseline() };
+    deps.store.saveUpdate(ctx.u);
+    return { kind: "boot_started", version: o.staged };
+  } catch (error) {
+    if (error instanceof ApplyInterrupted) throw error;        // a dead process records nothing
+    const message = error instanceof Error ? error.message : String(error);
+    // The record on disk is the truth of where this stood; re-read it as a recovery would, as apply's own catch
+    // does. §4.4's line holds here too: past the swap, the only other place the machine can stop is where it
+    // started. A rollback at boot starts the services itself — the manager's own start coalesces with it.
+    const open = deps.store.openUpdate();
+    if (open === null) return { kind: "abandoned", reason: message };
+    const reCtx: StepCtx = { deps, timing: ctx.timing, u: open };
+    if (deps.installer.layout().current === formatVersion(open.target)) {
+      return await runRollback(reCtx, { running: o.running, cause: message, baseline: null });
+    }
+    await abandonAttempt(reCtx, o.running);
+    return { kind: "abandoned", reason: message };
   }
 }

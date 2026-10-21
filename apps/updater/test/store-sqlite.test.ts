@@ -261,7 +261,7 @@ describe("the step record (RL4, §6.2)", () => {
     const store = open();
     expect(store.openUpdate()).toBeNull();
     const begun = beginUpdate({ id: "upd-4907", target: parseVersion("0.2.0")!, machine: MACHINE });
-    store.saveUpdate({ ...begun, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [] });
+    store.saveUpdate({ ...begun, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [], judgeBaseline: null, backupOf: null });
     const live = store.openUpdate();
     expect(live).toMatchObject({
       id: "upd-4907", kind: "update", state: "staged", mark: null,
@@ -273,7 +273,7 @@ describe("the step record (RL4, §6.2)", () => {
     // the drain step's own save: the mark it stands in, recorded done, before the step runs (§6.2)
     const stepped = beginStep(live!, "draining", { lockHeld: true });
     expect(stepped.ok).toBe(true);
-    if (stepped.ok) store.saveUpdate({ ...stepped.value, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: ["draining"] });
+    if (stepped.ok) store.saveUpdate({ ...stepped.value, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: ["draining"], judgeBaseline: null, backupOf: null });
     expect(store.openUpdate()).toMatchObject({ state: "draining", mark: "draining", doneMarks: ["draining"] });
 
     store.finishUpdate("upd-4907", "abandoned", 2_000);
@@ -290,8 +290,8 @@ describe("the step record (RL4, §6.2)", () => {
     const store = open();
     const first = beginUpdate({ id: "upd-1", target: parseVersion("0.2.0")!, machine: MACHINE });
     const second = beginUpdate({ id: "upd-2", target: parseVersion("0.3.0")!, machine: MACHINE });
-    store.saveUpdate({ ...first, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [] });
-    store.saveUpdate({ ...second, format: RECORD_FORMAT, startedAt: 5_000, doneMarks: [] });
+    store.saveUpdate({ ...first, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [], judgeBaseline: null, backupOf: null });
+    store.saveUpdate({ ...second, format: RECORD_FORMAT, startedAt: 5_000, doneMarks: [], judgeBaseline: null, backupOf: null });
     expect(store.openUpdate()!.id).toBe("upd-2");
     store.finishUpdate("upd-2", "abandoned", 6_000);
     expect(store.openUpdate()!.id).toBe("upd-1");     // the older attempt is still live
@@ -306,7 +306,7 @@ describe("the step record (RL4, §6.2)", () => {
     const after: Installation = { ...MACHINE, current: parseVersion("0.2.0")!, previous: parseVersion("0.1.0")! };
     const begun = beginRollback({ id: "rb-1", machine: after });
     expect(begun.ok).toBe(true);
-    if (begun.ok) store.saveUpdate({ ...begun.value, format: RECORD_FORMAT, startedAt: 9_000, doneMarks: ["rolling_back"] });
+    if (begun.ok) store.saveUpdate({ ...begun.value, format: RECORD_FORMAT, startedAt: 9_000, doneMarks: ["rolling_back"], judgeBaseline: null, backupOf: null });
     const live = store.openUpdate()!;
     expect(live).toMatchObject({ id: "rb-1", kind: "rollback", state: "rolling_back", mark: "rolling_back" });
     expect(live.target).toEqual(parseVersion("0.1.0"));
@@ -318,12 +318,19 @@ describe("the step record (RL4, §6.2)", () => {
 
   it("recordCommitted raises highestCommitted; recordBad keeps a Version out (the tables exist)", () => {
     const store = open();
-    store.recordCommitted("0.2.0", 100);
+    store.recordCommitted("0.1.0", 50, null);         // a commit that judged nothing (data from before §6.7) is no baseline
+    expect(store.highestCommitted()).toBe("0.1.0");
+    store.recordCommitted("0.2.0", 100, { hub: ["ready"] });
     expect(store.highestCommitted()).toBe("0.2.0");
-    store.recordCommitted("0.1.0", 200);              // an older commit never lowers it
+    store.recordCommitted("0.1.1", 200, null);        // an older Version never lowers it
     expect(store.highestCommitted()).toBe("0.2.0");
     store.recordBad("0.3.0", 300);
     expect(store.badVersions()).toEqual(["0.3.0"]);
+    // §6.7: the last commit's own baseline is what a boot apply judges against — the newest commit's word,
+    // whatever it recorded; a stale one would forgive failures the machine has never passed
+    expect(store.commitBaseline()).toBeNull();
+    store.recordCommitted("0.2.1", 400, { hub: ["ready"], fleet: ["ready"] });
+    expect(store.commitBaseline()).toEqual({ hub: ["ready"], fleet: ["ready"] });
     store.close();
   });
 
@@ -397,7 +404,7 @@ describe("the step record (RL4, §6.2)", () => {
 
     const store = openUpdateStore({ db: join(state, "old2.db"), lock: join(state, "apply.lock") });
     const raw = new Database(join(state, "old2.db"), { readonly: true });
-    expect(raw.pragma("user_version", { simple: true })).toBe(4);   // every migration since, all additive
+    expect(raw.pragma("user_version", { simple: true })).toBe(5);   // every migration since, all additive
     raw.close();
     expect(store.lastFeedCheck()).toMatchObject({ at: 40, feedSeq: 9 });   // the old rows read as they were
     expect(store.highestCommitted()).toBe("0.1.0");

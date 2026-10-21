@@ -78,10 +78,10 @@ export class RecoveryService {
         case "continue_apply":
         case "judge_health":
           // The swap finished (or the services are up, or will be): the same walk from the starts, judged against
-          // a fresh baseline and a fresh deadline.
-          return await continueAfterSwap(ctx, { running, baseline: null });
+          // the baseline the record carries when it has one — a boot apply's own (§6.7) — or a fresh one.
+          return await continueAfterSwap(ctx, { running, baseline: open.judgeBaseline ?? null });
         case "continue_rollback":
-          return await runRollback(ctx, { running, cause: "recovered mid-rollback", baseline: null });
+          return await runRollback(ctx, { running, cause: "recovered mid-rollback", baseline: open.judgeBaseline ?? null });
         case "finish_commit":
           return await runCommit(ctx);
       }

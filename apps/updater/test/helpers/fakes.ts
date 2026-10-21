@@ -205,6 +205,7 @@ export class FakeStore implements UpdateStore {
   readonly versions = new Map<string, StagedRecord>();
   readonly checkLog: CheckRecord[] = [];
   private readonly committedList: string[] = [];
+  private readonly committedBaselines: (Record<string, string[]> | null)[] = [];
   private readonly badList: string[] = [];
   private held: { release(): void } | null = null;
   /** Flip to true and tryLock answers null, as another process holding the lock would. */
@@ -241,9 +242,15 @@ export class FakeStore implements UpdateStore {
   }
 
   /** What the apply writes; the check service only reads it. */
-  recordCommitted(version: string, _at: number): void {
+  recordCommitted(version: string, _at: number, baseline: Record<string, string[]> | null = null): void {
     this.committedList.push(version);
+    this.committedBaselines.push(baseline);
     this.calls.push(`recordCommitted(${version})`);
+  }
+
+  /** §6.7: the last commit's recorded baseline, as the SQLite store answers it. */
+  commitBaseline(): Record<string, string[]> | null {
+    return this.committedBaselines.at(-1) ?? null;
   }
 
   recordBad(version: string, _at: number): void {

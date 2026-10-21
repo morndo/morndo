@@ -140,6 +140,12 @@ export class FakeServices implements ServiceManager {
   onStart: ((s: UpdateService, current: string | null) => void) | null = null;
   /** Runs as a stop lands: what a service still did in its last moment (a revocation that came in, say). */
   onStop: ((s: UpdateService, current: string | null) => void) | null = null;
+  /** Runs in place of the apply unit's whole run (§6.2): a test's stand-in for what the unit does to the store. */
+  runApplyScript: ((version: string) => Promise<void>) | null = null;
+  /** What lingerEnabled answers (§10.3's install refuses without it). */
+  linger = true;
+  /** Every enable call's unit list, in order (§10.3). */
+  readonly enables: string[][] = [];
   readonly calls: { op: string; service?: UpdateService; version?: string }[] = [];
   readonly tape: string[];
   readonly die: Die;
@@ -173,16 +179,33 @@ export class FakeServices implements ServiceManager {
     return this.restartCounts[s] ?? 0;
   }
 
-  async renderUnits(version: string): Promise<void> {
+  async renderUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<void> {
     this.die.check("renderUnits");
     this.calls.push({ op: "renderUnits", version });
-    this.tape.push(`renderUnits:${version}`);
+    this.tape.push(`renderUnits:${version}${role === undefined ? "" : ` (${role.services.join(",")})`}`);
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {
     this.calls.push({ op: "tmuxInAgentUnit" });
     this.tape.push(`tmux:${this.tmuxIn}`);
     return this.tmuxIn;
+  }
+
+  async runApply(version: string): Promise<void> {
+    this.calls.push({ op: "runApply", version });
+    this.tape.push(`runApply:${version}`);
+    if (this.runApplyScript !== null) await this.runApplyScript(version);
+  }
+
+  async enable(units: readonly string[]): Promise<void> {
+    this.calls.push({ op: "enable" });
+    this.enables.push([...units]);
+    this.tape.push(`enable:${units.join(",")}`);
+  }
+
+  async lingerEnabled(): Promise<boolean> {
+    this.calls.push({ op: "lingerEnabled" });
+    return this.linger;
   }
 }
 

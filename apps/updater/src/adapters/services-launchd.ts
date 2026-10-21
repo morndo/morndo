@@ -1,10 +1,11 @@
 // The launchd ServiceManager (design §4.6, §5, U19: launchctl(1) as the mirror the design cites): macOS's
 // answer to services-systemd. The labels are com.morndo.<service>; a stop is bootout, a start bootstraps the
 // plist — kickstart -k for a job that is already loaded — and the restart count probation judges comes from
-// launchctl print's "runs =" line, counted from this adapter's own start. tmuxInAgentUnit is false here on
-// purpose: launchd stops a job's processes, not a control group, so the tmux server an agent started does
-// not ride along with the job's death — the hazard RL13 guards on systemd has no macOS counterpart.
-import { execFile } from "node:child_process";
+// launchctl print's "runs =" line, counted from this adapter's own start. The apply runs as a detached child
+// of the launcher (launchd has no transient units), setsid so no job's end takes it along. tmuxInAgentUnit is
+// false here on purpose: launchd stops a job's processes, not a control group, so the tmux server an agent
+// started does not ride along with the job's death — the hazard RL13 guards on systemd has no macOS counterpart.
+import { execFile, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { UPDATE_SCOPE_SERVICES, type UpdateService } from "@morndo/domain";
@@ -26,6 +27,18 @@ const execFileRun: Run = (file, args) => new Promise(resolve => {
 
 // Morndo's labels (§5): hub, fleet and node become com.morndo.<service>.
 const label = (s: UpdateService): string => `com.morndo.${s}`;
+const SERVICE_PLISTS = new Set(UPDATE_SCOPE_SERVICES.map(s => `${label(s)}.plist`));
+
+// A systemd unit name to its launchd label, for `enable` — the one place the two managers' vocabularies meet.
+// The update timer's unit and its service both map to the one job that runs the tick; the boot unit has no
+// counterpart (launchd has no ordering, so the boot apply happens at the tick's first safe point instead), and
+// the apply template is never enabled — it is a person's or the tick's own call.
+const plistOfUnit = (name: string): string | null => {
+  const base = name.replace(/^morndo-/, "").replace(/\.(service|timer)$/, "");
+  if (base === "update" || base === "update-recover") return `com.morndo.${base}.plist`;
+  if ((UPDATE_SCOPE_SERVICES as readonly string[]).includes(base)) return `com.morndo.${base}.plist`;
+  return null;
+};
 
 // The "runs = N" line of `launchctl print`'s state section; a job with no line, or none an answer carries,
 // has not run.
@@ -80,11 +93,14 @@ export class LaunchdServices implements ServiceManager {
     return Math.max(0, runsOf(out.stdout) - (this.runsAtStart.get(s) ?? 0));
   }
 
-  async renderUnits(version: string): Promise<void> {
+  async renderUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<void> {
     // The templates carry @HOME@ because launchd has no %h: the home is written in at render time. No
-    // daemon-reload follows — launchd has none; a start bootstraps whatever plist it finds here.
+    // daemon-reload follows — launchd has none; a start bootstraps whatever plist it finds here. A role, when
+    // given, narrows the service plists to that role's — `morndo install`'s rendering for the role asked for.
     const from = join(this.releases, version, "units", "launchd");
-    const shipped = readdirSync(from).filter(n => n.startsWith("com.morndo.") && n.endsWith(".plist"));
+    const wanted = (name: string): boolean =>
+      role === undefined || !SERVICE_PLISTS.has(name) || role.services.some(s => `${label(s)}.plist` === name);
+    const shipped = readdirSync(from).filter(n => n.startsWith("com.morndo.") && n.endsWith(".plist") && wanted(n));
     if (shipped.length === 0) throw new Error(`${from}: a Version ships no launchd templates`);
     mkdirSync(this.agentsDir, { recursive: true });
     for (const name of shipped) {
@@ -105,6 +121,36 @@ export class LaunchdServices implements ServiceManager {
   async tmuxInAgentUnit(): Promise<boolean> {
     // False by design, not by omission: see this file's header. The systemd adapter carries the guard.
     return false;
+  }
+
+  async runApply(version: string): Promise<void> {
+    // launchd has no transient units, so the apply runs as a child of this program, detached with setsid — the
+    // macOS mirror of the apply unit's rule (§5, U19): no service's end, and no terminal's hangup, takes the
+    // walk along. It is waited on here, so the caller reads the apply's own exit, not the child's spawn.
+    const done = await new Promise<{ code: number | null }>(resolve => {
+      const child = spawn(join(this.home, ".local/bin/morndo-update"), ["update", "apply", "--version", version],
+        { detached: true, stdio: "ignore" });
+      child.on("error", () => resolve({ code: 127 }));
+      child.on("exit", code => resolve({ code }));
+    });
+    if (done.code !== 0) throw new Error(`morndo-update apply --version ${version}: exit ${done.code ?? "?"}`);
+  }
+
+  async enable(units: readonly string[]): Promise<void> {
+    // The unit names come in systemd's vocabulary (the install names one list for both managers); each maps to
+    // the plist launchd knows, the ones with no counterpart skip, and each plist is bootstrapped — which starts
+    // the job too, the `--now` half of enable.
+    for (const name of units) {
+      const plist = plistOfUnit(name);
+      if (plist === null) continue;
+      await this.checked(["bootstrap", this.domainTarget, join(this.agentsDir, plist)]);
+    }
+  }
+
+  async lingerEnabled(): Promise<boolean> {
+    // True by design: launchd user agents load at login and keep running under the user's GUI session — the
+    // notion systemd calls linger has no loginctl here, and nothing to check.
+    return true;
   }
 
   private target(s: UpdateService): string { return `${this.domainTarget}/${label(s)}` }

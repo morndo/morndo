@@ -91,8 +91,15 @@ export type CheckRecord = {
   feedSeq: number | null; feedExpiresAt: number | null;
 };
 // The step record (RL4, §6.2): the Update as it stands in update.db — the domain's own fields plus the format
-// its steps were written in, when the attempt began, and the marks recorded done so far.
-export type StoredUpdate = Update & { format: number; startedAt: number; doneMarks: string[] };
+// its steps were written in, when the attempt began, the marks recorded done so far, and two fields only a
+// walking record carries: the health baseline this attempt was judged against (§6.7 — a commit writes it down
+// for the next boot apply, and a recovery that finishes the attempt still knows it), and, for a rollback, the
+// id of the update whose Backups it would restore (§6.5: the commit's own, not this attempt's).
+export type StoredUpdate = Update & {
+  format: number; startedAt: number; doneMarks: string[];
+  judgeBaseline: Record<string, string[]> | null;
+  backupOf: string | null;
+};
 // A step record that has ended (recentUpdates, for --status): when it ended, or null while it runs.
 export type UpdateHistory = StoredUpdate & { finishedAt: number | null };
 export interface UpdateStore {
@@ -119,8 +126,11 @@ export interface UpdateStore {
   openUpdate(): StoredUpdate | null;
   /** Ends an attempt; `state` names how (§4.4's terminal states a finish may write). Unknown id: throws. */
   finishUpdate(id: string, state: "committed" | "abandoned" | "rolled_back" | "rollback_failed", at: number): void;
-  /** The commit's own memory (RL2): highestCommitted only ever rises. */
-  recordCommitted(version: string, at: number): void;
+  /** The commit's own memory (RL2): highestCommitted only ever rises. The baseline is §6.7's — what passed at
+   *  the commit is what the next boot apply holds the services to — null when none was judged. */
+  recordCommitted(version: string, at: number, baseline: Record<string, string[]> | null): void;
+  /** The last commit's recorded baseline (§6.7), or null: what a boot apply judges the services against. */
+  commitBaseline(): Record<string, string[]> | null;
   /** A Version that failed here is never auto-installed again (RL7). */
   recordBad(version: string, at: number): void;
   /** The Manifest text recorded when the Version was staged, or null (staged before it was kept). */
@@ -138,7 +148,7 @@ export interface Clock { now(): number }
 
 // ---- the apply's own ports (§4.6); the adapters for the machine come with the apply's PR, tests fake them
 
-// The machine's services (§4.6 ServiceManager). Adapters for systemd and launchd come in the next PR; tests fake it.
+// The machine's services (§4.6 ServiceManager). The adapters are systemd and launchd; tests fake it.
 export interface ServiceManager {
   /** The Morndo services this machine runs, of hub, fleet, node. */
   services(): UpdateService[];
@@ -146,10 +156,19 @@ export interface ServiceManager {
   start(s: UpdateService): Promise<void>;
   /** How many times the service manager restarted it since `since` (systemd NRestarts). */
   restarts(s: UpdateService): Promise<number>;
-  /** Render the units of `version` and reload the manager (§6.2 step 6). */
-  renderUnits(version: string): Promise<void>;
+  /** Render the units of `version` and reload the manager (§6.2 step 6). `role`, when given, renders only that
+   *  role's service units beside the update units — what `morndo install` writes for the role it was asked for. */
+  renderUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<void>;
   /** RL13: true when the tmux server sits inside the node agent's unit. */
   tmuxInAgentUnit(): Promise<boolean>;
+  /** §6.2's apply runs as its own unit, so a crash of whoever asked for it never interrupts the walk: start
+   *  `morndo-update-apply@<version>.service` and return when the unit's own run has ended. */
+  runApply(version: string): Promise<void>;
+  /** `morndo install`'s last act: enable and start the update timers, the boot and recovery units, and the
+   *  role's own services (systemd enable --now; launchd bootstraps the plists). */
+  enable(units: readonly string[]): Promise<void>;
+  /** Whether the user's services keep running after logout (systemd linger): `morndo install` refuses without it. */
+  lingerEnabled(): Promise<boolean>;
 }
 export interface RoleProbe {
   /** Whether the service has read hold.json (its health's `held`, from service-kit HoldWatch); null: no answer. */

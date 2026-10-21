@@ -153,6 +153,34 @@ describe("the fleet probe (§6.3, §6.4)", () => {
   });
 });
 
+describe("the hold acknowledgement (§6.2 step 3)", () => {
+  it("reads `held` from each service's own answer: true, false, and an older service's missing field is no acknowledgement", async () => {
+    // The hub and the fleet: the same ServiceHealth shape over their own doors.
+    for (const answer of [true, false, undefined]) {
+      hubAnswer = (_req, res) => reply(res, 200, full(answer === undefined ? {} : { held: answer }));
+      fleetAnswer = (_req, res) => reply(res, 200, full(answer === undefined ? {} : { held: answer }));
+      const p = probes();
+      expect(await p.seesHold("hub"), `hub held ${String(answer)}`).toBe(answer ?? null);
+      expect(await p.seesHold("fleet"), `fleet held ${String(answer)}`).toBe(answer ?? null);
+    }
+    // The agent: the same word inside status.json.
+    for (const answer of [true, false, undefined]) {
+      const doc = statusDoc(answer === undefined ? {} : { held: answer });
+      const p = probes({ nodeStatus: statusFile(`held-${String(answer)}.json`, doc) });
+      expect(await p.seesHold("node"), `node held ${String(answer)}`).toBe(answer ?? null);
+    }
+  });
+
+  it("no answer is no acknowledgement, for any of the three: silence is not consent", async () => {
+    hubAnswer = () => { /* it never answers */ };
+    fleetAnswer = () => { /* it never answers */ };
+    const p = probes({ timeoutMs: 60 });             // nodeStatus defaults to a file that is not there
+    expect(await p.seesHold("hub")).toBeNull();
+    expect(await p.seesHold("fleet")).toBeNull();
+    expect(await p.seesHold("node")).toBeNull();
+  });
+});
+
 describe("the node probe (§6.3, §6.4)", () => {
   it("reads the safe point and the health from status.json", async () => {
     const p = probes({ nodeStatus: statusFile("good.json", statusDoc({ inFlight: [{ kind: "pane.send", id: "d-4" }] })) });

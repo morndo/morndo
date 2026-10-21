@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SystemdServices, type Run } from "../src/adapters/services-systemd.ts";
+import { SystemdServices, systemdUserManager, type Run } from "../src/adapters/services-systemd.ts";
 
 let scratch = "";
 beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), "morndo-upd-")); });
@@ -163,5 +163,67 @@ describe("SystemdServices (§4.6, §5, §6.2 step 6)", () => {
   it("tmuxInAgentUnit() is false when the unit has no control group (not loaded)", async () => {
     const m = machine({ reply: a => a.includes("ControlGroup") ? { stdout: "\n" } : {} });
     await expect(m.manager.tmuxInAgentUnit()).resolves.toBe(false);
+  });
+
+  it("runApply starts the apply's own unit for the Version and waits for its end (§6.2)", async () => {
+    const m = machine();
+    await m.manager.runApply("0.2.0");
+    expect(m.sys.calls).toEqual([
+      { file: "systemctl", args: ["--user", "start", "morndo-update-apply@0.2.0.service"] },
+    ]);
+    const failing = machine({ reply: a => a.includes("start")
+      ? { code: 1, stderr: "Unit morndo-update-apply@.service not found.\n" } : {} });
+    await expect(failing.manager.runApply("0.2.0")).rejects.toThrow(/not found/);
+  });
+
+  it("enable is one enable --now for the whole list (§10.3), and an empty list runs nothing", async () => {
+    const m = machine();
+    await m.manager.enable(["morndo-update.timer", "morndo-hub.service"]);
+    expect(m.sys.calls).toEqual([
+      { file: "systemctl", args: ["--user", "enable", "--now", "morndo-update.timer", "morndo-hub.service"] },
+    ]);
+    const quiet = machine();
+    await quiet.manager.enable([]);
+    expect(quiet.sys.calls).toEqual([]);
+  });
+
+  it("lingerEnabled asks loginctl for the user's Linger: yes is yes, anything else is no (§10.3)", async () => {
+    const linger = (answer: Answer) => {
+      const m = machine({ reply: a => a.includes("show-user") ? answer : {} });
+      return { sys: m.sys, manager: new SystemdServices({ home: m.home, units: m.units, run: m.sys.run, user: "worker" }) };
+    };
+    const yes = linger({ stdout: "yes\n" });
+    await expect(yes.manager.lingerEnabled()).resolves.toBe(true);
+    expect(yes.sys.calls).toEqual([{ file: "loginctl", args: ["show-user", "worker", "-p", "Linger", "--value"] }]);
+    await expect(linger({ stdout: "no\n" }).manager.lingerEnabled()).resolves.toBe(false);
+    await expect(linger({ code: 1, stderr: "no such user" }).manager.lingerEnabled()).resolves.toBe(false);
+  });
+
+  it("renderUnits with a role ships that role's services with every update unit, and drops the rest (§10.3)", async () => {
+    const m = machine({
+      installed: ["morndo-fleet.service"],
+      releaseUnits: {
+        "morndo-hub.service": "[Unit]\nDescription=hub\n",
+        "morndo-fleet.service": "[Unit]\nDescription=fleet\n",
+        "morndo-node.service": "[Unit]\nDescription=node\n",
+        "morndo-update.timer": "[Timer]\nOnBootSec=5min\n",
+        "morndo-update-recover.service": "[Unit]\nDescription=recover\n",
+      },
+    });
+    await m.manager.renderUnits("0.2.0", { services: ["node"] });
+    expect(readdirSync(m.units).sort()).toEqual([
+      "morndo-node.service",
+      "morndo-update-recover.service",
+      "morndo-update.timer",
+    ]);
+  });
+
+  it("systemdUserManager asks the manager itself; anything but a zero answer is not this machine's (§4.7)", async () => {
+    const tape: { file: string; args: string[] }[] = [];
+    const run: Run = async (file, args) => { tape.push({ file, args }); return { code: 0, stdout: "", stderr: "" }; };
+    await expect(systemdUserManager(run)).resolves.toBe(true);
+    expect(tape).toEqual([{ file: "systemctl", args: ["--user", "show-environment"] }]);
+    await expect(systemdUserManager(async () => ({ code: 1, stdout: "", stderr: "" }))).resolves.toBe(false);
+    await expect(systemdUserManager(async () => ({ code: 127, stdout: "", stderr: "" }))).resolves.toBe(false);   // no systemctl at all
   });
 });

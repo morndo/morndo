@@ -110,6 +110,17 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("CREATE TABLE rollout_halts (version TEXT NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL)");
     },
   },
+  {
+    version: 5,
+    name: "the health baseline a commit records (§6.7)",
+    compat: "additive",
+    // A boot apply judges the services against the last commit's recorded baseline — what passed then must pass
+    // after — so every commit writes it beside its Version, and a boot apply (or a recovery that finishes the
+    // walk) reads it back. Rows from before carry none, and read as "judge fresh".
+    up: db => {
+      db.exec("ALTER TABLE committed ADD COLUMN baseline TEXT");
+    },
+  },
 ];
 
 export class UpdateDbFromFuture extends Error {
@@ -140,6 +151,7 @@ type UpdateRow = { id: string; format: number; record: string; started_at: numbe
 const updateText = (u: StoredUpdate): string => JSON.stringify({
   id: u.id, kind: u.kind, target: u.target, preUpdate: u.preUpdate, state: u.state, mark: u.mark,
   backups: u.backups, migrations: u.migrations, doneMarks: u.doneMarks,
+  judgeBaseline: u.judgeBaseline ?? null, backupOf: u.backupOf ?? null,
 });
 
 // A Version as it comes back from JSON, re-parsed through the domain, so a row some other build wrote cannot
@@ -171,6 +183,9 @@ const storedUpdate = (row: UpdateRow): StoredUpdate => {
   }
   const pre = parsed.preUpdate as { current: unknown; previous: unknown } | null;
   if (typeof pre !== "object" || pre === null) throw new Error(`update ${row.id}: no pre-update pair`);
+  if (parsed.backupOf !== null && parsed.backupOf !== undefined && typeof parsed.backupOf !== "string") {
+    throw new Error(`update ${row.id}: not a backup owner`);
+  }
   return {
     id: row.id,
     kind: parsed.kind,
@@ -186,7 +201,23 @@ const storedUpdate = (row: UpdateRow): StoredUpdate => {
     format: row.format,
     startedAt: row.started_at,
     doneMarks: parsed.doneMarks,
+    // §6.7's two: the baseline this attempt was judged against, and the rollback's Backup owner. A record from
+    // before either existed carries neither, and both read as none.
+    judgeBaseline: readBaseline(parsed.judgeBaseline, `update ${row.id}: baseline`),
+    backupOf: parsed.backupOf === undefined || parsed.backupOf === null ? null : parsed.backupOf,
   };
+};
+
+// The baseline is a service-to-checks table (§6.4); anything else on a record is a wiring bug, named loudly.
+const readBaseline = (value: unknown, what: string): Record<string, string[]> | null => {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error(`${what}: not the shape`);
+  const out: Record<string, string[]> = {};
+  for (const [service, checks] of Object.entries(value as Record<string, unknown>)) {
+    if (!Array.isArray(checks) || !checks.every(c => typeof c === "string")) throw new Error(`${what}: not the shape`);
+    out[service] = checks;
+  }
+  return out;
 };
 
 const storedHistory = (row: UpdateRow): UpdateHistory => ({ ...storedUpdate(row), finishedAt: row.finished_at });
@@ -223,6 +254,7 @@ export class SqliteUpdateStore implements UpdateStore {
   readonly #lastFeedCheck: Database.Statement;
   readonly #manifestOf: Database.Statement;
   readonly #writeCommitted: Database.Statement;
+  readonly #lastCommitted: Database.Statement;
   readonly #writeBad: Database.Statement;
   readonly #writeUpdate: Database.Statement;
   readonly #readUpdate: Database.Statement;
@@ -271,7 +303,9 @@ export class SqliteUpdateStore implements UpdateStore {
     });
     this.#checks = this.#db.prepare("SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at FROM checks ORDER BY id DESC LIMIT ?");
     this.#lastFeedCheck = this.#db.prepare("SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at FROM last_feed WHERE id = 1");
-    this.#writeCommitted = this.#db.prepare("INSERT INTO committed (version, at) VALUES (?, ?) ON CONFLICT(version) DO UPDATE SET at = excluded.at");
+    this.#writeCommitted = this.#db.prepare(`INSERT INTO committed (version, at, baseline) VALUES (?, ?, ?)
+      ON CONFLICT(version) DO UPDATE SET at = excluded.at, baseline = excluded.baseline`);
+    this.#lastCommitted = this.#db.prepare("SELECT baseline FROM committed ORDER BY at DESC, rowid DESC LIMIT 1");
     this.#writeBad = this.#db.prepare("INSERT INTO bad (version, at) VALUES (?, ?) ON CONFLICT(version) DO UPDATE SET at = excluded.at");
     this.#writeUpdate = this.#db.prepare(`INSERT INTO updates (id, format, record, state, started_at, finished_at)
       VALUES (?, ?, ?, ?, ?, NULL)
@@ -376,8 +410,17 @@ export class SqliteUpdateStore implements UpdateStore {
 
   // ---- the step record (RL4, §6.2) and the apply's own writes
 
-  recordCommitted(version: string, at: number): void {
-    this.#writeCommitted.run(version, at);
+  recordCommitted(version: string, at: number, baseline: Record<string, string[]> | null): void {
+    this.#writeCommitted.run(version, at, baseline === null ? null : JSON.stringify(baseline));
+  }
+
+  // §6.7: the newest commit's recorded baseline, or null (nothing committed, or a row from before the column).
+  // Anything the JSON will not give back as the shape it was written in reads as none, never a guess.
+  commitBaseline(): Record<string, string[]> | null {
+    const row = this.#lastCommitted.get() as { baseline: string | null } | undefined;
+    if (row === undefined || row.baseline === null) return null;
+    try { return readBaseline(JSON.parse(row.baseline), "the committed baseline"); }
+    catch { return null; }
   }
 
   recordBad(version: string, at: number): void {

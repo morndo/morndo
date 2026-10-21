@@ -232,7 +232,12 @@ export class DirsInstaller implements Installer {
   }
 
   async verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]> {
-    const dir = join(this.releases, version);
+    return await this.verifyTreeAt(join(this.releases, version), filesSha256);
+  }
+
+  /** The same verification against any tree directory, by path: `morndo install`'s door to it (§10.3), which
+   *  checks the unpacked archive it runs from — a tree no link points at yet. */
+  async verifyTreeAt(dir: string, filesSha256: string | null): Promise<TreeFinding[]> {
     const findings: TreeFinding[] = [];
     let listBytes: Buffer;
     try { listBytes = readFileSync(join(dir, "files.json")); } catch { return [{ path: "files.json", problem: "unreadable" }]; }
@@ -281,6 +286,46 @@ export class DirsInstaller implements Installer {
     walk("");
     findings.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     return findings;
+  }
+
+  /** §10.3's first install: the tree `morndo install` runs from, already verified against its own files.json
+   *  (verifyTreeAt), copied into the releases directory read-only — the same layout promote leaves: files at
+   *  the modes the list names, directories 0555, install.json beside them. A leftover directory of the same
+   *  name (a first install that died before its links) is made writable and replaced; the manifest's digest is
+   *  unknown on this path — install.sh verified the Manifest, and this records only what it can check itself. */
+  installTree(o: { tree: string; version: string; at: number }): void {
+    if (parseVersion(o.version) === null) throw new Error(`${o.version}: not a Version`);
+    const listBytes = readFileSync(join(o.tree, "files.json"));
+    const list = FileListSchema.parse(JSON.parse(listBytes.toString("utf8")));
+    const target = join(this.releases, o.version);
+    if (existsSync(target)) this.removeTree(target);       // nothing links at it on a first install
+    mkdirSync(target, { recursive: true, mode: 0o700 });
+    for (const entry of list) {
+      const from = join(o.tree, entry.path);
+      const to = join(target, entry.path);
+      let st: ReturnType<typeof lstatSync>;
+      try { st = lstatSync(from); } catch { this.removeTree(target); throw new Error(`${entry.path}: not in the tree`); }
+      if (st.isDirectory()) mkdirSync(to, { recursive: true, mode: 0o755 });
+      else if (st.isSymbolicLink()) {
+        mkdirSync(dirname(to), { recursive: true, mode: 0o755 });
+        symlinkSync(readlinkSync(from), to);
+      } else {
+        // copy, then the list's mode: the modes come from the list, never the tree this ran from
+        mkdirSync(dirname(to), { recursive: true, mode: 0o755 });
+        writeFileSync(to, readFileSync(from));
+        chmodSync(to, parseInt(entry.mode, 8));
+      }
+    }
+    writeFileSync(join(target, "install.json"), `${JSON.stringify({
+      method: "updater",
+      installedAt: isoUtc(o.at),
+      manifestSha256: null,
+      filesSha256: this.hashes.sha256(listBytes),
+    }, null, 2)}\n`);
+    chmodSync(join(target, "install.json"), 0o444);
+    // read-only from here (§5): every directory 0555, deepest first, then the whole rename onto the disk
+    for (const dir of dirsDeepestFirst(target)) chmodSync(dir, 0o555);
+    this.syncDir();
   }
 
   freeBytes(): number {
