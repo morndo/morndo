@@ -2141,6 +2141,10 @@ export const CONTROLS: Control[] = [
   { id: "pr4-tar-dotdot-allowed", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
     find: `    if (part === "..") return "a '..' segment";\n`, replace: "",
     run: ["apps/updater/test/tar-read.test.ts"], expect: "to be an instance of TarRefused" },
+  // The review of 2026-10-21: a link checked only lexically climbed out through another link of the archive.
+  { id: "pr4-link-through-link", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
+    find: "          if (escape !== null) refuse(escape);\n", replace: "",
+    run: ["apps/updater/test/tar-read.test.ts"], expect: "through another link" },
   { id: "pr4-download-cap-ignored", task: "pr4", file: "apps/updater/src/adapters/https-get.ts",
     find: "if (chunk.length > room) overLimit = true;", replace: "if (false) overLimit = true;",
     run: ["apps/updater/test/artifacts-https.test.ts"], expect: "expected false to be true" },
