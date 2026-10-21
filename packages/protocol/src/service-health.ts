@@ -32,6 +32,9 @@ export const ServiceHealth = z.strictObject({
   version: ProductVersion,
   schema: z.number().check(z.int(), z.gte(0)),
   ready: z.boolean(),
+  // The service's acknowledgement that it has read hold.json (service-kit HoldWatch): the updater judges the drain only
+  // after every service says so. Optional: a service from before it says nothing, and the updater then waits it out.
+  held: z.exactOptional(z.boolean()),
   inFlight: z.array(InFlightItem).check(z.maxLength(100)),
 });
 export type ServiceHealth = z.infer<typeof ServiceHealth>;
@@ -46,6 +49,7 @@ export const NodeStatusHealth = z.looseObject({
   version: ProductVersion,
   ready: z.boolean(),
   state: z.enum(["stopped", "connecting", "online", "backoff", "refused", "conflict", "unsupported"]),
+  held: z.exactOptional(z.boolean()),                   // as ServiceHealth's: the node's acknowledgement of hold.json
   inFlight: z.exactOptional(z.array(InFlightItem).check(z.maxLength(100))),
 });
 export type NodeStatusHealth = z.infer<typeof NodeStatusHealth>;

@@ -291,7 +291,7 @@ export function startHttp(p: {
       authenticated: auth(req) !== null,
     });
     if (detail === "ready") return json(res, 200, { ready: true });
-    return json(res, 200, { version: productVersion(), schema: schemaVersion, ready: true, inFlight: flight.list() });
+    return json(res, 200, { version: productVersion(), schema: schemaVersion, ready: true, held: watch.held, inFlight: flight.list() });
   }
 
   // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).

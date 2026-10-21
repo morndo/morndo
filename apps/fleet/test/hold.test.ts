@@ -21,7 +21,7 @@ describe("a hold on the fleet", () => {
     const health = await api.get("/v1/health");
     expect(health?.status).toBe(200);
     expect(ServiceHealth.safeParse(health?.body).success).toBe(true);
-    expect(health?.body).toMatchObject({ version: "0.0.0", schema: SCHEMA_VERSION, ready: true });
+    expect(health?.body).toMatchObject({ version: "0.0.0", schema: SCHEMA_VERSION, ready: true, held: true });   // its ack of the hold
     expect((await api.get("/v1/caps"))?.status).toBe(200);
     const sent = await api.raw("/v1/op", {
       method: "POST",

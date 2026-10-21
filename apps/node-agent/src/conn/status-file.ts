@@ -17,7 +17,7 @@ export type ConnStatus = {
 };
 export type AgentStatus = ConnStatus & {
   node: string; instanceId: string; pid: number; spoolDepth: number; drops: number; jobs?: string;
-  version?: string; ready?: boolean;
+  version?: string; ready?: boolean; held?: boolean;
   inFlight: InFlight[];                                  // work a restart would interrupt (updates design §6.3)
 };
 
