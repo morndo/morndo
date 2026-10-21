@@ -257,6 +257,8 @@ export class CheckService {
         return refused("manifest_version", `the manifest is for ${manifest.version}, the feed entry for ${best.text}`);
       }
       const manifestSha256 = verifier.sha256(signedManifest.bytes);
+      // the verified Manifest's own text: recorded with the staging, what the apply's plan re-parses (§6.2 step 1)
+      const manifestText = decodeText.decode(signedManifest.bytes);
 
       // §10.2 step 5: this platform's artifact, downloaded no further than the manifest's size (RL1).
       const artifact = manifest.artifacts.find(a => a.platform === platform);
@@ -271,7 +273,7 @@ export class CheckService {
       if (installer.has(best.text) && store.versionRecord(best.text) === null) {
         const findings = await installer.verifyTree(best.text, artifact.filesSha256);
         if (findings.length === 0) {
-          store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now() });
+          store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now(), manifest: manifestText });
           return finish({ kind: "staged", version: best.text, already: true },
             "adopted a verified directory left without its record", best.text);
         }
@@ -309,7 +311,7 @@ export class CheckService {
 
       // §6.1 step 6: promote, remember, and let the download go.
       installer.promote(best.text, { manifestSha256, filesSha256: artifact.filesSha256, at: clock.now() });
-      store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now() });
+      store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now(), manifest: manifestText });
       return finish({ kind: "staged", version: best.text, already: false }, "verified and staged");
     } catch (error) {
       if (error instanceof FetchFailed) {

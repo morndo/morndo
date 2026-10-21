@@ -4,13 +4,16 @@
 // The store mirrors the real one's ratchet (RL3); the artifacts mirror the real adapter's cap semantics.
 import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compareVersions, DEFAULT_CHANNEL, DEFAULT_MODE, parseVersion, type Channel, type UpdateSettings } from "@morndo/domain";
+import {
+  compareVersions, DEFAULT_CHANNEL, DEFAULT_MODE, parseVersion, TERMINAL_UPDATE_STATES,
+  type Channel, type UpdateSettings,
+} from "@morndo/domain";
 import { ARTIFACT_NAME } from "@morndo/protocol";
 import { DirsInstaller } from "../../src/adapters/installer-dirs.ts";
 import {
   FetchFailed, type ArtifactStore, type CheckRecord, type Clock, type Download, type Installer, type Layout,
-  type ReleaseFeed, type SettingsSource, type Signed, type StagedRecord, type TreeFinding, type TrustState,
-  type UpdateStore,
+  type ReleaseFeed, type SettingsSource, type Signed, type StagedRecord, type StoredUpdate, type TreeFinding,
+  type TrustState, type UpdateHistory, type UpdateStore,
 } from "../../src/application/ports.ts";
 
 // Removes a directory tree however it is left: a promoted Version is read-only (files 0444, directories 0555, §5),
@@ -167,6 +170,21 @@ export class FakeInstaller implements Installer {
     this.real.removeVersion(version);
   }
 
+  swap(pair: { current: string; previous: string | null }): void {
+    this.calls.push({ op: "swap", version: pair.current });
+    this.real.swap(pair);
+  }
+
+  setGood(version: string): void {
+    this.calls.push({ op: "setGood", version });
+    this.real.setGood(version);
+  }
+
+  prune(keep: readonly string[]): void {
+    this.calls.push({ op: "prune" });
+    this.real.prune(keep);
+  }
+
   verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]> {
     return this.real.verifyTree(version, filesSha256);
   }
@@ -217,9 +235,46 @@ export class FakeStore implements UpdateStore {
     this.calls.push(`saveTrust(key set ${keySet === null ? "none" : keySet.version}, stable ${this.trustState.highestFeedSeq.stable})`);
   }
 
-  /** What PR 5's apply writes; the check service only reads it. */
-  commit(version: string): void { this.committedList.push(version); }
-  markBad(version: string): void { this.badList.push(version); }
+  /** What the apply writes; the check service only reads it. */
+  recordCommitted(version: string, _at: number): void {
+    this.committedList.push(version);
+    this.calls.push(`recordCommitted(${version})`);
+  }
+
+  recordBad(version: string, _at: number): void {
+    this.badList.push(version);
+    this.calls.push(`recordBad(${version})`);
+  }
+
+  // The step record (RL4), mirrored: save before the step runs, finish ends the attempt.
+  readonly updates: UpdateHistory[] = [];
+
+  saveUpdate(u: StoredUpdate): void {
+    const at = this.updates.findIndex(row => row.id === u.id);
+    if (at === -1) this.updates.push({ ...u, finishedAt: null });
+    else this.updates[at] = { ...u, finishedAt: this.updates[at]!.finishedAt };
+    this.calls.push(`saveUpdate(${u.id} ${u.state})`);
+  }
+
+  openUpdate(): StoredUpdate | null {
+    const live = this.updates.filter(row => !(TERMINAL_UPDATE_STATES as readonly string[]).includes(row.state));
+    if (live.length === 0) return null;
+    const newest = live.reduce((best, row) => (row.startedAt >= best.startedAt ? row : best));
+    const { finishedAt: _ended, ...open } = newest;   // the end is null by definition while it runs
+    return open;
+  }
+
+  finishUpdate(id: string, state: UpdateHistory["state"], at: number): void {
+    const row = this.updates.find(r => r.id === id);
+    if (row === undefined) throw new Error(`${id}: no update to finish`);
+    row.state = state;
+    row.finishedAt = at;
+    this.calls.push(`finishUpdate(${id} ${state})`);
+  }
+
+  recentUpdates(limit: number): UpdateHistory[] {
+    return [...this.updates].sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);
+  }
 
   highestCommitted(): string | null {
     return this.committedList.reduce<string | null>((best, version) => {
@@ -251,6 +306,8 @@ export class FakeStore implements UpdateStore {
   }
 
   versionRecord(version: string): StagedRecord | null { return this.versions.get(version) ?? null; }
+
+  manifestOf(version: string): string | null { return this.versions.get(version)?.manifest ?? null; }
 
   recordCheck(r: CheckRecord): void {
     this.checkLog.push(r);

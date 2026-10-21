@@ -1,5 +1,8 @@
 // The updater's ports (design §4.6). The application decides; these touch the network, the disk and the clock.
-import type { Channel, InstallMethod, KeySet, UpdateSettings } from "@morndo/domain";
+import type {
+  Channel, DatabaseName, DbState, HealthReport, InstallMethod, KeySet, SafePointReport, Update, UpdateService,
+  UpdateSettings,
+} from "@morndo/domain";
 
 // A signed document as fetched: its bytes and the bytes of the signature file beside it (`<url>.sig`), both unparsed.
 export type Signed = { bytes: Uint8Array; signature: Uint8Array };
@@ -63,6 +66,14 @@ export interface Installer {
   discard(version: string): void;
   /** Removes an installed <version>/ tree; refuses (throws) while current, previous or good points at it. */
   removeVersion(version: string): void;
+  /** §6.2 step 6: `previous` first, then `current` — each a new link beside the old, renamed over it, the
+   *  releases directory synced after each. A crash between the two leaves both links on the old Version.
+   *  `previous: null` removes the previous link (a first install has none to keep). */
+  swap(pair: { current: string; previous: string | null }): void;
+  /** Points `good` at the last committed Version (§5), the same atomic way. */
+  setGood(version: string): void;
+  /** Removes every installed <version>/ not named — never the ones current, previous or good point at (§6.2 step 10). */
+  prune(keep: readonly string[]): void;
   /** Re-checks an installed Version against its files.json (and that list against `filesSha256` when known). */
   verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]>;
   /** Free bytes on the file system holding the releases directory. */
@@ -70,11 +81,16 @@ export interface Installer {
 }
 
 export type TrustState = { keySet: KeySet | null; highestFeedSeq: { stable: number; latest: number } };
-export type StagedRecord = { version: string; manifestSha256: string; filesSha256: string; at: number };
+export type StagedRecord = { version: string; manifestSha256: string; filesSha256: string; at: number; manifest: string };
 export type CheckRecord = {
   at: number; channel: Channel; outcome: string; detail: string; version: string | null;
   feedSeq: number | null; feedExpiresAt: number | null;
 };
+// The step record (RL4, §6.2): the Update as it stands in update.db — the domain's own fields plus the format
+// its steps were written in, when the attempt began, and the marks recorded done so far.
+export type StoredUpdate = Update & { format: number; startedAt: number; doneMarks: string[] };
+// A step record that has ended (recentUpdates, for --status): when it ended, or null while it runs.
+export type UpdateHistory = StoredUpdate & { finishedAt: number | null };
 export interface UpdateStore {
   /** The apply lock (RL4, §5 apply.lock): held until release() or the process dies; null when another holds it. */
   tryLock(): { release(): void } | null;
@@ -93,7 +109,58 @@ export interface UpdateStore {
   /** The newest check that carries the feed's word, however far back among the kept rows, or null. A later
    *  refusal leaves the last good word standing (§4.5): ten failed checks in a row must not hide it. */
   lastFeedCheck(): CheckRecord | null;
+  /** Writes the step record: one transaction, synced, before the step it stands for runs (RL4). */
+  saveUpdate(u: StoredUpdate): void;
+  /** The newest update not in a terminal state, or null: what a recovery picks up (§6.6). */
+  openUpdate(): StoredUpdate | null;
+  /** Ends an attempt; `state` names how (§4.4's terminal states a finish may write). Unknown id: throws. */
+  finishUpdate(id: string, state: "committed" | "abandoned" | "rolled_back" | "rollback_failed", at: number): void;
+  /** The commit's own memory (RL2): highestCommitted only ever rises. */
+  recordCommitted(version: string, at: number): void;
+  /** A Version that failed here is never auto-installed again (RL7). */
+  recordBad(version: string, at: number): void;
+  /** The Manifest text recorded when the Version was staged, or null (staged before it was kept). */
+  manifestOf(version: string): string | null;
+  /** The last attempts, newest first (§8.1 --status). */
+  recentUpdates(limit: number): UpdateHistory[];
 }
 
 export interface SettingsSource { read(): UpdateSettings }
 export interface Clock { now(): number }
+
+// ---- the apply's own ports (§4.6); the adapters for the machine come with the apply's PR, tests fake them
+
+// The machine's services (§4.6 ServiceManager). Adapters for systemd and launchd come in the next PR; tests fake it.
+export interface ServiceManager {
+  /** The Morndo services this machine runs, of hub, fleet, node. */
+  services(): UpdateService[];
+  stop(s: UpdateService): Promise<void>;
+  start(s: UpdateService): Promise<void>;
+  /** How many times the service manager restarted it since `since` (systemd NRestarts). */
+  restarts(s: UpdateService): Promise<number>;
+  /** Render the units of `version` and reload the manager (§6.2 step 6). */
+  renderUnits(version: string): Promise<void>;
+  /** RL13: true when the tmux server sits inside the node agent's unit. */
+  tmuxInAgentUnit(): Promise<boolean>;
+}
+export interface RoleProbe {
+  safePoint(s: UpdateService): Promise<SafePointReport | null>;
+  health(s: UpdateService): Promise<HealthReport | null>;
+}
+export interface SchemaInspector {
+  read(db: DatabaseName): DbState | null;
+}
+export type BackupResult = { ok: true; schema: number } | { ok: false; reason: string };
+export interface Backup {
+  take(updateId: string, db: DatabaseName): Promise<BackupResult>;
+  has(updateId: string, db: DatabaseName): boolean;
+  restore(updateId: string, db: DatabaseName): void;
+  prune(keep: readonly string[]): void;
+}
+export interface HoldWriter {
+  write(h: { services: UpdateService[]; reason: "drain" | "probation"; version: string; since: number }): void;
+  clear(): void;
+}
+export interface Sleeper { sleep(ms: number): Promise<void> }
+export type AlertKind = "update_rolled_back" | "update_rollback_failed" | "update_deferred" | "update_unknown_record";
+export interface AlertSink { raise(kind: AlertKind, detail: string): void }

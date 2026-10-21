@@ -8,11 +8,16 @@
 import Database from "better-sqlite3";
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { compareVersions, parseVersion, type Channel, type KeySet } from "@morndo/domain";
+import {
+  compareVersions, formatVersion, parseVersion, TERMINAL_UPDATE_STATES,
+  type Channel, type KeySet, type Update, type Version,
+} from "@morndo/domain";
 import { errno, migrate as runMigrations, openPrivateDb, type Migration } from "@morndo/service-kit";
-import type { CheckRecord, StagedRecord, TrustState, UpdateStore } from "../application/ports.ts";
+import type { CheckRecord, StagedRecord, StoredUpdate, TrustState, UpdateHistory, UpdateStore } from "../application/ports.ts";
 
-const MIGRATIONS: readonly Migration[] = [
+// update.db's migrations, additive forever (§4.6, §11.2): an older updater must open what a newer one wrote —
+// the whole rollback story — so each one only adds. Exported for the additive linter's test.
+export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     name: "trust, staged versions, committed and bad versions, checks",
@@ -73,6 +78,28 @@ const MIGRATIONS: readonly Migration[] = [
         WHERE feed_seq IS NOT NULL AND feed_expires_at IS NOT NULL ORDER BY id DESC LIMIT 1`).run();
     },
   },
+  {
+    version: 3,
+    name: "the step record (RL4) and the staged Manifest's text",
+    compat: "additive",
+    // §6.2's step record: one row per attempt, the Update's own fields inside record — an older updater that
+    // cannot read the table still leaves it whole — and the queried bits beside it. versions.manifest keeps the
+    // verified Manifest's own text, what the apply's plan re-parses (§6.2 step 1); rows from before this
+    // migration carry none, and read as absent until the next check stages their Version again.
+    up: db => {
+      db.exec(`
+        ALTER TABLE versions ADD COLUMN manifest TEXT;
+        CREATE TABLE updates (
+          id TEXT PRIMARY KEY,
+          format INTEGER NOT NULL,
+          record TEXT NOT NULL,
+          state TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          finished_at INTEGER
+        );
+      `);
+    },
+  },
 ];
 
 export class UpdateDbFromFuture extends Error {
@@ -86,9 +113,73 @@ export class UpdateDbFromFuture extends Error {
   }
 }
 
-type VersionRow = { version: string; manifest_sha256: string; files_sha256: string; staged_at: number };
-const stagedRecord = (row: VersionRow): StagedRecord =>
-  ({ version: row.version, manifestSha256: row.manifest_sha256, filesSha256: row.files_sha256, at: row.staged_at });
+type VersionRow = { version: string; manifest_sha256: string; files_sha256: string; staged_at: number; manifest: string | null };
+// A staged row from before manifests were kept (migration 2's shape) has no Manifest text, so no apply can be
+// planned from it: it reads as absent, and the next check that stages the Version re-records it whole.
+const stagedRecord = (row: VersionRow): StagedRecord | null =>
+  row.manifest === null ? null
+    : {
+      version: row.version, manifestSha256: row.manifest_sha256, filesSha256: row.files_sha256,
+      at: row.staged_at, manifest: row.manifest,
+    };
+
+// The updates table's row (RL4, §6.2): the record column holds the Update's own fields plus its doneMarks; the
+// columns carry what the queries need without parsing it — which attempt is open, when attempts began and ended.
+type UpdateRow = { id: string; format: number; record: string; started_at: number; finished_at: number | null };
+
+const updateText = (u: StoredUpdate): string => JSON.stringify({
+  id: u.id, kind: u.kind, target: u.target, preUpdate: u.preUpdate, state: u.state, mark: u.mark,
+  backups: u.backups, migrations: u.migrations, doneMarks: u.doneMarks,
+});
+
+// A Version as it comes back from JSON, re-parsed through the domain, so a row some other build wrote cannot
+// smuggle in a shape the domain never made.
+const readVersion = (value: unknown, what: string): Version => {
+  const asFields = value as Version | null;
+  if (typeof asFields !== "object" || asFields === null
+    || ![asFields.major, asFields.minor, asFields.patch].every(n => typeof n === "number")) {
+    throw new Error(`${what}: not a Version`);
+  }
+  const again = parseVersion(formatVersion(asFields));
+  if (again === null) throw new Error(`${what}: not a Version`);
+  return again;
+};
+
+// A record read back (§6.6's recovery reads exactly this). A state or a mark this build does not know passes
+// through as it is: recovery's answer to the unknown is to act on nothing (§6.6), which needs the name, not a
+// parse. Anything structurally broken throws with the attempt's id in the message.
+const storedUpdate = (row: UpdateRow): StoredUpdate => {
+  let parsed: Record<string, unknown>;
+  try { parsed = JSON.parse(row.record) as Record<string, unknown>; }
+  catch { throw new Error(`update ${row.id}: the record is not JSON`); }
+  if (parsed.kind !== "update" && parsed.kind !== "rollback") throw new Error(`update ${row.id}: not a kind`);
+  if (typeof parsed.state !== "string") throw new Error(`update ${row.id}: no state`);
+  if (parsed.mark !== null && typeof parsed.mark !== "string") throw new Error(`update ${row.id}: not a mark`);
+  if (!Array.isArray(parsed.backups)) throw new Error(`update ${row.id}: no backups list`);
+  if (!Array.isArray(parsed.doneMarks) || !parsed.doneMarks.every(m => typeof m === "string")) {
+    throw new Error(`update ${row.id}: no done-marks list`);
+  }
+  const pre = parsed.preUpdate as { current: unknown; previous: unknown } | null;
+  if (typeof pre !== "object" || pre === null) throw new Error(`update ${row.id}: no pre-update pair`);
+  return {
+    id: row.id,
+    kind: parsed.kind,
+    target: readVersion(parsed.target, `update ${row.id}: target`),
+    preUpdate: {
+      current: readVersion(pre.current, `update ${row.id}: pre-update current`),
+      previous: pre.previous === null ? null : readVersion(pre.previous, `update ${row.id}: pre-update previous`),
+    },
+    state: parsed.state as Update["state"],
+    mark: parsed.mark as Update["mark"],
+    backups: parsed.backups as Update["backups"],
+    migrations: (parsed.migrations ?? null) as Update["migrations"],
+    format: row.format,
+    startedAt: row.started_at,
+    doneMarks: parsed.doneMarks,
+  };
+};
+
+const storedHistory = (row: UpdateRow): UpdateHistory => ({ ...storedUpdate(row), finishedAt: row.finished_at });
 
 type CheckRow = { at: number; channel: string; outcome: string; detail: string; version: string | null;
   feed_seq: number | null; feed_expires_at: number | null };
@@ -118,6 +209,16 @@ export class SqliteUpdateStore implements UpdateStore {
   readonly #recordCheckTx: (r: CheckRecord) => void;
   readonly #checks: Database.Statement;
   readonly #lastFeedCheck: Database.Statement;
+  readonly #manifestOf: Database.Statement;
+  readonly #writeCommitted: Database.Statement;
+  readonly #writeBad: Database.Statement;
+  readonly #writeUpdate: Database.Statement;
+  readonly #readUpdate: Database.Statement;
+  readonly #endUpdate: Database.Statement;
+  readonly #openUpdate: Database.Statement;
+  readonly #recentUpdates: Database.Statement;
+  readonly #saveUpdateTx: (u: StoredUpdate) => void;
+  readonly #finishUpdateTx: (id: string, state: "committed" | "abandoned" | "rolled_back" | "rollback_failed", at: number) => void;
   #closed = false;
 
   constructor(o: { db: string; lock: string }) {
@@ -135,10 +236,11 @@ export class SqliteUpdateStore implements UpdateStore {
       ON CONFLICT(id) DO UPDATE SET key_set = excluded.key_set, seq_stable = excluded.seq_stable, seq_latest = excluded.seq_latest`);
     this.#committed = this.#db.prepare("SELECT version FROM committed");
     this.#bad = this.#db.prepare("SELECT version FROM bad ORDER BY at");
-    this.#versions = this.#db.prepare("SELECT version, manifest_sha256, files_sha256, staged_at FROM versions");
-    this.#writeVersion = this.#db.prepare(`INSERT INTO versions (version, manifest_sha256, files_sha256, staged_at)
-      VALUES (?, ?, ?, ?) ON CONFLICT(version) DO UPDATE SET manifest_sha256 = excluded.manifest_sha256,
-      files_sha256 = excluded.files_sha256, staged_at = excluded.staged_at`);
+    this.#versions = this.#db.prepare("SELECT version, manifest_sha256, files_sha256, staged_at, manifest FROM versions");
+    this.#writeVersion = this.#db.prepare(`INSERT INTO versions (version, manifest_sha256, files_sha256, staged_at, manifest)
+      VALUES (?, ?, ?, ?, ?) ON CONFLICT(version) DO UPDATE SET manifest_sha256 = excluded.manifest_sha256,
+      files_sha256 = excluded.files_sha256, staged_at = excluded.staged_at, manifest = excluded.manifest`);
+    this.#manifestOf = this.#db.prepare("SELECT manifest FROM versions WHERE version = ?");
     this.#insertCheck = this.#db.prepare(`INSERT INTO checks (at, channel, outcome, detail, version, feed_seq, feed_expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`);
     this.#trimChecks = this.#db.prepare("DELETE FROM checks WHERE id NOT IN (SELECT id FROM checks ORDER BY id DESC LIMIT 100)");
@@ -155,6 +257,27 @@ export class SqliteUpdateStore implements UpdateStore {
     });
     this.#checks = this.#db.prepare("SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at FROM checks ORDER BY id DESC LIMIT ?");
     this.#lastFeedCheck = this.#db.prepare("SELECT at, channel, outcome, detail, version, feed_seq, feed_expires_at FROM last_feed WHERE id = 1");
+    this.#writeCommitted = this.#db.prepare("INSERT INTO committed (version, at) VALUES (?, ?) ON CONFLICT(version) DO UPDATE SET at = excluded.at");
+    this.#writeBad = this.#db.prepare("INSERT INTO bad (version, at) VALUES (?, ?) ON CONFLICT(version) DO UPDATE SET at = excluded.at");
+    this.#writeUpdate = this.#db.prepare(`INSERT INTO updates (id, format, record, state, started_at, finished_at)
+      VALUES (?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(id) DO UPDATE SET format = excluded.format, record = excluded.record, state = excluded.state,
+      started_at = excluded.started_at`);
+    this.#readUpdate = this.#db.prepare("SELECT id, format, record, started_at, finished_at FROM updates WHERE id = ?");
+    this.#endUpdate = this.#db.prepare("UPDATE updates SET record = ?, state = ?, finished_at = ? WHERE id = ?");
+    // newest first by when the attempt began; the rowid breaks a tie the way the writes happened
+    this.#openUpdate = this.#db.prepare(`SELECT id, format, record, started_at, finished_at FROM updates
+      WHERE state NOT IN (${TERMINAL_UPDATE_STATES.map(() => "?").join(", ")})
+      ORDER BY started_at DESC, rowid DESC LIMIT 1`);
+    this.#recentUpdates = this.#db.prepare("SELECT id, format, record, started_at, finished_at FROM updates ORDER BY started_at DESC, rowid DESC LIMIT ?");
+    this.#saveUpdateTx = this.#db.transaction((u: StoredUpdate) => {
+      this.#writeUpdate.run(u.id, u.format, updateText(u), u.state, u.startedAt);
+    });
+    this.#finishUpdateTx = this.#db.transaction((id: string, state: "committed" | "abandoned" | "rolled_back" | "rollback_failed", at: number) => {
+      const row = this.#readUpdate.get(id) as UpdateRow | undefined;
+      if (row === undefined) throw new Error(`${id}: no update to finish`);
+      this.#endUpdate.run(updateText({ ...storedUpdate(row), state }), state, at, id);
+    });
   }
 
   trust(): TrustState {
@@ -193,7 +316,7 @@ export class SqliteUpdateStore implements UpdateStore {
   }
 
   recordStaged(r: StagedRecord): void {
-    this.#writeVersion.run(r.version, r.manifestSha256, r.filesSha256, r.at);
+    this.#writeVersion.run(r.version, r.manifestSha256, r.filesSha256, r.at, r.manifest);
   }
 
   versionRecord(version: string): StagedRecord | null {
@@ -210,8 +333,15 @@ export class SqliteUpdateStore implements UpdateStore {
       const v = parseVersion(row.version);
       if (v === null) return best;
       if (ceiling !== null && compareVersions(v, ceiling) <= 0) return best;
-      return best !== null && compareVersions(v, parseVersion(best.version)!) <= 0 ? best : stagedRecord(row);
+      const record = stagedRecord(row);                 // a row from before manifests were kept reads as absent
+      if (record === null) return best;
+      return best !== null && compareVersions(v, parseVersion(best.version)!) <= 0 ? best : record;
     }, null);
+  }
+
+  manifestOf(version: string): string | null {
+    const row = this.#manifestOf.get(version) as { manifest: string | null } | undefined;
+    return row === undefined ? null : row.manifest;
   }
 
   recordCheck(r: CheckRecord): void {
@@ -228,6 +358,33 @@ export class SqliteUpdateStore implements UpdateStore {
   lastFeedCheck(): CheckRecord | null {
     const row = this.#lastFeedCheck.get() as CheckRow | undefined;
     return row === undefined ? null : checkRecord(row);
+  }
+
+  // ---- the step record (RL4, §6.2) and the apply's own writes
+
+  recordCommitted(version: string, at: number): void {
+    this.#writeCommitted.run(version, at);
+  }
+
+  recordBad(version: string, at: number): void {
+    this.#writeBad.run(version, at);
+  }
+
+  saveUpdate(u: StoredUpdate): void {
+    this.#saveUpdateTx(u);
+  }
+
+  openUpdate(): StoredUpdate | null {
+    const row = this.#openUpdate.get(...TERMINAL_UPDATE_STATES) as UpdateRow | undefined;
+    return row === undefined ? null : storedUpdate(row);
+  }
+
+  finishUpdate(id: string, state: "committed" | "abandoned" | "rolled_back" | "rollback_failed", at: number): void {
+    this.#finishUpdateTx(id, state, at);
+  }
+
+  recentUpdates(limit: number): UpdateHistory[] {
+    return (this.#recentUpdates.all(limit) as UpdateRow[]).map(storedHistory);
   }
 
   // The apply lock (RL4, §5): open the lock file as a SQLite database, hold it exclusively. BEGIN EXCLUSIVE under

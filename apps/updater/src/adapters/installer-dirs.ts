@@ -4,7 +4,7 @@
 // (RL1 file_list: every file against the signed list, nothing extra, no path outside). Digests come from the
 // SSH-signature verifier, node:crypto's one door (§4.7); this adapter adds no crypto of its own.
 import { execFile } from "node:child_process";
-import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statfsSync, writeFileSync, type Dirent } from "node:fs";
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, renameSync, rmSync, statfsSync, symlinkSync, writeFileSync, type Dirent } from "node:fs";
 import { dirname, join } from "node:path";
 import { parseVersion } from "@morndo/domain";
 import { FileListSchema } from "@morndo/protocol";
@@ -156,9 +156,56 @@ export class DirsInstaller implements Installer {
     // read-only from here (§5): every directory 0555, deepest first
     for (const dir of dirsDeepestFirst(staging)) chmodSync(dir, 0o555);
     renameSync(staging, target);
+    this.syncDir();   // the rename is not the directory's until the directory itself is on disk
+  }
+
+  // The releases directory is not its contents' until it is synced itself — what survives a power loss is what
+  // reached the disk, not what the cache holds.
+  private syncDir(): void {
     const fd = openSync(this.releases, "r");
-    fsyncSync(fd);   // the rename is not the directory's until the directory itself is on disk
-    closeSync(fd);
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+  }
+
+  // One atomic relink (§6.2 step 6): a new link beside the old under a dotted temp name, rename(2) over the old
+  // one — a reader resolves the name before or after, never without it — and the directory synced. A leftover
+  // temp from a killed run goes first; a directory squatting on the name is an error, not something to remove.
+  private relink(name: "current" | "previous" | "good", target: string): void {
+    const temp = join(this.releases, `.${name}.new`);
+    rmSync(temp, { force: true });
+    symlinkSync(target, temp);
+    renameSync(temp, join(this.releases, name));
+    this.syncDir();
+  }
+
+  // §6.2 step 6. `previous` goes first, so a crash between the two renames leaves both links on the old Version:
+  // the machine runs what it ran, and recovery (§6.6) reads the same layout it would have read before the swap.
+  swap(pair: { current: string; previous: string | null }): void {
+    if (pair.previous === null) rmSync(join(this.releases, "previous"), { force: true });
+    else this.relink("previous", pair.previous);
+    this.relink("current", pair.current);
+  }
+
+  setGood(version: string): void {
+    this.relink("good", version);
+  }
+
+  // §6.2 step 10: every installed <version>/ not named goes, except the ones the links still point at — current
+  // runs it, previous and good are the rollback and the recovery floor (§5). Not a Version's name, not ours.
+  prune(keep: readonly string[]): void {
+    const links = this.layout();
+    const held = new Set([links.current, links.previous, links.good]);
+    let entries: Dirent[];
+    try { entries = readdirSync(this.releases, { withFileTypes: true }); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;   // nothing installed: nothing to prune
+      throw error;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+      if (parseVersion(entry.name) === null) continue;
+      if (held.has(entry.name) || keep.includes(entry.name)) continue;
+      this.removeTree(join(this.releases, entry.name));
+    }
   }
 
   discard(version: string): void { this.removeTree(this.staging(version)); }

@@ -110,6 +110,7 @@ describe("the check service (§6.1, §10.2)", () => {
     expect(w.installer.has(OFFERED)).toBe(true);                    // .staging-0.2.0 became 0.2.0/
     expect(w.artifacts.downloads()).toEqual([]);                    // the download went after the promotion
     expect(w.store.versionRecord(OFFERED)).toMatchObject({ filesSha256: w.rel.filesSha256, manifestSha256: w.rel.manifestSha256 });
+    expect(w.store.manifestOf(OFFERED)).toBe(w.rel.manifestText);     // the verified Manifest's own text, for the apply
     expect(w.store.trust().highestFeedSeq).toEqual({ stable: 1, latest: 0 });
     expect(w.store.trust().keySet?.version).toBe(1);                // the shipped anchor, now the store's own
     recorded(w, "staged", null, OFFERED);
@@ -479,7 +480,7 @@ describe("the check service (§6.1, §10.2)", () => {
   });
 
   it("a Version marked bad here is skipped bad_here", async () => {
-    const w = build(w => w.store.markBad(OFFERED));
+    const w = build(w => w.store.recordBad(OFFERED, NOW));
     expect(await w.service.check()).toEqual({ kind: "skipped", reason: "bad_here", version: OFFERED });
     expect(w.artifacts.calls).toEqual([]);
     nothingLeft(w);
@@ -583,6 +584,7 @@ describe("the check service (§6.1, §10.2)", () => {
     expect(out).toEqual({ kind: "staged", version: OFFERED, already: true });
     expect(w.artifacts.calls.length).toBe(fetches);                // adopted: nothing downloaded
     expect(w.store.versionRecord(OFFERED)).toMatchObject({ filesSha256: w.rel.filesSha256, manifestSha256: w.rel.manifestSha256 });
+    expect(w.store.manifestOf(OFFERED)).toBe(w.rel.manifestText);     // the adopted path records it too
     recorded(w, "staged", null, OFFERED);
     expect(w.store.checks(1)[0]!.detail).toBe("adopted a verified directory left without its record");
   });
