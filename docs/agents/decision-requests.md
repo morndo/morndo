@@ -209,6 +209,44 @@ Manager · ≈4 min · Includes spend
 ★ Recommended: Extend the triage script      [Read and decide]
 ```
 
+## Short cards
+
+The manager's everyday question to the principal is a card, not a brief: a few visible lines and a `[buttons …]` last
+line he taps on his phone. Write it in the card file below and check it with `morndo-decide card card.md`, which
+refuses a card with no recommendation, a default that is not one of the options, or a default that continues a live
+risk you named, warns on ids he can't read, and prints the lines to post, the buttons line last. It files nothing and
+needs no hub, like `lint` and `template`: a card goes into the conversation, not the hub's record.
+
+### The card template
+
+`morndo-decide card --template` prints it.
+
+```markdown
+Id: ny-80
+Outcome: <one plain line: what is asked or what happened, no ids>
+Recommend: <key of the recommended option>
+Options:
+- <key>: <Label>
+- <key>: <Label>
+Default: <key of the option that applies if he does not answer>
+Risk: <optional: the live risk this touches, if there is one>
+```
+
+### A card example
+
+Made up.
+
+```markdown
+Id: ny-80
+Outcome: The release is ready; one check from the reviewer is still open.
+Recommend: hold
+Options:
+- hold: Hold until the check is in
+- merge: Merge now
+Default: hold
+Risk: the migration has no rollback yet
+```
+
 ## Filing and after
 
 ```sh
@@ -237,6 +275,7 @@ You ask the principal for a decision with `morndo-decide`. One brief, his format
 
 - File one when the decision is his: spending money, anything public or outside the team, an irreversible step, a product or taste call. Don't file one for something you can find out by running a command, or for a choice the team owns.
 - Start from the blank: `morndo-decide template`. Check it before you file: `morndo-decide lint brief.md`. A refusal is one line per problem; fix those and lint again. Warnings do not refuse.
+- A short question for his phone is a card, not a brief: `morndo-decide card --template`, then `morndo-decide card card.md`. It refuses a card with no recommendation or a default that continues a live risk, warns on ids he can't read (#12, a commit hash, ny-80), and prints the card to post, buttons line last.
 - File it: `morndo-decide new brief.md`. It prints an id, such as `d-12`. `morndo-decide show d-12` says where it stands.
 - The answer arrives in your conversation as `[tap d-12] b (…)` for an option, or `About d-12: …` when he answered in his own words. Act on it, then `morndo-decide settle d-12`.
 - The facts changed: `morndo-decide restate d-12 brief.md`. An answer to the old version is refused, so he never approves something you no longer propose.

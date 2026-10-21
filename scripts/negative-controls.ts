@@ -3100,6 +3100,24 @@ export const CONTROLS: Control[] = [
   { id: "t280-no-long-text-cap-check", task: "280", file: "apps/fleet/src/application/connections.ts",
     find: "!c.caps.includes(CAP_LONG_TEXT)", replace: "false",
     run: ["apps/fleet/test/long-text.test.ts"], expect: "unknown_op" },
+  // ---- B7 (board T-307): short cards are checked like briefs, each guard removed once.
+  { id: "b7-card-needs-recommendation", task: "307", file: "packages/domain/src/card.ts",
+    find: 'if (!isText(draft.recommend) || draft.recommend.trim() === "") {',
+    replace: 'if (false && (!isText(draft.recommend) || draft.recommend.trim() === "")) {',
+    run: ["packages/domain/test/card.test.ts"], expect: "no_recommendation" },
+  { id: "b7-card-recommend-first", task: "307", file: "packages/domain/src/card.ts",
+    find: "} else if (!optionsBroken && options[0]!.key !== rec) {",
+    replace: "} else if (false && !optionsBroken && options[0]!.key !== rec) {",
+    run: ["packages/domain/test/card.test.ts"], expect: "recommend_not_first" },
+  { id: "b7-card-continue-on-risk", task: "307", file: "packages/domain/src/card.ts",
+    find: "if (risk !== null && carriesOn) {", replace: "if (false && risk !== null && carriesOn) {",
+    run: ["packages/domain/test/card.test.ts"], expect: "continue_default_on_live_risk" },
+  { id: "b7-card-jargon-hash", task: "307", file: "packages/domain/src/card.ts",
+    find: "(?=[0-9a-f]*\\d)", replace: "",
+    run: ["packages/domain/test/card.test.ts"], expect: "defaced" },
+  { id: "b7-card-cli-errors-exit", task: "307", file: "apps/board-cli/src/decide.ts",
+    find: "if (errors.length) return 1;", replace: "if (errors.length) return 0;",
+    run: ["apps/board-cli/test/decide-card.test.ts"] },
 ];
 
 // ---- the runner

@@ -74,3 +74,15 @@ From the design, section 12, each with the recommended default:
 1. **Who may send a brief to you?** Default: the manager only; a lane's brief is a draft the manager forwards or declines.
 2. **Quick answers on the compact card?** Default: yes, through the confirm step or the Undo window, except for briefs with spend, which open the brief first.
 3. **One format for everything agents file?** Default: yes, a full brief for every decision filed with the new command; today's plain asks keep working.
+
+## Amendment: short cards (2026-10-21, board T-307)
+
+The manager's everyday question to the principal was never a brief: a few lines and a `[buttons …]` last line, sent
+on his phone, never filed. A card now gets the brief's discipline as a short form: a pure `lintCard` in the domain, a
+text adapter in the protocol, and `morndo-decide card`, which checks a card file and prints the lines to post — it
+files nothing and needs no hub, like `lint` and `template`. Its rules: an id for the buttons line, one plain outcome
+line, two to four options with the protocol's keys and labels, the recommended option first and named, a default that
+is one of the options, and no placeholder left from the blank; with a live Risk named, a default that carries on
+("continue", "keep going", "do nothing") is refused, and ids only the manager can read (#12, a commit hash, an ask id)
+warn. The continue words and the jargon patterns are lint — shape, not judgement of truth: whether the risk is real
+stays with the manager.
