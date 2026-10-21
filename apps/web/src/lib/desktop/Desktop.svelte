@@ -370,7 +370,7 @@
       onView={v => (view = v)} onManager={() => manager && open(manager.id)} onPreferences={t => (preferences = t)} />
     <div class="workspace">
       <div class="panel" class:over={narrow && rightShown} style:--right-w="{drawnRight}px" style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${drawnRight}px` : ''}">
-        <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines}
+        <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines} runs={feed.boardRuns}
           decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
           {prefsOf} onMenu={(id, x, y) => (menu = { x, y, id })}
           onSelect={open} onActivity={() => (view = "activity")} onCompose={() => { if (manager) { open(manager.id); setTimeout(() => composerEl?.focus(), 50); } }} />

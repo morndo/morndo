@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFAULT_POLICY } from "@morndo/domain";
-import type { LaneEvent } from "@morndo/protocol";
+import { LIMITS, type LaneEvent } from "@morndo/protocol";
 import { Store } from "../src/adapters/store.ts";
 import { BoardService } from "../src/application/board-service.ts";
 import { localNode, memoryBackend, refusal, until, type FakeFleet, type MemoryBackend } from "./helpers/fake-fleet.ts";
@@ -249,6 +249,31 @@ describe("morndo lanes: keys, start, stop, status, events", () => {
     const json = await lanes(["start", "build", "--cwd", "/w/build", "--json", "--node", "pc"]);
     expect(json.code).toBe(0);
     expect(JSON.parse(json.out)).toEqual({ node: "pc", workerId: "pc.aaaaaaaa.9", waiting: "trust" });
+  });
+
+  it("start: a prompt of up to maxMessageText goes to the node whole; a longer one is refused in one line, nothing assigned or sent", async () => {
+    fleet.intercept("lane.start", async () => ({ ok: true, result: { workerId: "pc.aaaaaaaa.9", prompt: "lanes:start:x:prompt" } }));
+    // ASCII at the bound: one argv element holds at most 131,072 bytes (MAX_ARG_STRLEN), so a multi-byte prompt of this
+    // length cannot be an argument at all; the fleet's own tests carry the multi-byte one.
+    const whole = "x".repeat(LIMITS.maxMessageText);
+    expect(whole).toHaveLength(LIMITS.maxMessageText);
+    const r = await lanes(["start", "build", "--cwd", "/w/build", "--prompt", whole]);
+    expect(r.code, r.err).toBe(0);
+    expect(fleet.calls.filter(c => c.op === "lane.start").at(-1)?.args).toMatchObject({ name: "build", cwd: "/w/build", prompt: whole });
+    // The hub's own board too: a refused prompt assigns no task (the guard runs before assignTask).
+    const hubHome = join(home, "hub");
+    const manager = { kind: "manager", name: "manager", token: "tok-m" } as const;
+    const seeded = new Store(hubHome);
+    new BoardService({ store: seeded, policy: () => DEFAULT_POLICY }).create({ title: "Build the login page" }, manager);   // T-1, nobody's
+    seeded.close();
+    const starts = fleet.calls.filter(c => c.op === "lane.start").length;
+    const over = await lanes(["start", "build", "--cwd", "/w/build", "--task", "T-1", "--prompt", "x".repeat(LIMITS.maxMessageText + 1)], { env: { MORNDO_HOME: hubHome } });
+    expect([over.code, over.err]).toEqual([2, expect.stringContaining(`the prompt is over ${LIMITS.maxMessageText} characters`)]);
+    expect(fleet.calls.filter(c => c.op === "lane.start")).toHaveLength(starts);       // nothing was sent
+    const s = new Store(hubHome);
+    try {
+      expect(new BoardService({ store: s, policy: () => DEFAULT_POLICY }).task("T-1")?.task).toMatchObject({ assignee: null, status: "backlog" });
+    } finally { s.close(); }
   });
 
   it("start --task: the task is the new lane's first, assigned as the console on the hub's board; an unknown or done task starts nothing", async () => {
