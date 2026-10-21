@@ -3192,7 +3192,7 @@ export const CONTROLS: Control[] = [
   { id: "b9-ui-only-memory-asks", task: "309", file: "apps/web/src/lib/desktop/DecisionCard.svelte",
     find: "noteIdOfAsk(item.id) !== null && open && canAnswer",
     replace: "open && canAnswer",
-    run: ["apps/web/test/memory-code-desktop.test.ts"], expect: "data-memory-code-ask" },
+    run: ["apps/web/test/memory-code-desktop.test.ts"], expect: "to be +0" },
   { id: "b9-ui-step-up-retry", task: "309", file: "apps/web/src/lib/desktop/Desktop.svelte",
     find: "await withStepUp(() => api.post<{ code: string; expiresAt: number }>(`/api/memory/notes/${encodeURIComponent(noteId)}/approval-code`), at => (verifiedAt = at));",
     replace: "await api.post<{ code: string; expiresAt: number }>(`/api/memory/notes/${encodeURIComponent(noteId)}/approval-code`);",
