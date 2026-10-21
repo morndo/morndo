@@ -27,26 +27,16 @@ const VERSION = /^[\x21-\x7e]{1,64}$/;
 export type SessionInfo = { sessionId: string; name: string | null; pane: string; cwd: string; version: string | null; pid: number; status: SessionStatus | null; engine?: string; aliases?: string[] };
 const STATUSES = new Set<string>(SESSION_STATUSES);
 
-// B6 (board T-306): two live session files can name one pane — a headless `claude -p` run started inside the lane inherits
-// its TMUX_PANE and writes its own file — and whichever file readdirSync happens to list last must not decide who owns the
-// pane: the lane's own Stop is judged against it (window-of.ts foreignStop), and a headless winner would leave the lane
-// never reporting done. Rank before age: an entrypoint that does not start with "sdk" (the lane's own, "cli") beats one
-// that does (a headless "sdk-cli", younger than the lane that started it); among equals the earlier startedAt (a missing
-// or non-numeric one is later than any number); a final tie the smaller sessionId.
-type PaneCandidate = { info: SessionInfo; sdk: boolean; startedAt: number };
-const outranks = (a: PaneCandidate, b: PaneCandidate) =>
-  a.sdk !== b.sdk ? b.sdk : a.startedAt !== b.startedAt ? a.startedAt < b.startedAt : a.info.sessionId < b.info.sessionId;
-
 export function sessionRegistry(configDir: string) {
   const dir = join(configDir, "sessions");
   const transcripts = new Map<string, string>();
   return {
     // pane ID ("%3") → the live session in it
     byPane(): Map<string, SessionInfo> {
-      const out = new Map<string, PaneCandidate>();
-      if (!existsSync(dir)) return new Map();
+      const out = new Map<string, SessionInfo>();
+      if (!existsSync(dir)) return out;
       let files: string[];
-      try { files = readdirSync(dir); } catch { return new Map(); }   // not a directory, or not ours to read: no sessions
+      try { files = readdirSync(dir); } catch { return out; }         // not a directory, or not ours to read: no sessions
       for (const f of files) {
         if (!f.endsWith(".json")) continue;
         let d: Record<string, unknown>;
@@ -61,13 +51,28 @@ export function sessionRegistry(configDir: string) {
           cwd: text(d.cwd), version: typeof d.version === "string" && VERSION.test(d.version) ? d.version : null,
           status: typeof d.status === "string" && STATUSES.has(d.status) ? d.status as SessionStatus : null,
         };
-        const cand: PaneCandidate = {
-          info, sdk: text(d.entrypoint).startsWith("sdk"),
-          startedAt: typeof d.startedAt === "number" && Number.isFinite(d.startedAt) ? d.startedAt : Number.POSITIVE_INFINITY,
-        };
-        if (!prev || outranks(cand, prev)) out.set(pane, cand);
+        if (!prev || Number(d.updatedAt ?? 0) > 0) out.set(pane, info);
       }
-      return new Map([...out].map(([pane, c]) => [pane, c.info]));
+      return out;
+    },
+    // B6: does a LIVE session file positively say this session is a headless run? Fail open: a session no file names, a file with
+    // no entrypoint, an interactive one, or a dead process is not headless. A session id that an interactive file ALSO names (a
+    // headless `claude -p --resume <the lane's session>`) is the lane's: only a session every live file for which is "sdk…" counts.
+    headless(sessionId: string): boolean {
+      if (!existsSync(dir)) return false;
+      let files: string[];
+      try { files = readdirSync(dir); } catch { return false; }         // not a directory, or not ours to read: no sessions
+      let sdk = false;                                                  // a live file named this session with an sdk entrypoint
+      for (const f of files) {
+        if (!f.endsWith(".json")) continue;
+        let d: Record<string, unknown>;
+        try { d = JSON.parse(readFileSync(join(dir, f), "utf8")); } catch { continue; }
+        if (d === null || typeof d !== "object") continue;
+        if (d.sessionId !== sessionId || !processAlive(Number(d.pid))) continue;
+        if (!(typeof d.entrypoint === "string" && d.entrypoint.startsWith("sdk"))) return false;   // interactive, or none: the lane's
+        sdk = true;
+      }
+      return sdk;
     },
     transcriptPath(sessionId: string): string | null {
       const cached = transcripts.get(sessionId);

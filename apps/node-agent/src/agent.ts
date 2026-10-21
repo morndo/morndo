@@ -183,7 +183,9 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     relay = await startRelay({
       port: config.relayPort, spool, files, log, onAppended: () => { sender.kick(); ops.deliverer.kick("hook"); }, now: ops.now,
       windowOf: windowResolver({ windowOfPane: p => ops.inventory.windowOfPane(p), sessions, refresh: sessions.fresh }),
-      foreign: foreignStop({ sessions, refresh: sessions.fresh }),
+      // B6: a fresh read of the sessions directory per Stop or failure, no cache: a headless run's file may have appeared a
+      // moment ago, and Stops are one per turn.
+      foreign: foreignStop({ headless: id => ops.registry.headless(id) }),
       ask: (body, window) => statusAsk(body, window, config.policy.statusContract, lane => jobsOf(lane)),
     });
   } catch (e) {

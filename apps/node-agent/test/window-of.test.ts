@@ -103,43 +103,24 @@ describe("how often a hook makes the registry be read", () => {
 });
 
 // B6: a headless `claude -p` started in a lane's pane inherits its TMUX_PANE but has a session_id of its own; its Stop
-// must not end the lane's turn. Foreign only when the session registered for the pane (or a fresh read: /clear or a
-// resume starts a new session a moment before the cache sees it) is another one; unknown is never foreign, so a lane's
-// own finish is never dropped on a guess.
+// must not end the lane's turn. Foreign ONLY when the poster's own session positively says it is headless (sessions.ts);
+// everything else is the lane's — an unknown session, a lane after /clear or a resume (its session id is new), no pane,
+// no session id — so a lane's own finish is never dropped on a guess (fail open).
 describe("a Stop from another session in the lane's pane (B6)", () => {
-  const lane = (sessionId: string, aliases?: string[]): SessionInfo =>
-    ({ sessionId, name: "demo", pane: "%3", cwd: "/work/demo", version: null, pid: 4242, status: "idle", ...(aliases ? { aliases } : {}) });
-  it("is foreign when the pane's registered session is another one, and the registry read again says the same", () => {
-    const isForeign = foreignStop({ sessions: () => new Map([["%3", lane("sess-lane")]]) });
+  it("a headless run's Stop is foreign", () => {
+    const isForeign = foreignStop({ headless: id => id === "sess-headless" });
     expect(isForeign({ TMUX_PANE: "%3", session_id: "sess-headless" })).toBe(true);
   });
-  it("is the lane's own when the session is the registered one or one of its aliases", () => {
-    const isForeign = foreignStop({ sessions: () => new Map([["%3", lane("sess-lane")]]) });
-    expect(isForeign({ TMUX_PANE: "%3", session_id: "sess-lane" })).toBe(false);
-    const engineLane = foreignStop({ sessions: () => new Map([["%3", lane("engine-4242-5500", ["lane-uuid"])]]) });
-    expect(engineLane({ TMUX_PANE: "%3", session_id: "lane-uuid" })).toBe(false);
-  });
-  it("is never foreign on unknown: no registered session for the pane, no pane, no session, a pane that isn't one, not an object", () => {
-    const nowhere = foreignStop({ sessions: () => new Map<string, SessionInfo>() });
-    expect(nowhere({ TMUX_PANE: "%3", session_id: "sess-headless" })).toBe(false);
-    expect(nowhere({ session_id: "sess-headless" })).toBe(false);       // no pane: windowOf looks the session up instead
-    expect(nowhere({ TMUX_PANE: "%3" })).toBe(false);
-    expect(nowhere({ TMUX_PANE: "3", session_id: "sess-headless" })).toBe(false);
-    expect(nowhere("plain words")).toBe(false);
-    expect(nowhere([{ TMUX_PANE: "%3", session_id: "sess-headless" }])).toBe(false);
-    // the cached read knows no session for the pane: unknown, even when a fresh read would name one
-    const behind = foreignStop({ sessions: () => new Map<string, SessionInfo>(), refresh: () => new Map([["%3", lane("sess-lane")]]) });
-    expect(behind({ TMUX_PANE: "%3", session_id: "sess-headless" })).toBe(false);
-  });
-  it("reads the registry again before judging: a new session after /clear is the lane's own, a third one is still foreign", () => {
-    let refreshed = 0;
-    const isForeign = foreignStop({
-      sessions: () => new Map([["%3", lane("sess-old")]]),
-      refresh: () => { refreshed++; return new Map([["%3", lane("sess-new")]]); },
-    });
-    expect(isForeign({ TMUX_PANE: "%3", session_id: "sess-new" })).toBe(false);
-    expect(refreshed).toBe(1);
-    expect(isForeign({ TMUX_PANE: "%3", session_id: "sess-other" })).toBe(true);
+  it("an unknown session's Stop is a lane finish, as is any without a pane or a session id, and any non-object", () => {
+    const unknown = foreignStop({ headless: () => false });
+    expect(unknown({ TMUX_PANE: "%3", session_id: "sess-nobody" })).toBe(false);
+    const headless = foreignStop({ headless: () => true });              // even a session that says headless needs the rest
+    expect(headless({ session_id: "sess-headless" })).toBe(false);       // no pane: windowOf looks the session up instead
+    expect(headless({ TMUX_PANE: "3", session_id: "sess-headless" })).toBe(false);
+    expect(headless({ TMUX_PANE: "%3" })).toBe(false);
+    expect(headless(null)).toBe(false);
+    expect(headless("plain words")).toBe(false);
+    expect(headless([{ TMUX_PANE: "%3", session_id: "sess-headless" }])).toBe(false);
   });
 });
 

@@ -55,20 +55,15 @@ export function cachedFor<T>(ms: number, read: () => T, now: () => number = () =
   return Object.assign(() => readIfOlderThan(ms), { fresh: () => readIfOlderThan(Math.min(REFRESH_MS, ms)) });
 }
 
-// B6: a Stop or a StopFailure (/hook/failure) from a session that is not the one registered for the pane it names (a
-// headless run started inside a lane's pane inherits its TMUX_PANE, and would end the lane's turn or report its failure
-// as the lane's). Unknown is never foreign: a pane with no registered session, a body without a pane or a session. The
-// registry may be a moment behind (/clear, a resume), so a mismatch reads it again once, as windowResolver does for an
-// unknown id.
-export function foreignStop(o: { sessions(): Map<string, SessionInfo>; refresh?: () => Map<string, SessionInfo> }): (body: unknown) => boolean {
-  const named = (s: SessionInfo, id: string) => s.sessionId === id || (s.aliases?.includes(id) ?? false);
+// B6: a Stop or a StopFailure whose own session positively says it is headless, posted from a pane (a headless `claude -p` run
+// started inside a lane's pane inherits its TMUX_PANE, and would end the lane's turn or report its failure as the lane's).
+// FAIL OPEN: everything else is the lane's — an unknown session, a lane after /clear or a resume (its session id is new), no
+// pane, no session id. Judged by the poster's own session only (sessions.ts headless), never by which session owns the pane.
+export function foreignStop(o: { headless(sessionId: string): boolean }): (body: unknown) => boolean {
   return body => {
     if (body === null || typeof body !== "object" || Array.isArray(body)) return false;
     const b = body as Record<string, unknown>;
     if (typeof b.TMUX_PANE !== "string" || !PANE_ID.test(b.TMUX_PANE) || typeof b.session_id !== "string") return false;
-    const own = o.sessions().get(b.TMUX_PANE);
-    if (own === undefined || named(own, b.session_id)) return false;
-    const fresh = (o.refresh ? o.refresh() : o.sessions()).get(b.TMUX_PANE);
-    return fresh !== undefined && !named(fresh, b.session_id);
+    return o.headless(b.session_id);
   };
 }

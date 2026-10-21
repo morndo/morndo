@@ -48,30 +48,40 @@ describe("session registry", () => {
       expect(sessionRegistry(dir).byPane().get("%3")?.status, String(status)).toBe(kept);
     }
   });
-  // B6 (T-306): a headless run started inside a lane writes its own session file naming the lane's pane. Whichever file
-  // readdirSync lists last must not decide who owns the pane, or the lane's own Stop is judged foreign and dropped.
-  describe("two live sessions in one pane (B6)", () => {
-    const lane = { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3", entrypoint: "cli", startedAt: 1_000, updatedAt: 5 };
-    const headless = { pid: process.pid, sessionId: "sess-headless", tmux: "qa:@0.%3", entrypoint: "sdk-cli", startedAt: 2_000, updatedAt: 9 };
-    const bothOrders = (a: Record<string, unknown>, b: Record<string, unknown>, keep: () => void) => {
-      for (const [first, second] of [[a, b], [b, a]] as const) {
-        rmSync(join(dir, "sessions"), { recursive: true, force: true });
-        mkdirSync(join(dir, "sessions"));
-        writeFileSync(join(dir, "sessions", "1.json"), JSON.stringify(first));
-        writeFileSync(join(dir, "sessions", "2.json"), JSON.stringify(second));
-        keep();
-      }
-    };
-    it("a pane holding the lane's own session and a headless run's keeps the lane's, in either file order", () => {
-      bothOrders(lane, headless, () => expect(sessionRegistry(dir).byPane().get("%3")?.sessionId).toBe("sess-lane"));
-    });
-    it("with no entrypoint the earlier startedAt wins, either order; a headless run older than the lane's own still loses", () => {
-      const early = { pid: process.pid, sessionId: "sess-early", tmux: "qa:@0.%3", startedAt: 1_000, updatedAt: 9 };   // the later updatedAt must not win
-      const late = { pid: process.pid, sessionId: "sess-late", tmux: "qa:@0.%3", startedAt: 2_000, updatedAt: 1 };
-      bothOrders(early, late, () => expect(sessionRegistry(dir).byPane().get("%3")?.sessionId).toBe("sess-early"));
-      const noStart = { pid: process.pid, sessionId: "sess-nostart", tmux: "qa:@0.%3", updatedAt: 1 };
-      bothOrders(noStart, early, () => expect(sessionRegistry(dir).byPane().get("%3")?.sessionId).toBe("sess-early"));   // no startedAt counts as later
-      bothOrders({ ...headless, startedAt: 500 }, lane, () => expect(sessionRegistry(dir).byPane().get("%3")?.sessionId).toBe("sess-lane"));   // rank before age
-    });
+});
+
+// B6: a session is headless only when its own live file says so (entrypoint "sdk…", a `claude -p` run; "cli" is a lane's —
+// the field is internal, sessions.ts). Fail open: no file, no entrypoint, an interactive one, a dead process — none is
+// headless, so a lane's own Stop is never dropped; and an interactive file naming the same id (a headless resume of the
+// lane's own session) makes it the lane's, whatever another file says.
+describe("headless()", () => {
+  const write = (name: string, fields: Record<string, unknown>) => writeFileSync(join(dir, "sessions", name), JSON.stringify(fields));
+  it("a session whose only live file has an sdk entrypoint is headless", () => {
+    mkdirSync(join(dir, "sessions"));
+    for (const entrypoint of ["sdk-cli", "sdk-ts"]) {
+      write("1.json", { pid: process.pid, sessionId: "sess-h", tmux: "qa:@0.%3", entrypoint });
+      expect(sessionRegistry(dir).headless("sess-h"), entrypoint).toBe(true);
+    }
+  });
+  it("is not headless: an interactive file, no entrypoint, an unknown id, a dead process, no sessions directory", () => {
+    mkdirSync(join(dir, "sessions"));
+    write("1.json", { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3", entrypoint: "cli" });
+    expect(sessionRegistry(dir).headless("sess-lane")).toBe(false);
+    write("1.json", { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3" });
+    expect(sessionRegistry(dir).headless("sess-lane")).toBe(false);
+    expect(sessionRegistry(dir).headless("sess-nobody")).toBe(false);
+    write("1.json", { pid: 999_999_999, sessionId: "sess-gone", tmux: "qa:@0.%3", entrypoint: "sdk-cli" });
+    expect(sessionRegistry(dir).headless("sess-gone")).toBe(false);
+    expect(sessionRegistry(join(dir, "absent")).headless("sess-lane")).toBe(false);
+  });
+  it("a session id an interactive file also names is the lane's (a headless resume of the lane's own session)", () => {
+    mkdirSync(join(dir, "sessions"));
+    const interactive = { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3", entrypoint: "cli" };
+    const headless = { pid: process.pid, sessionId: "sess-lane", tmux: "qa:@0.%3", entrypoint: "sdk-cli" };
+    for (const [first, second] of [[interactive, headless], [headless, interactive]] as const) {
+      write("1.json", first);
+      write("2.json", second);
+      expect(sessionRegistry(dir).headless("sess-lane")).toBe(false);
+    }
   });
 });
