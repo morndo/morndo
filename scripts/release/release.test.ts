@@ -32,6 +32,7 @@ import { stampVersion, UNSTAMPED_VERSION } from "./stamp.ts";
 import { thirdPartyNotice } from "./notice.ts";
 
 const COMMIT = "ab".repeat(20);
+const STAMP_COMMIT = "3fa2c1d09b7e4a5c8d1f6e2b0a9c7d5e4f3a2b1c";
 const WHEN = Date.parse("2026-11-02T10:00:00Z");
 const tree = [
   { path: "bin/morndo", bytes: new TextEncoder().encode("#!/bin/sh\necho morndo\n"), mode: "0555" as const },
@@ -566,6 +567,19 @@ describe("launchers follow the package bins", () => {
 });
 
 describe("stage, launchers, node pin, notice", () => {
+  it("stages the build stamp: the Release's Version and commit, listed in files.json", () => {
+    const repo = temp();
+    const nodeDir = temp();
+    writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.0.0"}\n');
+    writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+    mkdirSync(join(nodeDir, "bin"), { recursive: true });
+    writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n");
+    const dest = join(temp(), "out");
+    stageRelease({ repo, nodeDir, dest, version: "0.3.1", commit: STAMP_COMMIT });
+    expect(JSON.parse(readFileSync(join(dest, "app/build.json"), "utf8"))).toEqual({ version: "0.3.1", commit: STAMP_COMMIT });
+    expect(readFileSync(join(dest, "files.json"), "utf8")).toContain("app/build.json");
+  });
+
   it("stages a fixture tree twice into archives with the same bytes", () => {
     const repo = temp();
     const nodeDir = temp();
@@ -586,12 +600,12 @@ describe("stage, launchers, node pin, notice", () => {
     const outside = join(temp(), "outside");
     writeFileSync(outside, "nope\n");
     symlinkSync(outside, join(repo, "escape"));
-    expect(() => stageRelease({ repo, nodeDir, dest: join(temp(), "out"), version: "0.1.0" })).toThrow(/symlink/i);
+    expect(() => stageRelease({ repo, nodeDir, dest: join(temp(), "out"), version: "0.1.0", commit: STAMP_COMMIT })).toThrow(/symlink/i);
     rmSync(join(repo, "escape"));
     const destA = join(temp(), "a");
     const destB = join(temp(), "b");
-    stageRelease({ repo, nodeDir, dest: destA, version: "0.1.0" });
-    stageRelease({ repo, nodeDir, dest: destB, version: "0.1.0" });
+    stageRelease({ repo, nodeDir, dest: destA, version: "0.1.0", commit: STAMP_COMMIT });
+    stageRelease({ repo, nodeDir, dest: destB, version: "0.1.0", commit: STAMP_COMMIT });
     const files = (root: string) => FileListSchema.parse(JSON.parse(readFileSync(join(root, "files.json"), "utf8"))).map(e => e.path);
     expect(files(destA)).toEqual(files(destB));
     expect(files(destA).some(p => p.includes("docs/") || p.endsWith(".test.ts"))).toBe(false);
@@ -624,7 +638,7 @@ describe("stage, launchers, node pin, notice", () => {
     writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n");
     cpSync(join(import.meta.dirname, "../../apps/updater/units"), join(repo, "apps/updater/units"), { recursive: true });
     const dest = join(temp(), "out");
-    stageRelease({ repo, nodeDir, dest, version: "0.1.0" });
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", commit: STAMP_COMMIT });
     const listed = FileListSchema.parse(JSON.parse(readFileSync(join(dest, "files.json"), "utf8")));
     const templates = (dir: string, prefix = ""): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap(e =>
@@ -661,13 +675,13 @@ describe("stage, launchers, node pin, notice", () => {
     writeFileSync(join(compiled, "domain/package.json"), '{"name":"@morndo/domain","exports":{".":"./src/index.js"}}\n');
     writeFileSync(join(compiled, "domain/src/index.js"), "export const n = 1;\n");
     const dest = join(temp(), "out");
-    stageRelease({ repo, nodeDir, dest, version: "0.1.0", compiled });
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", commit: STAMP_COMMIT, compiled });
     expect(readlinkSync(join(dest, "node/bin/npm"))).toBe("../lib/npm-cli.js");
     const linkedRoot = temp();
     const via = join(linkedRoot, "via");
     symlinkSync(nodeDir, via);
     const linkedDest = join(temp(), "linked-out");
-    stageRelease({ repo, nodeDir: via, dest: linkedDest, version: "0.1.0", compiled });
+    stageRelease({ repo, nodeDir: via, dest: linkedDest, version: "0.1.0", commit: STAMP_COMMIT, compiled });
     expect(readlinkSync(join(linkedDest, "node/bin/npm"))).toBe("../lib/npm-cli.js");
     mkdirSync(join(repo, "apps/hub/src"), { recursive: true });
     mkdirSync(join(repo, "apps/hub/test"), { recursive: true });
@@ -679,14 +693,14 @@ describe("stage, launchers, node pin, notice", () => {
     symlinkSync("../test/hidden.ts", join(repo, "apps/hub/src/from-test.ts"));
     symlinkSync("../../../docs/x.md", join(repo, "apps/hub/src/doc.md"));
     const withLinks = join(temp(), "links-out");
-    stageRelease({ repo, nodeDir, dest: withLinks, version: "0.1.0", compiled });
+    stageRelease({ repo, nodeDir, dest: withLinks, version: "0.1.0", commit: STAMP_COMMIT, compiled });
     expect(readlinkSync(join(withLinks, "app/apps/hub/src/alias.ts"))).toBe("index.ts");
     expect(lstatSync(join(withLinks, "app/apps/hub/src/from-test.ts")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(withLinks, "app/apps/hub/src/from-test.ts"), "utf8")).toBe("export const hidden = 1;\n");
     expect(lstatSync(join(withLinks, "app/apps/hub/src/doc.md")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(withLinks, "app/apps/hub/src/doc.md"), "utf8")).toBe("outside the staged set\n");
     symlinkSync("../test", join(repo, "apps/hub/src/skipped-dir"));
-    expect(() => stageRelease({ repo, nodeDir, dest: join(temp(), "bad-link"), version: "0.1.0", compiled })).toThrow(new RegExp(`unshipped directory: ${join(repo, "apps/hub/test")}`));
+    expect(() => stageRelease({ repo, nodeDir, dest: join(temp(), "bad-link"), version: "0.1.0", commit: STAMP_COMMIT, compiled })).toThrow(new RegExp(`unshipped directory: ${join(repo, "apps/hub/test")}`));
     expect(lstatSync(join(dest, "app/node_modules/@morndo/domain")).isSymbolicLink()).toBe(false);
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/src/index.js"), "utf8")).toBe("export const n = 1;\n");
     expect(readFileSync(join(dest, "app/node_modules/@morndo/domain/package.json"), "utf8")).toContain("./src/index.js");
@@ -728,7 +742,7 @@ describe("stage, launchers, node pin, notice", () => {
     symlinkSync("../../packages/brand", join(repo, "node_modules/@morndo/brand"));
     writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n");
     const dest = join(temp(), "out");
-    stageRelease({ repo, nodeDir, dest, version: "0.1.0", compiled });
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", commit: STAMP_COMMIT, compiled });
     const css = readFileSync(join(dest, "app/node_modules/@morndo/brand/assets/tokens/morndo-tokens.css"), "utf8");
     expect(css.length).toBeGreaterThan(0);
     expect(readFileSync(join(dest, "app/node_modules/@morndo/brand/assets/mark/morndo-mark-black.svg"), "utf8")).toContain("<svg");

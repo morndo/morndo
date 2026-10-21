@@ -11,7 +11,7 @@ const MIN = 60_000;
 const NOW = Date.now();
 const task = (n: number, status: string, assignee: string | null) => ({
   key: `T-${n}`, n, title: `Task ${n}`, description: "", status, assignee, priority: "normal", blockedReason: null,
-  createdAt: NOW - 90 * MIN, updatedAt: NOW - 60 * MIN, createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0,
+  createdAt: NOW - 90 * MIN, updatedAt: NOW - 60 * MIN, stateChangedAt: NOW - 60 * MIN, createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0,
 });
 const run = (lane: string, o: Record<string, unknown> = {}) => ({ lane, node: "pc", phase: "working", deadline: null, overdue: false, since: NOW - 3 * MIN, source: "session", ...o });
 const LANES = ["manager", "builder", "reviewer", "alpha", "old"];
@@ -68,7 +68,7 @@ const sample = (tab: Page, ms: number) => tab.evaluate(ms => new Promise<Sample>
   };
   requestAnimationFrame(tick);
 }), ms);
-const MOVED = () => board([task(1, "doing", "builder"), { ...task(2, "doing", "reviewer"), rev: 2, updatedAt: NOW }, task(3, "done", "alpha"), task(4, "doing", "old")], RUNS);
+const MOVED = () => board([task(1, "doing", "builder"), { ...task(2, "doing", "reviewer"), rev: 2, updatedAt: NOW, stateChangedAt: NOW }, task(3, "done", "alpha"), task(4, "doing", "old")], RUNS);
 
 describe("the board follows the Runs of its frame", () => {
   it("shows the ring, the live line, the counts and the lanes without a task, dropping the Run it can't read", { timeout: 30_000 }, async () => {

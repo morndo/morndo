@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "version": 1,
+  "expiresAt": "2027-10-21T00:00:00Z",
+  "root": ["SHA256:fWLNSJCecJxMS+aNFP8ZeAva4OYryNGWjEv9MC18pPo"],
+  "release": ["SHA256:tW1KoCBd6Arcxk0zYai6d3qTQrgvnYgxOjYaY0qaGcA"],
+  "feed": ["SHA256:uYdDYvYfwq8lAkxt4Y8ZlqAv1YFGtCIF95NNTYWGl48"]
+}

@@ -51,7 +51,7 @@ import { startRelay, type Relay } from "./relay/server.ts";
 import { statusAsk, type JobsOf } from "./relay/status-ask.ts";
 import { Spool } from "./relay/spool.ts";
 import { StreamSender } from "./relay/stream-sender.ts";
-import { cachedFor, windowResolver } from "./relay/window-of.ts";
+import { cachedFor, foreignStop, windowResolver } from "./relay/window-of.ts";
 import { dropOnce, type TestHooks } from "./test-hooks.ts";
 
 // Results that carry transcript or file bytes, or a capture of up to 256 KiB, go on the bulk queue (spec §5.2 "Frames").
@@ -193,6 +193,9 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     relay = await startRelay({
       port: config.relayPort, spool, files, log, onAppended: () => { sender.kick(); ops.deliverer.kick("hook"); }, now: ops.now,
       windowOf: windowResolver({ windowOfPane: p => ops.inventory.windowOfPane(p), sessions, refresh: sessions.fresh }),
+      // B6: a fresh read of the sessions directory per Stop or failure, no cache: a headless run's file may have appeared a
+      // moment ago, and Stops are one per turn.
+      foreign: foreignStop({ headless: id => ops.registry.headless(id) }),
       ask: (body, window) => statusAsk(body, window, config.policy.statusContract, lane => jobsOf(lane)),
     });
   } catch (e) {

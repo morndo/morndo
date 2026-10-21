@@ -143,10 +143,11 @@ export function engineSessionRegistry(dir: string, io: EngineSessionIo) {
 export type SessionSource = {
   byPane(panes?: PanePids): Map<string, SessionInfo>;
   transcriptPath(sessionId: string): string | null;
+  headless(sessionId: string): boolean;
 };
 
 export function combineSessions(
-  claude: { byPane(): Map<string, SessionInfo>; transcriptPath(sessionId: string): string | null },
+  claude: { byPane(): Map<string, SessionInfo>; transcriptPath(sessionId: string): string | null; headless(sessionId: string): boolean },
   engines: { byPane(panes: PanePids): Map<string, SessionInfo>; transcriptPath(sessionId: string): string | null },
   panePids: () => PanePids,
 ): SessionSource {
@@ -157,5 +158,6 @@ export function combineSessions(
       return out;
     },
     transcriptPath: sessionId => claude.transcriptPath(sessionId) ?? engines.transcriptPath(sessionId),
+    headless: id => claude.headless(id),                              // engine lanes are never headless
   };
 }
