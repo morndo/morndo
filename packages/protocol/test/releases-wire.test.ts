@@ -91,6 +91,10 @@ describe("manifest.json (the release key's document)", () => {
   it("negative control: a commit that isn't 40 hex is refused", () => {
     expect(parse(ManifestSchema, { ...doc, commit: "1f".repeat(19) })).toBe(false);
   });
+  it("a floor of 0 is a database with no breaking migration, and a negative floor is refused", () => {
+    expect(parse(ManifestSchema, { ...doc, schemas: { ...doc.schemas, hub: { version: 17, floor: 0 } } })).toBe(true);
+    expect(parse(ManifestSchema, { ...doc, schemas: { ...doc.schemas, hub: { version: 17, floor: -1 } } })).toBe(false);
+  });
 });
 
 describe("files.json (the file list inside an installed Version)", () => {

@@ -9,6 +9,7 @@ import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
 import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
+import { turnStopper } from "./reader-gone.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
 import { baseUrlProblem, childEnv, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
 import { readCodexLimits, usageReport } from "./adapters/usage-codex.ts";
@@ -29,12 +30,31 @@ const ACTOR: Actor = { kind: "principal", command: "cli" };
 const GATE = new Set(["off", "terms", "expired", "repo", "isolation", "dialect", "leases", "budget"]);
 const LEASES = 8;
 
-export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string };
+// `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
+export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal };
 
 export type Parsed = { cmd: string; positionals: string[]; rest: string[]; get(name: string): string | undefined; all(name: string): string[] };
 
+// `morndo-keys help`: what a run does when the reader of its output goes away, and where that stops working. Printed before
+// the store is opened, so it works on a machine with no connections yet.
+export const HELP = `morndo-keys run --connection <name> [--role R] [--workspace DIR] [--reserve USD] -- <agent arguments>
+morndo-keys pool exec --runtime codex [--lane L] [--account A] -- exec … <prompt>
+  Run the agent on a connection's key (or a pool account's sign-in) and relay its output.
+
+  When the reader of the output has gone (\`… | head\`), or the terminal has (SIGHUP), the agent and the processes it started are
+  stopped: SIGTERM, SIGKILL after 3 s, and the lease is closed with what the turn used. run then exits 1, pool exec 143, and both
+  129 when the terminal went away. nohup does not exempt a run: Node resets an inherited SIGHUP ignore when it starts, for the bin
+  and for the agent it starts. A run's agent stays in the terminal's own session, so Ctrl-C, Ctrl-Z and /dev/tty work as for any
+  command (a pool turn has a process group of its own, as it always had, and is stopped as a group).
+
+  A reader that is gone is noticed only when the bin writes to it. An agent that prints once at the end (claude with
+  --output-format json) or goes quiet is not stopped before its next output, so its turn can be paid for in full: Node 24 has
+  no way to see a pipe's reader close without a write. Use a streaming output format where this matters.
+`;
+
 export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
   const parsed = parse(argv);
+  if (parsed.cmd === "help") { io.stdout(HELP); return 0; }
   try {
     if (parsed.cmd === "helper") return await helper(env, parsed, io);
     return await command(env, parsed, io);
@@ -208,6 +228,8 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   let failure = "";
   let outRedactor = streamRedactor([""]);
   let errRedactor = streamRedactor([""]);
+  const stopper = turnStopper(io);
+  let hungUp = false;
   try {
     const secret = connection.kind === "api-key" ? await home.open(connection.ref) : "";
     outRedactor = streamRedactor([secret]);
@@ -217,6 +239,8 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     const hooks = {
       onStdout: (chunk: string) => { io.stdout(outRedactor.push(chunk)); },
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
+      onStart: (pid: number) => { stopper.started(pid); },
+      proceed: () => stopper.proceed(),
     };
     const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
@@ -235,6 +259,9 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     io.stderr(errRedactor.push(failure));
     status = 1;
   } finally {
+    await stopper.settle();                                  // what the agent started is gone before the books close
+    if (stopper.cut() && status === 0) status = 1;           // a launcher may exit 0 on SIGTERM: a turn cut short is not done
+    hungUp = stopper.cut() && stopper.hungUp();
     io.stdout(outRedactor.flush());
     io.stderr(errRedactor.flush());
     const again = released ? openHome(saved) : home;
@@ -245,9 +272,10 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       again.leases.close(name, lease.id, outcome, cost);
       const seen = modelFromOutput(stdout);
       if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
-    } finally { if (released) again.close(); }
+    } finally { if (released) again.close(); stopper.done(); }
   }
   if (refusal !== null) return refusal;
+  if (hungUp) return 129;                                  // the terminal went away (SIGHUP): 128 + 1
   // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
   // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
   // The old wrapper's fallback on 70 then still means only what the launcher itself decided.

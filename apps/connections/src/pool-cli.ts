@@ -19,6 +19,7 @@ import { childEnv, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { usageReport, type CodexLimits } from "./adapters/usage-codex.ts";
 import { type PoolRefusal, type TurnBegun, type TurnEnd } from "./application/pool-service.ts";
+import { reaper } from "./reader-gone.ts";
 
 const DEFAULT_RUNTIME = "codex";
 const DEFAULT_WAIT_MS = 1_800_000;
@@ -280,14 +281,24 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
 
   let stopped: number | null = null;
   let childPid: number | null = null;
+  // The stop goes to the turn's group: SIGTERM, then SIGKILL after the grace for what ignores it, and the kill is kept until the
+  // group is gone, not until the output pipes close (reader-gone.ts). `cutShort`: the turn was really stopped (a live group got the
+  // signal, or nothing was spawned), so the exit code is the signal's; a signal after a clean finish changes neither it nor the lease.
+  const reap = reaper();
+  let cutShort = false;
   const onSignal = (signal: NodeJS.Signals): void => {
-    stopped = signal === "SIGINT" ? 130 : 143;
-    if (childPid !== null) { try { process.kill(-childPid, signal); } catch { /* already gone */ } }
+    stopped = signal === "SIGINT" ? 130 : signal === "SIGHUP" ? 129 : 143;
+    if (childPid !== null && reap.stop([-childPid])) cutShort = true;
   };
   const term = (): void => onSignal("SIGTERM");
   const int = (): void => onSignal("SIGINT");
+  const hup = (): void => onSignal("SIGHUP");           // the terminal went away: the turn has a group of its own and would go on
   process.on("SIGTERM", term);
   process.on("SIGINT", int);
+  process.on("SIGHUP", hup);
+  // A reader that is gone (reader-gone.ts) stops the turn as a SIGTERM would: no account's budget is spent on unread output.
+  io.gone?.addEventListener("abort", term, { once: true });
+  if (io.gone?.aborted) term();
 
   const claimId = randomUUID();
   // Starts a turn on a session, waiting while the member is busy (backing off), saying so once.
@@ -344,17 +355,20 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
     let outcome = "failed";
     try {
       const result = await runtimeCodex.execute(plan, argv, {
-        onStdout: take, onStderr: text => { io.stderr(text); }, onStart: pid => { childPid = pid; },
+        onStdout: take, onStderr: text => { io.stderr(text); }, onStart: pid => { childPid = pid; }, proceed: () => { if (stopped !== null) cutShort = true; return stopped === null; },
       }, store);
       if (buffer !== "") { handle(buffer); buffer = ""; }
-      turn.status = result.status;
-      outcome = result.status === 0 ? "done" : "failed";
+      turn.status = cutShort && result.status === 0 ? 1 : result.status;   // a launcher may exit 0 on the signal
+      outcome = turn.status === 0 ? "done" : "failed";
     } catch (error) {
       outcome = error instanceof Error ? error.message : "run failed";
       home.leases.close(current.member, granted.id, outcome, null);
       home.pool.release(runtime, current.claimId);
       throw error;
-    } finally { childPid = null; }
+    } finally {
+      childPid = null;
+      await reap.settle();
+    }
     home.leases.close(current.member, granted.id, outcome, null);
     return turn;
   };
@@ -388,7 +402,7 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
         io.stderr(`${error instanceof Error ? error.message : "run failed"}\n`);
         return exit ?? 1;
       }
-      if (stopped !== null) { home.pool.end(runtime, current.claimId, { kind: "other" }); return stopped; }
+      if (stopped !== null && cutShort) { home.pool.end(runtime, current.claimId, { kind: "other" }); return stopped; }
       if (turn.status === 0) { home.pool.end(runtime, current.claimId, { kind: "done" }); return 0; }
       const ended = endOf(turn);
       const out = home.pool.end(runtime, current.claimId, ended, { dir, night: night(), tried: [...tried] });
@@ -419,5 +433,7 @@ async function exec(home: Opened, runtime: string, parsed: Parsed, io: Io): Prom
   } finally {
     process.off("SIGTERM", term);
     process.off("SIGINT", int);
+    process.off("SIGHUP", hup);
+    io.gone?.removeEventListener("abort", term);
   }
 }
