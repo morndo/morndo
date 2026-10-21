@@ -17,7 +17,7 @@ export type TestFleet = Fleet & {
   code(name: string): string;
   agent(o?: { node?: string; key?: AgentKey; instanceId?: string; streamId?: string }): FakeAgent;
   joined(name: string, o?: { instanceId?: string; streamId?: string }): Promise<FakeAgent>;
-  online(name: string, o?: { instanceId?: string; streamId?: string; caps?: string[] }): Promise<FakeAgent>;
+  online(name: string, o?: { instanceId?: string; streamId?: string; caps?: string[]; commit?: string }): Promise<FakeAgent>;
 };
 
 const running = new Set<Fleet>();
@@ -62,7 +62,7 @@ export async function startTestFleet(o: FleetOptions & { dir?: string; config?: 
     },
     online: async (name, a = {}) => {
       const fa = await t.joined(name, a);
-      const r = await fa.connect(a.caps ? { caps: a.caps } : {});
+      const r = await fa.connect({ ...(a.caps ? { caps: a.caps } : {}), ...(a.commit ? { commit: a.commit } : {}) });
       if (!r.ok) throw new Error(`connect refused: ${r.closed.code} ${r.closed.reason}`);
       return fa;
     },

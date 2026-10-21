@@ -230,6 +230,16 @@ export const MIGRATIONS: readonly Migration[] = [
     compat: "additive",
     up: db => { if (!hasColumn(db, "sends", "label")) db.exec("ALTER TABLE sends ADD COLUMN label TEXT"); },
   },
+  {
+    version: 23,
+    name: "board_tasks.state_changed_at: the last change of status, assignee or description, which the board's own moves compare a Run with (D6), so a comment no longer stops D1; a task already there takes its updated_at",
+    compat: "additive",
+    up: db => {
+      if (hasColumn(db, "board_tasks", "state_changed_at")) return;
+      db.exec("ALTER TABLE board_tasks ADD COLUMN state_changed_at INTEGER");
+      db.exec("UPDATE board_tasks SET state_changed_at = updated_at");
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
