@@ -1,6 +1,6 @@
 // The LLM connections page in Chromium, against a fake hub. One browser, its default context, closed after.
 import type {} from "playwright";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -64,7 +64,10 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
 describe("the LLM connections page", () => {
   let web: Awaited<ReturnType<typeof startWeb>>;
   beforeAll(async () => { web = await startWeb(PAGE); }, 60_000);
-  afterAll(async () => { await web?.close(); });
+  afterAll(async () => {
+    try { await web?.close(); }
+    finally { rmSync(SHOTS, { recursive: true, force: true }); }
+  });
 
   it("adds, changes priority, saves a role and revokes, using the protocol words", async () => {
     const page = await web.browser.newPage();

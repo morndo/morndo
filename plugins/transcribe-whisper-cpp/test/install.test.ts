@@ -57,11 +57,13 @@ describe("install choices", () => {
     expect(pins.models.base.url).toBe("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin");
     expect(pins.models.turbo.model).toBe("large-v3-turbo-q5_0");
     const dir = mkdtempSync(join(tmpdir(), "morndo-pins-"));
-    const bad = join(dir, "plugin.json");
-    const body = JSON.parse(JSON.stringify(pins)) as { models: { base: { url: string } } };
-    body.models.base.url = "https://example.invalid/ggml-base.bin";
-    writeFileSync(bad, JSON.stringify(body));
-    expect(() => readPins(bad)).toThrow(/model base/);
+    try {
+      const bad = join(dir, "plugin.json");
+      const body = JSON.parse(JSON.stringify(pins)) as { models: { base: { url: string } } };
+      body.models.base.url = "https://example.invalid/ggml-base.bin";
+      writeFileSync(bad, JSON.stringify(body));
+      expect(() => readPins(bad)).toThrow(/model base/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it("a change of cmake flags uses a different build directory, and the workflow cache key includes them", () => {
