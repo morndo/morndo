@@ -22,7 +22,6 @@ set -eu
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
 robot=$(printf '\360\237\244\226')
 fs=$(printf '\037')
-rs=$(printf '\036')
 err=$(mktemp)
 out=$(mktemp)
 trap 'rm -f "$err" "$out"' EXIT
@@ -108,27 +107,33 @@ log_all() {
   fi
 }
 
-# One pass of both noreply rules and the legacy pin, in git's order. af and cf
-# pick the author and committer address fields; recs says the records end in
-# the record separator (0x1e), not a newline, because a message can hold
-# line breaks.
+# One pass of both noreply rules and the legacy pin, in git's order, over a log
+# of exactly id, author address and committer address, one line each, split at
+# the unit separator. A name or an address that holds the separator shifts the
+# fields, so a record that is not exactly three fields refuses (fail closed).
+# The addresses are always read from this log, never from the one that also
+# holds names and messages, where a crafted name could shift them.
 scan_mails() {
-  LC_ALL=C awk -v af="$1" -v cf="$2" -v recs="$3" -v legacy=" ${COMMIT_TRACES_LEGACY:-} " -v fs="$fs" -v rs="$rs" '
-    BEGIN { FS = fs; if (recs + 0) RS = rs }
+  LC_ALL=C awk -v legacy=" ${COMMIT_TRACES_LEGACY:-} " -v fs="$fs" '
+    BEGIN { FS = fs }
     {
       sub(/^[[:space:]]+/, "", $0)
       if ($0 == "") next
+      if (NF != 3) {
+        printf "commit-traces: %s record does not read as id, author and committer address\n", substr($0, 1, 40) > "/dev/stderr"
+        exit 1
+      }
       if (index(legacy, " " $1 " ")) next
-      if (tolower($af) !~ /^[^@[:space:]]+@users[.]noreply[.]github[.]com$/) {
+      if (tolower($2) !~ /^[^@[:space:]]+@users[.]noreply[.]github[.]com$/) {
         printf "commit-traces: %s author email is not @users.noreply.github.com\n", $1 > "/dev/stderr"
         exit 1
       }
-      if (tolower($cf) !~ /^[^@[:space:]]+@users[.]noreply[.]github[.]com$/ &&
-          tolower($cf) != "noreply@github.com") {
+      if (tolower($3) !~ /^[^@[:space:]]+@users[.]noreply[.]github[.]com$/ &&
+          tolower($3) != "noreply@github.com") {
         printf "commit-traces: %s committer email is not a noreply address\n", $1 > "/dev/stderr"
         exit 1
       }
-    }' "$4"
+    }' "$1"
 }
 
 # The ids bad_message or bad_ident can refuse: everything they match (a name,
@@ -165,11 +170,11 @@ candidates() {
 mails() {
   [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
   log_all '%H%x1f%ae%x1f%ce' "$@"
-  scan_mails 2 3 0 "$out"
+  scan_mails "$out"
 }
 
 # The range mode: one pass finds the candidates, check_commit judges each
-# one, then the same mail pass as mails mode covers the whole range.
+# one, then the mails mode's own log and pass cover the whole range.
 range() {
   [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
   log_all '%H%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%B%x1e' "$@"
@@ -177,7 +182,8 @@ range() {
   for sha in $list; do
     check_commit "$sha"
   done
-  scan_mails 3 5 1 "$out"
+  log_all '%H%x1f%ae%x1f%ce' "$@"
+  scan_mails "$out"
 }
 
 [ "$#" -ge 1 ] || fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"

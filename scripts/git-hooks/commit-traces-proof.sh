@@ -272,6 +272,16 @@ plant 'a plain author mail' 7 bad Ada dev@example.invalid Ada ada@users.noreply.
 plant 'a plain committer mail' 40 bad Ada ada@users.noreply.github.com Ada dev@example.invalid 'note'
 plant 'a web-flow author, last' 61 bad Ada noreply@github.com Ada ada@users.noreply.github.com 'note'
 
+# A unit separator (0x1f) in a name or an address must not shift the fields the checks read: a crafted name that makes a
+# non-noreply author address look like the committer's noreply one passed `range` once. Both are refused, in both modes.
+us=$(printf '\037')
+plant 'a unit separator in the author name' 30 bad "X${us}ada@users.noreply.github.com" dev@example.invalid \
+  ada@users.noreply.github.com ada@users.noreply.github.com 'note'
+plant 'a unit separator in the author mail' 44 bad Ada "ada@users.noreply.github.com${us}ada@users.noreply.github.com" \
+  Ada ada@users.noreply.github.com 'note'
+plant 'a unit separator in the committer name' 9 bad Ada ada@users.noreply.github.com "Y${us}ada@users.noreply.github.com" \
+  dev@example.invalid 'note'
+
 # A web-flow committer is the one allowed exception; it passes both modes.
 history 18 Ada ada@users.noreply.github.com Ada noreply@github.com 'note'
 sh "$checker" range "$tip" >/dev/null 2>&1 || fail "a web-flow committer should pass range"
