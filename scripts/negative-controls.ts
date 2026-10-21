@@ -2145,6 +2145,15 @@ export const CONTROLS: Control[] = [
   { id: "pr4-link-through-link", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
     find: "          if (escape !== null) refuse(escape);\n", replace: "",
     run: ["apps/updater/test/tar-read.test.ts"], expect: "through another link" },
+  // The same review, confirmed on macOS: a name looked up by its exact spelling let a differently cased (or
+  // differently normalised) link target climb out, and two spellings that fold to one name pass as two entries.
+  // The rule is the archive's names, not the file system's, so these run on every platform (no platform field).
+  { id: "pr4-link-case-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
+    find: "path.normalize(\"NFC\").toLowerCase()", replace: "path",
+    run: ["apps/updater/test/tar-read.test.ts"], expect: "to be an instance of TarRefused" },
+  { id: "pr4-link-nfd-fold", task: "pr4", file: "apps/updater/src/adapters/tar-read.ts",
+    find: ".normalize(\"NFC\")", replace: "",
+    run: ["apps/updater/test/tar-read.test.ts"], expect: "to be an instance of TarRefused" },
   { id: "pr4-download-cap-ignored", task: "pr4", file: "apps/updater/src/adapters/https-get.ts",
     find: "if (chunk.length > room) overLimit = true;", replace: "if (false) overLimit = true;",
     run: ["apps/updater/test/artifacts-https.test.ts"], expect: "expected false to be true" },
