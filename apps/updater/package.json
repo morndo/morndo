@@ -1,0 +1,21 @@
+{
+  "name": "@morndo/updater",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "bin": {
+    "morndo-update": "./src/main.ts"
+  },
+  "dependencies": {
+    "@morndo/domain": "0.0.0",
+    "@morndo/protocol": "0.0.0",
+    "@morndo/service-kit": "0.0.0",
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0"
+  }
+}
