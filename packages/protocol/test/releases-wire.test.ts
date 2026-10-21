@@ -4,8 +4,9 @@
 import { describe, expect, it } from "vitest";
 import type { ChannelFeed, KeySet, Manifest } from "@morndo/domain";
 import {
-  ChannelFeedSchema, FeedEntrySchema, FileListSchema, FleetHealthSchema, HealthReportSchema, HubHealthSchema,
-  KeySetSchema, ManifestSchema, NodeStatusSchema, SafePointReportSchema, UpdateConfigSchema, UpdateStatusSchema,
+  ARTIFACT_NAME, ChannelFeedSchema, FeedEntrySchema, FileListSchema, FleetHealthSchema, HealthReportSchema,
+  HubHealthSchema, KeySetSchema, ManifestSchema, NodeStatusSchema, SafePointReportSchema, UpdateConfigSchema,
+  UpdateStatusSchema,
 } from "../src/releases.ts";
 
 const parse = <S extends { safeParse: (d: unknown) => { success: boolean } }>(schema: S, doc: unknown) =>
@@ -90,6 +91,18 @@ describe("manifest.json (the release key's document)", () => {
   });
   it("negative control: a commit that isn't 40 hex is refused", () => {
     expect(parse(ManifestSchema, { ...doc, commit: "1f".repeat(19) })).toBe(false);
+  });
+  it("an artifact name may carry '+' (a Version's build metadata); a leading dot, a '/' or a too-long name is refused", () => {
+    // The rule the updater's download directory shares (§9.6): a plain name that cannot leave the directory it
+    // lands in. '+' is a plain character here, because the pipeline folds build metadata into the artifact's name.
+    expect(parse(ManifestSchema, { ...doc, artifacts: [{ ...doc.artifacts[0]!, name: "morndo-0.5.0+b7-linux-x64.tar.gz" }] })).toBe(true);
+    expect(parse(ManifestSchema, { ...doc, artifacts: [{ ...doc.artifacts[0]!, name: ".morndo-0.5.0.tar.gz" }] })).toBe(false);
+    expect(parse(ManifestSchema, { ...doc, artifacts: [{ ...doc.artifacts[0]!, name: "sub/morndo-0.5.0.tar.gz" }] })).toBe(false);
+    expect(parse(ManifestSchema, { ...doc, artifacts: [{ ...doc.artifacts[0]!, name: "" }] })).toBe(false);
+    expect(ARTIFACT_NAME.test("morndo-0.5.0+b7-linux-x64.tar.gz")).toBe(true);
+    expect(ARTIFACT_NAME.test(".hidden.tar.gz")).toBe(false);
+    expect(ARTIFACT_NAME.test("sub/x.tar.gz")).toBe(false);
+    expect(ARTIFACT_NAME.test(`x${"y".repeat(200)}.tar.gz`)).toBe(false);   // over the rule's 201 characters
   });
   it("a floor of 0 is a database with no breaking migration, and a negative floor is refused", () => {
     expect(parse(ManifestSchema, { ...doc, schemas: { ...doc.schemas, hub: { version: 17, floor: 0 } } })).toBe(true);

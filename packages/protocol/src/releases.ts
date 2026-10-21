@@ -73,9 +73,14 @@ export const ProtocolRangeSchema = z.strictObject({
   agent: z.tuple([boundedInt, boundedInt]),
   clientApi: z.tuple([boundedInt, boundedInt]),
 });
+// One rule for what a Manifest may call an Artifact (§9.6), shared with the updater's download directory: a
+// plain file name — it starts with a letter or digit and admits no separator, so no name can leave the directory
+// it lands in — and '+' is a plain character, because a Version's build metadata is part of the name the pipeline
+// signs. Two rules would drift apart; one of them refusing what the other signed is a crash, not a refusal.
+export const ARTIFACT_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,200}$/;
 export const ArtifactRefSchema = z.strictObject({
   platform: z.enum(PLATFORM_WORDS),
-  name: z.string().check(z.regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,200}$/)),
+  name: z.string().check(z.regex(ARTIFACT_NAME)),
   size: z.int().check(z.gte(1)),
   sha256: sha256(),
   filesSha256: sha256(),

@@ -69,6 +69,8 @@ beforeAll(async () => {
   };
   // A content-length alone over the cap: refused before the first byte is written.
   routes["/huge.tar.gz"] = { body: Buffer.alloc(5000, 9) };
+  // A name with build metadata, as the pipeline writes it when a Version carries any: '+' is a plain character.
+  routes["/morndo-1.4.0+b7-linux-x64.tar.gz"] = { body: full };
 });
 
 afterAll(async () => {
@@ -131,5 +133,19 @@ describe("HttpsArtifacts against a local HTTPS server", () => {
     await expect(store().fetch(`${server.url}full.tar.gz`, { name: "sub/full.tar.gz", ...o })).rejects.toThrow(/plain file name/);
     await expect(store().fetch(`${server.url}full.tar.gz`, { name: "..", ...o })).rejects.toThrow(/plain file name/);
     await expect(store().fetch(`${server.url}full.tar.gz`, { name: "./full.tar.gz", ...o })).rejects.toThrow(/plain file name/);
+  });
+
+  it("downloads an artifact whose name carries '+' (build metadata); a leading dot or a '/' is still refused", async () => {
+    // The manifest's own name rule admits '+', so the download directory must too — one rule for both, or a
+    // validly signed name crashes the check. The rule's other edges hold as before: no leading dot, no separator.
+    const name = "morndo-1.4.0+b7-linux-x64.tar.gz";
+    const one = store();
+    const download = await one.fetch(`${server.url}${name}`, { name, maxBytes: 4096, timeoutMs: 5000 });
+    expect(download).toMatchObject({ path: join(downloads, `${name}.part`), size: 3000, overLimit: false, cut: false });
+    one.discard(name);
+    expect(existsSync(download.path)).toBe(false);
+    const o = { maxBytes: 4096, timeoutMs: 5000 };
+    await expect(store().fetch(`${server.url}full.tar.gz`, { name: "sub/full.tar.gz", ...o })).rejects.toThrow(/plain file name/);
+    await expect(store().fetch(`${server.url}full.tar.gz`, { name: ".full.tar.gz", ...o })).rejects.toThrow(/plain file name/);
   });
 });

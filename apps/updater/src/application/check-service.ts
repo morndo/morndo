@@ -304,8 +304,11 @@ export class CheckService {
         const detail = `${error.reason}: ${error.message}`;
         return finish({ kind: "unreachable", detail }, detail);
       }
-      cleanup();
-      throw error;
+      // Anything else is still an answer, never a crash out of the program (§8.1): a recorded refusal at its own
+      // step, the error's message as the detail, exit 65 from the CLI — and finish's cleanup leaves nothing
+      // behind (§13), whatever the failure was.
+      const message = error instanceof Error ? error.message : String(error);
+      return refused("error", message);
     } finally {
       lock.release();
     }

@@ -76,13 +76,14 @@ export type ReleaseFixture = {
 };
 
 export function releaseFixture(o: {
-  version: string; platform?: Platform; now: number; tamper?: (tree: TreeFile[], filesJson: string) => Buffer;
+  version: string; platform?: Platform; now: number; name?: string;
+  tamper?: (tree: TreeFile[], filesJson: string) => Buffer;
 }): ReleaseFixture {
   const platform = o.platform ?? "linux-x64";
   const tree = TREE(o.version);
   const built = buildRelease(tree);
   const archive = o.tamper === undefined ? built.gz : o.tamper(tree, built.filesJson);
-  const name = artifactName(o.version, platform);
+  const name = o.name ?? artifactName(o.version, platform);
   const schemas: Record<DatabaseName, SchemaInfo> = {
     hub: { version: 3, floor: 1 }, fleet: { version: 2, floor: 0 }, node: { version: 2, floor: 0 },
     connections: { version: 1, floor: 0 },

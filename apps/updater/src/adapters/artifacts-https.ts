@@ -6,12 +6,9 @@
 import { createWriteStream, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { finished } from "node:stream/promises";
+import { ARTIFACT_NAME } from "@morndo/protocol";
 import { FetchFailed, type ArtifactStore, type Download } from "../application/ports.ts";
 import { httpsGet } from "./https-get.ts";
-
-// A plain file name: what a Manifest calls an Artifact. It cannot start with a dot ("..", ".hidden") and admits no
-// separator, so no name can walk out of the downloads directory.
-const PLAIN_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export class HttpsArtifacts implements ArtifactStore {
   private readonly dir: string;
@@ -50,7 +47,10 @@ export class HttpsArtifacts implements ArtifactStore {
   }
 
   private part(name: string): string {
-    if (!PLAIN_NAME.test(name)) throw new Error(`not a plain file name: ${name}`);
+    // The wire's own rule (ARTIFACT_NAME), not a second one beside it: whatever a Manifest may sign — '+' build
+    // metadata included — this directory accepts, and what the wire refuses (a leading dot, a separator) it does
+    // too, so no name can walk out of the downloads directory.
+    if (!ARTIFACT_NAME.test(name)) throw new Error(`not a plain file name: ${name}`);
     return join(this.dir, `${name}.part`);
   }
 }

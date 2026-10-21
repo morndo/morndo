@@ -205,6 +205,19 @@ describe("the check service (§6.1, §10.2)", () => {
     recorded(w, "refused", "artifact_digest", OFFERED);
   });
 
+  it("a release whose artifact name carries '+' (a Version's build metadata) stages", async () => {
+    // The wire's own name rule admits '+' (the pipeline folds build metadata into the name); the download
+    // directory's rule is the same one, so a validly signed name never dies at the adapter's door.
+    const w = build(() => {}, {
+      makeRelease: () => releaseFixture({ version: OFFERED, now: NOW, name: "morndo-0.2.0+b7-linux-x64.tar.gz" }),
+    });
+    const out = await w.service.check();
+    expect(out).toEqual({ kind: "staged", version: OFFERED, already: false });
+    expect(w.artifacts.calls[0]!.name).toBe("morndo-0.2.0+b7-linux-x64.tar.gz");
+    expect(w.installer.has(OFFERED)).toBe(true);
+    expect(w.store.versionRecord(OFFERED)).not.toBeNull();
+  });
+
   it("manifest bytes that do not match the feed entry's digest are refused at manifest_digest", async () => {
     const w = build(w => {
       w.feed.channels.set("stable", doctoredFeed(w.keys, w.feedText, doc => {
@@ -476,6 +489,16 @@ describe("the check service (§6.1, §10.2)", () => {
     const w = build(w => w.artifacts.unserve(w.rel.name));
     expect(await w.service.check()).toMatchObject({ kind: "unreachable" });
     expect(w.feed.calls.manifests).toEqual([w.rel.manifestUrl]);   // it got as far as the download
+    nothingLeft(w);
+  });
+
+  it("an adapter that throws a plain error mid-stage is a recorded refusal, never a crash", async () => {
+    const w = build(world => {
+      world.artifacts.fetch = async () => { throw new Error("disk full"); };   // as a full disk would
+    });
+    const out = await w.service.check();
+    expect(out).toEqual({ kind: "refused", step: "error", detail: "disk full" });
+    recorded(w, "refused", "error", OFFERED);
     nothingLeft(w);
   });
 

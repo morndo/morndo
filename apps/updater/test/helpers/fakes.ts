@@ -5,6 +5,7 @@
 import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compareVersions, DEFAULT_CHANNEL, DEFAULT_MODE, parseVersion, type Channel, type UpdateSettings } from "@morndo/domain";
+import { ARTIFACT_NAME } from "@morndo/protocol";
 import { DirsInstaller } from "../../src/adapters/installer-dirs.ts";
 import {
   FetchFailed, type ArtifactStore, type CheckRecord, type Clock, type Download, type Installer, type Layout,
@@ -87,6 +88,7 @@ export class FakeArtifacts implements ArtifactStore {
   unserve(name: string): void { this.served.delete(name); }
 
   async fetch(url: string, o: { name: string; maxBytes: number; timeoutMs: number }): Promise<Download> {
+    if (!ARTIFACT_NAME.test(o.name)) throw new Error(`not a plain file name: ${o.name}`);   // the real adapter's rule
     const served = this.served.get(o.name);
     if (served === undefined) throw new FetchFailed("status", `HTTP 404 from ${url}`);
     const total = served.bytes.length + (served.extra ?? 0);
