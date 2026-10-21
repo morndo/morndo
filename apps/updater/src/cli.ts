@@ -56,12 +56,13 @@ const checkLine = (o: CheckOutcome): string => {
     case "skipped": return `Skipped: ${o.reason}. Nothing was staged.`;
     case "busy": return "Busy: another process holds the apply lock.";
     case "unreachable": return `Unreachable: ${o.detail}.`;
+    case "failed": return `Failed: ${o.detail}. Nothing was staged; the next check tries again.`;
     case "not_ours": return o.detail;
   }
 };
-const checkCode = (o: CheckOutcome): number =>
+export const checkCode = (o: CheckOutcome): number =>
   o.kind === "refused" ? EXIT_DATAERR
-  : o.kind === "busy" || o.kind === "unreachable" ? EXIT_TEMPFAIL
+  : o.kind === "busy" || o.kind === "unreachable" || o.kind === "failed" ? EXIT_TEMPFAIL
   : o.kind === "not_ours" ? EXIT_CONFIG
   : EXIT_OK;
 

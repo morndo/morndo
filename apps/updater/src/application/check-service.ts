@@ -35,7 +35,8 @@ export type CheckOutcome =
   | { kind: "refused"; step: string; detail: string }                  // RL1/RL3: the chain's own word for what failed
   | { kind: "not_ours"; detail: string }                               // RL14: a checkout, a package, or updates disabled
   | { kind: "busy" }                                                   // another process holds the apply lock
-  | { kind: "unreachable"; detail: string };                           // FetchFailed: network, status, timeout
+  | { kind: "unreachable"; detail: string }                            // FetchFailed: network, status, timeout
+  | { kind: "failed"; detail: string };                                // anything else (a full disk, an I/O error): try later
 
 const decodeText = new TextDecoder();
 
@@ -315,11 +316,11 @@ export class CheckService {
         const detail = `${error.reason}: ${error.message}`;
         return finish({ kind: "unreachable", detail }, detail);
       }
-      // Anything else is still an answer, never a crash out of the program (§8.1): a recorded refusal at its own
-      // step, the error's message as the detail, exit 65 from the CLI — and finish's cleanup leaves nothing
-      // behind (§13), whatever the failure was.
+      // Anything else is still an answer, never a crash out of the program (§8.1): a recorded failure, the error's
+      // message as the detail, and finish's cleanup leaves nothing behind (§13). It says nothing about the release
+      // (a full disk, an I/O error), so it is a failure to try again later (exit 75), not a refusal of the data (65).
       const message = error instanceof Error ? error.message : String(error);
-      return refused("error", message);
+      return finish({ kind: "failed", detail: message }, `error: ${message}`);
     } finally {
       lock.release();
     }

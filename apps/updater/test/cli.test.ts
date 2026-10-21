@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UpdateStatusSchema } from "@morndo/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { platformWord, runUpdater } from "../src/cli.ts";
+import { checkCode, platformWord, runUpdater } from "../src/cli.ts";
 import { CHECKOUT_SENTENCE } from "../src/application/check-service.ts";
 import { wipe } from "./helpers/fakes.ts";
 
@@ -35,6 +35,16 @@ const run = async (argv: string[], env: Record<string, string | undefined> = {})
 const APPLIES_NOTHING = /applies nothing yet/;
 
 describe("the command line (§8.1, §8.4)", () => {
+  // sysexits.h (§8.4): a refusal of the data is 65; anything that should simply be tried again later — the network,
+  // a busy lock, an I/O error such as a full disk — is 75.
+  it("exit codes: refused 65; failed, unreachable and busy 75; not ours 78; the rest 0", () => {
+    expect(checkCode({ kind: "refused", step: "artifact_digest", detail: "x" })).toBe(65);
+    expect(checkCode({ kind: "failed", detail: "disk full" })).toBe(75);
+    expect(checkCode({ kind: "unreachable", detail: "x" })).toBe(75);
+    expect(checkCode({ kind: "busy" })).toBe(75);
+    expect(checkCode({ kind: "not_ours", detail: "x" })).toBe(78);
+    expect(checkCode({ kind: "staged", version: "0.2.0", already: false })).toBe(0);
+  });
   it("maps the machine to the platforms Morndo ships, and no other", () => {
     expect(platformWord("linux", "x64")).toBe("linux-x64");
     expect(platformWord("linux", "arm64")).toBe("linux-arm64");

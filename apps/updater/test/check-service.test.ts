@@ -530,13 +530,15 @@ describe("the check service (§6.1, §10.2)", () => {
     nothingLeft(w);
   });
 
-  it("an adapter that throws a plain error mid-stage is a recorded refusal, never a crash", async () => {
+  // An I/O error is no verdict on the release (review of 2026-10-21): it is a failure to try again later (exit 75),
+  // recorded like every outcome, never a refusal of the data (65) and never a crash.
+  it("an adapter that throws a plain error mid-stage is a recorded failure to retry, never a crash", async () => {
     const w = build(world => {
       world.artifacts.fetch = async () => { throw new Error("disk full"); };   // as a full disk would
     });
     const out = await w.service.check();
-    expect(out).toEqual({ kind: "refused", step: "error", detail: "disk full" });
-    recorded(w, "refused", "error", OFFERED);
+    expect(out).toEqual({ kind: "failed", detail: "disk full" });
+    recorded(w, "failed", "error", OFFERED);
     nothingLeft(w);
   });
 
