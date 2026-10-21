@@ -86,7 +86,7 @@ export const canRetry = (r: OutboxRecord, now: number) =>
 // it is.
 export const canEdit = (r: OutboxRecord) => r.state === "failed" && (r.error === "stale" || LASTING.has(r.error ?? ""));
 // The longest text one message can carry (the hub refuses longer: too_long).
-export const MAX_TEXT = LIMITS.maxSendText;
+export const MAX_TEXT = LIMITS.maxMessageText;
 // Cancel: a message the manager's queue still holds, not typed yet (ruling 83). Once typed it can't be taken back.
 export const canCancel = (r: OutboxRecord) => r.state === "sent" && r.delivery?.state === "queued" && r.delivery.waiting !== "typed" && r.delivery.waiting !== "held";
 

@@ -28,15 +28,15 @@ async function openAlpha(answer: { status: number; error?: string }) {
 const box = () => tab.getByRole("textbox", { name: "Message alpha" });
 
 describe("the composer's length", () => {
-  it("over 8,000 characters: said while typing, Send off, nothing sent; back under: Send on", { timeout: 30_000 }, async () => {
+  it("over 100,000 characters: said while typing, Send off, nothing sent; back under: Send on", { timeout: 30_000 }, async () => {
     await openAlpha({ status: 200 });
-    await box().fill("x".repeat(8001));
+    await box().fill("x".repeat(100_001));
     await tab.locator("[data-over]").waitFor();
-    expect(await tab.locator("[data-over]").innerText()).toContain("8001 of 8000");
+    expect(await tab.locator("[data-over]").innerText()).toContain("100,001 of 100,000");
     expect(await tab.getByRole("button", { name: "Send" }).isDisabled()).toBe(true);
     await box().press("Enter");
     expect(posts).toEqual([]);
-    await box().fill("x".repeat(8000));
+    await box().fill("x".repeat(100_000));
     expect(await tab.locator("[data-over]").count()).toBe(0);
     expect(await tab.getByRole("button", { name: "Send" }).isDisabled()).toBe(false);
   });

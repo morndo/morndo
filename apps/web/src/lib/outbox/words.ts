@@ -2,7 +2,8 @@
 // code. One wording for the desktop's conversation and the phone's update card (review of PR #7, finding 12): the
 // phone had its own short list and showed the hub's raw codes for the rest.
 import { unreachable } from "@morndo/domain";
-import { UNSEEN_AFTER_MS, type OutboxRecord } from "./state.ts";
+import { LIMITS } from "@morndo/protocol";
+import { MAX_TEXT, UNSEEN_AFTER_MS, type OutboxRecord } from "./state.ts";
 import { DELIVERED, GIVEN_UP, MAY_HAVE_BEEN, NOT_DELIVERED, QUEUED, queuedLine } from "../queue-words.ts";
 
 // After the worker's name: "builder is showing a menu. …". The desktop says where to look as "the Terminal tab".
@@ -13,7 +14,7 @@ const PROBLEMS: Record<string, string> = {
   not_submitted: "didn't take the message. Check its Terminal tab.",
   no_pane: "is no longer running.",
   busy: "is being typed into by something else right now. Try again in a few seconds.",
-  too_long: "can't take a message this long (8000 characters at most).",
+  too_long: `can't take a message this long (${MAX_TEXT.toLocaleString("en-US")} characters at most).`,
   not_yours: "can't take that file: it was uploaded from another device.",
   unknown_upload: "can't take that file anymore. Attach it again.",
   expired: "can't take that file anymore: it's over a day old. Attach it again.",
@@ -26,7 +27,7 @@ const PROBLEMS: Record<string, string> = {
   // with executed "no"), so these come back as Not sent. Nothing was typed.
   denied: "is on a machine that doesn't let Morndo type into it (its node policy), so nothing was typed.",
   bad_args: "couldn't be reached: the fleet refused the message as malformed, so nothing was typed. If its window name has a tab or another control character in it, rename the window, then try again.",
-  unknown_op: "is on a machine whose Morndo agent is too old to type messages, so nothing was typed. Update Morndo on that machine.",
+  unknown_op: `is on a machine whose Morndo agent is too old for a message this long (it takes at most ${LIMITS.maxSendText.toLocaleString("en-US")} characters), so nothing was typed. Update Morndo on that machine.`,
   internal: "is on a machine that couldn't record the message before typing it (a full disk?), so nothing was typed. Try again once it has room.",
   name_taken: "shares its name with a lane on another machine, so nothing was typed. Rename one of them, then try again.",
   lane_conflict: "shares its name with another window, so nothing was typed: nobody can tell which one it's for. Rename one of them, then try again.",

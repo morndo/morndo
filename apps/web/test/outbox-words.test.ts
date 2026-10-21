@@ -16,6 +16,8 @@ describe("outbox words", () => {
     for (const code of ["no_pane", "busy", "draft_present", "no_input_box", "not_submitted", "too_long", "stale", "step_up", "timeout", "uncertain", "too_large", "node_offline"]) {
       expect(sendReason(rec("x", { state: "failed", error: code }), "builder")).not.toContain(code);
     }
+    expect(sendReason(rec("x", { state: "failed", error: "too_long" }), "builder")).toContain("100,000 characters at most");
+    expect(sendReason(rec("x", { state: "failed", error: "unknown_op" }), "builder")).toContain("at most 8,000 characters");
   });
   it("a send the node or the fleet refused saying nothing ran (the hub's SEND_REFUSALS) says why in words, and that nothing was typed", () => {
     for (const code of SEND_REFUSALS) {

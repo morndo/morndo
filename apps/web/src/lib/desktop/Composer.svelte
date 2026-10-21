@@ -47,6 +47,7 @@
   const readyIds = $derived(shots.filter(s => s.status === "ready" && s.id).map(s => s.id as string));
   // Longer than a lane takes: said while typing, and not sent (the hub would refuse it too_long).
   const over = $derived(text.length > MAX_TEXT);
+  const withSep = (n: number) => n.toLocaleString("en-US");
   const canSend = $derived(!closed && !over && (text.trim().length > 0 || readyIds.length > 0) && !uploading && !shots.some(s => s.status === "error"));
 
   function addFiles(files: File[]) {
@@ -211,7 +212,7 @@
       aria-label="Message {targetName}"
       disabled={closed}
     ></textarea>
-    {#if over}<p class="shot-err" data-over>Too long for one message: {text.length} of {MAX_TEXT} characters.</p>{/if}
+    {#if over}<p class="shot-err" data-over>Too long for one message: {withSep(text.length)} of {withSep(MAX_TEXT)} characters.</p>{/if}
     <div class="tools">
       {#if !noFiles}<button class="attach" onclick={() => fileInput?.click()} aria-label="Attach a file" title="Attach a file (or paste or drop one)"><Paperclip size={16} /></button>{/if}
       <input bind:this={fileInput} type="file" accept={UPLOAD_ACCEPT} multiple hidden
