@@ -180,7 +180,7 @@ describe("op arguments (what the agent acts on: strict)", () => {
     expect(ok("pane.captureMany", { workerIds: Array.from({ length: 65 }, (_, i) => `pc.3fa2c1d0.${i}`) })).toBe(false);
     expect(ok("pane.captureMany", { workerIds: ["%1"] })).toBe(false);
     expect(ok("pane.keys", { workerId: W, data: "x".repeat(4097), expect: expectArgs })).toBe(false);
-    expect(ok("pane.send", { workerId: W, text: "x".repeat(8001), expect: expectArgs })).toBe(false);
+    expect(ok("pane.send", { workerId: W, text: "x".repeat(LIMITS.maxMessageText + 1), expect: expectArgs })).toBe(false);
     expect(ok("pane.send", { workerId: W, text: "hi" })).toBe(false);                                  // no expectation
     expect(ok("pane.send", { workerId: W, text: "hi", expect: { ...expectArgs, window: "a\nb" } })).toBe(false);
     for (const sessionId of ["../../.ssh/id_rsa", "a/b", "a.b", ""]) expect(ok("transcript.size", { sessionId }), sessionId).toBe(false);

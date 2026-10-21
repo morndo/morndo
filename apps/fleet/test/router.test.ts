@@ -5,6 +5,7 @@
 // results from the same instance accepted, results for another instance's requests dropped (spec 9, contract: "a fake
 // agent answering the wrong id or an old connEpoch is ignored"); every side-effecting op audited.
 import { describe, expect, it, vi } from "vitest";
+import { LIMITS } from "@morndo/protocol";
 import { startTestFleet, type TestFleet } from "./helpers/fleet.ts";
 import { validResult, type FakeAgent } from "./helpers/fake-agent.ts";
 
@@ -64,7 +65,7 @@ describe("routing", () => {
     const a = await withLane(fleet, "pc", "api");
     const e = { server: "3fa2c1d0", window: "api" };
     const cases: [Parameters<typeof fleet.router.op>, string][] = [
-      [[{ workerId: W }, "pane.send", { workerId: W, text: "x".repeat(8001), expect: e }, { key: "hub:1" }], "text over 8000"],
+      [[{ workerId: W }, "pane.send", { workerId: W, text: "x".repeat(LIMITS.maxMessageText + 1), expect: e }, { key: "hub:1" }], "text over 100000"],
       [[{ workerId: W }, "pane.send", { workerId: W, text: "x" }, { key: "hub:2" }], "no expectation"],
       [[{ workerId: W }, "pane.keys", { workerId: W, data: "", expect: e }], "no keystrokes"],
       [[{ node: "pc" }, "pane.frame", { workerId: "%3" }], "not a worker ID"],
