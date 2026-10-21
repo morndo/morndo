@@ -1,8 +1,9 @@
 // The archive reader (design §6.1 step 4, §10.2 step 6, §10.4 "a crafted archive"): a streaming reader for
 // exactly what scripts/release/archive.ts packTree writes — gzip, ustar headers, and a POSIX pax `x` record
 // carrying `path` for a long name — and a refusal for everything else: a path that leaves the tree, a link that
-// points out (straight or by climbing through another link of the archive), anything written through a link,
-// device nodes and GNU extensions, a duplicate path, a bad checksum, a truncated body, unbounded expansion. It
+// points out (straight or by climbing through another link of the archive, whatever its spelling), anything
+// written through a link, device nodes and GNU extensions, a duplicate path or two names that fold to one
+// (case, Unicode form), a bad checksum, a truncated body, unbounded expansion. It
 // writes only inside `dest`, under its own modes (files
 // 0600, directories 0700): the installer sets the final modes from the signed file list, never from the archive.
 // Format sources: POSIX pax, "ustar Interchange Format" and "pax Interchange Format",
@@ -23,6 +24,15 @@ export class TarRefused extends Error {
 }
 
 const refuse = (reason: string): never => { throw new TarRefused(reason); };
+
+// A path's key: its spelling with case and Unicode form folded (NFC, lower case). A file system may treat two
+// spellings as one name — APFS, macOS's default, folds both — so the reader's maps are keyed this way on every
+// platform and two names that differ only by spelling are refused instead of written as two entries (no name in
+// this repository's node_modules or Node's distribution collides once folded, checked 2026-10-21). Link targets
+// are looked up by key too: a walk that spelled names exactly let `esc -> P/UP/..` climb out on a system where
+// P/UP names the link p/up (review of 2026-10-21). `normalize` and `toLowerCase` are ECMAScript's own, with no
+// locale: https://tc39.es/ecma262/multipage/text-processing.html (read 2026-10-21).
+const foldKey = (path: string): string => path.normalize("NFC").toLowerCase();
 
 // Strict UTF-8: a name that does not decode is refused, not guessed at — a lossy decode could alias two paths.
 const utf8 = new TextDecoder("utf-8", { fatal: true });
@@ -79,8 +89,8 @@ const pathFault = (path: string): string | null => {
 
 export async function extractTar(gzPath: string, dest: string, o: { maxBytes: number }): Promise<TarEntry[]> {
   const entries: TarEntry[] = [];
-  const seen = new Map<string, "dir" | "file" | "symlink">();   // every path this archive has put in dest
-  const links = new Map<string, string>();                      // every symlink's path -> target, for the check at the end
+  const seen = new Map<string, { kind: "dir" | "file" | "symlink"; path: string }>();   // every path this archive has put in dest, by folded key
+  const links = new Map<string, string>();                      // every symlink's folded key -> target, for the check at the end
   const pax = new Map<string, string>();                        // records waiting for the entry they describe
 
   let buf: Buffer = Buffer.alloc(0);
@@ -103,50 +113,63 @@ export async function extractTar(gzPath: string, dest: string, o: { maxBytes: nu
     const parts = path.split("/");
     for (let i = 1; i < parts.length; i++) {
       const parent = parts.slice(0, i).join("/");
-      const known = seen.get(parent);
-      if (known === "dir") continue;
-      if (known !== undefined) refuse(`refusing path ${path}: ${parent} is already ${known === "symlink" ? "a symlink" : "a file"}`);
+      const known = seen.get(foldKey(parent));
+      if (known !== undefined && known.path !== parent) {
+        refuse(`names that collide when case and Unicode form are folded: ${known.path}, ${parent}`);
+      }
+      if (known?.kind === "dir") continue;
+      if (known !== undefined) refuse(`refusing path ${path}: ${parent} is already ${known.kind === "symlink" ? "a symlink" : "a file"}`);
       const full = join(dest, parent);
       let st: ReturnType<typeof lstatSync> | null = null;
       try { st = lstatSync(full); } catch { st = null; }
       if (st !== null && !st.isDirectory()) refuse(`refusing path ${path}: ${parent} is not a directory`);
       if (st === null) mkdirSync(full, 0o700);
-      seen.set(parent, "dir");
+      seen.set(foldKey(parent), { kind: "dir", path: parent });
     }
   };
 
+  // The one refusal both name checks share: the same spelling twice is a duplicate path, two spellings that fold
+  // to one key are two entries here but one file on a folding file system.
+  const claim = (path: string, known: { kind: "dir" | "file" | "symlink"; path: string } | undefined): void => {
+    if (known === undefined) return;
+    if (known.path !== path) refuse(`names that collide when case and Unicode form are folded: ${known.path}, ${path}`);
+    if (known.kind !== "dir") refuse(`duplicate path ${path}`);
+  };
+
   const makeDir = (path: string): void => {
-    if (seen.get(path) === "dir") return;   // the same directory twice is nothing new
-    if (seen.has(path)) refuse(`duplicate path ${path}`);
+    const known = seen.get(foldKey(path));
+    if (known?.kind === "dir" && known.path === path) return;   // the same directory twice is nothing new
+    claim(path, known);
     ensureParents(path);
     mkdirSync(join(dest, path), 0o700);
-    seen.set(path, "dir");
+    seen.set(foldKey(path), { kind: "dir", path });
   };
 
   const makeFile = (path: string): void => {
-    if (seen.has(path)) refuse(`duplicate path ${path}`);
+    claim(path, seen.get(foldKey(path)));
     ensureParents(path);
     fd = openSync(join(dest, path), "wx", 0o600);   // "wx": a path that exists is never written over
-    seen.set(path, "file");
+    seen.set(foldKey(path), { kind: "file", path });
   };
 
   const makeSymlink = (path: string, target: string): void => {
-    if (seen.has(path)) refuse(`duplicate path ${path}`);
+    claim(path, seen.get(foldKey(path)));
     if (target === "") refuse(`refusing link ${path}: an empty target`);
     if (linkLeaves(path, target)) refuse(`refusing link ${path} -> ${target}: it leaves the tree`);
     ensureParents(path);
     symlinkSync(target, join(dest, path));
-    seen.set(path, "symlink");
-    links.set(path, target);
+    seen.set(foldKey(path), { kind: "symlink", path });
+    links.set(foldKey(path), target);
   };
 
   // The lexical rule above cannot see through another link: "x/l1/.." looks harmless on its own while x/l1 is
   // itself a link, yet the kernel resolves a link l2 -> x/l1/.. to the parent of dest, because each ".." applies
   // after the link before it was substituted. So once the whole archive is known, every link's target is walked
   // again the way the kernel would inside this archive: a segment whose path so far names a link of this archive
-  // gives way to that link's own target, resolved from that link's own directory. Linux caps one lookup at 40
-  // link traversals (ELOOP, path_resolution(7)); more substitutions than that is a loop. Returns the refusal
-  // reason, or null when the target ends inside the tree (existing or not).
+  // gives way to that link's own target, resolved from that link's own directory. Links are looked up by folded
+  // key, so a name the target spells differently (P/UP for p/up) still names the link it names on a folding
+  // file system. Linux caps one lookup at 40 link traversals (ELOOP, path_resolution(7)); more substitutions
+  // than that is a loop. Returns the refusal reason, or null when the target ends inside the tree (existing or not).
   const LINK_STEPS = 40;
   const linkThroughLinks = (path: string, target: string): string | null => {
     const stack = path.split("/").slice(0, -1);   // where the walk stands: the link's own directory at first
@@ -160,7 +183,7 @@ export async function extractTar(gzPath: string, dest: string, o: { maxBytes: nu
         stack.pop();
         continue;
       }
-      const own = links.get([...stack, part].join("/"));
+      const own = links.get(foldKey([...stack, part].join("/")));
       if (own === undefined) { stack.push(part); continue; }
       steps += 1;
       if (steps > LINK_STEPS) return `refusing link ${path} -> ${target}: a link loop`;

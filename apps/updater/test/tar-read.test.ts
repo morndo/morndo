@@ -102,6 +102,37 @@ describe("extractTar", () => {
     // the kernel agrees the chain stays inside: walking l3 lands on x, not on anything past dest
     expect(realpathSync(join(dest, "l3"))).toBe(realpathSync(join(dest, "x")));
   });
+  // The review of 2026-10-21, confirmed on macOS: a file system may treat two spellings as one name (APFS folds
+  // case and NFC/NFD), so a walk that looks links up by exact spelling never substitutes P/UP for p/up and
+  // realpath(dest/esc) was the folder above dest. Every name is keyed by its folded form on every platform.
+  it("refuses a link that climbs out through a differently cased link (p/up -> .., esc -> P/UP/..)", () =>
+    refuse(evilGz([
+      { name: "p", type: "5" },
+      { name: "p/up", type: "2", link: ".." },
+      { name: "esc", type: "2", link: "P/UP/.." },
+    ]), "link-case-fold", /esc/));
+  it("refuses a link that climbs out through a link spelled in another Unicode form", () => {
+    const composed = "café";        // é as one character
+    const decomposed = "café";    // the same name as e + combining acute
+    return refuse(evilGz([
+      { name: composed, type: "5" },
+      { name: `${composed}/up`, type: "2", link: ".." },
+      { name: "esc", type: "2", link: `${decomposed}/up/..` },
+    ]), "link-nfd-fold", /esc/);
+  });
+  it("accepts a parent link followed inside (p/up -> .., ok -> p/up/p)", async () => {
+    const archive = dir("parent-link.tar.gz");
+    writeFileSync(archive, evilGz([
+      { name: "p", type: "5" },
+      { name: "p/up", type: "2", link: ".." },
+      { name: "ok", type: "2", link: "p/up/p" },
+    ]));
+    const dest = dir("parent-link-dest");
+    mkdirSync(dest);
+    await extractTar(archive, dest, { maxBytes: 10 * 1024 * 1024 });
+    // the kernel agrees the walk stays inside: ok lands on p, not on anything past dest
+    expect(realpathSync(join(dest, "ok"))).toBe(realpathSync(join(dest, "p")));
+  });
   it("refuses a link loop (a -> b, b -> a, c -> a/z)", () =>
     refuse(evilGz([
       { name: "a", type: "2", link: "b" },
@@ -122,6 +153,31 @@ describe("extractTar", () => {
 
   it("refuses a path seen twice", () =>
     refuse(evilGz([{ name: "a", body: Buffer.from("1") }, { name: "a", body: Buffer.from("2") }]), "duplicate", /duplicate.*a|a.*duplicate/));
+
+  // Two spellings one file system would treat as one name are refused on every platform: written as two entries
+  // they are two files here and one file there, so the tree the signed list describes would not be the tree on disk.
+  it("refuses two names that differ only by case", () =>
+    refuse(evilGz([
+      { name: "README", body: Buffer.from("one") },
+      { name: "readme", body: Buffer.from("two") },
+    ]), "case-collision", /collide/));
+  it("refuses two names that differ only by Unicode form", () =>
+    refuse(evilGz([
+      { name: "café", body: Buffer.from("one") },
+      { name: "café", body: Buffer.from("two") },
+    ]), "nfd-collision", /collide/));
+  it("accepts two names whose folded forms differ", async () => {
+    const archive = dir("folded-ok.tar.gz");
+    writeFileSync(archive, evilGz([
+      { name: "README", body: Buffer.from("upper") },
+      { name: "readme.txt", body: Buffer.from("lower") },
+    ]));
+    const dest = dir("folded-ok-dest");
+    mkdirSync(dest);
+    await extractTar(archive, dest, { maxBytes: 10 * 1024 * 1024 });
+    expect(readFileSync(join(dest, "README"), "utf8")).toBe("upper");
+    expect(readFileSync(join(dest, "readme.txt"), "utf8")).toBe("lower");
+  });
 
   it("refuses a bad header checksum", () =>
     refuse(evilGz([{ name: "a", body: Buffer.from("x"), badChecksum: true }]), "checksum", /checksum/));
