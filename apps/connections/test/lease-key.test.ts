@@ -14,6 +14,8 @@ import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 import { claudeSettings } from "../src/adapters/runtime-claude.ts";
 import { selfHolder } from "../src/adapters/processes.ts";
+import { CLAUDE_RELEASE_FINGERPRINT } from "../src/adapters/claude-release-key.ts";
+import type { Fetch } from "../src/adapters/release-manifest.ts";
 import { run } from "../src/cli.ts";
 import { openHome } from "../src/compose.ts";
 
@@ -469,4 +471,82 @@ process.kill(process.pid, "SIGKILL");
     expect(closed.code).toBe(1);
     expect(closed.stdout).toBe("");
   }, 30_000);
+});
+
+// Signed releases (T-346): the owner pins the key, the directory and a floor once; a node job fills the cache; the lease reads it.
+// In process, with the manifest of 2.1.306 as Anthropic published it (test/fixtures/claude-release) served by a fake fetch.
+describe("keys signed releases", () => {
+  const fixtures = join(import.meta.dirname, "fixtures/claude-release");
+  const MANIFEST = readFileSync(join(fixtures, "2.1.306.manifest.json"));
+  const SIGNATURE = readFileSync(join(fixtures, "2.1.306.manifest.json.sig"));
+  const SERVED: Record<string, Uint8Array> = {
+    "https://downloads.claude.ai/claude-code-releases/2.1.306/manifest.json": MANIFEST,
+    "https://downloads.claude.ai/claude-code-releases/2.1.306/manifest.json.sig": SIGNATURE,
+  };
+
+  async function inProcess(args: string[], env: NodeJS.ProcessEnv, io: { tty?: boolean; fetch?: Fetch } = {}): Promise<Out> {
+    let stdout = "";
+    let stderr = "";
+    const code = await run(args, env, { stdin: "", ...io, stdout: text => { stdout += text; }, stderr: text => { stderr += text; } });
+    return { code, stdout, stderr };
+  }
+  function installed(dir: string, names: string[]): string {
+    const versions = join(dir, "versions");
+    mkdirSync(versions);
+    for (const name of names) writeFileSync(join(versions, name), "");
+    return versions;
+  }
+
+  it("pin-claude --signed pins the key, the directory and the floor at a terminal, and says what it pinned", async () => {
+    const dir = homeDir();
+    const env = envOf(dir);
+    await zaiReady(dir, env);
+    const versions = installed(dir, ["2.1.305", "2.1.306"]);
+    const noTerminal = await inProcess(["pin-claude", "--signed", "--versions-dir", versions, "--floor", "2.1.305"], env);
+    expect([noTerminal.code, noTerminal.stderr]).toEqual([1, "tty\n"]);
+    expect(readdirSync(dir)).not.toContain("claude-release-pin.json");
+    const pinned = await inProcess(["pin-claude", "--signed", "--versions-dir", versions, "--floor", "2.1.305"], env, { tty: true });
+    expect(pinned.code, pinned.stderr).toBe(0);
+    const said = JSON.parse(pinned.stdout) as Record<string, unknown>;
+    expect(said).toEqual({ fingerprint: CLAUDE_RELEASE_FINGERPRINT, versionsDir: realpathSync(versions), floor: "2.1.305", baseUrls: { zai: ZAI_BASE } });
+    expect(JSON.parse(readFileSync(join(dir, "claude-release-pin.json"), "utf8"))).toEqual(said);
+    // refusals: no such directory, a floor that is not a version or below the first signed release, none given and none to take
+    for (const [args, word] of [
+      [["--versions-dir", join(dir, "nowhere"), "--floor", "2.1.305"], "missing"],
+      [["--versions-dir", versions, "--floor", "latest"], "floor"],
+      [["--versions-dir", versions, "--floor", "2.1.88"], "floor"],
+      [["--versions-dir", versions], "floor"],
+    ] as [string[], string][]) {
+      const refused = await inProcess(["pin-claude", "--signed", ...args], env, { tty: true });
+      expect([refused.code, refused.stderr], args.join(" ")).toEqual([1, `${word}\n`]);
+    }
+  }, 60_000);
+
+  it("claude-releases sync fills the cache from the signed manifest, leaves a verified entry alone, and keeps the old cache when a fetch fails", async () => {
+    const dir = homeDir();
+    const env = envOf(dir);
+    await zaiReady(dir, env);
+    const versions = installed(dir, ["2.1.200", "2.1.306", "latest"]);
+    expect((await inProcess(["claude-releases", "sync"], env)).stderr).toBe("no_release_pin\n");
+    expect((await inProcess(["pin-claude", "--signed", "--versions-dir", versions, "--floor", "2.1.306"], env, { tty: true })).code).toBe(0);
+    const requested: string[] = [];
+    const fake: Fetch = async url => { requested.push(url); const body = SERVED[url]; if (body === undefined) throw new Error("HTTP 404"); return body; };
+    const first = await inProcess(["claude-releases", "sync"], env, { fetch: fake });
+    expect([first.code, first.stdout]).toEqual([0, `${JSON.stringify({ version: "2.1.306", status: "fetched" })}\n`]);   // 2.1.200 is below the floor, "latest" no version
+    expect(requested).toHaveLength(2);
+    expect(readFileSync(join(dir, "claude-releases", "2.1.306", "manifest.json"))).toEqual(MANIFEST);
+    const again = await inProcess(["claude-releases", "sync"], env, { fetch: fake });
+    expect([again.code, again.stdout]).toEqual([0, `${JSON.stringify({ version: "2.1.306", status: "cached" })}\n`]);
+    expect(requested).toHaveLength(2);                                                                     // a verified cache costs no request
+    // a new version appears (the installer); its manifest can't be fetched: exit 1, the cache of 2.1.306 stays
+    writeFileSync(join(versions, "2.1.307"), "");
+    const down: Fetch = async () => { throw new Error("connect ECONNREFUSED 10.0.0.1:443"); };
+    const failed = await inProcess(["claude-releases", "sync"], env, { fetch: down });
+    expect(failed.code).toBe(1);
+    expect(failed.stdout.trim().split("\n").map(line => JSON.parse(line))).toEqual([{ version: "2.1.306", status: "cached" }, { version: "2.1.307", status: "failed", why: "fetch failed" }]);
+    expect(readdirSync(join(dir, "claude-releases"))).toEqual(["2.1.306"]);
+    // --only asks for one more, below nothing: still a version at or above the floor
+    const only = await inProcess(["claude-releases", "sync", "--only", "2.1.306", "--only", "2.1.100", "--only", "../x"], env, { fetch: fake });
+    expect(only.stdout.trim().split("\n").map(line => (JSON.parse(line) as { version: string }).version).sort((a, b) => a.localeCompare(b))).toEqual(["2.1.306", "2.1.307"]);
+  }, 60_000);
 });
