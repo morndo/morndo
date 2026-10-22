@@ -3258,14 +3258,40 @@ export const CONTROLS: Control[] = [
     replace: "    void entry;",
     run: ["apps/hub/test/revocation-journal.test.ts"], expect: "the next start applies the journal" },
   { id: "c2c-fleet-journal-not-applied", task: "c2c", file: "apps/fleet/src/application/revocations.ts",
-    find: "    if (entry.kind === \"node\" && nodes.revoke(entry.id)) applied += 1;",
+    find: "    if (entry.kind === \"node\" && nodes.revokeEnrolment(entry.id, entry.enrolment)) applied += 1;",
     replace: "    void entry;",
     run: ["apps/fleet/test/revocation-journal.test.ts"], expect: "the journal applied at start" },
   { id: "c2c-updater-ignores-journal", task: "c2c", file: "apps/updater/src/adapters/revocations-sqlite.ts",
-    find: "    const journaled = journaledIds(db, this.#paths[db]);        // the service's start re-applies these (RL10)",
+    find: "    const journaled = journals ? journaledIds(db, this.#paths[db], backup) : new Set<string>();",
     replace: "    const journaled = new Set<string>();",
     run: ["apps/updater/test/apply-service.test.ts", "apps/updater/test/revocations-sqlite.test.ts"], expect: "rollback_failed" },
   // C1 review: an append after a crash mid-write cuts the torn line first; glued on, the journal reads no more.
+  // #106 review (md-rev5 on fe91ae4), one control per fix.
+  // 4: a node's entry revokes its enrolment only; by name, a node that joined again is revoked at every start.
+  { id: "c2c-node-revoked-by-name", task: "c2c", file: "apps/fleet/src/application/revocations.ts",
+    find: "nodes.revokeEnrolment(entry.id, entry.enrolment)", replace: "nodes.revoke(entry.id)",
+    run: ["apps/fleet/test/revocation-journal.test.ts"], expect: "stays joined across every restart" },
+  { id: "c2c-updater-node-any-enrolment", task: "c2c", file: "apps/updater/src/adapters/revocations-sqlite.ts",
+    find: "    if (entry.kind === \"node\" && enrolmentInBackup.get(entry.id) !== entry.enrolment) continue;\n", replace: "",
+    run: ["apps/updater/test/revocations-sqlite.test.ts"], expect: "leaves out what the service's journal" },
+  // 5: a bad line is skipped and reported; thrown, it stops the start and hides the rest.
+  { id: "c2c-journal-bad-line-throws", task: "c2c", file: "packages/service-kit/src/revocation-journal.ts",
+    find: "try { parsed = JSON.parse(line); } catch (e) { bad.push({ line: i + 1, why: (e as Error).message }); return; }",
+    replace: "parsed = JSON.parse(line);",
+    run: ["apps/hub/test/revocation-journal.test.ts", "apps/fleet/test/revocation-journal.test.ts"], expect: "garbage line" },
+  // 6: a rollback to a Version without journals may excuse nothing by the journal.
+  { id: "c2c-updater-trusts-old-target", task: "c2c", file: "apps/updater/src/adapters/revocations-sqlite.ts",
+    find: "const journals = applier !== undefined && existsSync(join(this.#releases, target, applier));",
+    replace: "const journals = applier !== undefined;",
+    run: ["apps/updater/test/revocations-sqlite.test.ts"], expect: "leaves out what the service's journal" },
+  // 7: a restore renews the hub's store, whatever inode the file lands on.
+  { id: "c2c-restore-keeps-hub-store", task: "c2c", file: "apps/updater/src/adapters/backup-sqlite.ts",
+    find: "    if (db === \"hub\") forgetHubStore(beside);\n", replace: "",
+    run: ["apps/updater/test/backup-sqlite.test.ts"], expect: "is a new store" },
+  // 8: past its size the journal is compacted.
+  { id: "c2c-journal-never-compacted", task: "c2c", file: "packages/service-kit/src/revocation-journal.ts",
+    find: "    if (size <= maxBytes) return false;", replace: "    return false;",
+    run: ["packages/service-kit/test/revocation-journal.test.ts"], expect: "compacts past its size" },
   { id: "c2c-journal-glues-torn-line", task: "c2c", file: "packages/service-kit/src/revocation-journal.ts",
     find: "        if (tail[0] !== 0x0a) {", replace: "        if (false) {",
     run: ["packages/service-kit/test/revocation-journal.test.ts"], expect: "cuts the torn bytes first" },
