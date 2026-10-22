@@ -31,7 +31,7 @@ import { stageRelease } from "../../scripts/release/stage.ts";
 import { FEED_NAMESPACE, KEYS_NAMESPACE, RELEASE_NAMESPACE } from "../../apps/updater/src/application/namespaces.ts";
 import { makeSigningKey } from "../../apps/updater/test/helpers/sshsig.ts";
 import { makeTestCa } from "../../apps/updater/test/helpers/tls.ts";
-import { nextMigration } from "./checks.ts";
+import { nextMigration, ownerOf, ownerText } from "./checks.ts";
 
 // The feed's fixed address, baked into the signed documents on the host and served inside the container on
 // exactly this port (scenario.ts serves it; the two constants must agree).
@@ -64,6 +64,8 @@ export type BuiltWorld = {
 // copied into the scratch (without .git and .worktrees), the copies are edited, compiled, pruned and staged there.
 export function buildWorld(repo: string): BuiltWorld {
   const scratch = mkdtempSync(join(tmpdir(), "morndo-c2-build-"));
+  // Whose scratch this is, first thing: another run's sweep leaves it alone while this process runs (checks.ts).
+  writeFileSync(join(scratch, "owner"), ownerText(ownerOf(process.pid)));
   // A build that fails leaves nothing of itself behind (unless E2E_KEEP=1): the repository copy is large.
   try { return buildInto(repo, scratch); }
   catch (error) {

@@ -18,7 +18,9 @@
 // /sbin/init (Docker mounts it read-only without --privileged), and tmpfs for /run, /run/lock and /tmp. /dev is
 // Docker's own container /dev: no host device. A host whose AppArmor profile forbids the remount refuses here:
 // systemd says so in the boot wait. The container is removed on every way out — the end of the run, an error,
-// SIGINT or SIGTERM — and each run first removes any container with the label a killed run left behind. The one extra mount the full-disk step needs is a tmpfs of the container's own memory
+// SIGINT or SIGTERM — and each run first removes what a killed run left behind: only a gone run's, by the owner
+// label (pid and start time) each container carries, so two runs on one box leave each other alone. The one
+// extra mount the full-disk step needs is a tmpfs of the container's own memory
 // (/mnt/tiny, 64k), not a host mount. A hard power loss is not tested here (docker kill is not one); that stays
 // manual QA.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -27,12 +29,13 @@ import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildWorld } from "./update-vm/build.ts";
-import { sweepScratch } from "./update-vm/checks.ts";
+import { OWNER_LABEL, ownerOf, ownerText, sweepContainers, sweepScratch } from "./update-vm/checks.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const IMAGE = "morndo-c2-e2e:local";
 const LABEL = "morndo-c2-e2e";
 const CONTAINER = `morndo-c2-e2e-${randomBytes(4).toString("hex")}`;
+const OWNER = ownerText(ownerOf(process.pid));                    // this run, as its container's label names it
 
 function docker(args: string[], o: { timeoutMs?: number } = {}): { code: number; out: string; err: string } {
   const done = spawnSync("docker", args, { encoding: "utf8", timeout: o.timeoutMs ?? 300_000, maxBuffer: 64 * 1024 * 1024 });
@@ -93,14 +96,15 @@ for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
   });
 }
 
-// A run killed outright (SIGKILL, a lost terminal) cannot clean up after itself: its container is removed here,
-// by the label only this harness puts on a container.
-const leftovers = docker(["ps", "-a", "--filter", `label=${LABEL}`, "-q"]).out.split("\n").filter(id => id !== "");
-for (const id of leftovers) {
-  const gone = docker(["rm", "-f", id], { timeoutMs: 120_000 });
-  process.stdout.write(`removed a container a killed run left behind (${id}): ${gone.code === 0 ? "ok" : gone.err}\n`);
-}
-// Its build scratch too (build.ts's, about 1.5 GB each): checks.ts's sweepScratch says which it may remove.
+// A run killed outright (SIGKILL, a lost terminal) cannot clean up after itself: what it left (its container,
+// its build scratch) is removed here — only a gone run's, by the owner each carries; a run going on now on this
+// box keeps its own (checks.ts).
+sweepContainers({
+  list: () => docker(["ps", "-a", "--filter", `label=${LABEL}`, "--format", `{{.ID}} {{.Label "${OWNER_LABEL}"}}`]).out
+    .split("\n").filter(l => l.trim() !== "").map(l => { const [id = "", owner = ""] = l.trim().split(" "); return { id, owner }; }),
+  remove: id => { const r = docker(["rm", "-f", id], { timeoutMs: 120_000 }); return { ok: r.code === 0, err: r.err }; },
+  say: line => process.stdout.write(`${line}\n`),
+});
 sweepScratch(tmpdir(), { keep: process.env.E2E_KEEP === "1", say: line => process.stdout.write(`${line}\n`) });
 
 try {
@@ -130,7 +134,7 @@ try {
   // /mnt/tiny is the full-disk step's own little disk: 64k of the container's memory, owned by the worker, so
   // the Backup that lands on it cannot fit. A tmpfs is not a host mount (nothing of the host is in it).
   const startedRun = docker([
-    "run", "-d", "--name", CONTAINER, "--label", `${LABEL}=1`,
+    "run", "-d", "--name", CONTAINER, "--label", `${LABEL}=1`, "--label", `${OWNER_LABEL}=${OWNER}`,
     "--cap-add", "SYS_ADMIN", "--cap-drop", "AUDIT_WRITE", "--cgroupns=private",
     "-e", "container=docker", "--tmpfs", "/run", "--tmpfs", "/run/lock", "--tmpfs", "/tmp",
     "--tmpfs", "/mnt/tiny:size=64k,uid=1000,gid=1000,mode=0700", IMAGE,
@@ -205,9 +209,10 @@ try {
   // The machine is throwaway: it goes, and the run proves it went. The image stays (it is this run's own, and a
   // rebuild costs minutes); only containers with the label are named, only this run's own container is removed.
   cleanUp();
-  const left = docker(["ps", "-a", "--filter", `label=${LABEL}`, "-q"]);
+  // This run's own: another run going on now on this box keeps its container until its own end.
+  const left = docker(["ps", "-a", "--filter", `label=${OWNER_LABEL}=${OWNER}`, "-q"]);
   if (left.out !== "") {
-    process.stderr.write(`containers with the label ${LABEL} remain: ${left.out.split("\n").join(", ")}\n`);
+    process.stderr.write(`this run's containers remain: ${left.out.split("\n").join(", ")}\n`);
     process.exitCode = 1;
   }
   process.stdout.write(`run took ${Math.round((Date.now() - started) / 1000)}s\n`);
