@@ -147,6 +147,146 @@ describe("a lane's day", () => {
   });
 });
 
+// B11: a task's PR merged is a record on the task, and Done waits for it to be live on every node. This hub answers
+// liveness as two nodes' builds would: pc's build doesn't carry the merge (on abc1234), srv01 names none. All names
+// synthetic, as everywhere here.
+describe("a task's merge and the done gate (B11)", () => {
+  let gate: InProcessHub;
+  let gateManager: string;
+  let gateBuilder: string;
+  beforeEach(async () => {
+    gate = await startInProcessHub({ liveness: () => ({ live: false, blockers: [{ node: "pc", on: "abc1234" }, { node: "srv01", on: null }] }) });
+    gateManager = gate.agents.issue("manager", "manager").secret;
+    gateBuilder = gate.agents.issue("lanes", "worker").secret;
+  });
+  afterEach(async () => { await gate.close(); });
+
+  async function gateCli(argv: string[], token: string, laneName: string | null) {
+    const out: string[] = [], err: string[] = [];
+    const code = await run(argv, { MORNDO_HUB: gate.base, MORNDO_AGENT_TOKEN: token, ...(laneName ? { MORNDO_LANE: laneName } : {}) },
+      { fetch, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  }
+  const managerSays = (...argv: string[]) => gateCli(argv, gateManager, null);
+  const builderSays = (...argv: string[]) => gateCli(argv, gateBuilder, "builder");
+
+  // One task through to review, its PR merged as abc1234: what the done gate judges.
+  async function taskMerged() {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    await builderSays("start", "T-1");
+    await builderSays("review", "T-1");
+    await managerSays("merged", "T-1", "abc1234");
+  }
+
+  // One call against a fetch that notes what was sent and answers as told: for the body the CLI builds.
+  async function stubCli(answer: Record<string, unknown>, argv: string[]) {
+    const sent: { path: string; body: unknown }[] = [];
+    const out: string[] = [], err: string[] = [];
+    const code = await run(argv, { MORNDO_HUB: "https://hub.example.test", MORNDO_AGENT_TOKEN: "mat_stub" }, {
+      fetch: async (url, init) => {
+        sent.push({ path: new URL(url).pathname, body: init?.body === undefined ? undefined : JSON.parse(init.body as string) });
+        return new Response(JSON.stringify(answer), { status: 200, headers: { "content-type": "application/json" } });
+      },
+      lane: async () => null, out: l => out.push(l), err: l => err.push(l),
+    });
+    return { code, out: out.join("\n"), err: err.join("\n"), sent };
+  }
+  // A task and the event of its merge, as the hub answers a change: enough for the CLI to print.
+  const shipIt = { key: "T-1", n: 1, title: "Ship it", description: "", status: "review", assignee: "builder", priority: "normal", blockedReason: null, createdAt: 0, updatedAt: 0, stateChangedAt: 0, createdBy: { kind: "manager", name: "manager", token: "mat_x" }, rev: 4, doneAt: null, comments: 0 };
+  const mergedIn = { key: "T-1", rev: 4, at: 0, actor: { kind: "manager", name: "manager", token: "mat_x" }, change: { kind: "merged", repo: "morndo/morndo", sha: "abc1234" } };
+  const actor = { kind: "manager", name: "manager", token: "mat_x" } as const;
+
+  it("merged records the commit, default repo morndo/morndo", async () => {
+    const mine = await stubCli({ task: shipIt, event: mergedIn }, ["merged", "T-1", "abc1234"]);
+    expect(mine.code).toBe(0);
+    expect(mine.out).toContain("recorded its merge: morndo/morndo abc1234");
+    expect(mine.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "merged", sha: "abc1234" } }]);
+    const other = await stubCli({ task: shipIt, event: mergedIn }, ["merged", "T-1", "abc1234", "--repo", "acme/other"]);
+    expect(other.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "merged", sha: "abc1234", repo: "acme/other" } }]);
+    await managerSays("new", "Ship it", "--assign", "builder");
+    expect(await managerSays("merged", "T-1")).toMatchObject({ code: 2, err: "usage: morndo-board merged T-12 <sha> [--repo owner/name]" });
+    expect(await managerSays("merged", "T-1", "abc1234", "--repo")).toMatchObject({ code: 2, err: "usage: morndo-board merged T-12 <sha> [--repo owner/name]" });
+  });
+  it("unmerged clears a record, and its usage needs a sha", async () => {
+    const cleared = await stubCli({ task: shipIt, event: { ...mergedIn, change: { kind: "unmerged", repo: "morndo/morndo", sha: "abc1234" } } }, ["unmerged", "T-1", "abc1234"]);
+    expect(cleared.code).toBe(0);
+    expect(cleared.out).toContain("cleared its merge record: morndo/morndo abc1234");
+    expect(cleared.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "unmerged", sha: "abc1234" } }]);
+    await taskMerged();
+    const again = await managerSays("unmerged", "T-1", "abc1234");
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("cleared its merge record: morndo/morndo abc1234");
+    expect((await managerSays("show", "T-1")).out).not.toContain("Merged:");
+    expect((await managerSays("list")).out).not.toContain("merged, not live");
+    expect(await managerSays("unmerged", "T-1")).toMatchObject({ code: 2, err: "usage: morndo-board unmerged T-12 <sha> [--repo owner/name]" });
+    expect(await managerSays("unmerged", "T-1", "abc1234", "--repo")).toMatchObject({ code: 2, err: "usage: morndo-board unmerged T-12 <sha> [--repo owner/name]" });
+  });
+  it("done is refused while the merge is not live", async () => {
+    await taskMerged();
+    const refused = await managerSays("done", "T-1", "--why", "ran the checks at the merge");
+    expect(refused).toMatchObject({ code: 1, err: 'refused: its merge is not live: merged, not live: pc on abc1234, srv01 unknown; if you accept it anyway: done T-12 --why "…" --not-live "<reason>"' });
+  });
+  it("done --not-live sends the reason", async () => {
+    const event = { key: "T-1", rev: 5, at: 0, actor, change: { kind: "moved", from: "review", to: "done", reason: "ran the checks", notLive: "srv01 is retiring this week" } };
+    const cli = await stubCli({ task: { ...shipIt, status: "done" }, event }, ["done", "T-1", "--why", "ran the checks", "--not-live", "srv01 is retiring this week"]);
+    expect(cli.code).toBe(0);
+    expect(cli.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "move", to: "done", reason: "ran the checks", notLive: "srv01 is retiring this week" } }]);
+    await taskMerged();
+    expect(await managerSays("done", "T-1", "--why", "checked", "--not-live")).toMatchObject({ code: 2, err: "--not-live takes the reason it is accepted before it is live" });
+  });
+  it("show prints the merge and its label", async () => {
+    await taskMerged();
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toContain("Merged: morndo/morndo abc1234 (by manager, ");
+    expect(shown.out).toContain("merged, not live: pc on abc1234, srv01 unknown");
+  });
+  it("show prints the override", async () => {
+    await taskMerged();
+    await managerSays("done", "T-1", "--why", "ran the checks", "--not-live", "srv01 is retiring this week");
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toContain("Accepted as done while not live: srv01 is retiring this week");
+    expect(shown.out).toContain("review → done: ran the checks (done while not live: srv01 is retiring this week)");
+  });
+  it("list marks a task that merged but is not live", async () => {
+    await taskMerged();
+    expect((await managerSays("list")).out).toContain("Ship it  [merged, not live: pc on abc1234, srv01 unknown]");
+    await managerSays("done", "T-1", "--why", "ran the checks", "--not-live", "srv01 is retiring this week");
+    expect((await managerSays("list")).out).toContain("  (done not live: srv01 is retiring this week)");
+  });
+  it("list leaves tasks without a merge as they were", async () => {
+    await managerSays("new", "A", "--assign", "builder");
+    await builderSays("start", "T-1");
+    await builderSays("review", "T-1");
+    expect((await managerSays("list")).out).toBe("In review (1)\n  T-1    builder        A");
+    expect(JSON.parse((await managerSays("list", "--json")).out)).toMatchObject([{ key: "T-1", status: "review" }]);
+  });
+  it("bad_sha and bad_repo are explained", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    expect(await managerSays("merged", "T-1", "nope")).toMatchObject({ code: 1, err: "refused: that isn't a commit hash (7 to 40 hex characters)" });
+    expect(await managerSays("merged", "T-1", "abc1234", "--repo", "acme")).toMatchObject({ code: 1, err: "refused: that isn't a repo name (owner/name)" });
+  });
+  it("too_many and no_commit are explained", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    for (let i = 0; i < 5; i++) expect((await managerSays("merged", "T-1", String(i).repeat(40))).code).toBe(0);
+    expect(await managerSays("merged", "T-1", "a".repeat(40))).toMatchObject({ code: 1, err: "refused: a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>" });
+    const err: string[] = [];
+    const code = await run(["merged", "T-1", "abc1234"], { MORNDO_HUB: "https://hub.example.test", MORNDO_AGENT_TOKEN: "mat_stub" }, {
+      fetch: async () => new Response(JSON.stringify({ error: "no_commit" }), { status: 409, headers: { "content-type": "application/json" } }),
+      lane: async () => null, out: () => {}, err: l => err.push(l),
+    });
+    expect(code).toBe(1);
+    expect(err.join("\n")).toBe("refused: the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout");
+  });
+  it("merged then done: refused while not live, done once the reason is given", async () => {
+    await taskMerged();
+    expect((await managerSays("done", "T-1", "--why", "ran the checks")).code).toBe(1);
+    const done = await managerSays("done", "T-1", "--why", "ran the checks", "--not-live", "srv01 is retiring this week");
+    expect(done.code).toBe(0);
+    expect(done.out).toContain("Done this week");
+    expect(gate.board.task("T-1")).toMatchObject({ merged: { merges: [{ repo: "morndo/morndo", sha: "abc1234", override: "srv01 is retiring this week" }] } });
+  });
+});
+
 describe("the prompt and the plumbing", () => {
   it("prints the instructions block for a role, needing no hub", async () => {
     const out: string[] = [];
