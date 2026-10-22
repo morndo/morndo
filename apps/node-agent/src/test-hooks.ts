@@ -10,7 +10,7 @@
 //   os.homedir() would read $HOME (https://nodejs.org/docs/latest-v24.x/api/os.html#osuserinfooptions, read 2026-10-06).
 // Bad JSON, an unknown hook or a value of the wrong type is refused too: a typo must not silently turn a hook off.
 // Fleet clients adds four for the delivery drills (Task 16; RECONCILIATION.md ruling 20):
-// killAfterEffect, noSessionBinding, retypeUnderFirstKey and deliveryStartGraceMs.
+// killAfterEffect, noSessionBinding, retypeUnderFirstKey and deliveryStartGraceMs; the switch-off drill cancelBusyTimes.
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -28,6 +28,8 @@ export type TestHooks = {
                               // name like a sticky one, and the pane is never asked for the session
   retypeUnderFirstKey?: true; // negative control: the one retype after an interrupt runs under the delivery's own key, not `<id>#2`
   deliveryStartGraceMs?: number; // how long a pane this agent started may wait for Claude Code (LIMITS.deliveryStartGraceMs)
+  cancelBusyTimes?: number;   // the first this-many delivery.cancel calls answer busy, as one that meets the delivery being typed
+                              // this very moment does (the switch-off drill: a race CI met and a quiet machine rarely does)
 };
 
 export class TestHooksRefused extends Error {
@@ -47,6 +49,7 @@ const VALID: { [K in keyof Required<TestHooks>]: (v: unknown) => boolean } = {
   noSessionBinding: v => v === true,
   retypeUnderFirstKey: v => v === true,
   deliveryStartGraceMs: v => Number.isSafeInteger(v) && (v as number) >= 0,
+  cancelBusyTimes: v => Number.isSafeInteger(v) && (v as number) >= 1,
 };
 
 // A directory with its links resolved, so a link to the account's home is that home; one that doesn't exist (yet) is

@@ -386,17 +386,25 @@ export const boardChanged = (e: TaskEvent): BoardChanged => ({
     : { kind: e.actor.kind, name: e.actor.name, endpointId: null, token: e.actor.token },
 });
 
+// B12: the task a lane's status line names ("STATUS: DONE T-285 …"), as the hub read it from the Run's line (the protocol's
+// parser; the domain imports no wire package). Only a turn's end, or a wait, is the line's word; a working Run's line is the last turn's.
+export type NamedStatus = { key: TaskKey; status: "done" | "blocked" | "needs_decision" | "waiting" };
+
 // B10, D1 to D6: the move the board makes by itself for `task`, following its assignee's Run, or null. D6: a Run whose
 // phase began at or before the task's last change of state (status, assignee, description; a comment is not one) moves
 // nothing, so the board never undoes what a person or a lane did after it. D5: never to Done, never an assignment (the board's actor can't: runsTheBoard is false for it).
 export const GONE_REASON = "its lane stopped without DONE";
 export const BACKGROUND_REASON = "background work still running";
-export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
+export function derivedMove(task: Task, run: Run, board: readonly Task[], named: NamedStatus | null = null): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
   if (task.assignee === null || task.assignee !== run.lane || run.since <= task.stateChangedAt) return null;
+  // B12: the key counts only when the line is the turn's word: a turn's end, or a wait.
+  const keyed = run.phase === "ended" || run.phase === "waiting" ? named : null;
   // The reason is the run's status line as one clean line: a control character in it (a lane's odd output) is a space,
   // never a refused move (line(), bad_text).
   const said = (run.line ?? "").replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, REASON_MAX) || null;
   if (task.status === "doing") {
+    // B12: a keyed line is about the task it names only (D1, D2); a gone run carries none (D3).
+    if (keyed !== null && keyed.key !== task.key) return null;
     // D1: DONE is the turn's word even while its background work runs (the Run keeps the outcome; phase is waiting).
     if (run.phase === "ended" && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
     if (run.phase === "waiting" && run.wait?.on === "background" && run.outcome === "done") return { to: "review", reason: BACKGROUND_REASON, rule: "D1" };
@@ -406,16 +414,33 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to:
   }
   if (task.status === "todo" || task.status === "blocked" || task.status === "review") {
     if (run.phase !== "working" && run.phase !== "waiting") return null;
-    // D4: the lane's one task it works on now. Its to do or blocked one, when it has exactly one; else its one in review
-    // (taken up again). Two candidates, or a task already in progress (B5), and the board moves nothing.
     const mine = board.filter(t => t.assignee === run.lane);
+    if (keyed !== null) {
+      // B12: a keyed WAITING that names this task takes it up again (D1). Any other keyed line naming a task not in
+      // progress moves nothing, and no other task moves while the line is current.
+      if (keyed.key !== task.key || keyed.status !== "waiting" || mine.some(t => t.status === "doing")) return null;
+      return { to: "doing", reason: said, rule: "D1" };
+    }
+    // D4: the lane's one task to take up, when it has exactly one to do. B12: only to do → in progress; a task in review or
+    // blocked leaves its column by an explicit move or a keyed WAITING that names it (D1). Two to dos, or a task already
+    // in progress (B5), and the board moves nothing.
     if (mine.some(t => t.status === "doing")) return null;
-    const waiting = mine.filter(t => t.status === "todo" || t.status === "blocked");
-    const reviews = mine.filter(t => t.status === "review");
-    const pick = waiting.length === 1 ? waiting[0] : waiting.length === 0 && reviews.length === 1 ? reviews[0] : undefined;
-    return pick?.key === task.key ? { to: "doing", reason: null, rule: "D4" } : null;
+    const todos = mine.filter(t => t.status === "todo");
+    return todos.length === 1 && todos[0]?.key === task.key ? { to: "doing", reason: null, rule: "D4" } : null;
   }
   return null;
+}
+
+// B12: a keyed line naming a task that is not one of the lane's open tasks moves nothing (derivedMove); the board leaves one
+// line about it, so it is never silent: in the history of the lane's own task in progress, else of the named task. D6: a run
+// that began at or before that task in progress last changed state says nothing new (a stale ended run adds no note).
+export function keyMismatch(run: Run, named: NamedStatus | null, board: readonly Task[]): { key: TaskKey; text: string } | null {
+  if (named === null || (run.phase !== "ended" && run.phase !== "waiting")) return null;
+  const mine = board.filter(t => t.assignee === run.lane);
+  if (mine.some(t => t.key === named.key)) return null;
+  const doing = mine.find(t => t.status === "doing");
+  if (doing && run.since <= doing.stateChangedAt) return null;
+  return { key: (doing ?? { key: named.key }).key, text: `${run.lane}'s status line at ${new Date(run.since).toISOString()} names ${named.key}, which is not its open task; the board moved nothing` };
 }
 
 // B10, D3 for a lane the fleet doesn't list at all (it ended before runs were kept, or its Run dropped): there is no Run to

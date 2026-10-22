@@ -34,6 +34,12 @@ const DELIVERY_MIRROR_SLACK_MS = 2_000;
 export const SENDING_DROP_AFTER_MS = LIMITS.deliveryOpTimeoutMs + DELIVERY_MIRROR_SLACK_MS;
 const KEEP_MS = 7 * 24 * 3_600_000;              // the node keeps a final delivery 7 days (spec §4.3); the hub its row as long
 const COMMANDS_SHOWN_MS = 24 * 3_600_000;         // a device's messages the feed lists after its hello: the outbox's day
+// The switch off asks again when a cancel is answered busy (the node typing it this moment): first after a quarter
+// second, then twice as long each time up to 4 s apart, for at most 30 s in all — a busy window can last about 20 s
+// (a long paste, or a try that waits on the pane), and the hub serves only once every cancel is answered.
+const CANCEL_BUSY_FIRST_MS = 250;
+const CANCEL_BUSY_MAX_WAIT_MS = 4_000;
+const CANCEL_BUSY_MAX_MS = 30_000;
 // How far a state is on: an older word (an event that crossed a newer answer) never moves a delivery back. The node's
 // one retype is the exception: held, then typed again after an interrupt dropped it.
 const RANK: Record<DeliveryState, number> = { queued: 0, typed: 1, held: 2, delivered: 3, uncertain: 3, given_up: 3 };
@@ -183,7 +189,10 @@ export class ManagerQueue {
       return { ok: false, problem: "uncertain" };
     }
     if (r.refused === "already_typed") { log.info(`${id} was typed already: it is followed to its end`); return { ok: false, problem: "already_typed" }; }
-    if (this.#store.managerDelivery(id)?.state === "sending" && r.refused !== "node_offline" && r.refused !== "timeout") {
+    // A "sending" row the node refused to cancel is one it never got (dropped), unless the refusal says it holds it:
+    // busy is the node typing that delivery this moment (review of 2026-10-22), and offline or a timeout says nothing.
+    if (this.#store.managerDelivery(id)?.state === "sending"
+      && r.refused !== "node_offline" && r.refused !== "timeout" && r.refused !== "busy") {
       this.#store.dropManagerDelivery(id);
       return { ok: false, problem: r.refused };
     }
@@ -265,7 +274,21 @@ export class ManagerQueue {
   // as the fleet waits for its node, and the hub serves only once every one is answered (review #8).
   async #cancelQueued() {
     const open = this.#store.openManagerDeliveries().filter(r => r.state === "queued" || r.state === "sending");
-    await Promise.all(open.map(r => this.cancel(r.deliveryId)));
+    await Promise.all(open.map(r => this.#cancelAtStart(r.deliveryId)));
+  }
+
+  // A cancel answered busy means the node is typing that delivery this very moment — its deliverer tries a delivery
+  // that waits for a menu to close every few seconds — and "ask again in a moment" (spec §4.3, delivery.cancel). Asked
+  // again (backing off, bounded), it ends cancelled (still queued) or already_typed (followed to its end). Given up on, it was
+  // followed and could be typed after the hub began typing directly, which the switch off exists to prevent.
+  async #cancelAtStart(id: string): Promise<void> {
+    let waited = 0;
+    for (let wait = CANCEL_BUSY_FIRST_MS; ; wait = Math.min(wait * 2, CANCEL_BUSY_MAX_WAIT_MS)) {
+      const r = await this.cancel(id);
+      if (r.ok || r.problem !== "busy" || waited + wait > CANCEL_BUSY_MAX_MS) return;
+      await new Promise<void>(resolve => setTimeout(resolve, wait));
+      waited += wait;
+    }
   }
 
   #safeApply(d: Delivery) {

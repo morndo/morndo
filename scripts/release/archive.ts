@@ -14,18 +14,41 @@ const BLOCK = 512;
 
 export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
   if (!Number.isInteger(mtimeSec) || mtimeSec < 0) throw new Error("refusing a commit time that is not a whole second");
-  const seen = new Set<string>();
+  const seen = new Map<string, { path: string; dir: boolean }>();   // every path that lands in the archive, by folded key
+  const linkTargets = new Map<string, string>();   // every link's folded key -> its target
+  const linkList: { path: string; target: string }[] = [];
   const dirs = new Set<string>();
+  // A name is claimed once; only a directory may be named twice (explicitly and as someone's parent). Two
+  // spellings that fold to one key are two entries in the archive but one file on a folding file system (APFS:
+  // case, NFC/NFD), so such a pair is refused here — the reader refuses it too, and no real tree holds one (no
+  // name in this repository's node_modules or Node's distribution collides once folded, checked 2026-10-21).
+  const take = (path: string, dir: boolean): void => {
+    const known = seen.get(foldKey(path));
+    if (known === undefined) { seen.set(foldKey(path), { path, dir }); return; }
+    if (known.path !== path) throw new Error(`names that collide when case and Unicode form are folded: ${known.path}, ${path}`);
+    if (!(known.dir && dir)) throw new Error(`duplicate path ${path}`);
+  };
   for (const file of files) {
     assertTreePath(file.path);
     if ("link" in file && linkLeaves(file.path, file.link)) {
       throw new Error(`refusing link target ${file.link}`);
     }
-    if (seen.has(file.path)) throw new Error(`duplicate path ${file.path}`);
-    seen.add(file.path);
+    take(file.path, "directory" in file);
+    if ("link" in file) {
+      linkTargets.set(foldKey(file.path), file.link);
+      linkList.push({ path: file.path, target: file.link });
+    }
     if ("directory" in file) dirs.add(`${file.path}/`);
     const parts = file.path.split("/");
-    for (let i = 1; i < parts.length; i++) dirs.add(`${parts.slice(0, i).join("/")}/`);
+    for (let i = 1; i < parts.length; i++) {
+      const parent = parts.slice(0, i).join("/");
+      take(parent, true);
+      dirs.add(`${parent}/`);
+    }
+  }
+  for (const { path, target } of linkList) {
+    const escape = linkThroughTree(linkTargets, path, target);
+    if (escape !== null) throw new Error(`refusing link ${path} -> ${target}: ${escape}`);
   }
   type Packed = Exclude<TreeFile, { directory: true }>;
   const isPacked = (file: TreeFile): file is Packed => !("directory" in file);
@@ -77,6 +100,56 @@ export function linkLeaves(path: string, target: string): boolean {
     stack.push(part);
   }
   return false;
+}
+
+// A path's key: its spelling with case and Unicode form folded (below), the reader's rule of
+// 2026-10-21. A file system may treat two spellings as one name — APFS, macOS's default, folds both — so names
+// are compared by key here too, whatever system the archive is later unpacked on.
+// Folded as far as a file system might, to a fixed point (review of 2026-10-21, second round): compatibility forms
+// first (NFKC: the ﬁ ligature becomes fi, a superscript two becomes 2), then lower, upper and lower case again (ẞ and
+// ß become ss, ς and σ become σ, the Kelvin sign becomes k), NFKC again, repeated until nothing changes, then NFC.
+// On Node 24.21.0 one round already settles every code point up to U+2FFFF; the bound is insurance for mixed
+// strings. Folding more only ever refuses an odd archive; folding less would let two spellings of one file
+// through. No name in this repository's node_modules, apps, packages or Node 24.21.0's distribution collides
+// under this fold (checked 2026-10-21).
+const FOLD_FORM = "NFKC";
+const FOLD_ROUNDS = 8;
+const foldStep = (s: string): string => s.toLowerCase().toUpperCase().toLowerCase().normalize(FOLD_FORM);
+export const foldKey = (path: string): string => {
+  let key = path.normalize(FOLD_FORM);
+  for (let round = 0; round < FOLD_ROUNDS; round += 1) {
+    const next = foldStep(key);
+    if (next === key) break;
+    key = next;
+  }
+  return key.normalize("NFC");
+};
+
+// The walk the reader (apps/updater/src/adapters/tar-read.ts) does once the archive is known: the target is
+// followed through the tree's own links, each ".." applying after the link before it was substituted (the
+// kernel's rule, path_resolution(7)), with names looked up by folded key so a differently spelled name still
+// finds its link: `esc -> P/UP/..` climbs out where `p/up -> ..` is a normal parent link. `links` maps a link's
+// folded key to its target. Returns the refusal reason, or null when the target ends inside the tree.
+const LINK_STEPS = 40;   // Linux caps one lookup at 40 traversals (ELOOP); more substitutions than that is a loop
+export function linkThroughTree(links: ReadonlyMap<string, string>, path: string, target: string): string | null {
+  const stack = path.split("/").slice(0, -1);   // where the walk stands: the link's own directory at first
+  const rest = [...target.split("/")];
+  let steps = 0;
+  while (rest.length > 0) {
+    const part = rest.shift()!;
+    if (part === "." || part === "") continue;
+    if (part === "..") {
+      if (stack.length === 0) return "it leaves the tree through another link";
+      stack.pop();
+      continue;
+    }
+    const own = links.get(foldKey([...stack, part].join("/")));
+    if (own === undefined) { stack.push(part); continue; }
+    steps += 1;
+    if (steps > LINK_STEPS) return "a link loop";
+    rest.unshift(...own.split("/"));   // the substituted target walks from the stack as it stands: its link's own directory
+  }
+  return null;
 }
 
 export function assertTreePath(path: string): void {
