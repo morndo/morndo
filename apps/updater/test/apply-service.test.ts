@@ -2,7 +2,7 @@
 // the real store, real SQLite databases and a real hold.json, with only the machine's services and probes faked.
 // Each case bends one thing and asserts the outcome, what was touched (the tape holds every call in order), and
 // what the record says afterwards. The kill-and-recover cases live in recovery-service.test.ts (§6.6).
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -308,6 +308,18 @@ describe("the apply service (§6.2–§6.5)", () => {
     w.store.recordCommitted(B, w.timeline.now(), null);      // B is already the committed ceiling
     expect(await w.apply().apply({ now: false })).toEqual({ kind: "nothing_staged" });
     expect(w.tape.length).toBe(0);
+  });
+
+  it("never walks a staged Version this machine recorded bad (RL7), whatever the fleet now says: waiting bad_here, nothing stopped", async () => {
+    // A Version staged before its rollback stays staged; after a resume the tick asks again. RL7: not tried again here.
+    const w = await buildApplyWorld(scratch);
+    w.store.recordBad(B, w.timeline.now());
+    const out = await w.apply().apply({ now: true, attempt: "offered-again-after-a-resume-0" });
+    expect(out).toEqual({ kind: "deferred", reason: "bad_here", blockers: [] });
+    expect(w.tape.length).toBe(0);                             // nothing drained, stopped or swapped
+    expect(w.current()).toBe(A);
+    expect(w.store.recentUpdates(1)).toEqual([]);              // no Update begun
+    expect(JSON.parse(readFileSync(w.statePath, "utf8"))).toMatchObject({ state: "waiting", version: A, target: B, reason: "bad_here" });
   });
 
   it("answers not_ours for an install without the updater's current link", async () => {
