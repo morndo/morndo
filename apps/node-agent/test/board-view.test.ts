@@ -3,7 +3,7 @@
 // is skipped, never a block.
 import { createServer, type Server } from "node:http";
 import { describe, expect, it } from "vitest";
-import { notLiveFromHub } from "../src/relay/board-view.ts";
+import { BOARD_VIEW_TIMEOUT_MS, notLiveFromHub } from "../src/relay/board-view.ts";
 
 const TOKEN = "mgr_secret-token";
 const entry = (key: string, live: boolean | null, shas: [string, string][]) => ({
@@ -78,5 +78,16 @@ describe("the hub's board view", () => {
     const silentUrl = await listen(silent);
     try { expect(await notLiveFromHub({ hub: silentUrl, token: TOKEN, lane: "manager", timeoutMs: 50 })).toBeNull(); }
     finally { await closed(silent); }
+  });
+
+  it("waits about a second for the board, not longer: a Stop is held until it answers", async () => {
+    expect(BOARD_VIEW_TIMEOUT_MS).toBeLessThanOrEqual(1_000);
+    const silent = createServer(() => {});
+    const silentUrl = await listen(silent);
+    try {
+      const started = performance.now();
+      expect(await notLiveFromHub({ hub: silentUrl, token: TOKEN, lane: "manager" })).toBeNull();   // the default timeout
+      expect(performance.now() - started).toBeLessThan(2_000);
+    } finally { silent.closeAllConnections(); await closed(silent); }
   });
 });

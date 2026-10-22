@@ -6,9 +6,10 @@ import { MergedViewSchema } from "@morndo/protocol";
 import type { NotLiveTask } from "./digest-check.ts";
 
 // AbortSignal.timeout bounds a hub that never answers (Node.js fetch, node:globals), as a job grant is bounded
-// (job-grant.ts). Three seconds is enough for a board and short enough not to hold a Stop.
+// (job-grant.ts). The relay answers the Stop only after this, so it is one second: a board that is slower is skipped, and
+// only the not-live rule with it.
 // https://nodejs.org/docs/latest-v24.x/api/globals.html#abortsignaltimeoutms read 2026-10-22.
-export const BOARD_VIEW_TIMEOUT_MS = 3_000;
+export const BOARD_VIEW_TIMEOUT_MS = 1_000;
 
 // The tasks whose merge is recorded and not live: each `merged` entry of the board's answer is parsed one by one
 // (MergedViewSchema), one that doesn't parse dropped, as the app drops it; a `live` of true or null says nothing

@@ -46,6 +46,7 @@ import { openJobRuntime, type JobRuntime } from "./ops/job-runtime.ts";
 import { nodeOpener } from "./ops/node-files.ts";
 import { createOpsRuntime } from "./ops/runtime.ts";
 import { agentPaths } from "./paths.ts";
+import { readBoardToken } from "./relay/board-token.ts";
 import { notLiveFromHub } from "./relay/board-view.ts";
 import { replyStyleAsk, type NotLiveOf } from "./relay/digest-check.ts";
 import { RelayFiles } from "./relay/relay-files.ts";
@@ -180,13 +181,15 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   // The waker ask's job check (W1, status-ask.ts). The job store opens after the relay, so until it does the node can't
   // tell whether a job will wake a lane, and only the status ask is made; a read that fails can't tell either.
   let jobsOf: JobsOf = () => null;
-  // The reply style ask's not-live rule (T-308, digest-check.ts): the node needs MORNDO_AGENT_TOKEN, the manager's
-  // token, to read the hub's board; without it, or without a hub, only the length and jargon rules run. The board is
-  // read per Stop, for the Stop's own window.
-  const agentToken = process.env.MORNDO_AGENT_TOKEN ?? "";
+  // The reply style ask's not-live rule (T-308, digest-check.ts): the board is read with the token in the board-token
+  // file, when a Stop needs it. The token is not read from the environment: it would be in the tmux server's and every
+  // lane's. Without a hub, or with no usable file, only the length and jargon rules run.
+  if (process.env.MORNDO_AGENT_TOKEN) log.warn(`MORNDO_AGENT_TOKEN is set in the node's environment and is ignored: every lane it starts would hold it. Put the board token in ${paths.boardTokenFile} (mode 600)`);
   const boardHub = config.hub ?? "";
-  const notLiveOf = (lane: string): NotLiveOf | undefined =>
-    boardHub !== "" && agentToken !== "" ? () => notLiveFromHub({ hub: boardHub, token: agentToken, lane }) : undefined;
+  const notLiveOf = (lane: string): NotLiveOf | undefined => boardHub === "" ? undefined : async () => {
+    const token = readBoardToken(paths.boardTokenFile);
+    return token === null ? null : notLiveFromHub({ hub: boardHub, token, lane });
+  };
   let relay: Relay;
   try {
     relay = await startRelay({

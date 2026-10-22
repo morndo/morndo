@@ -6,8 +6,9 @@
 // a Stop hook) keeps it to once per turn, far below the cap of eight continuations in a row (same page). Unlike the
 // status ask, background tasks and wake-ups do not stop it: a digest posted while something runs is still posted.
 // What is checked is the visible part — the message with every closed <details>…</details> block removed (an unclosed
-// one removes nothing) — of a digest (the lines after a "### Digest" heading, up to the next heading) or a card (an
-// answer whose last non-blank line is a "[buttons …]" line); anything else is not asked. The not-live rule reads the
+// one removes nothing) — of a digest (the lines after a "## Digest" or "### Digest" heading, up to the next heading of
+// its level or above; a heading in a code fence is none) or a card (an answer whose last non-blank line is a
+// "[buttons …]" line, read as kira reads it: manager-ui.ts parseAnswer); anything else is not asked. The not-live rule reads the
 // hub's board, and a board that can't be read (null) skips only that rule, never blocks on it.
 import { jargonIn } from "@morndo/domain";
 import { firstLineOf, statusLineOf } from "@morndo/protocol";
@@ -34,29 +35,65 @@ const visible = (message: string): string => {
   }
 };
 
-const DIGEST_HEADING = /^#{3}\s+Digest\b/i;
-const ANY_HEADING = /^#{1,3} /;
-const BUTTONS_LINE = /^\[buttons\s+\S+\]/;
-// A line that says work is finished, and does not already say it is not live (that line is honest): a candidate for
-// the not-live rule.
+// A heading is ATX: up to three spaces, then hashes (CommonMark), and a fence is three or more backticks or tildes; a heading
+// inside one is example text.
+const DIGEST_HEADING = /^ {0,3}(#{2,3})\s+Digest\b/i;
+const HEADING = /^ {0,3}(#{1,6})\s/;
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+// kira's reading of the first and last things of an answer (manager-ui.ts parseAnswer): "[quiet]" first, any case, and a
+// buttons line as the last non-empty line, trimmed, any case, with an id of its grammar. Not wider: what kira would not
+// take as buttons is no card here.
+const QUIET = /^\s*\[quiet\]\s*/i;
+const BUTTONS = /^\[buttons\s+[A-Za-z0-9_-]{1,32}\]/i;
+// A line that says work is finished, and, said of the task it names, whether it is already not live (that is honest): a
+// candidate for the not-live rule.
 const DONE_IN_LINE = /\b(done|merged|shipped|landed)\b/i;
 const SAYS_NOT_LIVE = /\bnot\s+(yet\s+)?live\b/i;
-// How a candidate names its task: a key, case-sensitive as a task key is written, or a commit token.
-const TASK_KEY = /\bT-\d+\b/g;
-const COMMIT = /\b[0-9a-f]{7,40}\b/gi;
+// How a candidate names its task: a key, in any case, or a commit token.
+const NAMES = /\bT-\d+\b|\b[0-9a-f]{7,40}\b/gi;
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
+// Which lines are in a fenced code block, the fences themselves included. A fence closes on the same character, at least as
+// long, with nothing after it; one never closed runs to the end.
+const fencedLines = (lines: string[]): boolean[] => {
+  let open: { char: string; len: number } | null = null;
+  return lines.map(line => {
+    const m = FENCE.exec(line);
+    if (open === null) {
+      if (m === null || (m[1]![0] === "`" && m[2]!.includes("`"))) return false;
+      open = { char: m[1]![0]!, len: m[1]!.length };
+      return true;
+    }
+    if (m !== null && m[1]![0] === open.char && m[1]!.length >= open.len && m[2]!.trim() === "") open = null;
+    return true;
+  });
+};
+
+const lastNonBlank = (lines: string[]): number => {
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.trim() !== "") return i;
+  return -1;
+};
+
 // The digest or the card to check, or null when the answer is neither: a digest is its heading's lines up to the next
-// heading; a card is all its lines, a buttons line last.
+// heading of its level or above; a card is all its lines, a buttons line last. A buttons line, the last one, is no line.
 const digestOrCard = (lines: string[]): { kind: "digest" | "card"; lines: string[] } | null => {
-  const heading = lines.findIndex(l => DIGEST_HEADING.test(l));
+  const fenced = fencedLines(lines);
+  const heading = lines.findIndex((l, i) => !fenced[i] && DIGEST_HEADING.test(l));
+  let kind: "digest" | "card";
+  let own: string[];
   if (heading !== -1) {
-    const end = lines.findIndex((l, i) => i > heading && ANY_HEADING.test(l));
-    return { kind: "digest", lines: lines.slice(heading + 1, end === -1 ? undefined : end) };
+    const level = DIGEST_HEADING.exec(lines[heading]!)![1]!.length;
+    const end = lines.findIndex((l, i) => i > heading && !fenced[i] && (HEADING.exec(l)?.[1]!.length ?? 7) <= level);
+    kind = "digest";
+    own = lines.slice(heading + 1, end === -1 ? undefined : end);
+  } else {
+    const last = lastNonBlank(lines);
+    if (last === -1 || !BUTTONS.test(lines[last]!.trim())) return null;
+    kind = "card";
+    own = lines;
   }
-  let last: string | null = null;
-  for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.trim() !== "") { last = lines[i]!; break; }
-  return last !== null && BUTTONS_LINE.test(last) ? { kind: "card", lines } : null;
+  const last = lastNonBlank(own);
+  return { kind, lines: last !== -1 && BUTTONS.test(own[last]!.trim()) ? own.filter((_, i) => i !== last) : own };
 };
 
 // The reason to send back, so tests compare it whole. One paragraph, whatever it names.
@@ -67,39 +104,45 @@ export function replyStyleReason(kind: "digest" | "card", problems: string[]): s
 }
 
 // The not-live rule: a done line that names a task, by key or by commit, against the board's tasks whose merges are
-// not live yet. The board is read at most once per Stop, and only when some done line names something; a board that
-// can't be read (null) is no problem, and the task's key, not the token, is named.
+// not live yet. A name is excused when the words "not live" follow it before the next name on the line (said of it, not of
+// another task on the line). The board is read at most once per Stop, and only when some done line names something that is
+// not excused; a board that can't be read (null) is no problem, and the task's key, not the token, is named.
 async function notLiveProblem(lines: string[], notLiveOf: NotLiveOf | undefined): Promise<string | null> {
   if (notLiveOf === undefined) return null;
   const keys = new Set<string>();
-  const tokens: string[] = [];
-  for (const l of lines.filter(l => DONE_IN_LINE.test(l) && !SAYS_NOT_LIVE.test(l))) {
-    for (const k of l.match(TASK_KEY) ?? []) keys.add(k);
-    for (const t of l.match(COMMIT) ?? []) tokens.push(t.toLowerCase());
+  const commits: string[] = [];
+  for (const line of lines.filter(l => DONE_IN_LINE.test(l))) {
+    const names = [...line.matchAll(NAMES)];
+    names.forEach((m, i) => {
+      const said = line.slice(m.index + m[0].length, names[i + 1]?.index ?? line.length);
+      if (SAYS_NOT_LIVE.test(said)) return;
+      if (/^t-/i.test(m[0])) keys.add(m[0].toUpperCase());
+      else commits.push(m[0].toLowerCase());
+    });
   }
-  if (keys.size === 0 && tokens.length === 0) return null;
+  if (keys.size === 0 && commits.length === 0) return null;
   const board = await notLiveOf();
   if (board === null) return null;
   const hit = new Set<string>();
   for (const task of board) {
-    if (keys.has(task.key) || task.shas.some(sha => tokens.some(t => sha.toLowerCase().startsWith(t)))) hit.add(task.key);
+    if (keys.has(task.key.toUpperCase()) || task.shas.some(sha => commits.some(c => sha.toLowerCase().startsWith(c)))) hit.add(task.key);
   }
   return hit.size === 0 ? null : `${[...hit].map(k => `"${k}"`).join(", ")} listed as done, but the board has the merge not live yet`;
 }
 
 // The reason to send back with {"decision":"block"}, or null when this Stop is not asked. The lines that count are the
-// digest's or the card's own: blank lines, a buttons line, a lone [quiet] and the message's status line are not lines.
+// digest's or the card's own: blank lines, the buttons line, a leading [quiet] and the message's status line are not lines.
 export async function replyStyleAsk(body: unknown, window: string | null, contract: StatusContract, notLiveOf?: NotLiveOf): Promise<string | null> {
   if (contract.mode !== "ask" || window === null || !contract.exempt.includes(window)) return null;
   if (body === null || typeof body !== "object" || Array.isArray(body)) return null;
   const b = body as Record<string, unknown>;
   if (b.hook_event_name !== "Stop" || b.stop_hook_active === true) return null;
   if (typeof b.last_assistant_message !== "string") return null;
-  const message = b.last_assistant_message;
+  const message = b.last_assistant_message.replace(QUIET, "");
   const what = digestOrCard(visible(message).split("\n"));
   if (what === null) return null;
-  const statusFirst = statusLineOf(firstLineOf(message)) !== null ? firstLineOf(message) : null;
-  const kept = what.lines.filter(l => l.trim() !== "" && !l.startsWith("[buttons ") && l !== "[quiet]" && (statusFirst === null || l.trim() !== statusFirst));
+  const statusFirst = statusLineOf(firstLineOf(message)) !== null ? firstLineOf(message).trim() : null;
+  const kept = what.lines.filter(l => l.trim() !== "" && (statusFirst === null || l.trim() !== statusFirst));
   const words = kept.reduce((n, l) => n + l.split(/\s+/).filter(t => LETTER_OR_DIGIT.test(t)).length, 0);
   const problems: string[] = [];
   if (kept.length > DIGEST_MAX_LINES) problems.push(`${kept.length} lines (the limit is ${DIGEST_MAX_LINES})`);

@@ -110,6 +110,59 @@ describe("the reply style ask", () => {
   });
 });
 
+describe("the reply style ask: how kira and markdown see the answer", () => {
+  const line = "one plain line of the card";
+  const lines = (n: number) => Array.from({ length: n }, () => line);
+
+  it("a buttons line is read as kira reads it: last non-empty line, trimmed, any case, the id's grammar, no wider", async () => {
+    for (const buttons of ["[BUTTONS ask-1] go=Go | stop=Stop", "   [Buttons ask-1] go=Go | stop=Stop  ", "[buttons ask-1]"]) {
+      expect(await ask([...lines(10), buttons].join("\n")), buttons).toBe(replyStyleReason("card", ["10 lines (the limit is 8)"]));
+      expect(await ask([...lines(8), buttons].join("\n")), buttons).toBeNull();                 // it is not a line
+    }
+    for (const notButtons of ["[buttons ask 1] go=Go", "[buttons ask-1 go=Go", `[buttons ${"a".repeat(33)}] go=Go`, "see [buttons ask-1] go=Go", "[buttons]"]) {
+      expect(await ask([...lines(10), notButtons].join("\n")), notButtons).toBeNull();            // kira would not parse it: no card
+    }
+    expect(await ask([...lines(10), "[buttons ask-1] go=Go", ""].join("\n"))).not.toBeNull();     // trailing blank lines: still last
+    expect(await ask(["[buttons ask-1] go=Go", ...lines(10)].join("\n"))).toBeNull();              // not last: no card
+  });
+
+  it("[quiet] is read as kira reads it: first thing, any case, leading space", async () => {
+    expect(await ask(["  [QUIET] first line", ...lines(7), "[buttons ask-1] go=Go"].join("\n"))).toBeNull();   // 8 lines, the tag is not one
+    expect(await ask(["[Quiet]", ...lines(8), "[buttons ask-1] go=Go"].join("\n"))).toBeNull();
+    expect(await ask(["[quiet]", ...lines(9), "[buttons ask-1] go=Go"].join("\n"))).not.toBeNull();
+  });
+
+  it("a digest heading is ## or ### (up to three spaces in), and a heading in a code fence is no heading", async () => {
+    const body = Array.from({ length: 6 }, () => words(43));
+    expect(await ask(["## Digest", ...body].join("\n"))).toBe(replyStyleReason("digest", ["258 words (the limit is 120)"]));
+    expect(await ask(["   ### Digest", ...body].join("\n"))).toBe(replyStyleReason("digest", ["258 words (the limit is 120)"]));
+    expect(await ask(["#### Digest", ...body].join("\n"))).toBeNull();                              // not one of the two
+    expect(await ask(["    ### Digest", ...body].join("\n"))).toBeNull();                           // four spaces: code, not a heading
+    expect(await ask(["# Digest", ...body].join("\n"))).toBeNull();
+    for (const fence of ["```", "~~~"]) {
+      expect(await ask([fence, "### Digest", fence, ...body].join("\n"))).toBeNull();               // an example in a fence
+      expect(await ask([fence + "md", "### Digest", ...body, fence].join("\n"))).toBeNull();
+    }
+    expect(await ask(["```", "### Notes", "```", "### Digest", ...body].join("\n"))).not.toBeNull();   // a closed fence ends
+    expect(await ask(["### Digest", "short line", "```", "### Notes", "```", ...body].join("\n"))).not.toBeNull();   // a fenced heading doesn't end the digest
+    expect(await ask(["## Digest", "short line", "### Sub", ...body].join("\n"))).not.toBeNull();  // a deeper heading is inside it
+    expect(await ask(["## Digest", "short line", "## Next", ...body].join("\n"))).toBeNull();      // the same level ends it
+  });
+
+  it("not live is excused only for the task it is said of, and a key is read in any case", async () => {
+    const board: NotLiveOf = async () => [{ key: "T-310", shas: ["5b354d6aa"] }, { key: "T-311", shas: [] }];
+    const said = '"T-310" listed as done, but the board has the merge not live yet';
+    expect(await ask(digest(["T-310 merged and T-311 not live"]), {}, board)).toContain(said);       // T-311's words are not T-310's
+    expect(await ask(digest(["T-310 merged, not live until the next release"]), {}, board)).toBeNull();
+    const second = await ask(digest(["T-310 merged (not live), T-311 merged"]), {}, board);
+    expect(second).toContain('"T-311" listed as done');
+    expect(second).not.toContain('"T-310"');
+    expect(await ask(digest(["t-310 merged"]), {}, board)).toContain(said);                          // lower case: the same key
+    expect(await ask(digest(["T-310 MERGED"]), {}, board)).toContain(said);
+    expect(await ask(digest(["T-310 not live yet; merged, T-311 done"]), {}, board)).toContain('"T-311" listed as done');
+  });
+});
+
 describe("the relay asks over HTTP", () => {
   let home: { home: string; cleanup: () => void };
   let adb: AgentDb;
