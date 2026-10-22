@@ -24,7 +24,7 @@ import { AccessService } from "./application/access-service.ts";
 import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
-import { EscalationService, managerOf } from "./application/escalation-service.ts";
+import { EscalationService, managerOf, type MemoryAsks } from "./application/escalation-service.ts";
 import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { ManagerQueue } from "./application/manager-queue.ts";
@@ -58,7 +58,8 @@ import { MemoryStore } from "./adapters/memory-store.ts";
 import { MemoryFromFuture } from "./adapters/memory-migrations.ts";
 import { MemoryService } from "./application/memory-service.ts";
 import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
-import { runMemory } from "./console/memory.ts";
+import { readCodeLine, runMemory } from "./console/memory.ts";
+import { runUpdaterProgram } from "./console/update.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,6 +107,11 @@ const crash = exitOnCrash(log);
 // `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
 // on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
 if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
+// `morndo update` and `morndo doctor` (design §4.8) run here too, before the hub's settings and database are read:
+// they need neither, and a machine with no hub still updates. The hub runs the updater's program, as it runs the
+// engines CLI, and leaves with its exit code.
+if (process.argv[2] === "update" || process.argv[2] === "doctor")
+  await exitAfterOutput(await runUpdaterProgram(process.argv.slice(2)));
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
 const EXIT_DATABASE_FROM_FUTURE = EXIT_CONFIG;          // see openStore below
 const config = loadConfig();
@@ -211,6 +217,9 @@ switch (cmd) {
       id => observation.nameOf(id), ports.uploads, ports.sendStatus, queue ? { queue, isManager: id => id === managerPane() } : null,
       () => managerPane() ?? null, config.managerWindow);
     const filed: { briefs: BriefService | null } = { briefs: null };
+    // Memory is opened below, after Decisions: its pending Notes reach the board through this holder once it exists
+    // (ADR-0031 round 2); a hub without Memory never files an Ask.
+    const memoryHolder: { service: MemoryService | null } = { service: null };
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -224,6 +233,10 @@ switch (cmd) {
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
       queue,
       briefs: () => filed.briefs?.sightings() ?? [],
+      memory: () => {
+        const m = memoryHolder.service;
+        return m && { pending: () => m.pendingApprovals(), decide: (a, id, d) => m.decide(a, id, d) } satisfies MemoryAsks;
+      },
     });
     const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
     filed.briefs = briefs;
@@ -289,7 +302,8 @@ switch (cmd) {
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
     const memoryStore = openMemory(config.dataDir);
     if (memoryStore) shutdown.onStop(() => memoryStore.close());
-    const memory = memoryStore ? new MemoryService({ store: memoryStore }) : null;
+    const memory = memoryStore ? new MemoryService({ store: memoryStore, policy: () => access.policy() }) : null;
+    memoryHolder.service = memory;                              // Memory off (null): the board files no Ask
     const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
     // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens.
     const usage = new UsageService({ store });
@@ -441,7 +455,9 @@ switch (cmd) {
   }
   // ADR-0031: Memory at the console, which acts for the principal; it opens memory.db itself (console/memory.ts).
   case "memory": {
-    const code = await runMemory(args, processIo(), { dataDir: config.dataDir });
+    // The one-time code is read from stdin (a prompt on a terminal, one line when piped), never from argv (console/memory.ts).
+    const stdin = process.stdin;
+    const code = await runMemory(args, { ...processIo(), readCode: () => readCodeLine(stdin, stdin.isTTY === true, text => void process.stderr.write(text)) }, { dataDir: config.dataDir });
     store.close();
     await exitAfterOutput(code);
     break;

@@ -18,7 +18,8 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
   the new lane's before it starts. When a lane that runs needs a task, assign it: \`morndo-board assign T-12 <lane>\`.
 - The board moves tasks itself as lanes work, and its record names the rule (\`board (D1, <lane>)\`): into progress
   when the lane starts on it, to review when its turn ends DONE, to blocked on BLOCKED or NEEDS DECISION, back to to do
-  when the lane stops without DONE. It never marks a task done and never assigns one.
+  when the lane stops without DONE. It never marks a task done and never assigns one. A task in review or blocked stays
+  there until you or its lane moves it (\`resume\`), or its lane's status line names it (\`STATUS: WAITING T-12\`).
 - A lane has one task in progress at a time. If a lane must switch, move its current task first (\`todo\` or \`block\`).
 - A task in review is the lane's word, not proof. Check it (run the check, read the diff, ask another lane), then
   \`morndo-board done T-12 --why "<what you checked>"\`, or send it back with
@@ -40,13 +41,15 @@ export const WORKER_PROMPT = `## Your tasks
 Your work is on the team's board. Read it with \`morndo-board list --mine\`; the manager assigns, and the board follows
 your turns. The principal reads the board instead of asking you.
 
-- End every turn with a status line, the first line of your answer: \`STATUS: DONE\`, \`STATUS: BLOCKED <what you need,
-  from whom>\`, \`STATUS: NEEDS DECISION <which>\` or \`STATUS: WAITING <on what> for <N> min\`. The board reads it.
+- End every turn with a status line, the first line of your answer, naming the task key right after the word:
+  \`STATUS: DONE T-12\`, \`STATUS: BLOCKED T-12 <what you need, from whom>\`, \`STATUS: NEEDS DECISION T-12 <which>\` or
+  \`STATUS: WAITING T-12 <on what> for <N> min\`. The board reads it and moves only the task you name; a line without a
+  key falls back to your task in progress. A question or a thank-you does not take a task out of review or blocked.
 - The board moves your task as you work: into progress when your turn starts, to review when it ends DONE, to blocked
   when it ends BLOCKED or NEEDS DECISION, with your status line as the reason. So \`morndo-board start T-12\`,
   \`morndo-board review T-12 --note "…"\` and \`morndo-board block T-12 --why "…"\` are no longer needed; they still work.
 - A checkpoint, a stage reached with the task not finished, is not DONE: end the turn with
-  \`STATUS: NEEDS DECISION checkpoint: <what>\`, which the board moves to blocked with that line as the reason; the
+  \`STATUS: NEEDS DECISION T-12 checkpoint: <what>\`, which the board moves to blocked with that line as the reason; the
   manager decides whether you go on.
 - Work on one task at a time; the board refuses a second in progress. When a block clears: \`morndo-board resume T-12\`.
 - Work only on tasks assigned to you. If you find work that isn't on the board, file it as a proposal:
