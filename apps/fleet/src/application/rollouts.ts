@@ -22,6 +22,9 @@ export type RolloutRefusal = { ok: false; refused: "not_allowed" | "not_halted";
 // The name a halt carries when the control plane's own updater rolled back: the fleet knows no node name for its own
 // machine, and the name says where it happened.
 export const CONTROL_PLANE_MACHINE = "control-plane";
+// Ignored rollback reports raise at most one alert per machine in this window (review of #107, round 5).
+export const IGNORED_ALERT_WINDOW_MS = 24 * 3_600_000;
+const SPENT = "that attempt was counted already";
 
 export class Rollouts {
   #store: RolloutsStore;
@@ -159,18 +162,23 @@ export class Rollouts {
       ...(update.attempt === undefined ? {} : { attempt: update.attempt }),
     };
     if (ignored !== null) {
-      const key = `${machine}|${update.attempt ?? "-"}|${ignored}`;
-      if (this.#ignoredSeen.has(key)) return;
-      if (this.#ignoredSeen.size >= 1000) this.#ignoredSeen.clear();
-      this.#ignoredSeen.add(key);
-      this.#audit.alert(kind, o.own ? null : machine, { ...detail, ignored });
+      // A repeat of a report already accepted (its id spent by this machine) is the health repeating itself: silent.
+      if (ignored === SPENT && this.#store.lookup(update.attempt!)?.machine === machine) return;
+      // Anything else is folded per machine: one alert a day, with how many came since the last and the last reason,
+      // so a node sending forged ids cannot flood the owner (review of #107, round 5).
+      const f = this.#folded.get(machine);
+      const now = this.#now();
+      if (f !== undefined && now - f.alertedAt < IGNORED_ALERT_WINDOW_MS) { f.count++; f.lastReason = ignored; return; }
+      const count = (f?.count ?? 0) + 1;
+      this.#folded.set(machine, { alertedAt: now, count: 0, lastReason: ignored });
+      this.#audit.alert(kind, o.own ? null : machine, { ...detail, ignored: f !== undefined && f.count > 0 ? f.lastReason : ignored, count });
       return;
     }
     if (!this.#store.used(update.attempt!, this.#now())) return;
     this.#audit.alert(kind, o.own ? null : machine, detail);
     this.halt(target!, machine, reason ?? `${machine} reports a ${update.state === "rolled_back" ? "rollback" : "failed rollback"} without a reason`);
   }
-  #ignoredSeen = new Set<string>();
+  #folded = new Map<string, { alertedAt: number; count: number; lastReason: string }>();
 
   // Why a rollback report halts nothing, or null when it may.
   #refusal(machine: string, update: NodeUpdateHealth, own: boolean): string | null {
@@ -178,7 +186,7 @@ export class Rollouts {
     if (update.attempt === undefined) return "it carries no attempt id";
     const issued = this.#store.lookup(update.attempt);
     if (issued === null) return "the fleet never issued that attempt id";
-    if (issued.usedAt !== null) return "that attempt was counted already";
+    if (issued.usedAt !== null) return SPENT;
     if (issued.machine !== machine) return "that attempt id was issued to another machine";
     const t = parseVersion(update.target), ran = parseVersion(update.version), was = parseVersion(issued.version);
     if (t === null || was === null || compareVersions(t, was) !== 0) return `that attempt id was issued for ${issued.version}, not ${update.target}`;

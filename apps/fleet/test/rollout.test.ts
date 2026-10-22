@@ -275,7 +275,7 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     expect(second?.attempt).toMatch(/^[A-Za-z0-9_-]{22,64}$/);
     b.health(rolledBack("forged-forged-forged-forged"));
     b.health(rolledBack(first!.attempt));                    // spent already
-    await vi.waitFor(() => expect(ignoredAlerts(fleet).length).toBeGreaterThanOrEqual(2));
+    await vi.waitFor(() => expect(ignoredAlerts(fleet)).toHaveLength(1));   // the forged one; the spent one adds none
     expect(await isHalted(api)).toBe(false);
     b.health(rolledBack(second!.attempt, { reason: "again" }));
     await vi.waitFor(async () => expect(await isHalted(api)).toBe(true));
@@ -356,5 +356,34 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     expect(store.lookup(kept)).not.toBeNull();
     const newer = store.issue("n3", "0.0.1", now);           // the same offer again: the same unused id
     expect(newer).toBe(stale);
+  });
+
+  it("a flood of forged ids is one alert per machine a day, with the count and the last reason", async () => {
+    let now = Date.UTC(2026, 9, 1);
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN, now: () => now });
+    const api = client(fleet.config.socketPath);
+    await api.post("/v1/rollout/committed", { version: V });
+    // straight to the service: the agent channel's own rate limit would drop most of a burst before it got here
+    const forged = (id: string) => ({ state: "rolled_back" as const, version: "0.0.0-rc.1", target: V, reason: "x", attempt: id });
+    for (let i = 0; i < 100; i++) fleet.rollouts.health("n2", forged(`forged-${String(i).padStart(3, "0")}-xxxxxxxxxxxxxxx`));
+    expect(ignoredAlerts(fleet)).toHaveLength(1);
+    expect(await isHalted(api)).toBe(false);
+    now += 25 * 3_600_000;                                   // the next day: the ones folded since are counted
+    fleet.rollouts.health("n2", forged("forged-next-day-xxxxxxxxxxxxx"));
+    expect(ignoredAlerts(fleet)).toHaveLength(2);
+    expect(ignoredAlerts(fleet)[1]?.detail).toMatchObject({ count: 100, ignored: "the fleet never issued that attempt id" });
+  });
+
+  it("a real rollback raises only its halt alert: its repeats, under the spent id, raise nothing", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const api = client(fleet.config.socketPath);
+    const b = await fleet.online("n2", { caps: [CAP_ROLLOUT] });
+    await api.post("/v1/rollout/committed", { version: V });
+    const offer = await offerOf(b);
+    for (let i = 0; i < 5; i++) b.health(rolledBack(offer!.attempt));
+    await vi.waitFor(async () => expect(await isHalted(api)).toBe(true));
+    await new Promise(r => setTimeout(r, 500));
+    expect(fleet.audit.of("alert.update_rolled_back")).toHaveLength(1);
+    expect(ignoredAlerts(fleet)).toHaveLength(0);
   });
 });
