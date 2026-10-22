@@ -16,7 +16,9 @@ const fixtures = join(import.meta.dirname, "fixtures/claude-release");
 const MANIFEST = readFileSync(join(fixtures, "2.1.306.manifest.json"));
 const SIGNATURE = readFileSync(join(fixtures, "2.1.306.manifest.json.sig"));
 const LINUX_X64 = "520bc6c1f40af466bd03a278b5ae1af1a2938bc7de5b9e5cb15526da20d71cfe";   // linux-x64 in that manifest
-const AT = new Date("2026-10-22T00:00:00Z");
+const AT = new Date("2026-10-22T00:00:00Z");                  // for the real manifest, signed 2026-10-21 by a key made 2026-03-30
+// A key made inside a test is made now, so it is judged a minute later, not at a fixed date that the clock may have passed.
+const soon = (): Date => new Date(Date.now() + 60_000);
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 const tmp = (): string => { const dir = mkdtempSync(join(tmpdir(), "morndo-releases-")); dirs.push(dir); return dir; };
@@ -68,22 +70,22 @@ describe("verifying a manifest", () => {
     const other = await ownKey();
     const manifest = manifestFor("2.1.999", { "linux-x64": SUM });
     const signature = await other.sign(manifest);
-    expect(await verifyManifest(manifest, signature, "2.1.999", other.trust, AT)).toMatchObject({ ok: true });          // the machinery works with its own key
-    expect(await verifyManifest(manifest, signature, "2.1.999", COMPILED_TRUST, AT)).toMatchObject({ ok: false, why: "the manifest signature is not good" });   // wrong key
-    expect(await verifyManifest(manifest, signature, "2.1.999", { armoredKey: other.trust.armoredKey, fingerprint: CLAUDE_RELEASE_FINGERPRINT }, AT)).toMatchObject({ ok: false, why: "the release key is not the trusted one" });
+    expect(await verifyManifest(manifest, signature, "2.1.999", other.trust, soon())).toMatchObject({ ok: true });          // the machinery works with its own key
+    expect(await verifyManifest(manifest, signature, "2.1.999", COMPILED_TRUST, soon())).toMatchObject({ ok: false, why: "the manifest signature is not good" });   // wrong key
+    expect(await verifyManifest(manifest, signature, "2.1.999", { armoredKey: other.trust.armoredKey, fingerprint: CLAUDE_RELEASE_FINGERPRINT }, soon())).toMatchObject({ ok: false, why: "the release key is not the trusted one" });
   });
 
   it("refuses a good signature on a manifest for another version, with no checksum, or that is not JSON", async () => {
     const own = await ownKey();
     const sign = async (bytes: Uint8Array) => ({ bytes, signature: await own.sign(bytes) });
     const other = await sign(manifestFor("2.1.998", { "linux-x64": SUM }));
-    expect(await verifyManifest(other.bytes, other.signature, "2.1.999", own.trust, AT)).toMatchObject({ ok: false, why: "the manifest is for another version" });
+    expect(await verifyManifest(other.bytes, other.signature, "2.1.999", own.trust, soon())).toMatchObject({ ok: false, why: "the manifest is for another version" });
     const empty = await sign(manifestFor("2.1.999", {}));
-    expect(await verifyManifest(empty.bytes, empty.signature, "2.1.999", own.trust, AT)).toMatchObject({ ok: false, why: "the manifest lists no checksum" });
+    expect(await verifyManifest(empty.bytes, empty.signature, "2.1.999", own.trust, soon())).toMatchObject({ ok: false, why: "the manifest lists no checksum" });
     const junk = await sign(manifestFor("2.1.999", { "linux-x64": "not-a-checksum" }));
-    expect(await verifyManifest(junk.bytes, junk.signature, "2.1.999", own.trust, AT)).toMatchObject({ ok: false });
+    expect(await verifyManifest(junk.bytes, junk.signature, "2.1.999", own.trust, soon())).toMatchObject({ ok: false });
     const text = await sign(new TextEncoder().encode("not json"));
-    expect(await verifyManifest(text.bytes, text.signature, "2.1.999", own.trust, AT)).toMatchObject({ ok: false, why: "the manifest is not JSON" });
+    expect(await verifyManifest(text.bytes, text.signature, "2.1.999", own.trust, soon())).toMatchObject({ ok: false, why: "the manifest is not JSON" });
   });
 
   it("refuses a signature made with a weak hash (SHA-1, SHA-224), and takes SHA-256 and SHA-512", async () => {
@@ -104,10 +106,10 @@ describe("verifying a manifest", () => {
       return list.write();
     };
     for (const [name, hash] of [["SHA-256", enums.hash.sha256], ["SHA-512", enums.hash.sha512]] as const) {
-      expect(await verifyManifest(manifest, await signWith(hash), "2.1.999", trust, AT), name).toMatchObject({ ok: true });
+      expect(await verifyManifest(manifest, await signWith(hash), "2.1.999", trust, soon()), name).toMatchObject({ ok: true });
     }
     for (const [name, hash] of [["SHA-1", enums.hash.sha1], ["SHA-224", enums.hash.sha224]] as const) {
-      expect(await verifyManifest(manifest, await signWith(hash), "2.1.999", trust, AT), name).toMatchObject({ ok: false, why: "the manifest signature is not good" });
+      expect(await verifyManifest(manifest, await signWith(hash), "2.1.999", trust, soon()), name).toMatchObject({ ok: false, why: "the manifest signature is not good" });
     }
   }, 30_000);
 
