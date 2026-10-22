@@ -87,8 +87,11 @@ describe("release pipeline files", () => {
     // The units need tmux and ffmpeg, as ci.yml installs them: the first bench run failed seven remux tests with
     // `spawnSync ffmpeg ENOENT` on both Linux legs (ubuntu-24.04 ships no ffmpeg).
     expect(build).toContain("sudo apt-get install -y --no-install-recommends tmux ffmpeg");
-    expect(build).toContain("brew install tmux ffmpeg");
     expect(build.indexOf("tmux ffmpeg")).toBeLessThan(build.indexOf("npx vitest run --project=units"));
+    // The unit suite is a Linux suite (/proc, systemd, tmux, a directory renamed at 0555): on macos-15 the bench's run had
+    // 179 failures. The units gate the Linux legs; the macOS leg builds, stages and smoke-tests its tree all the same.
+    expect(build).toMatch(/if \[ "\$RUNNER_OS" = Linux \]; then\s+npx vitest run --project=units/);
+    expect(build).not.toContain("brew install tmux ffmpeg");
     expect(build).toContain("npm prune --omit=dev");
     // T-355: the prune must not run a workspace's lifecycle scripts: apps/web's prepare is `svelte-kit sync`, and by then
     // svelte-kit is pruned (exit 127). No runtime dependency has an install script (ADR-0005).

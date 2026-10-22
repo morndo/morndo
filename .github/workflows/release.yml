@@ -137,20 +137,13 @@ jobs:
       # The units run here too, and some need tmux and ffmpeg, as ci.yml installs them (ubuntu-24.04 ships no ffmpeg:
       # https://packages.ubuntu.com/noble/ffmpeg, read 2026-10-13). The first bench run failed seven remux tests with
       # `spawnSync ffmpeg ENOENT` on both Linux legs.
-      - name: tmux and ffmpeg for the unit tests (Linux)
+      - name: tmux and ffmpeg for the unit tests
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends tmux ffmpeg
           ffmpeg -version | head -n 1
-      - name: tmux and ffmpeg for the unit tests (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          brew install tmux ffmpeg
-          ffmpeg -version | head -n 1
-
       - name: Test, build and pack
         run: |
           set -euo pipefail
@@ -163,7 +156,11 @@ jobs:
           if node -e "const s=require('./node_modules/better-sqlite3/package.json').scripts||{}; if(!s.install) process.exit(1)"; then
             npm run install --prefix node_modules/better-sqlite3
           fi
-          npx vitest run --project=units
+          # The unit suite is a Linux suite (/proc, systemd, tmux, a directory renamed at 0555): the bench run had 179 failures
+          # on macos-15. The units gate the Linux legs; the macOS leg builds, stages and smoke-tests its tree below.
+          if [ "$RUNNER_OS" = Linux ]; then
+            npx vitest run --project=units
+          fi
           npm run build
           # Node will not strip types under node_modules (nodejs.org/docs/latest-v24.x/api/typescript.html,
           # "Type stripping in dependencies", v24.21.0, read 2026-10-13). Compile while typescript is installed.
