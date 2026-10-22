@@ -578,7 +578,7 @@ describe("a hub that is updating", () => {
 describe("the hub's store stamped on each Command (RL10)", () => {
   const STORE_A = "11111111-1111-4111-8111-111111111111";
   const STORE_B = "22222222-2222-4222-8222-222222222222";
-  const timers = { now: () => Date.now(), setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id as ReturnType<typeof setTimeout>) };
+  const timers = { now: () => Date.now(), setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id) };
   const stubAnswer = (bodies: Record<string, unknown>[]) => vi.stubGlobal("fetch", async (_path: unknown, init: RequestInit) => {
     bodies.push(JSON.parse(init.body as string) as Record<string, unknown>);
     return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
@@ -609,7 +609,7 @@ describe("the hub's store stamped on each Command (RL10)", () => {
 
   it("a header change after writing leaves the record's stamp: its attempts keep the store they were written with", async () => {
     const attempts: { id: string; hubStore?: string }[] = [];
-    answer = async r => { attempts.push({ id: r.id, hubStore: r.hubStore }); return { kind: "unanswered" }; };
+    answer = async r => { attempts.push({ id: r.id, ...(r.hubStore ? { hubStore: r.hubStore } : {}) }); return { kind: "unanswered" }; };
     seenStore = STORE_A;
     const o = outbox();
     const a = await o.enqueue(cmd("%1", "first"));

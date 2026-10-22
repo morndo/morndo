@@ -1775,7 +1775,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/fleet/test/deliveries.test.ts"], expect: "text is empty" },
   // The manager always on the list, the fleet's alerts in the app, and the outbox fixes of the rage QA (2026-10-12).
   { id: "port-manager-absent-queued", task: "port", file: "apps/hub/src/application/steering-service.ts",
-    find: "    return this.send(a, this.#absent, text, requestId, [], undefined, undefined, createdAt, again);", replace: "    return { ok: false, problem: \"no_pane\" };",
+    find: "    return this.send(a, this.#absent, text, requestId, [], undefined, undefined, createdAt, again, hubStore);", replace: "    return { ok: false, problem: \"no_pane\" };",
     run: ["apps/hub/test/http-manager-send.test.ts"], expect: "queued for its sticky lane" },
   { id: "port-manager-absent-no-files", task: "port", file: "apps/hub/src/application/steering-service.ts",
     find: "if (!this.#manager?.queue.on || uploads.length) return", replace: "if (!this.#manager?.queue.on) return",
@@ -3132,7 +3132,7 @@ export const CONTROLS: Control[] = [
     find: "wait: { on: \"background\", tasks: [...t.tasks] }, ...said,", replace: "wait: { on: \"background\", tasks: [...t.tasks] },",
     run: ["packages/domain/test/run.test.ts", "apps/hub/test/board-projector.test.ts", "apps/fleet/test/runs.test.ts"], expect: "the turn's own outcome stays on the Run" },
   { id: "b10-state-changed-mend", task: "ADR-0032", file: "apps/hub/src/adapters/store.ts",
-    find: "try { migrate(this.db); this.mendStateChangedAt(); }", replace: "try { migrate(this.db); }",
+    find: "this.mendStateChangedAt();\n      this.storeId", replace: "this.storeId",
     run: ["apps/hub/test/migrations.test.ts"], expect: "takes state_changed_at from the task's events" },
   { id: "b10-board-reason", task: "ADR-0032", file: "packages/domain/src/board.ts",
     find: " || (actor.kind === \"board\" && given)) {", replace: ") {",
@@ -3265,6 +3265,20 @@ export const CONTROLS: Control[] = [
     find: "    const journaled = journaledIds(db, this.#paths[db]);        // the service's start re-applies these (RL10)",
     replace: "    const journaled = new Set<string>();",
     run: ["apps/updater/test/apply-service.test.ts", "apps/updater/test/revocations-sqlite.test.ts"], expect: "rollback_failed" },
+  // ---- PR 5c step C2 ("RL10: a hub store on every database, stamped on every Command"): the uncertain branch, the
+  // file-identity renewal and the outbox stamp, each removed once.
+  { id: "c2c-other-store-typed", task: "c2c", file: "apps/hub/src/application/steering-service.ts",
+    find: "    if (known === null && hubStore !== undefined",
+    replace: "    if (false && known === null && hubStore !== undefined",
+    run: ["apps/hub/test/steering-store-stamp.test.ts"], expect: "uncertain, nothing typed, nothing recorded" },
+  { id: "c2c-store-not-renewed", task: "c2c", file: "apps/hub/src/adapters/store.ts",
+    find: "      if (row && inodeOf(row.identity) === inodeOf(identity)) {",
+    replace: "      if (row) {",
+    run: ["apps/hub/test/hub-store.test.ts"], expect: "a copy renamed over the file starts a new store" },
+  { id: "c2c-outbox-unstamped", task: "c2c", file: "apps/web/src/lib/outbox/outbox.ts",
+    find: "      ...(stamp ? { hubStore: stamp } : {}),",
+    replace: "      ...(false ? { hubStore: stamp } : {}),",
+    run: ["apps/web/test/outbox.test.ts"], expect: "carries that store" },
   // ---- B2 (board T-302): a lane the fleet doesn't list is gone, each guard removed once.
   { id: "b2-unregistered-only-doing", task: "302", file: "packages/domain/src/board.ts",
     find: "if (task.status !== \"doing\" || task.assignee === null || registered.has(task.assignee)) return null;",
