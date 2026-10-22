@@ -1431,6 +1431,8 @@ When the stream can't be written (a full disk), the script paths answer 503 so t
 - no background task is running and no wake-up is scheduled (`background_tasks`, `session_crons` empty);
 - the policy's `statusContract.mode` is `ask` (the default) and the lane isn't in `statusContract.exempt` (default `["manager"]`).
 
+The relay also asks the orchestrator lanes once for a short, plain digest or card (the reply style ask: apps/node-agent/README.md).
+
 ```example hook-stop-asked
 POST http://127.0.0.1:8787/hook/stop
 content-type: application/json
