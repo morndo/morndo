@@ -22,7 +22,7 @@
 // (/mnt/tiny, 64k), not a host mount. A hard power loss is not tested here (docker kill is not one); that stays
 // manual QA.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -101,10 +101,22 @@ for (const id of leftovers) {
 }
 // Its build scratch too (build.ts's morndo-c2-build-*, about 1.5 GB each): one run at a time on a machine, as the
 // label sweep above already assumes.
-for (const name of readdirSync(tmpdir()).filter(n => n.startsWith("morndo-c2-build-"))) {
-  rmSync(join(tmpdir(), name), { recursive: true, force: true });
-  process.stdout.write(`removed the build scratch a killed run left behind (${name})\n`);
+// A kept scratch (E2E_KEEP=1) is a person's to read and stays; only a real directory named exactly build.ts's
+// prefix and its six random characters is ever removed, and a failure to remove one is said, never thrown.
+if (process.env.E2E_KEEP !== "1") {
+  for (const name of readdirSync(tmpdir()).filter(n => /^morndo-c2-build-[A-Za-z0-9]{6}$/.test(n))) {
+    const path = join(tmpdir(), name);
+    try {
+      if (!lstatSync(path).isDirectory()) continue;
+      rmSync(path, { recursive: true, force: true });
+      process.stdout.write(`removed the build scratch a killed run left behind (${name})\n`);
+    } catch (error) {
+      process.stdout.write(`could not remove ${path}: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
 }
+// The sweeps' own test (E2E_SWEEP_ONLY=1): stop here, with nothing built and no machine started.
+if (process.env.E2E_SWEEP_ONLY === "1") process.exit(0);
 
 try {
   // ---- the six Releases, signed, and the six publish points (build.ts does it the pipeline's way).
@@ -145,6 +157,13 @@ try {
   // scenario's checks say which); "starting" keeps us waiting.
   const bootDeadline = Date.now() + 180_000;
   for (;;) {
+    // A container that stopped is a machine that will never boot: its entrypoint's own words say why (the e2e-init
+    // remount, refused by a host's security profile, exits 77) — read at once, not after the wall below.
+    const alive = docker(["inspect", "-f", "{{.State.Running}} {{.State.ExitCode}}", CONTAINER]);
+    if (alive.out.startsWith("false")) {
+      const said = docker(["logs", CONTAINER]);
+      throw new Error(`the machine stopped before systemd came up (exit ${alive.out.split(" ")[1]}): ${(said.out + said.err).trim().split("\n").slice(-3).join(" | ")}`);
+    }
     const state = docker(["exec", CONTAINER, "systemctl", "is-system-running"]);
     if (state.out === "running" || state.out === "degraded") break;
     if (Date.now() > bootDeadline) throw new Error(`systemd never came up (${state.out || state.err})`);

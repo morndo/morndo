@@ -22,7 +22,9 @@ RUN usermod --login worker --home /srv/worker --move-home ubuntu \
 # Without --privileged, Docker mounts the container's (private) cgroup tree read-only, and systemd as PID 1 cannot
 # make its own scopes. The container has CAP_SYS_ADMIN (systemd.io/CONTAINER_INTERFACE: "do not drop" it), so the
 # entrypoint remounts that tree writable — its own namespace's, nothing of the host's — and becomes /sbin/init.
-RUN printf '#!/bin/sh\nset -e\nmount -o remount,rw /sys/fs/cgroup\nexec /sbin/init\n' > /usr/local/sbin/e2e-init \
+# A host whose security profile forbids the remount (AppArmor's docker-default denies mount) gets one clear line and
+# exit 77 here, which the harness reads at once, rather than a systemd that never comes up.
+RUN printf '#!/bin/sh\nif ! mount -o remount,rw /sys/fs/cgroup 2>/tmp/e2e-init.err; then\n  echo "e2e-init: cannot remount /sys/fs/cgroup writable ($(cat /tmp/e2e-init.err)); this host forbids it (AppArmor?)"\n  exit 77\nfi\nexec /sbin/init\n' > /usr/local/sbin/e2e-init \
   && chmod 0755 /usr/local/sbin/e2e-init
 
 LABEL morndo-c2-e2e=1

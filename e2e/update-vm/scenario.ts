@@ -293,8 +293,9 @@ async function machineWhole(o: { versionA: string; versionV: string }): Promise<
   }
   const quicks = [HUB_DB, FLEET_DB, NODE_DB, UPDATE_DB].map(quickCheck);
   const applying = existsSync(join(UPDATE_STATE, "applying"));
-  const ok = healthy && quicks.every(q => q === "ok") && !applying;
-  return { ok, where: current, detail: `${parts.join(", ")}; quick_check ${quicks.join(", ")}; the applying marker ${applying ? "is still there" : "is gone"}` };
+  const open = openRecord();                // a whole machine has no attempt standing open (§6.6: recovery ended it)
+  const ok = healthy && quicks.every(q => q === "ok") && !applying && open === null;
+  return { ok, where: current, detail: `${parts.join(", ")}; quick_check ${quicks.join(", ")}; the applying marker ${applying ? "is still there" : "is gone"}; ${open === null ? "no record open" : `a record still open at ${open.mark}`}` };
 }
 
 // The feed host runs as its own process (feed-server.ts beside this file): every command below is a spawnSync,
@@ -398,6 +399,7 @@ async function main(): Promise<number> {
 
   const timers2 = run("systemctl", ["--user", "list-timers", "--all", "morndo-update-recover.timer", "--no-pager"]);
   const recoverFrom = Date.now();
+  const killedAtSec = Math.floor(recoverFrom / 1000) - 1;
   let recovered2 = false;
   for (;;) {
     const open = openRecord();
@@ -415,8 +417,16 @@ async function main(): Promise<number> {
     `$ systemctl --user list-timers --all morndo-update-recover.timer\n${timers2.out}\n${timers2.err}\n`,
     `$ systemctl --user show morndo-update-recover.service -p Result -p ExecMainStatus -p ExecMainExitTimestamp\n${recoverUnit2.out}\n`,
   ].join("\n"));
+  // The recovery unit's own runs since the kill, from the user journal (systemd unloads an inactive unit, so its
+  // properties alone can read as defaults): it must have started and finished, and said so, by the timer's hand.
+  const ran2 = run("journalctl", ["--user", "-u", "morndo-update-recover.service", "--since", `@${killedAtSec}`, "--no-pager", "-o", "cat"]);
+  writeFileSync(join(EVIDENCE, "2-recover-journal.txt"), `${ran2.out}\n${ran2.err}\n`);
+  const recoverRan2 = /Starting morndo-update-recover\.service/.test(ran2.out) && /Finished morndo-update-recover\.service/.test(ran2.out)
+    && !/morndo-update-recover\.service: (Failed|Main process exited, code=exited, status=[1-9])/.test(ran2.out);
   const last2 = lastRecord();
-  check("2-timer-recovered", recovered2 && elapsed2 <= 370 && last2?.target === VERSION_B && last2?.state === "abandoned",
+  check("2-recover-unit-ran", recoverRan2,
+    recoverRan2 ? "the recovery unit started and finished after the kill (user journal)" : `the recovery unit's journal since the kill: ${ran2.out.split("\n").slice(-6).join(" | ")}`);
+  check("2-timer-recovered", recovered2 && recoverRan2 && elapsed2 <= 370 && last2?.target === VERSION_B && last2?.state === "abandoned",
     recovered2
       ? `the recovery timer put the machine back on ${VERSION_A} by itself in ${elapsed2}s; the record is ${last2?.state}; the recover unit: ${recoverUnit2.out.replace(/\n/g, "; ")}`
       : `the machine was not back on ${VERSION_A} after ${elapsed2}s with no recover typed by hand; the timer said: ${timers2.out.replace(/\n/g, " | ")}`);
@@ -529,13 +539,22 @@ async function main(): Promise<number> {
   pointFeedAt("feed-4");
   const hubDump7 = sqlite(HUB_DB, ".dump");
   writeFileSync(join(EVIDENCE, "7-hub-before.sql"), hubDump7);
+  const hubShape = () => [
+    sqlite(HUB_DB, "SELECT group_concat(type || ' ' || name || ': ' || coalesce(sql, ''), char(10)) FROM (SELECT * FROM sqlite_master ORDER BY type, name)"),
+    `user_version ${sqlite(HUB_DB, "PRAGMA user_version")}`,
+    `floor ${sqlite(HUB_DB, "SELECT floor FROM _morndo_schema WHERE id = 1")}`,
+  ].join("\n");
+  const hubShape7 = hubShape();
   const to31 = command("7-update", MORNDO, ["update", "--yes"], { timeoutMs: 20 * 60_000 });
   check("7-rolled-back-from-31", to31.code === 1 && (to31.out + to31.err).includes(`Rolled back from ${VERSION_D}`),
     `update --yes exited ${to31.code}: ${firstLines(to31)}`);
   const hubDump7After = sqlite(HUB_DB, ".dump");
   writeFileSync(join(EVIDENCE, "7-hub-after.sql"), hubDump7After);
-  check("7-hub-unchanged", hubDump7After === hubDump7,
-    "the hub database's .dump is the same as before: the throwing migration ran inside its one transaction and moved nothing");
+  // What a migration could have moved: the schema (every object's own SQL), user_version and the floor. Rows the
+  // services write while they run (the store row, presence) are not the migration's, and are not compared.
+  const hubShape7After = hubShape();
+  check("7-hub-unchanged", hubShape7After === hubShape7,
+    `the hub's schema, user_version and floor are as before (${hubShape7After.split("\n").slice(-2).join("; ")}): the throwing migration ran inside its one transaction and moved nothing`);
   check("7-links", linkName("current") === VERSION_A && !existsSync(join(UPDATE_STATE, "applying")), `current=${linkName("current")}`);
   await servicesAt("7-services-healthy", VERSION_A);
   const quicks7 = [quickCheck(HUB_DB), quickCheck(FLEET_DB), quickCheck(NODE_DB), quickCheck(UPDATE_DB)];
@@ -618,7 +637,7 @@ async function main(): Promise<number> {
   } catch { /* the check below says it in its own words */ }
   const last9 = lastRecord();
   check("9-not-applied", to40.code === 75 && (to40.out + to40.err).includes("The apply did not finish (abandoned)")
-    && unitLines9.some(l => l.includes("Not applied: hub:"))
+    && unitLines9.some(l => l.includes("Not applied: hub:") && /disk is full|SQLITE_FULL|ENOSPC/i.test(l))
     && last9?.target === VERSION_F && last9.state === "abandoned"
     && linkName("current") === VERSION_A && !existsSync(join(UPDATE_STATE, "applying")),
     `update --yes exited ${to40.code}: ${firstLines(to40, 3)}; the apply unit said: ${unitLines9.join(" | ")}`);
