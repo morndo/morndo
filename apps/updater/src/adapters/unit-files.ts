@@ -3,8 +3,8 @@
 // setup before the updater — a service unit that runs Morndo's own program, written by hand or by an earlier
 // install — which a render adopts once, keeping the old file beside the new one; or someone else's, which a render
 // refuses unless asked to replace it, and then keeps it beside the new one first.
-import { copyFileSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 export class ForeignUnits extends Error {
   readonly paths: readonly string[];
@@ -23,6 +23,8 @@ export interface UnitDir {
   marked(text: string): boolean;
   /** Whether an unmarked file is the setup before the updater: one of our service names running our own program. */
   legacy(name: string, text: string): boolean;
+  /** What of an adopted legacy file must outlive it (its environment), as a file to write beside it, or null. */
+  carry?(name: string, text: string): { path: string; text: string } | null;
 }
 
 const readOrNull = (path: string): string | null => {
@@ -53,7 +55,20 @@ const keepPath = (path: string): string => {
 export function placeUnits(d: UnitDir, files: readonly { name: string; text: string }[], replaceForeign: boolean): string[] {
   const foreign = foreignIn(d, files.map(f => f.name));
   if (foreign.length > 0 && !replaceForeign) throw new ForeignUnits(foreign);
-  const kept = [...legacyIn(d, files.map(f => f.name)), ...foreign].map(p => { const keep = keepPath(p); copyFileSync(p, keep); return keep; });
+  const legacy = legacyIn(d, files.map(f => f.name));
+  const kept = [...legacy, ...foreign].map(p => { const keep = keepPath(p); copyFileSync(p, keep); return keep; });
+  // What an adopted unit set that the new one does not (its environment) goes beside it first, written whole; a
+  // carried file already there with other words is kept, and this one takes the next free name.
+  for (const p of legacy) {
+    const carried = d.carry?.(basename(p), readFileSync(p, "utf8")) ?? null;
+    if (carried === null) continue;
+    mkdirSync(dirname(carried.path), { recursive: true });
+    let to = carried.path;
+    for (let i = 1; existsSync(to) && readFileSync(to, "utf8") !== carried.text; i++) to = carried.path.replace(/\.conf$/, `.${i}.conf`);
+    const temp = `${to}.new`;
+    writeFileSync(temp, carried.text);
+    renameSync(temp, to);
+  }
   for (const f of files) {
     // atomic like every updater write (§5): a whole file lands by rename, never half of one by a crash.
     // A leftover temp from a killed render is removed first, so it cannot keep an old mode through create.

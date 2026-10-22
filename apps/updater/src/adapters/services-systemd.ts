@@ -134,6 +134,22 @@ export class SystemdServices implements ServiceManager {
     return {
       dir: this.units, isUnit: n => n.startsWith("morndo-") && isUnitFile(n), marked: t => t.startsWith(`${UNIT_MARK}\n`),
       legacy: (n, t) => legacyService(n, t.split("\n").filter(l => l.trim().startsWith("ExecStart=")).join("\n")),
+      // The environment the earlier unit gave its service (a hub URL, paths) goes into a drop-in, which every later
+      // render leaves alone (systemd.unit(5), drop-in directories): the service starts with it as before.
+      carry: (n, t) => {
+        let inService = false;
+        const lines: string[] = [];
+        for (const raw of t.split("\n")) {
+          const line = raw.trim();
+          if (line.startsWith("[")) inService = line === "[Service]";
+          else if (inService && (line.startsWith("Environment=") || line.startsWith("EnvironmentFile="))) lines.push(line);
+        }
+        if (lines.length === 0) return null;
+        return {
+          path: join(this.units, `${n}.d`, "before-morndo.conf"),
+          text: `# Carried over from the unit before the updater (${n}.before-morndo).\n[Service]\n${lines.join("\n")}\n`,
+        };
+      },
     };
   }
 
