@@ -333,7 +333,7 @@ export type Agent = {
 // into policy.json (the agent keeps the two apart, Task 6: a policy written into config.json would be ignored, and the
 // agent would act on the default tmux server). Not run yet.
 export async function joinAgent(fleet: Fleet, node: string, o: { tmux: TmuxServer; session?: string; policy?: Partial<AgentConfig["policy"]> }): Promise<Agent> {
-  const home = tempDir(`morndo-node-${node}-`);
+  const home = tempDir(`morndo-${node}-`);   // short: see agentAt's check of the job socket's path
   const joinString = fleet.addNode(node);
   // The fleet is a child process, so waiting on `join` synchronously blocks nothing it needs.
   const r = spawnSync(process.execPath, ["--no-warnings", AGENT_MAIN, "join", joinString], { env: cleanEnv(home), encoding: "utf8", timeout: 30_000 });
@@ -350,7 +350,15 @@ export async function joinAgent(fleet: Fleet, node: string, o: { tmux: TmuxServe
   return agentAt(fleet, node, home);
 }
 
+// The agent listens on <home>/.local/state/morndo-node/job.sock, a Unix socket: its path must fit sockaddr_un.sun_path (107
+// bytes on Linux, the same limit as the fleet's client socket in startFleet). Under /tmp a HOME is ~40 bytes; under the
+// RAM scratch (vitest.config.ts ramScratch, /run/user/<uid>/morndo-test-<pid>-<random>-fleet) it is ~65, so a HOME named
+// morndo-node-n1-twin-XXXXXX made the twin's path 110: its listen failed with EINVAL, it exited at start, and flapping.test.ts
+// saw no conflict, no alert (T-279; 0 alerts, not 1, on srv01). Fail here, naming the path, not in a log nobody reads.
+const SUN_PATH_MAX = 107;
 function agentAt(fleet: Fleet, node: string, home: string): Agent {
+  const sock = agentPaths(home).jobSock;
+  if (Buffer.byteLength(sock) > SUN_PATH_MAX) throw new Error(`${node}'s job socket path is ${Buffer.byteLength(sock)} bytes, over the ${SUN_PATH_MAX} a Unix socket allows: ${sock} (a shorter TMPDIR or home prefix)`);
   const configPath = agentPaths(home).configFile;
   const config = () => loadConfig(home);
   const status = async () => (await fleet.client.nodes()).find(n => n.name === node)?.status ?? null;
@@ -419,7 +427,7 @@ function agentAt(fleet: Fleet, node: string, home: string): Agent {
     // A cloned machine: the same config, policy and private key in another HOME, with its own relay port (a clone has its
     // own loopback) and a fresh database (copying a live WAL database could tear it, and the conflict doesn't depend on it).
     async clone() {
-      const twin = tempDir(`morndo-node-${node}-twin-`);
+      const twin = tempDir(`morndo-${node}-t-`);
       const original = config();
       const moved = JSON.parse(readFileSync(configPath, "utf8").replaceAll(home, twin)) as Record<string, unknown> & { keyPath: string };
       mkdirSync(dirname(moved.keyPath), { recursive: true });
