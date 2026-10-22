@@ -1,15 +1,18 @@
-// The Revocations adapter (RL10, design §11.5), until the revocation journals arrive (PR 5c): a restore must never
-// bring back a revoked device, agent token or node. During a probation that may restore, the services still take
-// revocations (RL9), and those rows live only in the database the restore would replace — so before any restore the
-// rollback asks which ids are revoked in the live database and not in this update's Backup of it. Both files are
-// opened read-only. The tables are the services' own: the hub's endpoints and agent_tokens (apps/hub's migrations),
-// the fleet's nodes (apps/fleet's migrations), and the connections store's secrets and secret versions (its
-// store-migrations.ts: status or state 'revoked') and its Connections, kept as JSON in the one-row directory table
-// (body.connections[].status 'revoked'); a table a schema doesn't have yet holds no revocations.
+// The Revocations adapter (RL10, design §11.5): a restore must never bring back a revoked device, agent token or
+// node. During a probation that may restore, the services still take revocations (RL9), and those rows live only in
+// the database the restore would replace — so before any restore the rollback asks which ids are revoked in the live
+// database and not in this update's Backup of it, minus what the service's own journal beside that database holds
+// (§11.5): the service re-applies its journal at every start, so a restore may drop those from the database without
+// dropping the revocation. The connections store journals nothing, so its revocations still gate a restore. Both
+// files are opened read-only. The tables are the services' own: the hub's endpoints and agent_tokens (apps/hub's
+// migrations), the fleet's nodes (apps/fleet's migrations), and the connections store's secrets and secret versions
+// (its store-migrations.ts: status or state 'revoked') and its Connections, kept as JSON in the one-row directory
+// table (body.connections[].status 'revoked'); a table a schema doesn't have yet holds no revocations.
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import type { DatabaseName } from "@morndo/domain";
+import { RevocationJournal, type RevocationKind } from "@morndo/service-kit";
 import type { Revocations } from "../application/ports.ts";
 import type { DatabasePaths } from "./paths.ts";
 
@@ -24,6 +27,26 @@ const REVOKED: Partial<Record<DatabaseName, readonly RevokedRows[]>> = {
     { table: "secret_versions", id: "reference || '#' || version", revoked: "state = 'revoked'" },
   ],
 };
+
+// What each service's journal (§11.5) names by kind, as the `${table}:${id}` ids above are spelled: the hub's
+// endpoints and agent tokens, the fleet's nodes. The connections store has no journal, so it is absent here too.
+const JOURNALED: Partial<Record<DatabaseName, Partial<Record<RevocationKind, string>>>> = {
+  hub: { endpoint: "endpoints", agent_token: "agent_tokens" },
+  fleet: { node: "nodes" },
+};
+
+// The journal a service writes beside its database (revoked.log, service-kit's RevocationJournal), read with the
+// service's own reader. A journal that cannot be read throws, and the restore the answer gates is refused instead.
+function journaledIds(db: DatabaseName, path: string): Set<string> {
+  const byKind = JOURNALED[db];
+  if (byKind === undefined) return new Set();
+  const out = new Set<string>();
+  for (const entry of new RevocationJournal(join(dirname(path), "revoked.log")).entries()) {
+    const table = byKind[entry.kind];
+    if (table !== undefined) out.add(`${table}:${entry.id}`);
+  }
+  return out;
+}
 
 function revokedIn(path: string, tables: readonly RevokedRows[], directory: boolean): Set<string> {
   const out = new Set<string>();
@@ -75,6 +98,7 @@ export class SqliteRevocations implements Revocations {
     if (tables === undefined || !existsSync(backup) || !existsSync(this.#paths[db])) return [];
     const directory = db === "connections";
     const kept = revokedIn(backup, tables, directory);
-    return [...revokedIn(this.#paths[db], tables, directory)].filter(id => !kept.has(id)).sort();
+    const journaled = journaledIds(db, this.#paths[db]);        // the service's start re-applies these (RL10)
+    return [...revokedIn(this.#paths[db], tables, directory)].filter(id => !kept.has(id) && !journaled.has(id)).sort();
   }
 }

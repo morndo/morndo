@@ -4,10 +4,12 @@
 // what the record says afterwards. The kill-and-recover cases live in recovery-service.test.ts (§6.6).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readHold, writeFloor } from "@morndo/service-kit";
+import { RevocationJournal, readHold, writeFloor } from "@morndo/service-kit";
+import { NodesStore } from "../../fleet/src/adapters/nodes-store.ts";
+import { applyRevocationJournal } from "../../fleet/src/application/revocations.ts";
 import {
   A, B, buildApplyWorld, breakBackups, dbFingerprint, holdText, SCHEMAS_A, SCHEMAS_B_FLEET_FLOOR, STALE,
 } from "./helpers/apply-fakes.ts";
@@ -415,6 +417,41 @@ describe("the apply service (§6.2–§6.5)", () => {
     const db = new Database(w.dbPaths.fleet, { readonly: true });
     try { expect(db.prepare("SELECT revoked_at FROM nodes WHERE name = 'node-b'").get()).toEqual({ revoked_at: 1 }); }
     finally { db.close(); }
+  });
+
+  it("a failing migration restores the backup and keeps revocations", async () => {
+    // RL10 with the journals (5c): the revocation the fleet made during probation is journaled beside fleet.db, as
+    // its own revoke writes it, and the fleet re-applies the journal at every start — so the restore is no longer
+    // refused: the rollback restores the fleet's Backup, and the journal is what keeps the node revoked after it.
+    const w = await buildApplyWorld(scratch, { bSchemas: SCHEMAS_B_FLEET_FLOOR });
+    const fleet = new Database(w.dbPaths.fleet);
+    fleet.exec(`CREATE TABLE nodes (name TEXT PRIMARY KEY, revoked_at INTEGER);
+      CREATE TABLE join_codes (hash TEXT PRIMARY KEY, node TEXT, expires_at INTEGER, used_at INTEGER)`);
+    fleet.prepare("INSERT INTO nodes (name, revoked_at) VALUES (?, NULL)").run("node-b");
+    fleet.close();
+    const journal = new RevocationJournal(join(dirname(w.dbPaths.fleet), "revoked.log"));
+    w.services.onStart = (s, current) => {
+      if (s !== "fleet" || current !== B) return;
+      journal.append({ kind: "node", id: "node-b", at: 1 });   // journaled before the write, as the fleet does
+      const db = new Database(w.dbPaths.fleet);
+      db.pragma("user_version = 3");
+      writeFloor(db, 3);
+      db.prepare("UPDATE nodes SET revoked_at = ? WHERE name = ?").run(1, "node-b");   // revoked during probation
+      db.close();
+    };
+    w.probe.healthScript = (s) =>
+      s === "hub" && w.current() === B ? null : { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });       // the restore was allowed
+    expect(w.tape).toContain("backup:restore:fleet");
+
+    // The fleet's own start, as serve.ts runs it: the journal applies over the restored database, and the node the
+    // restore brought back active is revoked again, with its agent refused at the next hello.
+    const db = new Database(w.dbPaths.fleet);
+    const nodes = new NodesStore(db, () => 2, journal);
+    expect(applyRevocationJournal(journal, nodes)).toBe(1);
+    expect(nodes.active("node-b")).toBeNull();
+    db.close();
   });
 
   it("keeps the probation hold fresh while a rollback waits on tmux", async () => {

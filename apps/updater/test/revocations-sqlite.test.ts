@@ -1,8 +1,10 @@
-// The Revocations adapter (RL10 before the journals): which ids a restore of an update's Backup would bring back.
+// The Revocations adapter (RL10): which ids a restore of an update's Backup would bring back — with the revocation
+// journals subtracted, what the service re-applies at its start is no longer dropped.
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
+import { RevocationJournal } from "@morndo/service-kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { databasePaths } from "../src/adapters/paths.ts";
 import { SqliteRevocations } from "../src/adapters/revocations-sqlite.ts";
@@ -79,4 +81,24 @@ describe("SqliteRevocations", () => {
     expect(r.droppedBy("upd-4", "connections")).toEqual(["directory:vendor-a"]);
   });
 
+  it("leaves out what the service's journal beside its database holds, since its start re-applies it", () => {
+    // The hub's journal, as the hub writes it beside morndo.db: the endpoint's revocation is in it, the token's is
+    // not (the hub re-applies the first at its start, so a restore may drop it; the second still gates).
+    const home = join(scratch, "e");
+    const paths = databasePaths(home, {});
+    const backups = join(home, "backups");
+    const hubTables = `CREATE TABLE endpoints (id TEXT PRIMARY KEY, revoked_at INTEGER);
+      CREATE TABLE agent_tokens (id TEXT PRIMARY KEY, revoked_at INTEGER);`;
+    db(join(backups, "upd-5", "hub.db"), `${hubTables}
+      INSERT INTO endpoints VALUES ('phone-b', NULL); INSERT INTO agent_tokens VALUES ('tok-a', NULL);`);
+    db(paths.hub, `${hubTables}
+      INSERT INTO endpoints VALUES ('phone-b', 9); INSERT INTO agent_tokens VALUES ('tok-a', 9);`);
+    new RevocationJournal(join(dirname(paths.hub), "revoked.log")).append({ kind: "endpoint", id: "phone-b", at: 9 });
+    db(join(backups, "upd-5", "fleet.db"), "CREATE TABLE nodes (name TEXT PRIMARY KEY, revoked_at INTEGER); INSERT INTO nodes VALUES ('node-a', NULL);");
+    db(paths.fleet, "CREATE TABLE nodes (name TEXT PRIMARY KEY, revoked_at INTEGER); INSERT INTO nodes VALUES ('node-a', 9);");
+    new RevocationJournal(join(dirname(paths.fleet), "revoked.log")).append({ kind: "node", id: "node-a", at: 9 });
+    const r = new SqliteRevocations({ paths, backups });
+    expect(r.droppedBy("upd-5", "hub")).toEqual(["agent_tokens:tok-a"]);
+    expect(r.droppedBy("upd-5", "fleet")).toEqual([]);
+  });
 });
