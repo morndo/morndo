@@ -2042,6 +2042,10 @@ export const CONTROLS: Control[] = [
     find: "const cut = counted.filter(n => n.agentProtocol === null || n.agentProtocol < min || n.agentProtocol > max).map(n => n.name);",
     replace: "const cut = counted.filter(() => false).map(n => n.name);",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "protocol_dropped" },
+  // T-315 (6b, found by 6d): the walk's own RL7 guard — a staged Version recorded bad here is never walked again.
+  { id: "c3b-rl7-bad-walked", task: "315", file: "apps/updater/src/application/apply-service.ts",
+    find: "if (store.badVersions().some(text =>", replace: "if (false && store.badVersions().some(text =>",
+    run: ["apps/updater/test/apply-service.test.ts"], expect: "recorded bad" },
   { id: "pr1-rl12-halt-ignored", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (rollout.halted) return err(\"halted\");", replace: "if (false) return err(\"halted\");",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "halted" },
