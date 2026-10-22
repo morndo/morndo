@@ -280,6 +280,13 @@ function walk(root: string, exclude: Set<string> = new Set()): TreeFile[] {
 // verifies its own anchor landed, so a moved line in the repository fails the build instead of quietly shipping
 // a release without its marker.
 
+// The number a scratch migration takes: one past the highest the file already holds, whatever main has added since.
+function nextMigration(text: string): number {
+  const numbers = [...text.matchAll(/^\s+version: (\d+),$/gm)].map(m => Number(m[1]));
+  if (numbers.length === 0) throw new Error("migrations.ts: no migration numbers found");
+  return Math.max(...numbers) + 1;
+}
+
 // B (0.2.0): one additive hub migration (§11.2) — an older hub opens the database it leaves, so a rollback to A
 // restores nothing and the marker table stays.
 function additiveMigration(): (copy: string) => void {
@@ -291,7 +298,7 @@ function additiveMigration(): (copy: string) => void {
     const marker = "e2e_b_marker";
     if (text.includes(marker)) throw new Error("migrations.ts: the B marker is already there");
     writeFileSync(path, text.replace(anchor, `  {
-    version: 25,
+    version: ${nextMigration(text)},
     name: "the update-vm run's additive marker (release B; a scratch-copy edit, never shipped)",
     compat: "additive",
     up: db => db.exec("CREATE TABLE IF NOT EXISTS ${marker} (id INTEGER PRIMARY KEY CHECK (id = 1), at INTEGER NOT NULL)"),
@@ -309,7 +316,7 @@ function breakingMigration(): (copy: string) => void {
     const anchor = "];\n\nexport const SCHEMA_VERSION";
     if (!text.includes(anchor) || !text.includes("e2e_b_marker")) throw new Error("migrations.ts: the C edit did not find B's change in place");
     writeFileSync(path, text.replace(anchor, `  {
-    version: 26,
+    version: ${nextMigration(text)},
     name: "the update-vm run's breaking floor (release C; a scratch-copy edit, never shipped)",
     compat: "breaking",
     up: db => db.exec("CREATE TABLE IF NOT EXISTS e2e_c_marker (id INTEGER PRIMARY KEY CHECK (id = 1), at INTEGER NOT NULL)"),
@@ -345,7 +352,7 @@ function failingMigration(): (copy: string) => void {
     const anchor = "];\n\nexport const SCHEMA_VERSION";
     if (!text.includes(anchor) || !text.includes("e2e_b_marker")) throw new Error("migrations.ts: the 0.3.1 edit did not find B's change in place");
     writeFileSync(path, text.replace(anchor, `  {
-    version: 26,
+    version: ${nextMigration(text)},
     name: "the update-vm run's failing migration (release 0.3.1; a scratch-copy edit, never shipped)",
     compat: "additive",
     up: () => { throw new Error("the update-vm run's planted migration failure (release 0.3.1)"); },
@@ -381,7 +388,7 @@ function secondAdditiveMigration(): (copy: string) => void {
     const anchor = "];\n\nexport const SCHEMA_VERSION";
     if (!text.includes(anchor) || !text.includes("e2e_b_marker")) throw new Error("migrations.ts: the 0.4.0 edit did not find B's change in place");
     writeFileSync(path, text.replace(anchor, `  {
-    version: 26,
+    version: ${nextMigration(text)},
     name: "the update-vm run's second additive marker (release 0.4.0; a scratch-copy edit, never shipped)",
     compat: "additive",
     up: db => db.exec("CREATE TABLE IF NOT EXISTS e2e_d_marker (id INTEGER PRIMARY KEY CHECK (id = 1), at INTEGER NOT NULL)"),
