@@ -516,6 +516,7 @@ export type FeedWatch = {
   workers(): { id: string; name: string }[];
   seen: Set<string>; names: Set<string>;                        // every worker id and name the hub ever listed here
   screens: { worker: string; text: string; got: number }[];    // screen frames of the watched worker
+  alerts: { kind: string; detail: Record<string, unknown> }[];  // the latest alerts frame's items
   watch(worker: string | null): void; close(): void;
 };
 export type Reply = { status: number; body: Record<string, unknown> };
@@ -628,6 +629,7 @@ export async function startHub(fleet: Fleet, o: { pollMs?: number; web?: "stub" 
 
 type FeedFrame = {
   t: string; workers?: { id: string; name: string }[]; worker?: string; text?: string;
+  items?: { kind: string; detail: Record<string, unknown> }[];
   events?: { body: { type: string; worker?: { id: string; name: string }; workerId?: string; name?: string } }[];
 };
 async function openFeed(base: string, origin: string, secret: string): Promise<FeedWatch> {
@@ -636,6 +638,7 @@ async function openFeed(base: string, origin: string, secret: string): Promise<F
   const seen = new Set<string>();
   const names = new Set<string>();
   const screens: FeedWatch["screens"] = [];
+  const alerts: FeedWatch["alerts"] = [];
   let snapshots = 0;
   const add = (id: string, name: string) => { roster.set(id, name); seen.add(id); names.add(name); };
   ws.on("message", raw => {
@@ -648,6 +651,7 @@ async function openFeed(base: string, origin: string, secret: string): Promise<F
         else if (b.type === "WorkerGone" && b.workerId) roster.delete(b.workerId);
       }
     } else if (m.t === "screen" && m.worker && typeof m.text === "string") screens.push({ worker: m.worker, text: m.text, got: performance.now() });
+    else if (m.t === "alerts") alerts.splice(0, alerts.length, ...(m.items ?? []));
   });
   ws.on("error", () => { /* a hub that went away: the test's own checks say what failed */ });
   await new Promise<void>((resolve, reject) => {
@@ -659,7 +663,7 @@ async function openFeed(base: string, origin: string, secret: string): Promise<F
   await until("the hub's first snapshot", () => snapshots > 0);
   return {
     workers: () => [...roster].map(([id, name]) => ({ id, name })),
-    seen, names, screens,
+    seen, names, screens, alerts,
     watch: worker => ws.send(JSON.stringify({ t: "watch", worker })),
     close: () => ws.close(),
   };
