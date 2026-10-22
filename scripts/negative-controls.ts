@@ -1265,7 +1265,7 @@ export const CONTROLS: Control[] = [
     find: "startedAt: pid === null ? null : starts.at(pid)", replace: "startedAt: null",
     run: ["apps/node-agent/test/deliverer-tmux.test.ts"], expect: "gives each lane its pane process's start" },
   { id: "fc5-cancel-while-typing", task: "fc5", file: "apps/node-agent/src/deliveries/deliverer.ts",
-    find: "    if (this.#trying.has(id)) return err(\"busy\", \"the delivery is being typed right now; ask again in a moment\");\n",
+    find: "    if (this.#trying.has(id) || this.#busyByHook()) return err(\"busy\", \"the delivery is being typed right now; ask again in a moment\");\n",
     replace: "",
     run: ["apps/node-agent/test/deliverer.test.ts"], expect: "busy" },
   { id: "fc5-no-replay", task: "fc5", file: "apps/node-agent/src/agent.ts",
