@@ -19,9 +19,9 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { WebSocket } from "ws";
 import {
-  CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, readOpError, redactText, RunViewSchema, toLogFormat, type Alert, type AlertKind,
-  type Delivery, type DeliveryState, type Health, type JobsList, type LaneEvent, type LaneWatchEntry, type OpArgs, type OpError, type OpName, type OpResult,
-  type RunView,
+  CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, readOpError, redactText, RolloutWireSchema, RunViewSchema, SEMVER, toLogFormat,
+  type Alert, type AlertKind, type Delivery, type DeliveryState, type Health, type JobsList, type LaneEvent, type LaneWatchEntry, type OpArgs, type OpError,
+  type OpName, type OpResult, type RolloutWire, type RunView,
 } from "@morndo/protocol";
 
 export type NodeStatus = "online" | "stale" | "offline";
@@ -34,12 +34,14 @@ const stderrLog = (level: "warn" | "error") => (message: string, error?: unknown
 const STDERR_LOG: FleetLog = { warn: stderrLog("warn"), error: stderrLog("error") };
 export type FleetNode = { name: string; status: NodeStatus; health: Health | null; agent: string | null };
 export type FleetLane = { name: string; node: string; workerId: string | null; conflict: boolean };
-// `alert`: its body is an Alert, and `node` is the alert's node or "". `delivery`, `lane` (fleet clients §4.4, §7) and
-// `run` (a lane's Run, ADR-0032): their bodies are checked here, so they come typed.
+// `alert`: its body is an Alert, and `node` is the alert's node or "". `delivery`, `lane` (fleet clients §4.4, §7),
+// `run` (a lane's Run, ADR-0032) and `rollout` (the Rollout as it stands, updates §7): their bodies are checked here,
+// so they come typed.
 export type FleetEvent = { t: "inventory" | "health" | "status" | "conflict" | "alert" | "job"; node: string; body: unknown }
   | { t: "delivery"; node: string; body: Delivery & { stale: boolean } }
   | { t: "lane"; node: string; body: LaneEvent }
-  | { t: "run"; node: string; body: RunView };
+  | { t: "run"; node: string; body: RunView }
+  | { t: "rollout"; node: string; body: RolloutWire };
 // A delivery as the fleet serves it: its latest state, and whether its node is offline now (stale).
 export type FleetDelivery = Delivery & { stale: boolean };
 export type OpTarget = { workerId: string } | { node: string } | { lane: string };
@@ -107,12 +109,17 @@ const CLIENT_NAME = /^[a-z]{1,16}$/;
 const FILE_IDLE_MS = 30_000;
 const RECONNECT_MS = [1000, 2000, 5000, 10_000, 30_000] as const;
 const STATUSES = new Set<string>(["online", "stale", "offline"]);
-const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "alert", "delivery", "lane", "job", "run"]);
-// "unrouted_hook": hook events for a script path no subscriber takes (ADR-0012 decision 8; detail { path, events }).
-// "delivery_waiting" and "subscriber_lagging": fleet clients §4.5, §6. "job_failed" and "job_unnoticed": ADR-0017.
-// "engine_fallback": ADR-0027. "draft_stashed": a lane's unsent draft put away so its deliveries went in (#64).
-const ALERT_KINDS = new Set<string>(["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter",
-  "backlog_full", "unrouted_hook", "delivery_waiting", "subscriber_lagging", "job_failed", "job_unnoticed", "engine_fallback", "draft_stashed"] satisfies AlertKind[]);
+const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "alert", "delivery", "lane", "job", "run", "rollout"]);
+// The alert kinds this client knows, a copy of the protocol's own list (packages/protocol ALERT_KINDS) so a read of
+// GET /v1/alerts can filter what it doesn't know without importing the set at call time. "unrouted_hook": hook events
+// for a script path no subscriber takes (ADR-0012 decision 8; detail { path, events }). "delivery_waiting" and
+// "subscriber_lagging": fleet clients §4.5, §6. "job_failed" and "job_unnoticed": ADR-0017. "connection": the
+// connections store (ADR-0025). "engine_fallback": ADR-0027. "draft_stashed": a lane's unsent draft put away so its
+// deliveries went in (#64). The four update kinds: the updates design §7.
+// tests/rollout.test.ts checks this copy against the protocol's, so neither drifts from the other.
+export const ALERT_KINDS = new Set<string>(["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter",
+  "backlog_full", "unrouted_hook", "delivery_waiting", "subscriber_lagging", "job_failed", "job_unnoticed", "connection", "engine_fallback", "draft_stashed",
+  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked"] satisfies AlertKind[]);
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // A store sequence as the fleet passes it on, or null: absent, null, or not a count (never guessed at).
@@ -272,6 +279,42 @@ export class FleetClient {
     if (!isRecord(v) || !Array.isArray(v.runs)) throw new FleetMismatch("GET /v1/runs: not a list of runs");
     return v.runs.map(r => parseBody(RunViewSchema, r)).filter((r): r is RunView => r !== null);
   }
+  // The Rollout as the fleet carries it (updates §7): the build its control plane runs — the ceiling for every
+  // node's Version (RL11) — and the Rollout of the highest Version it holds, null while it has committed none. The
+  // `rollout` event carries the same body on every change of it.
+  async rollout(): Promise<{ controlPlane: { version: string; commit: string | null }; rollout: RolloutWire | null }> {
+    const v = await this.#json("GET", "/v1/rollout");
+    if (!isRecord(v) || !isRecord(v.controlPlane) || typeof v.controlPlane.version !== "string" || !SEMVER.test(v.controlPlane.version)
+      || !(v.controlPlane.commit === null || (typeof v.controlPlane.commit === "string" && /^[0-9a-f]{40}$/.test(v.controlPlane.commit))))
+      throw new FleetMismatch("GET /v1/rollout: not a rollout answer");
+    const rollout = v.rollout === null ? null : parseBody(RolloutWireSchema, v.rollout);
+    if (v.rollout !== null && rollout === null) throw new FleetMismatch("GET /v1/rollout: the rollout doesn't fit the wire");
+    return { controlPlane: v.controlPlane as { version: string; commit: string | null }, rollout };
+  }
+  // The control plane commits its own running Version (updates §4.3): the Rollout it answers is the one now in
+  // flight. A refusal (a Version the control plane doesn't run itself) throws FleetOpFailed — nothing was committed.
+  async rolloutCommitted(version: string, soakMinutes?: number): Promise<RolloutWire> {
+    return this.#rolloutWrite("committed", { version, ...(soakMinutes === undefined ? {} : { soakMinutes }) });
+  }
+  // One machine's rollback, or the principal's hand, stops the Rollout of a Version everywhere (RL12).
+  async haltRollout(version: string, machine: string, reason: string): Promise<RolloutWire> {
+    return this.#rolloutWrite("halt", { version, machine, reason });
+  }
+  // The principal's word resumes a halted Rollout; not_halted is a refusal (FleetOpFailed), nothing changed.
+  async resumeRollout(version: string): Promise<RolloutWire> {
+    return this.#rolloutWrite("resume", { version });
+  }
+  // The three rollout writes: `ok: true` answers the Rollout now in force; a refusal carries its reason in the body
+  // whatever the status (409 not_allowed or not_halted, 400 a body that doesn't fit), and nothing was written; an
+  // answer that is neither leaves the write in doubt, as an op's does.
+  async #rolloutWrite(kind: "committed" | "halt" | "resume", body: Record<string, unknown>): Promise<RolloutWire> {
+    const v = (await this.#outcome("POST", `/v1/rollout/${kind}`, body)).value;
+    const rollout = isRecord(v) && v.ok === true ? parseBody(RolloutWireSchema, v.rollout) : null;
+    if (rollout) return rollout;
+    const refused = isRecord(v) && typeof v.error === "string" && typeof v.message === "string" ? readOpError(v.error, "no", v.message) : null;
+    if (refused) throw new FleetOpFailed(`rollout/${kind}`, refused);
+    throw new FleetUnavailable(`POST /v1/rollout/${kind}: not a rollout answer`, true);
+  }
   // A file on a node, streamed (GET /v1/files): the fleet reads it in chunks of at most 256 KiB under the node's rules.
   async *fileStream(node: string, refOrPath: string): AsyncIterable<Uint8Array> {
     const path = `/v1/files/${encodeURIComponent(node)}/${encodeURIComponent(refOrPath)}`;
@@ -356,6 +399,10 @@ export class FleetClient {
           const body = parseBody(RunViewSchema, v.body);
           if (!body) { this.#log.warn("fleet events: a run event of an unknown shape, ignored"); return; }
           e = { t: "run", node: v.node, body };
+        } else if (v.t === "rollout") {
+          const body = parseBody(RolloutWireSchema, v.body);
+          if (!body) { this.#log.warn("fleet events: a rollout event of an unknown shape, ignored"); return; }
+          e = { t: "rollout", node: v.node, body };
         } else {
           e = { t: v.t as "inventory" | "health" | "status" | "conflict" | "alert" | "job", node: v.node, body: v.body };
         }

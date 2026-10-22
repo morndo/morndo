@@ -28,6 +28,7 @@ import type { Connections, Peer } from "../application/connections.ts";
 import type { Deliveries } from "../application/deliveries.ts";
 import type { HookSink, IntakeHandle } from "../application/hook-sink.ts";
 import type { JobMirror } from "../application/job-mirror.ts";
+import type { Rollouts } from "../application/rollouts.ts";
 import type { Audit } from "./audit.ts";
 import type { FleetKey } from "./keys.ts";
 import { verifySig } from "./keys.ts";
@@ -38,6 +39,8 @@ import type { RateLimiter } from "./rate-limit.ts";
 export type SessionDeps = {
   connections: Connections; nodes: NodesStore; audit: Audit; fleetKey: FleetKey; hooks: HookSink; jobs: JobMirror; log: Logger;
   deliveries: Pick<Deliveries, "fromNode" | "heldByOther">;
+  // The welcome's two updates fields (updates §7): this fleet's own build, and the Rollout as it stands.
+  rollouts: Pick<Rollouts, "latest">; build: { version: string; commit: string | null };
   limiter: RateLimiter; handshakes: { take(source: string): boolean }; handshakeMs: number; source: string;
 };
 
@@ -149,7 +152,7 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
         state = { kind: "admitting" };
         d.connections.admit({
           node: hello.node, instanceId: hello.instanceId, streamId: hello.streamId, peer, source: d.source, agentVersion: hello.agent.version, agentCommit: hello.agent.commit ?? null,
-          claudeVersion: hello.claude.version, caps: hello.caps,
+          claudeVersion: hello.claude.version, caps: hello.caps, proto: hello.proto,
         }, epoch => {
           clearTimeout(handshake);
           state = { kind: "live", node: hello.node, instanceId: hello.instanceId, streamId: hello.streamId };
@@ -158,7 +161,12 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
           // The highest store sequence this store has shown (fleet.db): an agent whose database is behind it was put
           // back from an older copy, and starts a new store before it runs anything (spec §5.2). None known: omitted.
           const seen = d.connections.storeSeqSeen(hello.node, hello.streamId);
-          send({ v: 1, t: "welcome", connEpoch: epoch, ackSeq: mark.seq, streamKnown: mark.known, ...(seen === null ? {} : { storeSeqSeen: seen }) });
+          // With it (updates §7) the control plane's own build — what a node's updater checks its Versions against
+          // (RL11) — and the Rollout as it stands, null while the control plane has committed none.
+          send({
+            v: 1, t: "welcome", connEpoch: epoch, ackSeq: mark.seq, streamKnown: mark.known, ...(seen === null ? {} : { storeSeqSeen: seen }),
+            controlPlane: { version: d.build.version, commit: d.build.commit }, rollout: d.rollouts.latest(),
+          });
           try { d.jobs.retry(hello.node); } catch (e) { d.log.error(`node ${hello.node}: retrying job notices failed`, e); }
           try { d.jobs.pushNotices(hello.node); } catch (e) { d.log.error(`node ${hello.node}: sending notice results failed`, e); }
         }).then(admitted => {

@@ -198,6 +198,11 @@ export class FleetConnection {
           if (phase !== "online") { protocolError("an ack before welcome"); return; }
           o.onAck(msg);
           return;
+        case "rollout":
+          // This version announces no capability for Rollout pushes, so a fleet that reads the caps never sends one;
+          // a fleet that does anyway is tolerated: the frame asks nothing of an agent this old (updates §7).
+          o.log.debug("a rollout message this agent did not ask for; ignored");
+          return;
       }
     });
     ws.on("error", e => o.log.debug(`connection error: ${(e as NodeJS.ErrnoException).code ?? e.message}`));

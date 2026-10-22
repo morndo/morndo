@@ -28,7 +28,12 @@
 //   GET  /v1/lane-watch                { lanes: LaneWatchEntry[] }: each
 //                                      lane's last turn as the lane watch holds it (reliable lanes §3.2, the brief)
 //   GET  /v1/runs                      { runs: RunView[] }: each lane's Run, by lane (ADR-0032, runs.ts)
-//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run", node, body };
+//   GET  /v1/rollout                   { controlPlane: { version, commit }, rollout: RolloutWire | null } (updates §7)
+//   POST /v1/rollout/committed         { version, soakMinutes? } → { ok: true, rollout }; 409 not_allowed for a
+//                                      Version the control plane doesn't run itself
+//   POST /v1/rollout/halt              { version, machine, reason } → { ok: true, rollout }
+//   POST /v1/rollout/resume            { version } → { ok: true, rollout }; 409 not_halted when nothing is halted
+//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run" | "rollout", node, body };
 //                                      a client more than eventsBufferBytes behind is closed with 1013 (it reconnects
 //                                      and gets the current state first)
 // The path is split on "/" before any segment is decoded, so a name or path holding "/" (as %2F) stays one segment
@@ -49,6 +54,7 @@ import type { JobMirror } from "../application/job-mirror.ts";
 import type { LaneRegistry } from "../application/lane-registry.ts";
 import { SIDE_EFFECT_OPS, opError, type Outcome } from "../application/requests.ts";
 import type { Router } from "../application/router.ts";
+import type { Rollouts } from "../application/rollouts.ts";
 import type { Runs } from "../application/runs.ts";
 import type { Audit } from "./audit.ts";
 import { parseDeliveryBody } from "./delivery-body.ts";
@@ -56,6 +62,7 @@ import { streamFile } from "./files-route.ts";
 import type { Logger } from "./log.ts";
 import type { NodesStore } from "./nodes-store.ts";
 import { parseOpBody } from "./op-body.ts";
+import { parseRolloutBody } from "./rollout-body.ts";
 import { clearStaleSocket, prepareSocketDir } from "./socket-dir.ts";
 import { SCHEMA_VERSION } from "./migrations.ts";
 
@@ -72,6 +79,7 @@ class HttpError extends Error {
 export type ClientApiDeps = {
   router: Router; connections: Connections; lanes: LaneRegistry; nodes: NodesStore; audit: Audit; events: EventHub; jobs: JobMirror; log: Logger;
   deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">; laneWatch?: Pick<LaneWatch, "view">; runs?: Pick<Runs, "view">;
+  rollouts: Pick<Rollouts, "committed" | "halt" | "resume" | "latest" | "controlPlane">;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
 };
@@ -261,6 +269,37 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     }
     if (method === "GET" && s.length === 1 && first === "lane-watch") return json(res, 200, { lanes: d.laneWatch?.view() ?? [] });
     if (method === "GET" && s.length === 1 && first === "runs") return json(res, 200, { runs: d.runs?.view() ?? [] });
+    // The Rollout the fleet carries (updates §7): reads answer however the fleet stands; the writes share the ops'
+    // hold refusal (RL9) — nothing moves while the fleet updates itself.
+    if (method === "GET" && s.length === 1 && first === "rollout") {
+      return json(res, 200, { controlPlane: d.rollouts.controlPlane(), rollout: d.rollouts.latest() });
+    }
+    if (method === "POST" && s.length === 2 && first === "rollout" && (second === "committed" || second === "halt" || second === "resume")) {
+      if (held()) return json(res, 503, { error: "updating", message: "the fleet is not taking new work while it updates" }, { "Retry-After": "1" });
+      let body: unknown;
+      try { body = await readJson(req); }
+      catch (e) {
+        if (!(e instanceof HttpError)) throw e;
+        return json(res, e.status, { error: e.message });
+      }
+      const parsed = parseRolloutBody(second, body);
+      if (!parsed.ok) throw new HttpError(400, parsed.message);
+      if (parsed.kind === "committed") {
+        const r = d.rollouts.committed(parsed.version, parsed.soakMinutes);
+        if (!r.ok) return json(res, 409, { error: r.refused, message: r.message });
+        d.audit.record("client", "rollout.committed", null, { version: parsed.version, client: clientOf(req) });
+        return json(res, 200, { ok: true, rollout: r.rollout });
+      }
+      if (parsed.kind === "halt") {
+        const r = d.rollouts.halt(parsed.version, parsed.machine, parsed.reason);
+        if (r.changed) d.audit.record("client", "rollout.halted", null, { version: parsed.version, client: clientOf(req) });
+        return json(res, 200, { ok: true, rollout: r.rollout });
+      }
+      const r = d.rollouts.resume(parsed.version);
+      if (!r.ok) return json(res, 409, { error: r.refused, message: r.message });
+      d.audit.record("client", "rollout.resumed", null, { version: parsed.version, client: clientOf(req) });
+      return json(res, 200, { ok: true, rollout: r.rollout });
+    }
     if (method === "POST" && s.length === 1 && first === "deliveries") {
       let body: unknown;
       try { body = await readJson(req); }

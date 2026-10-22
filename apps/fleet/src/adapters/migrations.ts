@@ -239,6 +239,21 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX IF NOT EXISTS lane_events_by_session ON lane_events (session_id, seq) WHERE session_id IS NOT NULL;
     `),
   },
+  {
+    version: 16,
+    name: "the Rollout the fleet carries (updates §4.2, §7): one row per Version, the halted state durable",
+    compat: "additive",
+    up: db => db.exec(`
+      -- The Rollout of each Version the control plane committed (rollouts). halt_* are set when a node's rollback
+      -- stopped it (RL12) and cleared by a resume; they are synced (a halt must outlive the machine), so the fleet
+      -- answers GET /v1/rollout with the same Rollout after a restart. resumed_at: the last resume, for the audit's
+      -- story. No CHECK constraints (the additive lint's rule) — the application service holds the words.
+      CREATE TABLE IF NOT EXISTS rollouts (
+        version TEXT PRIMARY KEY, control_plane_committed_at INTEGER, soak_minutes INTEGER NOT NULL DEFAULT 30,
+        halted INTEGER NOT NULL DEFAULT 0, halted_by TEXT, halt_reason TEXT, halted_at INTEGER, resumed_at INTEGER,
+        updated_at INTEGER NOT NULL DEFAULT 0);
+    `),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

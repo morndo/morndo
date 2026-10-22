@@ -68,4 +68,7 @@ export const CHECK: Checkers = {
   "connections.role": decoded("connections.role"),
   "connections.revoke": decoded("connections.revoke"),
   "connections.narrow": decoded("connections.narrow"),
+  // Updates §5.4: the arguments as the fleet checked them (a Version). This node has no handler for the op yet —
+  // the executor answers unknown_op for it — and never announces CAP_UPDATE, so the fleet sends it none.
+  "update.apply": decoded("update.apply"),
 };

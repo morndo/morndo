@@ -333,7 +333,7 @@ launchd has no ordering, so on macOS the staged Version applies at the first saf
 2. Its commit starts the soak: 30 minutes by default.
 3. Each node applies once the control plane runs the target or newer (RL11), the Rollout isn't halted (RL12), the soak has passed, and after a random delay of up to 15 minutes, so two nodes rarely restart at once.
 
-A node learns the control plane's Version and the Rollout's state from the fleet's `welcome` and a new `rollout` event (optional fields: protocol 1 still parses). It reports its own update state in its `health` message (optional fields too).
+A node learns the control plane's Version and the Rollout's state from the fleet's `welcome` (optional fields, so an agent that predates them still parses the frame) and from the `rollout` message the fleet sends on every change — but only once the node announced the `rollout` capability in its hello's caps, because an agent closes an unknown frame type (1008) rather than skipping it: the fleet sends the message only to agents that asked for it. It reports its own update state in its `health` message (optional fields too).
 
 **Skew rules.**
 
