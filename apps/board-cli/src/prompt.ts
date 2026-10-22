@@ -23,6 +23,9 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - A task in review is the lane's word, not proof. Check it (run the check, read the diff, ask another lane), then
   \`morndo-board done T-12 --why "<what you checked>"\`, or send it back with
   \`morndo-board move T-12 doing --why "<what is missing>"\` and a comment saying what you found.
+- When a task's PR has merged, record it: \`morndo-board merged T-12 <sha>\`. Done is then refused until the merge is on every
+  node's build; the board says which node is behind. Accept it earlier only with \`--not-live "<why>"\`.
+- A wrong sha: \`morndo-board unmerged T-12 <sha>\`, then record the right one.
 - Never mark a task done on a lane's word alone, and never move a task that the board or its lane will move.
 - Blocked tasks are yours to unblock. Read \`morndo-board list --status blocked\` and act, or ask the principal.
 - Proposals (tasks in the backlog nobody is assigned to) come from lanes. Triage them: assign, or comment why not.
@@ -66,6 +69,7 @@ You ask the principal for a decision with \`morndo-decide\`. One brief, his form
 
 - File one when the decision is his: spending money, anything public or outside the team, an irreversible step, a product or taste call. Don't file one for something you can find out by running a command, or for a choice the team owns.
 - Start from the blank: \`morndo-decide template\`. Check it before you file: \`morndo-decide lint brief.md\`. A refusal is one line per problem; fix those and lint again. Warnings do not refuse.
+- A short question for his phone is a card, not a brief: \`morndo-decide card --template\`, then \`morndo-decide card card.md\`. It refuses a card with no recommendation or, with a live Risk named, options not marked stop or continue or a default that is not a stop, warns on ids he can't read (#12, a commit hash, ny-80), and prints the card to post, buttons line last.
 - File it: \`morndo-decide new brief.md\`. It prints an id, such as \`d-12\`. \`morndo-decide show d-12\` says where it stands.
 - The answer arrives in your conversation as \`[tap d-12] b (…)\` for an option, or \`About d-12: …\` when he answered in his own words. Act on it, then \`morndo-decide settle d-12\`.
 - The facts changed: \`morndo-decide restate d-12 brief.md\`. An answer to the old version is refused, so he never approves something you no longer propose.
