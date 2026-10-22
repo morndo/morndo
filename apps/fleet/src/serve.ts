@@ -71,10 +71,13 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   // from an older copy (the updater's rollback) brings no revoked node back.
   const journal = new RevocationJournal(join(dirname(config.dbPath), "revoked.log"));
   const nodes = new NodesStore(db, now, journal);
-  const reapplied = applyRevocationJournal(journal, nodes);
-  if (reapplied > 0) log.info(`re-applied ${reapplied} revocations from revoked.log`);
   const events = new EventHub(e => log.error("an event subscriber failed", e));
   const audit = new Audit(db, { now, log, onAlert: a => events.emit({ t: "alert", node: a.node ?? "", body: a }) });
+  // A line the journal cannot read is an Alert, never a refusal to start: the rest of the journal still applies.
+  const reapplied = applyRevocationJournal(journal, nodes);
+  if (reapplied.applied > 0) log.info(`re-applied ${reapplied.applied} revocations from revoked.log`);
+  for (const b of reapplied.bad) audit.alert("journal_unreadable", null, { file: "revoked.log", line: b.line, why: b.why });
+  if (journal.compact()) log.info("revoked.log compacted to one entry per revocation");
   // On start and daily; a busy or full fleet.db is logged and tried again the next day, never thrown out of the timer.
   const pruneAudit = () => {
     try { const n = audit.prune(); if (n > 0) log.info(`audit: removed ${n} rows older than 90 days`); }

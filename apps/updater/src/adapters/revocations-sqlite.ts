@@ -35,16 +35,45 @@ const JOURNALED: Partial<Record<DatabaseName, Partial<Record<RevocationKind, str
   fleet: { node: "nodes" },
 };
 
-// The journal a service writes beside its database (revoked.log, service-kit's RevocationJournal), read with the
-// service's own reader. A journal that cannot be read throws, and the restore the answer gates is refused instead.
-function journaledIds(db: DatabaseName, path: string): Set<string> {
+// The file in a Version's tree that applies a service's journal at its start (apps/<service>/src/application/
+// revocations.ts): a Version without it (one from before the journals) applies nothing, so a rollback to it may
+// excuse nothing by the journal. A later rename of the file only makes this stricter, never looser.
+const APPLIER: Partial<Record<DatabaseName, string>> = {
+  hub: "app/apps/hub/src/application/revocations.ts",
+  fleet: "app/apps/fleet/src/application/revocations.ts",
+};
+
+// The ids the journal beside a service's database (revoked.log, read with the service's own reader) will revoke
+// again at the service's next start over the restored `backup`. Hub ids are never reused. A node's entry revokes one
+// enrolment, so it covers the node only when the row the backup brings back is that enrolment: a node revoked, joined
+// again and revoked again is covered by the entry of the enrolment the backup holds, or by none. Bad lines cover
+// nothing (the service skips them too).
+function journaledIds(db: DatabaseName, path: string, backup: string): Set<string> {
   const byKind = JOURNALED[db];
   if (byKind === undefined) return new Set();
+  const entries = new RevocationJournal(join(dirname(path), "revoked.log")).entries();
   const out = new Set<string>();
-  for (const entry of new RevocationJournal(join(dirname(path), "revoked.log")).entries()) {
+  const enrolmentInBackup = db === "fleet" ? nodeEnrolments(backup) : new Map<string, string>();
+  for (const entry of entries) {
     const table = byKind[entry.kind];
-    if (table !== undefined) out.add(`${table}:${entry.id}`);
+    if (table === undefined) continue;
+    if (entry.kind === "node" && enrolmentInBackup.get(entry.id) !== entry.enrolment) continue;
+    out.add(`${table}:${entry.id}`);
   }
+  return out;
+}
+
+// Each node's enrolment as a fleet.db holds it; a database from before the enrolment column holds none.
+function nodeEnrolments(path: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const db = new Database(path, { readonly: true, fileMustExist: true });
+  try {
+    const columns = db.prepare("SELECT name FROM pragma_table_info('nodes')").all() as { name: string }[];
+    if (!columns.some(c => c.name === "enrolment")) return out;
+    for (const r of db.prepare("SELECT name, enrolment FROM nodes WHERE enrolment IS NOT NULL").all() as { name: string; enrolment: string }[]) {
+      out.set(r.name, r.enrolment);
+    }
+  } finally { db.close(); }
   return out;
 }
 
@@ -85,20 +114,26 @@ function revokedConnections(body: string | undefined): string[] {
 export class SqliteRevocations implements Revocations {
   readonly #paths: DatabasePaths;
   readonly #backups: string;
+  readonly #releases: string;
 
-  // `backups` is the same directory SqliteBackup keeps its copies in: <backups>/<updateId>/<db>.db.
-  constructor(o: { paths: DatabasePaths; backups: string }) {
+  // `backups` is the same directory SqliteBackup keeps its copies in: <backups>/<updateId>/<db>.db. `releases` holds
+  // the Version trees (<releases>/<version>/), where the target's own code says whether it applies journals.
+  constructor(o: { paths: DatabasePaths; backups: string; releases: string }) {
     this.#paths = o.paths;
     this.#backups = o.backups;
+    this.#releases = o.releases;
   }
 
-  droppedBy(updateId: string, db: DatabaseName): string[] {
+  droppedBy(updateId: string, db: DatabaseName, target: string): string[] {
     const tables = REVOKED[db];
     const backup = join(this.#backups, updateId, `${db}.db`);
     if (tables === undefined || !existsSync(backup) || !existsSync(this.#paths[db])) return [];
     const directory = db === "connections";
     const kept = revokedIn(backup, tables, directory);
-    const journaled = journaledIds(db, this.#paths[db]);        // the service's start re-applies these (RL10)
+    // The service's start re-applies these (RL10) — when the Version going back in applies journals at all.
+    const applier = APPLIER[db];
+    const journals = applier !== undefined && existsSync(join(this.#releases, target, applier));
+    const journaled = journals ? journaledIds(db, this.#paths[db], backup) : new Set<string>();
     return [...revokedIn(this.#paths[db], tables, directory)].filter(id => !kept.has(id) && !journaled.has(id)).sort();
   }
 }

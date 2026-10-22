@@ -216,5 +216,5 @@ export interface AlertSink { raise(kind: AlertKind, detail: string): void }
 export interface Revocations {
   /** The ids revoked in the live database that are not revoked in this update's Backup of it: what a restore would
    *  bring back. Empty for a database that holds no revocations, or when there is no Backup to compare. */
-  droppedBy(updateId: string, db: DatabaseName): string[];
+  droppedBy(updateId: string, db: DatabaseName, target: string): string[];
 }

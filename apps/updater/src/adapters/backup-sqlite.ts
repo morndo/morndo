@@ -13,6 +13,20 @@ import type { DatabaseName } from "@morndo/domain";
 import type { DatabasePaths } from "./paths.ts";
 import type { Backup, BackupResult } from "../application/ports.ts";
 
+// RL10 (§11.5, amending S5): a restored hub database is another store, whatever inode the rename leaves it on (an
+// inode can come back after two restores). Its store row goes before the copy is renamed in, so the hub's next start
+// finds none and makes a new store id: a Command stamped with the store before the restore is answered uncertain.
+// The copy is put in rollback-journal mode for this one write, so no -wal is left beside it; the hub sets WAL again
+// when it opens the database.
+function forgetHubStore(path: string): void {
+  const d = new Database(path);
+  try {
+    d.pragma("journal_mode = DELETE");
+    const known = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'hub_store'").get();
+    if (known !== undefined) d.prepare("DELETE FROM hub_store").run();
+  } finally { d.close(); }
+}
+
 export class SqliteBackup implements Backup {
   readonly #paths: DatabasePaths;
   readonly #backups: string;
@@ -70,6 +84,7 @@ export class SqliteBackup implements Backup {
     const target = this.#paths[db];
     const beside = `${target}.restore`;
     copyFileSync(backup, beside);
+    if (db === "hub") forgetHubStore(beside);
     const fd = openSync(beside, "r+");
     try { fsyncSync(fd); } finally { closeSync(fd); }
     rmSync(`${target}-wal`, { force: true });

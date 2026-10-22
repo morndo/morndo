@@ -134,7 +134,10 @@ const journal = new RevocationJournal(join(config.dataDir, "revoked.log"));
 const access = new AccessService(store, passkeys(config), Date.now, journal);
 const agents = new AgentAccess(store, config.managerWindow, Date.now, journal);
 const reapplied = applyRevocationJournal(journal, { access, agents });
-if (reapplied > 0) log.info(`re-applied ${reapplied} revocations from revoked.log`);
+if (reapplied.applied > 0) log.info(`re-applied ${reapplied.applied} revocations from revoked.log`);
+// A bad line is reported and skipped, never a refusal to start (the hub's Alerts are the fleet's; this is its log).
+for (const b of reapplied.bad) log.error(`revoked.log line ${b.line} skipped, not a revocation entry: ${b.why}`);
+if (journal.compact()) log.info("revoked.log compacted to one entry per revocation");
 const [cmd = "serve", ...args] = process.argv.slice(2);
 const when = (t: number | null) => (t === null ? "-" : new Date(t).toLocaleString());
 // The console commands' own output, for the person at the box (a pairing link must show as it is): not a log.

@@ -258,9 +258,11 @@ export type RunView = Run;
 // the client API's GET /v1/alerts and sent as the "alert" event. `detail` is per kind (plan Contracts, "Alerts").
 // delivery_waiting: a delivery still queued, typed or held after 2, 15 and 60 minutes (fleet clients §4.5);
 // subscriber_lagging: a subscriber's oldest undelivered event is older than 60 s (§6);
-// draft_stashed: a node stashed a lane's unsent draft so its deliveries could go in (#64).
+// draft_stashed: a node stashed a lane's unsent draft so its deliveries could go in (#64);
+// journal_unreadable: a line of the fleet's revocation journal it could not read and skipped (updates design §11.5).
 export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter", "backlog_full", "unrouted_hook",
-  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback", "draft_stashed"] as const;
+  "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback", "draft_stashed",
+  "journal_unreadable"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type Alert = { id: number; at: number; node: string | null; kind: AlertKind; detail: Record<string, unknown> };
 // The alerts the app pushes (the owner, 2026-10-12): a node's key may be stolen (a new source, a second instance), events

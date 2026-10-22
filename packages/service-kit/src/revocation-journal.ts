@@ -2,32 +2,37 @@
 // database is appended here first, and each start applies what the journal holds. A database restored from an older
 // copy then brings no revoked device, agent token or node back: whatever the restored file forgets, the journal
 // remembers (AC4, FL4). The file is revoked.log, beside the database it shadows.
-import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, openSync, readFileSync, readSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** What a journal entry revokes: a hub endpoint, a hub agent token, or a fleet node — the three ids a restore could
- *  bring back. The connections store has no journal: it has no service to apply one at start. */
+ *  bring back. The connections store has no journal: it has no service to apply one at start. Endpoints and agent
+ *  tokens have ids no later one reuses; a node keeps its name across a revoke and a join again, so a node's entry
+ *  names the enrolment it revoked too, and a later enrolment under the same name is not revoked by it. */
 export type RevocationKind = "endpoint" | "agent_token" | "node";
-export type RevocationEntry = { kind: RevocationKind; id: string; at: number };
+export type RevocationEntry =
+  | { kind: "endpoint" | "agent_token"; id: string; at: number }
+  | { kind: "node"; id: string; enrolment: string; at: number };
+/** A complete line (newline-terminated) that is not a whole entry: skipped, and reported to whoever reads. */
+export type BadLine = { line: number; why: string };
 
-/** A line that is complete (newline-terminated) but not a whole entry. Reading on would risk losing a revocation in
- *  silence, which is the one thing the journal must never do, so it is thrown instead of skipped. */
-export class JournalUnreadable extends Error {
-  constructor(line: number, why: string) {
-    super(`revoked.log line ${line} is not a revocation entry: ${why}`);
-    this.name = "JournalUnreadable";
-  }
-}
-
-const KINDS: readonly string[] = ["endpoint", "agent_token", "node"];
-const asEntry = (v: unknown, line: number): RevocationEntry => {
-  if (typeof v !== "object" || v === null) throw new JournalUnreadable(line, "not an object");
+const asEntry = (v: unknown): RevocationEntry | string => {
+  if (typeof v !== "object" || v === null) return "not an object";
   const e = v as Record<string, unknown>;
-  if (!KINDS.includes(e.kind as string) || typeof e.id !== "string" || e.id.length === 0 || typeof e.at !== "number") {
-    throw new JournalUnreadable(line, "it is not { kind: endpoint | agent_token | node, id, at }");
+  if (typeof e.id !== "string" || e.id.length === 0 || typeof e.at !== "number") return "it has no id or at";
+  if (e.kind === "endpoint" || e.kind === "agent_token") return { kind: e.kind, id: e.id, at: e.at };
+  if (e.kind === "node") {
+    return typeof e.enrolment === "string" && e.enrolment.length > 0
+      ? { kind: "node", id: e.id, enrolment: e.enrolment, at: e.at } : "a node entry without its enrolment";
   }
-  return { kind: e.kind as RevocationKind, id: e.id, at: e.at };
+  return "its kind is not endpoint, agent_token or node";
 };
+
+/** One key per thing revoked: what compaction keeps one entry of. */
+export const revocationKey = (e: RevocationEntry): string => e.kind === "node" ? `node:${e.id}:${e.enrolment}` : `${e.kind}:${e.id}`;
+
+/** The size above which a start compacts the journal (`compact`): about ten thousand entries. */
+export const JOURNAL_COMPACT_BYTES = 1024 * 1024;
 
 export class RevocationJournal {
   readonly #path: string;
@@ -67,20 +72,58 @@ export class RevocationJournal {
     }
   }
 
-  // Every well-formed line, in the order they were appended. A last line without its newline is a write the crash
-  // cut short and is skipped; the append after such a crash cuts it off before it writes its own line. An absent
-  // file is a journal with nothing in it.
-  entries(): RevocationEntry[] {
+  // Every well-formed line, in the order they were appended, and the lines that are not. A last line without its
+  // newline is a write a crash cut short and is skipped quietly; the append after such a crash cuts it off before it
+  // writes its own line. Any other bad line is skipped and reported, never thrown: a service that refused to start on
+  // one would lose every revocation the rest of the journal holds, and crash-loop besides. An absent file is a
+  // journal with nothing in it.
+  read(): { entries: RevocationEntry[]; bad: BadLine[] } {
     let text: string;
     try { text = readFileSync(this.#path, "utf8"); }
     catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return { entries: [], bad: [] };
       throw e;
     }
-    return text.split("\n").slice(0, -1).map((line, i) => {
+    const entries: RevocationEntry[] = [];
+    const bad: BadLine[] = [];
+    text.split("\n").slice(0, -1).forEach((line, i) => {
       let parsed: unknown;
-      try { parsed = JSON.parse(line); } catch (e) { throw new JournalUnreadable(i + 1, (e as Error).message); }
-      return asEntry(parsed, i + 1);
+      try { parsed = JSON.parse(line); } catch (e) { bad.push({ line: i + 1, why: (e as Error).message }); return; }
+      const entry = asEntry(parsed);
+      if (typeof entry === "string") bad.push({ line: i + 1, why: entry });
+      else entries.push(entry);
     });
+    return { entries, bad };
+  }
+
+  entries(): RevocationEntry[] { return this.read().entries; }
+
+  // A start's housekeeping: past `maxBytes`, the journal is rewritten with one entry per thing revoked (the latest),
+  // whole by rename, so it neither grows without end nor is read whole at length at every start. Bad lines are not
+  // carried over (the caller reported them on its read). A line another process appended while this ran is never
+  // lost: the rewrite is dropped when the file grew meanwhile, and the next start tries again. Answers whether it
+  // rewrote.
+  compact(maxBytes = JOURNAL_COMPACT_BYTES): boolean {
+    let size: number;
+    try { size = statSync(this.#path).size; }
+    catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw e;
+    }
+    if (size <= maxBytes) return false;
+    const latest = new Map<string, RevocationEntry>();
+    for (const e of this.read().entries) latest.set(revocationKey(e), e);
+    const temp = `${this.#path}.compact`;
+    const fd = openSync(temp, "w", 0o600);
+    try {
+      const body = Buffer.from([...latest.values()].map(e => `${JSON.stringify(e)}\n`).join(""), "utf8");
+      for (let at = 0; at < body.length;) at += writeSync(fd, body, at);
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    if (statSync(this.#path).size !== size) { rmSync(temp, { force: true }); return false; }
+    renameSync(temp, this.#path);
+    const dir = openSync(dirname(this.#path), "r");
+    try { fsyncSync(dir); } finally { closeSync(dir); }
+    return true;
   }
 }

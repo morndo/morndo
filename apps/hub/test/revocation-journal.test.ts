@@ -2,7 +2,7 @@
 // revoked.log beside morndo.db before the database write, and each start applies the journal again — so a database
 // restored from an older copy (the updater's rollback, or a copy put back by hand) brings no revoked device or agent
 // token back. The start here is what main.ts does: open the store, wire the services, apply.
-import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -62,7 +62,7 @@ function open(): void {
 
 function start(): number {
   open();
-  return applyRevocationJournal(journal, { access, agents });
+  return applyRevocationJournal(journal, { access, agents }).applied;
 }
 
 beforeEach(() => {
@@ -119,6 +119,20 @@ describe("the hub's revocation journal (RL10)", () => {
     open();
     expect(agents.authenticate(secret, "lane-a")).toMatchObject({ ok: true });   // the restore brought it back
     expect(start()).toBe(1);
+    expect(agents.authenticate(secret, "lane-a")).toMatchObject({ ok: false, refused: "revoked" });
+  });
+  it("a garbage line and a torn last line are skipped and reported; the rest still applies and the start goes on", async () => {
+    const { token, secret } = agents.issue("workers", "worker");
+    const older = snapshotDb();
+    expect(agents.revoke(token.id)).toBe(true);
+    putBack(older);
+    const path = join(dir, "revoked.log");
+    const good = readFileSync(path, "utf8");
+    writeFileSync(path, `garbage that is no entry\n${good}{"kind":"endpoint","id":"to`);
+    open();
+    const applied = applyRevocationJournal(journal, { access, agents });
+    expect(applied.applied).toBe(1);
+    expect(applied.bad).toEqual([{ line: 1, why: expect.any(String) }]);
     expect(agents.authenticate(secret, "lane-a")).toMatchObject({ ok: false, refused: "revoked" });
   });
 });

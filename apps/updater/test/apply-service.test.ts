@@ -2,7 +2,7 @@
 // the real store, real SQLite databases and a real hold.json, with only the machine's services and probes faked.
 // Each case bends one thing and asserts the outcome, what was touched (the tape holds every call in order), and
 // what the record says afterwards. The kill-and-recover cases live in recovery-service.test.ts (§6.6).
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -425,14 +425,21 @@ describe("the apply service (§6.2–§6.5)", () => {
     // refused: the rollback restores the fleet's Backup, and the journal is what keeps the node revoked after it.
     const w = await buildApplyWorld(scratch, { bSchemas: SCHEMAS_B_FLEET_FLOOR });
     const fleet = new Database(w.dbPaths.fleet);
-    fleet.exec(`CREATE TABLE nodes (name TEXT PRIMARY KEY, revoked_at INTEGER);
+    fleet.exec(`CREATE TABLE nodes (name TEXT PRIMARY KEY, revoked_at INTEGER, enrolment TEXT);
       CREATE TABLE join_codes (hash TEXT PRIMARY KEY, node TEXT, expires_at INTEGER, used_at INTEGER)`);
-    fleet.prepare("INSERT INTO nodes (name, revoked_at) VALUES (?, NULL)").run("node-b");
+    fleet.prepare("INSERT INTO nodes (name, revoked_at, enrolment) VALUES (?, NULL, ?)").run("node-b", "en-1");
     fleet.close();
+    // A, the Version going back in, applies the fleet's journal at its start (its tree has the applier)
+    const applier = join(w.releases, A, "app/apps/fleet/src/application/revocations.ts");
+    // the installed tree is read-only (§5): each directory on the way is opened for the write, then closed again
+    const steps = ["", "app", "app/apps", "app/apps/fleet", "app/apps/fleet/src", "app/apps/fleet/src/application"].map(d => join(w.releases, A, d));
+    for (const d of steps) { if (existsSync(d)) chmodSync(d, 0o755); else mkdirSync(d); }
+    writeFileSync(applier, "// applies the journal\n");
+    for (const d of steps.reverse()) chmodSync(d, 0o555);
     const journal = new RevocationJournal(join(dirname(w.dbPaths.fleet), "revoked.log"));
     w.services.onStart = (s, current) => {
       if (s !== "fleet" || current !== B) return;
-      journal.append({ kind: "node", id: "node-b", at: 1 });   // journaled before the write, as the fleet does
+      journal.append({ kind: "node", id: "node-b", enrolment: "en-1", at: 1 });   // journaled before the write, as the fleet does
       const db = new Database(w.dbPaths.fleet);
       db.pragma("user_version = 3");
       writeFloor(db, 3);
@@ -449,7 +456,7 @@ describe("the apply service (§6.2–§6.5)", () => {
     // restore brought back active is revoked again, with its agent refused at the next hello.
     const db = new Database(w.dbPaths.fleet);
     const nodes = new NodesStore(db, () => 2, journal);
-    expect(applyRevocationJournal(journal, nodes)).toBe(1);
+    expect(applyRevocationJournal(journal, nodes)).toEqual({ applied: 1, bad: [] });
     expect(nodes.active("node-b")).toBeNull();
     db.close();
   });

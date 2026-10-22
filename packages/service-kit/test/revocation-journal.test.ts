@@ -1,18 +1,19 @@
 // The revocation journal (RL10, docs/design/updates/README.md §11.5): a service appends every revocation to
 // revoked.log beside its database before it writes the database, and reads the journal back at start. A torn last
-// line is a crash mid-write and is skipped; anything else that is not a whole entry is refused loudly, because a
-// revocation lost in silence is exactly what the journal exists to prevent.
+// line is a crash mid-write and is skipped; any other line that is not a whole entry is skipped and reported, never
+// thrown, so one bad line neither hides the rest nor stops a service from starting.
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { JournalUnreadable, RevocationJournal } from "../src/index.ts";
+import { RevocationJournal } from "../src/index.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 const dir = () => { const d = mkdtempSync(join(tmpdir(), "morndo-journal-")); dirs.push(d); return d; };
 
-const node = (id: string, at = 1) => JSON.stringify({ kind: "node", id, at });
+const node = (id: string, at = 1, enrolment = `en-${id}`) => JSON.stringify({ kind: "node", id, enrolment, at });
+const nodeEntry = (id: string, at = 1, enrolment = `en-${id}`) => ({ kind: "node" as const, id, enrolment, at });
 
 describe("RevocationJournal", () => {
   it("appends one line an entry each, and reads them back in order", () => {
@@ -20,67 +21,83 @@ describe("RevocationJournal", () => {
     const journal = new RevocationJournal(path);
     journal.append({ kind: "endpoint", id: "eph-1", at: 5 });
     journal.append({ kind: "agent_token", id: "mat-1", at: 6 });
+    journal.append(nodeEntry("pc", 7));
     expect(journal.entries()).toEqual([
-      { kind: "endpoint", id: "eph-1", at: 5 }, { kind: "agent_token", id: "mat-1", at: 6 },
+      { kind: "endpoint", id: "eph-1", at: 5 }, { kind: "agent_token", id: "mat-1", at: 6 }, nodeEntry("pc", 7),
     ]);
-    expect(readFileSync(path, "utf8")).toBe('{"kind":"endpoint","id":"eph-1","at":5}\n{"kind":"agent_token","id":"mat-1","at":6}\n');
+    expect(readFileSync(path, "utf8")).toBe(`{"kind":"endpoint","id":"eph-1","at":5}\n{"kind":"agent_token","id":"mat-1","at":6}\n${node("pc", 7)}\n`);
   });
 
   it("creates the file with mode 0600", () => {
     const path = join(dir(), "revoked.log");
-    new RevocationJournal(path).append({ kind: "node", id: "pc", at: 1 });
+    new RevocationJournal(path).append(nodeEntry("pc"));
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 
   it("reads an absent journal as empty", () => {
-    expect(new RevocationJournal(join(dir(), "revoked.log")).entries()).toEqual([]);
+    expect(new RevocationJournal(join(dir(), "revoked.log")).read()).toEqual({ entries: [], bad: [] });
   });
 
-  it("skips a torn last line, a crash mid-write", () => {
+  it("skips a torn last line, a crash mid-write, without calling it bad", () => {
     const path = join(dir(), "revoked.log");
     const journal = new RevocationJournal(path);
-    journal.append({ kind: "node", id: "pc", at: 1 });
+    journal.append(nodeEntry("pc"));
     appendFileSync(path, '{"kind":"node","id":"torn');         // no newline: the write never finished
-    expect(journal.entries()).toEqual([{ kind: "node", id: "pc", at: 1 }]);
+    expect(journal.read()).toEqual({ entries: [nodeEntry("pc")], bad: [] });
   });
 
   it("an append after a torn last line cuts the torn bytes first, so the journal still reads", () => {
     // The crash left a line without its newline; the next revocation must not glue onto it, or every later start
-    // would find a whole bad line and refuse the journal.
+    // would find a whole bad line where two entries should be.
     const path = join(dir(), "revoked.log");
     const journal = new RevocationJournal(path);
-    journal.append({ kind: "node", id: "pc", at: 1 });
+    journal.append(nodeEntry("pc"));
     appendFileSync(path, '{"kind":"node","id":"torn');
-    journal.append({ kind: "node", id: "laptop", at: 2 });
-    expect(journal.entries()).toEqual([{ kind: "node", id: "pc", at: 1 }, { kind: "node", id: "laptop", at: 2 }]);
+    journal.append(nodeEntry("laptop", 2));
+    expect(journal.read()).toEqual({ entries: [nodeEntry("pc"), nodeEntry("laptop", 2)], bad: [] });
     expect(readFileSync(path, "utf8")).toBe(`${node("pc")}\n${node("laptop", 2)}\n`);
     // a file that is nothing but a torn line is cut to nothing first
     const only = join(dir(), "revoked.log");
     writeFileSync(only, '{"kind":"no');
-    new RevocationJournal(only).append({ kind: "node", id: "pc", at: 1 });
+    new RevocationJournal(only).append(nodeEntry("pc"));
     expect(readFileSync(only, "utf8")).toBe(`${node("pc")}\n`);
   });
 
-  it("refuses a bad line that is not the torn last one, naming the line", () => {
+  it("skips and reports every bad line that is not the torn last one, and keeps the rest", () => {
     const path = join(dir(), "revoked.log");
-    writeFileSync(path, `${node("pc", 1)}\nnot json at all\n${node("mac", 2)}\n`);
-    const read = () => new RevocationJournal(path).entries();
-    expect(read).toThrow(JournalUnreadable);
-    expect(read).toThrow("line 2");
-    writeFileSync(path, `${node("pc", 1)}\n{"kind":"device","id":"x","at":1}\n`);   // a kind no service writes
-    expect(read).toThrow("line 2");
-    writeFileSync(path, node("pc", 1) + "\n\n");                 // an empty line is not an entry either
-    expect(read).toThrow("line 2");
+    writeFileSync(path, [
+      node("pc", 1), "not json at all", '{"kind":"device","id":"x","at":1}', '{"kind":"node","id":"old","at":1}', "",
+      node("mac", 2),
+    ].join("\n") + "\n" + '{"kind":"node","id":"to');            // and a torn last line after them
+    const read = new RevocationJournal(path).read();
+    expect(read.entries).toEqual([nodeEntry("pc", 1), nodeEntry("mac", 2)]);
+    expect(read.bad.map(b => b.line)).toEqual([2, 3, 4, 5]);
+    expect(read.bad[2]!.why).toMatch(/without its enrolment/);   // a node line must name what it revoked
   });
 
   it("two journal objects on one file both land, as two processes", () => {
     const path = join(dir(), "revoked.log");
-    const console_ = new RevocationJournal(path);
-    const service = new RevocationJournal(path);
-    console_.append({ kind: "node", id: "pc", at: 1 });
-    service.append({ kind: "node", id: "mac", at: 2 });
-    expect(new RevocationJournal(path).entries()).toEqual([
-      { kind: "node", id: "pc", at: 1 }, { kind: "node", id: "mac", at: 2 },
-    ]);
+    new RevocationJournal(path).append(nodeEntry("pc", 1));
+    new RevocationJournal(path).append(nodeEntry("mac", 2));
+    expect(new RevocationJournal(path).entries()).toEqual([nodeEntry("pc", 1), nodeEntry("mac", 2)]);
+  });
+
+  it("compacts past its size to one entry per thing revoked, the latest, and leaves a small one alone", () => {
+    const path = join(dir(), "revoked.log");
+    const journal = new RevocationJournal(path);
+    journal.append(nodeEntry("pc", 1, "en-1"));
+    journal.append({ kind: "endpoint", id: "eph-1", at: 2 });
+    journal.append(nodeEntry("pc", 3, "en-1"));                  // a start that re-applied it wrote it again
+    journal.append(nodeEntry("pc", 4, "en-2"));                  // a later enrolment under the same name
+    appendFileSync(path, "garbage\n");
+    const before = readFileSync(path, "utf8");
+    expect(journal.compact(before.length)).toBe(false);          // not past the size: untouched
+    expect(readFileSync(path, "utf8")).toBe(before);
+    expect(journal.compact(10)).toBe(true);
+    expect(journal.read()).toEqual({
+      entries: [nodeEntry("pc", 3, "en-1"), { kind: "endpoint", id: "eph-1", at: 2 }, nodeEntry("pc", 4, "en-2")], bad: [],
+    });
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(new RevocationJournal(join(dir(), "absent.log")).compact(0)).toBe(false);
   });
 });

@@ -341,14 +341,14 @@ export async function runRollback(ctx: StepCtx, o: {
         database: db, restoreOnRollback: plan[db].restoreOnRollback, backupPresent: deps.backup.has(backupOf, db),
       });
       if (!allowed.ok) return failed(`${db}: ${allowed.error} (${o.cause})`);
-      const dropped = deps.revocations.droppedBy(backupOf, db);
+      const dropped = deps.revocations.droppedBy(backupOf, db, backText);
       if (dropped.length > 0) return failed(revocationsDropped(db, dropped, blameText, o.cause));
     }
     await stopServices(deps, o.running);
     // Again now that nothing runs: a revoke that landed between the check above and the stop lives only in the
     // database the restore would replace. Then the target's services start again and the rollback fails loudly.
     for (const db of restores) {
-      const dropped = deps.revocations.droppedBy(backupOf, db);
+      const dropped = deps.revocations.droppedBy(backupOf, db, backText);
       if (dropped.length > 0) {
         await startServices(deps, o.running);
         return failed(revocationsDropped(db, dropped, blameText, o.cause));
