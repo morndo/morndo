@@ -3,7 +3,7 @@
 // private (0600 in a 0700 directory); a restore that puts the checked copy back and never leaves a stale -wal/-shm
 // beside it. better-sqlite3's backup restarts when the source is written meanwhile, so a busy writer is the case,
 // not the exception (§11.1, the connections store's rule).
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -146,6 +146,27 @@ describe("SqliteBackup (§11.3, §11.4)", () => {
     expect(existsSync(paths.connections)).toBe(false);
     expect(existsSync(`${paths.connections}-wal`)).toBe(false);
     expect(existsSync(`${paths.connections}-shm`)).toBe(false);
+  });
+
+  it("a database that is there but cannot be read fails its backup: it is never taken for absent", async () => {
+    // existsSync answers false on EACCES too. Taken for absent, a later restore would delete a store that was there.
+    const home = mkdtempSync(join(scratch, "home-"));
+    const paths = databasePaths(home, {});
+    mkdirSync(dirname(paths.connections), { recursive: true });
+    const made = new Database(paths.connections);
+    made.exec("CREATE TABLE secrets (reference TEXT)");
+    made.close();
+    const backup = new SqliteBackup({ paths, backups: join(home, "state", "backups") });
+    chmodSync(dirname(paths.connections), 0o000);               // the file is there; this user cannot reach it
+    try {
+      const taken = await backup.take("u-1", "connections");
+      expect(taken.ok).toBe(false);
+      if (!taken.ok) expect(taken.reason).toMatch(/connections: .*EACCES|permission denied/i);
+      expect(backup.has("u-1", "connections")).toBe(false);    // no marker, no copy: nothing to restore from
+    } finally {
+      chmodSync(dirname(paths.connections), 0o700);
+    }
+    expect(existsSync(paths.connections)).toBe(true);
   });
 
   it("has() answers per update id and database; prune keeps only the named ids", async () => {
