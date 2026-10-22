@@ -11,11 +11,18 @@
 //
 // The rules the run holds itself to (PR 5d): every container and image carries the label morndo-c2-e2e; no host
 // mounts, no host network, no published ports — files move by docker cp only; no other container, image or
-// volume is ever named. The one extra mount the full-disk step needs is a tmpfs of the container's own memory
+// volume is ever named. The container is not --privileged (that gives every host device and capability): it gets
+// what systemd as PID 1 needs and nothing more (systemd.io/CONTAINER_INTERFACE, read 2026-10-22) — CAP_SYS_ADMIN
+// (Docker's defaults already hold CAP_MKNOD), no audit capability (CAP_AUDIT_WRITE dropped, so systemd does not
+// try to audit), a private cgroup namespace whose tree the entrypoint remounts writable before it execs
+// /sbin/init (Docker mounts it read-only without --privileged), and tmpfs for /run, /run/lock and /tmp. /dev is
+// Docker's own container /dev: no host device. A host whose AppArmor profile forbids the remount refuses here:
+// systemd says so in the boot wait. The container is removed on every way out — the end of the run, an error,
+// SIGINT or SIGTERM — and each run first removes any container with the label a killed run left behind. The one extra mount the full-disk step needs is a tmpfs of the container's own memory
 // (/mnt/tiny, 64k), not a host mount. A hard power loss is not tested here (docker kill is not one); that stays
 // manual QA.
-import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +36,20 @@ const CONTAINER = `morndo-c2-e2e-${randomBytes(4).toString("hex")}`;
 function docker(args: string[], o: { timeoutMs?: number } = {}): { code: number; out: string; err: string } {
   const done = spawnSync("docker", args, { encoding: "utf8", timeout: o.timeoutMs ?? 300_000, maxBuffer: 64 * 1024 * 1024 });
   return { code: done.status ?? -1, out: (done.stdout ?? "").trim(), err: (done.stderr ?? "").trim() };
+}
+
+// The one long call (the scenario, up to 50 minutes) runs without blocking, so a signal's cleanup can run during it.
+let running: ChildProcess | null = null;
+function dockerAsync(args: string[], timeoutMs: number): Promise<{ code: number; out: string; err: string }> {
+  return new Promise(resolve => {
+    const child = spawn("docker", args, { stdio: ["ignore", "pipe", "pipe"] });
+    running = child;
+    let out = "", err = "";
+    child.stdout.on("data", (b: Buffer) => { out += b.toString(); });
+    child.stderr.on("data", (b: Buffer) => { err += b.toString(); });
+    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    child.on("close", code => { clearTimeout(timer); running = null; resolve({ code: code ?? -1, out: out.trim(), err: err.trim() }); });
+  });
 }
 
 function refuse(reason: string): never {
@@ -49,6 +70,42 @@ if (dockerAnswers.code !== 0) refuse(`docker does not answer (${dockerAnswers.er
 const started = Date.now();
 let scratch: string | null = null;
 let containerStarted = false;
+
+// What every way out does: this run's container goes, its scratch with it (unless E2E_KEEP=1).
+function cleanUp(): void {
+  if (containerStarted) {
+    const removed = docker(["rm", "-f", CONTAINER], { timeoutMs: 120_000 });
+    if (removed.code !== 0) {
+      process.stderr.write(`removing ${CONTAINER} failed: ${removed.err}\n`);
+      process.exitCode = 1;
+    }
+    containerStarted = false;
+  }
+  if (scratch !== null && process.env.E2E_KEEP !== "1") { rmSync(scratch, { recursive: true, force: true }); scratch = null; }
+}
+for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
+  process.on(signal, () => {
+    process.stderr.write(`\n${signal}: removing the machine and the scratch\n`);
+    running?.kill("SIGKILL");
+    cleanUp();
+    process.exit(code);
+  });
+}
+
+// A run killed outright (SIGKILL, a lost terminal) cannot clean up after itself: its container is removed here,
+// by the label only this harness puts on a container.
+const leftovers = docker(["ps", "-a", "--filter", `label=${LABEL}`, "-q"]).out.split("\n").filter(id => id !== "");
+for (const id of leftovers) {
+  const gone = docker(["rm", "-f", id], { timeoutMs: 120_000 });
+  process.stdout.write(`removed a container a killed run left behind (${id}): ${gone.code === 0 ? "ok" : gone.err}\n`);
+}
+// Its build scratch too (build.ts's morndo-c2-build-*, about 1.5 GB each): one run at a time on a machine, as the
+// label sweep above already assumes.
+for (const name of readdirSync(tmpdir()).filter(n => n.startsWith("morndo-c2-build-"))) {
+  rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  process.stdout.write(`removed the build scratch a killed run left behind (${name})\n`);
+}
+
 try {
   // ---- the six Releases, signed, and the six publish points (build.ts does it the pipeline's way).
   process.stdout.write(`building the six releases (this takes a few minutes)…\n`);
@@ -75,7 +132,8 @@ try {
   // /mnt/tiny is the full-disk step's own little disk: 64k of the container's memory, owned by the worker, so
   // the Backup that lands on it cannot fit. A tmpfs is not a host mount (nothing of the host is in it).
   const startedRun = docker([
-    "run", "-d", "--name", CONTAINER, "--label", `${LABEL}=1`, "--privileged", "--cgroupns=private",
+    "run", "-d", "--name", CONTAINER, "--label", `${LABEL}=1`,
+    "--cap-add", "SYS_ADMIN", "--cap-drop", "AUDIT_WRITE", "--cgroupns=private",
     "-e", "container=docker", "--tmpfs", "/run", "--tmpfs", "/run/lock", "--tmpfs", "/tmp",
     "--tmpfs", "/mnt/tiny:size=64k,uid=1000,gid=1000,mode=0700", IMAGE,
   ]);
@@ -112,12 +170,12 @@ try {
   // ---- the scenario, inside the machine, under the unpacked A tree's own Node. The story waits minutes on the
   // recovery timer alone, so the wall is the story's own: 50 minutes.
   process.stdout.write(`running the scenario inside the machine (a good half hour)…\n`);
-  const scenarioRun = docker([
+  const scenarioRun = await dockerAsync([
     "exec", "-u", "worker:1000",
     "-e", "HOME=/srv/worker", "-e", "XDG_RUNTIME_DIR=/run/user/1000",
     "-e", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
     CONTAINER, "/srv/worker/e2e/tree-a/node/bin/node", "/srv/worker/e2e/scenario.ts",
-  ], { timeoutMs: 50 * 60_000 });
+  ], 50 * 60_000);
   process.stdout.write(`${scenarioRun.out}\n`);
   if (scenarioRun.err !== "") process.stderr.write(`${scenarioRun.err}\n`);
   mkdirSync(join(outDir, "evidence"), { recursive: true });
@@ -141,19 +199,12 @@ try {
 } finally {
   // The machine is throwaway: it goes, and the run proves it went. The image stays (it is this run's own, and a
   // rebuild costs minutes); only containers with the label are named, only this run's own container is removed.
-  if (containerStarted) {
-    const removed = docker(["rm", "-f", CONTAINER], { timeoutMs: 120_000 });
-    if (removed.code !== 0) {
-      process.stderr.write(`removing ${CONTAINER} failed: ${removed.err}\n`);
-      process.exitCode = 1;
-    }
-  }
+  cleanUp();
   const left = docker(["ps", "-a", "--filter", `label=${LABEL}`, "-q"]);
   if (left.out !== "") {
     process.stderr.write(`containers with the label ${LABEL} remain: ${left.out.split("\n").join(", ")}\n`);
     process.exitCode = 1;
   }
-  if (scratch !== null && process.env.E2E_KEEP !== "1") rmSync(scratch, { recursive: true, force: true });
   process.stdout.write(`run took ${Math.round((Date.now() - started) / 1000)}s\n`);
 }
 

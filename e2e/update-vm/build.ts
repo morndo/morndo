@@ -63,6 +63,15 @@ export type BuiltWorld = {
 // copied into the scratch (without .git and .worktrees), the copies are edited, compiled, pruned and staged there.
 export function buildWorld(repo: string): BuiltWorld {
   const scratch = mkdtempSync(join(tmpdir(), "morndo-c2-build-"));
+  // A build that fails leaves nothing of itself behind (unless E2E_KEEP=1): the repository copy is large.
+  try { return buildInto(repo, scratch); }
+  catch (error) {
+    if (process.env.E2E_KEEP !== "1") rmSync(scratch, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function buildInto(repo: string, scratch: string): BuiltWorld {
   const now = Date.now();
   const mtime = Math.floor(now / 1000);                         // one clock for every archive: a rebuild is comparable
                                                                  // (packTree's mtime is whole seconds, like git's %ct)

@@ -19,6 +19,12 @@ RUN usermod --login worker --home /srv/worker --move-home ubuntu \
   && mkdir -p /var/lib/systemd/linger \
   && touch /var/lib/systemd/linger/worker
 
+# Without --privileged, Docker mounts the container's (private) cgroup tree read-only, and systemd as PID 1 cannot
+# make its own scopes. The container has CAP_SYS_ADMIN (systemd.io/CONTAINER_INTERFACE: "do not drop" it), so the
+# entrypoint remounts that tree writable — its own namespace's, nothing of the host's — and becomes /sbin/init.
+RUN printf '#!/bin/sh\nset -e\nmount -o remount,rw /sys/fs/cgroup\nexec /sbin/init\n' > /usr/local/sbin/e2e-init \
+  && chmod 0755 /usr/local/sbin/e2e-init
+
 LABEL morndo-c2-e2e=1
 STOPSIGNAL SIGRTMIN+3
-CMD ["/sbin/init"]
+CMD ["/usr/local/sbin/e2e-init"]
