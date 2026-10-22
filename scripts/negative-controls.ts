@@ -2131,6 +2131,10 @@ export const CONTROLS: Control[] = [
     run: ["packages/protocol/test/releases-wire.test.ts"], expect: "expected true to be false" },
   // ---- PR 4, check and stage (design §6.1, §10.2, §13): each guard of the chain and its edges, removed once.
   // CI on #94 (2026-10-22): the switch off gave up on a cancel answered busy, and the drill timed out waiting for it.
+  // Found by the 5d run on a throwaway machine: a released tree prints its Version with its build stamp.
+  { id: "pr4-selftest-exact-only", task: "pr4", file: "apps/updater/src/adapters/installer-dirs.ts",
+    find: "const ours = printed === version || (stamp !== null &&", replace: "const ours = printed === version || (false && stamp !== null &&",
+    run: ["apps/updater/test/installer-dirs.test.ts"], expect: "selftest takes the Version with its build stamp" },
   { id: "pr4-hub-cancel-busy-once", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
     find: "const CANCEL_BUSY_MAX_MS = 30_000;", replace: "const CANCEL_BUSY_MAX_MS = 0;",
     run: ["apps/hub/test/manager-queue.test.ts"], expect: "answered busy" },
