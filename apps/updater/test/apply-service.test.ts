@@ -43,6 +43,15 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(w.store.recentUpdates(1)[0]!.doneMarks).toEqual(["draining", "stopping", "backing_up", "swapping", "starting", "committing"]);
   });
 
+  it("a machine without one of the databases yet updates: its Backup is the absence (§11.3)", async () => {
+    // A machine that never made a connections store. The plan still covers the database; nothing to copy is no
+    // reason to abandon the update.
+    const w = await buildApplyWorld(scratch);
+    rmSync(w.dbPaths.connections, { force: true });
+    const out = await w.apply().apply({ now: false });
+    expect(out).toEqual({ kind: "committed", version: B });
+  });
+
   it("apply waits for in-flight deliveries", async () => {
     // A delivery being typed on the node: the probe reports it for the first three polls, then nothing.
     const first = await buildApplyWorld(scratch);
