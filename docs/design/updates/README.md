@@ -573,6 +573,7 @@ ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n re
 | Network attacker | TLS and signatures |
 | A crafted archive (paths with `..`, absolute paths, links outside, devices, setuid) | Section 6.1, step 4; and only after RL1 |
 | A same-user process edits the installed tree | Not prevented: the node is not an isolation boundary (ADR-0012). `morndo doctor` detects it against the signed file list. Read-only modes stop accidents only. |
+| A same-user process writes `rollback-confirmed` itself | Accepted, the same residual: it lets the rollback unit run without the typed word, which that process could have typed itself (`morndo update --rollback` takes it from any process of the user). The file is consumed on use, valid 10 minutes, for the running Version only, and voided when the unit fails to start. |
 | A downgrade through the Channel or a withdrawal | RL2 |
 | "Update now" used to push something | It is a principal Command with step-up; the operation names a Version only; the node still applies RL1 and RL2; a node's policy can deny `update.apply`. |
 

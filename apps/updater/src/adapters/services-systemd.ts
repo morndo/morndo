@@ -40,6 +40,21 @@ const unit = (s: UpdateService): string => `morndo-${s}.service`;
 const SERVICE_UNITS = new Set(UPDATE_SCOPE_SERVICES.map(s => unit(s)));
 const isUnitFile = (name: string): boolean => name.endsWith(".service") || name.endsWith(".timer");
 
+// The setup before the updater (§10.3, adopted once): a service unit of one of our names whose command runs that
+// service's own program — its source entry point from a checkout, or its launcher. A unit of our name running anything
+// else is someone else's, and only `morndo install --force` replaces it.
+const PROGRAM: Record<UpdateService, { entry: string; launcher: string }> = {
+  hub: { entry: "apps/hub/src/main.ts", launcher: "morndo" },
+  fleet: { entry: "apps/fleet/src/main.ts", launcher: "morndo-fleet" },
+  node: { entry: "apps/node-agent/src/main.ts", launcher: "morndo-node" },
+};
+export const legacyService = (name: string, command: string): boolean => {
+  const s = UPDATE_SCOPE_SERVICES.find(x => unit(x) === name || `com.morndo.${x}.plist` === name);
+  if (s === undefined) return false;
+  const p = PROGRAM[s];
+  return command.includes(p.entry) || new RegExp(`/${p.launcher}(\\s|<|$)`, "m").test(command);
+};
+
 // The first line of every unit file a render writes: what marks the file as Morndo's to replace or remove.
 export const UNIT_MARK = "# Morndo's own unit: every update rewrites it. Put changes in a drop-in (<unit>.d/*.conf).";
 
@@ -114,7 +129,10 @@ export class SystemdServices implements ServiceManager {
   }
 
   private unitDir(): UnitDir {
-    return { dir: this.units, isUnit: n => n.startsWith("morndo-") && isUnitFile(n), marked: t => t.startsWith(`${UNIT_MARK}\n`) };
+    return {
+      dir: this.units, isUnit: n => n.startsWith("morndo-") && isUnitFile(n), marked: t => t.startsWith(`${UNIT_MARK}\n`),
+      legacy: (n, t) => legacyService(n, t.split("\n").filter(l => l.trim().startsWith("ExecStart=")).join("\n")),
+    };
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {
