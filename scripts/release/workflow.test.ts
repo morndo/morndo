@@ -46,6 +46,9 @@ describe("release pipeline files", () => {
       "changelog-path": "CHANGELOG.md",
     });
     expect(config.packages["."]).not.toHaveProperty("bump-patch-for-minor-pre-major");
+    // The first Release is 0.1.0 (design updates README, "Before 1.0"; ADR-0019 "0.x first"). Without this key Release
+    // Please falls back to 1.0.0 when no tag exists yet, and a published release can never be withdrawn.
+    expect(config.packages["."]).toHaveProperty("initial-version", "0.1.0");
     const prepare = job(release, "release-please");
     expect(prepare).toContain(`actions/create-github-app-token@${APP_TOKEN}`);
     expect(prepare).toContain("secrets.RELEASE_APP_ID");
