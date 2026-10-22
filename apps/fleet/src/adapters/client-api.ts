@@ -79,11 +79,18 @@ class HttpError extends Error {
 export type ClientApiDeps = {
   router: Router; connections: Connections; lanes: LaneRegistry; nodes: NodesStore; audit: Audit; events: EventHub; jobs: JobMirror; log: Logger;
   deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">; laneWatch?: Pick<LaneWatch, "view">; runs?: Pick<Runs, "view">;
-  rollouts: Pick<Rollouts, "committed" | "halt" | "resume" | "latest" | "controlPlane">;
+  rollouts: Pick<Rollouts, "committed" | "halt" | "resume" | "latest" | "controlPlane" | "aboveControlPlane">;
+  rolloutAuthority: RolloutAuthority;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
 };
 export type ClientApi = { close(): Promise<void> };
+
+// Who may move a Rollout forward (review of #107, finding 3). `updater`: the control plane's updater reporting its
+// commit. `principal`: the owner's resume and update.apply, which carry a fresh passkey (STEP_UP_OPS) through the
+// hub. A halt needs neither: it only ever stops updates. Until a check exists, both say no.
+export type RolloutAuthority = { updater(req: IncomingMessage): boolean; principal(req: IncomingMessage): boolean };
+export const CLOSED_ROLLOUT_AUTHORITY: RolloutAuthority = { updater: () => false, principal: () => false };
 
 const CLIENT = /^[a-z]{1,16}$/;
 // The client that asks, as it names itself; anything else is "unknown" (the socket is the owner's anyway, spec 8).
@@ -230,6 +237,9 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const parsed = parseOpBody(body);
       if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message), store: null, storeSeq: null });
       const b = parsed.body;
+      if (b.op === "update.apply" && !d.rolloutAuthority.principal(req)) {
+        return json(res, 200, { ok: false, error: opError("not_allowed", "update.apply is the principal's, with a fresh passkey through the hub, which the fleet cannot check yet: refused"), store: null, storeSeq: null });
+      }
       if (b.op === "lane.deliver" || b.op === "delivery.cancel") {
         return json(res, 400, { ok: false, error: opError("bad_args", `${b.op} is not sent as an op: use /v1/deliveries`), store: null, storeSeq: null });
       }
@@ -272,7 +282,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     // The Rollout the fleet carries (updates §7): reads answer however the fleet stands; the writes share the ops'
     // hold refusal (RL9) — nothing moves while the fleet updates itself.
     if (method === "GET" && s.length === 1 && first === "rollout") {
-      return json(res, 200, { controlPlane: d.rollouts.controlPlane(), rollout: d.rollouts.latest() });
+      return json(res, 200, { controlPlane: d.rollouts.controlPlane(), rollout: d.rollouts.latest(), aboveControlPlane: d.rollouts.aboveControlPlane() });
     }
     if (method === "POST" && s.length === 2 && first === "rollout" && (second === "committed" || second === "halt" || second === "resume")) {
       if (held()) return json(res, 503, { error: "updating", message: "the fleet is not taking new work while it updates" }, { "Retry-After": "1" });
@@ -284,6 +294,10 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       }
       const parsed = parseRolloutBody(second, body);
       if (!parsed.ok) throw new HttpError(400, parsed.message);
+      if (parsed.kind === "committed" && !d.rolloutAuthority.updater(req))
+        return json(res, 403, { error: "not_allowed", message: "only the control plane's updater commits a Rollout, and the fleet cannot check it yet: refused" });
+      if (parsed.kind === "resume" && !d.rolloutAuthority.principal(req))
+        return json(res, 403, { error: "not_allowed", message: "a resume is the principal's, with a fresh passkey through the hub, which the fleet cannot check yet: refused" });
       if (parsed.kind === "committed") {
         const r = d.rollouts.committed(parsed.version, parsed.soakMinutes);
         if (!r.ok) return json(res, 409, { error: r.refused, message: r.message });

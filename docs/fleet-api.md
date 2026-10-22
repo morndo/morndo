@@ -226,13 +226,15 @@ GET /v1/rollout
 ---
 200
 
-{ "controlPlane": { "version": "{{string:cp}}", "commit": "{{string}}" }, "rollout": null }
+{ "controlPlane": { "version": "{{string:cp}}", "commit": "{{string}}" }, "rollout": null, "aboveControlPlane": [] }
 ```
 
 - `controlPlane` is the fleet's own build: the Version and the commit of the tree it runs.
-- `rollout` is the highest Version the fleet holds a Rollout of, or null before any commit or halt. `controlPlaneCommittedAt` is when the control plane committed to it and `soakMinutes` (0–10080, 30 by default) how long it runs it before a node may take it; `halted`, `haltedBy`, `haltReason` and `haltedAt` say when a machine or the owner stopped it.
+- `rollout` is the Rollout nodes follow: the highest Version at or below the control plane's own that the fleet holds a Rollout of, or null. `aboveControlPlane` lists the halted Rollouts above it, highest first: what the control plane rolled back from. They never stand for the Rollout (no node runs above its control plane, RL11) and stay until resumed. `controlPlaneCommittedAt` is when the control plane committed to it and `soakMinutes` (0–10080, 30 by default) how long it runs it before a node may take it; `halted`, `haltedBy`, `haltReason` and `haltedAt` say when a machine or the owner stopped it.
 
-**Committing.** `POST /v1/rollout/committed` takes `{ version, soakMinutes? }` and starts the Rollout of that Version unhalted. The control plane commits only the Version it runs itself; anything else is 409 `not_allowed`, and nothing is stored.
+**Who may move a Rollout.** The socket is the user's, and a lane runs as that user too, so the fleet takes a commit only from the control plane's updater, and a resume or an `update.apply` only from the principal with a fresh passkey through the hub. Until the fleet can check them (the updater's commit: updates PR 6b; the hub's step-up proof: PR 6c) it refuses all three, whoever asks: 403 `not_allowed` here, `not_allowed` for the op (§8). A halt needs neither: it only ever stops updates.
+
+**Committing.** `POST /v1/rollout/committed` takes `{ version, soakMinutes? }` and starts the soak of that Version. The control plane commits only the Version it runs itself; anything else is 409 `not_allowed`, and nothing is stored. A Version is a Release's: SemVer without build metadata (`0.4.2`, not `0.4.2+x`), and a Rollout is found by precedence, so no spelling steps around a halt.
 
 ```example rollout-committed
 POST /v1/rollout/committed
@@ -241,19 +243,7 @@ content-type: application/json
 
 { "version": "{{string:cp}}", "soakMinutes": 30 }
 ---
-200
-
-{ "ok": true, "rollout": { "version": "{{string:cp}}", "controlPlaneCommittedAt": "{{time:cp-at}}", "soakMinutes": 30, "halted": false, "haltedBy": null, "haltReason": null, "haltedAt": null } }
-```
-
-```example rollout-committed-other
-POST /v1/rollout/committed
-x-morndo-client: kira
-content-type: application/json
-
-{ "version": "9.9.9" }
----
-409
+403
 
 { "error": "not_allowed", "message": "{{string}}" }
 ```
@@ -269,7 +259,7 @@ content-type: application/json
 ---
 200
 
-{ "ok": true, "rollout": { "version": "{{string:cp}}", "controlPlaneCommittedAt": "{{time:cp-at}}", "soakMinutes": 30, "halted": true, "haltedBy": "n1", "haltReason": "a check failed on n1", "haltedAt": "{{time}}" } }
+{ "ok": true, "rollout": { "version": "{{string:cp}}", "controlPlaneCommittedAt": null, "soakMinutes": 30, "halted": true, "haltedBy": "n1", "haltReason": "a check failed on n1", "haltedAt": "{{time}}" } }
 ```
 
 ```example rollout-resume
@@ -279,9 +269,9 @@ content-type: application/json
 
 { "version": "{{string:cp}}" }
 ---
-200
+403
 
-{ "ok": true, "rollout": { "version": "{{string:cp}}", "controlPlaneCommittedAt": "{{time:cp-at}}", "soakMinutes": 30, "halted": false, "haltedBy": null, "haltReason": null, "haltedAt": null } }
+{ "error": "not_allowed", "message": "{{string}}" }
 ```
 
 A node that reports `rolled_back` or `rollback_failed` in its `health` halts the Rollout of the Version it was leaving itself, with one alert per node and target (§14). While the fleet holds new work for its own update these routes answer 503 `updating` (§10).
@@ -1245,7 +1235,7 @@ content-type: application/json
 ---
 200
 
-{ "ok": false, "error": { "code": "unknown_op", "executed": "no", "message": "n1's agent has no update.apply; update Morndo on it" }, "store": null, "storeSeq": null }
+{ "ok": false, "error": { "code": "not_allowed", "executed": "no", "message": "update.apply is the principal's, with a fresh passkey through the hub, which the fleet cannot check yet: refused" }, "store": null, "storeSeq": null }
 ```
 
 The two delivery ops are the node's own; a client reaches them through `/v1/deliveries`:
@@ -1348,12 +1338,10 @@ That turn end said DONE with a background task still running, so `w1`'s Run wait
 {"t":"run","node":"n1","body":{"lane":"w1","node":"n1","sessionId":"{{uuid:w1-session}}","phase":"waiting","wait":{"on":"background","tasks":[{"type":"shell","label":"Check the docs links"}]},"deadline":"{{time}}","overdue":false,"outcome":"done","line":"STATUS: DONE","since":"{{time}}","source":"hook"}}
 ```
 
-The Rollout changed while the examples above ran — committed (§5.4), halted by a machine's failed check, resumed:
+The Rollout changed while the examples above ran: halted by a machine's failed check (§5.4; the commit and the resume there were refused, so they changed nothing). Every change is one event, a commit and a resume too:
 
 ```example events-rollout events
-{"t":"rollout","node":"","body":{"version":"{{string:cp}}","controlPlaneCommittedAt":"{{time:cp-at}}","soakMinutes":30,"halted":false,"haltedBy":null,"haltReason":null,"haltedAt":null}}
-{"t":"rollout","node":"","body":{"version":"{{string:cp}}","controlPlaneCommittedAt":"{{time:cp-at}}","soakMinutes":30,"halted":true,"haltedBy":"n1","haltReason":"a check failed on n1","haltedAt":"{{time}}"}}
-{"t":"rollout","node":"","body":{"version":"{{string:cp}}","controlPlaneCommittedAt":"{{time:cp-at}}","soakMinutes":30,"halted":false,"haltedBy":null,"haltReason":null,"haltedAt":null}}
+{"t":"rollout","node":"","body":{"version":"{{string:cp}}","controlPlaneCommittedAt":null,"soakMinutes":30,"halted":true,"haltedBy":"n1","haltReason":"a check failed on n1","haltedAt":"{{time}}"}}
 ```
 
 ## 10. Errors
@@ -1364,13 +1352,13 @@ The Rollout changed while the examples above ran — committed (§5.4), halted b
 - On `POST /v1/op`, `POST /v1/deliveries` and `POST /v1/deliveries/<id>/cancel`, every outcome is status 200, refusals included: `{ ok: false, error }` (§6, §8).
 - A body that doesn't fit is the exception: 400 for one that doesn't fit the route, 415 for one that isn't JSON, 413 for one over 1 MiB, each `{ ok: false, error }` (`bad_args`, or `too_large` over the limit). On `/v1/op` it also carries `store: null, storeSeq: null`: nothing was sent to a node.
 - An unknown delivery id is 404 `{ error: "no_such_delivery" }`, on `GET` and on cancel.
-- On the Rollout routes (§5.4), a write the state refuses is 409 `{ error, message }`; a body that doesn't fit is 400; while the fleet holds new work for its own update they answer 503 `updating`.
+- On the Rollout routes (§5.4), a write its caller may not make is 403 `{ error: "not_allowed", message }`, and a write the state refuses is 409 `{ error, message }`; a body that doesn't fit is 400; while the fleet holds new work for its own update they answer 503 `updating`.
 - On `/v1/files`, a refusal before the first byte has the status of §12.
 
 | Code | Executed | Means | Example |
 |---|---|---|---|
 | `bad_args` | no | The request or the op's arguments don't fit: an unknown op, a missing or extra key, a field of the wrong type, a delivery id without its client's name. | `err-bad-args`, `err-not-json`, `deliver-bad`, `deliver-malformed` |
-| `unknown_op` | no | The node doesn't know an op the fleet does: an older agent. `update.apply` on a node whose agent didn't announce the `update` capability is refused the same way, by the fleet, before anything is sent (§8). | `op-update-apply` |
+| `unknown_op` | no | The node doesn't know an op the fleet does: an older agent. `update.apply` on a node whose agent didn't announce the `update` capability is refused the same way, by the fleet, before anything is sent (§8). | none: needs an older agent |
 | `denied` | no | The node's policy refuses it: an op left out of its `ops`, a `protected` lane for `lane.stop`, a folder lanes may not start in. | `op-lane-stop-protected` |
 | `no_pane` | no | No such lane, worker or window, or the pane isn't the one expected (another server, window or session). | `err-no-pane`, `deliver-no-lane` |
 | `menu_open` | no | `pane.send`: a menu is on the screen. A delivery waits instead. | `err-menu-open` |
@@ -1388,7 +1376,7 @@ The Rollout changed while the examples above ran — committed (§5.4), halted b
 | `no_session` | no | A delivery to a pane with no live Claude Code session (no session file, or its process gone) that isn't waiting for one to start (§6.1). | `deliver-no-session` |
 | `already_typed` | no | `cancel` of a delivery past `queued`. | `cancel-typed` |
 | `updating` | no | The fleet or the node holds new work while it updates (503 from the fleet). Narrowing, revoking, `lane.stop`, `job.cancel` and `delivery.cancel` still run; a delivery already queued waits (`unavailable`). | none: needs an update in progress |
-| `not_allowed` | no | `file.put`: a file the attachment policy refuses (not an allowed kind, or a text file that isn't UTF-8). `update.apply`: a Version above the control plane's own (RL11), or a halted Rollout (RL12, §5.4). The Rollout routes answer 409 with it too. | none |
+| `not_allowed` | no | `file.put`: a file the attachment policy refuses (not an allowed kind, or a text file that isn't UTF-8). `update.apply`: refused until the fleet can check the principal's step-up (§5.4), then a Version above the control plane's own (RL11) or a halted Rollout (RL12). The Rollout routes answer 403 (who asks) or 409 (what is asked) with it too. | `op-update-apply` |
 
 ```example err-bad-args
 POST /v1/op

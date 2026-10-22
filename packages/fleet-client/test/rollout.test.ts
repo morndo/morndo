@@ -50,8 +50,13 @@ describe("the fleet client's rollout routes", () => {
   it("rollout() reads GET /v1/rollout and checks its shape", async () => {
     answer = { controlPlane: { version: "0.4.2", commit: null }, rollout };
     const c = new FleetClient(join(dir, "f.sock"));
-    expect(await c.rollout()).toEqual({ controlPlane: { version: "0.4.2", commit: null }, rollout });
+    expect(await c.rollout()).toEqual({ controlPlane: { version: "0.4.2", commit: null }, rollout, aboveControlPlane: [] });
     expect(seen).toEqual([{ method: "GET", path: "/v1/rollout", body: null }]);
+    const above = { ...rollout, version: "0.5.0", halted: true, haltedBy: "cp", haltReason: "fleet health failed", haltedAt: 1 };
+    answer = { controlPlane: { version: "0.4.2", commit: null }, rollout, aboveControlPlane: [above] };
+    expect((await c.rollout()).aboveControlPlane).toEqual([above]);
+    answer = { controlPlane: { version: "0.4.2", commit: null }, rollout, aboveControlPlane: [{ ...above, version: "0.5.0+x" }] };
+    await expect(c.rollout()).rejects.toBeInstanceOf(FleetMismatch);
     answer = { controlPlane: { version: "0.4.2", commit: null }, rollout: null };
     expect((await c.rollout()).rollout).toBeNull();
     answer = { controlPlane: { version: "0.4.2", commit: null }, rollout: { ...rollout, version: "0.4" } };

@@ -18,7 +18,8 @@ export function parseRolloutBody(kind: "committed" | "halt" | "resume", v: unkno
   if (!isObject(v)) return no("the body must be a JSON object");
   const extra = Object.keys(v).filter(k => !FIELDS[kind].has(k));
   if (extra.length) return no(`unknown fields: ${extra.join(", ")}`);
-  if (typeof v.version !== "string" || !SEMVER.test(v.version)) return no("version must be a Version, such as 0.4.2");
+  if (typeof v.version !== "string" || !SEMVER.test(v.version) || v.version.includes("+"))
+    return no("version must be a Release's Version without build metadata, such as 0.4.2");
   if (kind === "resume") return { ok: true, kind, version: v.version };
   if (kind === "committed") {
     const soak = v.soakMinutes;

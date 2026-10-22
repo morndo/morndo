@@ -41,12 +41,29 @@ export class Rollouts {
 
   controlPlane(): { version: string; commit: string | null } { return this.#own; }
 
-  // The highest Version the fleet holds a Rollout of (the domain's compare, not the newest row), or null.
+  // The Rollout nodes follow: the highest Version at or below the control plane's own (the domain's compare, not
+  // the newest row), or null. A halt above it — the control plane's own rollback from a Version it no longer runs —
+  // never stands in for it (review of #107): no node may run above its control plane anyway (RL11).
   latest(): RolloutWire | null {
-    return this.#store.list().reduce<RolloutWire | null>((high, r) => {
+    return this.#store.list().filter(r => !this.aboveOwn(r.version)).reduce<RolloutWire | null>((high, r) => {
       const a = parseVersion(r.version), b = high === null ? null : parseVersion(high.version);
       return high === null || (a !== null && b !== null && compareVersions(a, b) > 0) ? r : high;
     }, null);
+  }
+
+  // The halted Rollouts above the control plane's Version, highest first: what the control plane rolled back from.
+  // They stay until the principal resumes them (or a newer Release); the app shows them beside the Rollout.
+  aboveControlPlane(): RolloutWire[] {
+    return this.#store.list().filter(r => r.halted && this.aboveOwn(r.version))
+      .sort((x, y) => compareVersions(parseVersion(y.version)!, parseVersion(x.version)!));
+  }
+
+  // The stored Rollout of a Version by precedence (SemVer §10: build metadata does not count), so no spelling of a
+  // Version escapes its halt. The edges refuse build metadata already; this holds even for a row written before.
+  #find(version: string): RolloutWire | null {
+    const v = parseVersion(version);
+    if (v === null) return null;
+    return this.#store.list().find(r => { const w = parseVersion(r.version); return w !== null && compareVersions(v, w) === 0; }) ?? null;
   }
 
   // RL11, as the agent gate asks it: is this Version above the one the control plane runs?
@@ -57,7 +74,7 @@ export class Rollouts {
 
   // RL12: is the Rollout of this Version halted? A Version nobody committed is not.
   halted(version: string): boolean {
-    return this.#store.get(version)?.halted ?? false;
+    return this.#find(version)?.halted ?? false;
   }
 
   // The control plane commits its own running Version (§4.3): a fleet never asks a node for a Version it doesn't run
@@ -67,7 +84,7 @@ export class Rollouts {
     const a = parseVersion(version), b = parseVersion(this.#own.version);
     if (a === null || b === null || !equalVersions(a, b))
       return { ok: false, refused: "not_allowed", message: `the control plane runs ${this.#own.version}, not ${version}` };
-    const was = this.#store.get(version);
+    const was = this.#find(version);
     const r: RolloutWire = {
       version, controlPlaneCommittedAt: this.#now(), soakMinutes,
       halted: was?.halted ?? false, haltedBy: was?.haltedBy ?? null, haltReason: was?.haltReason ?? null, haltedAt: was?.haltedAt ?? null,
@@ -81,7 +98,7 @@ export class Rollouts {
   // plane never committed is halted too, with no commit time: the control plane's own rollback comes before its
   // commit (review focus 2, "a rollback on cp halts nodes"), and a node must still learn that Version is halted.
   halt(version: string, machine: string, reason: string): RolloutWrite {
-    const r = this.#store.get(version) ?? {
+    const r = this.#find(version) ?? {
       version, controlPlaneCommittedAt: null, soakMinutes: DEFAULT_SOAK_MINUTES,
       halted: false, haltedBy: null, haltReason: null, haltedAt: null,
     };
@@ -94,7 +111,7 @@ export class Rollouts {
 
   // The principal's word (RL12): a resume clears the halt — the audit row for it is the route's, with the client.
   resume(version: string): RolloutWrite | RolloutRefusal {
-    const r = this.#store.get(version);
+    const r = this.#find(version);
     if (r === null || !r.halted) return { ok: false, refused: "not_halted", message: `the Rollout of ${version} is not halted` };
     const resumed: RolloutWire = { ...r, halted: false, haltedBy: null, haltReason: null, haltedAt: null };
     this.#store.put(resumed);
@@ -115,7 +132,9 @@ export class Rollouts {
       this.#audit.alert(kind, node, {
         version: update.version, ...(target === null ? {} : { target }), ...(reason === null ? {} : { reason }),
       });
-    if (target !== null) this.halt(target, node, reason ?? `${node} reports a ${update.state === "rolled_back" ? "rollback" : "failed rollback"} without a reason`);
+    // A node never runs above its control plane (RL11), so a report of a rollback from above it is wrong on its face:
+    // it is alerted, and halts nothing (review of #107: it would otherwise stand for the Rollout).
+    if (target !== null && !this.aboveOwn(target)) this.halt(target, node, reason ?? `${node} reports a ${update.state === "rolled_back" ? "rollback" : "failed rollback"} without a reason`);
   }
 
   // Every change of the Rollout reaches the clients as the `rollout` event (node: "", the fleet's own) and every

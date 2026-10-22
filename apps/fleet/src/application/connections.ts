@@ -252,7 +252,9 @@ export class Connections {
     // so every refusal answers executed: no.
     if (op === "update.apply" && c !== undefined && !c.stale && this.#updates !== null) {
       const version = typeof args === "object" && args !== null ? (args as { version?: unknown }).version : undefined;
-      if (typeof version === "string") {
+      if (typeof version !== "string")
+        return Promise.resolve(failed("bad_args", "update.apply needs a version"));
+      {
         if (!c.caps.includes(CAP_UPDATE))
           return Promise.resolve(failed("unknown_op", `${node}'s agent has no update.apply; update Morndo on it`));
         if (this.#updates.aboveOwn(version))

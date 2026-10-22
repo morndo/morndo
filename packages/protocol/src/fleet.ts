@@ -314,6 +314,10 @@ const label = () => z.string().check(z.maxLength(200));
 const buildCommit = () => z.string().check(z.regex(/^[0-9a-f]{40}$/));
 // A Version on the fleet channel: the same rule as the signed documents (releases.ts' SEMVER, SemVer 2.0.0).
 const semver = () => z.string().check(z.regex(SEMVER));
+// A Release's Version as the Rollout names it: SemVer without build metadata. Precedence ignores build metadata
+// (SemVer 2.0.0 §10), so "0.4.2+x" and "0.4.2" are one Version; the Rollout's words refuse the second spelling at the
+// edge so no halt can be stepped around by a spelling (review of #107).
+const releaseVersion = () => z.string().check(z.regex(SEMVER), z.refine(v => !v.includes("+"), "a Release's Version carries no build metadata"));
 const count = () => z.int().check(z.gte(0));
 const nodeName = () => z.string().check(z.regex(NODE_NAME));
 const workerId = () => z.string().check(z.regex(WORKER_ID));
@@ -438,7 +442,7 @@ export const OP_ARGS = {
   "connections.role": RoleCommand,
   "connections.revoke": RevokeCommand,
   "connections.narrow": NarrowCommand,
-  "update.apply": z.object({ version: semver() }),
+  "update.apply": z.object({ version: releaseVersion() }),
 } satisfies Record<OpName, z.ZodMiniType>;
 
 const PaneSchema = z.object({
@@ -517,7 +521,7 @@ const OpErrorSchema = z.pipe(
 // What a node reports is checked for shape here; whether a state may follow another is the domain's, on the node.
 const UpdateHealthSchema = z.object({
   state: z.enum(["current", "staged", "waiting", "applying", "rolled_back", "rollback_failed"]),
-  version: semver(), target: z.exactOptional(semver()), reason: z.exactOptional(label()), failedCheck: z.exactOptional(label()),
+  version: releaseVersion(), target: z.exactOptional(releaseVersion()), reason: z.exactOptional(label()), failedCheck: z.exactOptional(label()),
 });
 const HealthSchema = z.object({
   memTotal: z.number(), memAvailable: z.number(), psiSome10: z.nullable(z.number()), psiFull10: z.nullable(z.number()),
@@ -587,7 +591,7 @@ export type RolloutWire = {
   haltedBy: string | null; haltReason: string | null; haltedAt: number | null;
 };
 export const RolloutWireSchema = z.object({
-  version: semver(), controlPlaneCommittedAt: z.nullable(z.number()), soakMinutes: z.int().check(z.gte(0), z.lte(10_080)),
+  version: releaseVersion(), controlPlaneCommittedAt: z.nullable(z.number()), soakMinutes: z.int().check(z.gte(0), z.lte(10_080)),
   halted: z.boolean(), haltedBy: z.nullable(nodeName()), haltReason: z.nullable(label()), haltedAt: z.nullable(z.number()),
 });
 

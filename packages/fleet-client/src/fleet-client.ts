@@ -282,14 +282,18 @@ export class FleetClient {
   // The Rollout as the fleet carries it (updates §7): the build its control plane runs — the ceiling for every
   // node's Version (RL11) — and the Rollout of the highest Version it holds, null while it has committed none. The
   // `rollout` event carries the same body on every change of it.
-  async rollout(): Promise<{ controlPlane: { version: string; commit: string | null }; rollout: RolloutWire | null }> {
+  // `aboveControlPlane`: the halted Rollouts above it (what the control plane rolled back from), highest first; [] from
+  // a fleet that has none or doesn't say.
+  async rollout(): Promise<{ controlPlane: { version: string; commit: string | null }; rollout: RolloutWire | null; aboveControlPlane: RolloutWire[] }> {
     const v = await this.#json("GET", "/v1/rollout");
     if (!isRecord(v) || !isRecord(v.controlPlane) || typeof v.controlPlane.version !== "string" || !SEMVER.test(v.controlPlane.version)
       || !(v.controlPlane.commit === null || (typeof v.controlPlane.commit === "string" && /^[0-9a-f]{40}$/.test(v.controlPlane.commit))))
       throw new FleetMismatch("GET /v1/rollout: not a rollout answer");
     const rollout = v.rollout === null ? null : parseBody(RolloutWireSchema, v.rollout);
     if (v.rollout !== null && rollout === null) throw new FleetMismatch("GET /v1/rollout: the rollout doesn't fit the wire");
-    return { controlPlane: v.controlPlane as { version: string; commit: string | null }, rollout };
+    const above = Array.isArray(v.aboveControlPlane) ? v.aboveControlPlane.map(r => parseBody(RolloutWireSchema, r)) : [];
+    if (above.some(r => r === null)) throw new FleetMismatch("GET /v1/rollout: a halt above the control plane doesn't fit the wire");
+    return { controlPlane: v.controlPlane as { version: string; commit: string | null }, rollout, aboveControlPlane: above as RolloutWire[] };
   }
   // The control plane commits its own running Version (updates §4.3): the Rollout it answers is the one now in
   // flight. A refusal (a Version the control plane doesn't run itself) throws FleetOpFailed — nothing was committed.
@@ -305,7 +309,8 @@ export class FleetClient {
     return this.#rolloutWrite("resume", { version });
   }
   // The three rollout writes: `ok: true` answers the Rollout now in force; a refusal carries its reason in the body
-  // whatever the status (409 not_allowed or not_halted, 400 a body that doesn't fit), and nothing was written; an
+  // whatever the status (403 not_allowed for a caller the fleet won't take it from, 409 not_allowed or not_halted,
+  // 400 a body that doesn't fit), and nothing was written; an
   // answer that is neither leaves the write in doubt, as an op's does.
   async #rolloutWrite(kind: "committed" | "halt" | "resume", body: Record<string, unknown>): Promise<RolloutWire> {
     const v = (await this.#outcome("POST", `/v1/rollout/${kind}`, body)).value;
