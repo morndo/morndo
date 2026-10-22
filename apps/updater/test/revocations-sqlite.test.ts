@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { databasePaths } from "../src/adapters/paths.ts";
 import { SqliteRevocations } from "../src/adapters/revocations-sqlite.ts";
+import { SqliteBackup } from "../src/adapters/backup-sqlite.ts";
 import { wipe } from "./helpers/fakes.ts";
 
 let scratch = "";
@@ -79,4 +80,13 @@ describe("SqliteRevocations", () => {
     expect(r.droppedBy("upd-4", "connections")).toEqual(["directory:vendor-a"]);
   });
 
+  it("against a Backup of a database that did not exist, every revocation made since would be dropped", async () => {
+    const home = join(scratch, "absent");
+    const paths = databasePaths(home, {});
+    const backups = join(home, "backups");
+    expect(await new SqliteBackup({ paths, backups }).take("upd-9", "connections")).toEqual({ ok: true, schema: 0 });
+    db(paths.connections, `CREATE TABLE secrets (reference TEXT NOT NULL, status TEXT NOT NULL);
+      INSERT INTO secrets VALUES ('vendor-key', 'revoked'), ('other-key', 'active');`);
+    expect(new SqliteRevocations({ paths, backups }).droppedBy("upd-9", "connections")).toEqual(["secrets:vendor-key"]);
+  });
 });

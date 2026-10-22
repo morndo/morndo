@@ -12,6 +12,7 @@ import Database from "better-sqlite3";
 import type { DatabaseName } from "@morndo/domain";
 import type { Revocations } from "../application/ports.ts";
 import type { DatabasePaths } from "./paths.ts";
+import { absentMarker } from "./backup-sqlite.ts";
 
 // Each revocation table: the id it is named by, and what marks a row revoked. Fixed SQL, no input in it.
 type RevokedRows = { table: string; id: string; revoked: string };
@@ -72,9 +73,11 @@ export class SqliteRevocations implements Revocations {
   droppedBy(updateId: string, db: DatabaseName): string[] {
     const tables = REVOKED[db];
     const backup = join(this.#backups, updateId, `${db}.db`);
-    if (tables === undefined || !existsSync(backup) || !existsSync(this.#paths[db])) return [];
+    // A Backup of a database that did not exist keeps no revocation: every one made since would be dropped.
+    const absent = !existsSync(backup) && existsSync(absentMarker(this.#backups, updateId, db));
+    if (tables === undefined || (!existsSync(backup) && !absent) || !existsSync(this.#paths[db])) return [];
     const directory = db === "connections";
-    const kept = revokedIn(backup, tables, directory);
+    const kept = absent ? new Set<string>() : revokedIn(backup, tables, directory);
     return [...revokedIn(this.#paths[db], tables, directory)].filter(id => !kept.has(id)).sort();
   }
 }
