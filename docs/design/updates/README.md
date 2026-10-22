@@ -601,6 +601,7 @@ Capistrano, the common shape for versioned releases with a `current` link, keeps
 
 - Taken after the service stopped (RL5), with SQLite's online backup API through better-sqlite3, which makes "a bit-wise identical copy of the source database as it was when the copying commenced" [U20]. Then `PRAGMA quick_check` and the schema version are read from the copy, and the file and its directory are synced. (`VACUUM INTO` also makes "a consistent snapshot", but its copy "might be incomplete and corrupt" after a power loss unless `synchronous` is NORMAL or FULL [U20]; the backup API with an explicit sync is simpler to reason about.)
 - Mode 0600, under `~/.local/state/morndo-update/backups/` (a deny root of the node's file rules). Key files are never copied: they don't change in an Update.
+- A database the machine never made (no connections store yet, say) is backed up as absent: a marker, not a copy. Restoring it removes what the newer Version made since, so the Version that never had the file starts without it; every revocation in the removed file counts as one the restore would drop (RL10).
 - Kept for the last three committed Updates, then deleted. Free space is checked first (section 6.1).
 
 ### 11.4 Restore

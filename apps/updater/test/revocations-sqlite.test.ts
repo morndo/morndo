@@ -8,6 +8,7 @@ import { RevocationJournal } from "@morndo/service-kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { databasePaths } from "../src/adapters/paths.ts";
 import { SqliteRevocations } from "../src/adapters/revocations-sqlite.ts";
+import { SqliteBackup } from "../src/adapters/backup-sqlite.ts";
 import { wipe } from "./helpers/fakes.ts";
 
 let scratch = "";
@@ -115,5 +116,16 @@ describe("SqliteRevocations", () => {
     // rolling back to a Version that applies no journal: the journal excuses nothing
     expect(r.droppedBy("upd-5", "hub", "0.0.9")).toEqual(["agent_tokens:tok-a", "endpoints:phone-b"]);
     expect(r.droppedBy("upd-5", "fleet", "0.0.9")).toEqual(["nodes:node-a", "nodes:node-b"]);
+  });
+
+  it("against a Backup of a database that did not exist, every revocation made since would be dropped", async () => {
+    const home = join(scratch, "absent");
+    const paths = databasePaths(home, {});
+    const backups = join(home, "backups");
+    expect(await new SqliteBackup({ paths, backups }).take("upd-9", "connections")).toEqual({ ok: true, schema: 0 });
+    db(paths.connections, `CREATE TABLE secrets (reference TEXT NOT NULL, status TEXT NOT NULL);
+      INSERT INTO secrets VALUES ('vendor-key', 'revoked'), ('other-key', 'active');`);
+    expect(new SqliteRevocations({ paths, backups, releases: join(home, "releases") }).droppedBy("upd-9", "connections", "0.1.0"))
+      .toEqual(["secrets:vendor-key"]);
   });
 });

@@ -15,6 +15,7 @@ import type { DatabaseName } from "@morndo/domain";
 import { RevocationJournal, type RevocationKind } from "@morndo/service-kit";
 import type { Revocations } from "../application/ports.ts";
 import type { DatabasePaths } from "./paths.ts";
+import { absentMarker } from "./backup-sqlite.ts";
 
 // Each revocation table: the id it is named by, and what marks a row revoked. Fixed SQL, no input in it.
 type RevokedRows = { table: string; id: string; revoked: string };
@@ -48,12 +49,13 @@ const APPLIER: Partial<Record<DatabaseName, string>> = {
 // enrolment, so it covers the node only when the row the backup brings back is that enrolment: a node revoked, joined
 // again and revoked again is covered by the entry of the enrolment the backup holds, or by none. Bad lines cover
 // nothing (the service skips them too).
-function journaledIds(db: DatabaseName, path: string, backup: string): Set<string> {
+function journaledIds(db: DatabaseName, path: string, backup: string | null): Set<string> {
   const byKind = JOURNALED[db];
   if (byKind === undefined) return new Set();
   const entries = new RevocationJournal(join(dirname(path), "revoked.log")).entries();
   const out = new Set<string>();
-  const enrolmentInBackup = db === "fleet" ? nodeEnrolments(backup) : new Map<string, string>();
+  // a Backup of a fleet.db that did not exist brings no node back: no enrolment to cover
+  const enrolmentInBackup = db === "fleet" && backup !== null ? nodeEnrolments(backup) : new Map<string, string>();
   for (const entry of entries) {
     const table = byKind[entry.kind];
     if (table === undefined) continue;
@@ -127,13 +129,15 @@ export class SqliteRevocations implements Revocations {
   droppedBy(updateId: string, db: DatabaseName, target: string): string[] {
     const tables = REVOKED[db];
     const backup = join(this.#backups, updateId, `${db}.db`);
-    if (tables === undefined || !existsSync(backup) || !existsSync(this.#paths[db])) return [];
+    // A Backup of a database that did not exist keeps no revocation: every one made since would be dropped.
+    const absent = !existsSync(backup) && existsSync(absentMarker(this.#backups, updateId, db));
+    if (tables === undefined || (!existsSync(backup) && !absent) || !existsSync(this.#paths[db])) return [];
     const directory = db === "connections";
-    const kept = revokedIn(backup, tables, directory);
+    const kept = absent ? new Set<string>() : revokedIn(backup, tables, directory);
     // The service's start re-applies these (RL10) — when the Version going back in applies journals at all.
     const applier = APPLIER[db];
     const journals = applier !== undefined && existsSync(join(this.#releases, target, applier));
-    const journaled = journals ? journaledIds(db, this.#paths[db], backup) : new Set<string>();
+    const journaled = journals ? journaledIds(db, this.#paths[db], absent ? null : backup) : new Set<string>();
     return [...revokedIn(this.#paths[db], tables, directory)].filter(id => !kept.has(id) && !journaled.has(id)).sort();
   }
 }
