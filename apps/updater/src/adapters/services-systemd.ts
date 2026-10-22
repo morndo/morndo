@@ -179,11 +179,14 @@ export class SystemdServices implements ServiceManager {
   }
 
   // RL13: the group's own processes and every sub-group's, depth first — a fresh machine's tmux server
-  // lands in a sub-group the agent's own cgroup.procs does not name.
+  // lands in a sub-group the agent's own cgroup.procs does not name. A tmux client is not a server: the agent runs
+  // one for every poll of its panes, and tmux names it "tmux: client" (the server "tmux: server"; checked on tmux
+  // 3.4). Any other tmux name counts, an older tmux's plain "tmux" included: the safe side.
   private tmuxInCgroup(dir: string): boolean {
     for (const pid of readPids(join(dir, "cgroup.procs"))) {
       try {
-        if (readFileSync(join(this.procRoot, pid, "comm"), "utf8").startsWith("tmux")) return true;
+        const comm = readFileSync(join(this.procRoot, pid, "comm"), "utf8").trim();
+        if (comm.startsWith("tmux") && comm !== "tmux: client") return true;
       } catch { /* the process left between the two reads: it is not evidence of tmux */ }
     }
     let entries;
