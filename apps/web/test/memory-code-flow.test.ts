@@ -83,6 +83,12 @@ afterEach(async () => { await tab?.context().close(); });
 
 async function desktop(replies: { status: number; body: unknown }[]) {
   const context = await web.browser.newContext({ viewport: { width: 1600, height: 1000 } });
+  // The card says "Valid for ceil((expiresAt - now) / 1 min) min", and the Desktop's `now` is set when it mounts and
+  // refreshed every 30 s. The gate below mints expiresAt = Date.now() + 10 min when it answers, so with a running clock the
+  // card reads "11 min" (now is older than the mint) until the next 30 s tick: the test passed only when that tick fell
+  // inside waitFor's 30 s, and failed in CI when the browser was slow. A fixed Date.now() makes the mint and the card's
+  // `now` the same instant, so the card says "10 min" at once; timers keep running.
+  await context.clock.setFixedTime(NOW);
   tab = await context.newPage();
   errors = [];
   tab.on("pageerror", e => errors.push(e.message));
