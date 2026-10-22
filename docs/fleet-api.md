@@ -139,7 +139,7 @@ Any other value matches only itself. An answer may hold no field that its exampl
 - `health` is the node's latest report: memory, load, disk, the clock, the depth of its hook spool. It is null until the node has sent one.
 - `agent` is the version its agent last reported.
 - `commit` is the commit its agent runs, from its live connection: null while the node is offline, or for an agent that does not report one.
-- `proto` is the protocol versions its agent offered on its live connection: null while the node is offline.
+- `proto` is the protocol versions its agent offered on its live connection, and while it is offline the ones its last hello named (null for a node that never connected): an offline node still speaks those, so the control plane's skew gate counts them (RL11). Revoking the node is how the owner lets a Release past one that will never come back.
 - `update` is the node's last update report (§5.4): `{ state, version, target?, reason?, failedCheck? }`, with `state` one of `current`, `staged`, `waiting`, `applying`, `rolled_back`, `rollback_failed`. Null before any.
 
 ```example nodes
@@ -226,11 +226,11 @@ GET /v1/rollout
 ---
 200
 
-{ "controlPlane": { "version": "{{string:cp}}", "commit": "{{string}}" }, "rollout": null, "aboveControlPlane": [] }
+{ "controlPlane": { "version": "{{string:cp}}", "commit": "{{string}}" }, "rollout": null, "aboveControlPlane": [], "nodesAhead": [] }
 ```
 
 - `controlPlane` is the fleet's own build: the Version and the commit of the tree it runs.
-- `rollout` is the Rollout nodes follow: the highest Version at or below the control plane's own that the fleet holds a Rollout of, or null. `aboveControlPlane` lists the halted Rollouts above it, highest first: what the control plane rolled back from. They never stand for the Rollout (no node runs above its control plane, RL11) and stay until resumed. `controlPlaneCommittedAt` is when the control plane committed to it and `soakMinutes` (0–10080, 30 by default) how long it runs it before a node may take it; `halted`, `haltedBy`, `haltReason` and `haltedAt` say when a machine or the owner stopped it.
+- `rollout` is the Rollout nodes follow: the highest Version at or below the control plane's own that the fleet holds a Rollout of, or null. `aboveControlPlane` lists the halted Rollouts above it, highest first: what the control plane rolled back from. They never stand for the Rollout (no node runs above its control plane, RL11) and stay until resumed. `nodesAhead` names the nodes whose updater says they run above the control plane's Version: after the control plane rolls back, the nodes that had taken the Version it left stay on it. Nothing moves them by itself: the fleet refuses every `update.apply` to such a node (`not_allowed`), and their own ticks take nothing lower, so they wait until the control plane catches up or the owner rolls each back on it by hand (`morndo update --rollback`). The control plane's own rollback, the principal's included, halts the Version it left (its updater announces the attempt first). `controlPlaneCommittedAt` is when the control plane committed to it and `soakMinutes` (0–10080, 30 by default) how long it runs it before a node may take it; `halted`, `haltedBy`, `haltReason` and `haltedAt` say when a machine or the owner stopped it.
 
 **Who may move a Rollout.** The socket is the user's, and a lane runs as that user too, so the fleet takes a commit or a halt only from the control plane's updater, and a resume or an `update.apply` only from the principal with a fresh passkey through the hub. Until the fleet can check them (the updater: updates PR 6b; the hub's step-up proof: PR 6c) it refuses all four, whoever asks: 403 `not_allowed` here, `not_allowed` for the op (§8). A halt still happens where a rollback does, by the two internal paths: a node's own `health` (below), and, for the control plane itself, its updater's state file (`~/.local/state/morndo-update/state.json`, read once a second like `hold.json`).
 

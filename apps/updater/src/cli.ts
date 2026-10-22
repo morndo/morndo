@@ -20,7 +20,7 @@ import type { RecoverOutcome } from "./application/recovery-service.ts";
 import { RecoveryService } from "./application/recovery-service.ts";
 import { formatStatus, readStatus } from "./application/status-service.ts";
 import type {
-  AlertSink, ArtifactStore, FleetView, ReleaseFeed, RoleProbe, ServiceManager, UpdateHistory,
+  AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, UpdateHistory,
 } from "./application/ports.ts";
 import { ConfigFile, ConfigInvalid } from "./adapters/config-file.ts";
 import { ApplyingFileMarker } from "./adapters/applying-file.ts";
@@ -255,6 +255,11 @@ export async function runUpdater(
         parsed = { cmd: "apply-unit", version: flags[2]! };
       } else if (flags.length === 5 && versionAt(1) && flags[3] === "--attempt" && parseVersion(flags[2]!) !== null) {
         parsed = { cmd: "apply-unit", version: flags[2]!, attempt: flags[4]! };
+      } else if (flags.length === 4 && versionAt(1) && flags[3]!.startsWith("--attempt=")
+        && (flags[2] === "rollback" || parseVersion(flags[2]!) !== null)) {
+        // the unit's own form: `--attempt=${MORNDO_ATTEMPT}` stays one word when the value is unset (systemd.service(5):
+        // "${FOO}" is one argument), so an empty value reaches here as "--attempt=" and is judged below, by name
+        parsed = { cmd: "apply-unit", version: flags[2]!, attempt: flags[3]!.slice("--attempt=".length) };
       } else return usage();
     } else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
     else if (flags.includes("--status") && flags.every(f => f === "--status" || f === "--json")) parsed = { cmd: "status" };
@@ -349,8 +354,30 @@ export async function runUpdater(
     // the target's Manifest protocol range, asked live over the socket. A hold defers (75) and state.json names
     // it — "skew_blocked:" with the nodes, or a fleet that could not be asked at all; a target whose staged
     // record cannot be read never runs either. Null is the gate open.
+    // The fleet's node list as the last successful read saw it (review of #111): the boot apply runs before the
+    // fleet starts, so it decides on that list; with none seen yet it applies nothing and the tick does it later.
+    const nodesKeptFile = join(paths.state, "fleet-nodes.json");
+    const keptNodes = (): FleetNode[] | null => {
+      try {
+        const v = JSON.parse(readFileSync(nodesKeptFile, "utf8")) as { nodes?: unknown };
+        return Array.isArray(v.nodes) ? v.nodes as FleetNode[] : null;
+      } catch { return null; }
+    };
+    const keepingNodes = (real: FleetView, boot: boolean): Pick<FleetView, "nodes"> => ({
+      nodes: async () => {
+        let live: FleetNode[] | null = null;
+        try { live = await real.nodes(); } catch { live = null; }
+        if (live !== null) {
+          writeFileSync(nodesKeptFile, `${JSON.stringify({ at: systemClock.now(), nodes: live })}\n`, { mode: 0o600 });
+          return live;
+        }
+        const kept = boot ? keptNodes() : null;
+        if (kept !== null) return kept;
+        throw new Error("the fleet cannot be asked for its nodes");
+      },
+    });
     const skewGate = async (o: {
-      running: string | null; target: string; targetProtocol: ProtocolRange | null;
+      running: string | null; target: string; targetProtocol: ProtocolRange | null; boot?: boolean;
     }): Promise<number | null> => {
       const target = parseVersion(o.target);
       const running = parseVersion(o.running ?? "");
@@ -359,8 +386,13 @@ export async function runUpdater(
         io.err("the staged record cannot be read\n");
         return EXIT_TEMPFAIL;
       }
-      const gate = await controlPlaneSkew({ fleet: await fleetOf(), controlPlane: running, target, targetProtocol: o.targetProtocol });
+      const gate = await controlPlaneSkew({ fleet: keepingNodes(await fleetOf(), o.boot === true), controlPlane: running, target, targetProtocol: o.targetProtocol });
       if (gate.ok) return null;
+      if (gate.error.reason === "fleet_unreachable" && o.boot === true) {
+        stateSink.write({ state: "waiting", version: o.running ?? o.target, target: o.target, reason: "fleet_unreachable", at: systemClock.now() });
+        io.out("the boot apply waits: the fleet has not told this machine its nodes yet, so the tick applies it once the fleet answers\n");
+        return EXIT_OK;
+      }
       if (gate.error.reason === "fleet_unreachable") {
         stateSink.write({ state: "waiting", version: o.running ?? o.target, target: o.target, reason: "fleet_unreachable", at: systemClock.now() });
         io.err("the fleet cannot be asked for its nodes, so the apply waits (RL11)\n");
@@ -440,6 +472,10 @@ export async function runUpdater(
       return services;
     };
     const applyNowFile = join(paths.state, "apply-now");
+    // The attempt id the apply unit runs under (§5.4): a unit instance carries only its Version, so the starter
+    // writes the id here first (the node agent: the fleet's; morndo update --yes: a fresh one), and the unit reads
+    // it once (its template's EnvironmentFile) and removes it.
+    const applyEnvFile = join(paths.state, "apply.env");
     // The principal's confirmed rollback (§11.4), for the apply unit to find: written by `update --rollback` once the
     // word is typed (or --yes), naming the Version it leaves, and consumed by the unit. The unit's own command line is
     // one anyone can type; without this record it runs no rollback (review of 2026-10-22).
@@ -470,8 +506,22 @@ export async function runUpdater(
           return EXIT_OK;
         }
       }
+      // The attempt the unit runs under (§5.4): the control plane mints its own; a node takes the one the fleet
+      // offered it for this Version, and without such an offer applies nothing — a rollback under an id the fleet
+      // never issued would halt nothing.
+      const running = m.services();
+      let attempt = mintAttempt();
+      if (!running.includes("hub") || !running.includes("fleet")) {
+        const offer = (await (await fleetOf()).view().catch(() => null))?.offer ?? null;
+        if (offer === null || offer.version !== staged.version) {
+          io.err(`the fleet has not offered ${staged.version} to this node, so it applies nothing yet; the control plane's Updates page or its rollout moves it\n`);
+          return EXIT_TEMPFAIL;
+        }
+        attempt = offer.attempt;
+      }
       // §6.2's `--now`: a file the apply unit reads, because arguments cannot cross a unit boundary.
       if (parsed.now) writeFileSync(applyNowFile, "");
+      writeFileSync(applyEnvFile, `MORNDO_ATTEMPT=${attempt}\n`, { mode: 0o600 });
       try {
         await m.runApply(staged.version);
       } catch (error) {
@@ -497,6 +547,8 @@ export async function runUpdater(
       if (m === null) return EXIT_CONFIG;
       const goBack = "Going back to an older Version is morndo update --rollback: it says what a restore drops and asks first.";
       const running = installer.layout().current;
+      // apply.env is read once, by the unit that was started for it: gone now, a later start cannot reuse its id.
+      rmSync(applyEnvFile, { force: true });
       if (parsed.version === "rollback") {
         // Only the rollback `update --rollback` confirmed, for the Version still running, and lately.
         let confirmed: { from?: unknown; at?: unknown } | null = null;
@@ -523,6 +575,11 @@ export async function runUpdater(
       // unset variable. An id of no shape is a usage error before anything runs; a node refuses an apply without
       // one outright, because its rollback would halt nothing.
       const attempt = parsed.attempt === undefined || parsed.attempt === "" ? null : parsed.attempt;
+      if (attempt === null && parsed.attempt !== undefined) {
+        io.err(`no attempt id reached this apply: whoever starts the apply unit writes MORNDO_ATTEMPT into ${applyEnvFile} first ` +
+          "(the node agent for the fleet's update.apply, morndo update --yes on the control plane); nothing ran\n");
+        return EXIT_USAGE;
+      }
       if (attempt !== null && !ATTEMPT_ID.test(attempt)) {
         io.err("--attempt wants an id the fleet issued (16 bytes, base64url)\n");
         return EXIT_USAGE;
@@ -558,7 +615,7 @@ export async function runUpdater(
       if (held !== null) return held;
       const now = existsSync(applyNowFile);
       if (now) rmSync(applyNowFile, { force: true });
-      const outcome = await (await applyWith(m)).apply({ now });
+      const outcome = await (await applyWith(m)).apply({ now, ...(attempt === null ? {} : { attempt }) });
       return printOutcome(applyLine(outcome), applyCode(outcome));
     }
 
@@ -723,7 +780,7 @@ export async function runUpdater(
       const stagedNow = store.staged();
       if (stagedNow !== null) {
         const held = await skewGate({
-          running: installer.layout().current, target: stagedNow.version, targetProtocol: protocolOf(stagedNow.version),
+          running: installer.layout().current, target: stagedNow.version, targetProtocol: protocolOf(stagedNow.version), boot: true,
         });
         if (held !== null) return held;
       }

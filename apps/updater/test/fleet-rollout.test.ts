@@ -34,7 +34,7 @@ const DAY = 24 * 3600_000;
 const MIN = 60_000;
 let scratch = "";
 beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), "morndo-upd-")); });
-afterAll(() => { wipe(scratch); });
+afterAll(() => { wipe(scratch); }, 60_000);   // every world of the file, removed at once
 
 // An attempt id as both sides make them (§5.4): 16 random bytes, base64url.
 const ATTEMPT = /^[A-Za-z0-9_-]{22,64}$/;
@@ -441,7 +441,7 @@ describe("`morndo update tick` on a node — it follows the control plane (§6.7
     const again = await stale.run(["update", "tick"]);
     expect(again.code, again.err).toBe(75);
     expect(stateFile(stale.statePath)).toMatchObject({ reason: "no_view" });
-  });
+  }, 90_000);   // 2 worlds, each two signed releases unpacked (about 10 s apiece on a loaded box)
 
   it("a Rollout that is not of the target defers not_committed; a target above the control plane defers node_ahead", async () => {
     const none = await tickWorld();
@@ -455,7 +455,7 @@ describe("`morndo update tick` on a node — it follows the control plane (§6.7
     const out = await ahead.run(["update", "tick"]);
     expect(out.code, out.err).toBe(75);
     expect(stateFile(ahead.statePath)).toMatchObject({ state: "waiting", reason: "node_ahead" });
-  });
+  }, 90_000);   // 2 worlds, each two signed releases unpacked (about 10 s apiece on a loaded box)
 
   it("a committed Rollout the control plane sits below defers waiting_control_plane; a halted one defers halted", async () => {
     const behind = await tickWorld();
@@ -469,7 +469,7 @@ describe("`morndo update tick` on a node — it follows the control plane (§6.7
     const out = await halted.run(["update", "tick"]);
     expect(out.code, out.err).toBe(75);
     expect(stateFile(halted.statePath)).toMatchObject({ state: "waiting", reason: "halted" });
-  });
+  }, 90_000);   // 2 worlds, each two signed releases unpacked (about 10 s apiece on a loaded box)
 
   it("inside the soak it defers waiting_soak; past it, inside its drawn delay, waiting_jitter on the same draw", async () => {
     const soak = await tickWorld();
@@ -491,7 +491,7 @@ describe("`morndo update tick` on a node — it follows the control plane (§6.7
     expect(second.code, second.err).toBe(75);
     expect(stateFile(jitter.statePath)).toMatchObject({ reason: "waiting_jitter" });
     expect(jitter.store.jitterOf(B)).toBe(drawn);
-  });
+  }, 90_000);   // 2 worlds, each two signed releases unpacked (about 10 s apiece on a loaded box)
 
   it("everything allowed, the tick applies under the offer's attempt: the walk runs, the machine runs B, and every record of it carries that attempt", async () => {
     const w = await tickWorld();
@@ -571,7 +571,7 @@ describe("`morndo update apply --version <v> --attempt <id>` on a node (§8.3, �
     const wrong = await bad.run(["update", "apply", "--version", B, "--attempt", "short"]);
     expect(wrong.code, wrong.err).toBe(64);
     expect(bad.store.recentUpdates(1)).toEqual([]);
-  });
+  }, 90_000);   // 3 worlds, each two signed releases unpacked (about 10 s apiece on a loaded box)
 });
 
 describe("the control plane's own gate before an apply (§7, RL11)", () => {
@@ -598,7 +598,7 @@ describe("the control plane's own gate before an apply (§7, RL11)", () => {
     const out = await blind.run(["update", "tick"]);
     expect(out.code, out.err).toBe(75);
     expect(blind.current()).toBe(A);
-  });
+  }, 90_000);   // 2 worlds, each two signed releases unpacked (about 10 s apiece on a loaded box)
 
   it("a target that still accepts the node's protocol applies: the gate opens, the walk runs", async () => {
     const open = await tickWorld({ controlPlane: true, fleet: NODES });   // B's Manifest says agent [1, 2]
@@ -608,3 +608,109 @@ describe("the control plane's own gate before an apply (§7, RL11)", () => {
     expect(stateFile(open.statePath)).toMatchObject({ state: "current", version: B });
   }, 120_000);   // the walk really sleeps §6.4's sixty-second probation; the walls cannot shorten it
 });
+
+// The review of #111 at 8a79723 (four findings).
+describe("6b review: the attempt in the unit, the boot apply, offline nodes, a rollback that leaves nodes ahead", () => {
+  const NODES1 = (): FakeFleetView => { const f = new FakeFleetView(); f.nodesWord = [{ name: "n2", agentProtocol: 1, joined: true, revoked: false }]; return f; };
+  const applyEnv = (w: TickWorld) => join(w.home, ".local", "state", "morndo-update", "apply.env");
+
+  it("the unit's attempt is one word: --attempt= (systemd's expansion of an unset value) refuses with a clear error", async () => {
+    const w = await tickWorld();
+    w.fleet.word = word();
+    const out = await w.run(["update", "apply", "--version", B, "--attempt="]);
+    expect(out.code, out.err).toBe(64);
+    expect(out.err).toContain("apply.env");                       // says what is missing, not a usage dump
+    expect(w.store.recentUpdates(1)).toEqual([]);
+  });
+
+  it("the rollback instance's own command line (--version rollback --attempt=) reaches the rollback, not the usage", async () => {
+    const w = await tickWorld();
+    const out = await w.run(["update", "apply", "--version", "rollback", "--attempt="]);
+    expect(out.err).not.toContain("usage:");                     // parsed: the rollback's own gate answers
+    expect(w.store.recentUpdates(1)).toEqual([]);                // unconfirmed: nothing ran
+  });
+
+  it("--attempt=<id> carries the id, and the unit consumes apply.env so a later start cannot reuse it", async () => {
+    const id = "applied-by-the-principal-00000";
+    const w = await tickWorld();
+    w.fleet.word = word();
+    w.services.tmuxIn = true;
+    mkdirSync(dirname(applyEnv(w)), { recursive: true });
+    writeFileSync(applyEnv(w), `MORNDO_ATTEMPT=${id}\n`);
+    const r = await w.run(["update", "apply", "--version", B, `--attempt=${id}`]);
+    expect(r.code, r.err).toBe(75);
+    expect(w.store.recentUpdates(1)[0]?.attempt).toBe(id);
+    expect(existsSync(applyEnv(w))).toBe(false);
+  });
+
+  it("the control plane's update --yes writes apply.env with a fresh attempt before it starts the unit", async () => {
+    const w = await tickWorld({ controlPlane: true, fleet: NODES1() });
+    await w.run(["update", "--yes"]);
+    expect(w.services.tape.some(t => t.startsWith("runApply:"))).toBe(true);
+    const env = readFileSync(applyEnv(w), "utf8");
+    expect(env).toMatch(/^MORNDO_ATTEMPT=[A-Za-z0-9_-]{22,64}\n$/);
+  });
+
+  it("on a node, update --yes runs under the fleet's offered attempt, and refuses a Version it was not offered", async () => {
+    const w = await tickWorld();
+    w.fleet.word = word();                                          // offered B under OFFER.attempt
+    await w.run(["update", "--yes"]);
+    expect(readFileSync(applyEnv(w), "utf8")).toBe(`MORNDO_ATTEMPT=${OFFER.attempt}\n`);
+
+    const none = await tickWorld();
+    none.fleet.word = word({ offer: null });
+    const out = await none.run(["update", "--yes"]);
+    expect(out.code, out.err).toBe(75);
+    expect(out.err).toContain("offered");
+    expect(existsSync(applyEnv(none))).toBe(false);
+    expect(none.services.tape.some(t => t.startsWith("runApply:"))).toBe(false);
+  }, 90_000);   // 2 worlds, each two signed releases unpacked (about 10 s apiece on a loaded box)
+
+  it("the boot apply, before the fleet runs, decides on the node list the last tick saw", async () => {
+    // a tick with the fleet up sees n2 at protocol 1 and keeps that list; its own walk defers (tmux)
+    const w = await tickWorld({ controlPlane: true, fleet: NODES1() });
+    w.services.tmuxIn = true;
+    expect((await w.run(["update", "tick"], { random: () => 0, timing: SMALL_WALLS })).code).toBe(75);
+    w.services.tmuxIn = false;
+    w.fleet.throwNodes = true;                                     // boot: the fleet starts after this unit
+    const r = await w.run(["update", "boot"], { random: () => 0, timing: SMALL_WALLS });
+    expect(r.code, r.err).toBe(0);
+    expect(w.current()).toBe(B);
+  }, 120_000);
+
+  it("the boot apply with no list seen yet does not apply, says so, and leaves it to the tick", async () => {
+    const w = await tickWorld({ controlPlane: true, fleet: NODES1() });
+    w.fleet.throwNodes = true;
+    const r = await w.run(["update", "boot"]);
+    expect(r.code, r.err).toBe(0);
+    expect(w.current()).toBe(A);
+    expect(r.out + r.err).toContain("the tick");
+  });
+
+  it("the boot apply holds on the kept list too: a node it would cut off blocks it", async () => {
+    const w = await tickWorld({ controlPlane: true, fleet: NODES1(), protocol: { agent: [2, 2], clientApi: [1, 1] } });
+    expect((await w.run(["update", "tick"])).code).toBe(75);       // skew_blocked: n2, and the list kept
+    w.fleet.throwNodes = true;
+    const r = await w.run(["update", "boot"]);
+    expect(r.code, r.err).toBe(75);
+    expect(stateFile(w.statePath)).toMatchObject({ state: "waiting", reason: "skew_blocked: n2" });
+    expect(w.current()).toBe(A);
+  });
+
+  it("the principal's rollback announces its attempt (applying) before it reports the rollback under it", async () => {
+    const sink = new FakeStateSink();
+    const world = await buildApplyWorld(join(scratch, "rb-announce"), { stateSink: sink, preUpdatePrevious: A });
+    expect((await world.apply().apply({ now: true })).kind).toBe("committed");
+    const before = sink.written.length;
+    const out = await world.apply().rollback();
+    expect(out.kind).toBe("rolled_back");
+    const after = sink.written.slice(before);
+    const announced = after.findIndex(s => s.state === "applying");
+    const reported = after.findIndex(s => s.state === "rolled_back");
+    expect(announced).toBeGreaterThanOrEqual(0);
+    expect(reported).toBeGreaterThan(announced);
+    expect(after[announced]).toMatchObject({ target: B, attempt: expect.stringMatching(ATTEMPT) });
+    expect(after[reported]).toMatchObject({ version: A, target: B, attempt: after[announced]!.attempt });
+  }, 120_000);
+});
+

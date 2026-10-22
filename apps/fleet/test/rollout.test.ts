@@ -462,4 +462,29 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     await vi.waitFor(async () => expect(await isHalted(api)).toBe(true), { timeout: 5000 });
     await fleet.close();
   });
+
+  // The review of #111 at 8a79723.
+  it("an offline node keeps its last hello's protocols in /v1/nodes, across a fleet restart too", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const b = await fleet.online("n2");
+    await b.close();
+    const node = async (f: typeof fleet) => ((await bodyOf(client(f.config.socketPath).get("/v1/nodes"))) as Body[] | undefined)?.find(n => n.name === "n2");
+    await vi.waitFor(async () => expect(await node(fleet)).toMatchObject({ status: "offline", proto: [1] }));
+    await fleet.close();
+    const again = await startTestFleet({ dir: fleet.dir, rolloutAuthority: OPEN });
+    await vi.waitFor(async () => expect(await node(again)).toMatchObject({ status: "offline", proto: [1] }), { timeout: 5000 });
+  });
+
+  it("a node running above the control plane is listed as ahead, and no update.apply reaches it until that ends", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const api = client(fleet.config.socketPath);
+    const b = await fleet.online("n2", { caps: [CAP_UPDATE] });
+    b.health(health({ update: { state: "current", version: "0.1.0" } }));   // V is 0.0.0: n2 runs above it
+    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.nodesAhead).toEqual(["n2"]));
+    const op = await api.post("/v1/op", { node: "n2", op: "update.apply", args: { version: V }, key: "hub:u-ahead" });
+    expect(op?.body).toMatchObject({ ok: false, error: { code: "not_allowed", executed: "no" } });
+    expect(((op?.body ?? {}) as Body).error.message).toContain("above the control plane");
+    expect(b.reqs.filter(r => r.op === "update.apply")).toHaveLength(0);
+  });
 });
+

@@ -123,7 +123,7 @@ describe("the unit templates every Version ships (§5)", () => {
       // §5.4's attempt id rides an environment file the node agent writes (the instance carries only the Version);
       // "-": a control plane, which mints its own, has none
       EnvironmentFile: "-%h/.local/state/morndo-update/apply.env",
-      ExecStart: "%h/.local/bin/morndo-update update apply --version %i --attempt $MORNDO_ATTEMPT",
+      ExecStart: "%h/.local/bin/morndo-update update apply --version %i --attempt=${MORNDO_ATTEMPT}",
     });
   });
 

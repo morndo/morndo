@@ -143,6 +143,14 @@ export class Rollouts {
     return { ok: true, changed: true, rollout: this.#announce(resumed) };
   }
 
+  // The nodes running above the control plane's own Version, by their updater's word (review of #111): after the
+  // control plane rolls back, nodes that took the Version it left stay on it. Nothing re-syncs them by itself: no
+  // update.apply reaches them (the fleet's gate) and their own ticks take nothing lower, so they wait until the
+  // control plane catches up or the owner rolls each back by hand; the app shows them, so the owner can.
+  nodesAhead(nodes: readonly { name: string; update: { version: string } | null }[]): string[] {
+    return nodes.filter(n => n.update !== null && this.aboveOwn(n.update.version)).map(n => n.name).sort();
+  }
+
   // The store, for the tests' clock-driven pruning case.
   get store(): RolloutsStore { return this.#store; }
 

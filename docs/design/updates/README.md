@@ -320,6 +320,7 @@ Recovery runs from `good`, the last committed Version, because that code has pas
 Claude Code's promise is that the next start runs the new Version [U1]. For services the next start is usually a reboot. On Linux, `morndo-update-boot.service` runs before the services when a Version is staged, automatic updates are on and there is no pin:
 - It takes the apply lock, fetches the Feed again and runs `admit` (withdrawn, halted, bad here). Without a network it doesn't apply.
 - **Only on a machine that is its own control plane.** A node can't know at boot whether its control plane still runs the target or has halted the Rollout (RL11, RL12): its agent isn't connected yet. So a node applies through the tick, once its agent has connected and the fleet's view is less than 10 minutes old.
+- Skew (section 7) still applies, but the fleet isn't running yet. The control plane's updater keeps the node list from its last successful read of `GET /v1/nodes` (`fleet-nodes.json` in its state directory), and the boot apply decides on that list. With no list kept yet, it applies nothing and leaves the Version to the tick, which runs once the fleet answers.
 - It records the same marks as section 6.2 (`backing_up`, `swapping`, `starting`), writes `hold.json` when RL9 applies, then backs up and swaps while nothing runs: a safe point by construction.
 - The services then start on the new Version. The recovery unit, ordered after them, judges health and commits or rolls back as in section 6.6. With nothing running to read a baseline from, the baseline is the health recorded at the last commit.
 
@@ -344,6 +345,10 @@ A node learns the control plane's Version and the Rollout's state from the fleet
 | web app and hub | The same Release. The hub accepts the previous Release's web app: the protocol package only adds optional fields from one Release to the next, and removing one takes two Releases, as the agent protocol does. | An open tab sees `updated` and offers a reload (below). |
 
 **Changing the agent protocol takes two Releases.** Release A speaks N and N+1. Release B drops N. The control plane defers B, naming the nodes, until every joined, non-revoked node reports A or newer (RL11). `manifest.protocol` carries each Release's range, so the check needs no knowledge of what changed.
+
+**An offline node still counts.** `GET /v1/nodes` reports an offline node's protocols from its last hello, so the control plane's skew gate counts a node that is switched off. Revoking a node that will never come back lets a Release past it.
+
+**After the control plane rolls back.** The control plane's rollback, the principal's included, announces its own attempt id and halts the Version it left. Nodes that already took that Version now run above the control plane. Nothing moves them by itself: the fleet lists them as `nodesAhead`, refuses every `update.apply` to them, and their ticks take nothing lower. They wait until the control plane runs that Version again, or until the owner rolls each one back on the node with `morndo update --rollback`.
 
 **A bad Release.** When one machine rolls back, the Rollout halts and no other machine takes that Version automatically (RL12). The hub shows which machine failed and which check. `morndo update --resume-rollout <version>` or a newer Release continues. The maintainers can withdraw a Release in the Feed: machines stop being offered it, and machines already on it are told and stay (RL2). The fix goes out as a new Release.
 

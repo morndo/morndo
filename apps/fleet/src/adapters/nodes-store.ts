@@ -15,17 +15,23 @@ import { parsePublicKey } from "./keys.ts";
 export type NodeRow = {
   name: string; publicKey: string; createdAt: number; revokedAt: number | null; lastSeenAt: number | null;
   lastSource: string | null; agentVersion: string | null; connEpoch: number;
+  lastProto: number[] | null;                          // the protocols its last hello named (migration 17)
 };
 export type Issued = { ok: true; code: string; expiresAt: number } | { ok: false; refused: "bad_name" | "exists" };
 export type Redeemed = { ok: true; node: string } | { ok: false; refused: "unknown" | "expired" | "used" | "wrong_node" | "exists" | "bad_key" };
 
 type Row = {
   name: string; public_key: string; created_at: number; revoked_at: number | null; last_seen_at: number | null;
-  last_source: string | null; agent_version: string | null; conn_epoch: number;
+  last_source: string | null; agent_version: string | null; conn_epoch: number; last_proto?: string | null;
+};
+const protoFrom = (text: string | null | undefined): number[] | null => {
+  if (typeof text !== "string") return null;
+  try { const v: unknown = JSON.parse(text); return Array.isArray(v) && v.every(n => Number.isInteger(n)) ? v as number[] : null; }
+  catch { return null; }
 };
 const nodeFrom = (r: Row): NodeRow => ({
   name: r.name, publicKey: r.public_key, createdAt: r.created_at, revokedAt: r.revoked_at, lastSeenAt: r.last_seen_at,
-  lastSource: r.last_source, agentVersion: r.agent_version, connEpoch: r.conn_epoch,
+  lastSource: r.last_source, agentVersion: r.agent_version, connEpoch: r.conn_epoch, lastProto: protoFrom(r.last_proto),
 });
 
 type CodeRow = { hash: string; node: string; expires_at: number; used_at: number | null };
@@ -112,9 +118,11 @@ export class NodesStore {
     return r.conn_epoch;
   }
 
-  seen(name: string, agentVersion?: string): void {
+  seen(name: string, agentVersion?: string, proto?: number[]): void {
     if (agentVersion === undefined) this.#db.prepare("UPDATE nodes SET last_seen_at = ? WHERE name = ?").run(this.#now(), name);
-    else this.#db.prepare("UPDATE nodes SET last_seen_at = ?, agent_version = ? WHERE name = ?").run(this.#now(), agentVersion, name);
+    else if (proto === undefined) this.#db.prepare("UPDATE nodes SET last_seen_at = ?, agent_version = ? WHERE name = ?").run(this.#now(), agentVersion, name);
+    else this.#db.prepare("UPDATE nodes SET last_seen_at = ?, agent_version = ?, last_proto = ? WHERE name = ?")
+      .run(this.#now(), agentVersion, JSON.stringify(proto), name);
   }
 
   // Records where a node connected from; returns the previous source when it was a different one (an alert, spec 8).

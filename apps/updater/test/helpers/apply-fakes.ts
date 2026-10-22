@@ -3,6 +3,7 @@
 // parts a unit test cannot run. Everything the services drive is taped in order, and every fake can die at a named
 // call (ApplyInterrupted) to stand a process killed after a mark was saved (§13's power-loss table), which is how
 // the recovery tests reach each recorded step.
+import type { UpdateStateSink } from "../../src/application/ports.ts";
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -398,6 +399,8 @@ export type ApplyWorld = {
 };
 
 export type WorldOptions = {
+  /** A sink for state.json writes in place of the real file (to read their order). */
+  stateSink?: UpdateStateSink;
   /** B's Manifest's schemas (the migration cases). */
   bSchemas?: Record<DatabaseName, SchemaInfo>;
   /** What the previous link points at before the update (default: nothing, a first update) — the pair a rollback
@@ -493,7 +496,7 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   // commit's record carries, and the mint behind every attempt the updater itself owns (§5.4). The fleet stays in the
   // world for the tests to read; no service below is given it.
   const fleet = o.fleet ?? new FakeFleetView();
-  const stateSink = new StateFileWriter({ path: join(paths.state, "state.json") });
+  const stateSink: UpdateStateSink = o.stateSink ?? new StateFileWriter({ path: join(paths.state, "state.json") });
   const soakMinutes = o.soakMinutes ?? DEFAULT_SOAK_MINUTES;
   const mintAttempt = o.mintAttempt ?? ((): string => randomBytes(16).toString("base64url"));
   return {

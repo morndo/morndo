@@ -260,6 +260,16 @@ export const MIGRATIONS: readonly Migration[] = [
         issued_at INTEGER NOT NULL DEFAULT 0, used_at INTEGER);
     `),
   },
+  {
+    version: 17,
+    name: "a node's last hello protocols (review of #111): the skew gate counts an offline node too",
+    compat: "additive",
+    up: db => db.exec(`
+      -- The agent protocols a node's last hello named, as JSON (nodes.last_proto): an offline node still depends on
+      -- them, so GET /v1/nodes reports them when it is offline and the control plane's skew gate counts them (RL11).
+      ALTER TABLE nodes ADD COLUMN last_proto TEXT;
+    `),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

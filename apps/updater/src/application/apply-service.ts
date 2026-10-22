@@ -266,6 +266,9 @@ export class ApplyService {
       };
       const ctx: StepCtx = { deps, timing, u: firstSave };
       store.saveUpdate(firstSave);
+      // Announced before anything moves (review of #111): the fleet counts a rollback only under an id it saw in an
+      // `applying` record first, and this one leaves the running Version — that Version's Rollout halts.
+      state.write({ state: "applying", version: layout.current, target: layout.current, attempt: firstSave.attempt!, at: clock.now() });
       // §5's `applying` mark before anything moves: a death past this point is the recovery unit's to finish.
       applying.set(ctx.u.id);
       const running = services.services();

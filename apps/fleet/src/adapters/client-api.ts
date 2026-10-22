@@ -79,7 +79,7 @@ class HttpError extends Error {
 export type ClientApiDeps = {
   router: Router; connections: Connections; lanes: LaneRegistry; nodes: NodesStore; audit: Audit; events: EventHub; jobs: JobMirror; log: Logger;
   deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">; laneWatch?: Pick<LaneWatch, "view">; runs?: Pick<Runs, "view">;
-  rollouts: Pick<Rollouts, "committed" | "halt" | "resume" | "latest" | "controlPlane" | "aboveControlPlane">;
+  rollouts: Pick<Rollouts, "committed" | "halt" | "resume" | "latest" | "controlPlane" | "aboveControlPlane" | "nodesAhead">;
   rolloutAuthority: RolloutAuthority;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
@@ -284,7 +284,10 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     // The Rollout the fleet carries (updates §7): reads answer however the fleet stands; the writes share the ops'
     // hold refusal (RL9) — nothing moves while the fleet updates itself.
     if (method === "GET" && s.length === 1 && first === "rollout") {
-      return json(res, 200, { controlPlane: d.rollouts.controlPlane(), rollout: d.rollouts.latest(), aboveControlPlane: d.rollouts.aboveControlPlane() });
+      return json(res, 200, {
+        controlPlane: d.rollouts.controlPlane(), rollout: d.rollouts.latest(), aboveControlPlane: d.rollouts.aboveControlPlane(),
+        nodesAhead: d.rollouts.nodesAhead(d.connections.list()),
+      });
     }
     if (method === "POST" && s.length === 2 && first === "rollout" && (second === "committed" || second === "halt" || second === "resume")) {
       if (held()) return json(res, 503, { error: "updating", message: "the fleet is not taking new work while it updates" }, { "Retry-After": "1" });
