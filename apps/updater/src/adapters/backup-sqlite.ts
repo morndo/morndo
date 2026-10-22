@@ -6,12 +6,21 @@
 // proven before anything relies on it: quick_check must answer ok, and the schema the copy holds is read from
 // the copy itself. A restore (§11.4) copies the checked backup beside the database, syncs it, removes a stale
 // -wal/-shm that would corrupt the restored view, and renames the copy over the database.
-import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import type { DatabaseName } from "@morndo/domain";
 import type { DatabasePaths } from "./paths.ts";
 import type { Backup, BackupResult } from "../application/ports.ts";
+
+// Whether a path names nothing at all: true on ENOENT, false when something is there; any other error throws.
+const absentFile = (path: string): boolean => {
+  try { lstatSync(path); return false; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    throw error;
+  }
+};
 
 /** Where a Backup of a database that did not exist says so: beside where its copy would be. */
 export const absentMarker = (backups: string, updateId: string, db: DatabaseName): string =>
@@ -38,7 +47,9 @@ export class SqliteBackup implements Backup {
       chmodSync(dir, 0o700);                       // recursive mkdir keeps a mode it finds, not the one asked for
       // A database this machine never made (no connections store yet, say): its Backup is the absence (§11.3,
       // "a missing database is the nothing it is"), kept as a marker, and a restore of it removes what was made since.
-      if (!existsSync(this.#paths[db])) {
+      // Only ENOENT is absence: a file this user cannot reach (EACCES, ENOTDIR…) throws here, and the backup fails
+      // with nothing left behind — taken for absent, a restore would delete a store that was there.
+      if (absentFile(this.#paths[db])) {
         rmSync(dest, { force: true });
         const marker = absentMarker(this.#backups, updateId, db);
         writeFileSync(marker, "", { mode: 0o600 });
