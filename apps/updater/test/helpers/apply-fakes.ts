@@ -207,9 +207,10 @@ export class FakeServices implements ServiceManager {
     return this.tmuxIn;
   }
 
-  async runApply(version: string): Promise<void> {
-    this.calls.push({ op: "runApply", version });
+  async runApply(version: string, o?: { wait?: boolean }): Promise<void> {
+    this.calls.push({ op: "runApply", version, ...(o?.wait === false ? { wait: false } : { wait: true }) });
     this.tape.push(`runApply:${version}`);
+    if (o?.wait === false) return;                         // --detach: the unit, not this process, walks the steps
     if (this.runApplyScript !== null) await this.runApplyScript(version);
   }
 

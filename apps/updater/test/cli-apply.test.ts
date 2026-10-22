@@ -194,6 +194,30 @@ describe("`morndo update` — check, then apply what stands staged (§8.1)", () 
     expect(w.services.tape).toEqual([]);
   });
 
+  // PR 6c: the hub starts updates this way — one command, no waiting, the exit is the start's, not the walk's.
+  it("--detach starts the apply unit and answers at once: the unit, not this process, walks the steps", async () => {
+    const w = await world({ preStageB: true });
+    const r = await w.run(["update", "--yes", "--detach"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toMatch(/[Ss]tarted/);
+    expect(w.services.calls.find(c => c.op === "runApply")).toMatchObject({ version: B, wait: false });
+    expect(w.services.tape.filter(t => t !== `runApply:${B}`)).toEqual([]);   // nothing else ran here
+    expect(w.store.openUpdate()).toBeNull();                                  // no record: the unit writes its own
+  });
+
+  it("--detach without --yes is the same usage error; with nothing staged it answers as the check did", async () => {
+    const w = await world({ preStageB: true });
+    const refused = await w.run(["update", "--detach"]);
+    expect(refused.code).toBe(64);
+    expect(refused.err).toMatch(/--yes|terminal|apply/i);
+    expect(w.services.tape).toEqual([]);
+    const upToDate = await world({ offerB: false });
+    const r = await upToDate.run(["update", "--yes", "--detach"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toMatch(new RegExp(`Up to date: ${A}`));
+    expect(upToDate.services.calls.filter(c => c.op === "runApply")).toEqual([]);
+  });
+
   it("`update apply` refuses a version that is not the one staged, and applies nothing", async () => {
     const w = await world({ preStageB: true });
     const r = await w.run(["update", "apply", "--version", "9.9.9"]);
@@ -392,6 +416,17 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
       expect(r.prompts).toEqual([]);
       expect(w.services.calls.some(c => c.op === "runApply" && c.version === "rollback")).toBe(true);
     }
+  });
+
+  it("--rollback --yes --detach starts the rollback unit and answers at once (PR 6c)", async () => {
+    const w = await world();
+    await withPrevious(w);
+    const r = await w.run(["update", "--rollback", "--yes", "--detach"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toMatch(/[Ss]tarted/);
+    expect(w.services.calls.find(c => c.op === "runApply")).toMatchObject({ version: "rollback", wait: false });
+    expect(w.current()).toBe(A);                           // the unit, not this process, walks it back
+    expect(w.services.tape.filter(t => t !== "runApply:rollback")).toEqual([]);
   });
 
   // The apply unit's own command is a command line anyone can type: the rollback it runs must be one --rollback asked

@@ -56,10 +56,10 @@ const EXIT_SOFTWARE = 70;
 const EXIT_TEMPFAIL = 75;
 const EXIT_CONFIG = 78;
 
-const USAGE = `usage: morndo-update update [--yes] [--now]       check, then apply what stands staged (asks first on a terminal)
+const USAGE = `usage: morndo-update update [--yes] [--now] [--detach]   check, then apply what stands staged (asks first on a terminal)
        morndo-update update --check [--json]        check the channel feed, verify, and stage what passes
        morndo-update update --status [--json]       what this machine believes, the last updates included
-       morndo-update update --rollback [--yes]      back to the previous Version (a restore asks for the typed word)
+       morndo-update update --rollback [--yes] [--detach]   back to the previous Version (a restore asks for the typed word)
        morndo-update update apply --version <v> [--attempt <id>]   one apply, as the apply unit runs it
        morndo-update update tick | boot | recover   the timer's, the boot unit's and the recovery unit's commands
        morndo-update install --role control-plane|node [--channel stable|latest] [--force]
@@ -211,8 +211,8 @@ export async function runUpdater(
     = { cmd: "check" }
     | { cmd: "status" }
     | { cmd: "doctor" }
-    | { cmd: "update"; yes: boolean; now: boolean }
-    | { cmd: "rollback"; yes: boolean }
+    | { cmd: "update"; yes: boolean; now: boolean; detach: boolean }
+    | { cmd: "rollback"; yes: boolean; detach: boolean }
     | { cmd: "apply-unit"; version: string; attempt?: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
     | { cmd: "install"; role: "control-plane" | "node"; channel: Channel; force: boolean };
@@ -236,11 +236,12 @@ export async function runUpdater(
   } else {
     // update: one subcommand, or one flag set — never two asks in one line. Bare `update` is the ask itself.
     // The rollback is read before the update's own set so `--rollback --yes` and `--yes --rollback` are one ask.
-    if (flags.includes("--rollback") && flags.every(f => f === "--rollback" || f === "--yes")) {
-      parsed = { cmd: "rollback", yes: flags.includes("--yes") };
-    } else if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json") {
-      if (flags.some(f => f !== "--yes" && f !== "--now" && f !== "--json")) return usage();
-      parsed = { cmd: "update", yes: flags.includes("--yes"), now: flags.includes("--now") };
+    if (flags.includes("--rollback") && flags.every(f => f === "--rollback" || f === "--yes" || f === "--detach")) {
+      parsed = { cmd: "rollback", yes: flags.includes("--yes"), detach: flags.includes("--detach") };
+    } else if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json" || flags[0] === "--detach") {
+      if (flags.some(f => f !== "--yes" && f !== "--now" && f !== "--json" && f !== "--detach")) return usage();
+      if (flags.includes("--detach") && flags.includes("--now")) return usage();   // two asks: --now's file is removed by a waited start (§6.2); --detach cannot own it
+      parsed = { cmd: "update", yes: flags.includes("--yes"), now: flags.includes("--now"), detach: flags.includes("--detach") };
     } else if (flags[0] === "tick" && flags.length === 1) parsed = { cmd: "tick" };
     else if (flags[0] === "boot" && flags.length === 1) parsed = { cmd: "boot" };
     else if (flags[0] === "recover" && flags.length === 1) parsed = { cmd: "recover" };
@@ -528,6 +529,18 @@ export async function runUpdater(
       // §6.2's `--now`: a file the apply unit reads, because arguments cannot cross a unit boundary.
       if (parsed.now) writeFileSync(applyNowFile, "");
       writeFileSync(applyEnvFile, `MORNDO_ATTEMPT=${attempt}\n`, { mode: 0o600 });
+      // PR 6c's --detach — the hub's one command: start the unit, answer at once. The exit is the start's, not
+      // the walk's; the unit writes its own record, and a later --status reads it (§8.1).
+      if (parsed.detach) {
+        try {
+          await m.runApply(staged.version, { wait: false });
+        } catch (error) {
+          io.err(`the apply unit did not start: ${error instanceof Error ? error.message : String(error)}\n`);
+          return EXIT_TEMPFAIL;
+        }
+        io.out(`Started the apply unit for ${staged.version}; it walks the steps from here — morndo update --status tells how it ends.\n`);
+        return EXIT_OK;
+      }
       try {
         await m.runApply(staged.version);
       } catch (error) {
@@ -678,6 +691,18 @@ export async function runUpdater(
       const m = needManager();
       if (m === null) return EXIT_CONFIG;
       writeFileSync(rollbackConfirmedFile, `${JSON.stringify({ from: layout.current, at: Date.now() })}\n`, { mode: 0o600 });
+      // PR 6c's --detach, the hub's rollback command: start §5's morndo-update-apply@rollback.service instance
+      // and answer at once; the unit walks the machine back and records its own end.
+      if (parsed.detach) {
+        try {
+          await m.runApply("rollback", { wait: false });
+        } catch (error) {
+          io.err(`the apply unit did not start: ${error instanceof Error ? error.message : String(error)}\n`);
+          return EXIT_TEMPFAIL;
+        }
+        io.out("Started the rollback unit; it walks the machine back from here — morndo update --status tells how it ends.\n");
+        return EXIT_OK;
+      }
       try {
         await m.runApply("rollback");            // §5: the morndo-update-apply@rollback.service instance
       } catch (error) {

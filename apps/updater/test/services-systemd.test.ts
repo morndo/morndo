@@ -203,6 +203,14 @@ describe("SystemdServices (§4.6, §5, §6.2 step 6)", () => {
     await expect(failing.manager.runApply("0.2.0")).rejects.toThrow(/not found/);
   });
 
+  it("runApply with wait: false queues the unit with --no-block and answers at once (PR 6c's --detach)", async () => {
+    const m = machine();
+    await m.manager.runApply("0.2.0", { wait: false });
+    expect(m.sys.calls).toEqual([
+      { file: "systemctl", args: ["--user", "--no-block", "start", "morndo-update-apply@0.2.0.service"] },
+    ]);
+  });
+
   it("enable is one enable --now for the whole list (§10.3), and an empty list runs nothing", async () => {
     const m = machine();
     await m.manager.enable(["morndo-update.timer", "morndo-hub.service"]);

@@ -135,13 +135,18 @@ export class LaunchdServices implements ServiceManager {
     return false;
   }
 
-  async runApply(version: string): Promise<void> {
+  async runApply(version: string, o?: { wait?: boolean }): Promise<void> {
     // launchd has no transient units, so the apply runs as a child of this program, detached with setsid — the
     // macOS mirror of the apply unit's rule (§5, U19): no service's end, and no terminal's hangup, takes the
-    // walk along. It is waited on here, so the caller reads the apply's own exit, not the child's spawn.
+    // walk along. It is waited on here, so the caller reads the apply's own exit, not the child's spawn;
+    // --detach (`wait: false`, PR 6c) answers at the spawn instead: the walk keeps its detachment either way.
+    const child = spawn(join(this.home, ".local/bin/morndo-update"), ["update", "apply", "--version", version],
+      { detached: true, stdio: "ignore" });
+    if (o?.wait === false) {
+      child.on("error", () => {});           // a spawn that failed shows in the next --status, not as a throw here
+      return;
+    }
     const done = await new Promise<{ code: number | null }>(resolve => {
-      const child = spawn(join(this.home, ".local/bin/morndo-update"), ["update", "apply", "--version", version],
-        { detached: true, stdio: "ignore" });
       child.on("error", () => resolve({ code: 127 }));
       child.on("exit", code => resolve({ code }));
     });

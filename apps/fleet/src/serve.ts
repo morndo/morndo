@@ -40,6 +40,7 @@ import { LaneRegistry } from "./application/lane-registry.ts";
 import { LaneWatch, REBUILD_WINDOW_MS } from "./application/lane-watch.ts";
 import { CONTROL_PLANE_MACHINE, Rollouts } from "./application/rollouts.ts";
 import { CLOSED_ROLLOUT_AUTHORITY, type RolloutAuthority } from "./adapters/client-api.ts";
+import { decodePrincipalKey, principalAuthority } from "./adapters/principal-check.ts";
 import { UpdaterStateWatch, updaterStateFile } from "./adapters/updater-state-watch.ts";
 import { Router } from "./application/router.ts";
 import { Runs } from "./application/runs.ts";
@@ -53,7 +54,8 @@ export type FleetOptions = {
   holdPath?: string;
   // Who may commit a Rollout (the control plane's updater) and who may resume one or ask update.apply (the
   // principal, with step-up). Closed unless a check says yes (review of #107): the socket is the user's, and a lane
-  // runs as that user too. PR 6b brings the updater's check, PR 6c the hub's step-up proof. Not in the config file.
+  // runs as that user too. An explicit authority here wins (the tests'); otherwise the config's pinned principalKey
+  // (updates §5.4, PR 6c) opens the principal's two doors to the hub's signed assertion. Not in the config file.
   rolloutAuthority?: RolloutAuthority;
   // The control plane's own updater's state file (updates §7): its rollback halts the Rollout. Default under HOME.
   updaterStatePath?: string;
@@ -227,7 +229,10 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   try {
     await agents.ready;
     api = await startClientApi(config.socketPath, {
-      router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, runs: laneRuns, rollouts, rolloutAuthority: o.rolloutAuthority ?? CLOSED_ROLLOUT_AUTHORITY, log,
+      router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, runs: laneRuns, rollouts,
+      rolloutAuthority: o.rolloutAuthority
+        ?? (config.principalKey !== undefined ? principalAuthority(decodePrincipalKey(config.principalKey), { now }) : CLOSED_ROLLOUT_AUTHORITY),
+      log,
       ...(o.eventsBufferBytes === undefined ? {} : { eventsBufferBytes: o.eventsBufferBytes }),
       updates: { held: () => watch.held, flight },
     });

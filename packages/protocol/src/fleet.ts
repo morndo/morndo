@@ -247,6 +247,24 @@ export type Health = { memTotal: number; memAvailable: number; psiSome10: number
   // What the node's updater reports, when the node has one (updates §6.3, §7): absent from an older node, whose update
   // reads as null, never as a malformed health.
   update?: NodeUpdateHealth };
+
+// The status word the fleet gives a node (fleet clients §2.3): online, its agent connected; stale, its health went
+// quiet; offline, its agent gone.
+export const FLEET_NODE_STATUSES = ["online", "stale", "offline"] as const;
+export type FleetNodeStatus = (typeof FLEET_NODE_STATUSES)[number];
+// One row of GET /v1/nodes, as every client reads it (the hub's updates view among them, §8.1): the machine's name
+// and status, its last health report, the Version its agent said and the commit it runs (null before it said one),
+// the protocol versions its hello named (null when it is not connected), and its updater's last report (null before
+// any). A fleet from before updates sends the first four only — a client reads the rest as null, never as a mismatch.
+export type FleetNode = {
+  name: string;
+  status: FleetNodeStatus;
+  health: Health | null;
+  agent: string | null;
+  commit: string | null;
+  proto: number[] | null;
+  update: NodeUpdateHealth | null;
+};
 // "/lane": a lane state event the node made from its session state (fleet clients §7), carried and replayed like a hook.
 // Its body: { event: "needs_input" | "answered"; sessionId: string | null; question?: string }.
 export type HookEvent = { streamId: string; seq: number; at: number;
@@ -535,7 +553,7 @@ const UPDATE_HEALTH_FIELDS = {
   version: releaseVersion(), target: z.exactOptional(releaseVersion()), reason: z.exactOptional(label()), failedCheck: z.exactOptional(label()),
   attempt: z.exactOptional(z.string().check(z.regex(/^[A-Za-z0-9._:-]{1,64}$/))),
 };
-const UpdateHealthSchema = z.object(UPDATE_HEALTH_FIELDS);
+export const UpdateHealthSchema = z.object(UPDATE_HEALTH_FIELDS);
 // What a machine's updater last did, as it writes it to ~/.local/state/morndo-update/state.json (updates §7): a node's
 // agent reports it in its health; on the control plane the fleet reads it itself, so the control plane's own
 // rollback halts its Rollout without a route anyone else could call (review of #107). `at`: when it was written.

@@ -18,6 +18,8 @@ export * from "./usage.ts";
 export * from "./connections.ts";
 export * from "./jobs.ts";
 export * from "./releases.ts";
+export * from "./principal.ts";
+export * from "./updates.ts";
 export * from "./service-health.ts";
 export * from "./uploads.ts";
 export * from "./transcription.ts";

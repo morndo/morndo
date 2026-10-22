@@ -32,6 +32,7 @@ import type { UsageService } from "../application/usage-service.ts";
 import type { TranscriptionService } from "../application/transcription-service.ts";
 import type { BriefService } from "../application/brief-service.ts";
 import type { MemoryService } from "../application/memory-service.ts";
+import { CONTROL_PLANE_MACHINE, type UpdatesCommandOutcome, type UpdatesService } from "../application/updates-service.ts";
 import { BRIEF_TEMPLATE } from "./brief-template.ts";
 import { bridgeDesktop } from "./rfb.ts";
 import { servingHeaders, type Files } from "./files.ts";
@@ -40,8 +41,8 @@ import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
-  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UsageReportBody,
-  decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageReportBody,
+  decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema, type UpdatesView,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
 import { SCHEMA_VERSION } from "./migrations.ts";
@@ -215,6 +216,7 @@ export function startHttp(p: {
   presence?: PresenceService | null;                                        // ADR-0011: his last activity per device
   push?: { publicKey: Buffer; notifications: NotificationService } | null;   // web push (phase F); null: off
   engines?: EnginesService | null;                                          // ADR-0013: the Engines page; null: not connected
+  updatesService?: UpdatesService | null;                                   // updates §8.1 (PR 6c): every machine's Version; null: no fleet and no CLI
   connections?: ConnectionsPageService | null;                              // ADR-0018: LLM connections; null: no home set
   board?: { service: BoardService; agents: AgentAccess } | null;            // ADR-0015: the board; null: off
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
@@ -321,6 +323,16 @@ export function startHttp(p: {
     problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
     r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}) });
+
+  // An updates command's answer (updates §8.1): 403 a step-up too old, 409 the refusal with the fleet's own words
+  // (its code when the fleet refused), 503 what couldn't be asked. `view`: the screen read before the command —
+  // apply answers it, so the page lands whole.
+  const updatesAnswer = (res: ServerResponse, r: UpdatesCommandOutcome, view?: UpdatesView) => {
+    if (r.ok) return view === undefined ? json(res, 200, { ok: true }) : json(res, 200, { ok: true, view });
+    const status = r.problem === "step_up" ? 403 : r.problem === "unavailable" ? 503 : 409;
+    const error = r.problem === "refused" ? r.code : r.problem;
+    return json(res, status, r.problem === "step_up" ? { error } : { error, message: r.message });
+  };
 
   // ADR-0023: file, restate, list and close a decision brief. Same door as the board (a bearer token, no cookie).
   const briefStatus = (problem: string) =>
@@ -721,6 +733,40 @@ export function startHttp(p: {
       if (result.ok) return json(res, 200, result.view);
       const status = result.problem === "step_up" ? 403 : result.problem === "conflict" ? 409 : 400;
       return json(res, status, { error: result.problem });
+    }
+    // Updates §8.1 (PR 6c): the owner's one screen over every machine's Version. Reading is a look; each command is
+    // a Command (AC7), the fleet's refusal 409 with the fleet's own words, what can't be asked 503.
+    if (path === "/api/updates" && method === "GET") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.engineReads.take(a.endpoint.id));
+      return json(res, 200, await p.updatesService.view());
+    }
+    if (path === "/api/updates/apply" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UpdatesApplyBody);
+      // A node's apply is checked against the screen it was pressed on — the fleet lists the machine, or it is no
+      // one to command (an empty list proves nothing: the fleet may just not be answerable) — and answers that
+      // screen. The control plane's own apply needs no look besides its staged check (the service's), and answers
+      // itself: the machine about to move is the hub's.
+      if (body.machine !== CONTROL_PLANE_MACHINE) {
+        const view = await p.updatesService.view();
+        if (view.nodes.length > 0 && !view.nodes.some(n => n.name === body.machine)) {
+          return json(res, 409, { error: "unknown_machine", message: `${body.machine} is no machine the fleet lists` });
+        }
+        return updatesAnswer(res, await p.updatesService.apply(a, body.machine, body.version), view);
+      }
+      return updatesAnswer(res, await p.updatesService.apply(a, body.machine, body.version));
+    }
+    if (path === "/api/updates/rollback" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      return updatesAnswer(res, await p.updatesService.rollback(a, (await readBody(req, UpdatesRollbackBody)).machine));
+    }
+    if (path === "/api/updates/resume" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      return updatesAnswer(res, await p.updatesService.resume(a, (await readBody(req, UpdatesResumeBody)).version));
     }
     // ADR-0016: the accounts' usage, a look.
     if (path === "/api/usage" && method === "GET") return p.usage ? json(res, 200, p.usage.view()) : json(res, 404, { error: "usage_off" });
