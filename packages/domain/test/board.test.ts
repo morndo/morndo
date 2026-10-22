@@ -2,8 +2,8 @@
 // work and never to Done, one task in progress per lane, every change an event with provenance and a revision.
 import { describe, expect, it } from "vitest";
 import {
-  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, isOrphan, mayMove, parseTaskKey, sessionId, taskKey, unregisteredMove, workingOn,
-  type BoardActor, type Run, type Task, type TaskAction, type TaskActor,
+  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, MAX_MERGES, MORNDO_REPO, PRINCIPAL_NOT_LIVE, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, isOrphan, livenessOf, mayMove, mergeLabel, mergedView, parseTaskKey, sessionId, taskKey, unregisteredMove, workingOn,
+  type AncestryAnswer, type BoardActor, type DoneGate, type Liveness, type MergeRecord, type NodeBuild, type Run, type Task, type TaskAction, type TaskActor,
 } from "../src/index.ts";
 
 const NOW = 1_700_000_000_000;
@@ -308,5 +308,150 @@ describe("the board's own moves (B10, D1 to D6)", () => {
     const assigned = value(apply(t, { action: "assign", to: "builder" }, console));
     expect(assigned.task).toMatchObject({ assignee: "builder", status: "todo" });
     expect(boardChanged(assigned.event).actor).toEqual({ kind: "console", name: null, endpointId: null, token: null });
+  });
+});
+
+// B11: a task's PR merged is a merge record, and done waits for it to be live: on every enrolled node the merge commit is
+// an ancestor of (or equal to) the build the node reports. Unknown fails closed; the manager may accept anyway, saying why.
+describe("merged, not live (B11)", () => {
+  const SHA = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c";
+  const BUILD = "abc1234deadbeef0123456789abcdef012345678";   // the first 7 the label shows: abc1234
+  const OLD = "9999999999999999999999999999999999999999";
+  const merge = (o: Partial<MergeRecord> = {}): MergeRecord => ({ repo: MORNDO_REPO, sha: SHA, at: NOW, by: "manager", override: null, ...o });
+  const gate = (merges: readonly MergeRecord[], liveness: (sha: string) => Liveness): DoneGate => ({ merges, liveness });
+  const act = (t: Task, a: TaskAction, by: TaskActor, g?: DoneGate, board: Task[] = [t]) => applyAction(t, a, by, NOW + 1, board, g);
+  const inReview = () => ({ ...make(1, { assignee: "builder" }), status: "review" as const });
+  const notLive = (...blockers: { node: string; on: string | null }[]): Liveness => ({ live: false, blockers });
+  const boardActor = (lane: string): TaskActor => ({ kind: "board", rule: "D1", lane });
+
+  it("done is refused while the merge is not live", () => {
+    const t = inReview();
+    const r = act(t, { action: "move", to: "done", reason: "npm test: 14 passed" }, manager, gate([merge()], () => notLive({ node: "pc", on: BUILD })));
+    expect(r).toEqual({ ok: false, error: { problem: "not_live", detail: "merged, not live: pc on abc1234" } });
+    expect(t.status).toBe("review");                                 // a refusal changes nothing
+  });
+
+  it("it becomes live when all nodes report a descendant build", () => {
+    const builds: NodeBuild[] = [{ node: "pc", commit: BUILD }, { node: "srv01", commit: OLD }];
+    expect(livenessOf(SHA, builds, () => "ancestor")).toEqual({ live: true });
+    const behind = livenessOf(SHA, builds, (_m, b): AncestryAnswer => (b === OLD ? "not_ancestor" : "ancestor"));
+    expect(behind).toEqual({ live: false, blockers: [{ node: "srv01", on: OLD }] });
+    const done = act(inReview(), { action: "move", to: "done", reason: "npm test: 14 passed" }, manager, gate([merge()], () => ({ live: true })));
+    expect(value(done).task).toMatchObject({ status: "done" });
+  });
+
+  it("done with a not-live reason is accepted and recorded as an override", () => {
+    const g = gate([merge()], () => notLive({ node: "pc", on: BUILD }));
+    const r = act(inReview(), { action: "move", to: "done", reason: "npm test: 14 passed", notLive: "pc rebuilds overnight" }, manager, g);
+    expect(value(r).task.status).toBe("done");
+    expect(value(r).event.change).toMatchObject({ kind: "moved", to: "done", reason: "npm test: 14 passed", notLive: "pc rebuilds overnight" });
+    // without a reason for the override there is still no done
+    expect(problem(act(inReview(), { action: "move", to: "done", reason: "x", notLive: "  " }, manager, g))).toBe("not_live");
+    expect(problem(act(inReview(), { action: "move", to: "done", reason: "x", notLive: "a\x07b" }, manager, g))).toBe("bad_text");
+  });
+
+  it("the principal's own accept is never refused: it is recorded as the override", () => {
+    const g = gate([merge()], () => notLive({ node: "pc", on: BUILD }));
+    const r = act(inReview(), { action: "move", to: "done" }, principal, g);
+    expect(value(r).task.status).toBe("done");
+    expect(value(r).event.change).toMatchObject({ kind: "moved", to: "done", notLive: PRINCIPAL_NOT_LIVE });
+    // a live merge records nothing
+    const live = act(inReview(), { action: "move", to: "done" }, principal, gate([merge()], () => ({ live: true })));
+    expect(value(live).event.change).not.toHaveProperty("notLive");
+  });
+
+  it("unknown fails closed", () => {
+    expect(livenessOf(SHA, [{ node: "pc", commit: null }], () => "ancestor")).toEqual({ live: false, blockers: [{ node: "pc", on: null }] });
+    expect(mergeLabel([{ live: false, blockers: [{ node: "pc", on: null }] }])).toBe("merged, not live: pc unknown");
+    expect(livenessOf(SHA, [{ node: "pc", commit: BUILD }], () => "unknown")).toEqual({ live: false, blockers: [{ node: "pc", on: null }] });
+    expect(livenessOf(SHA, [], () => "ancestor")).toEqual({ live: false, blockers: [] });   // nothing says it is live
+    expect(mergeLabel([{ live: false, blockers: [] }])).toBe("merged, not live: no node reports a build");
+  });
+
+  it("a merge in another repo leaves done unchanged", () => {
+    const never = (): Liveness => { throw new Error("liveness asked of a merge in another repo"); };
+    const r = act(inReview(), { action: "move", to: "done", reason: "npm test: 14 passed" }, manager, gate([merge({ repo: "acme/other" })], never));
+    expect(value(r).task.status).toBe("done");
+    expect(value(r).event.change).not.toHaveProperty("notLive");
+    // no gate, no merges: notLive given anyway is ignored, not recorded
+    const noGate = act(inReview(), { action: "move", to: "done", reason: "x", notLive: "ignored" }, manager);
+    expect(value(noGate).task.status).toBe("done");
+    expect(value(noGate).event.change).not.toHaveProperty("notLive");
+    const empty = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, gate([], never));
+    expect(value(empty).task.status).toBe("done");
+  });
+
+  it("the merged action records a merge event that changes no state; a repeat is the same change", () => {
+    const t = make(1, { assignee: "builder" });
+    const r = act(t, { action: "merged", sha: SHA.toUpperCase() }, manager);
+    expect(value(r).event.change).toEqual({ kind: "merged", repo: MORNDO_REPO, sha: SHA });
+    expect(value(r).task).toMatchObject({ rev: 2, stateChangedAt: t.stateChangedAt, updatedAt: NOW + 1, status: "todo" });
+    expect(problem(act(value(r).task, { action: "merged", sha: SHA }, manager, gate([merge()], () => notLive())))).toBe("same");
+    expect(problem(act(t, { action: "merged", sha: "xyz" }, manager))).toBe("bad_sha");
+    expect(problem(act(t, { action: "merged", sha: "abc123" }, manager))).toBe("bad_sha");   // 6 hex
+  });
+
+  it("a task holds at most MAX_MERGES merge records, whoever records them; clearing one frees a slot", () => {
+    const t = make(1, { assignee: "builder" });
+    const held = (n: number) => Array.from({ length: n }, (_, i) => merge({ sha: String(i).repeat(40) }));
+    const lane: TaskActor = { kind: "worker", name: "builder", token: "tok-b" };
+    expect(MAX_MERGES).toBe(5);
+    expect(value(act(t, { action: "merged", sha: "a".repeat(40) }, manager, gate(held(MAX_MERGES - 1), () => notLive()))).event.change).toMatchObject({ kind: "merged" });
+    expect(problem(act(t, { action: "merged", sha: "a".repeat(40) }, manager, gate(held(MAX_MERGES), () => notLive())))).toBe("too_many");
+    expect(problem(act(t, { action: "merged", sha: "a".repeat(40) }, lane, gate(held(MAX_MERGES), () => notLive())))).toBe("too_many");
+    expect(value(act(t, { action: "unmerged", sha: "0".repeat(40) }, manager, gate(held(MAX_MERGES), () => notLive()))).event.change).toMatchObject({ kind: "unmerged" });
+  });
+
+  it("a bad repo is refused, and only the board's hands or the task's own lane may record a merge", () => {
+    const t = make(1, { assignee: "builder" });
+    expect(problem(act(t, { action: "merged", sha: SHA, repo: "not a repo" }, manager))).toBe("bad_repo");
+    expect(problem(act(t, { action: "merged", sha: SHA, repo: "a/b/c" }, manager))).toBe("bad_repo");
+    expect(problem(act(t, { action: "merged", sha: SHA, repo: "MORNDO/MORNDO" }, manager))).toBe("ok");   // case is the name's own
+    // the worker the task is assigned to may record; another lane may not; the board's own actor never does
+    expect(value(act(t, { action: "merged", sha: SHA }, builder)).event.change).toMatchObject({ kind: "merged" });
+    expect(problem(act(t, { action: "merged", sha: SHA }, reviewer))).toBe("not_yours");
+    expect(problem(act(t, { action: "merged", sha: SHA }, boardActor("builder")))).toBe("not_allowed");
+  });
+
+  it("a manager or the principal clears a merge record; a worker, the board and a missing record are refused", () => {
+    const t = inReview();
+    const g = gate([merge()], () => notLive({ node: "pc", on: BUILD }));
+    const r = act(t, { action: "unmerged", sha: SHA.toUpperCase() }, manager, g);
+    expect(value(r).event.change).toEqual({ kind: "unmerged", repo: MORNDO_REPO, sha: SHA });
+    expect(value(r).task).toMatchObject({ rev: t.rev + 1, stateChangedAt: t.stateChangedAt, updatedAt: NOW + 1, status: "review" });
+    expect(value(act(t, { action: "unmerged", sha: SHA }, principal, g)).event.change).toMatchObject({ kind: "unmerged" });
+    // a lane may not, not even on its own task; the board's own actor never does
+    expect(problem(act(t, { action: "unmerged", sha: SHA }, builder, g))).toBe("not_allowed");
+    expect(problem(act(t, { action: "unmerged", sha: SHA }, boardActor("builder"), g))).toBe("not_allowed");
+    // a record the task doesn't hold, by sha or by repo (the repo matches without regard to case)
+    expect(problem(act(t, { action: "unmerged", sha: "1234567890123456789012345678901234567890" }, manager, g))).toBe("no_merge");
+    expect(problem(act(t, { action: "unmerged", sha: SHA, repo: "acme/other" }, manager, g))).toBe("no_merge");
+    expect(value(act(t, { action: "unmerged", sha: SHA, repo: "MORNDO/MORNDO" }, manager, g)).event.change).toMatchObject({ kind: "unmerged" });
+    // a wrong sha or repo name, and nothing to clear with no gate at all
+    expect(problem(act(t, { action: "unmerged", sha: "xyz" }, manager, g))).toBe("bad_sha");
+    expect(problem(act(t, { action: "unmerged", sha: SHA, repo: "not a repo" }, manager, g))).toBe("bad_repo");
+    expect(problem(act(t, { action: "unmerged", sha: SHA }, manager))).toBe("no_merge");
+  });
+
+  it("mergeLabel and mergedView: the one-line label, and live null for merges in other repos", () => {
+    expect(mergeLabel([{ live: true }])).toBe("merged, live");
+    expect(mergeLabel([{ live: true }, notLive({ node: "pc", on: BUILD }, { node: "srv01", on: null })]))
+      .toBe("merged, not live: pc on abc1234, srv01 unknown");
+    // several merges: the union per node, the first blocker seen for a node wins
+    expect(mergeLabel([notLive({ node: "pc", on: BUILD }), notLive({ node: "pc", on: null }, { node: "srv01", on: OLD })]))
+      .toBe("merged, not live: pc on abc1234, srv01 on 9999999");
+    const behind = notLive({ node: "pc", on: BUILD });
+    const view = mergedView(taskKey(1), [merge(), merge({ repo: "acme/other", sha: "1234567" })], () => behind);
+    expect(view).toEqual({ key: "T-1", merges: [merge(), merge({ repo: "acme/other", sha: "1234567" })], live: false, label: "merged, not live: pc on abc1234" });
+    const never = (): Liveness => { throw new Error("liveness asked of a merge in another repo"); };
+    const otherOnly = mergedView(taskKey(2), [merge({ repo: "acme/other" }), merge({ repo: "yet/another" })], never);
+    expect(otherOnly.live).toBeNull();
+    expect(otherOnly.label).toBe("merged in acme/other");
+    // every morndo merge must be live, and the repo matches without regard to case
+    const twice = mergedView(taskKey(3), [merge({ sha: "1111111111111111111111111111111111111111" }), merge({ repo: "Morndo/Morndo", sha: "2222222222222222222222222222222222222222" })],
+      sha => (sha.startsWith("1") ? { live: true } : notLive({ node: "srv01", on: BUILD })));
+    expect(twice.live).toBe(false);
+    expect(twice.label).toBe("merged, not live: srv01 on abc1234");
+    expect(mergedView(taskKey(4), [merge()], () => ({ live: true }))).toMatchObject({ live: true, label: "merged, live" });
   });
 });

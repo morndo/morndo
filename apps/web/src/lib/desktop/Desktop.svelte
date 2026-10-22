@@ -382,7 +382,7 @@
       onView={v => (view = v)} onManager={() => manager && open(manager.id)} onPreferences={t => (preferences = t)} />
     <div class="workspace">
       <div class="panel" class:over={narrow && rightShown} style:--right-w="{drawnRight}px" style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${drawnRight}px` : ''}">
-        <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines}
+        <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines} runs={feed.boardRuns}
           decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
           {prefsOf} onMenu={(id, x, y) => (menu = { x, y, id })}
           onSelect={open} onActivity={() => (view = "activity")} onCompose={() => { if (manager) { open(manager.id); setTimeout(() => composerEl?.focus(), 50); } }} />
@@ -394,7 +394,7 @@
           {:else if view === "dashboard"}
             <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane} />
           {:else if view === "board"}
-            <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} live={feed.boardAt !== null} {now} open={openTask} jobs={feed.jobs} counts={feed.jobCounts} more={feed.jobsMore} openJob={openJobId} onOpen={k => (openTask = k)} onOpenJob={id => (openJobId = id)} onLoadJobs={loadHiddenJobs}
+            <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} merged={feed.boardMerged} live={feed.boardAt !== null} {now} open={openTask} jobs={feed.jobs} counts={feed.jobCounts} more={feed.jobsMore} openJob={openJobId} onOpen={k => (openTask = k)} onOpenJob={id => (openJobId = id)} onLoadJobs={loadHiddenJobs}
               onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />
           {:else if current}
             <ChannelView worker={current} displayName={nameOf(current)} {feed} {verifiedAt} panel={rightShown}

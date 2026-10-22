@@ -33,6 +33,10 @@ export type Config = {
   // does not read it. MORNDO_ENGINE_NODE: this machine's fleet node name; required when a fleet is in use.
   engineSessions?: string | null;
   engineNode?: string | null;
+  // MORNDO_REPO (B11): a local Morndo checkout the board reads merge ancestry from (`git merge-base --is-ancestor`),
+  // kept current by the operator; the board never fetches. Unset or null: no checkout, every answer unknown, so a
+  // merge in morndo/morndo holds done until the nodes' builds carry it.
+  morndoRepo?: string | null;
   // Web push (ADR-0008 phase F): the contact the push services see in the VAPID token (RFC 8292 "sub"), and push
   // services a test runs besides the browsers' own (never in production).
   pushContact?: string;
@@ -110,6 +114,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     managerQueue: fleetSocket(env) !== null && !/^(off|0)$/i.test(env.MORNDO_MANAGER_QUEUE ?? ""),
     engineSessions: engineSessions(env),
     engineNode: env.MORNDO_ENGINE_NODE || null,
+    morndoRepo: env.MORNDO_REPO || null,
     // Not the hub's own address: the JWT travels in clear to the browser vendors' push services, and the origin would
     // name the private host (review L2). Set MORNDO_PUSH_CONTACT to give them a contact of your own; `serve` refuses
     // to start with one they wouldn't take (isPushContact).
@@ -145,3 +150,4 @@ function engineSessions(env: NodeJS.ProcessEnv): string | null {
 // `serve` refuses one; reading it here never throws, so the console commands still work.
 export const engineSessionsOk = (v: string) => isAbsolute(v);
 export const fleetSocketOk = (v: string) => isAbsolute(v);
+export const morndoRepoOk = (v: string) => isAbsolute(v);

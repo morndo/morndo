@@ -1,9 +1,11 @@
 // The phone's chat list and status view, in words (ADR-0011): which rows, in which order (H2), what each previews, how
 // many messages that matter it holds (H1), and its status in one line (H3). Pure: the feed's state comes in.
-import { chatOrder, cutText, laneStatus, statusOf, type LaneStatus, type Message, type RosterEntry } from "@morndo/domain";
+import { chatOrder, cutText, laneStatus, statusOf, type LaneStatus, type Message, type RosterEntry, type Run } from "@morndo/domain";
 import type { ChatRowWire } from "@morndo/protocol";
 import type { DecisionItem } from "../../desktop/decisions.ts";
 import { stripButtonsLine, stripMarkers, withoutFileNotes } from "../../desktop/present.ts";
+import { onOwnWork } from "../../desktop/run-words.ts";
+import { BACKGROUND_LABEL } from "../../lanes.ts";
 import { spanLabel } from "../words.ts";
 import { ABSENT_MANAGER } from "../../manager.ts";
 
@@ -47,8 +49,9 @@ export function when(at: number, now: number): string {
 
 export type Status = LaneStatus & { line: string; label: string };
 // A lane's status line (H3): "Waits for you: Ship it tonight?", "Working: Running the tests.", "Finished: …", "Blocked: …",
-// "Idle: …"; and its short label with since when ("Waits 2 h", "Working 12 min", "Idle since 13:40").
-export function status(w: RosterEntry, asks: readonly DecisionItem[], answer: Message | null, now: number, repliedAt: number | null = null): Status {
+// "Idle: …"; and its short label with since when ("Waits 2 h", "Working 12 min", "Idle since 13:40"). `run`: the lane's Run
+// on the board, which keeps a lane that waits on its own background work (R2) working.
+export function status(w: RosterEntry, asks: readonly DecisionItem[], answer: Message | null, now: number, repliedAt: number | null = null, run?: Run | null): Status {
   const s = laneStatus({
     state: w.state, changedAt: w.changedAt, needsYou: w.needsYou, answer, repliedAt,
     asks: asks.map(d => ({ title: d.shortTitle ?? d.title, askedAt: d.askedAt })),
@@ -63,6 +66,12 @@ export function status(w: RosterEntry, asks: readonly DecisionItem[], answer: Me
   // A lane whose machine doesn't answer stays listed as offline. Only an open decision still says it waits;
   // a stale prompt on its screen does not.
   if (w.offline && !(s.kind === "waits" && s.ask)) return { kind: "idle", since: w.changedAt, ask: null, answer: null, line: "Offline", label: "Offline" };
+  // A lane not otherwise at work that waits on its own work still works (R2); one that waits for him, or is blocked, is not
+  // moved by its Run.
+  if (run && onOwnWork(run) && (s.kind === "idle" || s.kind === "finished")) {
+    return { kind: "working", since: run.since, ask: null, answer: s.answer,
+      line: said ? `${BACKGROUND_LABEL}: ${said}` : BACKGROUND_LABEL, label: `${BACKGROUND_LABEL} ${spanLabel(now - run.since)}` };
+  }
   const span = spanLabel(now - s.since);
   const label = s.kind === "waits" ? `Waits ${span}` : s.kind === "working" ? `Working ${span}` : `${s.kind === "finished" ? "Finished" : s.kind === "blocked" ? "Blocked" : "Idle"} ${when(s.since, now).includes(":") ? `since ${when(s.since, now)}` : when(s.since, now).toLowerCase()}`;
   return { ...s, line, label };
@@ -78,6 +87,7 @@ export type ChatListRow = {
 export function chatRows(o: {
   workers: readonly RosterEntry[]; chats: Readonly<Record<string, ChatRowWire>>; decisions: readonly DecisionItem[]; muted: readonly string[]; now: number;
   managerQueue?: boolean | null;                    // the hub's queue for the manager: what its not-running row says
+  runs?: ReadonlyMap<string, Run> | null;           // the board's Runs, by lane name: own-work waits still work (R2)
 }): ChatListRow[] {
   const absent = o.managerQueue ? "Not running; what you write waits for it" : "Not running; start it to message it";
   const rows = o.workers.map(w => {
@@ -85,7 +95,7 @@ export function chatRows(o: {
     const asks = o.decisions.filter(d => d.status === "open" && d.need === "decision" && d.asker.workerId === w.id);
     const muted = o.muted.includes(w.name);
     const replied = c && "repliedAt" in c ? (c.repliedAt ?? null) : (c?.last?.author.kind === "principal" ? c.last.at : null);
-    const st = status(w, asks, c?.answer ?? null, o.now, replied);
+    const st = status(w, asks, c?.answer ?? null, o.now, replied, o.runs?.get(w.name));
     return {
       worker: w.id, name: w.name, display: displayName(w.name), lastAt: c?.lastAt ?? w.lastMessageAt,
       preview: w.id === ABSENT_MANAGER ? absent : c ? preview(c.last) : w.title ?? "", unread: muted ? 0 : c?.unread ?? 0, muted,

@@ -289,7 +289,7 @@
 
   // The chat list (H1, H2): asked for when the feed is current, and again (at most every 2 s) when a lane spoke, a mark
   // moved or the roster changed; each row's status from the roster and the board.
-  const rows = $derived(chatRows({ workers: feed.roster, chats: feed.chats, decisions: feed.decisions, muted: feed.muted, now, managerQueue: feed.managerQueue }));
+  const rows = $derived(chatRows({ workers: feed.roster, chats: feed.chats, decisions: feed.decisions, muted: feed.muted, now, managerQueue: feed.managerQueue, runs: feed.boardRuns }));
   // The fleet's alerts he hasn't seen yet: a badge on Status, where they are.
   const newAlerts = $derived(unseen(feed.alerts, feed.reads[SEEN_MARK]));
   const unreadChats = $derived(feed.primed ? rows.filter(r => r.unread > 0).length : 0);
@@ -386,7 +386,7 @@
       alerts={feed.alerts} seenAt={feed.reads[SEEN_MARK] ?? 0} onSeen={at => feed.markRead(SEEN_MARK, at)} />
   {:else if tab === "board"}
     <div class="phone-wide">
-      <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} live={feed.boardAt !== null} {now} open={openTask} onOpen={k => (openTask = k)}
+      <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} merged={feed.boardMerged} live={feed.boardAt !== null} {now} open={openTask} onOpen={k => (openTask = k)}
         onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />
     </div>
   {:else}
