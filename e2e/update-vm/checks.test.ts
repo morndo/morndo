@@ -1,11 +1,11 @@
 // The throwaway-machine run's own judgements (checks.ts), tested without a machine: whose run a leftover is (a fake
 // /proc), the two sweeps that remove only what a gone run left, the scratch migration's number, and the two log
 // readings the scenario's checks rest on.
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { nextMigration, ownerAlive, ownerOf, ownerText, parseOwner, recoverUnitRan, saysDiskFull, sweepContainers, sweepScratch } from "./checks.ts";
+import { makeOwnedScratch, nextMigration, ownerAlive, ownerOf, ownerText, parseOwner, recoverUnitRan, saysDiskFull, SCRATCH_NAME, sweepContainers, sweepScratch } from "./checks.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
@@ -36,8 +36,9 @@ describe("the owner of a run", () => {
   });
 });
 
-// A temp directory as runs leave it: scratch of a live run, of a gone one, of a reused pid, of a run before owners;
-// a file of the same shape, names that only look alike.
+// A temp directory as runs leave it: scratch of a live run, of a gone one, of a reused pid, and one without an owner
+// (a run from before owners: a build dir now never exists without one, makeOwnedScratch below); a file of the same
+// shape, names that only look alike.
 const leftovers = () => {
   const d = dir();
   const scratch = (name: string, owner: string | null) => {
@@ -72,6 +73,36 @@ describe("sweepScratch", () => {
     const before = readdirSync(d).sort();
     expect(sweepScratch(d, { keep: true, say: () => {}, procRoot: proc })).toEqual([]);
     expect(readdirSync(d).sort()).toEqual(before);
+  });
+});
+
+describe("an owner whose /proc entry cannot be read", () => {
+  it("is not taken for gone: only a stat that is not there (ENOENT) is; any other failure keeps the leftover", () => {
+    const proc = fakeProc({ 4242: "777" });
+    chmodSync(join(proc, "4242", "stat"), 0o000);                  // hidepid, another namespace: there, not readable
+    try {
+      expect(ownerAlive({ pid: 4242, started: "777" }, proc)).toBe(true);
+      const removed: string[] = [];
+      sweepContainers({ list: () => [{ id: "aaa", owner: "4242:777" }], remove: id => { removed.push(id); return { ok: true, err: "" }; }, say: () => {}, procRoot: proc });
+      expect(removed).toEqual([]);
+    } finally { chmodSync(join(proc, "4242", "stat"), 0o644); }
+    writeFileSync(join(proc, "4242", "stat"), "4242 (node) S 1\n");      // a stat it cannot parse: unknown, kept too
+    expect(ownerAlive({ pid: 4242, started: "777" }, proc)).toBe(true);
+    expect(ownerAlive({ pid: 4343, started: "777" }, proc)).toBe(false);   // ENOENT: gone
+  });
+});
+
+describe("makeOwnedScratch", () => {
+  it("has no moment under the build's name without its owner: a sweep right after the create sees nothing to take", () => {
+    const d = dir();
+    const proc = fakeProc({});                                       // the creating run looks gone to the sweep
+    const made = makeOwnedScratch(d, "4242:777", {
+      afterCreate: () => { expect(sweepScratch(d, { keep: false, say: () => {}, procRoot: proc })).toEqual([]); },
+    });
+    expect(SCRATCH_NAME.test(made.split("/").pop()!)).toBe(true);
+    expect(readFileSync(join(made, "owner"), "utf8")).toBe("4242:777");
+    expect(readdirSync(d)).toEqual([made.split("/").pop()]);           // the transient name is gone
+    expect(existsSync(made)).toBe(true);
   });
 });
 

@@ -19,7 +19,7 @@
 // UI and starts all the same; no door this run reads is a UI route).
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { KeySetSchema } from "@morndo/protocol";
@@ -31,7 +31,7 @@ import { stageRelease } from "../../scripts/release/stage.ts";
 import { FEED_NAMESPACE, KEYS_NAMESPACE, RELEASE_NAMESPACE } from "../../apps/updater/src/application/namespaces.ts";
 import { makeSigningKey } from "../../apps/updater/test/helpers/sshsig.ts";
 import { makeTestCa } from "../../apps/updater/test/helpers/tls.ts";
-import { nextMigration, ownerOf, ownerText } from "./checks.ts";
+import { makeOwnedScratch, nextMigration, ownerOf, ownerText } from "./checks.ts";
 
 // The feed's fixed address, baked into the signed documents on the host and served inside the container on
 // exactly this port (scenario.ts serves it; the two constants must agree).
@@ -63,9 +63,9 @@ export type BuiltWorld = {
 // The three Releases and the three publish points, built once. Nothing here touches the repository: the tree is
 // copied into the scratch (without .git and .worktrees), the copies are edited, compiled, pruned and staged there.
 export function buildWorld(repo: string): BuiltWorld {
-  const scratch = mkdtempSync(join(tmpdir(), "morndo-c2-build-"));
-  // Whose scratch this is, first thing: another run's sweep leaves it alone while this process runs (checks.ts).
-  writeFileSync(join(scratch, "owner"), ownerText(ownerOf(process.pid)));
+  // Owned from its first moment under the build's name: another run's sweep leaves it alone while this process runs
+  // (checks.ts makeOwnedScratch: made under another name, its owner written, then renamed).
+  const scratch = makeOwnedScratch(tmpdir(), ownerText(ownerOf(process.pid)));
   // A build that fails leaves nothing of itself behind (unless E2E_KEEP=1): the repository copy is large.
   try { return buildInto(repo, scratch); }
   catch (error) {

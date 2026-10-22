@@ -3,7 +3,7 @@
 // one's, so two runs on one box leave each other alone); the number a scratch migration takes; whether the recovery
 // unit ran; whether an apply said the disk was full. Node built-ins only: scenario.ts imports this inside the
 // machine, under the A tree's own Node, beside it in the bundle.
-import { lstatSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** build.ts's scratch: mkdtemp's prefix and its six random characters, nothing longer or shorter. */
@@ -13,32 +13,56 @@ export const SCRATCH_NAME = /^morndo-c2-build-[A-Za-z0-9]{6}$/;
  *  the kernel has given to another process since is not taken for the run. */
 export type Owner = { pid: number; started: string };
 
-// The start time of a live process, or null when there is none (or no /proc to ask).
-function startedOf(pid: number, procRoot: string): string | null {
+// What /proc says of a process: its start time; "gone" only when its stat is not there (ENOENT); "unknown" when it
+// cannot be read or parsed for any other reason (hidepid, another PID namespace on one Docker daemon) — never taken
+// for gone, so a live run's leftovers are never swept on a guess.
+function startedOf(pid: number, procRoot: string): string | "gone" | "unknown" {
   let stat: string;
-  try { stat = readFileSync(join(procRoot, String(pid), "stat"), "utf8"); } catch { return null; }
+  try { stat = readFileSync(join(procRoot, String(pid), "stat"), "utf8"); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? "gone" : "unknown"; }
   const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);   // field 3 on; the comm may hold spaces
-  return fields[19] ?? null;                                                   // field 22
+  const started = fields[19];                                                  // field 22
+  return started !== undefined && /^\d+$/.test(started) ? started : "unknown";
 }
 
 export function ownerOf(pid: number, procRoot = "/proc"): Owner {
-  return { pid, started: startedOf(pid, procRoot) ?? "" };
+  const started = startedOf(pid, procRoot);
+  return { pid, started: started === "gone" || started === "unknown" ? "" : started };
 }
 export const ownerText = (o: Owner): string => `${o.pid}:${o.started}`;
 export function parseOwner(text: string): Owner | null {
   const m = /^(\d+):(\d+)$/.exec(text.trim());
   return m === null ? null : { pid: Number(m[1]), started: m[2]! };
 }
-/** Whether the run that owns a leftover still runs: that pid, with that start time. */
+/** Whether the run that owns a leftover may still run: that pid with that start time, or a process /proc will not
+ *  show (unknown is kept). False only for a pid that is not there, or is another process now. */
 export function ownerAlive(o: Owner, procRoot = "/proc"): boolean {
   const started = startedOf(o.pid, procRoot);
-  return started !== null && started === o.started;
+  if (started === "unknown") return true;
+  return started !== "gone" && started === o.started;
 }
 // A leftover whose owner says nothing parseable (one from before owners were written) is a gone run's.
 const gone = (owner: string, procRoot: string): boolean => {
   const o = parseOwner(owner);
   return o === null || !ownerAlive(o, procRoot);
 };
+
+/** A new build scratch in `dir`, owned from its first moment under the build's name: made under a name the sweep
+ *  does not take (morndo-c2-new-…), its owner written, then renamed to morndo-c2-build-… with the same six
+ *  characters. A sweep running meanwhile never sees it without its owner. `afterCreate` is the test's own moment. */
+export function makeOwnedScratch(dir: string, owner: string, hooks: { afterCreate?: () => void } = {}): string {
+  const made = mkdtempSync(join(dir, "morndo-c2-new-"));
+  try {
+    hooks.afterCreate?.();
+    writeFileSync(join(made, "owner"), owner);
+    const scratch = join(dir, `morndo-c2-build-${made.slice(made.length - 6)}`);
+    renameSync(made, scratch);
+    return scratch;
+  } catch (error) {
+    rmSync(made, { recursive: true, force: true });
+    throw error;
+  }
+}
 
 /** Removes the build scratch that runs which are gone left in `dir` (build.ts writes `owner` into each) and answers
  *  what it removed. A live run's scratch stays, whoever's it is; a kept scratch (`keep`, from E2E_KEEP=1) is a
