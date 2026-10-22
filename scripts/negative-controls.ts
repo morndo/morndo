@@ -3304,6 +3304,10 @@ export const CONTROLS: Control[] = [
     find: "  for (const b of bad) alerts.raise(\"journal_unreadable\", { file: \"revoked.log\", line: b.line, why: b.why }, at);",
     replace: "  void alerts; void bad; void at;",
     run: ["apps/hub/test/revocation-journal.test.ts"], expect: "urgent journal_unreadable Alert" },
+  // #106 round 3: the hub's start wires the Alert (main.ts), tested through a running hub.
+  { id: "c2c-hub-start-not-alerted", task: "c2c", file: "apps/hub/src/main.ts",
+    find: "    if (alerts !== null) raiseUnreadable(alerts, reapplied.bad, Date.now());", replace: "    void raiseUnreadable;",
+    run: ["test/fleet/hub-journal-alert.test.ts"], expect: "journal_unreadable alert in the feed" },
   { id: "c2c-journal-glues-torn-line", task: "c2c", file: "packages/service-kit/src/revocation-journal.ts",
     find: "        if (tail[0] !== 0x0a) {", replace: "        if (false) {",
     run: ["packages/service-kit/test/revocation-journal.test.ts"], expect: "cuts the torn bytes first" },
