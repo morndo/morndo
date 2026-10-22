@@ -3423,6 +3423,14 @@ export const CONTROLS: Control[] = [
   { id: "c2d-machine-run-without-script", task: "c2d", file: "package.json",
     find: "    \"e2e:update\": \"node e2e/update.e2e.ts\",\n", replace: "",
     run: ["apps/hub/test/val-b12-e2e-listed.test.ts"], expect: "has its own npm script" },
+  // R4 (md-rev6 on dbe25dd): a scratch is never under the build's name without its owner; an unreadable /proc
+  // entry is not a gone run.
+  { id: "c2d-scratch-made-under-build-name", task: "c2d", file: "e2e/update-vm/checks.ts",
+    find: "  const made = mkdtempSync(join(dir, \"morndo-c2-new-\"));", replace: "  const made = mkdtempSync(join(dir, \"morndo-c2-build-\"));",
+    run: ["e2e/update-vm/checks.test.ts"], expect: "has no moment under the build's name without its owner" },
+  { id: "c2d-unreadable-owner-gone", task: "c2d", file: "e2e/update-vm/checks.ts",
+    find: "  if (started === \"unknown\") return true;\n", replace: "",
+    run: ["e2e/update-vm/checks.test.ts"], expect: "is not taken for gone" },
   { id: "c2d-migration-number-fixed", task: "c2d", file: "e2e/update-vm/checks.ts",
     find: "  return Math.max(...numbers) + 1;", replace: "  return 25;",
     run: ["e2e/update-vm/checks.test.ts"], expect: "one past the highest number" },
