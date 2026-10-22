@@ -3392,6 +3392,10 @@ export const CONTROLS: Control[] = [
     find: "  for (const b of bad) alerts.raise(\"journal_unreadable\", { file: \"revoked.log\", line: b.line, why: b.why }, at);",
     replace: "  void alerts; void bad; void at;",
     run: ["apps/hub/test/revocation-journal.test.ts"], expect: "urgent journal_unreadable Alert" },
+  // Merged with main: a dev hub that ran hub_store as 24 still gets main's board_merges from migration 25.
+  { id: "c2c-dev-hub-skips-board-merges", task: "c2c", file: "apps/hub/src/adapters/migrations.ts",
+    find: "      if (known === undefined) MIGRATIONS.find(m => m.version === 24)!.up(db);", replace: "      void known;",
+    run: ["apps/hub/test/migrations.test.ts"], expect: "still gets main's board_merges" },
   // #106 round 3: the hub's start wires the Alert (main.ts), tested through a running hub.
   { id: "c2c-hub-start-not-alerted", task: "c2c", file: "apps/hub/src/main.ts",
     find: "    if (alerts !== null) raiseUnreadable(alerts, reapplied.bad, Date.now());", replace: "    void raiseUnreadable;",
