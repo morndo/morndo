@@ -3265,6 +3265,10 @@ export const CONTROLS: Control[] = [
     find: "    const journaled = journaledIds(db, this.#paths[db]);        // the service's start re-applies these (RL10)",
     replace: "    const journaled = new Set<string>();",
     run: ["apps/updater/test/apply-service.test.ts", "apps/updater/test/revocations-sqlite.test.ts"], expect: "rollback_failed" },
+  // C1 review: an append after a crash mid-write cuts the torn line first; glued on, the journal reads no more.
+  { id: "c2c-journal-glues-torn-line", task: "c2c", file: "packages/service-kit/src/revocation-journal.ts",
+    find: "        if (tail[0] !== 0x0a) {", replace: "        if (false) {",
+    run: ["packages/service-kit/test/revocation-journal.test.ts"], expect: "cuts the torn bytes first" },
   // ---- PR 5c step C2 ("RL10: a hub store on every database, stamped on every Command"): the uncertain branch, the
   // file-identity renewal and the outbox stamp, each removed once.
   { id: "c2c-other-store-typed", task: "c2c", file: "apps/hub/src/application/steering-service.ts",

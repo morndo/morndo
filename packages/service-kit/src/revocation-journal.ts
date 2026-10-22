@@ -2,7 +2,7 @@
 // database is appended here first, and each start applies what the journal holds. A database restored from an older
 // copy then brings no revoked device, agent token or node back: whatever the restored file forgets, the journal
 // remembers (AC4, FL4). The file is revoked.log, beside the database it shadows.
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, openSync, readFileSync, readSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
 
 /** What a journal entry revokes: a hub endpoint, a hub agent token, or a fleet node — the three ids a restore could
@@ -42,8 +42,22 @@ export class RevocationJournal {
   append(entry: RevocationEntry): void {
     const line = Buffer.from(`${JSON.stringify(entry)}\n`, "utf8");
     const made = !existsSync(this.#path);
-    const fd = openSync(this.#path, "a", 0o600);
+    const fd = openSync(this.#path, "a+", 0o600);
     try {
+      // A torn last line — a crash cut an earlier append short — is cut off first: glued to this line it would
+      // make one whole bad line, and every later start would refuse the journal. The torn entry was never
+      // whole, and its database write never came (the journal goes first), so nothing is lost by cutting it.
+      // A live writer's line is never seen half-written here: each line is one write(2) on an O_APPEND file.
+      const size = fstatSync(fd).size;
+      if (size > 0) {
+        const tail = Buffer.alloc(1);
+        readSync(fd, tail, 0, 1, size - 1);
+        if (tail[0] !== 0x0a) {
+          const whole = Buffer.alloc(size);
+          readSync(fd, whole, 0, size, 0);
+          ftruncateSync(fd, whole.lastIndexOf(0x0a) + 1);
+        }
+      }
       for (let at = 0; at < line.length;) at += writeSync(fd, line, at);   // a partial write loops until whole
       fsyncSync(fd);
     } finally { closeSync(fd); }
@@ -54,8 +68,8 @@ export class RevocationJournal {
   }
 
   // Every well-formed line, in the order they were appended. A last line without its newline is a write the crash
-  // cut short and is skipped; the append after such a crash starts a fresh line of its own. An absent file is a
-  // journal with nothing in it.
+  // cut short and is skipped; the append after such a crash cuts it off before it writes its own line. An absent
+  // file is a journal with nothing in it.
   entries(): RevocationEntry[] {
     let text: string;
     try { text = readFileSync(this.#path, "utf8"); }

@@ -44,6 +44,23 @@ describe("RevocationJournal", () => {
     expect(journal.entries()).toEqual([{ kind: "node", id: "pc", at: 1 }]);
   });
 
+  it("an append after a torn last line cuts the torn bytes first, so the journal still reads", () => {
+    // The crash left a line without its newline; the next revocation must not glue onto it, or every later start
+    // would find a whole bad line and refuse the journal.
+    const path = join(dir(), "revoked.log");
+    const journal = new RevocationJournal(path);
+    journal.append({ kind: "node", id: "pc", at: 1 });
+    appendFileSync(path, '{"kind":"node","id":"torn');
+    journal.append({ kind: "node", id: "laptop", at: 2 });
+    expect(journal.entries()).toEqual([{ kind: "node", id: "pc", at: 1 }, { kind: "node", id: "laptop", at: 2 }]);
+    expect(readFileSync(path, "utf8")).toBe(`${node("pc")}\n${node("laptop", 2)}\n`);
+    // a file that is nothing but a torn line is cut to nothing first
+    const only = join(dir(), "revoked.log");
+    writeFileSync(only, '{"kind":"no');
+    new RevocationJournal(only).append({ kind: "node", id: "pc", at: 1 });
+    expect(readFileSync(only, "utf8")).toBe(`${node("pc")}\n`);
+  });
+
   it("refuses a bad line that is not the torn last one, naming the line", () => {
     const path = join(dir(), "revoked.log");
     writeFileSync(path, `${node("pc", 1)}\nnot json at all\n${node("mac", 2)}\n`);
