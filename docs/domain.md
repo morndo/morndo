@@ -515,6 +515,8 @@ The team's task board, run as a real org runs one. The manager files tasks and h
 | Actor | Who changed the board: the principal from an Endpoint, the manager by its agent token, or a worker lane by a worker token naming it. | A name taken from a conversation's text. |
 | Agent token | A credential the hub's console issued for the manager's lane or for the worker lanes, kept as a hash, revocable. | A passkey; a Session. |
 | Record | The task's events in order, each with its actor and time; a comment is one. | A transcript. |
+| Merge record | The commit a task's PR merged as, in a named repo, with who recorded it and when. | A GitHub fact the board checks. |
+| Live | A `morndo/morndo` merge that every enrolled, non-revoked node's last reported build contains (the merge is an ancestor of, or equal to, the build commit). | Deployed somewhere; restarted. |
 
 | # | Invariant |
 |---|---|
@@ -528,11 +530,12 @@ The team's task board, run as a real org runs one. The manager files tasks and h
 | B8 | The board grants nothing: a status, a comment or an assignment is never a Mandate, a Decision, an Acknowledgement, Evidence or a Verdict. "Done" on the board is a person's or the manager's acceptance of a lane's word. |
 | B9 | The manager moves a task to Done only with a reason that names what it checked (tests run, CI at a commit, a review). The principal may give one. The reason makes the acceptance checkable; it is still not Evidence (B8). |
 
-| B10 | The board moves a task by itself, as actor `board`, only by D1 to D6, each naming its rule and the run it read ([ADR-0032](adr/0032-board-follows-the-fleet.md)). D1: in progress to in review when the assignee's turn ended DONE after the task's last change of state, even while its background work runs. D2: in progress to blocked when it ended BLOCKED or NEEDS DECISION; the reason is its status line. D3: in progress to to do when the assignee's lane is gone. D4: to do, blocked or in review to in progress when the assignee's run is working or waiting since after the task's last change, the lane has no other task in progress, and this is its only open task. D5: never to done, and never an assignment or an edit. D6: a run whose phase began before the task's last change of state (status, assignee, description; not a comment) moves nothing. |
+| B10 | The board moves a task by itself, as actor `board`, only by D1 to D6, each naming its rule and the run it read ([ADR-0032](adr/0032-board-follows-the-fleet.md)). A status line may name its task key right after the word (`STATUS: DONE T-285`); D1 and D2 with a key move only that task, and only if it is the lane's. D1: in progress to in review when the assignee's turn ended DONE after the task's last change of state, even while its background work runs; a keyed WAITING naming a task in review or blocked takes it back into progress. D2: in progress to blocked when it ended BLOCKED or NEEDS DECISION; the reason is its status line. D3: in progress to to do when the assignee's lane is gone. D4: to do to in progress when the assignee's run is working or waiting since after the task's last change, the lane has no other task in progress, and this is its only to do task; a task in review or blocked is taken up again only by a keyed WAITING that names it (D1). D5: never to done, and never an assignment or an edit. D6: a run whose phase began before the task's last change of state (status, assignee, description; not a comment) moves nothing. |
+| B11 | A task can carry merge records: the commit its PR merged as, in a repo, set by the manager, the principal, the console or the task's own lane (the board never reads GitHub). A merge in `morndo/morndo` is *live* when, for every enrolled, non-revoked node, it is an ancestor of (or equal to) the build commit that node last reported; until then the task shows "merged, not live", naming the blocking nodes. Done is refused while a `morndo/morndo` merge on the task is not live, unless the manager or the console gives the reason in `notLive`, which is recorded on the event and on the merge. The principal's own accept is never refused: it is recorded as the override "accepted by the principal". Unknown (no checkout, commit not in it, a node with no reported commit, no node at all) is not live. The manager, the principal or the console can clear a wrong record (a worker cannot); the record of the clearing stays in the history. A task holds at most 5 records. A lane's record is refused when the hub's checkout says it has no such commit; the manager's is not asked. An online node counts with the commit it reports now (none: unknown); an offline node with its last reported one. A merge in another repo changes nothing about done. The board still never moves a task to done by itself (D5), and never fetches ([ADR-0032 addendum](adr/0032-board-follows-the-fleet.md)). |
 
 The console (`morndo …` on the control plane) is an Actor too: it acts for the principal there, as `memory approve` does. `morndo lanes start --task T-12` assigns T-12 to the new lane as the console.
 
-Events: TaskFiled, TaskMoved, TaskAssigned, TaskEdited, TaskCommented (the record), BoardChanged (the audit row).
+Events: TaskFiled, TaskMoved, TaskAssigned, TaskEdited, TaskCommented, TaskMerged (the record), BoardChanged (the audit row).
 
 ## Runs: what each lane is doing now ([ADR-0032](adr/0032-board-follows-the-fleet.md))
 
@@ -785,6 +788,7 @@ What lanes, the manager and the principal learned about a scope, kept as Notes i
 | M5 | A Note's trust tier is set by where it came from and never rises on its own: an agent's Note rises only with evidence it did not produce, and a Note marked untrusted (it came from outside content: a mail, a web page, a comment) rises only by the principal's approval. |
 | M6 | The index a lane receives has a size limit. |
 | M7 | A Note past its re-check date is shown as stale, never silently dropped. |
+| M8 | Approval is the principal's: an Endpoint under step-up, or the console with a one-time code that only an Endpoint under step-up can mint (single use, bound to one Note, short-lived). |
 
 Events: NoteProposed, NoteApproved, NoteConfirmed, NoteSuperseded, NoteInvalidated (Memory's own record, `note_events`).
 
@@ -871,7 +875,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Secrets stands beside Authority*: a Use is not a Mandate (SC10).
 - *Knowledge stands beside Engines*. An SOP step names a Role and a Model class; the Role's chain and auto routing decide what runs, and nothing in Knowledge ranks or excludes an engine (K9). A Gate is answered through Escalation as a Decision; a run starts as a Job.
 - *Fleet supplies Memory* (customer and supplier). Lanes write through the hub's agents' door with an agent token. Memory's Skill files reach each node as one typed operation, `memory.sync`, sent in parts with a key, with no command and no path (FL14); a node's policy may deny it.
-- *Memory is a customer of Authority and Escalation*: only the principal approves a Procedure or an untrusted Note (M4, M5). Slice 1 takes the approval at the control plane's console, which already acts for the principal (`pair`, `revoke`); an Ask in the app is next.
+- *Memory is a customer of Authority and Escalation*: only the principal approves a Procedure or an untrusted Note (M4, M5, M8). In the app, a pending Note files an Ask on the Decisions board (id `mem-n-<k>`, at most ten at a time); the principal's answer under step-up approves or rejects it and is recorded as the Decision (E8). The approval at the control plane's console needs a one-time code minted under step-up in the app.
 - *Verification supplies Memory*: only evidence the author did not produce raises a Note to tier 2 (M5, V1).
 - *Memory stands beside Knowledge*: both hand agents Agent Skills and show a stale note as stale (K6, M7). They share no data: Knowledge ships what to plan with; Memory keeps what this user's lanes learned.
 
