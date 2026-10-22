@@ -159,6 +159,16 @@ describe("SystemdServices (§4.6, §5, §6.2 step 6)", () => {
     await expect(m.manager.renderUnits("0.2.0")).resolves.toEqual([]);
   });
 
+  it("foreignUnits reads an unpacked tree's units when its Version is not installed yet (a first install)", async () => {
+    const m = machine();                                       // nothing in the releases
+    const tree = mkdtempSync(join(scratch, "tree-"));
+    mkdirSync(join(tree, "units"));
+    writeFileSync(join(tree, "units", "morndo-hub.service"), "[Unit]\n");
+    writeFileSync(join(m.units, "morndo-hub.service"), "[Service]\nExecStart=/usr/bin/python3 /srv/example-user/hub.py\n");
+    await expect(m.manager.foreignUnits("0.2.0", undefined, { tree })).resolves.toEqual([join(m.units, "morndo-hub.service")]);
+    await expect(m.manager.foreignUnits("0.2.0")).rejects.toThrow(/ENOENT/);   // the releases have no 0.2.0 yet
+  });
+
   it("a unit of one of our names running another program is foreign, not legacy", async () => {
     const m = machine({ releaseUnits: { "morndo-hub.service": "[Unit]\n", "morndo-update.service": "[Service]\n" } });
     writeFileSync(join(m.units, "morndo-hub.service"), "[Service]\nExecStart=/usr/bin/python3 /srv/example-user/hub.py\n");

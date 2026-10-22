@@ -121,6 +121,8 @@ describe("the unit templates every Version ships (§5)", () => {
     expect(entries).toMatchObject({
       Type: "oneshot",
       ExecStart: "%h/.local/bin/morndo-update update apply --version %i",
+      // §8.4's own exits are answers, not a failed unit: `systemctl start` fails only for a crash
+      SuccessExitStatus: "1 64 65 70 75 78",
     });
   });
 

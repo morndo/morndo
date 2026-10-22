@@ -118,8 +118,10 @@ export class SystemdServices implements ServiceManager {
     return kept;
   }
 
-  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<string[]> {
-    return foreignIn(this.unitDir(), this.shipped(join(this.releases, version, "units"), role));
+  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { tree?: string }): Promise<string[]> {
+    // `tree`: the unpacked archive `morndo install` is about to install — its Version is not in the releases yet.
+    const from = o?.tree === undefined ? join(this.releases, version, "units") : join(o.tree, "units");
+    return foreignIn(this.unitDir(), this.shipped(from, role));
   }
 
   private shipped(from: string, role?: { services: readonly UpdateService[] }): string[] {
