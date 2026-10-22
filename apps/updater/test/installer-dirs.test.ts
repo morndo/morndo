@@ -215,6 +215,17 @@ describe("DirsInstaller", () => {
     if (!wrong.ok) expect(wrong.reason).toMatch(/0\.3\.0/);
   });
 
+  it("selftest takes the Version with its build stamp (SemVer build metadata), and nothing else that starts like it", async () => {
+    // A released tree carries app/build.json, so its launcher prints <version>+<commit> (service-kit's buildLabel);
+    // build metadata is not part of the Version (SemVer 2.0.0 §10).
+    const printing = (stdout: string) => new DirsInstaller({ releases, run: async () => ({ code: 0, stdout, stderr: "" }) });
+    expect(await printing("0.2.0+0123456789ab\n").selftest(VERSION)).toEqual({ ok: true });
+    expect(await printing("0.2.0\n").selftest(VERSION)).toEqual({ ok: true });
+    for (const other of ["0.2.0-rc.1", "0.2.01", "0.2.0+", "0.2.0 extra", "10.2.0+abc"]) {
+      expect((await printing(`${other}\n`).selftest(VERSION)).ok, other).toBe(false);
+    }
+  });
+
   it("verifyTree: an untouched Version has no findings", async () => {
     const { installer, filesSha256 } = await installGood();
     expect(await installer.verifyTree(VERSION, filesSha256)).toEqual([]);

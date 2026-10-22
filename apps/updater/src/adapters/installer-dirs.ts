@@ -138,8 +138,12 @@ export class DirsInstaller implements Installer {
   async selftest(version: string): Promise<{ ok: true } | { ok: false; reason: string }> {
     const done = await this.run(join(this.staging(version), "bin", "morndo"), ["--version"], 20_000);
     if (done.code !== 0) return { ok: false, reason: `bin/morndo --version exited ${done.code}` };
+    // The Version, or the Version and its build stamp (`+<commit>`, service-kit's buildLabel, which a released tree
+    // prints because it carries app/build.json): build metadata is not part of the Version (SemVer 2.0.0 §10).
     const printed = done.stdout.trim();
-    return printed === version ? { ok: true } : { ok: false, reason: `bin/morndo --version printed ${JSON.stringify(printed)}, not ${version}` };
+    const stamp = printed.startsWith(`${version}+`) ? printed.slice(version.length + 1) : null;
+    const ours = printed === version || (stamp !== null && /^[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*$/.test(stamp));
+    return ours ? { ok: true } : { ok: false, reason: `bin/morndo --version printed ${JSON.stringify(printed)}, not ${version}` };
   }
 
   promote(version: string, record: { manifestSha256: string; filesSha256: string; at: number }): void {
