@@ -1,6 +1,6 @@
 // A lease is recorded in the store before anything is launched (ADR-0018, CN8, CN9).
 import {
-  LEASE_REFUSED, closeLease, findConnection, lease, loseLease, noteHelper, refresh, type Directory,
+  LEASE_REFUSED, closeLease, findConnection, lease, loseLease, noteHelper, refresh, serveKey, type Directory, type KeyCaller,
 } from "@morndo/domain";
 import { dialectOf, findPreset, floorOf } from "./catalog.ts";
 import type { Deps, Failure, LeaseRequest, ProcId } from "./ports.ts";
@@ -77,6 +77,18 @@ export class LeaseService {
       if (!this.#deps.store.save(noted.value, policy, version)) continue;
       const ended = noted.value.events.slice(directory.events.length).find(event => event.type === "AuthorityEnded");
       if (ended?.type === "AuthorityEnded") this.#deps.alerts.raise({ kind: "authority", name, detail: ended.reason });
+      return ok(undefined);
+    }
+    return err({ problem: "conflict" });
+  }
+
+  // The audit line lands before the key is printed, so a served key is always one that was recorded.
+  serve(name: string, id: string, caller: KeyCaller): Result<void, Failure> {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const { directory, policy, version } = this.#deps.store.load();
+      const served = serveKey(directory, name, id, caller, this.#deps.clock.now());
+      if (!served.ok) return err({ problem: served.error.problem });
+      if (!this.#deps.store.save(served.value, policy, version)) continue;
       return ok(undefined);
     }
     return err({ problem: "conflict" });
