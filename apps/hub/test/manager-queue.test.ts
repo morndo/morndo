@@ -426,6 +426,62 @@ describe("the switch off (spec §9.1; step 2's rollback, §13)", () => {
     expect(["r1", "r2", "r3"].map(r => fleet.deliveries.get(`hub:ep1:${r}`)?.delivery.state)).toEqual(["given_up", "given_up", "given_up"]);
   });
 
+  // A cancel answered busy (the node is typing that delivery this very moment, as its deliverer tries it while it waits
+  // for a menu to close) means "ask again in a moment" (spec §4.3, delivery.cancel). At the switch off the hub asks
+  // again rather than following a delivery that would then be typed after it began typing directly.
+  it("asks again when a cancel at start is answered busy, and the delivery ends cancelled", async () => {
+    const on = queue();
+    await on.q.put(command("r1"), "one");
+    on.q.stop();
+    const real = fleetDeliveries(new FleetClient(fleet.socketPath));
+    let busy = 2;
+    const deliveries: Deliveries = {
+      ...real,
+      async cancel(id) {
+        if (busy > 0) { busy -= 1; return { ok: false, refused: "busy" }; }
+        return real.cancel(id);
+      },
+    };
+    const off = new ManagerQueue({ store, deliveries, lane: "manager", on: false, now: () => T0, pollMs: 60_000 });
+    queues.push(off);
+    await off.start();
+    expect(busy).toBe(0);
+    expect(fleet.deliveries.get("hub:ep1:r1")?.delivery).toMatchObject({ state: "given_up", why: "cancelled" });
+  });
+
+  // A row still "sending" (the hub has no mirror of its delivery yet) whose cancel is answered busy: busy proves the node
+  // holds the delivery and is typing it this moment, so the row stays — dropped, the answer could be typed later
+  // unseen, or typed twice once the hub answers directly. Both orders the node can end in (review of 2026-10-22).
+  const sendingRowAnsweredBusy = (then: "typed" | "not typed") => {
+    const id = "hub:ep1:r-busy";
+    store.saveManagerDelivery({ ...command("r-busy"), state: "sending", updatedAt: T0 });
+    const after: Delivery = then === "typed"
+      ? { id, node: "pc", target: { lane: "manager" }, state: "typed", queuedAt: T0, notAfter: T0 + 86_400_000, typedAt: T0 + 1 }
+      : { id, node: "pc", target: { lane: "manager" }, state: "given_up", queuedAt: T0, notAfter: T0 + 86_400_000, why: "cancelled" };
+    let busy = 1;
+    const deliveries: Deliveries = {
+      ...fleetDeliveries(new FleetClient(fleet.socketPath)),
+      async cancel() {
+        if (busy > 0) { busy -= 1; return { ok: false, refused: "busy" }; }
+        return then === "typed" ? { ok: false, refused: "already_typed" } : { ok: true, delivery: after };
+      },
+      async get() { return after; },
+    };
+    const off = new ManagerQueue({ store, deliveries, lane: "manager", on: false, now: () => T0, pollMs: 60_000 });
+    queues.push(off);
+    return { id, off };
+  };
+  it("keeps a 'sending' row whose cancel is answered busy, and follows it once the node has typed it", async () => {
+    const { id, off } = sendingRowAnsweredBusy("typed");
+    await off.start();
+    expect(store.managerDelivery(id), "the row stays: the node holds it").not.toBeNull();
+  });
+  it("keeps a 'sending' row whose cancel is answered busy, and records it cancelled once the node did not type it", async () => {
+    const { id, off } = sendingRowAnsweredBusy("not typed");
+    await off.start();
+    expect(store.managerDelivery(id)?.state).toBe("given_up");
+  });
+
   it("cancels what is still queued, first, and follows what was typed already to its end", async () => {
     const on = queue();
     await on.q.put(command("r1"), "one");
