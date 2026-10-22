@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -578,6 +578,44 @@ describe("stage, launchers, node pin, notice", () => {
     stageRelease({ repo, nodeDir, dest, version: "0.3.1", commit: STAMP_COMMIT });
     expect(JSON.parse(readFileSync(join(dest, "app/build.json"), "utf8"))).toEqual({ version: "0.3.1", commit: STAMP_COMMIT });
     expect(readFileSync(join(dest, "files.json"), "utf8")).toContain("app/build.json");
+  });
+
+  it("ships the repo's trust/keys.json and its signature in trust/, listed in files.json and packed (T-354)", () => {
+    const repo = temp();
+    const nodeDir = temp();
+    mkdirSync(join(repo, "trust"), { recursive: true });
+    mkdirSync(join(nodeDir, "bin"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0"}\n');
+    writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+    writeFileSync(join(repo, "trust/keys.json"), '{"version":1}\n');
+    writeFileSync(join(repo, "trust/keys.json.sig"), "-----BEGIN SSH SIGNATURE-----\nsig\n-----END SSH SIGNATURE-----\n");
+    writeFileSync(join(repo, "trust/release_allowed_signers"), "not shipped: the Key set is what a Version carries\n");
+    writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
+    const dest = join(temp(), "out");
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", commit: STAMP_COMMIT });
+    expect(readFileSync(join(dest, "trust/keys.json"), "utf8")).toBe('{"version":1}\n');
+    expect(readFileSync(join(dest, "trust/keys.json.sig"), "utf8")).toContain("BEGIN SSH SIGNATURE");
+    expect(statSync(join(dest, "trust/keys.json")).mode & 0o777).toBe(0o444);
+    expect(existsSync(join(dest, "trust/release_allowed_signers"))).toBe(false);
+    const listed = FileListSchema.parse(JSON.parse(readFileSync(join(dest, "files.json"), "utf8"))).map(e => e.path);
+    expect(listed).toContain("trust/keys.json");
+    expect(listed).toContain("trust/keys.json.sig");
+    expect(listed).not.toContain("trust/release_allowed_signers");
+    const tar = spawnSync("tar", ["-tzf", "-"], { input: packTree(readStaged(dest), 1_700_000_000), encoding: "utf8" });
+    expect(tar.stdout).toContain("trust/keys.json\n");
+    expect(tar.stdout).toContain("trust/keys.json.sig\n");
+  });
+
+  it("a repo with no trust/ still stages an empty trust/ (a fixture tree)", () => {
+    const repo = temp();
+    const nodeDir = temp();
+    mkdirSync(join(nodeDir, "bin"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0"}\n');
+    writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+    writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
+    const dest = join(temp(), "out");
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", commit: STAMP_COMMIT });
+    expect(readdirSync(join(dest, "trust"))).toEqual([]);
   });
 
   it("stages a fixture tree twice into archives with the same bytes", () => {

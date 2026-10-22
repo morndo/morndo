@@ -151,9 +151,14 @@ jobs:
           # Node will not strip types under node_modules (nodejs.org/docs/latest-v24.x/api/typescript.html,
           # "Type stripping in dependencies", v24.21.0, read 2026-10-13). Compile while typescript is installed.
           node scripts/release/main.ts compile --repo "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/compiled"
-          npm prune --omit=dev
+          # --ignore-scripts: no runtime dependency has an install script (ADR-0005), and prune would otherwise run
+          # apps/web's prepare (`svelte-kit sync`) after svelte-kit is gone: exit 127 (T-355).
+          # https://docs.npmjs.com/cli/v11/commands/npm-prune lists ignore-scripts (read 2026-10-22).
+          npm prune --omit=dev --ignore-scripts
           mtime=$(git log -1 --format=%ct "$RELEASE_SHA")
           node scripts/release/main.ts stage --repo "$GITHUB_WORKSPACE" --node "$RUNNER_TEMP/node" --dest "$RUNNER_TEMP/stage" --version "$VERSION" --commit "$RELEASE_SHA" --compiled "$RUNNER_TEMP/compiled"
+          # The Key set this Version ships with: an installer refuses a tree without it (T-354).
+          test -s "$RUNNER_TEMP/stage/trust/keys.json"
           ( cd "$RUNNER_TEMP/stage/app" && "$RUNNER_TEMP/node/bin/node" -e "require('better-sqlite3')(':memory:').close()" )
           for name in morndo morndo-fleet morndo-node morndo-job morndo-board morndo-keys; do
             "$RUNNER_TEMP/stage/bin/$name" --version

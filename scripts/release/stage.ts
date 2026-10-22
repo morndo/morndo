@@ -43,6 +43,13 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     if (isLock(lock)) files.push({ path: "LICENSES/NOTICE", bytes: Buffer.from(thirdPartyNotice(lock)), mode: "0444" });
   } catch { /* a fixture may omit the lock */ }
   files.push({ path: "units", mode: "0555", directory: true }, { path: "trust", mode: "0555", directory: true });
+  // trust/ is the Key set this Version ships with (design §5): the repo's keys.json and root's signature over it. An
+  // installer refuses a tree without trust/keys.json (T-354), and the release build checks it is staged. The signers files
+  // are the pipeline's own and do not ship. A fixture tree without trust/ stages it empty.
+  for (const name of ["keys.json", "keys.json.sig"]) {
+    try { files.push({ path: `trust/${name}`, bytes: readFileSync(join(p.repo, "trust", name)), mode: "0444" }); }
+    catch { /* absent: a fixture tree */ }
+  }
   const listed = listFiles(files);
   files.push({ path: "files.json", bytes: Buffer.from(listed.json), mode: "0444" });
   for (const file of files) {

@@ -85,6 +85,11 @@ describe("release pipeline files", () => {
     expect(build).toContain("npx vitest run --project=units");
     expect(build).toContain("npm run build");
     expect(build).toContain("npm prune --omit=dev");
+    // T-355: the prune must not run a workspace's lifecycle scripts: apps/web's prepare is `svelte-kit sync`, and by then
+    // svelte-kit is pruned (exit 127). No runtime dependency has an install script (ADR-0005).
+    expect(build).toMatch(/npm prune --omit=dev --ignore-scripts\s*$/m);
+    // T-354: the staged tree carries the Key set it shipped with, or an installer refuses it.
+    expect(build).toContain('test -s "$RUNNER_TEMP/stage/trust/keys.json"');
     expect(build).toContain('"$RUNNER_TEMP"/stage/bin/*');
     expect(build).toContain("better-sqlite3");
     expect(build).toContain("contents: read");
