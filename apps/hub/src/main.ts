@@ -2,7 +2,7 @@
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
 import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/domain";
-import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
+import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
 import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
@@ -24,7 +24,7 @@ import { AccessService } from "./application/access-service.ts";
 import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
-import { EscalationService, managerOf } from "./application/escalation-service.ts";
+import { EscalationService, managerOf, type MemoryAsks } from "./application/escalation-service.ts";
 import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { ManagerQueue } from "./application/manager-queue.ts";
@@ -43,6 +43,9 @@ import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
+import { gitAncestry, gitHasCommit } from "./adapters/git-ancestry.ts";
+import { MergeLiveness } from "./application/merge-liveness.ts";
+import { NodeBuilds } from "./application/node-builds.ts";
 import { AgentAccess } from "./application/agent-access.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
@@ -55,7 +58,7 @@ import { MemoryStore } from "./adapters/memory-store.ts";
 import { MemoryFromFuture } from "./adapters/memory-migrations.ts";
 import { MemoryService } from "./application/memory-service.ts";
 import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
-import { runMemory } from "./console/memory.ts";
+import { readCodeLine, runMemory } from "./console/memory.ts";
 import { runUpdaterProgram } from "./console/update.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -85,8 +88,9 @@ MORNDO_PANE_LOCK (the lock file other typists into the manager's pane take), MOR
 VNC server), MORNDO_VNC_PASSWORD_FILE, MORNDO_FLEET_SOCKET (the fleet service's client socket; unset, this
 machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane registry directory; off unless set),
 MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet), MORNDO_ENGINES (the engine layer's
-CLI, engine-layer bin/engines: the Engines page) and MORNDO_MANAGER_QUEUE (with a fleet, the manager's answers and
-messages go through the fleet's delivery queue; "off" types them directly). MORNDO_TRANSCRIBER (absolute path of a
+CLI, engine-layer bin/engines: the Engines page), MORNDO_MANAGER_QUEUE (with a fleet, the manager's answers and
+messages go through the fleet's delivery queue; "off" types them directly) and MORNDO_REPO (a local Morndo checkout:
+the board compares merge commits with the nodes' builds in it). MORNDO_TRANSCRIBER (absolute path of a
 protocol-1 plugin; otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcribe).`;
 
 // A reader that closes the pipe early (`morndo audit | head`) ends the output, not the process; a console command that leaves
@@ -151,6 +155,12 @@ switch (cmd) {
       log.error(`MORNDO_ENGINE_SESSIONS must be an absolute path to the engine-lane registry, not ${JSON.stringify(config.engineSessions)}; set the full path, or unset it to leave engine-lane status off.`);
       await exitAfterOutput(EXIT_CONFIG);
     }
+    // The same for a Morndo checkout that isn't an absolute path (config.ts morndoRepo): `git -C` would read it against
+    // wherever the service started. Unset is fine: the board just never says a merge is live.
+    if (config.morndoRepo && !morndoRepoOk(config.morndoRepo)) {
+      log.error(`MORNDO_REPO must be an absolute path to a Morndo checkout, not ${JSON.stringify(config.morndoRepo)}; set the full path, or unset it to judge every merge unknown.`);
+      await exitAfterOutput(EXIT_CONFIG);
+    }
     // From here on, a SIGTERM or SIGINT at any moment ends the hub as it ends one that serves: what the start has made so far
     // is closed (adapters/shutdown.ts), then exit 0. Each resource names its close when it exists; every wait of the start
     // goes through `shutdown.whileRunning`, so a start that is waiting when the stop begins goes no further.
@@ -207,6 +217,9 @@ switch (cmd) {
       id => observation.nameOf(id), ports.uploads, ports.sendStatus, queue ? { queue, isManager: id => id === managerPane() } : null,
       () => managerPane() ?? null, config.managerWindow);
     const filed: { briefs: BriefService | null } = { briefs: null };
+    // Memory is opened below, after Decisions: its pending Notes reach the board through this holder once it exists
+    // (ADR-0031 round 2); a hub without Memory never files an Ask.
+    const memoryHolder: { service: MemoryService | null } = { service: null };
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -220,6 +233,10 @@ switch (cmd) {
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
       queue,
       briefs: () => filed.briefs?.sightings() ?? [],
+      memory: () => {
+        const m = memoryHolder.service;
+        return m && { pending: () => m.pendingApprovals(), decide: (a, id, d) => m.decide(a, id, d) } satisfies MemoryAsks;
+      },
     });
     const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
     filed.briefs = briefs;
@@ -263,16 +280,30 @@ switch (cmd) {
     // ADR-0015: the board, changed by the principal (a Command) and by the agents (their tokens, issued below).
     // ADR-0032: with a fleet, the board also follows the lanes' Runs (the projector, on the fleet client the alerts and
     // the deliveries use): each lane's run goes out with the board, and its tasks move by D1 to D4 as actor "board".
+    // B11: with a fleet it also learns each node's build, and each merge's liveness over them, read from a local
+    // Morndo checkout (MORNDO_REPO). Without either, nothing is live: done waits, or is accepted with an override.
+    const builds = fleet ? new NodeBuilds({ source: () => fleet.client.nodes(), log }) : null;
+    builds?.start();
+    // When a background check settles what a merge's liveness is, the board says so at once: the frames wait for no
+    // next look. `board` is made below, so it is reached through a holder, as the projector is.
+    const held: { board: BoardService | null } = { board: null };
+    const liveness = new MergeLiveness({
+      builds: () => builds?.list() ?? [],
+      ancestry: gitAncestry(config.morndoRepo ?? null),
+      onChange: () => held.board?.runsChanged(),
+    });
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [] });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null) });
+    held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
-    shutdown.onStop(() => { following.projector?.stop(); board.stop(); });
+    shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
     const agents = new AgentAccess(store, config.managerWindow);
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
     const memoryStore = openMemory(config.dataDir);
     if (memoryStore) shutdown.onStop(() => memoryStore.close());
-    const memory = memoryStore ? new MemoryService({ store: memoryStore }) : null;
+    const memory = memoryStore ? new MemoryService({ store: memoryStore, policy: () => access.policy() }) : null;
+    memoryHolder.service = memory;                              // Memory off (null): the board files no Ask
     const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
     // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens.
     const usage = new UsageService({ store });
@@ -424,7 +455,9 @@ switch (cmd) {
   }
   // ADR-0031: Memory at the console, which acts for the principal; it opens memory.db itself (console/memory.ts).
   case "memory": {
-    const code = await runMemory(args, processIo(), { dataDir: config.dataDir });
+    // The one-time code is read from stdin (a prompt on a terminal, one line when piped), never from argv (console/memory.ts).
+    const stdin = process.stdin;
+    const code = await runMemory(args, { ...processIo(), readCode: () => readCodeLine(stdin, stdin.isTTY === true, text => void process.stderr.write(text)) }, { dataDir: config.dataDir });
     store.close();
     await exitAfterOutput(code);
     break;

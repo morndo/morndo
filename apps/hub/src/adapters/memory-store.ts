@@ -144,6 +144,22 @@ export class MemoryStore {
   lastSynced(node: string): { version: string; at: number } | null { return this.#setting<{ version: string; at: number }>(`synced:${node}`); }
   setSynced(node: string, version: string, at: number) { this.#saveSetting(`synced:${node}`, { version, at }); }
 
+  // M8: the one-time code the console needs to approve a Note. One live row per note (a newer code replaces it), only
+  // the hash of the normalised code, and a failure count that burns the row once it reaches the limit.
+  putApprovalCode(note: string, hash: string, expiresAt: number) {
+    this.db.prepare("INSERT OR REPLACE INTO approval_codes (note, hash, expires_at, failures) VALUES (?, ?, ?, 0)").run(note, hash, expiresAt);
+  }
+  approvalCode(note: string): { hash: string; expires_at: number; failures: number } | null {
+    const r = this.db.prepare("SELECT hash, expires_at, failures FROM approval_codes WHERE note = ?").get(note) as { hash: string; expires_at: number; failures: number } | undefined;
+    return r ?? null;
+  }
+  // The failure count after this wrong try; the caller drops the row once it reaches APPROVAL_CODE_FAILURES (M8).
+  bumpApprovalFailures(note: string): number {
+    const r = this.db.prepare("UPDATE approval_codes SET failures = failures + 1 WHERE note = ? RETURNING failures").get(note) as { failures: number } | undefined;
+    return r?.failures ?? 0;
+  }
+  dropApprovalCode(note: string) { this.db.prepare("DELETE FROM approval_codes WHERE note = ?").run(note); }
+
   close() { this.db.close(); }
 
   #setting<T>(key: string): T | null {

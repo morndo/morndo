@@ -245,6 +245,96 @@ describe("the board follows its assignee's run (B10)", () => {
     expect(shown(t.key)?.status).toBe("doing");
     expect(boardMoves()).toEqual([]);
   });
+
+  it("B12: with no key a DONE moves the lane's task in progress, as before", async () => {
+    const t = task("Ship it", "builder", T0, "doing");
+    source.list = [run("builder", "working", T0)];                     // listed: D3 leaves its task in progress be
+    await projector.start();
+    now = T0 + 60_000;
+    source.tell(run("builder", "ended", T0 + 30_000, { outcome: "done", line: "STATUS: DONE npm test: 14 passed" }));
+    expect(shown(t.key)?.status).toBe("review");
+    expect(lastEvent(t.key)).toMatchObject({ actor: { kind: "board", rule: "D1", lane: "builder" }, change: { kind: "moved", from: "doing", to: "review" } });
+  });
+
+  it("B12: a keyed DONE moves only the named task, and a key naming another lane's task moves nothing and is noted once", async () => {
+    const a = task("A", "builder", T0, "doing");
+    const b = task("B", "reviewer", T0, "doing");
+    source.list = [run("builder", "working", T0), run("reviewer", "working", T0)];
+    await projector.start();
+    now = T0 + 60_000;
+    const naming = run("builder", "ended", T0 + 30_000, { outcome: "done", line: `STATUS: DONE ${b.key} the review is in` });
+    source.tell(naming);
+    expect([shown(a.key)?.status, shown(b.key)?.status]).toEqual(["doing", "doing"]);   // nothing moved
+    expect(lastEvent(a.key)).toMatchObject({ actor: { kind: "board", rule: "D1", lane: "builder" }, change: { kind: "commented", text: expect.stringContaining(b.key) } });
+    source.tell({ ...naming, deadline: T0 + 90_000 });                                  // the same run again: no second comment
+    source.list = [naming];
+    source.reopen();                                                                    // nor from a list read again
+    await projector.refresh();
+    const comments = () => board.task(a.key)?.events.filter(e => e.change.kind === "commented") ?? [];
+    expect(comments()).toHaveLength(1);
+    const src2 = fakeRuns();
+    src2.list = [run("builder", "working", T0), run("reviewer", "working", T0)];
+    const again = new BoardProjector({ source: src2, board, log: { info: () => {}, warn: () => {}, error: () => {} } });
+    await again.start();                                                                // a hub restart: only the history keeps it one
+    src2.tell(naming);
+    again.stop();
+    expect(comments()).toHaveLength(1);
+    now = T0 + 120_000;
+    source.tell(run("builder", "ended", T0 + 110_000, { outcome: "done", line: `STATUS: DONE ${a.key} all checks pass` }));
+    expect(shown(a.key)?.status).toBe("review");
+  });
+
+  it("B12: a key naming another lane's task is noted on the named task when the lane has none in progress, and logged when there is no such task", async () => {
+    const mine = task("Check the build", "builder", T0, "review");
+    const b = task("B", "reviewer", T0, "doing");
+    source.list = [run("builder", "working", T0), run("reviewer", "working", T0)];
+    await projector.start();
+    now = T0 + 60_000;
+    const naming = run("builder", "ended", T0 + 30_000, { outcome: "done", line: `STATUS: DONE ${b.key} the review is in` });
+    source.tell(naming);
+    source.tell({ ...naming, deadline: T0 + 90_000 });
+    expect(shown(mine.key)?.status).toBe("review");
+    expect(shown(b.key)?.status).toBe("doing");
+    expect(board.task(b.key)?.events.filter(e => e.change.kind === "commented")).toHaveLength(1);
+    expect(lastEvent(b.key)).toMatchObject({ actor: { kind: "board", lane: "builder" }, change: { kind: "commented", text: expect.stringContaining(b.key) } });
+    now = T0 + 120_000;
+    source.tell(run("builder", "ended", T0 + 100_000, { outcome: "done", line: "STATUS: DONE T-999 nothing of mine" }));
+    expect(logged.some(l => l.level === "warn" && l.line.includes("T-999"))).toBe(true);        // never silent: the log says it
+  });
+
+  it("B12: a stale ended run adds no note once the lane's task in progress changed after it (D6)", async () => {
+    const a = task("A", "builder", T0 + 100_000, "doing");
+    source.list = [run("builder", "working", T0)];
+    await projector.start();
+    source.tell(run("builder", "ended", T0 + 50_000, { outcome: "done", line: "STATUS: DONE T-77 something else" }));
+    expect(board.task(a.key)?.events.filter(e => e.change.kind === "commented")).toHaveLength(0);
+  });
+
+  it("B12: three turn starts after a task is in review leave it in review (D4)", async () => {
+    const t = task("Check the build", "builder", T0, "review");
+    const b = task("Wait on the API key", "reviewer", T0, "blocked");
+    await projector.start();
+    now = T0 + 60_000;
+    source.tell(run("builder", "working", T0 + 30_000, { source: "session" }));
+    now = T0 + 120_000;
+    source.tell(run("builder", "working", T0 + 90_000, { source: "session" }));
+    now = T0 + 180_000;
+    source.tell(run("builder", "working", T0 + 150_000, { source: "session" }));
+    expect(shown(t.key)?.status).toBe("review");
+    now = T0 + 60_000;
+    source.tell(run("reviewer", "working", T0 + 30_000, { source: "session" }));
+    expect(shown(b.key)?.status).toBe("blocked");
+    expect(boardMoves()).toEqual([]);
+  });
+
+  it("B12: a keyed WAITING that names a task in review takes it back into progress (D1)", async () => {
+    const t = task("Check the build", "builder", T0, "review");
+    await projector.start();
+    now = T0 + 60_000;
+    source.tell(run("builder", "waiting", T0 + 30_000, { line: `STATUS: WAITING ${t.key} on CI`, wait: { on: "declared", what: "CI" } }));
+    expect(shown(t.key)?.status).toBe("doing");
+    expect(lastEvent(t.key)).toMatchObject({ actor: { kind: "board", rule: "D1", lane: "builder" }, change: { kind: "moved", from: "review", to: "doing", reason: `STATUS: WAITING ${t.key} on CI` } });
+  });
 });
 
 describe("a lane the fleet does not list is gone (D3, orphans)", () => {

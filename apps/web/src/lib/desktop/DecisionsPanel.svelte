@@ -11,12 +11,14 @@
   import DecisionCard from "./DecisionCard.svelte";
   import { groups, urgency, waitingCount, type DecisionItem, type LedgerState } from "./decisions.ts";
   import { clock } from "./grouping.ts";
+  import type { CodeOutcome } from "./memory-code.ts";
 
-  let { items, ledger, now, verifiedFresh, onAnswer, onOpenScreen, onOpenChat, onAskBrief }: {
+  let { items, ledger, now, verifiedFresh, onAnswer, onOpenScreen, onOpenChat, onAskBrief, onMemoryCode }: {
     items: DecisionItem[]; ledger: LedgerState; now: number; verifiedFresh: boolean;
     onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>;
     onOpenScreen: (workerId: string) => void; onOpenChat: (item: DecisionItem) => void;
     onAskBrief?: (item: DecisionItem) => Promise<AskOutcome>;
+    onMemoryCode?: (noteId: string) => Promise<CodeOutcome>;
   } = $props();
 
   let sessions = $state<Record<string, AnswerSession>>({});
@@ -97,7 +99,7 @@
         {#if !isShut(g.key, g.open)}
           <div class="cards">
             {#each g.items as d (d.id)}
-              <DecisionCard item={d} variant="panel" {now} {verifiedFresh} briefOpen={openId === d.id} session={sessions[d.id]} {onAnswer} {onOpenScreen} {onOpenChat} onOpen={item => (openId = item.id)} />
+              <DecisionCard item={d} variant="panel" {now} {verifiedFresh} briefOpen={openId === d.id} session={sessions[d.id]} {onAnswer} {onOpenScreen} {onOpenChat} onOpen={item => (openId = item.id)} {onMemoryCode} />
             {/each}
           </div>
         {/if}
