@@ -22,11 +22,12 @@
 // (/mnt/tiny, 64k), not a host mount. A hard power loss is not tested here (docker kill is not one); that stays
 // manual QA.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildWorld } from "./update-vm/build.ts";
+import { sweepScratch } from "./update-vm/checks.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const IMAGE = "morndo-c2-e2e:local";
@@ -99,24 +100,8 @@ for (const id of leftovers) {
   const gone = docker(["rm", "-f", id], { timeoutMs: 120_000 });
   process.stdout.write(`removed a container a killed run left behind (${id}): ${gone.code === 0 ? "ok" : gone.err}\n`);
 }
-// Its build scratch too (build.ts's morndo-c2-build-*, about 1.5 GB each): one run at a time on a machine, as the
-// label sweep above already assumes.
-// A kept scratch (E2E_KEEP=1) is a person's to read and stays; only a real directory named exactly build.ts's
-// prefix and its six random characters is ever removed, and a failure to remove one is said, never thrown.
-if (process.env.E2E_KEEP !== "1") {
-  for (const name of readdirSync(tmpdir()).filter(n => /^morndo-c2-build-[A-Za-z0-9]{6}$/.test(n))) {
-    const path = join(tmpdir(), name);
-    try {
-      if (!lstatSync(path).isDirectory()) continue;
-      rmSync(path, { recursive: true, force: true });
-      process.stdout.write(`removed the build scratch a killed run left behind (${name})\n`);
-    } catch (error) {
-      process.stdout.write(`could not remove ${path}: ${error instanceof Error ? error.message : String(error)}\n`);
-    }
-  }
-}
-// The sweeps' own test (E2E_SWEEP_ONLY=1): stop here, with nothing built and no machine started.
-if (process.env.E2E_SWEEP_ONLY === "1") process.exit(0);
+// Its build scratch too (build.ts's, about 1.5 GB each): checks.ts's sweepScratch says which it may remove.
+sweepScratch(tmpdir(), { keep: process.env.E2E_KEEP === "1", say: line => process.stdout.write(`${line}\n`) });
 
 try {
   // ---- the six Releases, signed, and the six publish points (build.ts does it the pipeline's way).
@@ -135,6 +120,7 @@ try {
   if (!existsSync(scenario)) throw new Error("e2e/update-vm/scenario.ts is not where this run expects it");
   copyFileSync(scenario, join(world.bundle, "scenario.ts"));
   copyFileSync(join(ROOT, "e2e/update-vm/feed-server.ts"), join(world.bundle, "feed-server.ts"));   // its feed host
+  copyFileSync(join(ROOT, "e2e/update-vm/checks.ts"), join(world.bundle, "checks.ts"));             // its judgements
 
   // ---- the machine itself, and the bundle into it.
   process.stdout.write(`building the machine…\n`);

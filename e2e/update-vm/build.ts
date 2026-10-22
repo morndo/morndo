@@ -31,6 +31,7 @@ import { stageRelease } from "../../scripts/release/stage.ts";
 import { FEED_NAMESPACE, KEYS_NAMESPACE, RELEASE_NAMESPACE } from "../../apps/updater/src/application/namespaces.ts";
 import { makeSigningKey } from "../../apps/updater/test/helpers/sshsig.ts";
 import { makeTestCa } from "../../apps/updater/test/helpers/tls.ts";
+import { nextMigration } from "./checks.ts";
 
 // The feed's fixed address, baked into the signed documents on the host and served inside the container on
 // exactly this port (scenario.ts serves it; the two constants must agree).
@@ -279,13 +280,6 @@ function walk(root: string, exclude: Set<string> = new Set()): TreeFile[] {
 // ---- the scratch-copy edits (B and C): each returns the edits as functions over the copy, and each edit
 // verifies its own anchor landed, so a moved line in the repository fails the build instead of quietly shipping
 // a release without its marker.
-
-// The number a scratch migration takes: one past the highest the file already holds, whatever main has added since.
-function nextMigration(text: string): number {
-  const numbers = [...text.matchAll(/^\s+version: (\d+),$/gm)].map(m => Number(m[1]));
-  if (numbers.length === 0) throw new Error("migrations.ts: no migration numbers found");
-  return Math.max(...numbers) + 1;
-}
 
 // B (0.2.0): one additive hub migration (§11.2) — an older hub opens the database it leaves, so a rollback to A
 // restores nothing and the marker table stays.
