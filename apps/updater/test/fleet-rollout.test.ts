@@ -687,6 +687,32 @@ describe("6b review: the attempt in the unit, the boot apply, offline nodes, a r
     expect(r.out + r.err).toContain("the tick");
   });
 
+  it("the boot apply does not use a kept list older than ten minutes: it applies nothing and leaves it to the tick", async () => {
+    const w = await tickWorld({ controlPlane: true, fleet: NODES1() });
+    w.services.tmuxIn = true;
+    expect((await w.run(["update", "tick"])).code).toBe(75);       // a live read: the list is kept
+    const kept = join(w.home, ".local", "state", "morndo-update", "fleet-nodes.json");
+    const doc = JSON.parse(readFileSync(kept, "utf8")) as { at: number; nodes: unknown };
+    writeFileSync(kept, `${JSON.stringify({ ...doc, at: Date.now() - FRESH_VIEW_MS - MIN })}\n`);
+    w.services.tmuxIn = false;
+    w.fleet.throwNodes = true;
+    const r = await w.run(["update", "boot"]);
+    expect(r.code, r.err).toBe(0);
+    expect(w.current()).toBe(A);
+    expect(r.out + r.err).toContain("the tick");
+  }, 90_000);   // 1 world, three runs
+
+  it("a joined node that never said its protocol holds the control plane, named as unknown", async () => {
+    const f = new FakeFleetView();
+    f.nodesWord = [{ name: "n3", agentProtocol: null, joined: true, revoked: false }];
+    const w = await tickWorld({ controlPlane: true, fleet: f });
+    const r = await w.run(["update", "tick"]);
+    expect(r.code, r.err).toBe(75);
+    expect(stateFile(w.statePath)).toMatchObject({ state: "waiting", reason: "skew_blocked: n3" });
+    expect(r.err).toContain("unknown");
+    expect(w.current()).toBe(A);
+  });
+
   it("the boot apply holds on the kept list too: a node it would cut off blocks it", async () => {
     const w = await tickWorld({ controlPlane: true, fleet: NODES1(), protocol: { agent: [2, 2], clientApi: [1, 1] } });
     expect((await w.run(["update", "tick"])).code).toBe(75);       // skew_blocked: n2, and the list kept

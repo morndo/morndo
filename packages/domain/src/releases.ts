@@ -379,11 +379,13 @@ export function judgeProbation(p: { upMs: number; restarts: number }): Result<tr
 // ---- Skew (RL11) and the Rollout (RL12)
 
 export type NodeView = { name: string; version: Version | null; agentProtocol: number | null; joined: boolean; revoked: boolean };
-export type SkewRefusal = { reason: "node_ahead" } | { reason: "protocol_dropped"; nodes: string[] };
+export type SkewRefusal = { reason: "node_ahead" } | { reason: "protocol_dropped"; nodes: string[]; unknown?: string[] };
 
 // May this machine apply this Version, given the control plane and the nodes? A node never applies above its
 // control plane. The control plane defers a Release that drops an agent protocol a joined, non-revoked node still
 // depends on — the Manifest's protocol range decides, so no knowledge of what changed is needed — and names them.
+// A joined node whose protocol is unknown (it never said one) counts as cut too, and is named in `unknown`: the
+// control plane cannot know it would still be understood. Revoking the node lets a Release past it.
 export function skew(p: {
   machine: "node" | "control_plane"; controlPlane: Version; nodes: NodeView[];
   target: Version; targetProtocol: { agent: [number, number]; clientApi: [number, number] };
@@ -391,9 +393,10 @@ export function skew(p: {
   if (p.machine === "node" && compareVersions(p.target, p.controlPlane) > 0) return err({ reason: "node_ahead" });
   if (p.machine === "control_plane") {
     const [min, max] = p.targetProtocol.agent;
-    const cut = p.nodes.filter(n => n.joined && !n.revoked && n.agentProtocol !== null
-      && (n.agentProtocol < min || n.agentProtocol > max)).map(n => n.name);
-    if (cut.length > 0) return err({ reason: "protocol_dropped", nodes: cut });
+    const counted = p.nodes.filter(n => n.joined && !n.revoked);
+    const cut = counted.filter(n => n.agentProtocol === null || n.agentProtocol < min || n.agentProtocol > max).map(n => n.name);
+    const unknown = counted.filter(n => n.agentProtocol === null).map(n => n.name);
+    if (cut.length > 0) return err({ reason: "protocol_dropped", nodes: cut, ...(unknown.length > 0 ? { unknown } : {}) });
   }
   return ok(true);
 }

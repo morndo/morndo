@@ -122,7 +122,7 @@ export function applyUnitGate(p: {
 // non-revoked node still depends on, and the fleet's own node list decides — asked live, because the nodes'
 // protocols are the fleet's word, not this machine's view of them. A fleet that cannot be asked is no answer at
 // all: the apply waits, never runs on no word. The hold names the nodes, for state.json and the alert it becomes.
-export type SkewHold = { reason: "fleet_unreachable" } | { reason: "skew_blocked"; nodes: string[] };
+export type SkewHold = { reason: "fleet_unreachable" } | { reason: "skew_blocked"; nodes: string[]; unknown: string[] };
 export async function controlPlaneSkew(p: {
   fleet: Pick<FleetView, "nodes">; controlPlane: Version; target: Version; targetProtocol: ProtocolRange;
 }): Promise<{ ok: true } | { ok: false; error: SkewHold }> {
@@ -136,8 +136,8 @@ export async function controlPlaneSkew(p: {
   if (!word.ok) {
     // This machine is the control plane, whose only refusal is protocol_dropped (RL11) — node_ahead is a node's
     // word, never this call's; the narrowing keeps the hold's nodes the refusal's own.
-    if (word.error.reason !== "protocol_dropped") return err({ reason: "skew_blocked", nodes: [] });
-    return err({ reason: "skew_blocked", nodes: word.error.nodes });
+    if (word.error.reason !== "protocol_dropped") return err({ reason: "skew_blocked", nodes: [], unknown: [] });
+    return err({ reason: "skew_blocked", nodes: word.error.nodes, unknown: word.error.unknown ?? [] });
   }
   return { ok: true };
 }

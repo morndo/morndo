@@ -15,7 +15,7 @@ import { ApplyService, type ApplyOutcome } from "./application/apply-service.ts"
 import { planOf, type ApplyTiming } from "./application/apply-steps.ts";
 import { CHECKOUT_SENTENCE, CheckService, type CheckOutcome } from "./application/check-service.ts";
 import { doctor } from "./application/doctor-service.ts";
-import { FEED_CHECK_MS, applyUnitGate, controlPlaneSkew, deferSentence, nodeGate } from "./application/fleet-follow.ts";
+import { FEED_CHECK_MS, FRESH_VIEW_MS, applyUnitGate, controlPlaneSkew, deferSentence, nodeGate } from "./application/fleet-follow.ts";
 import type { RecoverOutcome } from "./application/recovery-service.ts";
 import { RecoveryService } from "./application/recovery-service.ts";
 import { formatStatus, readStatus } from "./application/status-service.ts";
@@ -355,11 +355,14 @@ export async function runUpdater(
     // it — "skew_blocked:" with the nodes, or a fleet that could not be asked at all; a target whose staged
     // record cannot be read never runs either. Null is the gate open.
     // The fleet's node list as the last successful read saw it (review of #111): the boot apply runs before the
-    // fleet starts, so it decides on that list; with none seen yet it applies nothing and the tick does it later.
+    // fleet starts, so it decides on that list, if it is no older than ten minutes; with none, it applies nothing
+    // and the tick does it later.
     const nodesKeptFile = join(paths.state, "fleet-nodes.json");
+    // A list older than the fleet view's own freshness bound is no word at all (review of #111 at 927859b).
     const keptNodes = (): FleetNode[] | null => {
       try {
-        const v = JSON.parse(readFileSync(nodesKeptFile, "utf8")) as { nodes?: unknown };
+        const v = JSON.parse(readFileSync(nodesKeptFile, "utf8")) as { at?: unknown; nodes?: unknown };
+        if (typeof v.at !== "number" || systemClock.now() - v.at > FRESH_VIEW_MS) return null;
         return Array.isArray(v.nodes) ? v.nodes as FleetNode[] : null;
       } catch { return null; }
     };
@@ -400,7 +403,10 @@ export async function runUpdater(
       }
       const nodes = gate.error.nodes.join(", ");
       stateSink.write({ state: "waiting", version: o.running ?? o.target, target: o.target, reason: `skew_blocked: ${nodes}`, at: systemClock.now() });
-      io.err(`the target would drop an agent protocol these joined nodes still speak (RL11): ${nodes}\n`);
+      const unknown = gate.error.unknown;
+      io.err(unknown.length === 0
+        ? `the target would drop an agent protocol these joined nodes still speak (RL11): ${nodes}\n`
+        : `the target would drop an agent protocol these joined nodes still speak, or their protocol is unknown (RL11): ${nodes}; unknown: ${unknown.join(", ")} (revoke a node that will not come back)\n`);
       return EXIT_TEMPFAIL;
     };
     // The staged Manifest's protocol range, what skew asks about (RL11): re-read from the store's own copy, the

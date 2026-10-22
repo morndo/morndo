@@ -139,7 +139,7 @@ Any other value matches only itself. An answer may hold no field that its exampl
 - `health` is the node's latest report: memory, load, disk, the clock, the depth of its hook spool. It is null until the node has sent one.
 - `agent` is the version its agent last reported.
 - `commit` is the commit its agent runs, from its live connection: null while the node is offline, or for an agent that does not report one.
-- `proto` is the protocol versions its agent offered on its live connection, and while it is offline the ones its last hello named (null for a node that never connected): an offline node still speaks those, so the control plane's skew gate counts them (RL11). Revoking the node is how the owner lets a Release past one that will never come back.
+- `proto` is the protocol versions its agent offered on its live connection, and while it is offline the ones its last hello named (null for a node that never connected): an offline node still speaks those, so the control plane's skew gate counts them (RL11). A joined node with null holds the control plane's apply as unknown. Revoking the node is how the owner lets a Release past one that will never come back.
 - `update` is the node's last update report (§5.4): `{ state, version, target?, reason?, failedCheck? }`, with `state` one of `current`, `staged`, `waiting`, `applying`, `rolled_back`, `rollback_failed`. Null before any.
 
 ```example nodes
