@@ -3249,6 +3249,40 @@ export const CONTROLS: Control[] = [
   { id: "c2b-rollback-without-confirmation", task: "c2b", file: "apps/updater/src/cli.ts",
     find: ": answer === \"rollback\";", replace: ": true;",
     run: ["apps/updater/test/cli-apply.test.ts"], expect: "Not rolled back" },
+  // 5b round 3 (md-rev5 on 78bf596), one control per fix.
+  // F1: the apply unit named "rollback" runs only what `update --rollback` confirmed; without the check it runs bare.
+  { id: "c2b-apply-unit-rollback-unconfirmed", task: "c2b", file: "apps/updater/src/cli.ts",
+    find: "if (confirmed === null || confirmed.from !== running", replace: "if (false && confirmed === null || confirmed.from !== running",
+    run: ["apps/updater/test/cli-apply.test.ts"], expect: "the apply unit refuses a rollback that --rollback did not confirm" },
+  // F1: and the apply unit takes no Version at or below the running one.
+  { id: "c2b-apply-unit-older-version", task: "c2b", file: "apps/updater/src/cli.ts",
+    find: "compareVersions(asked, runningVersion) <= 0", replace: "compareVersions(asked, runningVersion) < 0",
+    run: ["apps/updater/test/cli-apply.test.ts"], expect: "the apply unit refuses a rollback that --rollback did not confirm" },
+  // F2: a swap renders the machine's own units only; with every unit rendered, a node gets the hub's and fleet's.
+  { id: "c2b-swap-renders-every-role", task: "c2b", file: "apps/updater/src/application/apply-service.ts",
+    find: "await services.renderUnits(staged.version, { services: running });", replace: "await services.renderUnits(staged.version);",
+    run: ["apps/updater/test/apply-service.test.ts"], expect: "renders only the units of the machine's own services" },
+  // F3: a render removes only the unit files Morndo marked; unmarked, a person's own morndo-* unit is deleted.
+  { id: "c2b-render-removes-foreign", task: "c2b", file: "apps/updater/src/adapters/unit-files.ts",
+    find: "if (text !== null && d.marked(text)) rmSync", replace: "if (text !== null) rmSync",
+    run: ["apps/updater/test/services-systemd.test.ts"], expect: "removes only units Morndo wrote" },
+  // F3: and overwrites none it did not write unless asked.
+  { id: "c2b-render-overwrites-foreign", task: "c2b", file: "apps/updater/src/adapters/unit-files.ts",
+    find: "if (foreign.length > 0 && !replaceForeign) throw new ForeignUnits(foreign);", replace: "",
+    run: ["apps/updater/test/services-systemd.test.ts"], expect: "removes only units Morndo wrote" },
+  // F3: install checks before it writes anything; without the check a foreign unit stops it half-installed.
+  { id: "c2b-install-no-foreign-check", task: "c2b", file: "apps/updater/src/cli.ts",
+    find: "if (foreign.length > 0 && !parsed.force) {", replace: "if (false) {",
+    run: ["apps/updater/test/install.test.ts"], expect: "refuses a unit of ours that Morndo did not write" },
+  // F4: recovery runs from `good`, not through ~/.local/bin's link to `current`.
+  { id: "c2b-recover-through-current", task: "c2b", file: "apps/updater/units/morndo-update-recover.service",
+    find: "ExecStart=%h/.local/share/morndo-releases/good/bin/morndo-update update recover",
+    replace: "ExecStart=%h/.local/bin/morndo-update update recover",
+    run: ["apps/updater/test/units.test.ts"], expect: "recovery runs only while the applying mark exists" },
+  // F5: an open record the recovery cannot act on is one Alert, not one every 5 minutes.
+  { id: "c2b-unknown-record-alert-every-run", task: "c2b", file: "apps/updater/src/application/recovery-service.ts",
+    find: "if (store.firstAlert(open.id, \"update_unknown_record\", clock.now())) alerts.raise", replace: "alerts.raise",
+    run: ["apps/updater/test/recovery-service.test.ts"], expect: "a mark this Version does not know" },
   // ---- B2 (board T-302): a lane the fleet doesn't list is gone, each guard removed once.
   { id: "b2-unregistered-only-doing", task: "302", file: "packages/domain/src/board.ts",
     find: "if (task.status !== \"doing\" || task.assignee === null || registered.has(task.assignee)) return null;",
