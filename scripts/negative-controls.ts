@@ -1814,7 +1814,7 @@ export const CONTROLS: Control[] = [
     find: "  alert: { ttlSeconds: 6 * 3600, topic: \"alerts\", urgency: \"high\" },", replace: "  alert: { ttlSeconds: 6 * 3600, topic: \"alert\", urgency: \"high\" },",
     run: ["apps/hub/test/notification-service.test.ts"], expect: "a length that decodes" },
   { id: "port-alerts-event-news", task: "port", file: "apps/hub/src/application/alerts-service.ts",
-    find: "    this.#onNew(a, urgent(a));\n", replace: "",
+    find: "    this.#onNew(a, urgent(a));\n  }\n", replace: "  }\n",
     run: ["apps/hub/test/alerts-service.test.ts"], expect: "an event is news once" },
   { id: "port-alerts-urgent-push", task: "port", file: "apps/hub/src/application/notification-service.ts",
     find: "if (raises({ kind: \"alert\", urgent })) this.#raise(\"alert\");", replace: "if (false) this.#raise(\"alert\");",
