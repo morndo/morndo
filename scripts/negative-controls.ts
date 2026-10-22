@@ -2134,6 +2134,10 @@ export const CONTROLS: Control[] = [
   { id: "pr4-hub-cancel-busy-once", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
     find: "const CANCEL_BUSY_MAX_MS = 30_000;", replace: "const CANCEL_BUSY_MAX_MS = 0;",
     run: ["apps/hub/test/manager-queue.test.ts"], expect: "answered busy" },
+  // The same guard against the real thing: the drill forces the race CI met (the node's cancelBusyTimes hook).
+  { id: "pr4-drill-cancel-busy", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
+    find: "const CANCEL_BUSY_MAX_MS = 30_000;", replace: "const CANCEL_BUSY_MAX_MS = 0;",
+    run: ["test/fleet/drills-manager-queue.test.ts"], expect: "waiting for cancelled at start" },
   { id: "pr4-hub-busy-drops-sending-row", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
     find: ' && r.refused !== "busy") {', replace: ") {",
     run: ["apps/hub/test/manager-queue.test.ts"], expect: "the node holds it" },

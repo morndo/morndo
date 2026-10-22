@@ -225,6 +225,24 @@ describe("switched off (MORNDO_MANAGER_QUEUE=off, step 2's rollback)", () => {
     expect(await answers(o.fleet)).toHaveLength(1);                // only the cancelled one: the direct answer queued nothing
   });
 
+  // The race CI met on #94 (run 39684997329): the hub's cancel at start lands while the node is typing that very delivery
+  // and is answered busy, "ask again". The node's cancelBusyTimes hook makes the first three cancels meet it every time;
+  // the hub asks again and the answer still ends cancelled, never typed.
+  it("an answer whose cancel at start is answered busy is asked again and still ends cancelled", async () => {
+    const o = await office({ cancelBusyTimes: 3 });
+    await o.manager.control({ status: "waiting" });
+    await statusIs(o, "waiting");
+    expect((await o.hub.answer("ny-1", "ship", randomUUID())).status).toBe(200);
+    const queued = await until("ny-1's delivery waiting for the menu", async () =>
+      (await answers(o.fleet)).find(d => d.state === "queued" && d.waiting?.reason === "menu_open") ?? null, 30_000, 250);
+    await o.hub.restart({ managerQueue: false });
+    await until("cancelled at start", async () => (await o.fleet.client.delivery(queued.id))?.why === "cancelled", 30_000);
+    expect(o.hub.log()).toMatch(/cancelling it was refused \(busy\)/);   // the race was met, and asked again
+    await until("ny-1 open again", async () => (await ask(o.hub))?.status === "open", 15_000);
+    await sleep(PAST_A_TRY);
+    expect(times(o.manager.submitted(), TAP)).toBe(0);
+  });
+
   it("a direct retry of an answer already typed finds its key on the node and isn't typed again (§9.1)", async () => {
     const o = await office();
     await typedThenForgotten(o);
