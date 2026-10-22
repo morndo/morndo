@@ -1265,7 +1265,7 @@ export const CONTROLS: Control[] = [
     find: "startedAt: pid === null ? null : starts.at(pid)", replace: "startedAt: null",
     run: ["apps/node-agent/test/deliverer-tmux.test.ts"], expect: "gives each lane its pane process's start" },
   { id: "fc5-cancel-while-typing", task: "fc5", file: "apps/node-agent/src/deliveries/deliverer.ts",
-    find: "    if (this.#trying.has(id)) return err(\"busy\", \"the delivery is being typed right now; ask again in a moment\");\n",
+    find: "    if (this.#trying.has(id) || this.#busyByHook()) return err(\"busy\", \"the delivery is being typed right now; ask again in a moment\");\n",
     replace: "",
     run: ["apps/node-agent/test/deliverer.test.ts"], expect: "busy" },
   { id: "fc5-no-replay", task: "fc5", file: "apps/node-agent/src/agent.ts",
@@ -2132,8 +2132,15 @@ export const CONTROLS: Control[] = [
   // ---- PR 4, check and stage (design §6.1, §10.2, §13): each guard of the chain and its edges, removed once.
   // CI on #94 (2026-10-22): the switch off gave up on a cancel answered busy, and the drill timed out waiting for it.
   { id: "pr4-hub-cancel-busy-once", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
-    find: "const CANCEL_BUSY_TRIES = 8;", replace: "const CANCEL_BUSY_TRIES = 1;",
+    find: "const CANCEL_BUSY_MAX_MS = 30_000;", replace: "const CANCEL_BUSY_MAX_MS = 0;",
     run: ["apps/hub/test/manager-queue.test.ts"], expect: "answered busy" },
+  // The same guard against the real thing: the drill forces the race CI met (the node's cancelBusyTimes hook).
+  { id: "pr4-drill-cancel-busy", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
+    find: "const CANCEL_BUSY_MAX_MS = 30_000;", replace: "const CANCEL_BUSY_MAX_MS = 0;",
+    run: ["test/fleet/drills-manager-queue.test.ts"], expect: "waiting for cancelled at start" },
+  { id: "pr4-hub-busy-drops-sending-row", task: "pr4", file: "apps/hub/src/application/manager-queue.ts",
+    find: ' && r.refused !== "busy") {', replace: ") {",
+    run: ["apps/hub/test/manager-queue.test.ts"], expect: "the node holds it" },
   { id: "pr4-feed-namespace-unchecked", task: "pr4", file: "apps/updater/src/application/check-service.ts",
     find: "facts.feed_namespace = feedFact !== undefined && feedFact.namespace === FEED_NAMESPACE;",
     replace: "facts.feed_namespace = true;",
