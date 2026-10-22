@@ -3230,8 +3230,11 @@ export const CONTROLS: Control[] = [
     replace: "const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.healthyAt, restarts: 0 });",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "rolled_back" },
   // Found by the 5d run on a throwaway machine: a database the machine never made does not stop an update.
+  { id: "c2a-unreadable-taken-for-absent", task: "c2a", file: "apps/updater/src/adapters/backup-sqlite.ts",
+    find: "      if (absentFile(this.#paths[db])) {", replace: "      if (!existsSync(this.#paths[db])) {",
+    run: ["apps/updater/test/backup-sqlite.test.ts"], expect: "never taken for absent" },
   { id: "c2a-absent-db-fails-backup", task: "c2a", file: "apps/updater/src/adapters/backup-sqlite.ts",
-    find: "      if (!existsSync(this.#paths[db])) {", replace: "      if (false) {",
+    find: "      if (absentFile(this.#paths[db])) {", replace: "      if (false) {",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "a machine without one of the databases yet updates" },
   { id: "c2a-absent-restore-keeps-file", task: "c2a", file: "apps/updater/src/adapters/backup-sqlite.ts",
     find: "    if (!existsSync(backup) && existsSync(absentMarker(this.#backups, updateId, db))) {", replace: "    if (false) {",
