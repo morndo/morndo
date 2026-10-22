@@ -7,17 +7,24 @@
 // console's (`morndo lanes start --task`) as { kind: "console" }: the same transaction, record and push as any change.
 // The view carries each lane's Run as the Fleet derived it and the to do tasks whose lane the fleet no longer lists
 // (orphans; the projector's, board-projector.ts), and a change of runs is pushed too, at most about once a second.
-import { DONE_SHOWN_MS, applyAction, boardChanged, boardOrder, createTask, mayCommand, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
+// B11: each task's merges are kept with their liveness (merge-liveness.ts over the fleet's node builds), Done is judged
+// against them, and the view says for each task with merges where they stand ("merged, not live: pc on abc1234").
+import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
 
 // `runs` (ADR-0032 §6, BoardFrameSchema.runs): each lane's latest Run; empty without a fleet. `orphans`: the to do tasks
-// whose lane the fleet no longer lists (BoardProjector.orphans); empty without a fleet.
-export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[] };
+// whose lane the fleet no longer lists (BoardProjector.orphans); empty without a fleet. `merged` (B11): one view per
+// shown task that has merges.
+export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[] };
 // A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
 export const RUNS_EVERY_MS = 1000;
-export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus };
+export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus; detail?: string };
+
+// Who recorded a merge (B11): the manager's or the lane's name, or the kind for the principal and the console. The board
+// itself records none (D5).
+const actorName = (a: TaskEvent["actor"]): string => a.kind === "manager" || a.kind === "worker" ? a.name : a.kind;
 
 export class BoardService {
   #store: Store;
@@ -25,6 +32,8 @@ export class BoardService {
   #policy: () => AccessPolicy;
   #lanes: () => string[];
   #runs: () => RunView[];
+  #liveness: (sha: string) => Liveness;
+  #knows: ((sha: string) => Promise<"yes" | "no" | "unknown">) | null;
   #orphans: (tasks: readonly Task[], now: number) => string[];
   #runsEveryMs: number;
   #runsTimer: NodeJS.Timeout | null = null;
@@ -34,9 +43,13 @@ export class BoardService {
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
   // fleet no longer lists (BoardProjector.orphans; none without a fleet). `runsEveryMs`: the runs' throttle.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number }) {
+  // `liveness` (B11): a merge's liveness over the nodes' builds; without one nothing is ever live, so Done waits. `knows`:
+  // whether the hub's checkout holds a commit, asked once for a lane's merge record (actChecked); without one none is asked.
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown"> }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
+    this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
+    this.#knows = p.knows ?? null;
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
@@ -63,11 +76,13 @@ export class BoardService {
   view(): BoardView {
     const now = this.#now();
     const tasks = boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now);
-    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now) };
+    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks) };
   }
-  task(key: string): { task: Task; events: TaskEvent[] } | null {
+  task(key: string): { task: Task; events: TaskEvent[]; merged: MergedView | null } | null {
     const task = this.#store.task(key);
-    return task ? { task, events: this.#store.taskEvents(key) } : null;
+    if (!task) return null;
+    const merges = this.#store.mergesOf(key);
+    return { task, events: this.#store.taskEvents(key), merged: merges.length > 0 ? mergedView(task.key, merges, this.#liveness) : null };
   }
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }
   openTasksOf(lane: string): Task[] { return this.#store.openTasksOf(lane); }
@@ -106,8 +121,9 @@ export class BoardService {
         ...(action.title !== undefined ? { title: action.title === redactKeyMaterial(task.title) ? task.title : action.title } : {}),
         ...(action.description !== undefined ? { description: action.description === redactKeyMaterial(task.description) ? task.description : action.description } : {}),
       } : action;
-      // B5 needs only the tasks in progress, not the whole board.
-      const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress());
+      // B5 needs only the tasks in progress, not the whole board. B11: Done is judged against the task's merges.
+      const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
+        { merges: this.#store.mergesOf(key), liveness: this.#liveness });
       if (!applied.ok) return applied;
       this.#write(applied.value.task, applied.value.event);
       return applied;
@@ -116,6 +132,20 @@ export class BoardService {
     if (!r.ok) return { ok: false, ...r.error };
     this.#tell();
     return { ok: true, ...r.value };
+  }
+
+  // `act`, for the agents' door (B11): a lane's merge record is first checked against the hub's checkout, once, and turned
+  // away (`no_commit`) when the checkout says it has no such commit, so a lane cannot make the hub run git for any sha it
+  // invents (a morndo/morndo record only). The manager's, the principal's and the console's records are not asked: they may come before the operator
+  // brings the checkout up to date, and a refused record would leave the task with no merge to hold done for. "unknown"
+  // (no checkout, git failing) takes the record.
+  async actChecked(key: string, action: TaskAction, actor: TaskActor): Promise<BoardResult> {
+    if (action.action === "merged" && actor.kind === "worker" && this.#knows) {
+      const sha = action.sha.trim().toLowerCase();
+      // Only morndo/morndo: the checkout is a Morndo one and says nothing of another repo's commits.
+      if (isMorndoRepo((action.repo ?? MORNDO_REPO).trim()) && /^[0-9a-f]{7,40}$/.test(sha) && await this.#knows(sha) === "no") return { ok: false, problem: "no_commit" };
+    }
+    return this.act(key, action, actor);
   }
 
   // B10: the board's own move of `key`, following `lane`'s Run (derivedMove's answer: D1 to D4), as that rule. `rev`: the
@@ -129,6 +159,23 @@ export class BoardService {
   #write(task: Task, event: TaskEvent) {
     this.#store.saveTask(task);
     this.#store.saveTaskEvent(event);
+    // B11: a merge is kept as a record with its event, an unmerged one drops that record, and an accepted not-live Done
+    // sets the override on the task's morndo/morndo merges — all in the same transaction as the change itself.
+    const change = event.change;
+    if (change.kind === "merged") this.#store.saveMerge(task.key, { repo: change.repo, sha: change.sha, at: event.at, by: actorName(event.actor), override: null });
+    if (change.kind === "unmerged") this.#store.deleteMerge(task.key, change.repo, change.sha);
+    if (change.kind === "moved" && change.to === "done" && change.notLive !== undefined) this.#store.overrideMerges(task.key, change.notLive);
     this.#store.record([boardChanged(event)]);
+  }
+
+  // One merged view per shown task that has merges (B11): every task's merges in one read, not one per task.
+  #merged(tasks: readonly Task[]): MergedView[] {
+    const all = this.#store.allMerges();
+    const views: MergedView[] = [];
+    for (const t of tasks) {
+      const merges = all.get(t.key);
+      if (merges !== undefined) views.push(mergedView(t.key, merges, this.#liveness));
+    }
+    return views;
   }
 }

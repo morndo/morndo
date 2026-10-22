@@ -203,8 +203,9 @@ export interface ServiceManager {
    *  Only files Morndo wrote are replaced or removed: one of a shipped name without Morndo's mark throws, unless
    *  `replaceForeign`, which keeps it aside first. Returns where each replaced file was kept. */
   renderUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { replaceForeign?: boolean }): Promise<string[]>;
-  /** The unit files a render of `version` for `role` would replace that are not Morndo's (no mark of ours). */
-  foreignUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<string[]>;
+  /** The unit files a render of `version` for `role` would replace that are not Morndo's (no mark of ours). `tree`:
+   *  read the units from that unpacked tree, for an install whose Version is not in the releases yet. */
+  foreignUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { tree?: string }): Promise<string[]>;
   /** RL13: true when the tmux server sits inside the node agent's unit. */
   tmuxInAgentUnit(): Promise<boolean>;
   /** §6.2's apply runs as its own unit, so a crash of whoever asked for it never interrupts the walk: start
@@ -257,5 +258,5 @@ export interface AlertSink { raise(kind: AlertKind, detail: string): void }
 export interface Revocations {
   /** The ids revoked in the live database that are not revoked in this update's Backup of it: what a restore would
    *  bring back. Empty for a database that holds no revocations, or when there is no Backup to compare. */
-  droppedBy(updateId: string, db: DatabaseName): string[];
+  droppedBy(updateId: string, db: DatabaseName, target: string): string[];
 }

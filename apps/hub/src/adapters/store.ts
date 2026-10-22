@@ -1,14 +1,16 @@
 // SQLite adapter for the Access context (ADR-0005). The domain never sees SQL; this maps rows to domain values.
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { assertLocalDisk } from "@morndo/service-kit";
+import { log } from "./log.ts";
 import { migrate } from "./migrations.ts";
 import type { DeliveryState } from "@morndo/protocol";
 import {
   endpointId, pairingTokenId, sessionId,
   type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
-  type Session, type Task, type TaskEvent, type Transcription, type UpdateCommanded, type Upload,
+  type Session, type Task, type TaskEvent, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
 } from "@morndo/domain";
 
 // What the audit log holds: Access events, and the principal's Decisions (the words of a Decision never, only their
@@ -91,13 +93,29 @@ const linkFrom = (r: Row): LinkRequest => ({
   decidedBy: r.decided_by === null ? null : endpointId(r.decided_by as string),
 });
 
+// The database file's identity, (device, inode), as the node's own open keeps it (final review I2; node-agent
+// src/db/open.ts). BigInt stats: an inode can pass 2^53. The device number is kept for the record only; the inode alone
+// is compared, because WSL2's distro disk, btrfs subvolumes and external volumes can come back under another one (attach
+// order), and comparing it would renew the store for nothing, with sends in doubt stuck uncertain.
+function fileIdentity(path: string): string {
+  const st = statSync(path, { bigint: true });
+  return `${st.dev}:${st.ino}`;
+}
+// The inode of a recorded identity ("<device>:<inode>"): the part compared.
+const inodeOf = (identity: string): string => identity.slice(identity.lastIndexOf(":") + 1);
+
 export class Store {
   readonly db: Database.Database;
+  // This database file's store (RL10, §11.5), as the row beside it holds it: renewed whenever the file's inode isn't
+  // the one recorded with it, so a copy renamed over the file (a restore §11.4) answers as a new store and Commands the
+  // old one typed stay uncertain on the devices that saw it. Every API answer names it (Morndo-Store).
+  readonly storeId: string;
 
   constructor(dataDir: string) {
     assertLocalDisk(dataDir);                            // before anything is created: a missing dir is judged by its parent
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-    this.db = new Database(join(dataDir, "morndo.db"));
+    const path = join(dataDir, "morndo.db");
+    this.db = new Database(path);
     this.db.pragma("journal_mode = WAL");
     // NORMAL, said out loud: what the hub has always run with, since better-sqlite3 builds SQLite with
     // SQLITE_DEFAULT_WAL_SYNCHRONOUS=1 (its compile_options; checked 2026-10-08, 13.0.3), which a WAL database takes on
@@ -105,8 +123,31 @@ export class Store {
     // never corrupt (https://www.sqlite.org/pragma.html#pragma_synchronous); fleet core §16.4.
     this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
-    try { migrate(this.db); this.mendStateChangedAt(); }  // numbered migrations (migrations.ts); refuses a newer database
+    try {
+      migrate(this.db);                                  // numbered migrations (migrations.ts); refuses a newer database
+      this.mendStateChangedAt();
+      this.storeId = this.storeOfThisFile(path);
+    }
     catch (e) { this.db.close(); throw e; }
+  }
+
+  // The store this file answers for: the row's, or, when the file's inode isn't the one recorded with it, a new one
+  // stored with this identity in one transaction — before anything is sent. A database without a row yet (new, or made
+  // by a hub from before migration 25) gets this file's identity, as the original; a file whose device number alone
+  // changed keeps its store and gets the new identity recorded.
+  private storeOfThisFile(path: string): string {
+    const identity = fileIdentity(path);
+    return this.db.transaction(() => {
+      const row = this.db.prepare("SELECT store, identity FROM hub_store WHERE id = 1").get() as { store: string; identity: string } | undefined;
+      if (row && inodeOf(row.identity) === inodeOf(identity)) {
+        if (row.identity !== identity) this.db.prepare("UPDATE hub_store SET identity = ? WHERE id = 1").run(identity);
+        return row.store;
+      }
+      const store = randomUUID();
+      this.db.prepare("INSERT INTO hub_store (id, store, identity) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET store = excluded.store, identity = excluded.identity").run(store, identity);
+      if (row) log.warn(`${basename(path)} is not the file this database was made in (copied or restored?): a new store; Commands sent before stay uncertain`);
+      return store;
+    }).immediate();
   }
 
   // A hub from before migration 23 opens a database at 23 as it is and saves a task without naming state_changed_at, so
@@ -519,6 +560,35 @@ export class Store {
       .map(r => ({ key: r.key as Task["key"], rev: r.rev as number, at: r.at as number, actor: JSON.parse(r.actor as string) as TaskEvent["actor"], change: JSON.parse(r.change as string) as TaskEvent["change"] }));
   }
 
+  // The board's merge records (B11): one row per recorded merge of a task's PR. The same record again (a replayed
+  // action) changes nothing; the row as it was first written stands.
+  saveMerge(key: string, m: MergeRecord) {
+    this.db.prepare("INSERT OR IGNORE INTO board_merges (key, repo, sha, at, by, override) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(key, m.repo, m.sha, m.at, m.by, m.override);
+  }
+  mergesOf(key: string): MergeRecord[] {
+    return (this.db.prepare("SELECT repo, sha, at, by, override FROM board_merges WHERE key = ? ORDER BY at, sha").all(key) as Row[]).map(mergeFrom);
+  }
+  allMerges(): Map<string, MergeRecord[]> {
+    const all = new Map<string, MergeRecord[]>();
+    for (const r of this.db.prepare("SELECT key, repo, sha, at, by, override FROM board_merges ORDER BY key, at, sha").all() as Row[]) {
+      const list = all.get(r.key as string) ?? [];
+      list.push(mergeFrom(r));
+      all.set(r.key as string, list);
+    }
+    return all;
+  }
+  // Done accepted while a merge was not live (B11): the reason lands on that task's morndo/morndo merges that carry no
+  // override yet. Other repositories' rows are never touched: their merges never held done.
+  overrideMerges(key: string, reason: string) {
+    this.db.prepare("UPDATE board_merges SET override = ? WHERE key = ? AND lower(repo) = 'morndo/morndo' AND override IS NULL").run(reason, key);
+  }
+  // A wrong record cleared (B11): the one row this (task, repo, sha) names, and no other; the repo matches without
+  // regard to case, as the domain matches it.
+  deleteMerge(key: string, repo: string, sha: string) {
+    this.db.prepare("DELETE FROM board_merges WHERE key = ? AND lower(repo) = lower(?) AND sha = ?").run(key, repo, sha);
+  }
+
   // Agent tokens (ADR-0015, B1).
   saveAgentToken(t: AgentToken) {
     this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, created_at, last_used_at, revoked_at) VALUES (@id, @name, @role, @secretHash, @createdAt, @lastUsedAt, @revokedAt)
@@ -635,6 +705,9 @@ const taskFrom = (r: Row): Task => ({
 const agentTokenFrom = (r: Row): AgentToken => ({
   id: r.id as string, name: r.name as string, role: r.role as AgentToken["role"], secretHash: r.secret_hash as string,
   createdAt: r.created_at as number, lastUsedAt: (r.last_used_at as number | null) ?? null, revokedAt: (r.revoked_at as number | null) ?? null,
+});
+const mergeFrom = (r: Row): MergeRecord => ({
+  repo: r.repo as string, sha: r.sha as string, at: r.at as number, by: r.by as string, override: (r.override as string | null) ?? null,
 });
 const briefFrom = (r: Row): BriefRecord => ({
   id: r.id as string, version: r.version as number, ref: (r.ref as string | null) ?? null,

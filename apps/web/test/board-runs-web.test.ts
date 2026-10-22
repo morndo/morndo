@@ -23,7 +23,7 @@ const RUNS = [
   run("old", { phase: "gone", source: "session" }),                                           // its window closed; the hub still lists it
   run("broken", { phase: "sleeping" }),                                                       // a phase this build can't read
 ];
-const board = (tasks: unknown[], runs?: unknown[]) => ({ t: "board", tasks, lanes: LANES, at: NOW, ...(runs ? { runs } : {}) });
+const board = (tasks: unknown[], runs?: unknown[], merged?: unknown[]) => ({ t: "board", tasks, lanes: LANES, at: NOW, ...(runs ? { runs } : {}), ...(merged ? { merged } : {}) });
 
 // The Desktop as the app mounts it, with the brand's tokens loaded as the root layout does (+layout.svelte), so the ring's
 // colours resolve: without them every status colour is undefined and an outline using one is dropped.
@@ -147,6 +147,24 @@ describe("the board follows the Runs of its frame", () => {
       expect((await seen).animations).toBe(0);                         // negative control: the test above sees > 0 with motion
       await tab.locator('[data-column="doing"] [data-task="T-2"]').waitFor();
       expect(await tab.evaluate(() => document.getAnimations().length)).toBe(0);
+    } finally { await tab.close(); }
+  });
+
+  it("says where a task's merge stands on its panel, from the frame's merged views (B11)", { timeout: 30_000 }, async () => {
+    const { tab, errors, push } = await boardTab("no-preference");
+    try {
+      const merged = [
+        { key: "T-2", merges: [{ repo: "morndo/morndo", sha: "b".repeat(40), at: NOW, by: "reviewer", override: null }], live: false, label: "merged, not live: pc on bbbbbbb" },
+        { key: "T-9", live: true },                                    // a view this build can't read: dropped, the rest show
+      ];
+      await push(board([task(1, "doing", "builder"), { ...task(2, "review", "reviewer"), rev: 2 }, task(3, "done", "alpha"), task(4, "doing", "old")], RUNS, merged));
+      await tab.locator('[data-column="review"] [data-task="T-2"]').waitFor();
+      await tab.locator('[data-task="T-2"]').click();
+      const panel = tab.locator('[data-task-panel="T-2"]');
+      await panel.locator("[data-merge-label]").waitFor();
+      expect(await panel.locator("[data-merge-label]").innerText()).toBe("merged, not live: pc on bbbbbbb");
+      expect(await panel.getByRole("button", { name: "Accept anyway" }).count()).toBe(1);
+      expect(errors).toEqual([]);
     } finally { await tab.close(); }
   });
 });

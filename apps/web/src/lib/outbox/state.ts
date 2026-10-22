@@ -34,6 +34,9 @@ export type OutboxRecord = {
   again?: true;                   // this attempt is Send again (ADR-0011); a status read never sets it
   resent?: true;                  // Send again queued it once more; a later given-up is final
   resendFailed?: true;            // given up, and Send again couldn't queue it once more (the hub's cannot_resend)
+  // The hub's store when this was written (RL10, §11.5): stamped on every attempt and never rewritten, so a hub whose
+  // database was put back — another store — answers "uncertain" instead of typing it twice. None before any answer.
+  hubStore?: string;
 };
 
 // The hub's `delivery` on a send answer, or null when it gives none (a message typed directly). A state this app

@@ -1734,6 +1734,7 @@ An alert is something for the owner to look at that changes no state. Each one i
 | `unrouted_hook` | the first event of a script path that no subscriber takes | `{ path, events }` |
 | `delivery_waiting` | a delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes, once each; never while it waits `earlier` behind another to its lane | `{ id, lane, state, reason, minutes }` |
 | `draft_stashed` | a node stashed a lane's unsent draft so its deliveries could go in (§4, `stashed`); once per delivery | `{ id, lane \| workerId, since, at, chars, copy }` |
+| `journal_unreadable` | a line of the fleet's revocation journal (`revoked.log` beside fleet.db) the start could not read and skipped; the rest still applied | `{ file, line, why }` |
 | `subscriber_lagging` | a subscriber's oldest undelivered event is older than 60 s | `{ subscriber, oldestAgeMs, streams }`: `streams`, the streams it holds up |
 | `job_failed` | a background job exited non-zero, timed out or was lost; once per job (node, id) | `{ id, name, class, outcome }` |
 | `job_unnoticed` | a job's notice was given up before its lane took it; once per job | `{ id, name, class, outcome }` |

@@ -129,6 +129,71 @@ describe("SystemdServices (§4.6, §5, §6.2 step 6)", () => {
     expect(m.sys.calls).toEqual([{ file: "systemctl", args: ["--user", "daemon-reload"] }]);
   });
 
+  it("renderUnits adopts the setup before the updater once, keeping each old unit, and its drop-ins stay", async () => {
+    // As a machine set up by hand before the updater: the services' units run the checkout's own entry points or the
+    // launchers, unmarked; a drop-in sits beside one; another tool's morndo-* unit is not one of our names.
+    const m = machine({
+      releaseUnits: {
+        "morndo-hub.service": "[Unit]\nDescription=hub 0.2.0\n",
+        "morndo-node.service": "[Unit]\nDescription=node 0.2.0\n",
+        "morndo-update.timer": "[Timer]\nOnBootSec=5min\n",
+      },
+    });
+    const hubBefore = "[Service]\nExecStart=%h/.nvm/versions/node/v24.21.0/bin/node --no-warnings /srv/example-user/code/apps/hub/src/main.ts serve\n";
+    const nodeBefore = "[Service]\nExecStart=%h/.local/bin/morndo-node run\n";
+    writeFileSync(join(m.units, "morndo-hub.service"), hubBefore);
+    writeFileSync(join(m.units, "morndo-node.service"), nodeBefore);
+    mkdirSync(join(m.units, "morndo-hub.service.d"));
+    writeFileSync(join(m.units, "morndo-hub.service.d/override.conf"), "[Service]\nEnvironment=X=1\n");
+    writeFileSync(join(m.units, "morndo-fleet-link.service"), "[Service]\nExecStart=/usr/bin/ssh -N example\n");
+    await expect(m.manager.foreignUnits("0.2.0")).resolves.toEqual([]);
+    await expect(m.manager.renderUnits("0.2.0")).resolves.toEqual([
+      join(m.units, "morndo-hub.service.before-morndo"), join(m.units, "morndo-node.service.before-morndo"),
+    ]);
+    expect(readFileSync(join(m.units, "morndo-hub.service.before-morndo"), "utf8")).toBe(hubBefore);
+    expect(readFileSync(join(m.units, "morndo-node.service.before-morndo"), "utf8")).toBe(nodeBefore);
+    expect(readFileSync(join(m.units, "morndo-hub.service"), "utf8")).toBe(`${UNIT_MARK}\n[Unit]\nDescription=hub 0.2.0\n`);
+    expect(readFileSync(join(m.units, "morndo-hub.service.d/override.conf"), "utf8")).toBe("[Service]\nEnvironment=X=1\n");
+    expect(readFileSync(join(m.units, "morndo-fleet-link.service"), "utf8")).toContain("/usr/bin/ssh");
+    // once adopted, the next render has nothing to keep
+    await expect(m.manager.renderUnits("0.2.0")).resolves.toEqual([]);
+  });
+
+  it("foreignUnits reads an unpacked tree's units when its Version is not installed yet (a first install)", async () => {
+    const m = machine();                                       // nothing in the releases
+    const tree = mkdtempSync(join(scratch, "tree-"));
+    mkdirSync(join(tree, "units"));
+    writeFileSync(join(tree, "units", "morndo-hub.service"), "[Unit]\n");
+    writeFileSync(join(m.units, "morndo-hub.service"), "[Service]\nExecStart=/usr/bin/python3 /srv/example-user/hub.py\n");
+    await expect(m.manager.foreignUnits("0.2.0", undefined, { tree })).resolves.toEqual([join(m.units, "morndo-hub.service")]);
+    await expect(m.manager.foreignUnits("0.2.0")).rejects.toThrow(/ENOENT/);   // the releases have no 0.2.0 yet
+  });
+
+  it("adopting a legacy unit carries its Environment= and EnvironmentFile= lines into a drop-in every render keeps", async () => {
+    const m = machine({ releaseUnits: { "morndo-hub.service": "[Unit]\nDescription=hub 0.2.0\n[Service]\nExecStart=%h/.local/bin/morndo serve\n" } });
+    writeFileSync(join(m.units, "morndo-hub.service"), [
+      "[Unit]", "Description=the hub, by hand", "[Service]",
+      "Environment=MORNDO_PUBLIC_URL=https://hub.example.invalid", "  EnvironmentFile=-%h/.config/morndo/hub.env",
+      "ExecStart=%h/.nvm/versions/node/v24.21.0/bin/node /srv/example-user/code/apps/hub/src/main.ts serve", "",
+    ].join("\n"));
+    await m.manager.renderUnits("0.2.0");
+    const dropIn = join(m.units, "morndo-hub.service.d", "before-morndo.conf");
+    expect(readFileSync(dropIn, "utf8")).toBe(
+      "# Carried over from the unit before the updater (morndo-hub.service.before-morndo).\n[Service]\n"
+      + "Environment=MORNDO_PUBLIC_URL=https://hub.example.invalid\nEnvironmentFile=-%h/.config/morndo/hub.env\n");
+    await m.manager.renderUnits("0.2.0");                      // adopted once: the next render changes nothing there
+    expect(readFileSync(dropIn, "utf8")).toContain("EnvironmentFile=-%h/.config/morndo/hub.env");
+    expect(readdirSync(join(m.units, "morndo-hub.service.d"))).toEqual(["before-morndo.conf"]);
+  });
+
+  it("a unit of one of our names running another program is foreign, not legacy", async () => {
+    const m = machine({ releaseUnits: { "morndo-hub.service": "[Unit]\n", "morndo-update.service": "[Service]\n" } });
+    writeFileSync(join(m.units, "morndo-hub.service"), "[Service]\nExecStart=/usr/bin/python3 /srv/example-user/hub.py\n");
+    // an update unit never existed before the updater: unmarked, it is someone else's whatever it runs
+    writeFileSync(join(m.units, "morndo-update.service"), "[Service]\nExecStart=%h/.local/bin/morndo-update update tick\n");
+    await expect(m.manager.foreignUnits("0.2.0")).resolves.toEqual([join(m.units, "morndo-hub.service"), join(m.units, "morndo-update.service")]);
+  });
+
   it("renderUnits removes only units Morndo wrote, and refuses to overwrite one it did not unless told to keep it aside", async () => {
     const releaseUnits = {
       "morndo-hub.service": "[Unit]\nDescription=hub 0.2.0\n",

@@ -75,7 +75,7 @@ async function startFleetHub(rig: FleetRig): Promise<FleetHub> {
     },
   });
   const remote = new RemoteService({ store, terminal: rig.ports.terminal, panes: () => observation.snapshot().workers.map(w => w.id as string), desktop: () => null });
-  const http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, observation, steering, escalations, remote });
+  const http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, store, observation, steering, escalations, remote });
   await http.ready;
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
   return {

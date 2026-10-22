@@ -578,6 +578,8 @@ ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n re
 | Network attacker | TLS and signatures |
 | A crafted archive (paths with `..`, absolute paths, links outside, devices, setuid) | Section 6.1, step 4; and only after RL1 |
 | A same-user process edits the installed tree | Not prevented: the node is not an isolation boundary (ADR-0012). `morndo doctor` detects it against the signed file list. Read-only modes stop accidents only. |
+| A same-user process adds or cuts lines in `revoked.log` | Accepted, the same residual: the journal is not signed. Such a process can revoke or un-revoke in the database itself as well. |
+| A same-user process writes `rollback-confirmed` itself | Accepted, the same residual: it lets the rollback unit run without the typed word, which that process could have typed itself (`morndo update --rollback` takes it from any process of the user). The file is consumed on use, valid 10 minutes, for the running Version only, and voided when the unit fails to start. |
 | A downgrade through the Channel or a withdrawal | RL2 |
 | "Update now" used to push something | It is a principal Command with step-up; the operation names a Version only; the node still applies RL1 and RL2; a node's policy can deny `update.apply`. |
 
@@ -604,6 +606,7 @@ Capistrano, the common shape for versioned releases with a `current` link, keeps
 
 - Taken after the service stopped (RL5), with SQLite's online backup API through better-sqlite3, which makes "a bit-wise identical copy of the source database as it was when the copying commenced" [U20]. Then `PRAGMA quick_check` and the schema version are read from the copy, and the file and its directory are synced. (`VACUUM INTO` also makes "a consistent snapshot", but its copy "might be incomplete and corrupt" after a power loss unless `synchronous` is NORMAL or FULL [U20]; the backup API with an explicit sync is simpler to reason about.)
 - Mode 0600, under `~/.local/state/morndo-update/backups/` (a deny root of the node's file rules). Key files are never copied: they don't change in an Update.
+- A database the machine never made (no connections store yet, say) is backed up as absent: a marker, not a copy. Restoring it removes what the newer Version made since, so the Version that never had the file starts without it; every revocation in the removed file counts as one the restore would drop (RL10).
 - Kept for the last three committed Updates, then deleted. Free space is checked first (section 6.1).
 
 ### 11.4 Restore
@@ -615,7 +618,13 @@ Only in a rollback that needs it (RL8), or by the principal's `--allow-downgrade
 - **Hub.** A restored database forgets the sends it typed after the Backup. So the hub's database gets a store id, renewed by every restore, and every answer names it. A device keeps the store it last saw and stamps each Command with it before the first attempt. The hub answers a Command stamped with another store, whose request id it doesn't hold, as `uncertain` and never types it (RL10). The device's clock plays no part (FL13). The one false `uncertain` is a Command first sent in the moments before the device heard of the new store, which errs the safe way: the principal checks and sends again.
 - **Node.** A restored database starts a new store, and anything in doubt stays `uncertain` (FL7, the store sequence).
 - **Fleet.** During a probation that may restore, the fleet acknowledges no hook events, so the agents keep them and send them again (RL9). After a manual restore post-commit, hook events acknowledged since the Backup are gone; the confirmation says so.
-- **Revocations, in every service.** A revocation (`morndo revoke`, `morndo agent-token revoke`, `morndo-fleet node revoke`, or the same from the app) is written to its database and appended, synced, to a journal beside it (`revoked.log`). Each service applies the journal at every start, idempotently. A restored database therefore can't bring back a revoked device, agent token or node (AC4, FL4), whoever restored it and however old the Backup.
+- **Revocations, in the hub and the fleet.** A revocation (`morndo revoke`, `morndo agent-token revoke`, `morndo-fleet node revoke`, or the same from the app) is appended, synced, to a journal beside its database (`revoked.log`) before the database write. Each service applies the journal at every start, idempotently. A restored database therefore can't bring back a revoked device, agent token or node (AC4, FL4), whoever restored it and however old the Backup. Details:
+  - A node keeps its name across a revoke and a join again, so a node's entry names the enrolment it revoked (the join that made its key). A later enrolment under the same name is never revoked by an older entry.
+  - A line the journal cannot read is skipped and reported (the fleet raises a `journal_unreadable` Alert; the hub logs it). The rest still applies, and the service starts. A last line cut short by a crash is skipped quietly, and the next append cuts it off.
+  - Past 1 MiB, a start rewrites the journal with one entry per thing revoked.
+  - The updater lets a restore drop only the revocations the journal will apply again: those the Version going back in applies journals for (a Version from before the journals applies none), and for a node, only the enrolment the Backup brings back.
+  - The connections store has no journal: its revoked secrets and Connections still refuse a restore.
+- **The hub's store id after a restore.** The updater's restore removes the store row from the copy before it renames it in, so the hub's next start makes a new store id even when the file lands on the inode it had. A file found under another inode (a restore by hand) gets one too.
 
 ### 11.6 Configuration files
 

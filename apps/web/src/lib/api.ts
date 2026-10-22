@@ -23,11 +23,28 @@ type ErrorBody = { error?: unknown };
 const apiError = (res: Response, data: ErrorBody) =>
   new ApiError(res.status, typeof data.error === "string" ? data.error : `http_${res.status}`, res.status === 429 ? retryAfterMs(res.headers.get("retry-after")) : null, data as Record<string, unknown>);
 
+// The hub's store, from the Morndo-Store header of its answers (RL10, updates design §11.5): a Command is stamped with
+// the store this device saw before its first attempt, so a hub restored from another database — another store — answers
+// it "uncertain" instead of typing it twice. The last one seen is kept, in localStorage too so a reload keeps it;
+// storage that throws (blocked, private mode) only means this page remembers it for itself.
+const STORE_KEY = "morndo-hub-store";
+let hubStore: string | null = null;
+try { hubStore = localStorage.getItem(STORE_KEY); } catch { /* none kept: nothing is stamped until an answer */ }
+const sawStore = (res: Response) => {
+  const store = res.headers.get("morndo-store");
+  if (!store) return;
+  hubStore = store;
+  try { localStorage.setItem(STORE_KEY, store); } catch { /* kept for this page only */ }
+};
+// What a new Command is stamped with: the store seen before its first attempt, or null before any answer.
+export const seenHubStore = (): string | null => hubStore;
+
 // `extra`: more of fetch's options (keepalive, for a request that must outlive a closing page).
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown, signal?: AbortSignal, headers: Record<string, string> = {}, extra: RequestInit = {}): Promise<T> {
   const res = await fetch(path, body === undefined
     ? { ...extra, method, credentials: "same-origin", headers, ...(signal ? { signal } : {}) }
     : { ...extra, method, credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body), ...(signal ? { signal } : {}) });
+  sawStore(res);
   const data = (await res.json().catch(() => ({}))) as ErrorBody;
   if (!res.ok) throw apiError(res, data);
   return data as T;
@@ -38,6 +55,7 @@ export async function uploadFile(file: File): Promise<{ id: string; name: string
   const headers: Record<string, string> = { "content-type": "application/octet-stream" };
   if (file.name) headers[UPLOAD_NAME_HEADER] = encodeURIComponent(file.name);
   const res = await fetch("/api/uploads", { method: "POST", credentials: "same-origin", headers, body: file });
+  sawStore(res);
   const data = (await res.json().catch(() => ({}))) as ErrorBody;
   if (!res.ok) throw apiError(res, data);
   return data as { id: string; name: string; size: number; mime: string };

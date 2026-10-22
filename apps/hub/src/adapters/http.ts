@@ -14,6 +14,7 @@ import { chats, digest } from "../application/chats.ts";
 import type { PresenceService } from "../application/presence-service.ts";
 import type { Config } from "../config.ts";
 import type { HubIdentity } from "./identity.ts";
+import type { Store } from "./store.ts";
 import type { AccessService, Authenticated } from "../application/access-service.ts";
 import type { ObservationService, OlderResult } from "../application/observation-service.ts";
 import type { SendResult, SteeringService } from "../application/steering-service.ts";
@@ -210,7 +211,7 @@ export function healthDetail(opts: { remoteAddress: string | undefined; proxyLog
 
 export function startHttp(p: {
   config: Config; identity: HubIdentity; access: AccessService; observation: ObservationService; steering: SteeringService; escalations: EscalationService;
-  remote: RemoteService; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
+  remote: RemoteService; store: Store; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
   reading?: ReadingService | null;
   updates?: { schema?: number; holdPath?: string; now?: () => number };
   presence?: PresenceService | null;                                        // ADR-0011: his last activity per device
@@ -296,9 +297,11 @@ export function startHttp(p: {
     return json(res, 200, { ...productStamp(), schema: schemaVersion, ready: true, held: watch.held, inFlight: flight.list() });
   }
 
-  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).
+  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2). Each names the
+  // database's store (RL10, §11.5), so a device can stamp each Command with the hub store it saw before its first
+  // attempt and a restored hub — another store — answers it uncertain instead of typing it twice.
   const json = (res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}, path = "") => {
-    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
+    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", "Morndo-Store": p.store.storeId, ...extra });
     res.end(JSON.stringify(redactResponse(path, body)));
   };
   const setCookie = (secret: string) =>
@@ -320,9 +323,9 @@ export function startHttp(p: {
   // console is the whole identity (agent-access.ts), and a worker token says which lane it acts as (X-Morndo-Lane).
   // A refusal spends the caller's refusal bucket; a call spends the token's.
   const boardProblemStatus = (problem: string) =>
-    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" ? 409 : 400;
+    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" || problem === "too_many" || problem === "no_commit" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
-    r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}) });
+    r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}), ...(r.detail ? { detail: r.detail } : {}) });
 
   // An updates command's answer (updates §8.1): 403 a step-up too old, 409 the refusal with the fleet's own words
   // (its code when the fleet refused), 503 what couldn't be asked. The routes stay thin (round 2, R4): every look
@@ -457,7 +460,7 @@ export function startHttp(p: {
       const t = service.task(task[1] ?? "");
       return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
     }
-    if (task && method === "POST") return boardAnswer(res, service.act(task[1] ?? "", await readBody(req, BoardActionBody), who.actor));
+    if (task && method === "POST") return boardAnswer(res, await service.actChecked(task[1] ?? "", await readBody(req, BoardActionBody), who.actor));
     throw new HttpError(404, "no such route");
   }
 
@@ -608,13 +611,13 @@ export function startHttp(p: {
     if (sendTo !== null && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody, SEND_MAX_BODY);
-      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true));
+      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true, body.hubStore));
     }
     // The manager by its role: its window, or, while it has none, the fleet's queue for its sticky lane (steering).
     if (path === "/api/manager/send" && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody, SEND_MAX_BODY);
-      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true));
+      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true, body.hubStore));
     }
     // The principal's cancel of one of his messages to the manager still waiting in the fleet's queue (ruling 83; spec
     // §9.1): 200 with where it stands now (given up, cancelled), 409 only when it is too late (already typed), 404 for
@@ -767,6 +770,18 @@ export function startHttp(p: {
       const q = new URL(req.url ?? "/", "http://hub").searchParams;
       if (q.get("hidden") === "1" || q.has("before")) return json(res, 200, p.jobs.page(q.get("before")));
       return json(res, 200, p.jobs.view());
+    }
+    // ADR-0031 (M8): the console's one-time approval code, minted in the app for one Note that waits. A Command under
+    // step-up, like the approval itself; the code is said once here and never logged or stored but its hash — the
+    // console spends it (`morndo memory approve <id>`, the code read from stdin). No body to read. Not an agent route: only a session
+    // reaches it (the agents' door has no such path).
+    const approvalCode = /^\/api\/memory\/notes\/(N-\d{1,9})\/approval-code$/.exec(path);
+    if (approvalCode && method === "POST") {
+      if (!p.memory) return json(res, 404, { error: "memory_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const r = p.memory.service.issueApprovalCode(a, approvalCode[1] ?? "");
+      if (r.ok) return json(res, 200, { code: r.code, expiresAt: r.expiresAt });
+      return json(res, r.problem === "step_up" ? 403 : r.problem === "not_found" ? 404 : 409, { error: r.problem });
     }
     // ADR-0015: the board. Reading is a look; a change is a Command (AC7).
     if (path.startsWith("/api/board")) {

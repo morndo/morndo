@@ -6,12 +6,39 @@
 // proven before anything relies on it: quick_check must answer ok, and the schema the copy holds is read from
 // the copy itself. A restore (§11.4) copies the checked backup beside the database, syncs it, removes a stale
 // -wal/-shm that would corrupt the restored view, and renames the copy over the database.
-import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, closeSync, copyFileSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import type { DatabaseName } from "@morndo/domain";
 import type { DatabasePaths } from "./paths.ts";
 import type { Backup, BackupResult } from "../application/ports.ts";
+
+// RL10 (§11.5, amending S5): a restored hub database is another store, whatever inode the rename leaves it on (an
+// inode can come back after two restores). Its store row goes before the copy is renamed in, so the hub's next start
+// finds none and makes a new store id: a Command stamped with the store before the restore is answered uncertain.
+// The copy is put in rollback-journal mode for this one write, so no -wal is left beside it; the hub sets WAL again
+// when it opens the database.
+function forgetHubStore(path: string): void {
+  const d = new Database(path);
+  try {
+    d.pragma("journal_mode = DELETE");
+    const known = d.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'hub_store'").get();
+    if (known !== undefined) d.prepare("DELETE FROM hub_store").run();
+  } finally { d.close(); }
+}
+
+// Whether a path names nothing at all: true on ENOENT, false when something is there; any other error throws.
+const absentFile = (path: string): boolean => {
+  try { lstatSync(path); return false; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    throw error;
+  }
+};
+
+/** Where a Backup of a database that did not exist says so: beside where its copy would be. */
+export const absentMarker = (backups: string, updateId: string, db: DatabaseName): string =>
+  join(backups, updateId, `${db}.absent`);
 
 export class SqliteBackup implements Backup {
   readonly #paths: DatabasePaths;
@@ -32,6 +59,20 @@ export class SqliteBackup implements Backup {
     try {
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       chmodSync(dir, 0o700);                       // recursive mkdir keeps a mode it finds, not the one asked for
+      // A database this machine never made (no connections store yet, say): its Backup is the absence (§11.3,
+      // "a missing database is the nothing it is"), kept as a marker, and a restore of it removes what was made since.
+      // Only ENOENT is absence: a file this user cannot reach (EACCES, ENOTDIR…) throws here, and the backup fails
+      // with nothing left behind — taken for absent, a restore would delete a store that was there.
+      if (absentFile(this.#paths[db])) {
+        rmSync(dest, { force: true });
+        const marker = absentMarker(this.#backups, updateId, db);
+        writeFileSync(marker, "", { mode: 0o600 });
+        const fd = openSync(marker, "r");
+        try { fsyncSync(fd); } finally { closeSync(fd); }
+        const dirFd = openSync(dir, "r");
+        try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+        return { ok: true, schema: 0 };
+      }
       const source = new Database(this.#paths[db], { readonly: true, fileMustExist: true });
       try {
         await source.backup(dest);                 // §11.3: the online backup API, restartable under a live writer
@@ -60,7 +101,7 @@ export class SqliteBackup implements Backup {
   }
 
   has(updateId: string, db: DatabaseName): boolean {
-    return existsSync(this.file(updateId, db));
+    return existsSync(this.file(updateId, db)) || existsSync(absentMarker(this.#backups, updateId, db));
   }
 
   // §11.4: the checked backup goes back in, whole. The -wal/-shm beside the target are stale the moment the
@@ -68,8 +109,18 @@ export class SqliteBackup implements Backup {
   restore(updateId: string, db: DatabaseName): void {
     const backup = this.file(updateId, db);
     const target = this.#paths[db];
+    if (!existsSync(backup) && existsSync(absentMarker(this.#backups, updateId, db))) {
+      // The absence goes back: the database the newer Version made is removed, its -wal/-shm with it.
+      for (const f of [target, `${target}-wal`, `${target}-shm`]) rmSync(f, { force: true });
+      if (existsSync(dirname(target))) {
+        const dirFd = openSync(dirname(target), "r");
+        try { fsyncSync(dirFd); } finally { closeSync(dirFd); }
+      }
+      return;
+    }
     const beside = `${target}.restore`;
     copyFileSync(backup, beside);
+    if (db === "hub") forgetHubStore(beside);
     const fd = openSync(beside, "r+");
     try { fsyncSync(fd); } finally { closeSync(fd); }
     rmSync(`${target}-wal`, { force: true });

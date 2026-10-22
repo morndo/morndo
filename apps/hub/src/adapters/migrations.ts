@@ -240,6 +240,21 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("UPDATE board_tasks SET state_changed_at = updated_at");
     },
   },
+  {
+    version: 24,
+    name: "board_merges (B11): one recorded merge of a task's PR (repo, sha, who, when), and the override when done was accepted while it was not live; a new table only, so an older hub opens the database as it is",
+    compat: "additive",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS board_merges (
+      key TEXT NOT NULL, repo TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, by TEXT NOT NULL, override TEXT,
+      PRIMARY KEY (key, repo, sha))`),
+  },
+  {
+    version: 25,
+    name: "hub_store: the store id of this database file, renewed by every restore, so a Command stamped with another store is answered uncertain and never typed twice (RL10, amending S5)",
+    compat: "additive",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS hub_store (
+      id INTEGER PRIMARY KEY CHECK (id = 1), store TEXT NOT NULL, identity TEXT NOT NULL)`),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

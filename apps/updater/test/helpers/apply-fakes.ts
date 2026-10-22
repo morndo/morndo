@@ -197,7 +197,10 @@ export class FakeServices implements ServiceManager {
     return o?.replaceForeign === true ? this.foreign.map(p => `${p}.before-morndo`) : [];
   }
 
-  async foreignUnits(): Promise<string[]> {
+  /** Where each foreignUnits call read its units from: the tree it was given, or the releases. */
+  readonly foreignFrom: string[] = [];
+  async foreignUnits(version: string, _role?: unknown, o?: { tree?: string }): Promise<string[]> {
+    this.foreignFrom.push(o?.tree ?? `releases/${version}`);
     return [...this.foreign];
   }
 
@@ -484,7 +487,7 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   const applying = new ApplyingFileMarker({ state: paths.state });
   const backup = new TapedBackup({ tape, die, real: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }) });
   const schemas = new SqliteSchemas({ paths: dbPaths });
-  const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") });
+  const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups"), releases: paths.releases });
   const timeline = new FakeTimeline(NOW);                   // ms since the epoch, as Clock.now answers
   probe.seesHoldScript = () => {                            // HoldWatch re-reads hold.json every second
     const text = holdText(holdPathOf);

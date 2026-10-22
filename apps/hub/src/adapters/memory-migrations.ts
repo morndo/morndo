@@ -39,6 +39,17 @@ export const MEMORY_MIGRATIONS: readonly Migration[] = [
       CREATE TABLE IF NOT EXISTS memory_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
     `),
   },
+  {
+    // M8: the one-time codes the console needs to approve a Note. One live row per note; only the code's hash is kept,
+    // so the file alone never holds a working code (ADR-0004's limit is the same OS user either way).
+    version: 2,
+    name: "One-time codes for approving a Note at the console (M8)",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS approval_codes (
+        note TEXT PRIMARY KEY, hash TEXT NOT NULL, expires_at INTEGER NOT NULL, failures INTEGER NOT NULL DEFAULT 0);
+    `),
+  },
 ];
 
 export const MEMORY_SCHEMA_VERSION = MEMORY_MIGRATIONS.length;
