@@ -131,7 +131,10 @@ export class LaunchdServices implements ServiceManager {
   private unitDir(): UnitDir {
     return {
       dir: this.agentsDir, isUnit: isPlist, marked: t => t.split("\n", 2)[1] === PLIST_MARK,
-      legacy: (n, t) => legacyService(n, t.match(/<key>ProgramArguments<\/key>\s*<array>[\s\S]*?<\/array>/)?.[0] ?? ""),
+      // A plist that set its own environment cannot hand it on (launchd has no drop-ins): not adopted, so foreign —
+      // refused before anything stops, and only `morndo install --force` replaces it.
+      legacy: (n, t) => !t.includes("<key>EnvironmentVariables</key>")
+        && legacyService(n, t.match(/<key>ProgramArguments<\/key>\s*<array>[\s\S]*?<\/array>/)?.[0] ?? ""),
     };
   }
 

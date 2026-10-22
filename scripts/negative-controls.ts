@@ -3370,6 +3370,13 @@ export const CONTROLS: Control[] = [
   { id: "c2b-apply-exit-fails-unit", task: "c2b", file: "apps/updater/units/morndo-update-apply@.service",
     find: "SuccessExitStatus=1 64 65 70 75 78\n", replace: "",
     run: ["apps/updater/test/units.test.ts"], expect: "one apply is its own oneshot unit" },
+  // 5b round 6 (md-rev5 on c54d345): an adopted unit's environment is carried, or the adoption refused.
+  { id: "c2b-legacy-env-dropped", task: "c2b", file: "apps/updater/src/adapters/services-systemd.ts",
+    find: "        if (lines.length === 0) return null;", replace: "        return null;",
+    run: ["apps/updater/test/services-systemd.test.ts"], expect: "carries its Environment=" },
+  { id: "c2b-launchd-adopts-env", task: "c2b", file: "apps/updater/src/adapters/services-launchd.ts",
+    find: "legacy: (n, t) => !t.includes(\"<key>EnvironmentVariables</key>\")\n        && legacyService(", replace: "legacy: (n, t) => legacyService(",
+    run: ["apps/updater/test/services-launchd.test.ts"], expect: "EnvironmentVariables is not adopted" },
   // F5: an open record the recovery cannot act on is one Alert, not one every 5 minutes.
   { id: "c2b-unknown-record-alert-every-run", task: "c2b", file: "apps/updater/src/application/recovery-service.ts",
     find: "if (store.firstAlert(open.id, \"update_unknown_record\", clock.now())) alerts.raise", replace: "alerts.raise",
