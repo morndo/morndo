@@ -8,13 +8,16 @@ Notes in one place, and hands them to every lane as Agent Skills, whatever engin
 
 `Memory` is its own context (docs/domain.md "Memory: what the lanes learned"). Its rules are pure, in
 `packages/domain/src/memory.ts`: Notes, scopes, trust tiers, supersession, what is deliverable, the bounded index and the
-skill files. Invariants M1-M7 are in the domain doc and in that file's header.
+skill files. Invariants M1-M8 are in the domain doc and in that file's header.
 
 - **Fleet supplies Memory** (customer and supplier): lanes write through the hub's agent door. Memory's skill files reach
   each node through one typed operation, `memory.sync` (FL14: no command, no path).
 - **Memory is a customer of Authority and Escalation**: only the principal approves a Procedure or an untrusted Note
-  (M4, M5). Slice 1 takes the approval at the control plane's console, `morndo memory approve`. The console already acts
-  for the principal (`pair`, `revoke`). An Ask in the app is the next slice.
+  (M4, M5, M8) — an Endpoint under step-up, or the console with a one-time code (`XXXX-XXXX-XXXX`, 12 characters of
+  Crockford base32) that only a step-up session can mint for that one note. The code is single use, valid ten minutes,
+  one live code per note, burned after five wrong tries, and only its hash is stored. A pending Note files an Ask on
+  the Decisions board (id `mem-n-<k>`, at most ten at a time, the oldest first); the principal's answer under step-up
+  approves or rejects it.
 - **Verification supplies Memory**: only evidence the author did not produce raises a Note to tier 2 (M5).
 - **Memory stands beside Knowledge**: both hand agents Agent Skills and show a stale note as stale (K6, M7). They share
   no data. Knowledge ships what to plan with; Memory keeps what this user's lanes learned.
@@ -32,6 +35,8 @@ The hub opens its own file, `memory.db`, beside `morndo.db` in its data director
     `superseded_by`, `tier` or `last_confirmed_at` by a domain function's result.
   - `note_events`: one row per MemoryEvent, Memory's own record.
   - `notes_fts`: an FTS5 index over title, summary and body.
+  - `approval_codes`: the console's one-time approval codes (M8): the note (one live code each), the code's hash, its
+    expiry and its failure count.
   - `memory_settings`: the next note number, and per node the last version synced.
 - No other context reads these tables. The hub's other services do not import the memory store.
 
@@ -51,12 +56,35 @@ a worker's as the lane it names.
 Refusals answer 400 (bad body or field), 403 (`not_principal`, `not_yours`), 404 (`not_found`), 409 (`invalidated`,
 `already_*`, `mismatch`), with `{ error: <problem> }`. The rate buckets are the agent door's.
 
+## App
+
+A pending Procedure or untrusted Note files an Ask on the Decisions board, which the hub itself holds open (E14): id
+`mem-n-<k>` from the note's own id, at most ten Asks at a time (the oldest first; the rest wait their turn), the note's
+provenance and body as its context. The Ask offers **Approve** and **Reject**; the principal's answer needs step-up
+like any Command (AC7), approves or invalidates the note, and is recorded as the Decision (E8). An agent has no path to
+it: answering takes a session.
+
+The console's one-time code is minted in the app, for one note, under the same step-up:
+
+`POST /api/memory/notes/:id/approval-code` — 200 `{ code, expiresAt }` (with `Cache-Control: no-store`); 401 without a
+session, 403 `step_up` on a stale passkey check, 404 `not_found`, 409 `not_pending`, 404 `memory_off`. The code is said
+once on the wire, never logged, and only its hash is stored; `morndo memory approve <id>` spends it at the
+console: it asks for the code on stdin (a prompt on a terminal, one line when piped), and refuses `--code`, because an
+argument shows in the process list (`ps`).
+
+The Ask's card in the app has a **Console code…** button: it calls the route for that one note under step-up and shows
+the code once — the code itself, how long it stays valid, and the exact `morndo memory approve <id>` line to
+copy (the code is typed at its prompt, not put in the command). The code is held only in the card's own state, never in storage, the URL or a log, and it is gone when it is
+closed, when it expires, or when the note is decided; asking again mints a new code. The phone's card has no button:
+there is no console to type the command into.
+
 ## Console (on the control plane)
 
 `morndo memory <list|show|approve|invalidate|import|sync> ...` opens `memory.db` directly, like the other console
 commands open the hub's database.
 
-- `approve` acts as `{kind: "principal", via: "console"}`.
+- `approve <id>` asks for the one-time code on stdin and acts as `{kind: "principal", via: "console"}`. The one-time code comes from the app, minted
+  for that note by a step-up session (M8); without it, or with a wrong, used or expired one, the approval is refused.
 - `import --dir D --scope S [--procedure FILE]...` loads an agent's own markdown notes (frontmatter `name`,
   `description`) as `{kind: "import", label}`. That makes them tier 3: facts by default, procedures only as named, and a
   procedure still waits for `approve`.

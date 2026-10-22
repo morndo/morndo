@@ -6,9 +6,10 @@
 import { createHash } from "node:crypto";
 import {
   DEFAULT_POLICY, Escalations, answered, askFromBrief, askIdentity, askVersion, decidedChoice, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
-  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecisionBrief, type EndpointId, type Escalation, type Message, type SessionId, type Sighting,
+  type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecisionBrief, type EndpointId, type Escalation, type Message, type Note, type SessionId, type Sighting,
 } from "@morndo/domain";
 import type { BriefSighting } from "./brief-service.ts";
+import { memoryAsk } from "./memory-asks.ts";
 import { menuEscalationId } from "@morndo/protocol";
 import type { LedgerItem, LedgerRead } from "../adapters/ledger.ts";
 import { isLedgerId, parseAnswer, parseTap, tapLine, wordsLine, type ButtonOption } from "../adapters/manager-protocol.ts";
@@ -48,6 +49,13 @@ export type AnswerResult =
 // How a row in doubt is settled with its node: SteeringService's settle (a duplicate, uncertain, or null: the node never
 // started it, so it is judged anew). Without a fleet nobody else knows: uncertain.
 export type SettleInDoubt = (key: string, workerId: string) => Promise<SendResult | null>;
+
+// What the escalation service needs of Memory (ADR-0031 round 2): the pending Notes whose Asks it files, and the
+// app's answer to one. A getter, because the hub builds Memory after Decisions; absent, nothing changes.
+export type MemoryAsks = {
+  pending(): readonly Note[];
+  decide(a: Authenticated, id: string, decision: "approve" | "reject"): { ok: true } | { ok: false; problem: "step_up" | "not_found" | "changed" };
+};
 
 const MAX_WORDS = 4000;
 const SCREEN_LINES = 14;
@@ -136,6 +144,8 @@ export class EscalationService {
   #briefs: (() => BriefSighting[]) | null;
   #briefOf = new Map<string, BriefSighting>();
   #paneTaps = new Map<string, PaneTap>();
+  // Memory's pending Notes, when the hub has Memory (ADR-0031): their Asks ride the board like any hub-held ask.
+  #memory: (() => MemoryAsks | null) | null;
 
   constructor(p: {
     watch: Watch; ledger: (() => LedgerRead) | null; store: Store; managerName: string;
@@ -148,6 +158,9 @@ export class EscalationService {
     // The manager's queue (spec §9.1). Off or absent: answers to the manager are typed directly; one queued before the
     // switch went off is still followed (and was cancelled at start if it hadn't been typed).
     queue?: ManagerQueue | null;
+    // Memory's asks (ADR-0031 round 2): a pending Note files an Ask the principal answers in the app. Absent: a hub
+    // without Memory files none.
+    memory?: () => MemoryAsks | null;
   }) {
     this.#queue = p.queue ?? null;
     this.#queue?.subscribe(c => this.#onDelivery(c.row, c.view));
@@ -160,6 +173,7 @@ export class EscalationService {
     this.#now = p.now ?? Date.now;
     this.#policy = p.policy ?? (() => DEFAULT_POLICY);
     this.#briefs = p.briefs ?? null;
+    this.#memory = p.memory ?? null;
     this.#firstSeen = this.#store.askFirstSeen();
     // A row kept by the manager's inbox (PR #29, removed) may also carry its key and the words' hash: they were the
     // service's, never the Decision's, so they never reach the board (code review B8).
@@ -256,7 +270,7 @@ export class EscalationService {
     const ledger = this.#ledger ? this.#ledger() : null;
     this.#lastLedger = ledger;
     this.#briefOf = new Map((this.#briefs?.() ?? []).map(b => [b.id, b]));
-    const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now), ...this.#hubSightings()];
+    const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now), ...this.#hubSightings(), ...this.#memorySightings()];
     const changed = this.#x.reconcile(sightings, now, ledger?.ok ?? true);
     for (const id of this.#buttons.keys()) if (!this.#x.get(id)) this.#buttons.delete(id);   // kept as long as its ask
     this.#withdrawStale();
@@ -375,6 +389,9 @@ export class EscalationService {
     }
     // A brief that names a list item is that item (E10): one Escalation, the list still decides whether it is open.
     for (const b of this.#briefOf.values()) if (b.ref !== null) ids.add(b.id);
+    // "mem-" is Memory's own (ADR-0031 round 2): a button message or a list item that carries such an id must not borrow
+    // a note's Ask, or a tap on its text would approve the note it names. Such an id is no manager ask at all.
+    for (const id of [...ids]) if (id.startsWith("mem-")) ids.delete(id);
     const out: Sighting[] = [];
     for (const [id, b] of buttons) this.#buttons.set(id, b);
     for (const id of ids) {
@@ -471,6 +488,12 @@ export class EscalationService {
       });
     }
     return out;
+  }
+
+  // The Asks of Memory's pending Notes (ADR-0031 round 2): the hub holds each open (E14) until the note stops waiting
+  // or the principal answers in the app. No `answered`: only this hub's own answer path records one.
+  #memorySightings(): Sighting[] {
+    return (this.#memory?.()?.pending() ?? []).map(note => ({ ask: memoryAsk(note), source: { kind: "open" } as const, answered: null }));
   }
 
   // The echoes of answers queued for an ask asked again since (their row's ask isn't the id's newest button message),
@@ -606,6 +629,8 @@ export class EscalationService {
       const judged = await this.#settleEarlier(a, id, choice, e, k, key);
       if ("refused" in judged) return judged.refused;
       e = judged.e;
+      // A Memory note's Ask (ADR-0031 round 2): answered in the app, decided by Memory itself; never typed, never queued.
+      if (e.id.startsWith("mem-")) return this.#answerMemory(a, e, choice, key);
       if (this.#queue?.on && e.asker.kind === "manager") return await this.#queueAnswer(a, e, choice, requestId, key);
       if (!e.asker.workerId) {
         const conflict = e.asker.kind === "manager" && this.#watch.workers().some(w => w.name === this.#managerName && w.conflict);
@@ -650,6 +675,27 @@ export class EscalationService {
       for (const c of held) this.#applyDelivery(c.row, c.view);
       if (held.length > 0) this.#notify();
     }
+  }
+
+  // The principal's answer to a Memory note's Ask (ADR-0031 round 2; M4, M5, M8): approve or reject, decided by Memory
+  // itself under step-up — `answer()` judged the session already (AC7) and `decide` judges it again. Nothing is typed
+  // and no queue is touched: the hub holds the ask, so the Decision is recorded as any answer is (E8), and the feed and
+  // every endpoint learn it. A note that stopped waiting answers "changed" (E12): the Ask no longer says what he was
+  // shown. Nothing is recorded on a refusal.
+  #answerMemory(a: Authenticated, e: Escalation, choice: Choice, key: string): AnswerResult {
+    const item = this.#view(e.id, a.endpoint.id);
+    if (choice.kind !== "option" || (choice.key !== "approve" && choice.key !== "reject")) return { ok: false, problem: "bad_option", item };
+    const noteId = e.id.slice(4).toUpperCase();                  // mem-n-12 → N-12
+    const memory = this.#memory?.() ?? null;
+    if (!memory) return { ok: false, problem: "changed", item };
+    // The Ask answered is the Ask Memory files for that note now, word for word (E12): whatever else carries the id, or
+    // whatever the note became, a tap approves only what Memory itself showed him.
+    const note = memory.pending().find(n => n.id === noteId);
+    if (!note || e.asker.name !== "memory" || this.#version(e) !== askVersion(memoryAsk(note))) return { ok: false, problem: "changed", item };
+    const r = memory.decide(a, noteId, choice.key);
+    if (!r.ok) return { ok: false, problem: r.problem === "step_up" ? "step_up" : "changed", item };
+    log.info(`memory note ${noteId} ${choice.key === "approve" ? "approved" : "rejected"} in the app`);   // the id only, never the body or a code
+    return this.#delivered(a, e.id as string, choice, key, e.options.find(o => o.key === choice.key)?.label ?? null);
   }
 
   // The manager's answer through the fleet's queue (spec §9.1, E13): queued, it counts as given (E8) and the card says

@@ -65,3 +65,27 @@ The design, in short:
 - Wang et al., "MemPoison: Bypassing Selective Memory Mechanisms to Plant Backdoors in LLM Agents", arXiv 2605.29960: https://arxiv.org/abs/2605.29960
 - Gutiérrez et al., "HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models", arXiv 2405.14831: https://arxiv.org/abs/2405.14831
 - Kumaran, Hassabis and McClelland, "What Learning Systems do Intelligent Agents Need? Complementary Learning Systems Theory Updated", Trends in Cognitive Sciences 20(7):512-534, 2016, https://doi.org/10.1016/j.tics.2016.05.004. A fast store of episodes beside slowly consolidated knowledge: here, lane reports stay where they are, and Facts and Procedures are written and approved apart from them.
+
+## Amendment: approval is the principal's (2026-10-21, board T-309)
+
+Decision 3 had the console approve a Procedure or an untrusted Note by itself, and any process on the box that could run
+`morndo memory approve` approved — a lane that proposed a Procedure could have approved it. Approval is now the
+principal's answer under step-up (AC7, M8): either a signed-in Endpoint through the existing step-up check
+(`mayCommand`, as the board takes it), or the console with a one-time code that only an Endpoint under step-up can mint
+for that one note (`MemoryService.issueApprovalCode`). The code is 12 characters of Crockford base32 shown as
+`XXXX-XXXX-XXXX`, valid ten minutes, single use, one live code per note, burned after five wrong tries; only a SHA-256
+hash of it is stored, and it is compared with `timingSafeEqual`. The limit is ADR-0004's: the console runs as the same OS user
+as the hub, so a process of that user that can read or write `memory.db` directly is out of scope; the code raises the
+bar from running one command to editing the database file.
+
+Round 2 (2026-10-21) ships the app side: a pending Note files an Ask on the Decisions board — id `mem-n-<k>`, held open
+by the hub (E14), at most ten at a time, the oldest first — whose Approve/Reject answer under step-up approves or
+invalidates the Note and is recorded as the Decision (E8); nothing is typed and no queue is touched (M1). Minting the
+code has a route of its own, `POST /api/memory/notes/:id/approval-code`: a Command under step-up, answered once with
+`{ code, expiresAt }`, never logged; `morndo memory approve <id>` spends it, reading the code from stdin: an `--code` argument would show the live code in `ps`, so it is refused. The app has no button for the route
+yet: the Ask answers approval, the code is for the console.
+
+Round 3 (2026-10-21, board T-309) ships that button: the Ask's card in the app offers "Console code…", which mints the
+code under step-up and shows it once — with its expiry and the exact console command — until it is closed or expires.
+
+Rejecting is the safe direction, so `morndo memory invalidate` at the console needs no code: it can only keep a note out of the lanes' skills, never let one in.

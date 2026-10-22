@@ -23,14 +23,15 @@
   import StatusIcon from "./StatusIcon.svelte";
   import TaskCard from "./TaskCard.svelte";
   import TaskPanel from "./TaskPanel.svelte";
-  import { COLUMNS, FILEABLE, byStatus, type Run, type Task, type TaskStatus } from "./board.ts";
+  import { COLUMNS, FILEABLE, byStatus, type MergedView, type Run, type Task, type TaskStatus } from "./board.ts";
   import { jobKey, jobsOn, type JobCount, type ShownJob } from "./jobs.ts";
   import { PHASE_WORDS, lanesWithoutTask, runCards, runCounts, runLook } from "./run-words.ts";
   import "./board-controls.css";
 
-  let { tasks, lanes, live, now, runs = null, open = null, jobs = [], counts = [], more = 0, openJob = null, onOpen, onAct, onCreate, onOpenLane, onOpenJob, onLoadJobs }: {
+  let { tasks, lanes, live, now, runs = null, merged = null, open = null, jobs = [], counts = [], more = 0, openJob = null, onOpen, onAct, onCreate, onOpenLane, onOpenJob, onLoadJobs }: {
     tasks: Task[]; lanes: string[]; live: boolean; now: number;
     runs?: ReadonlyMap<string, Run> | null;               // each lane's Run, by lane (board.ts decodeRuns); null: the hub sent none
+    merged?: ReadonlyMap<string, MergedView> | null;      // where each task's merges stand, by key (board.ts decodeMerged); null: the hub sent none
     open?: string | null;                                 // the task open beside the board, by key
     jobs?: ShownJob[];
     counts?: JobCount[];
@@ -224,7 +225,7 @@
   </div>
   {#if current}
     {#key current.key}
-      <TaskPanel task={current} {lanes} {now} {pendingBlock} {notice} {onAct} {onOpenLane} onClose={() => onOpen(null)} />
+      <TaskPanel task={current} {lanes} {now} merged={merged?.get(current.key) ?? null} {pendingBlock} {notice} {onAct} {onOpenLane} onClose={() => onOpen(null)} />
     {/key}
   {/if}
   {#if filing}
