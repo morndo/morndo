@@ -60,7 +60,7 @@ export class Connections {
   #pingMs: number;
   #instancePongMs: number;
   #onRevoked: (node: string) => void;
-  #updates: { aboveOwn(version: string): boolean; halted(version: string): boolean; asked?(node: string, version: string): void } | null;
+  #updates: { aboveOwn(version: string): boolean; halted(version: string): boolean; issue?(node: string, version: string): string } | null;
   #revocations = new Map<string, number>();             // node → the revokedAt already acted on
   #sweep: ReturnType<typeof setInterval> | null = null;
   #bulk = new Map<string, BulkQueue>();
@@ -72,7 +72,7 @@ export class Connections {
     // The updates design's two rules (§5.4), injected so this service holds none of the Rollout: whether a Version is
     // above the one this control plane runs (RL11), and whether the Rollout of a Version is halted (RL12). Null in
     // tests that ask for none of it.
-    updatePolicy?: { aboveOwn(version: string): boolean; halted(version: string): boolean; asked?(node: string, version: string): void };
+    updatePolicy?: { aboveOwn(version: string): boolean; halted(version: string): boolean; issue?(node: string, version: string): string };
     storeSeqs: StoreSeqs;                                 // fleet.db's
   }) {
     this.#nodes = p.nodes;
@@ -261,7 +261,10 @@ export class Connections {
           return Promise.resolve(failed("not_allowed", `update.apply on ${node} for ${version}: a node never runs a Version newer than its control plane (RL11)`));
         if (this.#updates.halted(version))
           return Promise.resolve(failed("not_allowed", `update.apply on ${node} for ${version}: the Rollout of ${version} is halted: resume it first (RL12)`));
-        this.#updates.asked?.(node, version);              // an offer: that node's rollback from it may halt (review of #107)
+        // The fleet's own attempt id for this ask, replacing any the caller sent: the id that node's rollback of it is
+        // reported under, and the only one that halts (review of #107, round 4).
+        const attempt = this.#updates.issue?.(node, version);
+        if (attempt !== undefined) args = { ...(args as Record<string, unknown>), version, attempt };
       }
     }
     const text = (op === "pane.send" || op === "lane.deliver" || op === "lane.start") && typeof args === "object" && args !== null
@@ -363,11 +366,15 @@ export class Connections {
     }));
   }
 
-  // The Rollout as it now stands, to every live agent whose hello said it takes one (CAP_ROLLOUT); an agent from
-  // before the updates design is sent nothing — it would close on a frame it doesn't know (updates §7).
-  pushRollout(rollout: RolloutWire): void {
-    for (const c of this.#live.values())
-      if (!c.stale && c.caps.includes(CAP_ROLLOUT) && c.peer.open()) c.peer.send({ v: 1, t: "rollout", rollout });
+  // The Rollout as it now stands, to every live agent whose hello said it takes one (CAP_ROLLOUT), each with its own
+  // offer (what it may follow, and the attempt id it reports a rollback of it under; none while there is nothing to
+  // follow); an agent from before the updates design is sent nothing — it would close on a frame it doesn't know.
+  pushRollout(rollout: RolloutWire, offerFor: (node: string) => { version: string; attempt: string } | null = () => null): void {
+    for (const c of this.#live.values()) {
+      if (c.stale || !c.caps.includes(CAP_ROLLOUT) || !c.peer.open()) continue;
+      const offer = offerFor(c.node);
+      c.peer.send({ v: 1, t: "rollout", rollout, ...(offer === null ? {} : { offer }) });
+    }
   }
 
   // The live instance of a node, for tests and status: null when offline.

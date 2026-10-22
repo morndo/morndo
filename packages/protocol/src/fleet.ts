@@ -180,7 +180,9 @@ export type OpArgs = {
   "connections.narrow": z.output<typeof NarrowCommand>;
   // What the control plane asks a node to move to (updates §5.4): the Version of the Rollout. The fleet refuses the op
   // before it is sent when the Version is above its own running one (RL11) or the Rollout is halted (RL12).
-  "update.apply": { version: string };
+  // `attempt`: the fleet's own id for this ask, which it sets (a caller's is replaced): the id the node's updater
+  // reports a rollback of it under (review of #107, round 4).
+  "update.apply": { version: string; attempt?: string };
 };
 export type OpResult = {
   "inventory.get": { panes: Pane[]; invVersion: number };
@@ -320,6 +322,11 @@ const semver = () => z.string().check(z.regex(SEMVER));
 // A Release's Version as the Rollout names it: SemVer without build metadata. Precedence ignores build metadata
 // (SemVer 2.0.0 §10), so "0.4.2+x" and "0.4.2" are one Version; the Rollout's words refuse the second spelling at the
 // edge so no halt can be stepped around by a spelling (review of #107).
+// An attempt id the fleet issues: 16 random bytes, base64url (crypto.randomBytes), so nobody can guess one.
+export const ATTEMPT_ID = /^[A-Za-z0-9_-]{22,64}$/;
+const attemptId = () => z.string().check(z.regex(ATTEMPT_ID));
+// What a node may follow, and the attempt id it reports a rollback of it under (welcome, the rollout message).
+const offer = () => z.object({ version: releaseVersion(), attempt: attemptId() });
 const releaseVersion = () => z.string().check(z.regex(SEMVER), z.refine(v => !v.includes("+"), "a Release's Version carries no build metadata"));
 const count = () => z.int().check(z.gte(0));
 const nodeName = () => z.string().check(z.regex(NODE_NAME));
@@ -445,7 +452,7 @@ export const OP_ARGS = {
   "connections.role": RoleCommand,
   "connections.revoke": RevokeCommand,
   "connections.narrow": NarrowCommand,
-  "update.apply": z.object({ version: releaseVersion() }),
+  "update.apply": z.object({ version: releaseVersion(), attempt: z.exactOptional(attemptId()) }),
 } satisfies Record<OpName, z.ZodMiniType>;
 
 const PaneSchema = z.object({
@@ -642,6 +649,8 @@ export const Welcome = z.object({
   v, t: z.literal("welcome"), connEpoch: z.int().check(z.gte(1)), ackSeq: count(), streamKnown: z.boolean(), storeSeqSeen: z.exactOptional(count()),
   controlPlane: z.exactOptional(z.object({ version: semver(), commit: z.nullable(buildCommit()) })),
   rollout: z.exactOptional(z.nullable(RolloutWireSchema)),
+  // The Rollout this node may follow and the attempt id the fleet issued it for that (absent: nothing to follow).
+  offer: z.exactOptional(offer()),
 });
 // `op` is any name here: one the agent doesn't know is answered `unknown_op`, and arguments that don't fit OP_ARGS
 // `bad_args`, never dropped as a malformed message.
@@ -653,7 +662,7 @@ export const Req = z.object({
 export const Ack = z.object({ v, t: z.literal("ack"), streamId: z.uuid(), seq: count() });
 // The Rollout as it stands, on every change of it (updates §7): committed, halted, resumed. Only to agents whose hello
 // carried CAP_ROLLOUT; an agent from before the updates design would close on a frame it does not know.
-export const EvRollout = z.object({ v, t: z.literal("rollout"), rollout: RolloutWireSchema });
+export const EvRollout = z.object({ v, t: z.literal("rollout"), rollout: RolloutWireSchema, offer: z.exactOptional(offer()) });
 
 export const AgentMessage = z.discriminatedUnion("t", [Join, Hello, Proof, Res, EvHook, EvInventory, EvHealth, EvDelivery, EvJob]);
 export const FleetMessage = z.discriminatedUnion("t", [Challenge, Welcome, Req, Ack, EvRollout]);

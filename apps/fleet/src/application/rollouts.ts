@@ -27,12 +27,12 @@ export class Rollouts {
   #store: RolloutsStore;
   #audit: Audit;
   #events: EventHub;
-  #push: { pushRollout(r: RolloutWire): void };
+  #push: { pushRollout(r: RolloutWire, offerFor: (node: string) => { version: string; attempt: string } | null): void };
   #own: { version: string; commit: string | null };
   #now: () => number;
 
   constructor(p: {
-    store: RolloutsStore; audit: Audit; events: EventHub; push: { pushRollout(r: RolloutWire): void };
+    store: RolloutsStore; audit: Audit; events: EventHub; push: { pushRollout(r: RolloutWire, offerFor: (node: string) => { version: string; attempt: string } | null): void };
     own: { version: string; commit: string | null }; now?: () => number;
   }) {
     this.#store = p.store;
@@ -122,51 +122,68 @@ export class Rollouts {
     return { ok: true, changed: true, rollout: this.#announce(resumed) };
   }
 
-  // An update.apply the fleet forwards to a node: an offer of that Version to it (review of #107).
-  asked(node: string, version: string): void { this.#store.asked(node, version); }
+  // The store, for the tests' clock-driven pruning case.
+  get store(): RolloutsStore { return this.#store; }
 
-  // Did the fleet offer this Version to this node: a Rollout the control plane committed (which nodes follow on
-  // their own), or an update.apply forwarded to it? By precedence.
-  #offered(node: string, version: string): boolean {
-    const v = parseVersion(version);
-    if (v === null) return false;
-    const same = (x: string) => { const w = parseVersion(x); return w !== null && compareVersions(v, w) === 0; };
-    if (this.#store.list().some(r => r.controlPlaneCommittedAt !== null && same(r.version))) return true;
-    return this.#store.askedOf(node).some(same);
+  // What a node may follow and the attempt id it reports a rollback of it under (welcome, the rollout message): the
+  // Rollout nodes follow, once the control plane committed it and while it is not halted (review of #107, round 4).
+  offerFor(node: string): { version: string; attempt: string } | null {
+    const r = this.latest();
+    if (r === null || r.controlPlaneCommittedAt === null || r.halted) return null;
+    return { version: r.version, attempt: this.#store.issue(node, r.version, this.#now()) };
   }
 
+  // The attempt id an update.apply to a node carries: the fleet's, never the caller's.
+  issueFor(node: string, version: string): string { return this.#store.issue(node, version, this.#now()); }
+
   // A machine's updater report (§6.3): a node's in its health, the control plane's own from its updater's state file
-  // (`own`). A rollback — succeeded or failed — counts once, by the updater's own attempt id (the report repeats with
-  // every health tick until the machine updates again), kept in fleet.db apart from the pruned audit, so a second
-  // real rollback of the same Version after a resume halts again (review of #107). It halts the Version it was
-  // leaving only when that report is plausible: the target newer than what the machine ran before, and, for a node,
-  // a Version the fleet offered it and not above the control plane (RL11). Anything else is alerted with the reason
-  // it was ignored and halts nothing. The control plane's own report needs no offer: its rollback comes before its
-  // commit (review focus 2); that file is the same-user residual the design accepts (ADR-0004).
+  // (`own`). A rollback — succeeded or failed — halts the Version it was leaving only under an attempt id the fleet
+  // issued that machine for that Version and has not spent (review of #107, round 4): a node gets its ids with its
+  // offers, the control plane announces its own (random) one in its `applying` record. The id is spent only when the
+  // report is accepted, so a report ignored for another reason does not use up a real id; a forged, foreign or spent
+  // id halts nothing. It must also be plausible: the target newer than what the machine ran, and, for a node, not
+  // above the control plane (RL11). An ignored report is alerted once per machine, id and reason in this process (the
+  // report repeats with every health), and halts nothing.
   health(machine: string, update: NodeUpdateHealth, o: { own?: boolean } = {}): void {
+    if (o.own && update.state === "applying" && update.attempt !== undefined && update.target !== undefined) {
+      this.#store.register(machine, update.target, update.attempt, this.#now());
+      return;
+    }
     if (update.state !== "rolled_back" && update.state !== "rollback_failed") return;
     const kind = update.state === "rolled_back" ? "update_rolled_back" : "update_rollback_failed";
     const target = update.target ?? null;
     const reason = update.reason ?? update.failedCheck ?? null;
-    const key = update.attempt ?? `no-attempt:${target ?? "-"}:${update.version}`;
-    if (!this.#store.firstReport(machine, key)) return;
-    const ignored = this.#implausible(machine, update, o.own === true);
-    this.#audit.alert(kind, o.own ? null : machine, {
+    const ignored = this.#refusal(machine, update, o.own === true);
+    const detail = {
       machine, version: update.version, ...(target === null ? {} : { target }), ...(reason === null ? {} : { reason }),
-      ...(update.attempt === undefined ? {} : { attempt: update.attempt }), ...(ignored === null ? {} : { ignored }),
-    });
-    if (ignored === null && target !== null)
-      this.halt(target, machine, reason ?? `${machine} reports a ${update.state === "rolled_back" ? "rollback" : "failed rollback"} without a reason`);
+      ...(update.attempt === undefined ? {} : { attempt: update.attempt }),
+    };
+    if (ignored !== null) {
+      const key = `${machine}|${update.attempt ?? "-"}|${ignored}`;
+      if (this.#ignoredSeen.has(key)) return;
+      if (this.#ignoredSeen.size >= 1000) this.#ignoredSeen.clear();
+      this.#ignoredSeen.add(key);
+      this.#audit.alert(kind, o.own ? null : machine, { ...detail, ignored });
+      return;
+    }
+    if (!this.#store.used(update.attempt!, this.#now())) return;
+    this.#audit.alert(kind, o.own ? null : machine, detail);
+    this.halt(target!, machine, reason ?? `${machine} reports a ${update.state === "rolled_back" ? "rollback" : "failed rollback"} without a reason`);
   }
+  #ignoredSeen = new Set<string>();
 
   // Why a rollback report halts nothing, or null when it may.
-  #implausible(machine: string, update: NodeUpdateHealth, own: boolean): string | null {
+  #refusal(machine: string, update: NodeUpdateHealth, own: boolean): string | null {
     if (update.target === undefined) return "it names no target";
-    const t = parseVersion(update.target), ran = parseVersion(update.version);
-    if (t === null || ran === null || compareVersions(t, ran) <= 0) return `its target ${update.target} is not newer than ${update.version}, the Version it ran`;
-    if (own) return null;
-    if (this.aboveOwn(update.target)) return `${update.target} is above the control plane's ${this.#own.version}: no node runs it`;
-    if (!this.#offered(machine, update.target)) return `the fleet never offered ${update.target} to ${machine}`;
+    if (update.attempt === undefined) return "it carries no attempt id";
+    const issued = this.#store.lookup(update.attempt);
+    if (issued === null) return "the fleet never issued that attempt id";
+    if (issued.usedAt !== null) return "that attempt was counted already";
+    if (issued.machine !== machine) return "that attempt id was issued to another machine";
+    const t = parseVersion(update.target), ran = parseVersion(update.version), was = parseVersion(issued.version);
+    if (t === null || was === null || compareVersions(t, was) !== 0) return `that attempt id was issued for ${issued.version}, not ${update.target}`;
+    if (ran === null || compareVersions(t, ran) <= 0) return `its target ${update.target} is not newer than ${update.version}, the Version it ran`;
+    if (!own && this.aboveOwn(update.target)) return `${update.target} is above the control plane's ${this.#own.version}: no node runs it`;
     return null;
   }
 
@@ -174,7 +191,7 @@ export class Rollouts {
   // connected agent that announced CAP_ROLLOUT as the `rollout` message (updates §7).
   #announce(r: RolloutWire): RolloutWire {
     this.#events.emit({ t: "rollout", node: "", body: r });
-    this.#push.pushRollout(r);
+    this.#push.pushRollout(r, node => this.offerFor(node));
     return r;
   }
 }

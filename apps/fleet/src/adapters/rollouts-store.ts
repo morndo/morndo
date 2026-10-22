@@ -2,6 +2,7 @@
 // (RL12), so a fleet that restarts answers the same Rollout it held — GET /v1/rollout after a restart is the halt
 // that stopped every node's updates. The rows hold the wire's fields (RolloutWire) beside resumed_at (the last
 // resume, for the audit's story: the wire doesn't carry it) and updated_at (the last write).
+import { randomBytes } from "node:crypto";
 import type Database from "better-sqlite3";
 import type { RolloutWire } from "@morndo/protocol";
 import { synced } from "./db.ts";
@@ -15,6 +16,10 @@ const fromRow = (r: Row): RolloutWire => ({
   version: r.version, controlPlaneCommittedAt: r.control_plane_committed_at, soakMinutes: r.soak_minutes,
   halted: r.halted === 1, haltedBy: r.halted_by, haltReason: r.halt_reason, haltedAt: r.halted_at,
 });
+
+// How long an issued attempt id is kept (review of #107, round 4): a rollback is reported within minutes of its apply,
+// and a node that comes back after a month gets a fresh offer.
+export const ATTEMPT_RETENTION_MS = 30 * 86_400_000;
 
 export class RolloutsStore {
   #db: Database.Database;
@@ -34,19 +39,37 @@ export class RolloutsStore {
     return (this.#db.prepare("SELECT * FROM rollouts").all() as Row[]).map(fromRow);
   }
 
-  // An update.apply the fleet forwarded to a node (an offer, review of #107). Synced like the halts.
-  asked(node: string, version: string): void {
-    const now = this.#now();
-    synced(this.#db, () => this.#db.prepare("INSERT INTO update_asks (node, version, at) VALUES (?, ?, ?) ON CONFLICT(node, version) DO UPDATE SET at = excluded.at").run(node, version, now));
+  // The attempt id the fleet issues a machine for a Version it offers it: the unspent one it already holds, else a new
+  // random one (16 bytes, base64url). So rows stay bounded by the offers, never by what a node reports.
+  issue(machine: string, version: string, now: number = this.#now()): string {
+    const held = this.#db.prepare("SELECT attempt FROM rollout_attempts WHERE machine = ? AND version = ? AND used_at IS NULL ORDER BY issued_at DESC LIMIT 1")
+      .get(machine, version) as { attempt: string } | undefined;
+    if (held) return held.attempt;
+    const attempt = randomBytes(16).toString("base64url");
+    synced(this.#db, () => this.#db.prepare("INSERT INTO rollout_attempts (attempt, machine, version, issued_at) VALUES (?, ?, ?, ?)").run(attempt, machine, version, now));
+    this.prune(now);
+    return attempt;
   }
-  // The Versions the fleet asked this node to apply.
-  askedOf(node: string): string[] {
-    return (this.#db.prepare("SELECT version FROM update_asks WHERE node = ?").all(node) as { version: string }[]).map(r => r.version);
+  // An id the control plane's own updater announced with its `applying` record (it has no other way to be given one).
+  register(machine: string, version: string, attempt: string, now: number = this.#now()): void {
+    synced(this.#db, () => this.#db.prepare("INSERT OR IGNORE INTO rollout_attempts (attempt, machine, version, issued_at) VALUES (?, ?, ?, ?)").run(attempt, machine, version, now));
   }
-  // Marks one rollback report acted on; false when it was already (each counts once, by its attempt).
-  firstReport(machine: string, attempt: string): boolean {
-    const now = this.#now();
-    return synced(this.#db, () => this.#db.prepare("INSERT OR IGNORE INTO rollback_reports (machine, attempt, at) VALUES (?, ?, ?)").run(machine, attempt, now).changes === 1);
+  lookup(attempt: string): { machine: string; version: string; issuedAt: number; usedAt: number | null } | null {
+    const r = this.#db.prepare("SELECT machine, version, issued_at, used_at FROM rollout_attempts WHERE attempt = ?").get(attempt) as
+      { machine: string; version: string; issued_at: number; used_at: number | null } | undefined;
+    return r ? { machine: r.machine, version: r.version, issuedAt: r.issued_at, usedAt: r.used_at } : null;
+  }
+  // Spends an id; false when it was spent already.
+  used(attempt: string, now: number = this.#now()): boolean {
+    return synced(this.#db, () => this.#db.prepare("UPDATE rollout_attempts SET used_at = ? WHERE attempt = ? AND used_at IS NULL").run(now, attempt).changes === 1);
+  }
+  // Ids older than ATTEMPT_RETENTION_MS go: spent ones by when they were spent, unspent ones by when they were issued,
+  // except the newest offer of each machine and Version (still what that machine may report under).
+  prune(now: number = this.#now()): void {
+    const cutoff = now - ATTEMPT_RETENTION_MS;
+    this.#db.prepare(`DELETE FROM rollout_attempts WHERE (used_at IS NOT NULL AND used_at < ?)
+      OR (used_at IS NULL AND issued_at < ? AND issued_at < (SELECT MAX(r.issued_at) FROM rollout_attempts r
+        WHERE r.machine = rollout_attempts.machine AND r.version = rollout_attempts.version))`).run(cutoff, cutoff);
   }
 
   // Writes the Rollout of one Version whole. A write that clears a halt records when the fleet resumed it (the row's

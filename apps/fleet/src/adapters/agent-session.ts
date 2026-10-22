@@ -40,7 +40,7 @@ export type SessionDeps = {
   connections: Connections; nodes: NodesStore; audit: Audit; fleetKey: FleetKey; hooks: HookSink; jobs: JobMirror; log: Logger;
   deliveries: Pick<Deliveries, "fromNode" | "heldByOther">;
   // The welcome's two updates fields (updates §7): this fleet's own build, and the Rollout as it stands.
-  rollouts: Pick<Rollouts, "latest">; build: { version: string; commit: string | null };
+  rollouts: Pick<Rollouts, "latest" | "offerFor">; build: { version: string; commit: string | null };
   limiter: RateLimiter; handshakes: { take(source: string): boolean }; handshakeMs: number; source: string;
 };
 
@@ -161,11 +161,14 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
           // The highest store sequence this store has shown (fleet.db): an agent whose database is behind it was put
           // back from an older copy, and starts a new store before it runs anything (spec §5.2). None known: omitted.
           const seen = d.connections.storeSeqSeen(hello.node, hello.streamId);
+          // What this node may follow, with the attempt id the fleet issued it for that (review of #107, round 4).
+          const offer = d.rollouts.offerFor(hello.node);
           // With it (updates §7) the control plane's own build — what a node's updater checks its Versions against
           // (RL11) — and the Rollout as it stands, null while the control plane has committed none.
           send({
             v: 1, t: "welcome", connEpoch: epoch, ackSeq: mark.seq, streamKnown: mark.known, ...(seen === null ? {} : { storeSeqSeen: seen }),
             controlPlane: { version: d.build.version, commit: d.build.commit }, rollout: d.rollouts.latest(),
+            ...(offer === null ? {} : { offer }),
           });
           try { d.jobs.retry(hello.node); } catch (e) { d.log.error(`node ${hello.node}: retrying job notices failed`, e); }
           try { d.jobs.pushNotices(hello.node); } catch (e) { d.log.error(`node ${hello.node}: sending notice results failed`, e); }

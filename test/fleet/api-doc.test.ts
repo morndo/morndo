@@ -118,7 +118,11 @@ const BEFORE: Record<string, () => Promise<void>> = {
     mkdirSync(dir, { recursive: true });
     // it ran a pre-release of the Version before (lower by SemVer precedence), and rolled back from that Version
     const before = controlPlane.version.includes("-") ? controlPlane.version.replace(/-.*$/, "-0") : `${controlPlane.version}-0`;
-    writeFileSync(join(dir, "state.json"), JSON.stringify({ state: "rolled_back", version: before, target: controlPlane.version, failedCheck: "fleet health", attempt: "doc-1", at: Date.now() }));
+    // its updater announced its own random attempt id when it began applying, then rolled back under it
+    const attempt = "docAttemptQ1w2E3r4T5y6U7";
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ state: "applying", version: before, target: controlPlane.version, attempt, at: Date.now() }));
+    await sleep(1500);
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ state: "rolled_back", version: before, target: controlPlane.version, failedCheck: "fleet health", attempt, at: Date.now() + 1 }));
     await until("the halt from the control plane's own rollback", async () => (await fleet.client.rollout()).rollout?.halted === true, 15_000);
   },
 };
