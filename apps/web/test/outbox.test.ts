@@ -14,6 +14,8 @@ let posts: { id: string; worker: string; at: number; storedFirst: boolean }[];
 let answer: (r: OutboxRecord, attempt: number, signal: AbortSignal) => Promise<PostOutcome>;
 let seen: OutboxRecord[];
 let n: number;
+// The hub store this device last saw an answer name (RL10): what a new record is stamped with, as api.ts keeps it.
+let seenStore: string | null;
 
 function outbox() {
   return new Outbox({
@@ -27,6 +29,7 @@ function outbox() {
     connected: () => connected,
     onChange: rs => { seen = rs; },
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
+    hubStore: () => seenStore,
   });
 }
 const cmd = (worker = "%1", text = "ship it") => ({ worker, workerName: "alpha", text, uploads: [], seen: "none" });
@@ -37,7 +40,7 @@ const state = (o: Outbox, id: string) => o.records.find(r => r.id === id);
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(T0);
-  store = memoryStore(); connected = true; posts = []; seen = []; n = 0;
+  store = memoryStore(); connected = true; posts = []; seen = []; n = 0; seenStore = null;
   answer = async () => ({ kind: "typed" });
 });
 afterEach(() => vi.useRealTimers());
@@ -565,5 +568,60 @@ describe("a hub that is updating", () => {
     expect(n).toBe(2);
     expect(state(o, r.id)?.state).toBe("sent");
     vi.unstubAllGlobals();
+  });
+});
+
+// RL10 (updates design §11.5, amending S5): a record is stamped with the hub store this device saw before its first
+// attempt, and every attempt sends that stamp (device.ts's post), so a hub restored from another database answers the
+// Command "uncertain" instead of typing it twice. A later answer naming another store (the restore itself) never
+// rewrites a record already written: its stamp is the store seen before its first attempt, and only Retry sends again.
+describe("the hub's store stamped on each Command (RL10)", () => {
+  const STORE_A = "11111111-1111-4111-8111-111111111111";
+  const STORE_B = "22222222-2222-4222-8222-222222222222";
+  const timers = { now: () => Date.now(), setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id as ReturnType<typeof setTimeout>) };
+  const stubAnswer = (bodies: Record<string, unknown>[]) => vi.stubGlobal("fetch", async (_path: unknown, init: RequestInit) => {
+    bodies.push(JSON.parse(init.body as string) as Record<string, unknown>);
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  });
+
+  it("a record written after an answer carries that store, and post sends it as hubStore", async () => {
+    seenStore = STORE_A;
+    const bodies: Record<string, unknown>[] = [];
+    stubAnswer(bodies);
+    const o = new Outbox({ store: memoryStore(), post, timers, connected: () => true, onChange: () => {}, newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`, hubStore: () => seenStore });
+    const r = await o.enqueue(cmd());
+    await flush();
+    expect(r.hubStore).toBe(STORE_A);
+    expect(bodies).toEqual([expect.objectContaining({ hubStore: STORE_A })]);
+    vi.unstubAllGlobals();
+  });
+
+  it("a record written before any answer sends none", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    stubAnswer(bodies);
+    const o = new Outbox({ store: memoryStore(), post, timers, connected: () => true, onChange: () => {}, newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`, hubStore: () => seenStore });
+    const r = await o.enqueue(cmd());
+    await flush();
+    expect(r.hubStore).toBeUndefined();
+    expect("hubStore" in (bodies[0] ?? {})).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("a header change after writing leaves the record's stamp: its attempts keep the store they were written with", async () => {
+    const attempts: { id: string; hubStore?: string }[] = [];
+    answer = async r => { attempts.push({ id: r.id, hubStore: r.hubStore }); return { kind: "unanswered" }; };
+    seenStore = STORE_A;
+    const o = outbox();
+    const a = await o.enqueue(cmd("%1", "first"));
+    await advance(10_000);                                    // a few attempts of the first record, all under A
+    const before = attempts.filter(x => x.id === a.id).length;
+    seenStore = STORE_B;                                      // an answer names another store: the hub was restored
+    const b = await o.enqueue(cmd("%2", "second"));
+    await advance(10_000);
+    expect(attempts.filter(x => x.id === a.id).length).toBeGreaterThan(before);   // still retrying, still stamped A
+    expect(attempts.filter(x => x.id === a.id).every(x => x.hubStore === STORE_A)).toBe(true);
+    expect(attempts.filter(x => x.id === b.id).every(x => x.hubStore === STORE_B)).toBe(true);
+    expect(state(o, a.id)?.hubStore).toBe(STORE_A);
+    expect(state(o, b.id)?.hubStore).toBe(STORE_B);
   });
 });
