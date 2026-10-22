@@ -272,6 +272,8 @@ export type Alert = { id: number; at: number; node: string | null; kind: AlertKi
 export function urgentAlert(a: { kind: string; detail: Record<string, unknown> }): boolean {
   switch (a.kind) {
     case "source_changed": case "instance_conflict": case "dead_letter": case "backlog_full": case "draft_stashed": return true;
+    // a revocation the journal holds may not have been applied again: someone should look
+    case "journal_unreadable": return true;
     case "delivery_waiting": return typeof a.detail.minutes === "number" && a.detail.minutes >= 15;
     default: return false;
   }

@@ -100,9 +100,10 @@ export class RevocationJournal {
 
   // A start's housekeeping: past `maxBytes`, the journal is rewritten with one entry per thing revoked (the latest),
   // whole by rename, so it neither grows without end nor is read whole at length at every start. Bad lines are not
-  // carried over (the caller reported them on its read). A line another process appended while this ran is never
-  // lost: the rewrite is dropped when the file grew meanwhile, and the next start tries again. Answers whether it
-  // rewrote.
+  // carried over (the caller reported them on its read). A line another process appended while this ran is kept:
+  // the rewrite is dropped when the file grew meanwhile, and the next start tries again. Node has no file lock, so a
+  // narrow window between that check and the rename remains; it runs only at a service's start, past the size.
+  // Answers whether it rewrote.
   compact(maxBytes = JOURNAL_COMPACT_BYTES): boolean {
     let size: number;
     try { size = statSync(this.#path).size; }
