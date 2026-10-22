@@ -389,9 +389,28 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
     }
   });
 
-  it("the apply unit runs a rollback for the instance named rollback", async () => {
+  // The apply unit's own command is a command line anyone can type: the rollback it runs must be one --rollback asked
+  // for and the principal confirmed (§11.4), never a way around that ask (review of 2026-10-22, HIGH).
+  it("the apply unit refuses a rollback that --rollback did not confirm, and any Version not above the current one", async () => {
     const w = await world();
     await withPrevious(w);
+    const direct = await w.run(["update", "apply", "--version", "rollback"]);
+    expect(direct.code, direct.err).toBe(64);
+    expect(direct.err).toMatch(/morndo update --rollback/);
+    const older = await w.run(["update", "apply", "--version", "0.0.9"]);
+    expect(older.code, older.err).toBe(64);
+    expect(older.err).toMatch(/morndo update --rollback/);
+    const same = await w.run(["update", "apply", "--version", A]);       // the running one is not above itself
+    expect(same.code, same.err).toBe(64);
+    expect(w.current()).toBe(A);
+    expect(w.services.tape.filter(t => t.startsWith("stop:"))).toEqual([]);
+  });
+
+  it("the apply unit runs a rollback for the instance named rollback once --rollback confirmed it", async () => {
+    const w = await world();
+    await withPrevious(w);
+    w.services.runApplyScript = async () => {};             // the unit is run by hand below, as systemd would
+    expect((await w.run(["update", "--rollback", "--yes"])).prompts).toEqual([]);
     const r = await w.run(["update", "apply", "--version", "rollback"]);
     expect(r.code, r.err).toBe(1);
     expect(w.current()).toBe("0.0.9");

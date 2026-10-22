@@ -6,12 +6,13 @@
 // (systemd.kill(5), systemd 255, the design's U18). The cgroup root and /proc are constructor options so a test
 // walks a fake tree, not this machine's.
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { UPDATE_SCOPE_SERVICES, type UpdateService } from "@morndo/domain";
 import type { ServiceManager } from "../application/ports.ts";
 import { updaterPaths } from "./paths.ts";
+import { foreignIn, placeUnits, type UnitDir } from "./unit-files.ts";
 
 // One program, one argument list, no shell (execFile): what a test scripts, what systemctl answers.
 export type Run = (file: string, args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
@@ -37,6 +38,10 @@ export async function systemdUserManager(run: Run = execFileRun): Promise<boolea
 // Morndo's unit names (§5): hub, fleet and node become morndo-<s>.service.
 const unit = (s: UpdateService): string => `morndo-${s}.service`;
 const SERVICE_UNITS = new Set(UPDATE_SCOPE_SERVICES.map(s => unit(s)));
+const isUnitFile = (name: string): boolean => name.endsWith(".service") || name.endsWith(".timer");
+
+// The first line of every unit file a render writes: what marks the file as Morndo's to replace or remove.
+export const UNIT_MARK = "# Morndo's own unit: every update rewrites it. Put changes in a drop-in (<unit>.d/*.conf).";
 
 // Every pid cgroup.procs names, one per line; a group or file that cannot be read hides no tmux.
 const readPids = (path: string): string[] => {
@@ -83,30 +88,33 @@ export class SystemdServices implements ServiceManager {
     return Math.max(0, await this.nRestarts(s) - (this.restartsAtStart.get(s) ?? 0));
   }
 
-  async renderUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<void> {
+  async renderUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { replaceForeign?: boolean }): Promise<string[]> {
     // §6.2 step 6: the target's units are in place before `current` moves, so the reload that follows the
     // swap sees them. launchd's templates sit beside these in units/launchd/ and are not systemd's. A role, when
     // given, narrows the service units to that role's — `morndo install`'s rendering for the role it was asked
-    // for — and the update units always come along.
+    // for — and the update units always come along. Each file gets Morndo's mark as its first line.
     const from = join(this.releases, version, "units");
-    const wanted = (name: string): boolean =>
-      role === undefined || !SERVICE_UNITS.has(name) || role.services.some(s => unit(s) === name);
-    const shipped = readdirSync(from).filter(n => (n.endsWith(".service") || n.endsWith(".timer")) && wanted(n));
+    const shipped = this.shipped(from, role);
     if (shipped.length === 0) throw new Error(`${from}: a Version ships no units`);
     mkdirSync(this.units, { recursive: true });
-    for (const name of shipped) {
-      // atomic like every updater write (§5): a whole file lands by rename, never half of one by a crash.
-      // A leftover temp from a killed render is removed first, so it cannot keep an old mode through create.
-      const temp = join(this.units, `.${name}.new`);
-      rmSync(temp, { force: true });
-      writeFileSync(temp, readFileSync(join(from, name)));
-      renameSync(temp, join(this.units, name));
-    }
-    for (const name of readdirSync(this.units)) {
-      if (!name.startsWith("morndo-") || !(name.endsWith(".service") || name.endsWith(".timer"))) continue;
-      if (!shipped.includes(name)) rmSync(join(this.units, name));
-    }
+    const kept = placeUnits(this.unitDir(), shipped.map(name => ({ name, text: `${UNIT_MARK}\n${readFileSync(join(from, name), "utf8")}` })),
+      o?.replaceForeign === true);
     await this.checked(["--user", "daemon-reload"]);
+    return kept;
+  }
+
+  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<string[]> {
+    return foreignIn(this.unitDir(), this.shipped(join(this.releases, version, "units"), role));
+  }
+
+  private shipped(from: string, role?: { services: readonly UpdateService[] }): string[] {
+    const wanted = (name: string): boolean =>
+      role === undefined || !SERVICE_UNITS.has(name) || role.services.some(s => unit(s) === name);
+    return readdirSync(from).filter(n => isUnitFile(n) && wanted(n));
+  }
+
+  private unitDir(): UnitDir {
+    return { dir: this.units, isUnit: n => n.startsWith("morndo-") && isUnitFile(n), marked: t => t.startsWith(`${UNIT_MARK}\n`) };
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {

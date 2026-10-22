@@ -356,7 +356,7 @@ export async function runRollback(ctx: StepCtx, o: {
     }
     // The pair goes back as it was recorded (§6.5 step 2): the units, then the links — current first, then
     // previous, so a crash in between leaves both links on the known-good Version.
-    await deps.services.renderUnits(backText);
+    await deps.services.renderUnits(backText, { services: o.running });
     deps.installer.swapBack({
       current: backText,
       // The pair as it stood before the attempt being undone: for an update, what preUpdate recorded (no
@@ -391,7 +391,7 @@ export async function runRollback(ctx: StepCtx, o: {
 // starts (review of 2026-10-21). Then the hold comes off, the services start on the old Version, and the attempt ends.
 export async function abandonAttempt(ctx: StepCtx, running: readonly UpdateService[]): Promise<void> {
   const { deps } = ctx;
-  if (ctx.u.mark === "swapping") await deps.services.renderUnits(formatVersion(ctx.u.preUpdate.current));
+  if (ctx.u.mark === "swapping") await deps.services.renderUnits(formatVersion(ctx.u.preUpdate.current), { services: running });
   deps.hold.clear();
   await startServices(deps, running);
   finish(ctx, "abandoned");

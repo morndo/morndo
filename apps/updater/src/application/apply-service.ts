@@ -179,7 +179,7 @@ export class ApplyService {
       // Step 6: the units, then the links — the adapter's own order, previous first, is what makes a crash between
       // the two renames still run the old Version.
       mark(ctx, "swapping");
-      await services.renderUnits(staged.version);
+      await services.renderUnits(staged.version, { services: running });   // the machine's own units only
       installer.swap({ current: staged.version, previous: oldText });
       done(ctx, "swapping");
 
@@ -290,7 +290,7 @@ async function bootApply(ctx: StepCtx, o: {
     if (!gate.ok) { finish(ctx, "abandoned"); return { kind: "abandoned", reason: `${gate.error.database}: ${gate.error.reason}` }; }
     done(ctx, "backing_up");
     mark(ctx, "swapping");
-    await deps.services.renderUnits(o.staged);
+    await deps.services.renderUnits(o.staged, { services: deps.services.services() });
     deps.installer.swap({ current: o.staged, previous: o.oldText });
     done(ctx, "swapping");
     mark(ctx, "starting");

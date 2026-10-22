@@ -287,6 +287,13 @@ export class FakeStore implements UpdateStore {
   readonly haltRows: { version: string; reason: string; at: number }[] = [];
   recordHalt(version: string, reason: string, at: number): void { this.haltRows.unshift({ version, reason, at }); }
   halts(): { version: string; reason: string; at: number }[] { return [...this.haltRows]; }
+  readonly alertsSent = new Set<string>();
+  firstAlert(updateId: string, kind: string): boolean {
+    const key = `${updateId} ${kind}`;
+    if (this.alertsSent.has(key)) return false;
+    this.alertsSent.add(key);
+    return true;
+  }
 
   recentUpdates(limit: number): UpdateHistory[] {
     return [...this.updates].sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);

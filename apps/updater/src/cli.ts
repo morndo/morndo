@@ -6,7 +6,7 @@
 // unit and reports its record; the tick, the boot and the recovery units run the same services themselves.
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import { formatVersion, parseVersion, rollbackRestores, type Channel, type Platform, type UpdateService } from "@morndo/domain";
+import { compareVersions, formatVersion, parseVersion, rollbackRestores, type Channel, type Platform, type UpdateService } from "@morndo/domain";
 import { KeySetSchema, UpdateStatusSchema } from "@morndo/protocol";
 import { ApplyService, type ApplyOutcome } from "./application/apply-service.ts";
 import { planOf, type ApplyTiming } from "./application/apply-steps.ts";
@@ -55,7 +55,7 @@ const USAGE = `usage: morndo-update update [--yes] [--now]       check, then app
        morndo-update update --rollback [--yes]      back to the previous Version (a restore asks for the typed word)
        morndo-update update apply --version <v>     one apply, as the apply unit runs it
        morndo-update update tick | boot | recover   the timer's, the boot unit's and the recovery unit's commands
-       morndo-update install --role control-plane|node [--channel stable|latest]
+       morndo-update install --role control-plane|node [--channel stable|latest] [--force]
        morndo-update doctor [--json]                re-verify the installed tree
 morndo update --to, --channel, pin and auto arrive with the settings step.`;
 
@@ -204,7 +204,7 @@ export async function runUpdater(
     | { cmd: "rollback"; yes: boolean }
     | { cmd: "apply-unit"; version: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
-    | { cmd: "install"; role: "control-plane" | "node"; channel: Channel };
+    | { cmd: "install"; role: "control-plane" | "node"; channel: Channel; force: boolean };
   const usage = (): number => { io.err(`${USAGE}\n`); return EXIT_USAGE; };
   let parsed: Parsed;
   if (command === "doctor") {
@@ -213,13 +213,15 @@ export async function runUpdater(
   } else if (command === "install") {
     let role: "control-plane" | "node" | null = null;
     let channel: Channel | null = null;
+    let force = false;
     for (let i = 0; i < flags.length; i++) {
       if (flags[i] === "--role" && (flags[i + 1] === "control-plane" || flags[i + 1] === "node")) { role = flags[i + 1] as "control-plane" | "node"; i++; }
       else if (flags[i] === "--channel" && (flags[i + 1] === "stable" || flags[i + 1] === "latest")) { channel = flags[i + 1] as Channel; i++; }
+      else if (flags[i] === "--force") force = true;
       else return usage();
     }
     if (role === null) return usage();
-    parsed = { cmd: "install", role, channel: channel ?? "stable" };
+    parsed = { cmd: "install", role, channel: channel ?? "stable", force };
   } else {
     // update: one subcommand, or one flag set — never two asks in one line. Bare `update` is the ask itself.
     // The rollback is read before the update's own set so `--rollback --yes` and `--yes --rollback` are one ask.
@@ -357,6 +359,11 @@ export async function runUpdater(
       return services;
     };
     const applyNowFile = join(paths.state, "apply-now");
+    // The principal's confirmed rollback (§11.4), for the apply unit to find: written by `update --rollback` once the
+    // word is typed (or --yes), naming the Version it leaves, and consumed by the unit. The unit's own command line is
+    // one anyone can type; without this record it runs no rollback (review of 2026-10-22).
+    const rollbackConfirmedFile = join(paths.state, "rollback-confirmed");
+    const ROLLBACK_CONFIRMED_FOR_MS = 10 * 60_000;
 
     if (parsed.cmd === "update") {
       // §8.1's update: the check first, printed exactly as --check prints it; then the ask, then the apply unit.
@@ -407,9 +414,28 @@ export async function runUpdater(
       // --rollback` starts, so that no service the walk stops is its parent.
       const m = needManager();
       if (m === null) return EXIT_CONFIG;
+      const goBack = "Going back to an older Version is morndo update --rollback: it says what a restore drops and asks first.";
+      const running = installer.layout().current;
       if (parsed.version === "rollback") {
+        // Only the rollback `update --rollback` confirmed, for the Version still running, and lately.
+        let confirmed: { from?: unknown; at?: unknown } | null = null;
+        try { confirmed = JSON.parse(readFileSync(rollbackConfirmedFile, "utf8")) as { from?: unknown; at?: unknown }; }
+        catch { confirmed = null; }
+        rmSync(rollbackConfirmedFile, { force: true });
+        if (confirmed === null || confirmed.from !== running || typeof confirmed.at !== "number"
+          || Date.now() - confirmed.at > ROLLBACK_CONFIRMED_FOR_MS) {
+          io.err(`${goBack}\n`);
+          return EXIT_USAGE;
+        }
         const outcome = await applyWith(m).rollback();
         return printOutcome(applyLine(outcome), applyCode(outcome));
+      }
+      // An apply moves up only (RL2): a Version at or below the running one is never an apply's target.
+      const asked = parseVersion(parsed.version);
+      const runningVersion = running === null ? null : parseVersion(running);
+      if (asked !== null && runningVersion !== null && compareVersions(asked, runningVersion) <= 0) {
+        io.err(`${goBack}\n`);
+        return EXIT_USAGE;
       }
       const staged = store.staged();
       if (staged === null) { io.err("nothing stands staged to apply\n"); return EXIT_TEMPFAIL; }
@@ -475,6 +501,7 @@ export async function runUpdater(
       }
       const m = needManager();
       if (m === null) return EXIT_CONFIG;
+      writeFileSync(rollbackConfirmedFile, `${JSON.stringify({ from: layout.current, at: Date.now() })}\n`, { mode: 0o600 });
       try {
         await m.runApply("rollback");            // §5: the morndo-update-apply@rollback.service instance
       } catch (error) {
@@ -607,6 +634,14 @@ export async function runUpdater(
         return EXIT_CONFIG;
       }
     }
+    // The unit files, checked before anything is written too: a unit of one of our names that Morndo did not
+    // write is someone's own, and only --force replaces it — kept beside it as <name>.before-morndo.
+    const roleServices: readonly UpdateService[] = parsed.role === "control-plane" ? ["hub", "fleet", "node"] : ["node"];
+    const foreign = await m.foreignUnits(versionText, { services: roleServices });
+    if (foreign.length > 0 && !parsed.force) {
+      io.err(`${foreign.join(", ")}: not written by Morndo; move ${foreign.length === 1 ? "it" : "them"} away, or run with --force to keep ${foreign.length === 1 ? "it" : "them"} as <name>.before-morndo; nothing was installed\n`);
+      return EXIT_CONFIG;
+    }
     installer.installTree({ tree, version: versionText, at: systemClock.now() });
     installer.swap({ current: versionText, previous: null });
     installer.setGood(versionText);
@@ -626,8 +661,9 @@ export async function runUpdater(
     }
     // The units for the role (§5): the update units always, the role's services as the role runs them. A node
     // that has not joined yet does not start — it has nothing to run until the principal joins it.
-    const roleServices: readonly UpdateService[] = parsed.role === "control-plane" ? ["hub", "fleet", "node"] : ["node"];
-    await m.renderUnits(versionText, { services: roleServices });
+    for (const keep of await m.renderUnits(versionText, { services: roleServices }, { replaceForeign: parsed.force })) {
+      io.out(`kept the unit Morndo replaced as ${keep}\n`);
+    }
     const UPDATE_UNITS = ["morndo-update.timer", "morndo-update-boot.service", "morndo-update-recover.service", "morndo-update-recover.timer"] as const;
     const joined = existsSync(join(home, ".config/morndo-node/config.json"));
     const startable: readonly UpdateService[] = parsed.role === "control-plane"

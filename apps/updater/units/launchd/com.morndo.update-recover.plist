@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- The recovery watch (design §5, §6.6): at load and every 5 minutes. launchd has no ConditionPathExists,
-     so the command itself checks the `applying` mark and is a quick no-op without one. -->
+     so the command itself checks the `applying` mark and is a quick no-op without one. It runs good's own
+     launcher, not ~/.local/bin's link through `current`, which a crash mid-swap can leave broken. -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -8,7 +9,7 @@
   <string>com.morndo.update-recover</string>
   <key>ProgramArguments</key>
   <array>
-    <string>@HOME@/.local/bin/morndo-update</string>
+    <string>@HOME@/.local/share/morndo-releases/good/bin/morndo-update</string>
     <string>update</string>
     <string>recover</string>
   </array>

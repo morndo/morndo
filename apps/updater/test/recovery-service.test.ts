@@ -197,6 +197,10 @@ describe("the recovery unit (§6.6, §13)", () => {
     expect(w.alerts.raised.some(x => x.kind === "update_unknown_record" && x.detail.includes("teleporting"))).toBe(true);
     expect(w.store.openUpdate(), "the record stands untouched").not.toBeNull();
     expect(w.applying.present(), "and its mark with it").toBe(true);
+    // the recovery unit runs again every 5 minutes while the mark stands: the record is one Alert, not one a run
+    await expect(w.recover().recover()).resolves.toMatchObject({ kind: "unknown_record" });
+    await expect(w.recover().recover()).resolves.toMatchObject({ kind: "unknown_record" });
+    expect(w.alerts.raised.filter(x => x.kind === "update_unknown_record")).toHaveLength(1);
     expect(w.current()).toBe(A);
   });
 
@@ -206,11 +210,11 @@ describe("the recovery unit (§6.6, §13)", () => {
     const w = await buildApplyWorld(scratch);
     await killedApply(w, die => { die.on = { op: "swap" }; });
     expect(w.current()).toBe(A);
-    expect(w.tape).toContain(`renderUnits:${B}`);
+    expect(w.tape.some(t => t.startsWith(`renderUnits:${B}`))).toBe(true);
     const at = w.tape.length;
     expect(await w.recover().recover()).toEqual({ kind: "abandoned" });
     const after = w.tape.slice(at);
-    const render = after.indexOf(`renderUnits:${A}`);
+    const render = after.findIndex(t => t.startsWith(`renderUnits:${A}`));
     expect(render, "A's units rendered again").toBeGreaterThan(-1);
     expect(render).toBeLessThan(after.findIndex(t => t.startsWith("start:")));
   });

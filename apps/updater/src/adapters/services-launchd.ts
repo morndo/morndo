@@ -6,11 +6,12 @@
 // false here on purpose: launchd stops a job's processes, not a control group, so the tmux server an agent
 // started does not ride along with the job's death — the hazard RL13 guards on systemd has no macOS counterpart.
 import { execFile, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { UPDATE_SCOPE_SERVICES, type UpdateService } from "@morndo/domain";
 import type { ServiceManager } from "../application/ports.ts";
 import { updaterPaths } from "./paths.ts";
+import { foreignIn, placeUnits, type UnitDir } from "./unit-files.ts";
 
 // The same shape as services-systemd's: one program, one argument list, no shell.
 export type Run = (file: string, args: string[]) => Promise<{ code: number; stdout: string; stderr: string }>;
@@ -28,6 +29,15 @@ const execFileRun: Run = (file, args) => new Promise(resolve => {
 // Morndo's labels (§5): hub, fleet and node become com.morndo.<service>.
 const label = (s: UpdateService): string => `com.morndo.${s}`;
 const SERVICE_PLISTS = new Set(UPDATE_SCOPE_SERVICES.map(s => `${label(s)}.plist`));
+const isPlist = (name: string): boolean => name.startsWith("com.morndo.") && name.endsWith(".plist");
+
+// The second line of every plist a render writes, right after the XML declaration (a comment may not come before
+// it): what marks the file as Morndo's to replace or remove.
+export const PLIST_MARK = "<!-- Morndo's own job: every update rewrites it. -->";
+const withMark = (text: string): string => {
+  const [first, ...rest] = text.split("\n");
+  return first!.startsWith("<?xml") ? [first, PLIST_MARK, ...rest].join("\n") : `<?xml version="1.0" encoding="UTF-8"?>\n${PLIST_MARK}\n${text}`;
+};
 
 // A systemd unit name to its launchd label, for `enable` — the one place the two managers' vocabularies meet.
 // The update timer's unit and its service both map to the one job that runs the tick; the boot unit has no
@@ -93,29 +103,31 @@ export class LaunchdServices implements ServiceManager {
     return Math.max(0, runsOf(out.stdout) - (this.runsAtStart.get(s) ?? 0));
   }
 
-  async renderUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<void> {
+  async renderUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { replaceForeign?: boolean }): Promise<string[]> {
     // The templates carry @HOME@ because launchd has no %h: the home is written in at render time. No
     // daemon-reload follows — launchd has none; a start bootstraps whatever plist it finds here. A role, when
     // given, narrows the service plists to that role's — `morndo install`'s rendering for the role asked for.
+    // Each plist gets Morndo's mark as its second line, the first comment after the XML declaration.
     const from = join(this.releases, version, "units", "launchd");
-    const wanted = (name: string): boolean =>
-      role === undefined || !SERVICE_PLISTS.has(name) || role.services.some(s => `${label(s)}.plist` === name);
-    const shipped = readdirSync(from).filter(n => n.startsWith("com.morndo.") && n.endsWith(".plist") && wanted(n));
+    const shipped = this.shipped(from, role);
     if (shipped.length === 0) throw new Error(`${from}: a Version ships no launchd templates`);
     mkdirSync(this.agentsDir, { recursive: true });
-    for (const name of shipped) {
-      const text = readFileSync(join(from, name), "utf8").replaceAll("@HOME@", this.home);
-      // atomic like every updater write (§5): a whole plist lands by rename, never half of one by a crash.
-      // A leftover temp from a killed render is removed first, so it cannot keep an old mode through create.
-      const temp = join(this.agentsDir, `.${name}.new`);
-      rmSync(temp, { force: true });
-      writeFileSync(temp, text);
-      renameSync(temp, join(this.agentsDir, name));
-    }
-    for (const name of readdirSync(this.agentsDir)) {
-      if (!name.startsWith("com.morndo.") || !name.endsWith(".plist")) continue;
-      if (!shipped.includes(name)) rmSync(join(this.agentsDir, name));
-    }
+    return placeUnits(this.unitDir(), shipped.map(name => ({ name, text: withMark(readFileSync(join(from, name), "utf8").replaceAll("@HOME@", this.home)) })),
+      o?.replaceForeign === true);
+  }
+
+  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<string[]> {
+    return foreignIn(this.unitDir(), this.shipped(join(this.releases, version, "units", "launchd"), role));
+  }
+
+  private shipped(from: string, role?: { services: readonly UpdateService[] }): string[] {
+    const wanted = (name: string): boolean =>
+      role === undefined || !SERVICE_PLISTS.has(name) || role.services.some(s => `${label(s)}.plist` === name);
+    return readdirSync(from).filter(n => isPlist(n) && wanted(n));
+  }
+
+  private unitDir(): UnitDir {
+    return { dir: this.agentsDir, isUnit: isPlist, marked: t => t.split("\n", 2)[1] === PLIST_MARK };
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {

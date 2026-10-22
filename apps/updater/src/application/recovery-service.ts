@@ -56,7 +56,9 @@ export class RecoveryService {
       const layout = installer.layout();
       const current = layout.method === "updater" && layout.current !== null ? parseVersion(layout.current) : null;
       if (current === null) {
-        alerts.raise("update_unknown_record", `an open record at ${formatVersion(open.target)} with no current Version`);
+        if (store.firstAlert(open.id, "update_unknown_record", clock.now())) {    // one Alert per record, not one per run
+          alerts.raise("update_unknown_record", `an open record at ${formatVersion(open.target)} with no current Version`);
+        }
         return { kind: "unknown_record", detail: "no current Version to recover around" };
       }
       const decision = decide({
@@ -68,7 +70,7 @@ export class RecoveryService {
       const running = services.services();
       switch (decision.value.act) {
         case "nothing":
-          alerts.raise("update_unknown_record", decision.value.unknown);
+          if (store.firstAlert(open.id, "update_unknown_record", clock.now())) alerts.raise("update_unknown_record", decision.value.unknown);
           return { kind: "unknown_record", detail: decision.value.unknown };
         case "abandon":
           // Nothing swapped: the old units back if the swap had begun, the hold off, the services on the old

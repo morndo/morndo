@@ -566,4 +566,18 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(w.tape).not.toContain("backup:restore:connections");
   });
 
+
+  // ---- the review of 2026-10-22 on #104: a machine's own units only
+
+  it("renders only the units of the machine's own services: a node machine gets no hub or fleet units", async () => {
+    const w = await buildApplyWorld(scratch, { running: ["node"] });
+    w.probe.healthScript = (s) => s === "node" && w.current() === B
+      ? { service: s, version: A, checks: { ready: true, database: true } }      // forces the rollback's render too
+      : { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+    await w.apply().apply({ now: false });
+    const renders = w.tape.filter(t => t.startsWith("renderUnits:"));
+    expect(renders.length, "the swap's render and the rollback's").toBe(2);
+    for (const r of renders) expect(r, "every render names the machine's services: node only").toMatch(/\(node\)$/);
+  });
+
 });

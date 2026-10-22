@@ -150,6 +150,21 @@ describe("`morndo install --role control-plane` (§10.3)", () => {
     expect(existsSync(join(w.home, ".local/bin/morndo"))).toBe(false);
   });
 
+  it("refuses a unit of ours that Morndo did not write, before anything is written; --force keeps it aside", async () => {
+    const w = world({ joined: true });
+    w.services.foreign = ["/srv/example-user/.config/systemd/user/morndo-hub.service"];
+    const r = await w.run(["install", "--role", "control-plane"]);
+    expect(r.code, r.err).toBe(78);
+    expect(r.err).toMatch(/morndo-hub\.service: not written by Morndo; move it away, or run with --force/);
+    expect(w.services.tape.some(t => t.startsWith("renderUnits:"))).toBe(false);   // nothing rendered
+    expect(w.services.enables).toEqual([]);
+    expect(existsSync(join(w.paths.releases, "current"))).toBe(false);          // and nothing installed
+    const forced = await w.run(["install", "--role", "control-plane", "--force"]);
+    expect(forced.code, forced.err).toBe(0);
+    expect(w.services.tape).toContain(`renderUnits:${VERSION} (hub,fleet,node) replacing foreign`);
+    expect(forced.out).toMatch(/kept the unit Morndo replaced as \/srv\/example-user\/.*morndo-hub\.service\.before-morndo/);
+  });
+
   it("refuses a tree that does not check out against its own files.json, writing nothing", async () => {
     const w = world({ joined: true });
     const versionFile = join(w.tree, "app", "VERSION");

@@ -133,6 +133,8 @@ export class FakeServices implements ServiceManager {
   /** The Morndo services this machine runs (§6.2 stops and starts only these, in a fixed order). */
   running: UpdateService[];
   tmuxIn = false;
+  /** Unit files a render would replace that are not Morndo's: what foreignUnits answers. */
+  foreign: string[] = [];
   /** Per-service restart counts the manager would report since the start (probation, RL7). */
   restartCounts: Partial<Record<UpdateService, number>> = {};
   /** Runs when a service starts, told the Version that is current: a test's stand-in for the service's own startup
@@ -179,10 +181,15 @@ export class FakeServices implements ServiceManager {
     return this.restartCounts[s] ?? 0;
   }
 
-  async renderUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<void> {
+  async renderUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { replaceForeign?: boolean }): Promise<string[]> {
     this.die.check("renderUnits");
     this.calls.push({ op: "renderUnits", version });
-    this.tape.push(`renderUnits:${version}${role === undefined ? "" : ` (${role.services.join(",")})`}`);
+    this.tape.push(`renderUnits:${version}${role === undefined ? "" : ` (${role.services.join(",")})`}${o?.replaceForeign === true ? " replacing foreign" : ""}`);
+    return o?.replaceForeign === true ? this.foreign.map(p => `${p}.before-morndo`) : [];
+  }
+
+  async foreignUnits(): Promise<string[]> {
+    return [...this.foreign];
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {

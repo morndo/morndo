@@ -6,7 +6,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LaunchdServices, type Run } from "../src/adapters/services-launchd.ts";
+import { LaunchdServices, PLIST_MARK, type Run } from "../src/adapters/services-launchd.ts";
+import { ForeignUnits } from "../src/adapters/unit-files.ts";
 
 let scratch = "";
 beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), "morndo-upd-")); });
@@ -27,11 +28,12 @@ class Launchctl {
 
 // A Mac in miniature: a home with a LaunchAgents directory, a release tree whose units/launchd/ holds either
 // the real templates or a fixture's, and the adapter over a scripted launchctl. gui/501 is a made-up uid.
-const mac = (o: { installed?: string[]; templates?: "real" | Record<string, string>; reply?: (args: string[]) => Answer } = {}) => {
+const mac = (o: { installed?: string[]; foreign?: string[]; templates?: "real" | Record<string, string>; reply?: (args: string[]) => Answer } = {}) => {
   const home = mkdtempSync(join(scratch, "home-"));
   const agentsDir = join(home, "Library/LaunchAgents");
   mkdirSync(agentsDir, { recursive: true });
-  for (const name of o.installed ?? []) writeFileSync(join(agentsDir, name), "<plist version=\"1.0\"/>\n");
+  for (const name of o.installed ?? []) writeFileSync(join(agentsDir, name), `<?xml version="1.0"?>\n${PLIST_MARK}\n<plist version="1.0"/>\n`);
+  for (const name of o.foreign ?? []) writeFileSync(join(agentsDir, name), "<?xml version=\"1.0\"?>\n<plist version=\"1.0\"/>\n");
   if (o.templates) {
     const from = join(home, ".local/share/morndo-releases/0.2.0/units/launchd");
     mkdirSync(from, { recursive: true });
@@ -101,7 +103,7 @@ describe("LaunchdServices (§4.6, §5)", () => {
     expect(written).toEqual([...readdirSync(plist), "unrelated.plist"].sort());
     const hub = readFileSync(join(m.agentsDir, "com.morndo.hub.plist"), "utf8");
     expect(hub).not.toContain("@HOME@");
-    expect(hub.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n')).toBe(true);
+    expect(hub.startsWith(`<?xml version="1.0" encoding="UTF-8"?>\n${PLIST_MARK}\n`)).toBe(true);
     expect(hub).toContain('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"');
     expect(hub).toContain('<plist version="1.0">');
     expect(hub).toMatch(/<key>ProgramArguments<\/key>\s*<array>\s*<string>[^<]*<\/string>/);
@@ -109,6 +111,17 @@ describe("LaunchdServices (§4.6, §5)", () => {
     const update = readFileSync(join(m.agentsDir, "com.morndo.update.plist"), "utf8");
     expect(update).toContain(`<string>${m.home}/.local/bin/morndo-update</string>`);
     expect(m.lc.calls).toEqual([]);        // launchd has no daemon-reload: a start bootstraps what it finds
+  });
+
+  it("renderUnits removes only plists Morndo wrote, and refuses one of a shipped name it did not write unless told", async () => {
+    const m = mac({ foreign: ["com.morndo.hub.plist", "com.morndo.mine.plist"], templates: "real" });
+    await expect(m.manager.renderUnits("0.2.0")).rejects.toThrow(ForeignUnits);
+    expect(readdirSync(m.agentsDir).sort()).toEqual(["com.morndo.hub.plist", "com.morndo.mine.plist"]);
+    await expect(m.manager.renderUnits("0.2.0", undefined, { replaceForeign: true }))
+      .resolves.toEqual([join(m.agentsDir, "com.morndo.hub.plist.before-morndo")]);
+    expect(readFileSync(join(m.agentsDir, "com.morndo.mine.plist"), "utf8")).not.toContain(PLIST_MARK);   // a person's own, kept
+    expect(readFileSync(join(m.agentsDir, "com.morndo.hub.plist"), "utf8")).toContain(PLIST_MARK);
+    await expect(m.manager.foreignUnits("0.2.0")).resolves.toEqual([]);
   });
 
   it("refuses to render a Version that ships no launchd templates rather than uninstall them", async () => {

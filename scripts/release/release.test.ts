@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -552,6 +552,24 @@ describe("launchers follow the package bins", () => {
     mkdirSync(join(repo, "apps/tool/src"), { recursive: true });
     writeFileSync(join(repo, "apps/tool/package.json"), '{"name":"@morndo/tool","bin":{"morndo-tool":"./src/main.ts","morndo-tool-two":"src/two.ts"}}\n');
     expect(launchersFrom(repo)).toEqual({ "morndo-tool": "app/apps/tool/src/main.ts", "morndo-tool-two": "app/apps/tool/src/two.ts" });
+  });
+
+  it("a launcher reached through `good` runs the good Version while `current` names a broken one (§6.6)", () => {
+    // The recovery unit runs releases/good/bin/morndo-update: after a crash mid-swap `current` may name a Version
+    // that cannot even start, and recovery must not depend on it. Each Version's node is a stub naming its Version.
+    const releases = temp();
+    for (const [v, node] of [["0.1.0", '#!/bin/sh\necho "ran 0.1.0 $*"\n'], ["0.2.0", "#!/bin/sh\nexit 70\n"]] as const) {
+      mkdirSync(join(releases, v, "bin"), { recursive: true });
+      mkdirSync(join(releases, v, "node/bin"), { recursive: true });
+      writeFileSync(join(releases, v, "bin/morndo-update"), launcherSource("app/apps/updater/src/main.ts"), { mode: 0o755 });
+      writeFileSync(join(releases, v, "node/bin/node"), node, { mode: 0o755 });
+    }
+    symlinkSync("0.1.0", join(releases, "good"));
+    symlinkSync("0.2.0", join(releases, "current"));
+    const viaGood = spawnSync(join(releases, "good/bin/morndo-update"), ["update", "recover"], { encoding: "utf8" });
+    expect(viaGood.status, viaGood.stderr).toBe(0);
+    expect(viaGood.stdout).toBe(`ran 0.1.0 ${realpathSync(releases)}/0.1.0/bin/../app/apps/updater/src/main.ts update recover\n`);
+    expect(spawnSync(join(releases, "current/bin/morndo-update"), ["update", "recover"]).status).toBe(70);
   });
 
   it("refuses a bin path that leaves its package, and two packages that claim one name", () => {
