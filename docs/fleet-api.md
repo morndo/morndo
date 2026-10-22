@@ -232,7 +232,7 @@ GET /v1/rollout
 - `controlPlane` is the fleet's own build: the Version and the commit of the tree it runs.
 - `rollout` is the Rollout nodes follow: the highest Version at or below the control plane's own that the fleet holds a Rollout of, or null. `aboveControlPlane` lists the halted Rollouts above it, highest first: what the control plane rolled back from. They never stand for the Rollout (no node runs above its control plane, RL11) and stay until resumed. `controlPlaneCommittedAt` is when the control plane committed to it and `soakMinutes` (0–10080, 30 by default) how long it runs it before a node may take it; `halted`, `haltedBy`, `haltReason` and `haltedAt` say when a machine or the owner stopped it.
 
-**Who may move a Rollout.** The socket is the user's, and a lane runs as that user too, so the fleet takes a commit only from the control plane's updater, and a resume or an `update.apply` only from the principal with a fresh passkey through the hub. Until the fleet can check them (the updater's commit: updates PR 6b; the hub's step-up proof: PR 6c) it refuses all three, whoever asks: 403 `not_allowed` here, `not_allowed` for the op (§8). A halt needs neither: it only ever stops updates.
+**Who may move a Rollout.** The socket is the user's, and a lane runs as that user too, so the fleet takes a commit or a halt only from the control plane's updater, and a resume or an `update.apply` only from the principal with a fresh passkey through the hub. Until the fleet can check them (the updater: updates PR 6b; the hub's step-up proof: PR 6c) it refuses all four, whoever asks: 403 `not_allowed` here, `not_allowed` for the op (§8). A halt still happens where a rollback does, by the two internal paths: a node's own `health` (below), and, for the control plane itself, its updater's state file (`~/.local/state/morndo-update/state.json`, read once a second like `hold.json`).
 
 **Committing.** `POST /v1/rollout/committed` takes `{ version, soakMinutes? }` and starts the soak of that Version. The control plane commits only the Version it runs itself; anything else is 409 `not_allowed`, and nothing is stored. A Version is a Release's: SemVer without build metadata (`0.4.2`, not `0.4.2+x`), and a Rollout is found by precedence, so no spelling steps around a halt.
 
@@ -257,9 +257,9 @@ content-type: application/json
 
 { "version": "{{string:cp}}", "machine": "n1", "reason": "a check failed on n1" }
 ---
-200
+403
 
-{ "ok": true, "rollout": { "version": "{{string:cp}}", "controlPlaneCommittedAt": null, "soakMinutes": 30, "halted": true, "haltedBy": "n1", "haltReason": "a check failed on n1", "haltedAt": "{{time}}" } }
+{ "error": "not_allowed", "message": "{{string}}" }
 ```
 
 ```example rollout-resume
@@ -274,7 +274,7 @@ content-type: application/json
 { "error": "not_allowed", "message": "{{string}}" }
 ```
 
-A node that reports `rolled_back` or `rollback_failed` in its `health` halts the Rollout of the Version it was leaving itself, with one alert per node and target (§14). While the fleet holds new work for its own update these routes answer 503 `updating` (§10).
+A node that reports `rolled_back` or `rollback_failed` in its `health` halts the Rollout of the Version it was leaving itself, once, with one alert per node and target (§14): the report repeats until the node updates again, and a repeat halts nothing the principal has resumed since. A node's report of a rollback from above its control plane alerts and halts nothing (no node runs above it). The control plane's own rollback, from its updater's state file, halts as the machine `control-plane`, above its Version too. While the fleet holds new work for its own update these routes answer 503 `updating` (§10).
 
 ## 6. Deliveries
 
@@ -1338,10 +1338,10 @@ That turn end said DONE with a background task still running, so `w1`'s Run wait
 {"t":"run","node":"n1","body":{"lane":"w1","node":"n1","sessionId":"{{uuid:w1-session}}","phase":"waiting","wait":{"on":"background","tasks":[{"type":"shell","label":"Check the docs links"}]},"deadline":"{{time}}","overdue":false,"outcome":"done","line":"STATUS: DONE","since":"{{time}}","source":"hook"}}
 ```
 
-The Rollout changed while the examples above ran: halted by a machine's failed check (§5.4; the commit and the resume there were refused, so they changed nothing). Every change is one event, a commit and a resume too:
+The Rollout changed while the examples above ran: the control plane's own updater rolled back from its Version and recorded it in its state file, so the fleet halted it (§5.4; the routes' writes there were refused and changed nothing). Every change is one event, a commit and a resume too:
 
 ```example events-rollout events
-{"t":"rollout","node":"","body":{"version":"{{string:cp}}","controlPlaneCommittedAt":null,"soakMinutes":30,"halted":true,"haltedBy":"n1","haltReason":"a check failed on n1","haltedAt":"{{time}}"}}
+{"t":"rollout","node":"","body":{"version":"{{string:cp}}","controlPlaneCommittedAt":null,"soakMinutes":30,"halted":true,"haltedBy":"control-plane","haltReason":"fleet health","haltedAt":"{{time}}"}}
 ```
 
 ## 10. Errors

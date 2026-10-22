@@ -111,6 +111,14 @@ const BEFORE: Record<string, () => Promise<void>> = {
   "deliver-no-session": async () => { await sleep(Math.max(0, sh1At + GRACE_MS + 1000 - Date.now())); },
   "err-menu-open": async () => { await w1.control({ status: "waiting" }); await statusIs("w1", "waiting"); },
   "err-draft-present": async () => { w1.draft("half a thought"); await until("the draft on w1", () => w1.screen().includes("half a thought")); },
+  // the control plane's own rollback, as its updater's state file records it: the fleet halts that Version (§5.4)
+  "events-rollout": async () => {
+    const { controlPlane } = await fleet.client.rollout();
+    const dir = join(fleet.home, ".local", "state", "morndo-update");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ state: "rolled_back", version: controlPlane.version, target: controlPlane.version, failedCheck: "fleet health", at: Date.now() }));
+    await until("the halt from the control plane's own rollback", async () => (await fleet.client.rollout()).rollout?.halted === true, 15_000);
+  },
 };
 const AFTER: Record<string, () => Promise<void>> = {
   "delivery-expired": async () => { await w1.control({ status: "idle" }); await statusIs("w1", "idle"); },

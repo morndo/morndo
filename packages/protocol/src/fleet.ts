@@ -519,10 +519,16 @@ const OpErrorSchema = z.pipe(
 
 // A node's updater state as its health carries it (updates §6.3): the states of the domain's own state machine (§5.4).
 // What a node reports is checked for shape here; whether a state may follow another is the domain's, on the node.
-const UpdateHealthSchema = z.object({
+const UPDATE_HEALTH_FIELDS = {
   state: z.enum(["current", "staged", "waiting", "applying", "rolled_back", "rollback_failed"]),
   version: releaseVersion(), target: z.exactOptional(releaseVersion()), reason: z.exactOptional(label()), failedCheck: z.exactOptional(label()),
-});
+};
+const UpdateHealthSchema = z.object(UPDATE_HEALTH_FIELDS);
+// What a machine's updater last did, as it writes it to ~/.local/state/morndo-update/state.json (updates §7): a node's
+// agent reports it in its health; on the control plane the fleet reads it itself, so the control plane's own
+// rollback halts its Rollout without a route anyone else could call (review of #107). `at`: when it was written.
+export type UpdateStateFile = NodeUpdateHealth & { at: number };
+export const UpdateStateFileSchema = z.strictObject({ ...UPDATE_HEALTH_FIELDS, at: z.number() });
 const HealthSchema = z.object({
   memTotal: z.number(), memAvailable: z.number(), psiSome10: z.nullable(z.number()), psiFull10: z.nullable(z.number()),
   diskFreeHome: z.number(), load1: z.number(), tmuxOk: z.boolean(), wallClock: z.number(), spoolDepth: count(), drops: count(),
@@ -743,4 +749,5 @@ check<Same<z.output<typeof RunViewSchema>, RunView>>(true);
 check<Same<z.output<typeof LaneStateBodySchema>, LaneStateBody>>(true);
 check<Same<z.output<typeof RolloutWireSchema>, RolloutWire>>(true);
 check<Same<z.output<typeof UpdateHealthSchema>, NodeUpdateHealth>>(true);
+check<Same<z.output<typeof UpdateStateFileSchema>, UpdateStateFile>>(true);
 check<Same<(typeof SESSION_STATUSES)[number], SessionStatus>>(true);

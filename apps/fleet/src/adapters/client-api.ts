@@ -87,8 +87,10 @@ export type ClientApiDeps = {
 export type ClientApi = { close(): Promise<void> };
 
 // Who may move a Rollout forward (review of #107, finding 3). `updater`: the control plane's updater reporting its
-// commit. `principal`: the owner's resume and update.apply, which carry a fresh passkey (STEP_UP_OPS) through the
-// hub. A halt needs neither: it only ever stops updates. Until a check exists, both say no.
+// commit or halt. `principal`: the owner's resume and update.apply, which carry a fresh passkey (STEP_UP_OPS) through
+// the hub. A halt through a route is closed too (a lane could pre-halt a Version nothing could resume yet): the
+// rollbacks that halt come by the internal paths, a node's health and the control plane's updater state file. Until
+// a check exists, both say no.
 export type RolloutAuthority = { updater(req: IncomingMessage): boolean; principal(req: IncomingMessage): boolean };
 export const CLOSED_ROLLOUT_AUTHORITY: RolloutAuthority = { updater: () => false, principal: () => false };
 
@@ -296,6 +298,8 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       if (!parsed.ok) throw new HttpError(400, parsed.message);
       if (parsed.kind === "committed" && !d.rolloutAuthority.updater(req))
         return json(res, 403, { error: "not_allowed", message: "only the control plane's updater commits a Rollout, and the fleet cannot check it yet: refused" });
+      if (parsed.kind === "halt" && !d.rolloutAuthority.updater(req))
+        return json(res, 403, { error: "not_allowed", message: "a halt comes from a machine's own rollback (its health, or the control plane's updater) or the principal, which the fleet cannot check here yet: refused" });
       if (parsed.kind === "resume" && !d.rolloutAuthority.principal(req))
         return json(res, 403, { error: "not_allowed", message: "a resume is the principal's, with a fresh passkey through the hub, which the fleet cannot check yet: refused" });
       if (parsed.kind === "committed") {

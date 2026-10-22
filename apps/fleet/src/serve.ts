@@ -37,8 +37,9 @@ import { LaneEvents } from "./application/lane-events.ts";
 import { LaneEventsPush } from "./application/lane-events-push.ts";
 import { LaneRegistry } from "./application/lane-registry.ts";
 import { LaneWatch, REBUILD_WINDOW_MS } from "./application/lane-watch.ts";
-import { Rollouts } from "./application/rollouts.ts";
+import { CONTROL_PLANE_MACHINE, Rollouts } from "./application/rollouts.ts";
 import { CLOSED_ROLLOUT_AUTHORITY, type RolloutAuthority } from "./adapters/client-api.ts";
+import { UpdaterStateWatch, updaterStateFile } from "./adapters/updater-state-watch.ts";
 import { Router } from "./application/router.ts";
 import { Runs } from "./application/runs.ts";
 
@@ -53,6 +54,8 @@ export type FleetOptions = {
   // principal, with step-up). Closed unless a check says yes (review of #107): the socket is the user's, and a lane
   // runs as that user too. PR 6b brings the updater's check, PR 6c the hub's step-up proof. Not in the config file.
   rolloutAuthority?: RolloutAuthority;
+  // The control plane's own updater's state file (updates §7): its rollback halts the Rollout. Default under HOME.
+  updaterStatePath?: string;
   laneWatchSweepMs?: number;
   runsSweepMs?: number;
 };
@@ -98,6 +101,13 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   rollouts = new Rollouts({ store: new RolloutsStore(db, now), audit, events, push: connections, own: build, now });
   // A node's updater reports with its health (updates §6.3, §7): a rollback alerts and halts the Rollout of the
   // Version it was leaving (RL12).
+  // The control plane's own rollback, from its updater's state file (review of #107): the internal path, the only
+  // one besides a node's own health that halts without the principal.
+  const updaterWatch = new UpdaterStateWatch({
+    path: o.updaterStatePath ?? updaterStateFile(),
+    onReport: r => rollouts.health(CONTROL_PLANE_MACHINE, r, { own: true }),
+  });
+  updaterWatch.start();
   events.subscribe(e => {
     if (e.t === "health") {
       const update = (e.body as Health).update;
@@ -210,6 +220,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     });
   } catch (e) {
     watch.stop();
+    updaterWatch.stop();
     await agents.close();
     intake.stop();
     db.close();
@@ -234,6 +245,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     runs: laneRuns, rollouts, agentPort: agents.port(),
     close: async () => {
       watch.stop();
+      updaterWatch.stop();
       clearInterval(retention);
       clearInterval(noticeRetry);
       deliveries.stop();

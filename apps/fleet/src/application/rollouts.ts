@@ -19,6 +19,10 @@ import type { EventHub } from "./events.ts";
 export type RolloutWrite = { ok: true; changed: boolean; rollout: RolloutWire | null };
 export type RolloutRefusal = { ok: false; refused: "not_allowed" | "not_halted"; message: string };
 
+// The name a halt carries when the control plane's own updater rolled back: the fleet knows no node name for its own
+// machine, and the name says where it happened.
+export const CONTROL_PLANE_MACHINE = "control-plane";
+
 export class Rollouts {
   #store: RolloutsStore;
   #audit: Audit;
@@ -118,23 +122,27 @@ export class Rollouts {
     return { ok: true, changed: true, rollout: this.#announce(resumed) };
   }
 
-  // A node's updater report from its health (§6.3): a rollback — succeeded or failed — is one alert per node and
-  // target (the health repeats with every ping; the alert says it once) and halts the Rollout of the Version it was
-  // leaving, the node's reason or failed check in the halt. A report with no target halts nothing (see the header).
-  health(node: string, update: NodeUpdateHealth): void {
+  // A machine's updater report (§6.3): a node's in its health, the control plane's own from its updater's state file
+  // (`own`). A rollback — succeeded or failed — is one alert per machine and target, and halts the Rollout of the
+  // Version it was leaving once, together with that alert: the report repeats with every health tick until the
+  // machine updates again, and a repeat must not halt what the principal has since resumed (review of #107). A report
+  // with no target halts nothing (see the header). A node never runs above its control plane (RL11), so a node's
+  // report of a rollback from above it is alerted and halts nothing; the control plane's own may, which is how its
+  // rollback from a Version it no longer runs halts that Version (review focus 2).
+  health(machine: string, update: NodeUpdateHealth, o: { own?: boolean } = {}): void {
     if (update.state !== "rolled_back" && update.state !== "rollback_failed") return;
     const kind = update.state === "rolled_back" ? "update_rolled_back" : "update_rollback_failed";
     const target = update.target ?? null;
     const reason = update.reason ?? update.failedCheck ?? null;
-    const action = `alert.${kind}`;
-    const raised = this.#audit.of(action).some(a => a.node === node && (a.detail.target ?? null) === target);
-    if (!raised)
-      this.#audit.alert(kind, node, {
-        version: update.version, ...(target === null ? {} : { target }), ...(reason === null ? {} : { reason }),
-      });
-    // A node never runs above its control plane (RL11), so a report of a rollback from above it is wrong on its face:
-    // it is alerted, and halts nothing (review of #107: it would otherwise stand for the Rollout).
-    if (target !== null && !this.aboveOwn(target)) this.halt(target, node, reason ?? `${node} reports a ${update.state === "rolled_back" ? "rollback" : "failed rollback"} without a reason`);
+    const node = o.own ? null : machine;
+    const raised = this.#audit.of(`alert.${kind}`).some(a => (a.node ?? null) === node && (a.detail.machine ?? machine) === machine
+      && (a.detail.target ?? null) === target);
+    if (raised) return;
+    this.#audit.alert(kind, node, {
+      machine, version: update.version, ...(target === null ? {} : { target }), ...(reason === null ? {} : { reason }),
+    });
+    if (target !== null && (o.own === true || !this.aboveOwn(target)))
+      this.halt(target, machine, reason ?? `${machine} reports a ${update.state === "rolled_back" ? "rollback" : "failed rollback"} without a reason`);
   }
 
   // Every change of the Rollout reaches the clients as the `rollout` event (node: "", the fleet's own) and every

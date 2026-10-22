@@ -194,19 +194,51 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     });
   });
 
-  it("closed by default: commit, resume and update.apply are refused at the fleet for any client; a halt is not", async () => {
+  it("closed by default: commit, halt, resume and update.apply are refused at the fleet for any client", async () => {
     const fleet = await startTestFleet();
     const fresh = await fleet.online("n2", { caps: [CAP_UPDATE] });
     for (const who of ["hub", "lanes", "updater"]) {
       const api = client(fleet.config.socketPath, { "x-morndo-client": who });
       expect(await api.post("/v1/rollout/committed", { version: V })).toMatchObject({ status: 403, body: { error: "not_allowed" } });
       expect(await api.post("/v1/rollout/resume", { version: V })).toMatchObject({ status: 403, body: { error: "not_allowed" } });
+      // a lane pre-halting a Version would block it until the principal's resume exists (review of #107, round 2)
+      expect(await api.post("/v1/rollout/halt", { version: V, machine: "n2", reason: "test" })).toMatchObject({ status: 403, body: { error: "not_allowed" } });
       const op = await api.post("/v1/op", { node: "n2", op: "update.apply", args: { version: V }, key: `${who}:u1` });
       expect(op?.body).toMatchObject({ ok: false, error: { code: "not_allowed", executed: "no" } });
     }
     expect(fresh.reqs.filter(r => r.op === "update.apply")).toHaveLength(0);
-    // halting only ever stops updates: it stays open (the control plane's own rollback reports through it)
-    expect(await client(fleet.config.socketPath).post("/v1/rollout/halt", { version: V, machine: "n2", reason: "test" })).toMatchObject({ status: 200 });
+    expect((await bodyOf(client(fleet.config.socketPath).get("/v1/rollout")))?.rollout).toBeNull();
+  });
+
+  it("the control plane's own rollback halts through the updater's state file, above its Version too, once", async () => {
+    const dir = tempDir();
+    const statePath = join(dir, "update-state.json");
+    const fleet = await startTestFleet({ dir, updaterStatePath: statePath });   // closed: no route may halt
+    const api = client(fleet.config.socketPath);
+    writeFileSync(statePath, JSON.stringify({ state: "rolled_back", version: V, target: "99.0.0", failedCheck: "fleet health", at: 1 }));
+    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.aboveControlPlane).toEqual(
+      [expect.objectContaining({ version: "99.0.0", halted: true, haltedBy: "control-plane", haltReason: "fleet health" })]), { timeout: 5000 });
+    expect(fleet.audit.of("alert.update_rolled_back")).toHaveLength(1);
+    // resumed (the principal's word, here the service itself), the same record read again halts nothing
+    expect(fleet.rollouts.resume("99.0.0")).toMatchObject({ ok: true });
+    await new Promise(r => setTimeout(r, 2500));
+    expect((await bodyOf(api.get("/v1/rollout")))?.aboveControlPlane).toEqual([]);
+    expect(fleet.audit.of("alert.update_rolled_back")).toHaveLength(1);
+  });
+
+  it("a node's rolled_back report halts once: after a resume its next health halts nothing", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const api = client(fleet.config.socketPath);
+    await api.post("/v1/rollout/committed", { version: V });
+    const b = await fleet.online("n2");
+    const report = health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "a check failed" } });
+    b.health(report);
+    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(true));
+    await api.post("/v1/rollout/resume", { version: V });
+    b.health(report);
+    b.health(report);
+    await new Promise(r => setTimeout(r, 500));
+    expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(false);
   });
 
   it("a Version with build metadata is refused at the edge, and a halt holds for every spelling of the same precedence", async () => {
