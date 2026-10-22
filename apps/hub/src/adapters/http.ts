@@ -32,7 +32,7 @@ import type { UsageService } from "../application/usage-service.ts";
 import type { TranscriptionService } from "../application/transcription-service.ts";
 import type { BriefService } from "../application/brief-service.ts";
 import type { MemoryService } from "../application/memory-service.ts";
-import { CONTROL_PLANE_MACHINE, type UpdatesCommandOutcome, type UpdatesService } from "../application/updates-service.ts";
+import type { UpdatesCommandOutcome, UpdatesService } from "../application/updates-service.ts";
 import { BRIEF_TEMPLATE } from "./brief-template.ts";
 import { bridgeDesktop } from "./rfb.ts";
 import { servingHeaders, type Files } from "./files.ts";
@@ -42,7 +42,7 @@ import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
   RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageReportBody,
-  decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema, type UpdatesView,
+  decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
 import { SCHEMA_VERSION } from "./migrations.ts";
@@ -325,10 +325,10 @@ export function startHttp(p: {
     r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}) });
 
   // An updates command's answer (updates §8.1): 403 a step-up too old, 409 the refusal with the fleet's own words
-  // (its code when the fleet refused), 503 what couldn't be asked. `view`: the screen read before the command —
-  // apply answers it, so the page lands whole.
-  const updatesAnswer = (res: ServerResponse, r: UpdatesCommandOutcome, view?: UpdatesView) => {
-    if (r.ok) return view === undefined ? json(res, 200, { ok: true }) : json(res, 200, { ok: true, view });
+  // (its code when the fleet refused), 503 what couldn't be asked. The routes stay thin (round 2, R4): every look
+  // and every gate is the service's, so a refused command never costs a round trip first.
+  const updatesAnswer = (res: ServerResponse, r: UpdatesCommandOutcome) => {
+    if (r.ok) return json(res, 200, { ok: true });
     const status = r.problem === "step_up" ? 403 : r.problem === "unavailable" ? 503 : 409;
     const error = r.problem === "refused" ? r.code : r.problem;
     return json(res, status, r.problem === "step_up" ? { error } : { error, message: r.message });
@@ -744,18 +744,9 @@ export function startHttp(p: {
     if (path === "/api/updates/apply" && method === "POST") {
       if (!p.updatesService) return json(res, 404, { error: "updates_off" });
       limited(buckets.commands.take(a.endpoint.id));
+      // Thin on purpose (round 2, R4): the service gates the command before any look — the unknown-machine check
+      // rides behind it, on the fleet's own node list alone — so a stale step-up answers without a round trip.
       const body = await readBody(req, UpdatesApplyBody);
-      // A node's apply is checked against the screen it was pressed on — the fleet lists the machine, or it is no
-      // one to command (an empty list proves nothing: the fleet may just not be answerable) — and answers that
-      // screen. The control plane's own apply needs no look besides its staged check (the service's), and answers
-      // itself: the machine about to move is the hub's.
-      if (body.machine !== CONTROL_PLANE_MACHINE) {
-        const view = await p.updatesService.view();
-        if (view.nodes.length > 0 && !view.nodes.some(n => n.name === body.machine)) {
-          return json(res, 409, { error: "unknown_machine", message: `${body.machine} is no machine the fleet lists` });
-        }
-        return updatesAnswer(res, await p.updatesService.apply(a, body.machine, body.version), view);
-      }
       return updatesAnswer(res, await p.updatesService.apply(a, body.machine, body.version));
     }
     if (path === "/api/updates/rollback" && method === "POST") {

@@ -3371,6 +3371,14 @@ export const CONTROLS: Control[] = [
   { id: "b13-status-no-background", task: "B13", file: "apps/web/src/lib/phone/chat/rows.ts",
     find: 'run && onOwnWork(run) && (s.kind === "idle" || s.kind === "finished")', replace: "false",
     run: ["apps/web/test/phone-chat.test.ts"], expect: "is listed under Working" },
+  // ---- T-315 (updates PR 6c, round 2): the hub's real updater command line, and the fleet's key from the hub's file.
+  { id: "c3c-status-args", task: "315", file: "packages/protocol/src/updates.ts",
+    find: 'status: ["update", "--status", "--json"],', replace: 'status: ["--status", "--json"],',
+    run: ["apps/updater/test/cli-apply.test.ts"], expect: "argument lists" },
+  { id: "c3c-principal-file-ignored", task: "315", file: "apps/fleet/src/serve.ts",
+    find: ": hubFilePrincipalAuthority(o.principalKeyFile ?? hubIdentityPubFile(), { now })),",
+    replace: ": { updater: () => false, principal: () => false }),",
+    run: ["apps/fleet/test/principal.test.ts"], expect: "identity.pub opens the doors" },
 ];
 
 // ---- the runner

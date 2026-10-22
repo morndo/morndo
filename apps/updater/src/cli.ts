@@ -56,7 +56,7 @@ const EXIT_SOFTWARE = 70;
 const EXIT_TEMPFAIL = 75;
 const EXIT_CONFIG = 78;
 
-const USAGE = `usage: morndo-update update [--yes] [--now] [--detach]   check, then apply what stands staged (asks first on a terminal)
+const USAGE = `usage: morndo-update update [--yes] [--now] [--detach] [--staged <v>]   check, then apply what stands staged (asks first on a terminal; --staged applies only <v>)
        morndo-update update --check [--json]        check the channel feed, verify, and stage what passes
        morndo-update update --status [--json]       what this machine believes, the last updates included
        morndo-update update --rollback [--yes] [--detach]   back to the previous Version (a restore asks for the typed word)
@@ -211,7 +211,7 @@ export async function runUpdater(
     = { cmd: "check" }
     | { cmd: "status" }
     | { cmd: "doctor" }
-    | { cmd: "update"; yes: boolean; now: boolean; detach: boolean }
+    | { cmd: "update"; yes: boolean; now: boolean; detach: boolean; staged?: string }
     | { cmd: "rollback"; yes: boolean; detach: boolean }
     | { cmd: "apply-unit"; version: string; attempt?: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
@@ -238,10 +238,27 @@ export async function runUpdater(
     // The rollback is read before the update's own set so `--rollback --yes` and `--yes --rollback` are one ask.
     if (flags.includes("--rollback") && flags.every(f => f === "--rollback" || f === "--yes" || f === "--detach")) {
       parsed = { cmd: "rollback", yes: flags.includes("--yes"), detach: flags.includes("--detach") };
-    } else if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json" || flags[0] === "--detach") {
-      if (flags.some(f => f !== "--yes" && f !== "--now" && f !== "--json" && f !== "--detach")) return usage();
-      if (flags.includes("--detach") && flags.includes("--now")) return usage();   // two asks: --now's file is removed by a waited start (§6.2); --detach cannot own it
-      parsed = { cmd: "update", yes: flags.includes("--yes"), now: flags.includes("--now"), detach: flags.includes("--detach") };
+    } else if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json" || flags[0] === "--detach" || flags[0] === "--staged") {
+      // `--staged <v>` (PR 6c round 2, R3) names the Version the hub's Updates screen pressed — the only one this
+      // run applies (the guard below), so a Release staged between the screen's look and the press never starts by
+      // a press of an older name. It rides --yes: the hub's own command, whose ask that flag has already answered.
+      let yes = false, now = false, detach = false, staged: string | undefined;
+      for (let i = 0; i < flags.length; i++) {
+        const f = flags[i]!;
+        if (f === "--yes") yes = true;
+        else if (f === "--now") now = true;
+        else if (f === "--json") continue;                  // read above; the outcome's JSON stays one shape
+        else if (f === "--detach") detach = true;
+        else if (f === "--staged") {
+          const v = flags[i + 1];
+          if (v === undefined || v.startsWith("--")) return usage();
+          staged = v;
+          i += 1;
+        } else return usage();
+      }
+      if (detach && now) return usage();   // two asks: --now's file is removed by a waited start (§6.2); --detach cannot own it
+      if (staged !== undefined && !yes) return usage();
+      parsed = { cmd: "update", yes, now, detach, ...(staged === undefined ? {} : { staged }) };
     } else if (flags[0] === "tick" && flags.length === 1) parsed = { cmd: "tick" };
     else if (flags[0] === "boot" && flags.length === 1) parsed = { cmd: "boot" };
     else if (flags[0] === "recover" && flags.length === 1) parsed = { cmd: "recover" };
@@ -498,6 +515,13 @@ export async function runUpdater(
       if (json) io.out(`${JSON.stringify({ outcome })}\n`);
       else io.out(`${line}\n`);
       const staged = store.staged();
+      // The pressed Version (R3): when --staged named one and what stands staged is not it, nothing starts. The
+      // check above may have staged a newer Release between the screen's look and the press; this run moves the
+      // machine only under the name the principal pressed, and says both when they differ.
+      if (parsed.staged !== undefined && (staged === null || staged.version !== parsed.staged)) {
+        io.err(`what stands staged is ${staged?.version ?? "nothing"}, not ${parsed.staged}: nothing was started (--staged names the Version the screen pressed)\n`);
+        return EXIT_TEMPFAIL;
+      }
       if (staged === null || !installer.has(staged.version)) return EXIT_OK;   // up to date: nothing to apply
       const m = needManager();
       if (m === null) return EXIT_CONFIG;

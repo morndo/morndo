@@ -5,13 +5,13 @@
 // machine's own doors). The feed is faked the same way with the fixtures' own signed documents, so the tick's
 // check stages from a feed the test signed, and the apply that follows is the real walk on the real machine
 // files with nothing of the machine itself running.
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { writeFloor } from "@morndo/service-kit";
 import { parseVersion, type DatabaseName, type MigrationStep, type UpdateService } from "@morndo/domain";
-import { UpdateStatusSchema } from "@morndo/protocol";
+import { UpdateStatusSchema, UPDATER_ARGS } from "@morndo/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApplyTiming } from "../src/application/apply-steps.ts";
 import { DirsInstaller } from "../src/adapters/installer-dirs.ts";
@@ -226,6 +226,63 @@ describe("`morndo update` — check, then apply what stands staged (§8.1)", () 
     expect(w.services.tape).toEqual([]);
     expect(w.current()).toBe(A);
   });
+
+  // PR 6c round 2, R3: the hub presses a Version on the Updates screen and commands `--staged <v>`; that, and only
+  // that, is what this run applies. The check above may have staged a newer Release between the screen's look and
+  // the press — a press of the older name never starts the newer one.
+  it("--staged applies only the pressed Version: equal applies; unequal is 75 with nothing started; without --yes a usage error", async () => {
+    // equal: the apply starts as --yes --detach does, and apply.env (§5.4's attempt) stays written for the unit
+    {
+      const w = await world({ preStageB: true });
+      const r = await w.run(["update", "--yes", "--detach", "--staged", B]);
+      expect(r.code, r.err).toBe(0);
+      expect(w.services.calls.find(c => c.op === "runApply")).toMatchObject({ version: B, wait: false });
+      expect(readFileSync(join(w.paths.state, "apply.env"), "utf8")).toMatch(/^MORNDO_ATTEMPT=[A-Za-z0-9_-]{22}\n$/);
+    }
+    // unequal: one sentence naming both, exit 75, nothing started — not even the attempt's apply.env
+    {
+      const w = await world({ preStageB: true });
+      const r = await w.run(["update", "--yes", "--detach", "--staged", "9.9.9"]);
+      expect(r.code, r.err).toBe(75);
+      expect(r.err).toMatch(/what stands staged is 0\.2\.0, not 9\.9\.9: nothing was started/);
+      expect(w.services.tape).toEqual([]);
+      expect(existsSync(join(w.paths.state, "apply.env"))).toBe(false);
+    }
+    // --staged rides --yes: it names the pressed Version for a command whose ask is already answered
+    {
+      const w = await world({ preStageB: true });
+      const r = await w.run(["update", "--staged", B]);
+      expect(r.code).toBe(64);
+      expect(r.err).toMatch(/usage:/);
+      expect(w.services.tape).toEqual([]);
+    }
+  }, 90_000);   // three worlds, each a signed feed and unpacked releases
+});
+
+// The hub runs the control plane's updater through packages/protocol's UPDATER_ARGS and nothing else (PR 6c R1):
+// this is the contract between the two. A list the updater answers with its usage text (exit 64) is a hub that can
+// neither read its own machine's status nor move it — round 1's hub sent `--status --json` without the `update`
+// command, and every control-plane apply answered unavailable.
+describe("the hub's argument lists (UPDATER_ARGS, PR 6c R1): the updater reads every one", () => {
+  it("status answers the schema; apply and rollback start their units — none is the usage text", async () => {
+    // status and apply share one machine: reading status changes nothing
+    const w = await world({ preStageB: true });
+    const read = await w.run(UPDATER_ARGS.status);
+    expect(read.code, read.err).toBe(0);
+    expect(read.err).not.toMatch(/usage:/);
+    expect(UpdateStatusSchema.parse(JSON.parse(read.out)).staged).toBe(B);
+    const applied = await w.run(UPDATER_ARGS.apply(B));
+    expect(applied.code, applied.err).toBe(0);
+    expect(applied.err).not.toMatch(/usage:/);
+    expect(w.services.calls.find(c => c.op === "runApply")).toMatchObject({ version: B, wait: false });
+    // rollback needs a machine with somewhere to go back to
+    const back = await world();
+    await withPrevious(back);
+    const rolled = await back.run(UPDATER_ARGS.rollback);
+    expect(rolled.code, rolled.err).toBe(0);
+    expect(rolled.err).not.toMatch(/usage:/);
+    expect(back.services.calls.find(c => c.op === "runApply")).toMatchObject({ version: "rollback", wait: false });
+  }, 90_000);   // two worlds, each a signed feed and unpacked releases
 });
 
 describe("`morndo update tick` — the timer's own command (§6.1, §8.3)", () => {
@@ -309,43 +366,42 @@ describe("`morndo update boot` — the boot apply (§6.7)", () => {
   });
 });
 
-describe("`morndo update --rollback` — asks first on a preview, then its own unit (§8.1, §6.5, §11.4, §5)", () => {
-  // The plan of the commit that put A here, in the case that matters to a rollback: it migrated the fleet
-  // database across a raised floor (RL8), so going back restores the Backup and drops the writes since.
-  const RESTORES_FLEET: Record<DatabaseName, MigrationStep> = {
-    hub: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.hub.version, restoreOnRollback: false },
-    fleet: { willMigrate: true, backupRequired: true, expectedSchema: SCHEMAS_A.fleet.version, restoreOnRollback: true },
-    node: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.node.version, restoreOnRollback: false },
-    connections: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.connections.version, restoreOnRollback: false },
-  };
+// The plan of the commit that put A here, in the case that matters to a rollback: it migrated the fleet
+// database across a raised floor (RL8), so going back restores the Backup and drops the writes since.
+const RESTORES_FLEET: Record<DatabaseName, MigrationStep> = {
+  hub: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.hub.version, restoreOnRollback: false },
+  fleet: { willMigrate: true, backupRequired: true, expectedSchema: SCHEMAS_A.fleet.version, restoreOnRollback: true },
+  node: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.node.version, restoreOnRollback: false },
+  connections: { willMigrate: false, backupRequired: false, expectedSchema: SCHEMAS_A.connections.version, restoreOnRollback: false },
+};
 
-  // A machine with somewhere to go back to: 0.0.9 installed and linked as previous. With `restoreFleet`, the
-  // commit that put A here is on record with the plan above, and its fleet Backup sits on disk three hours old —
-  // the span §11.4's ask names.
-  const withPrevious = async (w: World, o: { restoreFleet?: boolean } = {}): Promise<void> => {
-    const stale = versionFixture({ version: "0.0.9", schemas: SCHEMAS_A });
-    const archive = join(w.home, "stale.tar.gz");
-    writeFileSync(archive, stale.archive);
-    const installer = new DirsInstaller({ releases: w.paths.releases });
-    const unpacked = await installer.unpack(archive, stale.version, { filesSha256: stale.filesSha256, maxBytes: 1 << 20 });
-    if (!unpacked.ok) throw new Error(`0.0.9 did not unpack: ${unpacked.reason}`);
-    installer.promote(stale.version, { manifestSha256: stale.manifestSha256, filesSha256: stale.filesSha256, at: NOW });
-    installer.swap({ current: A, previous: stale.version });
-    if (o.restoreFleet !== true) return;
-    const backupAt = Date.now() - 3 * 3600_000;
-    w.store.saveUpdate({
-      id: "upd-commit", kind: "update", target: parseVersion(A)!, preUpdate: { current: parseVersion(stale.version)!, previous: null },
-      state: "committed", mark: null, backups: [], migrations: RESTORES_FLEET,
-      format: 1, startedAt: backupAt, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null,
-    });
-    const file = join(w.paths.state, "backups", "upd-commit", "fleet.db");
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-    writeFileSync(file, "the fleet database as it was at the backup", { mode: 0o600 });
-    utimesSync(file, new Date(backupAt), new Date(backupAt));
-  };
+// A machine with somewhere to go back to: 0.0.9 installed and linked as previous. With `restoreFleet`, the
+// commit that put A here is on record with the plan above, and its fleet Backup sits on disk three hours old —
+// the span §11.4's ask names.
+const withPrevious = async (w: World, o: { restoreFleet?: boolean } = {}): Promise<void> => {
+  const stale = versionFixture({ version: "0.0.9", schemas: SCHEMAS_A });
+  const archive = join(w.home, "stale.tar.gz");
+  writeFileSync(archive, stale.archive);
+  const installer = new DirsInstaller({ releases: w.paths.releases });
+  const unpacked = await installer.unpack(archive, stale.version, { filesSha256: stale.filesSha256, maxBytes: 1 << 20 });
+  if (!unpacked.ok) throw new Error(`0.0.9 did not unpack: ${unpacked.reason}`);
+  installer.promote(stale.version, { manifestSha256: stale.manifestSha256, filesSha256: stale.filesSha256, at: NOW });
+  installer.swap({ current: A, previous: stale.version });
+  if (o.restoreFleet !== true) return;
+  const backupAt = Date.now() - 3 * 3600_000;
+  w.store.saveUpdate({
+    id: "upd-commit", kind: "update", target: parseVersion(A)!, preUpdate: { current: parseVersion(stale.version)!, previous: null },
+    state: "committed", mark: null, backups: [], migrations: RESTORES_FLEET,
+    format: 1, startedAt: backupAt, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null,
+  });
+  const file = join(w.paths.state, "backups", "upd-commit", "fleet.db");
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  writeFileSync(file, "the fleet database as it was at the backup", { mode: 0o600 });
+  utimesSync(file, new Date(backupAt), new Date(backupAt));
+};
 
-  // The apply unit's whole work as a script, as `update`'s test scripts it: one rollback-kind record, ended.
-  const unitRollsBack = (w: World): void => {
+// The apply unit's whole work as a script, as `update`'s test scripts it: one rollback-kind record, ended.
+const unitRollsBack = (w: World): void => {
     w.services.runApplyScript = async () => {
       const unit = openUpdateStore({ db: w.paths.db, lock: w.paths.lock });
       unit.saveUpdate({
@@ -358,6 +414,7 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
     };
   };
 
+describe("`morndo update --rollback` — asks first on a preview, then its own unit (§8.1, §6.5, §11.4, §5)", () => {
   it("--rollback with a restore lists what it drops and needs the typed word", async () => {
     // no terminal and no --yes: a usage error, one sentence, and nothing started
     {

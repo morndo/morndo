@@ -14,7 +14,7 @@ import { ReadingService } from "./application/reading-service.ts";
 import { PresenceService } from "./application/presence-service.ts";
 import { NotificationService } from "./application/notification-service.ts";
 import { loadOrCreateVapid, pushSender } from "./adapters/webpush.ts";
-import { loadOrCreateIdentity } from "./adapters/identity.ts";
+import { loadOrCreateIdentity, writeIdentityPub } from "./adapters/identity.ts";
 import { fleetForUpdates } from "./adapters/fleet-updates.ts";
 import { principalSigner } from "./adapters/principal-signer.ts";
 import { updaterCli } from "./adapters/updater-cli.ts";
@@ -130,6 +130,9 @@ function openStore(dir: string): Store {
   }
 }
 const identity = loadOrCreateIdentity(config.dataDir);
+// The same key where the fleet reads it (PR 6c round 2, R2): every start rewrites identity.pub, so a production
+// fleet without a pinned principalKey finds the hub's key without anyone installing it by hand.
+writeIdentityPub(config.dataDir, identity.publicKeyRaw);
 const access = new AccessService(store, passkeys(config));
 const [cmd = "serve", ...args] = process.argv.slice(2);
 const when = (t: number | null) => (t === null ? "-" : new Date(t).toLocaleString());

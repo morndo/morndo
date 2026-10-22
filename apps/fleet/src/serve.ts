@@ -39,8 +39,8 @@ import { LaneEventsPush } from "./application/lane-events-push.ts";
 import { LaneRegistry } from "./application/lane-registry.ts";
 import { LaneWatch, REBUILD_WINDOW_MS } from "./application/lane-watch.ts";
 import { CONTROL_PLANE_MACHINE, Rollouts } from "./application/rollouts.ts";
-import { CLOSED_ROLLOUT_AUTHORITY, type RolloutAuthority } from "./adapters/client-api.ts";
-import { decodePrincipalKey, principalAuthority } from "./adapters/principal-check.ts";
+import type { RolloutAuthority } from "./adapters/client-api.ts";
+import { decodePrincipalKey, hubFilePrincipalAuthority, hubIdentityPubFile, principalAuthority } from "./adapters/principal-check.ts";
 import { UpdaterStateWatch, updaterStateFile } from "./adapters/updater-state-watch.ts";
 import { Router } from "./application/router.ts";
 import { Runs } from "./application/runs.ts";
@@ -55,8 +55,12 @@ export type FleetOptions = {
   // Who may commit a Rollout (the control plane's updater) and who may resume one or ask update.apply (the
   // principal, with step-up). Closed unless a check says yes (review of #107): the socket is the user's, and a lane
   // runs as that user too. An explicit authority here wins (the tests'); otherwise the config's pinned principalKey
-  // (updates §5.4, PR 6c) opens the principal's two doors to the hub's signed assertion. Not in the config file.
+  // (updates §5.4, PR 6c) opens the principal's two doors to the hub's signed assertion, and without a pin the
+  // hub's own identity.pub does, read at each check (PR 6c round 2, R2). Neither is in the config file.
   rolloutAuthority?: RolloutAuthority;
+  // Where the fleet reads the hub's public key when the config pins none (R2): the hub's identity.pub. Default the
+  // hub's own data dir (MORNDO_HOME, else ~/.local/share/morndo), as the hub decides it.
+  principalKeyFile?: string;
   // The control plane's own updater's state file (updates §7): its rollback halts the Rollout. Default under HOME.
   updaterStatePath?: string;
   laneWatchSweepMs?: number;
@@ -231,7 +235,9 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     api = await startClientApi(config.socketPath, {
       router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, runs: laneRuns, rollouts,
       rolloutAuthority: o.rolloutAuthority
-        ?? (config.principalKey !== undefined ? principalAuthority(decodePrincipalKey(config.principalKey), { now }) : CLOSED_ROLLOUT_AUTHORITY),
+        ?? (config.principalKey !== undefined
+          ? principalAuthority(decodePrincipalKey(config.principalKey), { now })
+          : hubFilePrincipalAuthority(o.principalKeyFile ?? hubIdentityPubFile(), { now })),
       log,
       ...(o.eventsBufferBytes === undefined ? {} : { eventsBufferBytes: o.eventsBufferBytes }),
       updates: { held: () => watch.held, flight },

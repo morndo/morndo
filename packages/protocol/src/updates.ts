@@ -9,6 +9,19 @@ import { SEMVER } from "./releases.ts";
 import { NODE_NAME } from "./worker-id.ts";
 import type { NodeUpdateHealth, RolloutWire } from "./fleet.ts";
 
+// The argument lists the hub runs the control plane's updater CLI with (PR 6c): one place, so the hub, its tests
+// and the updater's own command line cannot drift apart — the updater's first word is its command (`update`;
+// apps/updater/src/cli.ts answers the usage text, exit 64, for anything else). `apply` takes the Version the
+// Updates screen pressed, and `--staged` (round 2, R3) makes that the only one the run applies.
+export const UPDATER_ARGS = {
+  /** What this machine believes: `update --status --json`. */
+  status: ["update", "--status", "--json"],
+  /** Apply exactly the pressed Version, detached: `update --yes --detach --staged <v>`. */
+  apply: (version: string): string[] => ["update", "--yes", "--detach", "--staged", version],
+  /** Back to the Version before, detached: `update --rollback --yes --detach`. */
+  rollback: ["update", "--rollback", "--yes", "--detach"],
+};
+
 // What `morndo update --status --json` prints, as the hub passes it on (§8.1): null when the updater did not answer.
 export type UpdaterStatus = z.output<typeof UpdateStatusSchema>;
 export type UpdatesNodeStatus = "online" | "stale" | "offline";

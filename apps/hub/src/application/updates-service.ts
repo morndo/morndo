@@ -18,6 +18,9 @@ export type UpdatesCommandOutcome =
   // The control plane's updater does not say this Version stands staged: the hub commands only what its own machine
   // already holds ready (updates §4.3: a Release is staged before it is applied).
   | { ok: false; problem: "not_staged"; message: string }
+  // The machine named is no machine the fleet lists: no one to command. An empty list proves nothing (the fleet
+  // may just not be answerable), so only a list that answers and omits it refuses here.
+  | { ok: false; problem: "unknown_machine"; message: string }
   // A node's rollback is its own hand: `morndo update --rollback` on that machine, never a remote one (§5.4).
   | { ok: false; problem: "not_yet"; message: string }
   | { ok: false; problem: "refused"; code: string; message: string }
@@ -60,18 +63,27 @@ export class UpdatesService {
   }
 
   async apply(a: Authenticated, machine: string, version: string): Promise<UpdatesCommandOutcome> {
+    // The command gate first (round 2, R4): a session that may not command is answered before anything is asked —
+    // no fleet round trip, no 10 s CLI status — so a refused command costs the caller nothing but the refusal.
     if (!this.#command(a)) return { ok: false, problem: "step_up" };
     if (machine === CONTROL_PLANE_MACHINE) {
       // Only what stands staged (§4.3): the updater swaps to a Version it holds, never one named over it.
       const status = await this.#cli.status();
-      if (status === null) return { ok: false, problem: "unavailable", message: "the control plane's updater did not answer (--status --json)" };
+      if (status === null) return { ok: false, problem: "unavailable", message: "the control plane's updater did not answer (update --status --json)" };
       if (status.staged !== version) {
         return { ok: false, problem: "not_staged", message: `what stands staged on the control plane is ${status.staged ?? "nothing"}` };
       }
-      try { await this.#cli.applyDetached(); }
+      try { await this.#cli.applyDetached(version); }
       catch (e) { return { ok: false, problem: "unavailable", message: `the control plane's updater did not take the command: ${(e as Error).message}` }; }
       this.#audit(a, "update.apply", machine, version);
       return { ok: true };
+    }
+    // A node is checked against the screen the button was pressed on: the fleet's own node list, and nothing
+    // wider. An empty list proves nothing (the fleet may just not be answerable); a fleet that cannot be asked
+    // answers through the write it refuses next.
+    const known = await this.#fleet.nodes();
+    if (known.ok && known.nodes.length > 0 && !known.nodes.some(n => n.name === machine)) {
+      return { ok: false, problem: "unknown_machine", message: `${machine} is no machine the fleet lists` };
     }
     const r = await this.#fleet.applyUpdate(machine, version, this.#sign({ op: "update.apply", version, node: machine }, this.#now()));
     return this.#done(r, a, "update.apply", machine, version);
