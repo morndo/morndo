@@ -46,7 +46,7 @@ import { openJobRuntime, type JobRuntime } from "./ops/job-runtime.ts";
 import { nodeOpener } from "./ops/node-files.ts";
 import { createOpsRuntime } from "./ops/runtime.ts";
 import { agentPaths } from "./paths.ts";
-import { readBoardToken } from "./relay/board-token.ts";
+import { dropAgentTokenEnv, readBoardToken } from "./relay/board-token.ts";
 import { notLiveFromHub } from "./relay/board-view.ts";
 import { replyStyleAsk, type NotLiveOf } from "./relay/digest-check.ts";
 import { RelayFiles } from "./relay/relay-files.ts";
@@ -184,7 +184,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   // The reply style ask's not-live rule (T-308, digest-check.ts): the board is read with the token in the board-token
   // file, when a Stop needs it. The token is not read from the environment: it would be in the tmux server's and every
   // lane's. Without a hub, or with no usable file, only the length and jargon rules run.
-  if (process.env.MORNDO_AGENT_TOKEN) log.warn(`MORNDO_AGENT_TOKEN is set in the node's environment and is ignored: every lane it starts would hold it. Put the board token in ${paths.boardTokenFile} (mode 600)`);
+  if (dropAgentTokenEnv()) log.warn(`MORNDO_AGENT_TOKEN was set in the node's environment: it is removed from it and ignored, as every lane it starts would hold it. Put the board token in ${paths.boardTokenFile} (mode 600)`);
   const boardHub = config.hub ?? "";
   const notLiveOf = (lane: string): NotLiveOf | undefined => boardHub === "" ? undefined : async () => {
     const token = readBoardToken(paths.boardTokenFile);

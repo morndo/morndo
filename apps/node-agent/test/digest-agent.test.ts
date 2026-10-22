@@ -85,13 +85,26 @@ describe("the board token of the reply style ask", () => {
     expect(seen).toEqual([]);
   });
 
-  it("does not read the token from the environment: it would reach every lane the node starts, so it is ignored and said so", async () => {
+  it("does not read the token from the environment: it is removed from it at start, and said so", async () => {
     process.env.MORNDO_AGENT_TOKEN = TOKEN;
     const { agent, post, lines } = await runAgent(config);
     stops.push(() => agent.stop());
+    expect(process.env.MORNDO_AGENT_TOKEN).toBeUndefined();
     expect(await (await post("/hook/stop", stop(DIGEST))).json()).toEqual({ ok: true, queued: true });
     expect(seen).toEqual([]);
-    expect(lines.join("\n")).toMatch(/MORNDO_AGENT_TOKEN is set in the node's environment and is ignored/);
+    expect(lines.join("\n")).toMatch(/MORNDO_AGENT_TOKEN was set in the node's environment: it is removed from it and ignored/);
+  });
+
+  it("a tmux server and a lane started after the agent have no token even when the node's environment had one", async () => {
+    process.env.MORNDO_AGENT_TOKEN = TOKEN;
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    t.tmux("new-session", "-d", "-s", "main", "-n", "base", "sleep 600");     // the server takes the environment as it is now
+    const out = join(home.home, "lane-env-2.txt");
+    t.tmux("new-window", "-d", "-t", "main", "-n", "worker", `env > '${out}'; sleep 600`);
+    expect(await until(() => existsSync(out) && readFileSync(out, "utf8").includes("PATH="))).toBe(true);
+    expect(readFileSync(out, "utf8")).not.toContain(TOKEN);
+    expect(readFileSync(out, "utf8")).not.toContain("MORNDO_AGENT_TOKEN");
   });
 
   it("a lane started after it has read the token has no token in its environment, and the agent put none in its own", async () => {

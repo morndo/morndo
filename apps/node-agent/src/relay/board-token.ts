@@ -1,6 +1,6 @@
 // The token the reply style ask (digest-check.ts) reads the hub's board with. A token in the node's environment would be in
 // the environment of the tmux server it hosts and of every lane started in it, so it is read from a file, when it is used,
-// and never copied anywhere: the file must be a plain file (not a link) that only its owner can read, one token without
+// and never copied anywhere (a MORNDO_AGENT_TOKEN a unit still sets is removed from the environment at start, below): the file must be a plain file (not a link) that only its owner can read, one token without
 // white space. Anything else gives null, and the not-live rule is skipped.
 import { closeSync, constants, fstatSync, openSync, readSync } from "node:fs";
 
@@ -17,4 +17,14 @@ export function readBoardToken(file: string): string | null {
     const token = buf.subarray(0, n).toString("utf8").trim();
     return /^[\x21-\x7e]+$/.test(token) ? token : null;
   } catch { return null; } finally { closeSync(fd); }
+}
+
+// The variable lanes use for their own tokens (docs/agents/board.md). If the node's environment holds one, the tmux server
+// and every lane started from it would inherit the node's, so `run` removes it before it hosts tmux, and the agent again
+// for anything that starts it otherwise. True when a token was there, so the caller can say so.
+export const AGENT_TOKEN_ENV = "MORNDO_AGENT_TOKEN";
+export function dropAgentTokenEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  const had = (env[AGENT_TOKEN_ENV] ?? "") !== "";
+  delete env[AGENT_TOKEN_ENV];
+  return had;
 }

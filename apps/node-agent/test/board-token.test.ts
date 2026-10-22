@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { readBoardToken } from "../src/relay/board-token.ts";
+import { dropAgentTokenEnv, readBoardToken } from "../src/relay/board-token.ts";
 import { tempHome } from "./helpers.ts";
 
 let home: { home: string; cleanup: () => void };
@@ -47,5 +47,17 @@ describe("the board token file", () => {
       write(text);
       expect(readBoardToken(file), JSON.stringify(text.slice(0, 20))).toBeNull();
     }
+  });
+});
+
+describe("MORNDO_AGENT_TOKEN in the node's environment", () => {
+  it("is removed from the environment it is given, and says whether a token was there", () => {
+    const env: NodeJS.ProcessEnv = { MORNDO_AGENT_TOKEN: "mgr_secret-token", PATH: "/bin", MORNDO_LANE: "manager" };
+    expect(dropAgentTokenEnv(env)).toBe(true);
+    expect(env).toEqual({ PATH: "/bin", MORNDO_LANE: "manager" });
+    expect(dropAgentTokenEnv(env)).toBe(false);
+    const empty: NodeJS.ProcessEnv = { MORNDO_AGENT_TOKEN: "" };
+    expect(dropAgentTokenEnv(empty)).toBe(false);                         // nothing to warn about, and nothing left
+    expect(empty).toEqual({});
   });
 });
