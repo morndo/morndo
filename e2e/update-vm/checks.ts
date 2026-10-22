@@ -16,18 +16,19 @@ export type Owner = { pid: number; started: string };
 // What /proc says of a process: its start time; "gone" only when its stat is not there (ENOENT); "unknown" when it
 // cannot be read or parsed for any other reason (hidepid, another PID namespace on one Docker daemon) — never taken
 // for gone, so a live run's leftovers are never swept on a guess.
-function startedOf(pid: number, procRoot: string): string | "gone" | "unknown" {
+type Seen = { kind: "running"; started: string } | { kind: "gone" } | { kind: "unknown" };
+function startedOf(pid: number, procRoot: string): Seen {
   let stat: string;
   try { stat = readFileSync(join(procRoot, String(pid), "stat"), "utf8"); }
-  catch (error) { return (error as NodeJS.ErrnoException).code === "ENOENT" ? "gone" : "unknown"; }
+  catch (error) { return { kind: (error as NodeJS.ErrnoException).code === "ENOENT" ? "gone" : "unknown" }; }
   const fields = stat.slice(stat.lastIndexOf(")") + 2).trim().split(/\s+/);   // field 3 on; the comm may hold spaces
   const started = fields[19];                                                  // field 22
-  return started !== undefined && /^\d+$/.test(started) ? started : "unknown";
+  return started !== undefined && /^\d+$/.test(started) ? { kind: "running", started } : { kind: "unknown" };
 }
 
 export function ownerOf(pid: number, procRoot = "/proc"): Owner {
-  const started = startedOf(pid, procRoot);
-  return { pid, started: started === "gone" || started === "unknown" ? "" : started };
+  const seen = startedOf(pid, procRoot);
+  return { pid, started: seen.kind === "running" ? seen.started : "" };
 }
 export const ownerText = (o: Owner): string => `${o.pid}:${o.started}`;
 export function parseOwner(text: string): Owner | null {
@@ -37,9 +38,9 @@ export function parseOwner(text: string): Owner | null {
 /** Whether the run that owns a leftover may still run: that pid with that start time, or a process /proc will not
  *  show (unknown is kept). False only for a pid that is not there, or is another process now. */
 export function ownerAlive(o: Owner, procRoot = "/proc"): boolean {
-  const started = startedOf(o.pid, procRoot);
-  if (started === "unknown") return true;
-  return started !== "gone" && started === o.started;
+  const seen = startedOf(o.pid, procRoot);
+  if (seen.kind === "unknown") return true;
+  return seen.kind === "running" && seen.started === o.started;
 }
 // A leftover whose owner says nothing parseable (one from before owners were written) is a gone run's.
 const gone = (owner: string, procRoot: string): boolean => {
