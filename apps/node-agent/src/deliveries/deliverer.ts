@@ -76,7 +76,7 @@ export type DraftStashDeps = { lanes: readonly string[]; afterMs: number; save: 
 export type DelivererDeps = {
   store: DeliveryStore; executor: Executor; panes: PaneView; transcripts: TranscriptView; now: () => number;
   emit: (d: Delivery) => void; log: Logger; stash?: DraftStashDeps;
-  hooks?: Pick<TestHooks, "noSessionBinding" | "retypeUnderFirstKey" | "deliveryStartGraceMs">;
+  hooks?: Pick<TestHooks, "noSessionBinding" | "retypeUnderFirstKey" | "deliveryStartGraceMs" | "cancelBusyTimes">;
 };
 
 const WAIT_CODES: ReadonlySet<ErrorCode> = new Set<ErrorCode>(["menu_open", "draft_present", "no_input_box", "busy", "no_pane"]);
@@ -180,10 +180,19 @@ export class Deliverer {
   cancel(id: string): OpResult["delivery.cancel"] | OpError {
     const d = this.#d.store.get(id);
     if (!d) return err("bad_args", "no delivery with that id on this node");
-    if (this.#trying.has(id)) return err("busy", "the delivery is being typed right now; ask again in a moment");
+    if (this.#trying.has(id) || this.#busyByHook()) return err("busy", "the delivery is being typed right now; ask again in a moment");
     if (d.state === "given_up") return { delivery: d };
     if (d.state !== "queued") return err("already_typed", "the delivery was typed already and can't be cancelled");
     return { delivery: this.#change(d, { state: "given_up", why: "cancelled" }) };
+  }
+
+  // The drill's cancelBusyTimes hook: the first that-many cancels meet a delivery "being typed" (test-hooks.ts).
+  #busyAnswered = 0;
+  #busyByHook(): boolean {
+    const times = this.#d.hooks?.cancelBusyTimes ?? 0;
+    if (this.#busyAnswered >= times) return false;
+    this.#busyAnswered += 1;
+    return true;
   }
 
   kick(_reason: KickReason): void { this.#schedule(); }
