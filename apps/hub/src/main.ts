@@ -321,7 +321,7 @@ switch (cmd) {
     shutdown.onStop(() => transcription.close());
     void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
     const http = startHttp({
-      config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
+      config, identity, access, observation, steering, escalations, remote, store, files, inbox, reading, presence,
       push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
       transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
     });

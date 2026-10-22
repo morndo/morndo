@@ -14,6 +14,7 @@ import { chats, digest } from "../application/chats.ts";
 import type { PresenceService } from "../application/presence-service.ts";
 import type { Config } from "../config.ts";
 import type { HubIdentity } from "./identity.ts";
+import type { Store } from "./store.ts";
 import type { AccessService, Authenticated } from "../application/access-service.ts";
 import type { ObservationService, OlderResult } from "../application/observation-service.ts";
 import type { SendResult, SteeringService } from "../application/steering-service.ts";
@@ -209,7 +210,7 @@ export function healthDetail(opts: { remoteAddress: string | undefined; proxyLog
 
 export function startHttp(p: {
   config: Config; identity: HubIdentity; access: AccessService; observation: ObservationService; steering: SteeringService; escalations: EscalationService;
-  remote: RemoteService; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
+  remote: RemoteService; store: Store; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
   reading?: ReadingService | null;
   updates?: { schema?: number; holdPath?: string; now?: () => number };
   presence?: PresenceService | null;                                        // ADR-0011: his last activity per device
@@ -294,9 +295,11 @@ export function startHttp(p: {
     return json(res, 200, { ...productStamp(), schema: schemaVersion, ready: true, held: watch.held, inFlight: flight.list() });
   }
 
-  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).
+  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2). Each names the
+  // database's store (RL10, §11.5), so a device can stamp each Command with the hub store it saw before its first
+  // attempt and a restored hub — another store — answers it uncertain instead of typing it twice.
   const json = (res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}, path = "") => {
-    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
+    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", "Morndo-Store": p.store.storeId, ...extra });
     res.end(JSON.stringify(redactResponse(path, body)));
   };
   const setCookie = (secret: string) =>

@@ -50,7 +50,7 @@ beforeAll(async () => {
     ledger: null, store, managerName: "manager", send: async () => ({ problem: null, typedAt: 0 }),
   });
   const remote = new RemoteService({ store, terminal: { frame: async () => null, keys: async () => false }, panes: () => ["%1"], desktop: () => null });
-  http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, observation, steering: new SteeringService(store, tmux), escalations, remote });
+  http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, store, observation, steering: new SteeringService(store, tmux), escalations, remote });
   await http.ready;
   base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
 });

@@ -240,6 +240,13 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("UPDATE board_tasks SET state_changed_at = updated_at");
     },
   },
+  {
+    version: 24,
+    name: "hub_store: the store id of this database file, renewed by every restore, so a Command stamped with another store is answered uncertain and never typed twice (RL10, amending S5)",
+    compat: "additive",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS hub_store (
+      id INTEGER PRIMARY KEY CHECK (id = 1), store TEXT NOT NULL, identity TEXT NOT NULL)`),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
