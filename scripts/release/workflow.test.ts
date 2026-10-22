@@ -155,8 +155,14 @@ describe("release pipeline files", () => {
     expect(outside).not.toContain("environment:");
     expect(outside).not.toContain("RELEASE_SSH_KEY");
     expect(outside).not.toContain("FEED_SSH_KEY");
-    expect(outside).toContain("contents: read");
+    // The release is still a draft here, and GitHub lists a draft only to a token with push access ("Only users with push
+    // access will receive listings for draft releases", REST releases docs): with contents: read, `gh release download`
+    // said "release not found" in the bench's run. The job holds no signing key and uploads nothing.
+    expect(outside).toContain("contents: write");
+    expect(outside).not.toContain("contents: read");
     expect(outside).toContain("attestations: read");
+    expect(outside).not.toContain("gh release upload");
+    expect(outside).not.toContain("gh release edit");
     expect(outside).toContain("trust/release_allowed_signers");
     expect(outside).toContain("ssh-keygen -Y verify");
     expect(outside).toContain("gh attestation verify");

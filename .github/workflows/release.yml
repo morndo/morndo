@@ -377,8 +377,12 @@ jobs:
     needs: [release-please, publish]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    # contents: write is only to see the draft: GitHub lists a draft release only to a token with push access
+    # (https://docs.github.com/en/rest/releases/releases, "List releases", read 2026-10-22), and with contents: read
+    # `gh release download` answered "release not found" in the release bench's run. This job holds no signing key and
+    # uploads or edits nothing; it only reads, and checks.
     permissions:
-      contents: read
+      contents: write
       attestations: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
