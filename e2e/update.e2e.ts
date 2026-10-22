@@ -1,14 +1,19 @@
 // The end-to-end run on a throwaway machine (design §13, e2e/update-vm/): a whole systemd in a Docker container,
-// Morndo installed into it as install.sh would, then one update that commits, one rollback, one update that
-// fails health and rolls the machine back — every step a JSON check line from the scenario inside the machine
-// (e2e/update-vm/scenario.ts). The host side builds the three Releases (e2e/update-vm/build.ts), builds the
-// machine, copies the bundle in, runs the scenario under the unpacked A tree's own Node, and copies the
-// evidence out. Nothing of this run touches the host's own Morndo, and nothing is left behind: the container is
-// removed in the finally block and the run asserts no container with its label remains.
+// Morndo installed into it as install.sh would, then the whole update story — one update that commits, one
+// rollback, one update that fails health and rolls the machine back, the first update killed mid-walk for the
+// recovery timer to finish alone, kills before and after the swap answered by `update recover`, a migration that
+// throws, a Version that dies in probation with revocations typed across its restore, and a full disk under the
+// Backup — every step a JSON check line from the scenario inside the machine (e2e/update-vm/scenario.ts). The
+// host side builds the six Releases (e2e/update-vm/build.ts), builds the machine, copies the bundle in, runs the
+// scenario under the unpacked A tree's own Node, and copies the evidence out. Nothing of this run touches the
+// host's own Morndo, and nothing is left behind: the container is removed in the finally block and the run
+// asserts no container with its label remains.
 //
 // The rules the run holds itself to (PR 5d): every container and image carries the label morndo-c2-e2e; no host
 // mounts, no host network, no published ports — files move by docker cp only; no other container, image or
-// volume is ever named. A hard power loss is not tested here (docker kill is not one); that stays manual QA.
+// volume is ever named. The one extra mount the full-disk step needs is a tmpfs of the container's own memory
+// (/mnt/tiny, 64k), not a host mount. A hard power loss is not tested here (docker kill is not one); that stays
+// manual QA.
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -45,8 +50,8 @@ const started = Date.now();
 let scratch: string | null = null;
 let containerStarted = false;
 try {
-  // ---- the three Releases, signed, and the three publish points (build.ts does it the pipeline's way).
-  process.stdout.write(`building the three releases (this takes a few minutes)…\n`);
+  // ---- the six Releases, signed, and the six publish points (build.ts does it the pipeline's way).
+  process.stdout.write(`building the six releases (this takes a few minutes)…\n`);
   const world = buildWorld(ROOT);
   scratch = world.scratch;
 
@@ -67,9 +72,12 @@ try {
   const built = docker(["build", "-t", IMAGE, "--label", `${LABEL}=1`, join(ROOT, "e2e/update-vm")], { timeoutMs: 600_000 });
   if (built.code !== 0) throw new Error(`docker build failed: ${built.err}`);
 
+  // /mnt/tiny is the full-disk step's own little disk: 64k of the container's memory, owned by the worker, so
+  // the Backup that lands on it cannot fit. A tmpfs is not a host mount (nothing of the host is in it).
   const startedRun = docker([
     "run", "-d", "--name", CONTAINER, "--label", `${LABEL}=1`, "--privileged", "--cgroupns=private",
-    "-e", "container=docker", "--tmpfs", "/run", "--tmpfs", "/run/lock", "--tmpfs", "/tmp", IMAGE,
+    "-e", "container=docker", "--tmpfs", "/run", "--tmpfs", "/run/lock", "--tmpfs", "/tmp",
+    "--tmpfs", "/mnt/tiny:size=64k,uid=1000,gid=1000,mode=0700", IMAGE,
   ]);
   if (startedRun.code !== 0) throw new Error(`docker run failed: ${startedRun.err}`);
   containerStarted = true;
@@ -101,14 +109,15 @@ try {
   const owned = docker(["exec", CONTAINER, "chown", "-R", "worker:worker", "/srv/worker/e2e"], { timeoutMs: 300_000 });
   if (owned.code !== 0) throw new Error(`chown of the bundle failed: ${owned.err}`);
 
-  // ---- the scenario, inside the machine, under the unpacked A tree's own Node.
-  process.stdout.write(`running the scenario inside the machine (several minutes)…\n`);
+  // ---- the scenario, inside the machine, under the unpacked A tree's own Node. The story waits minutes on the
+  // recovery timer alone, so the wall is the story's own: 50 minutes.
+  process.stdout.write(`running the scenario inside the machine (a good half hour)…\n`);
   const scenarioRun = docker([
     "exec", "-u", "worker:1000",
     "-e", "HOME=/srv/worker", "-e", "XDG_RUNTIME_DIR=/run/user/1000",
     "-e", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
     CONTAINER, "/srv/worker/e2e/tree-a/node/bin/node", "/srv/worker/e2e/scenario.ts",
-  ], { timeoutMs: 45 * 60_000 });
+  ], { timeoutMs: 50 * 60_000 });
   process.stdout.write(`${scenarioRun.out}\n`);
   if (scenarioRun.err !== "") process.stderr.write(`${scenarioRun.err}\n`);
   mkdirSync(join(outDir, "evidence"), { recursive: true });

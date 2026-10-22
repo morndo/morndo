@@ -1,10 +1,14 @@
-// The host side of the throwaway-machine run (design §13, e2e/update.e2e.ts): three whole Releases of this very
+// The host side of the throwaway-machine run (design §13, e2e/update.e2e.ts): six whole Releases of this very
 // repository, built and signed the way the pipeline builds them (§9) — scripts/release's own writers for the
 // stage, the file list, the archive, the manifest and the feed, throwaway keys made in memory by the updater's
-// test helper — plus the three publish points of the run's story. Version A (0.1.0) is the tree as it stands;
+// test helper — plus the six publish points of the run's story. Version A (0.1.0) is the tree as it stands;
 // B (0.2.0) appends one additive hub migration; C (0.3.0) appends B's change, one breaking hub migration (so the
 // old Version cannot open the database and a rollback must restore the backup) and a hub that exits 1 right
-// after its store opened. B and C exist only in the scratch copy; nothing generated lands inside the repository.
+// after its store opened; 0.3.1 appends B's change and a migration whose `up` throws (the failed migration); 0.3.2
+// appends B's change, C's breaking migration and a hub that serves and answers health normally, then exits 1
+// after 20 s (the death in probation, whose rollback restores around the revocations typed meanwhile); 0.4.0
+// appends B's change and one more additive migration (the healthy one the story ends on). Everything but A
+// exists only in the scratch copy; nothing generated lands inside the repository.
 //
 // Every path here is inside a scratch directory the caller removes (or keeps with E2E_KEEP=1); every key and
 // certificate lives in memory or in the scratch, never in the repository, and every name is made up
@@ -36,6 +40,9 @@ export const FEED_URL = `https://127.0.0.1:${FEED_PORT}/`;
 const VERSION_A = "0.1.0";
 const VERSION_B = "0.2.0";
 const VERSION_C = "0.3.0";
+const VERSION_D = "0.3.1";
+const VERSION_E = "0.3.2";
+const VERSION_F = "0.4.0";
 const CHANNEL = "stable";
 const PLATFORM = "linux-x64";
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";     // informational (§9.6); a made-up one, as a fixture's
@@ -94,13 +101,17 @@ export function buildWorld(repo: string): BuiltWorld {
   writeFileSync(join(bundle, "tls", "server.pem"), ca.serverCert);
   writeFileSync(join(bundle, "tls", "server.key"), ca.serverKey);
 
-  // One Release per Version: a scratch copy of the repository, edited for B and C, compiled, pruned, staged,
-  // trusted (trust/keys.json is the tree's own anchor, §10.1 — the stage leaves trust/ empty for the pipeline's
-  // own signing step, so it is written here and the file list is made again around it), packed and signed.
+  // One Release per Version: a scratch copy of the repository, edited for everything after A, compiled, pruned,
+  // staged, trusted (trust/keys.json is the tree's own anchor, §10.1 — the stage leaves trust/ empty for the
+  // pipeline's own signing step, so it is written here and the file list is made again around it), packed and
+  // signed.
   const releases: readonly { version: string; edit: () => readonly ((copy: string) => void)[] }[] = [
     { version: VERSION_A, edit: () => [] },
     { version: VERSION_B, edit: () => [additiveMigration()] },
     { version: VERSION_C, edit: () => [additiveMigration(), breakingMigration(), plantedHubFailure()] },
+    { version: VERSION_D, edit: () => [additiveMigration(), failingMigration()] },
+    { version: VERSION_E, edit: () => [additiveMigration(), breakingMigration(), hubDiesInProbation()] },
+    { version: VERSION_F, edit: () => [additiveMigration(), secondAdditiveMigration()] },
   ];
   const built: { version: string; archive: Buffer; manifestBytes: Buffer }[] = [];
   for (const spec of releases) {
@@ -139,9 +150,10 @@ export function buildWorld(repo: string): BuiltWorld {
     built.push({ version: spec.version, archive, manifestBytes: readFileSync(manifestPath) });
   }
 
-  // The three publish points (§13's run): feed-1 offers A, feed-2 offers A and B, feed-3 offers A, B and C.
-  // Each is a complete servable feed directory — keys, channel document, every release it lists — with the
-  // archives shared by hard link so the scratch stays honest about how much is really new.
+  // The six publish points (§13's run): feed-1 offers A, feed-2 adds B, feed-3 adds C, feed-4 adds the failed
+  // migration, feed-5 adds the probation death, feed-6 adds the healthy ending. Each is a complete servable feed
+  // directory — keys, channel document, every release it lists — with the archives shared by hard link so the
+  // scratch stays honest about how much is really new.
   let feedText: string | null = null;
   for (let i = 0; i < built.length; i++) {
     const b = built[i]!;
@@ -310,6 +322,62 @@ function plantedHubFailure(): (copy: string) => void {
 // The update-vm run's planted failure (release C; a scratch-copy edit, never shipped): the store is open — the
 // migration ran — and the hub leaves at once, only on the serve path.
 if (process.argv[2] === undefined || process.argv[2] === "serve") process.exit(1);`));
+  };
+}
+
+// 0.3.1 (the failing migration, §13's "a migration throws"): B's change, then one additive migration whose `up`
+// throws. The runner wraps every migration — floor, body, user_version — in one transaction, so the database
+// keeps exactly what it had; the hub's start refuses, the apply's health walk fails at its wall, and the rollback
+// restores nothing because nothing moved.
+function failingMigration(): (copy: string) => void {
+  return copy => {
+    const path = join(copy, "apps/hub/src/adapters/migrations.ts");
+    const text = readFileSync(path, "utf8");
+    const anchor = "];\n\nexport const SCHEMA_VERSION";
+    if (!text.includes(anchor) || !text.includes("e2e_b_marker")) throw new Error("migrations.ts: the 0.3.1 edit did not find B's change in place");
+    writeFileSync(path, text.replace(anchor, `  {
+    version: 26,
+    name: "the update-vm run's failing migration (release 0.3.1; a scratch-copy edit, never shipped)",
+    compat: "additive",
+    up: () => { throw new Error("the update-vm run's planted migration failure (release 0.3.1)"); },
+  },
+];\n\nexport const SCHEMA_VERSION`));
+  };
+}
+
+// 0.3.2 (the death in probation): B's change, C's breaking migration (so the rollback restores the hub database
+// and the revocations typed meanwhile must survive the restore), and a hub that serves and answers health
+// normally, then exits 1 after 20 s — past the health walk, inside the probation window, where a restart counts
+// against the Version. Serve path only: the console commands the run types while this hub is up (the two
+// revocations) are never the process that dies.
+function hubDiesInProbation(): (copy: string) => void {
+  return copy => {
+    const path = join(copy, "apps/hub/src/main.ts");
+    const text = readFileSync(path, "utf8");
+    const anchor = "    await running(http.ready);";
+    if (!text.includes(anchor)) throw new Error("hub main.ts: http.ready's line moved; the probation death needs a new anchor");
+    writeFileSync(path, text.replace(anchor, `${anchor}
+// The update-vm run's planted death (release 0.3.2; a scratch-copy edit, never shipped): serving and healthy,
+// then gone — serve only, so the console commands the run types while this hub is up are never the one that dies.
+if (process.argv[2] === undefined || process.argv[2] === "serve") setTimeout(() => process.exit(1), 20_000);`));
+  };
+}
+
+// 0.4.0 (the healthy ending): B's change, then one more additive hub migration — a second marker table, so the
+// story closes on a commit that migrates and holds nothing back.
+function secondAdditiveMigration(): (copy: string) => void {
+  return copy => {
+    const path = join(copy, "apps/hub/src/adapters/migrations.ts");
+    const text = readFileSync(path, "utf8");
+    const anchor = "];\n\nexport const SCHEMA_VERSION";
+    if (!text.includes(anchor) || !text.includes("e2e_b_marker")) throw new Error("migrations.ts: the 0.4.0 edit did not find B's change in place");
+    writeFileSync(path, text.replace(anchor, `  {
+    version: 26,
+    name: "the update-vm run's second additive marker (release 0.4.0; a scratch-copy edit, never shipped)",
+    compat: "additive",
+    up: db => db.exec("CREATE TABLE IF NOT EXISTS e2e_d_marker (id INTEGER PRIMARY KEY CHECK (id = 1), at INTEGER NOT NULL)"),
+  },
+];\n\nexport const SCHEMA_VERSION`));
   };
 }
 
