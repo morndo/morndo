@@ -134,6 +134,23 @@ jobs:
       - name: Verify and unpack Node
         run: sh scripts/release/verify-node.sh "$BUNDLED_NODE" "$PLATFORM" "$RUNNER_TEMP/node" "$RUNNER_TEMP/pubring.kbx"
 
+      # The units run here too, and some need tmux and ffmpeg, as ci.yml installs them (ubuntu-24.04 ships no ffmpeg:
+      # https://packages.ubuntu.com/noble/ffmpeg, read 2026-10-13). The first bench run failed seven remux tests with
+      # `spawnSync ffmpeg ENOENT` on both Linux legs.
+      - name: tmux and ffmpeg for the unit tests (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tmux ffmpeg
+          ffmpeg -version | head -n 1
+      - name: tmux and ffmpeg for the unit tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          brew install tmux ffmpeg
+          ffmpeg -version | head -n 1
+
       - name: Test, build and pack
         run: |
           set -euo pipefail
