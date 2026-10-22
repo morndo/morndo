@@ -21,7 +21,7 @@ import { runUpdater } from "../src/cli.ts";
 import {
   Die, FakeProbe, FakeServices, NOW, A, B, SCHEMAS_A, versionFixture,
 } from "./helpers/apply-fakes.ts";
-import { FakeArtifacts, FakeFeed, wipe } from "./helpers/fakes.ts";
+import { FakeArtifacts, FakeFeed, FakeFleetView, wipe } from "./helpers/fakes.ts";
 import { feedFixture, keySetDocument, makeKeys, manifestSignature, releaseFixture, type Keys, type ReleaseFixture } from "./helpers/release-fixtures.ts";
 
 const DAY = 24 * 3600_000;
@@ -42,6 +42,8 @@ type World = {
   feed: FakeFeed;
   /** The artifacts door: a test that wants the check to truly stage B serves its archive here. */
   artifacts: FakeArtifacts;
+  /** The fleet as the control plane asks it (§7): no Rollout word, and no nodes at all — the skew gate's open word. */
+  fleet: FakeFleetView;
   keys: Keys;
   b: ReleaseFixture;
   /** Also installs and stages B, as a check that already ran would have left the machine. */
@@ -112,12 +114,14 @@ async function world(o: { running?: UpdateService[]; preStageB?: boolean; offerB
   // The feed offers B unless a test asks for a machine that is already up to date (only A on the channel).
   const feed = feedOf(keys, o.offerB === false ? [a] : [b]);
   const artifacts = new FakeArtifacts(paths.downloads);
+  const fleet = new FakeFleetView();
+  fleet.nodesWord = [];                       // a control plane's apply asks the fleet's nodes (RL11): none is no hold
   const writeConfig = (doc: unknown): void => {
     mkdirSync(dirname(paths.config), { recursive: true, mode: 0o700 });
     writeFileSync(paths.config, `${JSON.stringify(doc)}\n`);
   };
   const w: World = {
-    home, paths, store, services, probe, feed, artifacts, keys, b,
+    home, paths, store, services, probe, feed, artifacts, fleet, keys, b,
     stageB: async () => {
       await install(b);
       store.recordStaged({ version: b.version, manifestSha256: b.manifestSha256, filesSha256: b.filesSha256, at: NOW - 1000, manifest: b.manifestText });
@@ -129,7 +133,7 @@ async function world(o: { running?: UpdateService[]; preStageB?: boolean; offerB
         out: s => out.push(s), err: s => err.push(s),
         ...(opts.tty === true ? { tty: true, ask: async (prompt: string) => { prompts.push(prompt); return opts.answer ?? ""; } } : {}),
       }, {
-        services, probe, feed, artifacts,
+        services, probe, feed, artifacts, fleet,
         ...(opts.timing ? { timing: opts.timing } : {}),
       });
       return { code, out: out.join(""), err: err.join(""), prompts };
@@ -160,7 +164,7 @@ describe("`morndo update` — check, then apply what stands staged (§8.1)", () 
         unit.saveUpdate({
           id: "upd-unit", kind: "update", target: parseVersion(B)!, preUpdate: { current: parseVersion(A)!, previous: null },
           state: "staged", mark: null, backups: [], migrations: null,
-          format: 1, startedAt: Date.now(), doneMarks: [], judgeBaseline: null, backupOf: null,
+          format: 1, startedAt: Date.now(), doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null,
         });
         unit.finishUpdate("upd-unit", state, Date.now());
         unit.close();
@@ -170,7 +174,7 @@ describe("`morndo update` — check, then apply what stands staged (§8.1)", () 
       expect(w.services.calls.some(c => c.op === "runApply" && c.version === B), state).toBe(true);
       expect(applyNowFile, state).toBe(false);             // no --now: the file is never written
     }
-  });
+  }, 120_000);   // four worlds, each a signed feed and two unpacked releases (68 s alone on this box)
 
   it("--now writes the apply-now file before the unit starts, and the unit's apply consumes it", async () => {
     const w = await world({ preStageB: true });
@@ -308,7 +312,7 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
     w.store.saveUpdate({
       id: "upd-commit", kind: "update", target: parseVersion(A)!, preUpdate: { current: parseVersion(stale.version)!, previous: null },
       state: "committed", mark: null, backups: [], migrations: RESTORES_FLEET,
-      format: 1, startedAt: backupAt, doneMarks: [], judgeBaseline: null, backupOf: null,
+      format: 1, startedAt: backupAt, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null,
     });
     const file = join(w.paths.state, "backups", "upd-commit", "fleet.db");
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
@@ -324,6 +328,7 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
         id: "upd-back", kind: "rollback", target: parseVersion("0.0.9")!, preUpdate: { current: parseVersion(A)!, previous: null },
         state: "rolled_back", mark: "rolling_back", backups: [], migrations: null,
         format: 1, startedAt: Date.now(), doneMarks: ["rolling_back"], judgeBaseline: null, backupOf: "upd-commit",
+        attempt: null,
       });
       unit.close();
     };
@@ -436,7 +441,7 @@ describe("`morndo update --status` — the last updates (§8.1)", () => {
     store.saveUpdate({
       id: "upd-1", kind: "update", target: parseVersion(B)!, preUpdate: { current: parseVersion(A)!, previous: null },
       state: "probation", mark: "starting", backups: [], migrations: null,
-      format: 1, startedAt: NOW, doneMarks: ["swapping"], judgeBaseline: null, backupOf: null,
+      format: 1, startedAt: NOW, doneMarks: ["swapping"], judgeBaseline: null, backupOf: null, attempt: null,
     });
     store.close();
     const r = await w.run(["update", "--status", "--json"]);

@@ -9,7 +9,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CAP_LONG_TEXT, LIMITS, NodeStatusHealth } from "@morndo/protocol";
+import { CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE, LIMITS, NodeStatusHealth } from "@morndo/protocol";
 import { Flight, holdFile, productBuild } from "@morndo/service-kit";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
 import { agentPaths } from "../src/paths.ts";
@@ -60,11 +60,24 @@ describe("over the connection", () => {
     stuck();
   });
 
-  it("its hello says it takes long messages (CAP_LONG_TEXT) beside the policy's ops", async () => {
-    const { agent } = await runAgent(config);
-    stops.push(() => agent.stop());
+  it("its hello says it takes long messages and the Rollout frame beside the policy's ops; CAP_UPDATE only with an updater installed", async () => {
+    const bare = await runAgent(config);
+    stops.push(() => bare.agent.stop());
     const hello = await fleet.waitFor(m => m.t === "hello");
-    expect((hello as Msg & { caps: string[] }).caps).toEqual([...config.policy.ops, CAP_LONG_TEXT]);
+    expect((hello as Msg & { caps: string[] }).caps).toEqual([...config.policy.ops, CAP_LONG_TEXT, CAP_ROLLOUT]);
+
+    // The updater installed — launcher and apply unit both present (updates §7) — with the policy allowing
+    // update.apply: the hello says CAP_UPDATE too, and the fleet may send the op.
+    mkdirSync(join(home.home, ".local", "bin"), { recursive: true });
+    writeFileSync(join(home.home, ".local/bin/morndo-update"), "#!/bin/sh\n");
+    mkdirSync(join(home.home, ".config/systemd/user"), { recursive: true });
+    writeFileSync(join(home.home, ".config/systemd/user/morndo-update-apply@.service"), "[Unit]\nDescription=apply\n");
+    await bare.agent.stop();
+    const before = fleet.received.length;
+    const withUpdater = await runAgent(loadConfig(home.home));
+    stops.push(() => withUpdater.agent.stop());
+    const second = await fleet.waitFor(m => m.t === "hello", 5000, before);
+    expect((second as Msg & { caps: string[] }).caps).toEqual([...config.policy.ops, CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE]);
   });
 
   it("its hello carries the build it runs: the version and the commit (the fleet's /v1/nodes shows it)", async () => {

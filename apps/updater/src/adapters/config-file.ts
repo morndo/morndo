@@ -3,9 +3,9 @@
 // never a guess. No file is the ordinary first install: the domain's defaults apply, and nothing is written until
 // a settings command runs.
 import { readFileSync } from "node:fs";
-import { DEFAULT_CHANNEL, DEFAULT_MODE, parseVersion, type UpdateSettings, type Window } from "@morndo/domain";
+import { DEFAULT_CHANNEL, DEFAULT_MODE, parseVersion, type Window } from "@morndo/domain";
 import { UpdateConfigSchema } from "@morndo/protocol";
-import type { SettingsSource } from "../application/ports.ts";
+import type { MachineSettings, SettingsSource } from "../application/ports.ts";
 
 export class ConfigInvalid extends Error {
   constructor(message: string) { super(message); this.name = "ConfigInvalid"; }
@@ -25,14 +25,14 @@ export class ConfigFile implements SettingsSource {
 
   constructor(path: string) { this.path = path; }
 
-  read(): UpdateSettings {
+  read(): MachineSettings {
     let text: string;
     try {
       text = readFileSync(this.path, "utf8");
     } catch (error) {
       // no file is a default everywhere (§8.3); a file this process cannot read is a real failure
       if ((error as NodeJS.ErrnoException).code === "ENOENT")
-        return { channel: DEFAULT_CHANNEL, mode: DEFAULT_MODE, pin: null, window: null };
+        return { channel: DEFAULT_CHANNEL, mode: DEFAULT_MODE, pin: null, window: null, soakMinutes: null };
       throw error;
     }
     let doc: unknown;
@@ -45,6 +45,8 @@ export class ConfigFile implements SettingsSource {
       mode: parsed.data.mode ?? DEFAULT_MODE,
       pin: parsed.data.pin === undefined ? null : parseVersion(parsed.data.pin),
       window: parsed.data.window === undefined ? null : windowMinutes(parsed.data.window),
+      // §4.5's soak, when the machine names one; null is the domain's own default, applied where it is used.
+      soakMinutes: parsed.data.soakMinutes ?? null,
     };
   }
 }

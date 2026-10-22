@@ -285,7 +285,8 @@ export type RunView = Run;
 // draft_stashed: a node stashed a lane's unsent draft so its deliveries could go in (#64);
 // the updates design (§7): rollout_halted — a Rollout halted, by a node's rollback or by hand; update_rolled_back — a
 // node rolled a Version back; update_rollback_failed — a rollback that did not reach the good Version;
-// update_skew_blocked — the control plane refused to ask a node for a Version above its own (RL11).
+// update_skew_blocked — the control plane held its apply while a joined node's agent protocol falls outside the
+// target's range (RL11): nothing ran, and the hold names the nodes.
 export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter", "backlog_full", "unrouted_hook",
   "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback", "draft_stashed",
   "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked"] as const;
@@ -538,8 +539,14 @@ const UpdateHealthSchema = z.object(UPDATE_HEALTH_FIELDS);
 // What a machine's updater last did, as it writes it to ~/.local/state/morndo-update/state.json (updates §7): a node's
 // agent reports it in its health; on the control plane the fleet reads it itself, so the control plane's own
 // rollback halts its Rollout without a route anyone else could call (review of #107). `at`: when it was written.
-export type UpdateStateFile = NodeUpdateHealth & { at: number };
-export const UpdateStateFileSchema = z.strictObject({ ...UPDATE_HEALTH_FIELDS, at: z.number() });
+// `soakMinutes` rides a `current` record: the commit's own soak (§4.5), the one number the fleet cannot know itself —
+// absent is the domain's default.
+export type UpdateStateFile = NodeUpdateHealth & { at: number; soakMinutes?: number };
+export const UpdateStateFileSchema = z.strictObject({
+  ...UPDATE_HEALTH_FIELDS,
+  at: z.number(),
+  soakMinutes: z.exactOptional(z.int().check(z.gte(0), z.lte(10_080))),
+});
 const HealthSchema = z.object({
   memTotal: z.number(), memAvailable: z.number(), psiSome10: z.nullable(z.number()), psiFull10: z.nullable(z.number()),
   diskFreeHome: z.number(), load1: z.number(), tmuxOk: z.boolean(), wallClock: z.number(), spoolDepth: count(), drops: count(),
@@ -610,6 +617,25 @@ export type RolloutWire = {
 export const RolloutWireSchema = z.object({
   version: releaseVersion(), controlPlaneCommittedAt: z.nullable(z.number()), soakMinutes: z.int().check(z.gte(0), z.lte(10_080)),
   halted: z.boolean(), haltedBy: z.nullable(nodeName()), haltReason: z.nullable(label()), haltedAt: z.nullable(z.number()),
+});
+
+// The fleet view file (updates §6.7, §7): ~/.local/state/morndo-node/fleet-view.json, what the node agent last heard
+// from the fleet — the build the control plane runs, the Rollout as it stands, and the offer the fleet made this node
+// (the Version it may take and the attempt id it reports a rollback of it under, §5.4) — with the moment it was
+// heard. The agent writes it; the node's updater reads it. `controlPlane` null: a fleet that ran no control plane said
+// so; `offer` null: the last word carried no offer, and a node without one applies nothing. Strict: anything else is
+// not a view, never a guess at what it might have meant.
+export type FleetViewFile = {
+  observedAt: number;
+  controlPlane: { version: string; commit: string | null } | null;
+  rollout: RolloutWire | null;
+  offer: { version: string; attempt: string } | null;
+};
+export const FleetViewFileSchema = z.strictObject({
+  observedAt: z.number(),
+  controlPlane: z.nullable(z.object({ version: semver(), commit: z.nullable(buildCommit()) })),
+  rollout: z.nullable(RolloutWireSchema),
+  offer: z.nullable(offer()),
 });
 
 // Every connection (§5.2). `caps`: the ops this node's policy allows, and capabilities beside them (CAP_LONG_TEXT;
@@ -762,5 +788,6 @@ check<Same<z.output<typeof RunViewSchema>, RunView>>(true);
 check<Same<z.output<typeof LaneStateBodySchema>, LaneStateBody>>(true);
 check<Same<z.output<typeof RolloutWireSchema>, RolloutWire>>(true);
 check<Same<z.output<typeof UpdateHealthSchema>, NodeUpdateHealth>>(true);
+check<Same<z.output<typeof FleetViewFileSchema>, FleetViewFile>>(true);
 check<Same<z.output<typeof UpdateStateFileSchema>, UpdateStateFile>>(true);
 check<Same<(typeof SESSION_STATUSES)[number], SessionStatus>>(true);

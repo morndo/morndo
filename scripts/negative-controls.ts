@@ -3197,14 +3197,14 @@ export const CONTROLS: Control[] = [
   // The review of 2026-10-21 (md-rev5 on #101): a restore must not drop a revocation, and the drain waits until the
   // services have seen the hold.
   { id: "c2a-restore-drops-revocations", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
-    find: "      if (dropped.length > 0) return failed(revocationsDropped(db, dropped, blameText, o.cause));", replace: "",
+    find: "      if (dropped.length > 0) return await failed(revocationsDropped(db, dropped, blameText, o.cause));", replace: "",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "stopped only once" },
   { id: "c2a-drain-before-hold-seen", task: "c2a", file: "apps/updater/src/application/apply-service.ts",
     find: "      const unseen = await waitHoldSeen(ctx, running);", replace: "      const unseen: string[] | null = null;",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "acknowledges the hold" },
   // The second review of 2026-10-21: the revocation check again once nothing runs, and a failed rollback on record.
   { id: "c2a-revocations-only-before-stop", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
-    find: "        await startServices(deps, o.running);\n        return failed(revocationsDropped(db, dropped, blameText, o.cause));",
+    find: "        await startServices(deps, o.running);\n        return await failed(revocationsDropped(db, dropped, blameText, o.cause));",
     replace: "        void startServices;",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "while the services stop" },
   { id: "c2a-failed-rollback-not-recorded", task: "c2a", file: "apps/updater/src/application/apply-steps.ts",
@@ -3234,8 +3234,8 @@ export const CONTROLS: Control[] = [
     replace: "return await this.nRestarts(s);",
     run: ["apps/updater/test/services-systemd.test.ts"], expect: "expected 9 to be 2" },
   { id: "c2b-tick-ignores-window", task: "c2b", file: "apps/updater/src/cli.ts",
-    find: "const applied = await applyWith(m).apply({ now: false, automatic: true, window: read.window });",
-    replace: "const applied = await applyWith(m).apply({ now: false, automatic: false, window: read.window });",
+    find: "now: false, automatic: true, window: read.window, ...(attempt === undefined ? {} : { attempt }),",
+    replace: "now: false, automatic: false, window: read.window, ...(attempt === undefined ? {} : { attempt }),",
     run: ["apps/updater/test/cli-apply.test.ts"], expect: "expected 1 to be 75" },
   { id: "c2b-install-no-linger-check", task: "c2b", file: "apps/updater/src/cli.ts",
     find: "if (!(await m.lingerEnabled())) {", replace: "if (false) {",

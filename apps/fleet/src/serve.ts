@@ -6,6 +6,7 @@
 import type Database from "better-sqlite3";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
+import { DEFAULT_SOAK_MINUTES } from "@morndo/domain";
 import type { Delivery, Health, Pane } from "@morndo/protocol";
 import { Flight, HoldWatch, assertLocalDisk, holdFile, productBuild } from "@morndo/service-kit";
 import type { FleetConfig } from "./config.ts";
@@ -102,10 +103,22 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   // A node's updater reports with its health (updates §6.3, §7): a rollback alerts and halts the Rollout of the
   // Version it was leaving (RL12).
   // The control plane's own rollback, from its updater's state file (review of #107): the internal path, the only
-  // one besides a node's own health that halts without the principal.
+  // one besides a node's own health that halts without the principal. The state file is the control plane updater's
+  // only word out (§4.5, PR 6b), so the same read carries its commit — a `current` record of the fleet's own running
+  // Version, at the record's own moment and soak, so a re-read (a restart among them) changes nothing — and its skew
+  // hold: a `waiting` record whose reason names the nodes RL11 held it for. Both beside the health path, which still
+  // registers the `applying` attempt and halts a rollback under it.
   const updaterWatch = new UpdaterStateWatch({
     path: o.updaterStatePath ?? updaterStateFile(),
-    onReport: r => rollouts.health(CONTROL_PLANE_MACHINE, r, { own: true }),
+    onReport: r => {
+      if (r.state === "current" && r.version === rollouts.controlPlane().version)
+        rollouts.committed(r.version, r.soakMinutes ?? DEFAULT_SOAK_MINUTES, r.at);
+      if (r.state === "waiting" && r.reason !== undefined && r.reason.startsWith("skew_blocked:")) {
+        const nodes = r.reason.slice("skew_blocked:".length).split(",").map(s => s.trim()).filter(s => s !== "");
+        rollouts.skewBlocked(r.target ?? r.version, nodes);
+      }
+      rollouts.health(CONTROL_PLANE_MACHINE, r, { own: true });
+    },
   });
   updaterWatch.start();
   events.subscribe(e => {

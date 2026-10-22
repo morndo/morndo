@@ -1,10 +1,14 @@
 # One apply, as its own unit (design §5): started by the tick, by `morndo update`, or by the fleet's
 # update.apply operation, so that no service this apply stops is its parent — a parent's stop would take the
 # apply with it. Started on demand, so it carries no [Install] section. %i is the instance (systemd.unit(5),
-# systemd 255): the Version to apply.
+# systemd 255): the Version to apply — the one argument a unit instance carries, so §5.4's attempt id travels
+# by an environment file instead: the node agent writes MORNDO_ATTEMPT into apply.env before it starts this
+# unit, and the leading "-" keeps a missing file from failing a control plane's apply, which mints its own id.
+# An unset variable expands to an empty argument (systemd.service(5)), which the updater reads as absence.
 [Unit]
 Description=Apply a staged Morndo release (%i)
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/bin/morndo-update update apply --version %i
+EnvironmentFile=-%h/.local/state/morndo-update/apply.env
+ExecStart=%h/.local/bin/morndo-update update apply --version %i --attempt $MORNDO_ATTEMPT

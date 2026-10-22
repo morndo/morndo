@@ -234,7 +234,7 @@ GET /v1/rollout
 
 **Who may move a Rollout.** The socket is the user's, and a lane runs as that user too, so the fleet takes a commit or a halt only from the control plane's updater, and a resume or an `update.apply` only from the principal with a fresh passkey through the hub. Until the fleet can check them (the updater: updates PR 6b; the hub's step-up proof: PR 6c) it refuses all four, whoever asks: 403 `not_allowed` here, `not_allowed` for the op (§8). A halt still happens where a rollback does, by the two internal paths: a node's own `health` (below), and, for the control plane itself, its updater's state file (`~/.local/state/morndo-update/state.json`, read once a second like `hold.json`).
 
-**Committing.** `POST /v1/rollout/committed` takes `{ version, soakMinutes? }` and starts the soak of that Version. The control plane commits only the Version it runs itself; anything else is 409 `not_allowed`, and nothing is stored. A Version is a Release's: SemVer without build metadata (`0.4.2`, not `0.4.2+x`), and a Rollout is found by precedence, so no spelling steps around a halt.
+**Committing.** The route is closed with the others: the control plane's updater commits by writing its state file (`~/.local/state/morndo-update/state.json`, read once a second like `hold.json`). A `current` record of the fleet's own running Version is the commit — `soakMinutes` rides the record (0–10080, the domain's 30 by default) and the soak starts at the record's own `at`, so a fleet that reads the same record again, after a restart among them, does not restart the soak and announces nothing anew; a `current` record of any other Version commits nothing. The control plane commits only the Version it runs itself. A Version is a Release's: SemVer without build metadata (`0.4.2`, not `0.4.2+x`), and a Rollout is found by precedence, so no spelling steps around a halt.
 
 ```example rollout-committed
 POST /v1/rollout/committed
@@ -1739,7 +1739,7 @@ An alert is something for the owner to look at that changes no state. Each one i
 | `rollout_halted` | the Rollout was halted — the owner's hand or a machine's rollback (§5.4); no machine takes the Version until it is resumed. Urgent. | `{ version, machine, reason }` |
 | `update_rolled_back` | a machine's updater rolled back to the Version it ran (a node's health, or the control plane's own state file, then with node null); once per accepted attempt (the fleet's issued id, §5.4). Ignored reports are folded per machine into at most one a day, with `ignored` (the last reason) and `count`. Urgent. | `{ machine, version, target?, reason?, attempt?, ignored?, count? }` |
 | `update_rollback_failed` | a machine's updater says its rollback failed: it runs a Version it cannot vouch for; once per accepted attempt, ignored ones folded as above. Urgent. | `{ machine, version, target?, reason?, attempt?, ignored?, count? }` |
-| `update_skew_blocked` | kept for a node held back by protocol skew (updates §4.2); nothing raises it yet | |
+| `update_skew_blocked` | the control plane's updater held its own apply: a joined node's agent protocol falls outside the target Release's range, so nothing ran (RL11, updates §4.2, §7). One alert per Version and node list, however often the state file repeats the same hold. Not urgent. | `{ version, nodes }` |
 | `connection` | kept for a node's Connections service (`docs/design/secret-store/README.md`, `AlertSink`); nothing raises it yet | |
 
 ## 15. Sources

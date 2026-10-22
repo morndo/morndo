@@ -82,15 +82,15 @@ describe("the unit templates every Version ships (§5)", () => {
     }
   });
 
-  it("the tick is a oneshot behind a six-hour timer with an hour of spread", () => {
+  it("the tick is a oneshot behind a 15-minute timer with 5 minutes of spread", () => {
     expect(readIni(readFileSync(join(UNITS, "morndo-update.service"), "utf8")).entries).toMatchObject({
       Type: "oneshot",
       ExecStart: "%h/.local/bin/morndo-update update tick",
     });
     expect(readIni(readFileSync(join(UNITS, "morndo-update.timer"), "utf8")).entries).toMatchObject({
       OnBootSec: "5min",
-      OnUnitActiveSec: "6h",
-      RandomizedDelaySec: "1h",
+      OnUnitActiveSec: "15min",
+      RandomizedDelaySec: "5min",
       Persistent: "true",
     });
   });
@@ -120,7 +120,10 @@ describe("the unit templates every Version ships (§5)", () => {
     const { entries } = readIni(readFileSync(join(UNITS, "morndo-update-apply@.service"), "utf8"));
     expect(entries).toMatchObject({
       Type: "oneshot",
-      ExecStart: "%h/.local/bin/morndo-update update apply --version %i",
+      // §5.4's attempt id rides an environment file the node agent writes (the instance carries only the Version);
+      // "-": a control plane, which mints its own, has none
+      EnvironmentFile: "-%h/.local/state/morndo-update/apply.env",
+      ExecStart: "%h/.local/bin/morndo-update update apply --version %i --attempt $MORNDO_ATTEMPT",
     });
   });
 
