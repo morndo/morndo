@@ -23,6 +23,16 @@ on:
 permissions:
   contents: read
 
+env:
+  # The trust anchor of the Key set, pinned here and not read from the tree it checks (scripts/release/check-key-set.sh):
+  # the root key's public half (trust/README.md) and the lowest Key set version a release may ship. keys.json must carry
+  # the root key's signature and be at least this version, so a validly signed older set cannot be replayed. A rotation
+  # raises KEY_SET_MIN_VERSION to the new keys.json's version in the same change. Public values, not secrets. The
+  # signers job checks the set first, so a bad one stops the run before Release Please makes a tag or a draft; the build
+  # checks the tree it builds again.
+  ROOT_ALLOWED_SIGNER: 'root@morndo.github.io namespaces="keys@morndo.github.io" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPjwqMc0uDQdQHelLxhebc5/oO2hpmEzFNQQuXX0UBUC' #gitleaks:allow
+  KEY_SET_MIN_VERSION: "1"
+
 concurrency:
   group: morndo-release
   cancel-in-progress: false
@@ -43,6 +53,9 @@ jobs:
         run: |
           set -euo pipefail
           if [ -s trust/release_allowed_signers ] && [ -s trust/feed_allowed_signers ] && [ -s trust/keys.json ]; then
+            # In the tree and wrong fails the job here, before the tag and the draft are made.
+            printf '%s\n' "$ROOT_ALLOWED_SIGNER" > "$RUNNER_TEMP/root_allowed_signers"
+            sh scripts/release/check-key-set.sh "$RUNNER_TEMP/root_allowed_signers" trust "$KEY_SET_MIN_VERSION"
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "skipping release: trust/release_allowed_signers, trust/feed_allowed_signers or trust/keys.json is not in the tree yet" >&2
@@ -112,9 +125,6 @@ jobs:
     env:
       BUNDLED_NODE: "24.21.0"
       NODE_RELEASE_KEYS_COMMIT: "481637f813e912c4aa3622d7964ab426c97b8e8d" #gitleaks:allow
-      # The root key's public half (trust/README.md), pinned here and not read from the tree it checks: keys.json must
-      # carry this key's signature (check-key-set.sh). A public key, not a secret.
-      ROOT_ALLOWED_SIGNER: 'root@morndo.github.io namespaces="keys@morndo.github.io" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPjwqMc0uDQdQHelLxhebc5/oO2hpmEzFNQQuXX0UBUC' #gitleaks:allow
       VERSION: ${{ needs.release-please.outputs.version }}
       RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
       PLATFORM: ${{ matrix.platform }}
@@ -131,7 +141,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' "$ROOT_ALLOWED_SIGNER" > "$RUNNER_TEMP/root_allowed_signers"
-          sh scripts/release/check-key-set.sh "$RUNNER_TEMP/root_allowed_signers" trust
+          sh scripts/release/check-key-set.sh "$RUNNER_TEMP/root_allowed_signers" trust "$KEY_SET_MIN_VERSION"
 
       - name: GnuPG on macOS
         if: runner.os == 'macOS'
@@ -169,7 +179,7 @@ jobs:
           node scripts/release/main.ts stage --repo "$GITHUB_WORKSPACE" --node "$RUNNER_TEMP/node" --dest "$RUNNER_TEMP/stage" --version "$VERSION" --commit "$RELEASE_SHA" --compiled "$RUNNER_TEMP/compiled"
           # The Key set this Version ships with, as staged: an installer refuses a tree without it (T-354), and it must
           # still carry the pinned root key's signature.
-          sh scripts/release/check-key-set.sh "$RUNNER_TEMP/root_allowed_signers" "$RUNNER_TEMP/stage/trust"
+          sh scripts/release/check-key-set.sh "$RUNNER_TEMP/root_allowed_signers" "$RUNNER_TEMP/stage/trust" "$KEY_SET_MIN_VERSION"
           ( cd "$RUNNER_TEMP/stage/app" && "$RUNNER_TEMP/node/bin/node" -e "require('better-sqlite3')(':memory:').close()" )
           for name in morndo morndo-fleet morndo-node morndo-job morndo-board morndo-keys; do
             "$RUNNER_TEMP/stage/bin/$name" --version

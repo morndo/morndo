@@ -93,9 +93,12 @@ describe("release pipeline files", () => {
     expect(code).not.toContain("ffmpeg");
     expect(code).not.toContain("vitest");
     // The Key set is checked before any repository program runs, and again on the copy that ships: a missing or wrong
-    // signature fails the build. The root signer is pinned here, in the workflow, not read from the tree it checks.
-    expect(build).toContain("ROOT_ALLOWED_SIGNER: 'root@morndo.github.io namespaces=\"keys@morndo.github.io\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPjwqMc0uDQdQHelLxhebc5/oO2hpmEzFNQQuXX0UBUC'");
-    const checks = [...build.matchAll(/sh scripts\/release\/check-key-set\.sh "\$RUNNER_TEMP\/root_allowed_signers" (\S+)/g)].map(m => m[1]);
+    // signature, or a set older than the pinned minimum version, fails the build. The root signer and the minimum version
+    // are pinned once, at the top of the workflow (the signers job reads them too), not read from the tree they check.
+    expect(build).not.toContain("ROOT_ALLOWED_SIGNER:");
+    expect(release).toMatch(/\nenv:\n(  .*\n)*  ROOT_ALLOWED_SIGNER: 'root@morndo\.github\.io namespaces="keys@morndo\.github\.io" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPjwqMc0uDQdQHelLxhebc5\/oO2hpmEzFNQQuXX0UBUC'/);
+    expect(release).toMatch(/\n  KEY_SET_MIN_VERSION: "\d+"\n/);
+    const checks = [...build.matchAll(/sh scripts\/release\/check-key-set\.sh "\$RUNNER_TEMP\/root_allowed_signers" (\S+) "\$KEY_SET_MIN_VERSION"/g)].map(m => m[1]);
     expect(checks).toEqual(["trust", '"$RUNNER_TEMP/stage/trust"']);
     expect(build.indexOf("check-key-set.sh")).toBeLessThan(build.indexOf("npm ci"));
     expect(build.lastIndexOf("check-key-set.sh")).toBeGreaterThan(build.indexOf("main.ts stage"));
@@ -179,6 +182,51 @@ describe("release pipeline files", () => {
     expect(prepare).toContain("pull-requests: write");
     expect(release).toMatch(/\npermissions:\n  contents: read\n/);
     expect(feed).toMatch(/\npermissions:\n  contents: read\n/);
+  });
+
+  it("the signers job checks the Key set's signature, so a bad set stops the run before Release Please makes the tag and the draft", () => {
+    const doc = parse(release) as { env?: Record<string, string>; jobs: Record<string, { needs?: unknown; steps: { id?: string; run?: string }[] }> };
+    expect(doc.env?.["ROOT_ALLOWED_SIGNER"]).toContain("ssh-ed25519");
+    expect(doc.env?.["KEY_SET_MIN_VERSION"]).toMatch(/^\d+$/);
+    expect(doc.jobs["release-please"]?.needs).toBe("signers");
+    const script = doc.jobs["signers"]?.steps.find(step => step.id === "check")?.run ?? "";
+    expect(script).toContain("check-key-set.sh");
+    const run = (mutate: (tree: string, dir: string) => void, minVersion = "1") => {
+      const dir = mkdtempSync(join(tmpdir(), "morndo-signers-"));
+      scratch.push(dir);
+      const tree = join(dir, "tree");
+      mkdirSync(join(tree, "trust"), { recursive: true });
+      mkdirSync(join(tree, "scripts", "release"), { recursive: true });
+      writeFileSync(join(tree, "scripts", "release", "check-key-set.sh"), readFileSync("scripts/release/check-key-set.sh"));
+      const keygen = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "root", "-f", join(dir, "root")], { encoding: "utf8" });
+      expect(keygen.status, keygen.stderr).toBe(0);
+      const signer = `root@morndo.github.io namespaces="keys@morndo.github.io" ${readFileSync(join(dir, "root.pub"), "utf8").split(" ").slice(0, 2).join(" ")}`;
+      for (const name of ["release_allowed_signers", "feed_allowed_signers"]) writeFileSync(join(tree, "trust", name), "x\n");
+      writeFileSync(join(tree, "trust", "keys.json"), '{\n  "schema": 1,\n  "version": 1,\n  "expiresAt": "2099-01-01T00:00:00Z"\n}\n');
+      const signed = spawnSync("ssh-keygen", ["-q", "-Y", "sign", "-f", join(dir, "root"), "-n", "keys@morndo.github.io", join(tree, "trust", "keys.json")], { encoding: "utf8" });
+      expect(signed.status, signed.stderr).toBe(0);
+      mutate(tree, dir);
+      const output = join(dir, "github-output");
+      writeFileSync(output, "");
+      const result = spawnSync("bash", ["-c", script], {
+        cwd: tree, encoding: "utf8",
+        env: { PATH: process.env["PATH"] ?? "/usr/bin:/bin", ROOT_ALLOWED_SIGNER: signer, KEY_SET_MIN_VERSION: minVersion, RUNNER_TEMP: dir, GITHUB_OUTPUT: output },
+      });
+      return { status: result.status, output: readFileSync(output, "utf8"), stderr: result.stderr };
+    };
+    expect(run(() => {})).toMatchObject({ status: 0, output: "ready=true\n" });
+    // Not in the tree yet: skipped cleanly, as before.
+    expect(run(tree => rmSync(join(tree, "trust", "keys.json")))).toMatchObject({ status: 0, output: "ready=false\n" });
+    // In the tree and wrong: the job fails, and never says ready, so no tag and no draft are made.
+    for (const [name, mutate, min] of [
+      ["a changed keys.json", (tree: string) => writeFileSync(join(tree, "trust", "keys.json"), "{}\n"), "1"],
+      ["a missing signature", (tree: string) => rmSync(join(tree, "trust", "keys.json.sig")), "1"],
+      ["an older set than the pinned minimum", () => {}, "2"],
+    ] as const) {
+      const r = run(mutate, min);
+      expect(r.status, name).not.toBe(0);
+      expect(r.output, name).not.toContain("ready=true");
+    }
   });
 
   it("checks the release from a job that cannot see the signing secret", () => {
