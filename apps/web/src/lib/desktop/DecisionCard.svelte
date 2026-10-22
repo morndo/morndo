@@ -26,15 +26,17 @@
   import { AnswerSession } from "./answer-session.svelte.ts";
   import type { AnswerBody, AnswerProblem } from "./answer-session.ts";
   import { ago, deliveryLine, dueLabel, REFUSALS, urgency, type DecisionItem } from "./decisions.ts";
+  import { CLOSED, current, noteIdOfAsk, shownFor, validUntil, type CodeOutcome, type Reveal } from "./memory-code.ts";
   import { DELIVERED, MAY_HAVE_BEEN, QUEUED } from "../queue-words.ts";
   import { clock } from "./grouping.ts";
 
-  let { item, variant, now, verifiedFresh, briefOpen = false, session: given, onAnswer, onOpenScreen, onOpenChat, onOpen }: {
+  let { item, variant, now, verifiedFresh, briefOpen = false, session: given, onAnswer, onOpenScreen, onOpenChat, onOpen, onMemoryCode }: {
     item: DecisionItem; variant: "panel" | "inline"; now: number; verifiedFresh: boolean; briefOpen?: boolean;
     session?: AnswerSession;
     onAnswer: (id: string, body: AnswerBody, requestId: string, seen?: string) => Promise<AnswerProblem | null>;
     onOpenScreen: (workerId: string) => void; onOpenChat?: (item: DecisionItem) => void;
     onOpen?: (item: DecisionItem) => void;
+    onMemoryCode?: (noteId: string) => Promise<CodeOutcome>;
   } = $props();
 
   const own = new AnswerSession(item);
@@ -77,6 +79,25 @@
     session.error = null;
   }
   function send(body: AnswerBody, requestId?: string) { void session.send(onAnswer, body, requestId); }
+
+  // The console's one-time approval code (ADR-0031 round 3): asked from the card, held only in `reveal` — never in
+  // storage, the URL or a log — and gone when closed, expired, or the note is decided. Asking again mints a new code;
+  // the hub burns the old one when the console spends it.
+  let reveal = $state<Reveal>(CLOSED);
+  const canAskCode = $derived(!!onMemoryCode && noteIdOfAsk(item.id) !== null && open && canAnswer);
+  const revealNow = $derived(current(reveal, now));
+  $effect(() => { if (!open) reveal = CLOSED; });
+  // A code past its expiry is dropped from the state itself, not only from the view: `current` alone would bring it back
+  // if the clock went back (a device clock set right), and the string would stay in memory until the card is gone.
+  $effect(() => { if (reveal.kind === "shown" && revealNow.kind !== "shown") reveal = revealNow; });
+  async function askCode() {
+    const noteId = noteIdOfAsk(item.id);
+    if (!noteId || !onMemoryCode || (revealNow.kind !== "idle" && revealNow.kind !== "failed")) return;
+    reveal = { kind: "asking" };
+    reveal = shownFor(noteId, await onMemoryCode(noteId));
+  }
+  function closeCode() { reveal = CLOSED; }
+  async function copyCommand(text: string) { try { await navigator.clipboard.writeText(text); } catch { /* clipboard refused */ } }
 </script>
 
 <article bind:this={root} class="dc {variant} u-{u}" data-decision={item.id} aria-label="Decision: {card.topic}">
@@ -187,6 +208,11 @@
         {/each}
         {#if canAnswer && !session.stale}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
+        {#if canAskCode && revealNow.kind !== "shown"}
+          <button type="button" class="link" data-memory-code-ask disabled={revealNow.kind === "asking"} onclick={askCode}>
+            {revealNow.kind === "asking" ? "Asking…" : "Console code…"}
+          </button>
+        {/if}
       {:else if view.need === "time"}
         <button class="btn primary" disabled={!canAnswer || session.stale} onclick={() => choose("Done", { text: "Done" })}>Done</button>
         <button class="btn" disabled={!canAnswer || session.stale} onclick={() => writeWords()}><MessageSquareText size={14} />Reply…</button>
@@ -198,6 +224,21 @@
       {/if}
     </div>
     {#if !canAnswer && item.answerable}<p class="note">{REFUSALS[item.answerable]}</p>{/if}
+  {/if}
+  {#if revealNow.kind === "shown"}
+    {@const r = revealNow}
+    <!-- The code once, with what it is for and the line that spends it; Close drops it for good (ADR-0031 round 3). -->
+    <div class="memcode" role="group" aria-label="One-time console code" data-memory-reveal>
+      <code data-memory-code>{r.code}</code>
+      <p>Valid for {validUntil(r.expiresAt, now)}. It works once, for this note only.</p>
+      <p class="how">At the console run <code data-memory-command>{r.command}</code> and enter the code when asked.</p>
+      <div class="row">
+        <button type="button" class="btn" onclick={() => void copyCommand(r.command)}>Copy command</button>
+        <button type="button" class="link" onclick={closeCode}>Close</button>
+      </div>
+    </div>
+  {:else if revealNow.kind === "failed"}
+    <p class="err" role="alert">{revealNow.text}</p>
   {/if}
   {#if session.error}<p class="err" role="alert">{session.error}</p>{/if}
   {#if variant === "panel" && onOpenChat && item.messageId}
@@ -283,5 +324,11 @@
   .rec { margin: 0; display: flex; align-items: center; gap: 6px; font: 400 13px/18px var(--font); }
   .chat { justify-self: start; }
   .restated { margin: 0; padding: 8px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-fg); font: 400 13px/18px var(--font); }
-  .actions, .state, .err, .note, .chat, .readonly, .screen, .restated { position: relative; z-index: 1; }
+  /* The console's one-time code (ADR-0031 round 3): the card's own well and the terminal's mono (COLOR.md 8, 11). */
+  .memcode { display: grid; gap: 6px; padding: 10px 12px; border-radius: 6px; background: var(--well); }
+  .memcode code { font: 700 13px/18px var(--mono); color: var(--text); overflow-wrap: anywhere; }
+  .memcode p { margin: 0; font: 400 13px/18px var(--font); color: var(--muted); }
+  .memcode .how { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+  .memcode .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .actions, .state, .err, .note, .chat, .readonly, .screen, .restated, .memcode { position: relative; z-index: 1; }
 </style>

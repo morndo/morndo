@@ -234,15 +234,21 @@ export function shellLane(t: TmuxServer, o: { window: string; session?: string; 
 
 // ---- the fleet service
 export type Fleet = {
-  home: string; port: number; socketPath: string; config: FleetConfig; client: FleetClient; proc(): Proc;
+  home: string; port: number; portsTried: number[]; socketPath: string; config: FleetConfig; client: FleetClient; proc(): Proc;
   cli(...args: string[]): { code: number | null; out: string; err: string };
   addNode(name: string): string; revoke(name: string): void;
   // Stops the service (SIGKILL by default), runs `whileDown` while nothing listens, then serves again on the same database.
   restart(signal?: NodeJS.Signals, whileDown?: () => Promise<void>): Promise<void>;
 };
+// How long a fleet may take to open its client API. It is a deadline on an event, not a pace: a fleet that exits is
+// seen at once (Fatal below), so only a hung one waits it out. A fleet started beside a dozen other processes on a loaded
+// machine printed nothing for over 15 s (ENOENT on its socket, 2 of 20 runs of drills-deliveries under load).
+const FLEET_START_MS = 45_000;   // below the fleet project's hookTimeout (60 s, vitest.config.ts): a hung start fails with this message, not the hook's
 export async function startFleet(o: {
   subscribers?: FleetConfig["subscribers"]; stickyLanes?: string[]; laneEvents?: Partial<FleetConfig["laneEvents"]>;
   laneWatch?: Partial<FleetConfig["laneWatch"]>;
+  // Where the first port comes from; a test of the retry hands in one that is taken. Default: freePort.
+  port?: () => Promise<number>;
 } = {}): Promise<Fleet> {
   const home = tempDir("morndo-fleet-");
   // The client socket's path must fit sockaddr_un.sun_path: 103 bytes on macOS, 107 on Linux
@@ -251,7 +257,8 @@ export async function startFleet(o: {
   // the fleet requires (spec §5.6). The agent endpoint listens on loopback with a ws:// public URL to loopback: the only
   // plain ws:// the fleet's config (Task 10) and the agent (fleetUrlOk, Task 7) accept.
   const sockDir = tempDir("mf-", "/tmp");
-  const port = await freePort();
+  let port = await (o.port ?? freePort)();
+  const portsTried = [port];
   const config: FleetConfig = {
     listen: { host: "127.0.0.1", port }, socketPath: join(sockDir, "fleet.sock"),
     dbPath: join(home, ".local/share/morndo-fleet/fleet.db"), keyPath: join(home, ".local/share/morndo-fleet/fleet-key.pem"),
@@ -264,7 +271,8 @@ export async function startFleet(o: {
     laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: false, ...o.laneWatch },
   };
   mkdirSync(join(home, ".config/morndo-fleet"), { recursive: true });
-  writeFileSync(join(home, ".config/morndo-fleet/config.json"), JSON.stringify(config, null, 2));
+  const writeConfig = () => writeFileSync(join(home, ".config/morndo-fleet/config.json"), JSON.stringify(config, null, 2));
+  writeConfig();
   const env = cleanEnv(home);
   const client = new FleetClient(config.socketPath);
   let proc: Proc | null = null;
@@ -274,15 +282,29 @@ export async function startFleet(o: {
     await until("the fleet's client API", async () => {
       if (!p.alive()) throw new Fatal(`the fleet exited during startup (${p.child.exitCode ?? p.child.signalCode})\n${p.tail(15)}`);
       return (await client.caps()).api.includes(1);
-    }, 15_000);
+    }, FLEET_START_MS);
   };
-  await serve();
+  // freePort() answers a port that was free when it asked: it closes the socket first, so a process that binds it
+  // later can lose it to another (a parallel test's server, or the kernel's pick for an outgoing connection: main CI
+  // run 39673017200, EADDRINUSE 127.0.0.1:39547). The fleet that finds its port taken exits at once; ask for another
+  // port and serve again, a few times, rather than fail a test that never depended on that port.
+  for (let attempt = 1; ; attempt++) {
+    try { await serve(); break; }
+    catch (e) {
+      if (attempt >= 5 || !/EADDRINUSE/.test(String((e as Error).message))) throw e;
+      port = await freePort();
+      portsTried.push(port);
+      config.listen.port = port;
+      config.publicUrl = `ws://127.0.0.1:${port}/agent`;
+      writeConfig();
+    }
+  }
   const cli = (...args: string[]) => {
     const r = spawnSync(process.execPath, ["--no-warnings", FLEET_MAIN, ...args], { env, encoding: "utf8", timeout: 30_000 });
     return { code: r.status, out: r.stdout ?? "", err: r.stderr ?? "" };
   };
   return {
-    home, port, socketPath: config.socketPath, config, client, cli,
+    home, port, portsTried, socketPath: config.socketPath, config, client, cli,
     proc: () => { if (!proc) throw new Error("the fleet isn't running"); return proc; },
     addNode(name) {
       const r = cli("node", "add", name);
@@ -311,7 +333,7 @@ export type Agent = {
 // into policy.json (the agent keeps the two apart, Task 6: a policy written into config.json would be ignored, and the
 // agent would act on the default tmux server). Not run yet.
 export async function joinAgent(fleet: Fleet, node: string, o: { tmux: TmuxServer; session?: string; policy?: Partial<AgentConfig["policy"]> }): Promise<Agent> {
-  const home = tempDir(`morndo-node-${node}-`);
+  const home = tempDir(`morndo-${node}-`);   // short: see agentAt's check of the job socket's path
   const joinString = fleet.addNode(node);
   // The fleet is a child process, so waiting on `join` synchronously blocks nothing it needs.
   const r = spawnSync(process.execPath, ["--no-warnings", AGENT_MAIN, "join", joinString], { env: cleanEnv(home), encoding: "utf8", timeout: 30_000 });
@@ -328,7 +350,15 @@ export async function joinAgent(fleet: Fleet, node: string, o: { tmux: TmuxServe
   return agentAt(fleet, node, home);
 }
 
+// The agent listens on <home>/.local/state/morndo-node/job.sock, a Unix socket: its path must fit sockaddr_un.sun_path (107
+// bytes on Linux, the same limit as the fleet's client socket in startFleet). Under /tmp a HOME is ~40 bytes; under the
+// RAM scratch (vitest.config.ts ramScratch, /run/user/<uid>/morndo-test-<pid>-<random>-fleet) it is ~65, so a HOME named
+// morndo-node-n1-twin-XXXXXX made the twin's path 110: its listen failed with EINVAL, it exited at start, and flapping.test.ts
+// saw no conflict, no alert (T-279; 0 alerts, not 1, on srv01). Fail here, naming the path, not in a log nobody reads.
+const SUN_PATH_MAX = 107;
 function agentAt(fleet: Fleet, node: string, home: string): Agent {
+  const sock = agentPaths(home).jobSock;
+  if (Buffer.byteLength(sock) > SUN_PATH_MAX) throw new Error(`${node}'s job socket path is ${Buffer.byteLength(sock)} bytes, over the ${SUN_PATH_MAX} a Unix socket allows: ${sock} (a shorter TMPDIR or home prefix)`);
   const configPath = agentPaths(home).configFile;
   const config = () => loadConfig(home);
   const status = async () => (await fleet.client.nodes()).find(n => n.name === node)?.status ?? null;
@@ -397,7 +427,7 @@ function agentAt(fleet: Fleet, node: string, home: string): Agent {
     // A cloned machine: the same config, policy and private key in another HOME, with its own relay port (a clone has its
     // own loopback) and a fresh database (copying a live WAL database could tear it, and the conflict doesn't depend on it).
     async clone() {
-      const twin = tempDir(`morndo-node-${node}-twin-`);
+      const twin = tempDir(`morndo-${node}-t-`);
       const original = config();
       const moved = JSON.parse(readFileSync(configPath, "utf8").replaceAll(home, twin)) as Record<string, unknown> & { keyPath: string };
       mkdirSync(dirname(moved.keyPath), { recursive: true });

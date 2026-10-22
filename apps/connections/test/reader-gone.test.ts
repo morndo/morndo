@@ -23,6 +23,15 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 
 const alive = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
 const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Waits for the child to have done something, not for a count of polls: a bin started under load can take seconds to get
+// going, and a signal sent to one that has not installed its handlers yet kills it by the default action (code null,
+// no lease). A wait that never ends in what it waits for fails by name instead of signalling blind.
+const until = async (what: string, done: () => boolean, ms = 30_000) => {
+  for (const end = Date.now() + ms; !done();) {
+    if (Date.now() > end) throw new Error(`${what} did not happen within ${ms} ms`);
+    await pause(5);
+  }
+};
 const pidIn = (dir: string, file: string): number => Number(readFileSync(join(dir, file), "utf8"));
 
 // A connection ready to run: a scratch home, a made-up key, the terms acknowledged, and `bin` as the claude runtime.
@@ -95,7 +104,7 @@ describe("morndo-keys run when its terminal goes away", () => {
   it("stops the agent and closes the lease on SIGHUP, and ends with 129", async () => {
     const t = ready(fixture);
     const { bin, closed } = start(t);
-    for (let i = 0; i < 100 && !existsSync(join(t.dir, "pid")); i++) await pause(50);
+    await until("the agent starting", () => existsSync(join(t.dir, "pid")));
     const started = Date.now();
     bin.kill("SIGHUP");
     expect(await closed).toMatchObject({ code: 129, signal: null });
@@ -110,7 +119,7 @@ describe("morndo-keys run when its terminal goes away", () => {
     for (let round = 0; round < 6; round++) {
       rmSync(join(t.dir, "finished"), { force: true });
       const { bin, closed } = start(t, ["--fast"]);
-      for (let i = 0; i < 400 && !existsSync(join(t.dir, "finished")); i++) await pause(2);
+      await until(`round ${round}: the agent finishing`, () => existsSync(join(t.dir, "finished")));   // its handlers are in, its turn is over
       try { bin.kill("SIGHUP"); } catch { /* it is already gone */ }
       const end = await closed;
       const outcome = t.outcomes().at(-1);
@@ -137,7 +146,7 @@ describe("morndo-keys run in a terminal that closes", () => {
     bin.stdout.resume();
     bin.stderr.resume();
     const closed = new Promise<number | null>(resolve => bin.once("close", resolve));
-    for (let i = 0; i < 100 && !existsSync(join(t.dir, "pid")); i++) await pause(50);
+    await until("the agent starting", () => existsSync(join(t.dir, "pid")));
     bin.kill("SIGHUP");
     expect(await closed).toBe(129);
     expect(alive(pidIn(t.dir, "pid"))).toBe(false);
