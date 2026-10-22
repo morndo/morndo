@@ -182,10 +182,13 @@ describe("`morndo update` — check, then apply what stands staged (§8.1)", () 
       format: 1, startedAt: Date.now() - DAY, doneMarks: [], judgeBaseline: null, backupOf: null,
     });
     w.store.finishUpdate("upd-yesterday", "committed", Date.now() - DAY);
-    const held = w.store.tryLock();
-    w.services.runApplyScript = async version => { await w.run(["update", "apply", "--version", version]); };
+    let unit: { code: number; err: string } | null = null;
+    w.services.runApplyScript = async version => {
+      const held = w.store.tryLock();                        // taken while the unit runs, not before the command
+      try { unit = await w.run(["update", "apply", "--version", version]); } finally { held?.release(); }
+    };
     const r = await w.run(["update", "--yes"]);
-    held?.release();
+    expect(unit, "the unit ran").toMatchObject({ code: 75, err: expect.stringMatching(/Busy/) });
     expect(r.code, r.err).toBe(75);
     expect(r.err).toMatch(/Busy: another process holds the apply lock/);
     expect(r.err + r.out).not.toMatch(/Committed|did not run/);
