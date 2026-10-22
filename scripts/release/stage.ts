@@ -3,7 +3,7 @@
 // A symlink is judged against the tree root, not the link's parent. One that stays inside is stored
 // as a symlink (Node's bin/npm -> ../lib/...). A workspace package is the exception: Node will not
 // strip types under node_modules, so the staged copy is the compiled JavaScript when --compiled is set.
-import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import type { TreeFile } from "./archive.ts";
 import { listFiles } from "./files.ts";
@@ -43,6 +43,20 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     if (isLock(lock)) files.push({ path: "LICENSES/NOTICE", bytes: Buffer.from(thirdPartyNotice(lock)), mode: "0444" });
   } catch { /* a fixture may omit the lock */ }
   files.push({ path: "units", mode: "0555", directory: true }, { path: "trust", mode: "0555", directory: true });
+  // trust/ is the Key set this Version ships with (design §5): the repo's keys.json and root's signature over it. An
+  // installer refuses a tree without trust/keys.json (T-354). The release build verifies the signature against the pinned
+  // root signer before and after staging (check-key-set.sh); a keys.json without a readable, non-empty signature is
+  // refused here too, so the Key set ships signed or not at all. The signers files are the pipeline's own and do not
+  // ship. A fixture tree without trust/keys.json stages trust/ empty.
+  if (existsSync(join(p.repo, "trust", "keys.json"))) {
+    for (const name of ["keys.json", "keys.json.sig"]) {
+      let bytes: Buffer;
+      try { bytes = readFileSync(join(p.repo, "trust", name)); }
+      catch { throw new Error(`trust/${name} is missing or unreadable: the Key set ships signed or not at all`); }
+      if (bytes.length === 0) throw new Error(`trust/${name} is empty: the Key set ships signed or not at all`);
+      files.push({ path: `trust/${name}`, bytes, mode: "0444" });
+    }
+  }
   const listed = listFiles(files);
   files.push({ path: "files.json", bytes: Buffer.from(listed.json), mode: "0444" });
   for (const file of files) {
