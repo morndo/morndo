@@ -7,7 +7,7 @@ import * as z from "./z.ts";
 import { UpdateStatusSchema } from "./releases.ts";
 import { SEMVER } from "./releases.ts";
 import { NODE_NAME } from "./worker-id.ts";
-import type { NodeUpdateHealth, RolloutWire } from "./fleet.ts";
+import type { NodeUpdateHealth, RolloutWire, UpdateStateFile } from "./fleet.ts";
 
 // The argument lists the hub runs the control plane's updater CLI with (PR 6c): one place, so the hub, its tests
 // and the updater's own command line cannot drift apart — the updater's first word is its command (`update`;
@@ -33,7 +33,9 @@ export type UpdatesNode = {
   update: NodeUpdateHealth | null;        // its updater's last report; null before any
 };
 export type UpdatesView = {
-  controlPlane: { version: string; commit: string | null; status: UpdaterStatus | null };
+  // `state`: the control plane's updater's last record (its state.json, as the fleet reads it too): why it waits,
+  // which --status does not say. Null when there is none, or it is not the protocol's shape.
+  controlPlane: { version: string; commit: string | null; status: UpdaterStatus | null; state: UpdateStateFile | null };
   rollout: RolloutWire | null;
   aboveControlPlane: RolloutWire[];
   nodes: UpdatesNode[];

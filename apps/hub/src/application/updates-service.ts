@@ -52,10 +52,10 @@ export class UpdatesService {
   // hub's own build — the hub is the control plane (§7), so its Version is what every node's answers against. A
   // fleet that can't be asked leaves its last word standing: the Rollout its last event carried, no nodes.
   async view(): Promise<UpdatesView> {
-    const [status, r, n] = await Promise.all([this.#cli.status(), this.#fleet.rollout(), this.#fleet.nodes()]);
+    const [status, state, r, n] = await Promise.all([this.#cli.status(), this.#cli.state(), this.#fleet.rollout(), this.#fleet.nodes()]);
     const build = this.#build();
     return {
-      controlPlane: { version: build.version, commit: build.commit, status },
+      controlPlane: { version: build.version, commit: build.commit, status, state },
       rollout: r.ok ? r.rollout : this.#rollout,
       aboveControlPlane: r.ok ? r.aboveControlPlane : [],
       nodes: n.ok ? n.nodes.map(node) : [],

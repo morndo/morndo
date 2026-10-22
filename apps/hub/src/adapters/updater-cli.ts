@@ -7,10 +7,11 @@
 // doesn't answer, or doesn't fit UpdateStatusSchema, reads as null: the view shows that as it is, and a command to
 // the control plane refuses — the hub will not move its own machine on a guess.
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { UpdateStatusSchema, UPDATER_ARGS } from "@morndo/protocol";
+import { UpdateStateFileSchema, UpdateStatusSchema, UPDATER_ARGS } from "@morndo/protocol";
 import type { UpdaterCli } from "../application/updates-ports.ts";
 
 const runFile = promisify(execFile);
@@ -21,8 +22,14 @@ const RUN_TIMEOUT_MS = 30_000;
 // updater is an error, not a hub that never answers.
 export type UpdaterRunner = (file: string, args: string[], o?: { timeoutMs?: number }) => Promise<{ stdout: string }>;
 
-export function updaterCli(o: { bin?: string; env?: NodeJS.ProcessEnv; run?: UpdaterRunner } = {}): UpdaterCli {
+// The updater's own state file (updates §6.3, §7): the same path the fleet's watcher reads on this machine
+// (apps/fleet/src/adapters/updater-state-watch.ts updaterStateFile), the rule written here — the hub does not import
+// the fleet.
+const stateFileOf = (env: NodeJS.ProcessEnv): string => join(env.HOME || homedir(), ".local", "state", "morndo-update", "state.json");
+
+export function updaterCli(o: { bin?: string; env?: NodeJS.ProcessEnv; run?: UpdaterRunner; stateFile?: string } = {}): UpdaterCli {
   const env = o.env ?? process.env;
+  const stateFile = o.stateFile ?? stateFileOf(env);
   const bin = o.bin ?? env.MORNDO_UPDATE_BIN ?? join(env.HOME || homedir(), ".local/bin/morndo-update");
   const run: UpdaterRunner = o.run ?? ((file, args, r) => runFile(file, args, { timeout: r?.timeoutMs ?? RUN_TIMEOUT_MS, encoding: "utf8", env }));
   return {
@@ -36,6 +43,13 @@ export function updaterCli(o: { bin?: string; env?: NodeJS.ProcessEnv; run?: Upd
     },
     // The Version the screen pressed rides --staged (R3): the updater applies only it, never a newer one a check
     // staged between the page's look and the press.
+    // The last record, read as it stands: missing, unreadable or not the protocol's shape is null, never a guess.
+    async state() {
+      try {
+        const parsed = UpdateStateFileSchema.safeParse(JSON.parse(await readFile(stateFile, "utf8")));
+        return parsed.success ? parsed.data : null;
+      } catch { return null; }
+    },
     async applyDetached(version: string) { await run(bin, UPDATER_ARGS.apply(version)); },
     async rollbackDetached() { await run(bin, UPDATER_ARGS.rollback); },
   };

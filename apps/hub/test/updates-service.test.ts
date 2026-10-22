@@ -7,6 +7,9 @@
 // carrying the hub's signed assertion (§5.4). A node's rollback is refused: it is that machine's own hand
 // (`morndo update --rollback` there), never a remote one.
 import { createPublicKey, generateKeyPairSync, sign as signEd, verify as verifyEd } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONTROL_FRESHNESS_MS, type AccessPolicy, type UpdateCommanded } from "@morndo/domain";
 import { PRINCIPAL_SIGN_PREFIX, UPDATER_ARGS, decodePrincipalHeader, type FleetNode, type PrincipalAsk, type RolloutWire } from "@morndo/protocol";
@@ -29,9 +32,10 @@ const identity: HubIdentity = {
 };
 
 // The control plane's updater as the fake runner runs it: one status standing staged, and every argument list it got.
-const cliWith = (standStaged: string | null) => {
+const cliWith = (standStaged: string | null, o: { stateFile?: string } = {}) => {
   const runs: { file: string; args: string[] }[] = [];
   const cli = updaterCli({
+    stateFile: o.stateFile ?? join(tmpdir(), "morndo-no-state-file-here", "state.json"),
     run: async (file, args) => {
       runs.push({ file, args });
       return { stdout: JSON.stringify({
@@ -164,7 +168,7 @@ describe("the updates service (no HTTP)", () => {
     const { fleet, rollout, nodes } = fleetWith();
     const svc = service(fleet, cliWith("0.5.0").cli, () => now, []);
     expect(await svc.view()).toEqual({
-      controlPlane: { version: "0.4.2", commit: null, status: expect.objectContaining({ staged: "0.5.0" }) },
+      controlPlane: { version: "0.4.2", commit: null, status: expect.objectContaining({ staged: "0.5.0" }), state: null },
       rollout, aboveControlPlane: [],
       nodes: [{ name: "pc", status: "online", version: "0.4.2", proto: [1], update: nodes[0]!.update }],
     });
@@ -258,3 +262,24 @@ describe("the updates routes", () => {
     await off.close();
   });
 });
+
+// The review of 6c part 2: the control plane's own waiting record, read from its updater's state file.
+describe("the control plane's state record in the view", () => {
+  it("carries the updater's state.json when it parses, and null when it is missing or not the protocol's shape", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-state-"));
+    try {
+      const file = join(dir, "state.json");
+      const { fleet } = fleetWith();
+      const read = async () => (await service(fleet, cliWith("0.5.0", { stateFile: file }).cli, () => 0, []).view()).controlPlane.state;
+      expect(await read()).toBeNull();
+      const record = { state: "waiting", version: "0.4.2", target: "0.5.0", reason: "skew_blocked: n3", at: 1_800_000_000_000 };
+      writeFileSync(file, `${JSON.stringify(record)}\n`);
+      expect(await read()).toEqual(record);
+      writeFileSync(file, "{ not json");
+      expect(await read()).toBeNull();
+      writeFileSync(file, JSON.stringify({ ...record, extra: 1 }));
+      expect(await read()).toBeNull();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+

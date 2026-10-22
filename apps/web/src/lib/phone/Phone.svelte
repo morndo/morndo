@@ -45,8 +45,8 @@
   import { decisionKey, type DigestLine } from "@morndo/domain";
   import "./phone.css";
 
-  let { verifiedAt: initialVerifiedAt, policy, engines = false, onSignedOut }: {
-    device: string; verifiedAt: number | null; policy: Policy; engines?: boolean; onSignedOut: () => void;
+  let { verifiedAt: initialVerifiedAt, policy, engines = false, updates = false, onSignedOut }: {
+    device: string; verifiedAt: number | null; policy: Policy; engines?: boolean; updates?: boolean; onSignedOut: () => void;
   } = $props();
 
   const feed = new LiveFeed();
@@ -408,7 +408,7 @@
       waiting={feed.primed ? session.count : 0} onOpen={w => { away.open = false; openChat(w); }} onDecide={() => { away.open = false; decide(); }}
       onMarkRead={markDigestRead} onLater={() => (away.open = false)} />
   {/if}
-  {#if settings}<SettingsSheet setting={away.setting} {engines} onChoose={v => away.choose(v)} onClose={() => (settings = false)} />{/if}
+  {#if settings}<SettingsSheet setting={away.setting} {engines} {updates} onChoose={v => away.choose(v)} onClose={() => (settings = false)} />{/if}
   {#if briefItem && briefSession}
     <BriefSheet item={briefItem} {now} clock={session.now} session={briefSession} answering={briefAnswering} refusal={briefRefusal} runAnswered={briefRunAnswered} note={briefNote}
       onPick={answerFromSheet} onUndo={() => session.undo()} onVerifyAgain={() => void verifySheetAgain()} onTryAgain={() => void trySheetAgain()} onAskBrief={askForBrief} />

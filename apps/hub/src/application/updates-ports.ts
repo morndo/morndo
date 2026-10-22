@@ -1,7 +1,7 @@
 // The updates service's ports (updates design §8.1, PR 6c): the fleet, the control plane's updater CLI, and what a
 // fleet write answers. Shapes only, no I/O — the adapters beside the service fill them (fleet-updates.ts,
 // updater-cli.ts), so the service stays a decision: who may command, what stands staged, which assertion signs.
-import type { FleetNode, RolloutWire, UpdaterStatus } from "@morndo/protocol";
+import type { FleetNode, RolloutWire, UpdateStateFile, UpdaterStatus } from "@morndo/protocol";
 
 // The control plane's own updater, as the hub asks it: the CLI this tree installs beside the hub
 // (`morndo-update`). `status` is `update --status --json`; null when it did not answer or its answer didn't fit —
@@ -11,6 +11,7 @@ import type { FleetNode, RolloutWire, UpdaterStatus } from "@morndo/protocol";
 // never spelled at a call site: the apply carries the pressed Version (R3's --staged).
 export type UpdaterCli = {
   status(): Promise<UpdaterStatus | null>;
+  state(): Promise<UpdateStateFile | null>;        // its state.json: the last record, why it waits; null without one
   applyDetached(version: string): Promise<void>;   // update --yes --detach --staged <v>, to exactly the pressed Version
   rollbackDetached(): Promise<void>;               // update --rollback --yes --detach, to the Version it ran before
 };
