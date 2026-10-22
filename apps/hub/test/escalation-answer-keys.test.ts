@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { endpointId, sessionId, type Message } from "@morndo/domain";
+import { WORKER_ASK_GRACE_MS, endpointId, sessionId, type Message } from "@morndo/domain";
 import { Store } from "../src/adapters/store.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
 import { answerKey } from "../src/application/escalation-service.ts";
@@ -195,9 +195,11 @@ describe("a menu ask kept across a restart", () => {
     });
     const askedAt = (s: ReturnType<typeof mk>) => s.board().items.find(i => i.id === "menu-4")?.askedAt;
     const first = mk();
+    first.poll();                                        // first sight; a worker's menu waits WORKER_ASK_GRACE_MS (N2)
+    clock = T0 + WORKER_ASK_GRACE_MS;
     first.poll();
     expect(askedAt(first)).toBe(T0);
-    clock = T0 + 90_000;
+    clock = T0 + WORKER_ASK_GRACE_MS + 90_000;           // the hub was down for 90 s, past the menu's grace
     screen = undefined;                                                // after the restart: not read yet
     const restarted = mk();
     restarted.poll();

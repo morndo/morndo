@@ -5,7 +5,7 @@
 // adapters, read through Observation; nothing is decided from them, O4).
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_POLICY, Escalations, answered, askFromBrief, askIdentity, askVersion, decidedChoice, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
+  DEFAULT_POLICY, Escalations, WORKER_ASK_GRACE_MS, answered, askFromBrief, askIdentity, askVersion, decidedChoice, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
   type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecisionBrief, type EndpointId, type Escalation, type Message, type Note, type SessionId, type Sighting,
 } from "@morndo/domain";
 import type { BriefSighting } from "./brief-service.ts";
@@ -517,12 +517,16 @@ export class EscalationService {
     return out;
   }
 
-  // Workers that wait for the principal: an open question (answered on its screen), or a menu on its screen.
+  // Workers that wait for the principal: an open question (answered on its screen), or a menu on its screen. A worker's
+  // ask waits WORKER_ASK_GRACE_MS first (N2): the manager answers most of them, so it reaches the principal only once
+  // it has been open that long, and until then it is on no board and raises no Notification. The manager's own asks are immediate.
   #workerSightings(now: number): Sighting[] {
     const out: Sighting[] = [];
     for (const w of this.#watch.workers()) {
       const isManager = w.name === this.#managerName;
       const asker = { kind: isManager ? "manager" as const : "worker" as const, name: isManager ? "Manager" : w.name, workerId: w.id };
+      // N2: a worker's ask is held from the principal until WORKER_ASK_GRACE_MS has passed since it was asked; the manager's never is.
+      const held = (askedAt: number) => asker.kind === "worker" && now - askedAt < WORKER_ASK_GRACE_MS;
       const questions = this.#watch.openQuestions(w.id);
       const read = this.#watch.screen(w.id);              // undefined: never read, offline or failed; no news about its menu
       const screen = read ?? "";
@@ -530,6 +534,7 @@ export class EscalationService {
         deadline: null, blocking: false, project: null, tracking: "source" as const,
         shortTitle: null, summary: null, minutes: null, link: null, details: null };
       for (const q of questions) {
+        if (held(q.at)) continue;                          // N2: open less than WORKER_ASK_GRACE_MS, so not for the principal yet
         const parts = q.questions ?? [];
         const first = parts[0];
         out.push({
@@ -547,15 +552,20 @@ export class EscalationService {
         const lines = screen.split("\n").map(l => l.trimEnd());
         while (lines.length && !lines.at(-1)) lines.pop();
         const id = menuEscalationId(w.id);                     // "menu-pc_3fa2c1d0_12"; a legacy "%4" stays "menu-4" (spec §4)
-        this.#menus.set(id, menuIdentity(screen) ?? "");
-        out.push({
-          ask: {
-            ...base, id: escalationId(id), title: "Waiting at a prompt on its screen",
-            context: lines.slice(-SCREEN_LINES).join("\n"), contextKind: "screen", options: [],
-            askedAt: this.#since(menuKey, now), messageId: null,
-          },
-          source: { kind: "open" }, answered: null,
-        });
+        // First sight persists even while the ask is held, so its clock survives a restart; a held menu is no sighting,
+        // sets no #menus and must not reach the else below, which drops the first sight and would restart the clock.
+        const askedAt = this.#since(menuKey, now);
+        if (!held(askedAt)) {
+          this.#menus.set(id, menuIdentity(screen) ?? "");
+          out.push({
+            ask: {
+              ...base, id: escalationId(id), title: "Waiting at a prompt on its screen",
+              context: lines.slice(-SCREEN_LINES).join("\n"), contextKind: "screen", options: [],
+              askedAt, messageId: null,
+            },
+            source: { kind: "open" }, answered: null,
+          });
+        }
       } else if (read !== undefined) {                      // only a screen that was read can say the menu is gone
         if (this.#firstSeen.delete(menuKey)) this.#store.dropAskFirstSeen(menuKey);      // the menu is gone: a menu shown again is a new ask
         this.#menus.delete(menuEscalationId(w.id));
