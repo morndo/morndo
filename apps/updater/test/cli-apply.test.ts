@@ -375,11 +375,11 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
       const w = await world();
       await withPrevious(w, { restoreFleet: true });
       const r = await w.run(["update", "--rollback"], {}, { tty: true, answer: "y" });
+      expect(r.out).toMatch(/Not rolled back\./);                // first: a "y" that went on would fail here
       expect(r.code, r.err).toBe(0);
       expect(r.out).toMatch(/Back to 0\.0\.9 from 0\.1\.0\./);
       expect(r.out).toMatch(/The fleet database goes back to its backup from \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(3 hours of writes since are dropped\)\./);
       expect(r.prompts.join("")).toMatch(/Type rollback to go on:/);
-      expect(r.out).toMatch(/Not rolled back\./);
       expect(w.services.tape).toEqual([]);
     }
     // the word itself: the rollback runs in its own unit (§5), and the record it leaves is the answer
