@@ -3,8 +3,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { lintBrief } from "@morndo/domain";
-import { BRIEF_TEMPLATE, parseBriefMarkdown } from "@morndo/protocol";
+import { lintBrief, lintCard } from "@morndo/domain";
+import { BRIEF_TEMPLATE, parseBriefMarkdown, CARD_TEMPLATE, parseCardMarkdown } from "@morndo/protocol";
 import { run } from "../src/decide.ts";
 import { DECIDE_MANAGER_PROMPT, DECIDE_WORKER_PROMPT } from "../src/prompt.ts";
 
@@ -35,6 +35,15 @@ describe("the decision-request guide matches the command", () => {
     const parsed = parseBriefMarkdown(fence(doc, "An example"));
     expect(parsed.problems).toEqual([]);
     expect(lintBrief(parsed.draft, NOW).problems).toEqual([]);
+  });
+  it("the card blank is the CLI's, and the card example is clean", async () => {
+    expect(fence(doc, "The card template")).toBe(CARD_TEMPLATE);
+    const out: string[] = [];
+    expect(await run(["card", "--template"], {}, { fetch, lane: async () => null, read: async () => "", out: l => out.push(l), err: () => {} })).toBe(0);
+    expect(`${out.join("\n")}\n`).toBe(CARD_TEMPLATE);
+    const parsed = parseCardMarkdown(fence(doc, "A card example"));
+    expect(parsed.problems).toEqual([]);
+    expect(lintCard(parsed.draft).problems).toEqual([]);
   });
   it("the manager's block is the CLI's", () => { expect(block(doc, "manager")).toBe(DECIDE_MANAGER_PROMPT); });
   it("the worker's block is the CLI's", () => { expect(block(doc, "worker")).toBe(DECIDE_WORKER_PROMPT); });

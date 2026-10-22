@@ -48,6 +48,12 @@ const STAY = `
   setInterval(() => {}, 1e9);
 `;
 
+// A marker a job writes is there to read once it has content: the file exists from the moment the job opens it, a write
+// later, so `existsSync` alone let a test read it empty ("Unexpected end of JSON input", CI run 39678158682, or a pid of 0).
+const written = (file: string): boolean => {
+  try { return readFileSync(file, "utf8") !== ""; } catch { return false; }
+};
+
 const alive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; } catch { return false; }
 };
@@ -303,7 +309,7 @@ describe.skipIf(!bus.ok)("systemd control group", () => {
     } finally { delete process.env.LEAK_SENTINEL; }
     if (!started.ok) throw new Error(`refused: ${started.error}`);
     expect(started.value.state).toBe("running");
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     const mark = JSON.parse(readFileSync(marker, "utf8")) as { pid: number; child: number; leak: string | null; id: string | null };
     expect(mark.leak).toBe(null);
     expect(mark.id).toBe(id);
@@ -526,7 +532,7 @@ describe.skipIf(!bus.ok)("systemd environment", () => {
       "require('node:fs').writeFileSync(process.argv[1], JSON.stringify(process.env))",
       marker,
     ]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     const env = JSON.parse(readFileSync(marker, "utf8")) as Record<string, string>;
     expect(env.MORNDO_JOB_ID).toBe(id);
     expect(env.MORNDO_LANE).toBe("builder");
@@ -587,7 +593,7 @@ describe.skipIf(!bus.ok)("systemd show", () => {
     const { store, start, home, opts, drill } = await systemdRig();
     const marker = join(home, "stay.json");
     const id = await start([process.execPath, "-e", STAY, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     const mark = JSON.parse(readFileSync(marker, "utf8")) as { pid: number };
     const blind = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: failingSystemctl(home) } });
     await blind.sweep();
@@ -606,7 +612,7 @@ describe.skipIf(!bus.ok)("systemd show", () => {
     const { store, start, home, opts, drill, dir } = await systemdRig({ logBytes: 8 });
     const marker = join(home, "stay.json");
     const id = await start([process.execPath, "-e", STAY, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     const mark = JSON.parse(readFileSync(marker, "utf8")) as { pid: number };
     writeFileSync(join(dir, `${id}.log`), "12345678");
     const blind = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: fakeTools(home, `#!/bin/sh
@@ -631,7 +637,7 @@ exit 0
     const { store, start, home, opts, drill } = await systemdRig();
     const marker = join(home, "stay.json");
     const id = await start([process.execPath, "-e", STAY, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     const mark = JSON.parse(readFileSync(marker, "utf8")) as { pid: number };
     const killed = join(home, "killed");
     const blind = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: fakeTools(home, `#!/bin/sh
@@ -654,7 +660,7 @@ exit 0
     const { store, start, sup, home } = await systemdRig();
     const marker = join(home, "stay.json");
     const id = await start([process.execPath, "-e", STAY, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     execFileSync("systemctl", ["--user", "stop", unitOf(id)], { timeout: 20_000 });
     expect(await until(() => showValue(unitOf(id), "LoadState") === "not-found")).toBe(true);
     await sup.sweep();
@@ -681,7 +687,7 @@ describe.skipIf(!bus.ok)("systemd log cap", () => {
     const { store, notices, start, sup, home, dir } = await systemdRig({ logBytes: 1_000_000, budget: 32 });
     const marker = join(home, "pid");
     const id = await start([process.execPath, "-e", POOL_WRITER, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     const pid = Number(readFileSync(marker, "utf8"));
     const logPath = join(dir, `${id}.log`);
     let held = 0;
@@ -842,7 +848,7 @@ describe("systemd event loop", () => {
     const markerB = join(home, "b.json");
     const a = await start([process.execPath, "-e", STAY, markerA]);
     const b = await start([process.execPath, "-e", STAY, markerB]);
-    expect(await until(() => existsSync(markerA) && existsSync(markerB))).toBe(true);
+    expect(await until(() => written(markerA) && written(markerB))).toBe(true);
     const blind = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: slowSystemctl(home) } });
     const began = performance.now();
     await blind.sweep();
@@ -1043,7 +1049,7 @@ describe.skipIf(!bus.ok)("systemd end states", () => {
     const { store, notices, start, sup, home } = await systemdRig();
     const marker = join(home, "stay.json");
     const id = await start([process.execPath, "-e", STAY, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     const mark = JSON.parse(readFileSync(marker, "utf8")) as { pid: number };
     process.kill(mark.pid, signal);
     expect(await until(() => showValue(unitOf(id), "ExecMainStatus") === status)).toBe(true);
@@ -1101,7 +1107,7 @@ describe.skipIf(!bus.ok)("the log cap rule on the systemd backend", () => {
     const { store, start, home, opts, drill, dir } = await systemdRig({ logBytes: 8 });
     const marker = join(home, "stay.json");
     const id = await start([process.execPath, "-e", STAY, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
     const late = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: stoppedAfterShow(home, 1, 4) } });
     await late.sweep();
@@ -1113,7 +1119,7 @@ describe.skipIf(!bus.ok)("the log cap rule on the systemd backend", () => {
     const { store, start, home, opts, drill, dir } = await systemdRig({ logBytes: 8 });
     const marker = join(home, "stay.json");
     const id = await start([process.execPath, "-e", STAY, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
     const late = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: endedAfterKill(home, 0, Number.MAX_SAFE_INTEGER) } });
     await late.sweep();
@@ -1163,7 +1169,7 @@ describe.skipIf(!bus.ok)("the log cap rule on the systemd backend, second round"
     const { store, start, home, opts, drill, dir } = await systemdRig({ logBytes: 8 });
     const marker = join(home, "stay.json");
     const id = await start([process.execPath, "-e", STAY, marker]);
-    expect(await until(() => existsSync(marker))).toBe(true);
+    expect(await until(() => written(marker))).toBe(true);
     writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
     const late = new JobSupervisor(store, { ...opts, systemd: { slice: drill.slice, toolEnv: stoppedAfterShow(home, 2, 9) } });
     await late.sweep();
