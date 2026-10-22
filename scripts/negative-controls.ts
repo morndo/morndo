@@ -3249,6 +3249,22 @@ export const CONTROLS: Control[] = [
   { id: "c2b-rollback-without-confirmation", task: "c2b", file: "apps/updater/src/cli.ts",
     find: ": answer === \"rollback\";", replace: ": true;",
     run: ["apps/updater/test/cli-apply.test.ts"], expect: "Not rolled back" },
+  // ---- PR 5c step C1 ("RL10: revocation journals"): each start's journal apply removed once, and the restore gate
+  // blinded to the journal. c2c-journal-after-db (a revoke journaled only after its database write) has no control:
+  // it needs a process killed between the two writes, which a source edit cannot produce; the order is held by the
+  // code's shape and the crash-between case is covered by the torn-line and JournalUnreadable tests.
+  { id: "c2c-hub-journal-not-applied", task: "c2c", file: "apps/hub/src/application/revocations.ts",
+    find: "    if (entry.kind === \"endpoint\" && o.access.revoke(entry.id)) applied += 1;\n    else if (entry.kind === \"agent_token\" && o.agents.revoke(entry.id)) applied += 1;",
+    replace: "    void entry;",
+    run: ["apps/hub/test/revocation-journal.test.ts"], expect: "the next start applies the journal" },
+  { id: "c2c-fleet-journal-not-applied", task: "c2c", file: "apps/fleet/src/application/revocations.ts",
+    find: "    if (entry.kind === \"node\" && nodes.revoke(entry.id)) applied += 1;",
+    replace: "    void entry;",
+    run: ["apps/fleet/test/revocation-journal.test.ts"], expect: "the journal applied at start" },
+  { id: "c2c-updater-ignores-journal", task: "c2c", file: "apps/updater/src/adapters/revocations-sqlite.ts",
+    find: "    const journaled = journaledIds(db, this.#paths[db]);        // the service's start re-applies these (RL10)",
+    replace: "    const journaled = new Set<string>();",
+    run: ["apps/updater/test/apply-service.test.ts", "apps/updater/test/revocations-sqlite.test.ts"], expect: "rollback_failed" },
   // ---- B2 (board T-302): a lane the fleet doesn't list is gone, each guard removed once.
   { id: "b2-unregistered-only-doing", task: "302", file: "packages/domain/src/board.ts",
     find: "if (task.status !== \"doing\" || task.assignee === null || registered.has(task.assignee)) return null;",
