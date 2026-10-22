@@ -16,7 +16,9 @@
 //
 // Two steps of the release workflow's build (release.yml) are not this build's to do: the units test run (build
 // QA, not part of the artifact) and `npm run build` (the web UI — the hub answers 503 per request for an unbuilt
-// UI and starts all the same; no door this run reads is a UI route).
+// UI and starts all the same; no door THIS run reads is a UI route). The fleet run (PR 6d) does read UI routes —
+// the pair page and /updates twice — so its set builds the web UI once, in the first copy, before the prune
+// removes vite, and ships the same built app in every one of its Releases.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -59,19 +61,25 @@ export type BuiltWorld = {
   archiveA: string;
 };
 
+// Which story's Releases this build makes. "vm" is #109's own set (the default, byte for byte as before); "fleet"
+// is PR 6d's two-machine set (e2e/update-fleet.e2e.ts): A 0.1.0, B 0.2.0 (one additive hub migration), G 0.3.0
+// (B's change and a node agent that dies at start on the machine named "node"), H 0.4.0 (B's change and a Manifest
+// whose agent protocol range [2,2] drops the protocol A–G's agents speak) — with the built web UI in every one.
+export type WorldSet = "vm" | "fleet";
+
 // The three Releases and the three publish points, built once. Nothing here touches the repository: the tree is
 // copied into the scratch (without .git and .worktrees), the copies are edited, compiled, pruned and staged there.
-export function buildWorld(repo: string): BuiltWorld {
-  const scratch = mkdtempSync(join(tmpdir(), "morndo-c2-build-"));
+export function buildWorld(repo: string, set: WorldSet = "vm"): BuiltWorld {
+  const scratch = mkdtempSync(join(tmpdir(), set === "fleet" ? "morndo-fleet-build-" : "morndo-c2-build-"));
   // A build that fails leaves nothing of itself behind (unless E2E_KEEP=1): the repository copy is large.
-  try { return buildInto(repo, scratch); }
+  try { return buildInto(repo, scratch, set); }
   catch (error) {
     if (process.env.E2E_KEEP !== "1") rmSync(scratch, { recursive: true, force: true });
     throw error;
   }
 }
 
-function buildInto(repo: string, scratch: string): BuiltWorld {
+function buildInto(repo: string, scratch: string, set: WorldSet): BuiltWorld {
   const now = Date.now();
   const mtime = Math.floor(now / 1000);                         // one clock for every archive: a rebuild is comparable
                                                                  // (packTree's mtime is whole seconds, like git's %ct)
@@ -114,18 +122,42 @@ function buildInto(repo: string, scratch: string): BuiltWorld {
   // staged, trusted (trust/keys.json is the tree's own anchor, §10.1 — the stage leaves trust/ empty for the
   // pipeline's own signing step, so it is written here and the file list is made again around it), packed and
   // signed.
-  const releases: readonly { version: string; edit: () => readonly ((copy: string) => void)[] }[] = [
-    { version: VERSION_A, edit: () => [] },
-    { version: VERSION_B, edit: () => [additiveMigration()] },
-    { version: VERSION_C, edit: () => [additiveMigration(), breakingMigration(), plantedHubFailure()] },
-    { version: VERSION_D, edit: () => [additiveMigration(), failingMigration()] },
-    { version: VERSION_E, edit: () => [additiveMigration(), breakingMigration(), hubDiesInProbation()] },
-    { version: VERSION_F, edit: () => [additiveMigration(), secondAdditiveMigration()] },
-  ];
+  const releases: readonly { version: string; edit: () => readonly ((copy: string) => void)[] }[] = set === "fleet"
+    ? [
+      { version: "0.1.0", edit: () => [] },
+      { version: "0.2.0", edit: () => [additiveMigration()] },
+      { version: "0.3.0", edit: () => [additiveMigration(), nodeAgentFailsOnNodeMachine()] },
+      { version: "0.4.0", edit: () => [additiveMigration(), dropAgentProtocol()] },
+    ]
+    : [
+      { version: VERSION_A, edit: () => [] },
+      { version: VERSION_B, edit: () => [additiveMigration()] },
+      { version: VERSION_C, edit: () => [additiveMigration(), breakingMigration(), plantedHubFailure()] },
+      { version: VERSION_D, edit: () => [additiveMigration(), failingMigration()] },
+      { version: VERSION_E, edit: () => [additiveMigration(), breakingMigration(), hubDiesInProbation()] },
+      { version: VERSION_F, edit: () => [additiveMigration(), secondAdditiveMigration()] },
+    ];
   const built: { version: string; archive: Buffer; manifestBytes: Buffer }[] = [];
+  // The fleet run's built web UI (see the header): built once in the first copy — the only moment every
+  // devDependency, vite among them, still stands there — harvested, and copied into each later copy. The build's
+  // own scratch (.svelte-kit, node_modules/.vite) leaves the copy again, so a Release ships the app and not the
+  // scaffolding that made it.
+  let webBuild: string | null = null;
   for (const spec of releases) {
     const copy = copyRepo(repo, join(scratch, `repo-${spec.version}`));
     for (const edit of spec.edit()) edit(copy);
+    if (set === "fleet") {
+      if (webBuild === null) {
+        run("npm", ["run", "prepare", "-w", "@morndo/web"], copy);          // svelte-kit sync, with the dev tree still whole
+        run("npm", ["run", "build", "-w", "@morndo/web"], copy);
+        webBuild = join(scratch, "web-build");
+        cpSync(join(copy, "apps/web/build"), webBuild, { recursive: true });
+        rmSync(join(copy, "apps/web/.svelte-kit"), { recursive: true, force: true });
+        rmSync(join(copy, "node_modules/.vite"), { recursive: true, force: true });
+      } else {
+        cpSync(webBuild, join(copy, "apps/web/build"), { recursive: true });
+      }
+    }
     run(process.execPath, ["scripts/release/main.ts", "compile", "--repo", copy, "--out", join(scratch, `compiled-${spec.version}`)], copy);
     // --ignore-scripts: prune runs workspaces' lifecycle scripts, and apps/web's `prepare` (svelte-kit sync) needs
     // the devDependency prune has just removed — the release workflow's own `npm prune --omit=dev` carries the same
@@ -394,6 +426,44 @@ function secondAdditiveMigration(): (copy: string) => void {
     up: db => db.exec("CREATE TABLE IF NOT EXISTS e2e_d_marker (id INTEGER PRIMARY KEY CHECK (id = 1), at INTEGER NOT NULL)"),
   },
 ];\n\nexport const SCHEMA_VERSION`));
+  };
+}
+
+// G (0.3.0, the fleet set's halted Rollout): B's change, then a node agent that leaves at once on the run path —
+// but only on the machine named "node" (the two containers' --hostname), so the same Release is healthy on the
+// control plane, which commits it, and fails its health walk on the node, which rolls back to B and halts the
+// Rollout fleet-wide (RL12). Serve path only: `join` and `status` still work on both machines, and the rollback's
+// own `morndo-node status` on the node never runs the dying process.
+function nodeAgentFailsOnNodeMachine(): (copy: string) => void {
+  return copy => {
+    const path = join(copy, "apps/node-agent/src/main.ts");
+    const text = readFileSync(path, "utf8");
+    const imports = 'import { homedir, userInfo } from "node:os";';
+    if (!text.includes(imports)) throw new Error("node-agent main.ts: the os import moved; the planted failure needs a new anchor");
+    writeFileSync(path, text.replace(imports, 'import { homedir, hostname, userInfo } from "node:os";'));
+    const after = readFileSync(path, "utf8");                       // the file as the second edit finds it
+    const anchor = "    ensureUtf8Locale();\n    const config = configOrExit();";
+    if (!after.includes(anchor)) throw new Error("node-agent main.ts: the run path's first lines moved; the planted failure needs a new anchor");
+    writeFileSync(path, after.replace(anchor, `// The update-fleet run's planted failure (release G; a scratch-copy edit, never shipped): on the
+// machine named "node" the agent never comes up, so the apply's health walk fails there and rolls the Version
+// back — while the control plane, named "cp", stays healthy on the same code and commits it.
+    if (hostname() === "node") { log.error("the update-fleet run's planted agent failure (release G)"); process.exit(1); }
+${anchor}`));
+  };
+}
+
+// H (0.4.0, the fleet set's skew hold): B's change, then a Manifest whose agent protocol range drops the protocol
+// every A–G agent speaks. The range comes from scripts/release/manifest.ts's protocolRange() — [1,1] while
+// FLEET_PROTO is 1 — and the manifest is built by the copy's own main.ts (buildInto runs it with cwd = the copy),
+// so changing it in H's copy alone changes H's Manifest alone. The updater's skew gate reads that range back from
+// the staged Manifest in update.db (cli.ts protocolOf), so no product code changes with it.
+function dropAgentProtocol(): (copy: string) => void {
+  return copy => {
+    const path = join(copy, "scripts/release/manifest.ts");
+    const text = readFileSync(path, "utf8");
+    const anchor = "    agent: [Math.max(1, FLEET_PROTO - 1), FLEET_PROTO],";
+    if (!text.includes(anchor)) throw new Error("manifest.ts: protocolRange's agent line moved; the H edit needs a new anchor");
+    writeFileSync(path, text.replace(anchor, `    agent: [FLEET_PROTO + 1, FLEET_PROTO + 1],   // the update-fleet run's skew (release H; a scratch-copy edit, never shipped)`));
   };
 }
 
