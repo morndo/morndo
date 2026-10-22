@@ -117,8 +117,9 @@ export class LaunchdServices implements ServiceManager {
       o?.replaceForeign === true);
   }
 
-  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<string[]> {
-    return foreignIn(this.unitDir(), this.shipped(join(this.releases, version, "units", "launchd"), role));
+  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { tree?: string }): Promise<string[]> {
+    const from = o?.tree === undefined ? join(this.releases, version, "units", "launchd") : join(o.tree, "units", "launchd");
+    return foreignIn(this.unitDir(), this.shipped(from, role));
   }
 
   private shipped(from: string, role?: { services: readonly UpdateService[] }): string[] {
@@ -149,7 +150,11 @@ export class LaunchdServices implements ServiceManager {
       child.on("error", () => resolve({ code: 127 }));
       child.on("exit", code => resolve({ code }));
     });
-    if (done.code !== 0) throw new Error(`morndo-update apply --version ${version}: exit ${done.code ?? "?"}`);
+    // As the systemd unit's SuccessExitStatus: an apply that ended in one of §8.4's own exits answered; anything
+    // else is a crash. The caller reads the answer from the record or the apply's result file.
+    if (done.code === null || ![0, 1, 64, 65, 70, 75, 78].includes(done.code)) {
+      throw new Error(`morndo-update apply --version ${version}: exit ${done.code ?? "?"}`);
+    }
   }
 
   async enable(units: readonly string[]): Promise<void> {

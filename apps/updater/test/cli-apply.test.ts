@@ -172,6 +172,36 @@ describe("`morndo update` — check, then apply what stands staged (§8.1)", () 
     }
   });
 
+  it("an apply that ends with no record answers in the unit's own words, never with an older record's", async () => {
+    // The real unit command runs as the unit would; another process holds the apply lock, so it ends busy (75) and
+    // records nothing. An attempt from a day before stands on record: it is not this run's answer.
+    const w = await world({ preStageB: true });
+    w.store.saveUpdate({
+      id: "upd-yesterday", kind: "update", target: parseVersion(B)!, preUpdate: { current: parseVersion(A)!, previous: null },
+      state: "staged", mark: null, backups: [], migrations: null,
+      format: 1, startedAt: Date.now() - DAY, doneMarks: [], judgeBaseline: null, backupOf: null,
+    });
+    w.store.finishUpdate("upd-yesterday", "committed", Date.now() - DAY);
+    let unit: { code: number; err: string } | null = null;
+    w.services.runApplyScript = async version => {
+      const held = w.store.tryLock();                        // taken while the unit runs, not before the command
+      try { unit = await w.run(["update", "apply", "--version", version]); } finally { held?.release(); }
+    };
+    const r = await w.run(["update", "--yes"]);
+    expect(unit, "the unit ran").toMatchObject({ code: 75, err: expect.stringMatching(/Busy/) });
+    expect(r.code, r.err).toBe(75);
+    expect(r.err).toMatch(/Busy: another process holds the apply lock/);
+    expect(r.err + r.out).not.toMatch(/Committed|did not run/);
+  });
+
+  it("a unit that crashed before it answered is a unit that did not run", async () => {
+    const w = await world({ preStageB: true });
+    w.services.runApplyScript = async () => { throw new Error("Job for morndo-update-apply@0.2.0.service failed"); };
+    const r = await w.run(["update", "--yes"]);
+    expect(r.code).toBe(75);
+    expect(r.err).toMatch(/the apply unit did not run: Job for/);
+  });
+
   it("--now writes the apply-now file before the unit starts, and the unit's apply consumes it", async () => {
     const w = await world({ preStageB: true });
     w.services.runApplyScript = async () => {
