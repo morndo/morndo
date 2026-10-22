@@ -2,8 +2,9 @@
 // database is appended here first, and each start applies what the journal holds. A database restored from an older
 // copy then brings no revoked device, agent token or node back: whatever the restored file forgets, the journal
 // remembers (AC4, FL4). The file is revoked.log, beside the database it shadows.
-import { closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fstatSync, fsyncSync, ftruncateSync, openSync, readFileSync, readSync, renameSync, statSync, writeSync } from "node:fs";
 import { dirname } from "node:path";
+import Database from "better-sqlite3";
 
 /** What a journal entry revokes: a hub endpoint, a hub agent token, or a fleet node — the three ids a restore could
  *  bring back. The connections store has no journal: it has no service to apply one at start. Endpoints and agent
@@ -34,6 +35,9 @@ export const revocationKey = (e: RevocationEntry): string => e.kind === "node" ?
 /** The size above which a start compacts the journal (`compact`): about ten thousand entries. */
 export const JOURNAL_COMPACT_BYTES = 1024 * 1024;
 
+/** How long an append or a compaction waits for the other to finish with the journal. */
+const JOURNAL_LOCK_WAIT_MS = 10_000;
+
 export class RevocationJournal {
   readonly #path: string;
 
@@ -45,6 +49,10 @@ export class RevocationJournal {
   // next start applies — never one only the database knows. The directory is fsynced the one time the file is made,
   // so the file's own name survives the crash it is there for.
   append(entry: RevocationEntry): void {
+    this.#locked(() => this.#append(entry));
+  }
+
+  #append(entry: RevocationEntry): void {
     const line = Buffer.from(`${JSON.stringify(entry)}\n`, "utf8");
     const made = !existsSync(this.#path);
     const fd = openSync(this.#path, "a+", 0o600);
@@ -100,11 +108,28 @@ export class RevocationJournal {
 
   // A start's housekeeping: past `maxBytes`, the journal is rewritten with one entry per thing revoked (the latest),
   // whole by rename, so it neither grows without end nor is read whole at length at every start. Bad lines are not
-  // carried over (the caller reported them on its read). A line another process appended while this ran is kept:
-  // the rewrite is dropped when the file grew meanwhile, and the next start tries again. Node has no file lock, so a
-  // narrow window between that check and the rename remains; it runs only at a service's start, past the size.
-  // Answers whether it rewrote.
-  compact(maxBytes = JOURNAL_COMPACT_BYTES): boolean {
+  // carried over (the caller reported them on its read). It holds the journal's lock from its read to its rename,
+  // so another process's append waits and lands in the rewritten file. Answers whether it rewrote.
+  compact(maxBytes = JOURNAL_COMPACT_BYTES, hooks: { beforeRename?: () => void } = {}): boolean {
+    return this.#locked(() => this.#compact(maxBytes, hooks));
+  }
+
+  // One process at a time writes the journal: an append, or a compaction from its read to its rename, so a line
+  // never lands in a file the rename is about to replace. The lock is SQLite's own exclusive lock on a file beside
+  // the journal — the kernel drops it with a process that dies holding it, so a crash leaves no stale lock — and a
+  // writer waits for it up to JOURNAL_LOCK_WAIT_MS. Revocations are rare and each holds it for one fsync.
+  #locked<T>(fn: () => T): T {
+    const lockPath = `${this.#path}.lock`;
+    const lock = new Database(lockPath, { timeout: JOURNAL_LOCK_WAIT_MS });
+    try {
+      chmodSync(lockPath, 0o600);
+      lock.pragma("locking_mode = EXCLUSIVE");
+      lock.exec("BEGIN EXCLUSIVE");
+      return fn();
+    } finally { lock.close(); }
+  }
+
+  #compact(maxBytes: number, hooks: { beforeRename?: () => void }): boolean {
     let size: number;
     try { size = statSync(this.#path).size; }
     catch (e) {
@@ -121,7 +146,7 @@ export class RevocationJournal {
       for (let at = 0; at < body.length;) at += writeSync(fd, body, at);
       fsyncSync(fd);
     } finally { closeSync(fd); }
-    if (statSync(this.#path).size !== size) { rmSync(temp, { force: true }); return false; }
+    hooks.beforeRename?.();
     renameSync(temp, this.#path);
     const dir = openSync(dirname(this.#path), "r");
     try { fsyncSync(dir); } finally { closeSync(dir); }

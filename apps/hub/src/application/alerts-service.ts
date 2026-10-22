@@ -19,8 +19,13 @@ function alertOf(v: unknown): AlertWire | null {
   return { id: v.id as number, at: v.at, node: v.node, kind: v.kind, detail: isRecord(v.detail) ? v.detail : {} };
 }
 
+// The hub's own alerts (a revocation journal line it could not read) take ids from here up: the fleet's are its audit
+// row numbers, which never come near 2^52, so the two never meet in one list.
+export const HUB_ALERT_IDS = 2 ** 52;
+
 export class AlertsService {
   #items: AlertWire[] = [];
+  #own = 0;
   #listeners = new Set<(items: AlertWire[]) => void>();
   #onNew: (a: AlertWire, isUrgent: boolean) => void;
 
@@ -41,6 +46,15 @@ export class AlertsService {
     if (!a || !this.#merge([a])) return;
     this.#tell();
     this.#onNew(a, urgent(a));
+  }
+
+  // One the hub raises itself, of a kind the fleet raises too: shown and pushed exactly as the fleet's are.
+  raise(kind: string, detail: Record<string, unknown>, at: number): AlertWire {
+    const a: AlertWire = { id: HUB_ALERT_IDS + this.#own++, at, node: null, kind, detail };
+    this.#merge([a]);
+    this.#tell();
+    this.#onNew(a, urgent(a));
+    return a;
   }
 
   view(): { items: AlertWire[] } { return { items: this.#items }; }

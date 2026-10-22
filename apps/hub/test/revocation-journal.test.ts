@@ -10,7 +10,8 @@ import { RevocationJournal } from "@morndo/service-kit";
 import { Store } from "../src/adapters/store.ts";
 import { AccessService } from "../src/application/access-service.ts";
 import { AgentAccess } from "../src/application/agent-access.ts";
-import { applyRevocationJournal } from "../src/application/revocations.ts";
+import { applyRevocationJournal, raiseUnreadable } from "../src/application/revocations.ts";
+import { AlertsService, HUB_ALERT_IDS } from "../src/application/alerts-service.ts";
 import type { Passkeys } from "../src/adapters/passkeys.ts";
 
 let dir: string;
@@ -134,5 +135,17 @@ describe("the hub's revocation journal (RL10)", () => {
     expect(applied.applied).toBe(1);
     expect(applied.bad).toEqual([{ line: 1, why: expect.any(String) }]);
     expect(agents.authenticate(secret, "lane-a")).toMatchObject({ ok: false, refused: "revoked" });
+  });
+  it("each bad line becomes the urgent journal_unreadable Alert, as the fleet raises it, and a push", () => {
+    const pushes: boolean[] = [];
+    const alerts = new AlertsService({ onNew: (_a, isUrgent) => pushes.push(isUrgent) });
+    alerts.load([{ id: 7, at: 1, node: "pc", kind: "clock_offset", detail: {} }]);      // one of the fleet's
+    raiseUnreadable(alerts, [{ line: 1, why: "not an object" }, { line: 4, why: "a node entry without its enrolment" }], now);
+    expect(alerts.view().items.filter(a => a.kind === "journal_unreadable")).toEqual([
+      { id: HUB_ALERT_IDS + 1, at: now, node: null, kind: "journal_unreadable", detail: { file: "revoked.log", line: 4, why: "a node entry without its enrolment" } },
+      { id: HUB_ALERT_IDS, at: now, node: null, kind: "journal_unreadable", detail: { file: "revoked.log", line: 1, why: "not an object" } },
+    ]);
+    expect(pushes).toEqual([true, true]);
+    expect(alerts.view().items.map(a => a.id)).toContain(7);
   });
 });

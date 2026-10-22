@@ -3,6 +3,7 @@
 // line is a crash mid-write and is skipped; any other line that is not a whole entry is skipped and reported, never
 // thrown, so one bad line neither hides the rest nor stops a service from starting.
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -99,5 +100,26 @@ describe("RevocationJournal", () => {
     });
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(new RevocationJournal(join(dir(), "absent.log")).compact(0)).toBe(false);
+  });
+  it("an append from another process while compaction rewrites waits for it and is kept", async () => {
+    // The other process's append arrives after compaction read the journal and before it renames the rewrite in:
+    // without one lock over both, the rename would drop it.
+    const path = join(dir(), "revoked.log");
+    const journal = new RevocationJournal(path);
+    journal.append(nodeEntry("pc", 1));
+    journal.append(nodeEntry("pc", 2));
+    const source = new URL("../src/revocation-journal.ts", import.meta.url).pathname;
+    let child: ReturnType<typeof spawn> | null = null;
+    journal.compact(10, {
+      beforeRename: () => {
+        child = spawn(process.execPath, ["--input-type=module", "-e",
+          `import { RevocationJournal } from ${JSON.stringify(source)}; new RevocationJournal(${JSON.stringify(path)}).append(${JSON.stringify(nodeEntry("mac", 3))});`],
+          { stdio: "ignore" });
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);   // time enough for it to land, unlocked
+      },
+    });
+    const code = await new Promise<number | null>(resolve => { child!.on("exit", c => resolve(c)); });
+    expect(code).toBe(0);
+    expect(journal.entries()).toEqual([nodeEntry("pc", 2), nodeEntry("mac", 3)]);
   });
 });

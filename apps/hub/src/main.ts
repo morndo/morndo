@@ -44,7 +44,7 @@ import { BoardService } from "./application/board-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
 import { AgentAccess } from "./application/agent-access.ts";
-import { applyRevocationJournal } from "./application/revocations.ts";
+import { applyRevocationJournal, raiseUnreadable } from "./application/revocations.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
 import { AlertsService, SEEN_MARK } from "./application/alerts-service.ts";
@@ -135,7 +135,8 @@ const access = new AccessService(store, passkeys(config), Date.now, journal);
 const agents = new AgentAccess(store, config.managerWindow, Date.now, journal);
 const reapplied = applyRevocationJournal(journal, { access, agents });
 if (reapplied.applied > 0) log.info(`re-applied ${reapplied.applied} revocations from revoked.log`);
-// A bad line is reported and skipped, never a refusal to start (the hub's Alerts are the fleet's; this is its log).
+// A bad line is reported and skipped, never a refusal to start: logged here, and an urgent Alert once `serve` has its
+// Alerts (raiseUnreadable).
 for (const b of reapplied.bad) log.error(`revoked.log line ${b.line} skipped, not a revocation entry: ${b.why}`);
 if (journal.compact()) log.info("revoked.log compacted to one entry per revocation");
 const [cmd = "serve", ...args] = process.argv.slice(2);
@@ -180,7 +181,9 @@ switch (cmd) {
     shutdown.onStop(() => jobs.close());
     // The fleet's alerts in the app; an urgent new one is a push (counts only), told once the notifications exist below.
     let alertPush: (urgent: boolean) => void = () => {};
-    const alerts = config.fleetSocket ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
+    // A hub without a fleet has Alerts only when its own journal had a line it could not read (the start's, above).
+    const alerts = config.fleetSocket || reapplied.bad.length > 0 ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
+    if (alerts !== null) raiseUnreadable(alerts, reapplied.bad, Date.now());
     const fleet = config.fleetSocket ? await running(openFleet(config.fleetSocket, files, jobs, alerts, shutdown)) : null;
     const ports: HubPorts = fleet?.ports ?? legacyPorts(config, { files });
     // Engine lanes on this machine, only when MORNDO_ENGINE_SESSIONS names their registry. Off otherwise: nothing is read.

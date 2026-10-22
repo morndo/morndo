@@ -5,6 +5,7 @@
 // token comes back. Answers how many entries actually revoked something: applying a second time changes nothing.
 import type { BadLine, RevocationJournal } from "@morndo/service-kit";
 import type { AccessService } from "./access-service.ts";
+import type { AlertsService } from "./alerts-service.ts";
 import type { AgentAccess } from "./agent-access.ts";
 
 // A line the journal cannot read is skipped and handed back for the caller to report; the rest still applies, and
@@ -19,4 +20,10 @@ export function applyRevocationJournal(journal: RevocationJournal, o: { access: 
     else if (entry.kind === "agent_token" && o.agents.revoke(entry.id)) applied += 1;
   }
   return { applied, bad };
+}
+
+// Each bad line, as the fleet reports its own: an urgent `journal_unreadable` Alert in the app (a revocation it held
+// may not have been applied again), with the same detail.
+export function raiseUnreadable(alerts: AlertsService, bad: readonly BadLine[], at: number): void {
+  for (const b of bad) alerts.raise("journal_unreadable", { file: "revoked.log", line: b.line, why: b.why }, at);
 }
