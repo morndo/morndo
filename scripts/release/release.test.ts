@@ -666,6 +666,25 @@ describe("stage, launchers, node pin, notice", () => {
     expect(tar.stdout).toContain("trust/keys.json.sig\n");
   });
 
+  it("refuses a keys.json whose signature is missing or unreadable: the Key set ships signed or not at all", () => {
+    const stageWith = (sig: (repo: string) => void) => {
+      const repo = temp();
+      const nodeDir = temp();
+      mkdirSync(join(repo, "trust"), { recursive: true });
+      mkdirSync(join(nodeDir, "bin"), { recursive: true });
+      writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0"}\n');
+      writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+      writeFileSync(join(repo, "trust/keys.json"), '{"version":1}\n');
+      writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
+      sig(repo);
+      return () => stageRelease({ repo, nodeDir, dest: join(temp(), "out"), version: "0.1.0", commit: STAMP_COMMIT });
+    };
+    expect(stageWith(() => {})).toThrow(/keys\.json\.sig/);                                       // no signature at all
+    expect(stageWith(repo => mkdirSync(join(repo, "trust/keys.json.sig")))).toThrow(/keys\.json\.sig/);   // one that cannot be read
+    expect(stageWith(repo => writeFileSync(join(repo, "trust/keys.json.sig"), ""))).toThrow(/keys\.json\.sig/);   // an empty one
+    expect(stageWith(repo => writeFileSync(join(repo, "trust/keys.json.sig"), "sig\n"))).not.toThrow();   // control: a signature file stages
+  });
+
   it("a repo with no trust/ still stages an empty trust/ (a fixture tree)", () => {
     const repo = temp();
     const nodeDir = temp();

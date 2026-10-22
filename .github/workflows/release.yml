@@ -112,6 +112,9 @@ jobs:
     env:
       BUNDLED_NODE: "24.21.0"
       NODE_RELEASE_KEYS_COMMIT: "481637f813e912c4aa3622d7964ab426c97b8e8d" #gitleaks:allow
+      # The root key's public half (trust/README.md), pinned here and not read from the tree it checks: keys.json must
+      # carry this key's signature (check-key-set.sh). A public key, not a secret.
+      ROOT_ALLOWED_SIGNER: 'root@morndo.github.io namespaces="keys@morndo.github.io" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPjwqMc0uDQdQHelLxhebc5/oO2hpmEzFNQQuXX0UBUC' #gitleaks:allow
       VERSION: ${{ needs.release-please.outputs.version }}
       RELEASE_SHA: ${{ needs.release-please.outputs.sha }}
       PLATFORM: ${{ matrix.platform }}
@@ -121,6 +124,14 @@ jobs:
           ref: ${{ needs.release-please.outputs.sha }}
           persist-credentials: false
           fetch-depth: 0
+
+      # Before any repository program runs: the Key set this build would ship must carry the pinned root key's signature.
+      # Plain shell and the system's ssh-keygen. It is checked again on the staged copy below.
+      - name: Key set signature
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$ROOT_ALLOWED_SIGNER" > "$RUNNER_TEMP/root_allowed_signers"
+          sh scripts/release/check-key-set.sh "$RUNNER_TEMP/root_allowed_signers" trust
 
       - name: GnuPG on macOS
         if: runner.os == 'macOS'
@@ -134,17 +145,7 @@ jobs:
       - name: Verify and unpack Node
         run: sh scripts/release/verify-node.sh "$BUNDLED_NODE" "$PLATFORM" "$RUNNER_TEMP/node" "$RUNNER_TEMP/pubring.kbx"
 
-      # The units run here too, and some need tmux and ffmpeg, as ci.yml installs them (ubuntu-24.04 ships no ffmpeg:
-      # https://packages.ubuntu.com/noble/ffmpeg, read 2026-10-13). The first bench run failed seven remux tests with
-      # `spawnSync ffmpeg ENOENT` on both Linux legs.
-      - name: tmux and ffmpeg for the unit tests
-        if: runner.os == 'Linux'
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tmux ffmpeg
-          ffmpeg -version | head -n 1
-      - name: Test, build and pack
+      - name: Build and pack
         run: |
           set -euo pipefail
           export PATH="$RUNNER_TEMP/node/bin:$PATH"
@@ -156,11 +157,6 @@ jobs:
           if node -e "const s=require('./node_modules/better-sqlite3/package.json').scripts||{}; if(!s.install) process.exit(1)"; then
             npm run install --prefix node_modules/better-sqlite3
           fi
-          # The unit suite is a Linux suite (/proc, systemd, tmux, a directory renamed at 0555): the bench run had 179 failures
-          # on macos-15. The units gate the Linux legs; the macOS leg builds, stages and smoke-tests its tree below.
-          if [ "$RUNNER_OS" = Linux ]; then
-            npx vitest run --project=units
-          fi
           npm run build
           # Node will not strip types under node_modules (nodejs.org/docs/latest-v24.x/api/typescript.html,
           # "Type stripping in dependencies", v24.21.0, read 2026-10-13). Compile while typescript is installed.
@@ -171,8 +167,9 @@ jobs:
           npm prune --omit=dev --ignore-scripts
           mtime=$(git log -1 --format=%ct "$RELEASE_SHA")
           node scripts/release/main.ts stage --repo "$GITHUB_WORKSPACE" --node "$RUNNER_TEMP/node" --dest "$RUNNER_TEMP/stage" --version "$VERSION" --commit "$RELEASE_SHA" --compiled "$RUNNER_TEMP/compiled"
-          # The Key set this Version ships with: an installer refuses a tree without it (T-354).
-          test -s "$RUNNER_TEMP/stage/trust/keys.json"
+          # The Key set this Version ships with, as staged: an installer refuses a tree without it (T-354), and it must
+          # still carry the pinned root key's signature.
+          sh scripts/release/check-key-set.sh "$RUNNER_TEMP/root_allowed_signers" "$RUNNER_TEMP/stage/trust"
           ( cd "$RUNNER_TEMP/stage/app" && "$RUNNER_TEMP/node/bin/node" -e "require('better-sqlite3')(':memory:').close()" )
           for name in morndo morndo-fleet morndo-node morndo-job morndo-board morndo-keys; do
             "$RUNNER_TEMP/stage/bin/$name" --version
@@ -194,11 +191,52 @@ jobs:
           path: dist
           if-no-files-found: error
 
+  # The unit suite has a job of its own, not a place in the legs that make the shipped tarballs: it needs tmux and
+  # ffmpeg from the distribution (ubuntu-24.04 ships no ffmpeg, https://packages.ubuntu.com/noble/ffmpeg, read
+  # 2026-10-13; ci.yml installs them the same way), and those unpinned packages stay out of a shipping leg. This job
+  # holds no key, uploads nothing, and `assemble` waits for it. The suite is a Linux one (/proc, systemd, tmux, a
+  # directory renamed at 0555): on the Apple runner the release bench had 179 failures, so it runs on the two Linux
+  # runners only (the Apple leg still builds, stages and smoke-tests its tree).
+  units:
+    needs: [release-please, signers]
+    if: needs.signers.outputs.ready == 'true' && needs.release-please.outputs.release_created == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+    env:
+      BUNDLED_NODE: "24.21.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0   # the downgrade-contract tests read an earlier commit
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.BUNDLED_NODE }}
+      - name: tmux and ffmpeg
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tmux ffmpeg
+          ffmpeg -version | head -n 1
+      - run: npm ci
+      - run: npx vitest run --project=units
+
   # The three jobs below are one release step split on purpose. `assemble` runs npm and repo code and holds no
   # key. `sign` holds the release key and runs no npm, no node and no repo program: it checks the files in plain
   # shell, signs, and uploads signatures only. `publish` attests and uploads, again without the key.
   assemble:
-    needs: [release-please, build]
+    needs: [release-please, build, units]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:

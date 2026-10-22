@@ -82,25 +82,56 @@ describe("release pipeline files", () => {
     expect(build).toContain("persist-credentials: false");
     expect(build).toContain("fetch-depth: 0");
     expect(build).toContain("npm ci");
-    expect(build).toContain("npx vitest run --project=units");
     expect(build).toContain("npm run build");
-    // The units need tmux and ffmpeg, as ci.yml installs them: the first bench run failed seven remux tests with
-    // `spawnSync ffmpeg ENOENT` on both Linux legs (ubuntu-24.04 ships no ffmpeg).
-    expect(build).toContain("sudo apt-get install -y --no-install-recommends tmux ffmpeg");
-    expect(build.indexOf("tmux ffmpeg")).toBeLessThan(build.indexOf("npx vitest run --project=units"));
-    // The unit suite is a Linux suite (/proc, systemd, tmux, a directory renamed at 0555): on macos-15 the bench's run had
-    // 179 failures. The units gate the Linux legs; the macOS leg builds, stages and smoke-tests its tree all the same.
-    expect(build).toMatch(/if \[ "\$RUNNER_OS" = Linux \]; then\s+npx vitest run --project=units/);
-    expect(build).not.toContain("brew install tmux ffmpeg");
+    // The legs that make the shipped tarballs install no distribution packages and run no test suite: the units run in
+    // their own job below, which holds no key and ships nothing (an unpinned apt install stays out of a shipping leg).
+    // (The one package the Apple leg may install is GnuPG, which verifies the bundled Node, and only when it is missing.)
+    const code = build.split("\n").filter(l => !l.trimStart().startsWith("#")).join("\n");   // a comment between jobs belongs to the slice before it
+    expect(code).not.toContain("apt-get");
+    expect(code).not.toMatch(/brew install (?!gnupg)/);
+    expect(code).not.toContain("tmux");
+    expect(code).not.toContain("ffmpeg");
+    expect(code).not.toContain("vitest");
+    // The Key set is checked before any repository program runs, and again on the copy that ships: a missing or wrong
+    // signature fails the build. The root signer is pinned here, in the workflow, not read from the tree it checks.
+    expect(build).toContain("ROOT_ALLOWED_SIGNER: 'root@morndo.github.io namespaces=\"keys@morndo.github.io\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPjwqMc0uDQdQHelLxhebc5/oO2hpmEzFNQQuXX0UBUC'");
+    const checks = [...build.matchAll(/sh scripts\/release\/check-key-set\.sh "\$RUNNER_TEMP\/root_allowed_signers" (\S+)/g)].map(m => m[1]);
+    expect(checks).toEqual(["trust", '"$RUNNER_TEMP/stage/trust"']);
+    expect(build.indexOf("check-key-set.sh")).toBeLessThan(build.indexOf("npm ci"));
+    expect(build.lastIndexOf("check-key-set.sh")).toBeGreaterThan(build.indexOf("main.ts stage"));
+    expect(build.lastIndexOf("check-key-set.sh")).toBeLessThan(build.indexOf("main.ts pack"));
     expect(build).toContain("npm prune --omit=dev");
     // T-355: the prune must not run a workspace's lifecycle scripts: apps/web's prepare is `svelte-kit sync`, and by then
     // svelte-kit is pruned (exit 127). No runtime dependency has an install script (ADR-0005).
     expect(build).toMatch(/npm prune --omit=dev --ignore-scripts\s*$/m);
-    // T-354: the staged tree carries the Key set it shipped with, or an installer refuses it.
-    expect(build).toContain('test -s "$RUNNER_TEMP/stage/trust/keys.json"');
     expect(build).toContain('"$RUNNER_TEMP"/stage/bin/*');
     expect(build).toContain("better-sqlite3");
     expect(build).toContain("contents: read");
+  });
+
+  it("runs the unit suite in a job of its own on the two Linux runners, with the tools it needs, before anything is assembled", () => {
+    const units = job(release, "units");
+    expect(units).toContain("runner: ubuntu-24.04\n");
+    expect(units).toContain("runner: ubuntu-24.04-arm");
+    expect(units).not.toContain("macos");
+    expect(units).toContain("fail-fast: false");
+    expect(units).toContain("contents: read");
+    expect(units).toContain("persist-credentials: false");
+    expect(units).toContain("fetch-depth: 0");   // the downgrade-contract tests read an earlier commit
+    expect(units).toContain("ref: ${{ needs.release-please.outputs.sha }}");
+    // The suite needs tmux and ffmpeg, as ci.yml installs them: the first bench run failed seven remux tests with
+    // `spawnSync ffmpeg ENOENT` (ubuntu-24.04 ships no ffmpeg). It is a Linux suite (/proc, systemd, tmux, a directory
+    // renamed at 0555): on macos-15 it had 179 failures, so it runs on the Linux runners only.
+    expect(units).toContain("sudo apt-get install -y --no-install-recommends tmux ffmpeg");
+    expect(units).toContain("node-version: ${{ env.BUNDLED_NODE }}");
+    expect(units).toContain("npm ci");
+    expect(units).toContain("npx vitest run --project=units");
+    expect(units.indexOf("tmux ffmpeg")).toBeLessThan(units.indexOf("npx vitest run --project=units"));
+    expect(units).not.toContain("secrets.");
+    expect(units).not.toContain("environment:");
+    expect(units).not.toContain("upload-artifact");
+    // the release is not assembled, signed or published unless the units passed
+    expect(job(release, "assemble")).toMatch(/needs: \[release-please, build, units\]/);
   });
 
   it("signs in its own release-environment job, then attests and publishes the draft without the key", () => {
@@ -364,7 +395,7 @@ describe("artifacts are downloaded by exact name", () => {
 
   it("the build matrix uploads under exactly those names", () => {
     expect(job(release, "build")).toContain("name: release-${{ matrix.platform }}");
-    expect([...release.matchAll(/platform: ([a-z0-9-]+)/g)].map(m => `release-${m[1]}`)).toEqual(names);
+    expect([...job(release, "build").matchAll(/platform: ([a-z0-9-]+)/g)].map(m => `release-${m[1]}`)).toEqual(names);
   });
 });
 
