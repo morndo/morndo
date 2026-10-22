@@ -29,7 +29,7 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     expect((await bodyOf(api.post("/v1/rollout/committed", { version: V })))?.ok).toBe(true);
     const b = await fleet.online("n2");
     for (let i = 0; i < 3; i++)
-      b.health(health({ update: { state: "rolled_back", version: "0.3.9", target: V, reason: "a check failed after the swap" } }));
+      b.health(health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "a check failed after the swap", attempt: "u-1" } }));
     await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(true));
     const rollout = (await bodyOf(api.get("/v1/rollout")))?.rollout;
     expect(rollout).toMatchObject({ haltedBy: "n2", haltReason: "a check failed after the swap" });
@@ -215,7 +215,7 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     const statePath = join(dir, "update-state.json");
     const fleet = await startTestFleet({ dir, updaterStatePath: statePath });   // closed: no route may halt
     const api = client(fleet.config.socketPath);
-    writeFileSync(statePath, JSON.stringify({ state: "rolled_back", version: V, target: "99.0.0", failedCheck: "fleet health", at: 1 }));
+    writeFileSync(statePath, JSON.stringify({ state: "rolled_back", version: V, target: "99.0.0", failedCheck: "fleet health", attempt: "cp-1", at: 1 }));
     await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.aboveControlPlane).toEqual(
       [expect.objectContaining({ version: "99.0.0", halted: true, haltedBy: "control-plane", haltReason: "fleet health" })]), { timeout: 5000 });
     expect(fleet.audit.of("alert.update_rolled_back")).toHaveLength(1);
@@ -231,7 +231,7 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     const api = client(fleet.config.socketPath);
     await api.post("/v1/rollout/committed", { version: V });
     const b = await fleet.online("n2");
-    const report = health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "a check failed" } });
+    const report = health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "a check failed", attempt: "u-1" } });
     b.health(report);
     await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(true));
     await api.post("/v1/rollout/resume", { version: V });
@@ -267,7 +267,7 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     expect((await bodyOf(api.get("/v1/rollout")))?.aboveControlPlane).toEqual([]);
     // a node never runs above its control plane, so a node's report of a rollback from above it halts nothing
     const b = await fleet.online("n3");
-    b.health(health({ update: { state: "rolled_back", version: V, target: "98.0.0", reason: "odd report" } }));
+    b.health(health({ update: { state: "rolled_back", version: V, target: "98.0.0", reason: "odd report", attempt: "u-9" } }));
     await vi.waitFor(() => expect(fleet.audit.of("alert.update_rolled_back")).toHaveLength(1));
     expect((await bodyOf(api.get("/v1/rollout")))?.aboveControlPlane).toEqual([]);
   });
@@ -278,5 +278,67 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     const op = await client(fleet.config.socketPath).post("/v1/op", { node: "n2", op: "update.apply", args: {}, key: "hub:u-none" });
     expect(op?.body).toMatchObject({ ok: false, error: { code: "bad_args", executed: "no" } });
     expect(fresh.reqs.filter(r => r.op === "update.apply")).toHaveLength(0);
+  });
+
+  it("a node's rollback halts only a Version the fleet offered it, from an older one; anything else is alerted and ignored", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const api = client(fleet.config.socketPath);
+    const b = await fleet.online("n2", { caps: [CAP_UPDATE] });
+    const halted = async () => (await bodyOf(api.get("/v1/rollout")))?.rollout?.halted ?? null;
+    const ignored = () => fleet.audit.of("alert.update_rolled_back").filter(a => typeof a.detail.ignored === "string");
+    // never offered: no commit of V, no update.apply of it to n2
+    b.health(health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "x", attempt: "u-a" } }));
+    await vi.waitFor(() => expect(ignored()).toHaveLength(1));
+    expect(await halted()).toBeNull();
+    // offered (committed), but not newer than what the node ran: a node on V cannot roll back from V
+    await api.post("/v1/rollout/committed", { version: V });
+    b.health(health({ update: { state: "rolled_back", version: V, target: V, reason: "x", attempt: "u-b" } }));
+    await vi.waitFor(() => expect(ignored()).toHaveLength(2));
+    expect(await halted()).toBe(false);
+    // the real case: offered, from an older Version
+    b.health(health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "health", attempt: "u-c" } }));
+    await vi.waitFor(async () => expect(await halted()).toBe(true));
+  });
+
+  it("an update.apply the fleet forwarded counts as an offer: that node's rollback from it halts", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const api = client(fleet.config.socketPath);
+    const b = await fleet.online("n2", { caps: [CAP_UPDATE] });
+    expect((await api.post("/v1/op", { node: "n2", op: "update.apply", args: { version: V }, key: "hub:u-ask" }))?.body).toMatchObject({ ok: true });
+    b.health(health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "health", attempt: "u-d" } }));
+    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(true));
+  });
+
+  it("each rollback counts once, by its attempt: a second real rollback after a resume halts again, with its alert", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const api = client(fleet.config.socketPath);
+    await api.post("/v1/rollout/committed", { version: V });
+    const b = await fleet.online("n2");
+    const first = health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "health", attempt: "u-1" } });
+    b.health(first);
+    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(true));
+    await api.post("/v1/rollout/resume", { version: V });
+    b.health(first);                                    // the same rollback again: nothing
+    await new Promise(r => setTimeout(r, 300));
+    expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(false);
+    b.health(health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "health again", attempt: "u-2" } }));
+    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(true));
+    expect(fleet.audit.of("alert.update_rolled_back").filter(a => a.detail.ignored === undefined)).toHaveLength(2);
+    expect(fleet.audit.of("alert.rollout_halted")).toHaveLength(2);
+  });
+
+  it("the once-only memory is not the audit: it survives the audit's pruning", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const api = client(fleet.config.socketPath);
+    await api.post("/v1/rollout/committed", { version: V });
+    const b = await fleet.online("n2");
+    const report = health({ update: { state: "rolled_back", version: "0.0.0-rc.1", target: V, reason: "health", attempt: "u-1" } });
+    b.health(report);
+    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(true));
+    await api.post("/v1/rollout/resume", { version: V });
+    fleet.db.prepare("DELETE FROM audit").run();        // as if 90 days had passed
+    b.health(report);
+    await new Promise(r => setTimeout(r, 300));
+    expect((await bodyOf(api.get("/v1/rollout")))?.rollout?.halted).toBe(false);
   });
 });

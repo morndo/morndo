@@ -34,6 +34,21 @@ export class RolloutsStore {
     return (this.#db.prepare("SELECT * FROM rollouts").all() as Row[]).map(fromRow);
   }
 
+  // An update.apply the fleet forwarded to a node (an offer, review of #107). Synced like the halts.
+  asked(node: string, version: string): void {
+    const now = this.#now();
+    synced(this.#db, () => this.#db.prepare("INSERT INTO update_asks (node, version, at) VALUES (?, ?, ?) ON CONFLICT(node, version) DO UPDATE SET at = excluded.at").run(node, version, now));
+  }
+  // The Versions the fleet asked this node to apply.
+  askedOf(node: string): string[] {
+    return (this.#db.prepare("SELECT version FROM update_asks WHERE node = ?").all(node) as { version: string }[]).map(r => r.version);
+  }
+  // Marks one rollback report acted on; false when it was already (each counts once, by its attempt).
+  firstReport(machine: string, attempt: string): boolean {
+    const now = this.#now();
+    return synced(this.#db, () => this.#db.prepare("INSERT OR IGNORE INTO rollback_reports (machine, attempt, at) VALUES (?, ?, ?)").run(machine, attempt, now).changes === 1);
+  }
+
   // Writes the Rollout of one Version whole. A write that clears a halt records when the fleet resumed it (the row's
   // own write time, `updated_at`: one clock, one value).
   put(r: RolloutWire): RolloutWire {

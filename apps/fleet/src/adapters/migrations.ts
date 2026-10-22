@@ -252,6 +252,14 @@ export const MIGRATIONS: readonly Migration[] = [
         version TEXT PRIMARY KEY, control_plane_committed_at INTEGER, soak_minutes INTEGER NOT NULL DEFAULT 30,
         halted INTEGER NOT NULL DEFAULT 0, halted_by TEXT, halt_reason TEXT, halted_at INTEGER, resumed_at INTEGER,
         updated_at INTEGER NOT NULL DEFAULT 0);
+      -- Each update.apply the fleet forwarded (update_asks): with the committed Rollouts, what the fleet offered a
+      -- node; a node's rollback report counts only for a Version it was offered (review of #107).
+      CREATE TABLE IF NOT EXISTS update_asks (node TEXT NOT NULL, version TEXT NOT NULL, at INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (node, version));
+      -- Each rollback the fleet has acted on, by the machine and the updater's own attempt id (rollback_reports): a
+      -- report repeats with every health tick, and counts once. Not the audit, which is pruned after 90 days.
+      CREATE TABLE IF NOT EXISTS rollback_reports (machine TEXT NOT NULL, attempt TEXT NOT NULL, at INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (machine, attempt));
     `),
   },
 ];

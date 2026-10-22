@@ -274,7 +274,7 @@ content-type: application/json
 { "error": "not_allowed", "message": "{{string}}" }
 ```
 
-A node that reports `rolled_back` or `rollback_failed` in its `health` halts the Rollout of the Version it was leaving itself, once, with one alert per node and target (§14): the report repeats until the node updates again, and a repeat halts nothing the principal has resumed since. A node's report of a rollback from above its control plane alerts and halts nothing (no node runs above it). The control plane's own rollback, from its updater's state file, halts as the machine `control-plane`, above its Version too. While the fleet holds new work for its own update these routes answer 503 `updating` (§10).
+A node that reports `rolled_back` or `rollback_failed` in its `health` halts the Rollout of the Version it was leaving (its `target`), with one alert (§14), when the report holds up: the target is newer than the Version the node ran (`version`), not above the control plane's (no node runs above it, RL11), and one the fleet offered that node — a Rollout the control plane committed, or an `update.apply` the fleet forwarded to it. Any other report is alerted with `detail.ignored` saying why, and halts nothing. A report counts once, by its `attempt` (the updater's own id of that Update), kept in `fleet.db` apart from the pruned audit: it repeats with every health until the node updates again, and a second real rollback of the same Version after a resume halts again. The control plane's own rollback, from its updater's state file, halts as the machine `control-plane`, above its Version too, without an offer (its rollback comes before its commit). That file can be written by any process of the user on the control plane: a residual the design accepts (ADR-0004, same-user trust; the control plane runs no work lanes, and its fleet policy refuses `lane.start`). While the fleet holds new work for its own update these routes answer 503 `updating` (§10).
 
 ## 6. Deliveries
 
@@ -1737,8 +1737,8 @@ An alert is something for the owner to look at that changes no state. Each one i
 | `job_unnoticed` | a job's notice was given up before its lane took it; once per job | `{ id, name, class, outcome }` |
 | `engine_fallback` | a lane started on an engine its role reached only after passing over others (§8, `lane.start`) | `{ lane, role?, entry, skipped }`: `skipped`, `{ entry, reason }[]` |
 | `rollout_halted` | the Rollout was halted — the owner's hand or a machine's rollback (§5.4); no machine takes the Version until it is resumed. Urgent. | `{ version, machine, reason }` |
-| `update_rolled_back` | a node's health says it rolled back to the Version it ran; once per node and target. Urgent. | `{ version, target?, reason? }` |
-| `update_rollback_failed` | a node's health says its rollback failed: it runs a Version it cannot vouch for; once per node and target. Urgent. | `{ version, target?, reason? }` |
+| `update_rolled_back` | a machine's updater rolled back to the Version it ran (a node's health, or the control plane's own state file, then with node null); once per machine and attempt. `ignored` says why it halted nothing (§5.4). Urgent. | `{ machine, version, target?, reason?, attempt?, ignored? }` |
+| `update_rollback_failed` | a machine's updater says its rollback failed: it runs a Version it cannot vouch for; once per machine and attempt, `ignored` as above. Urgent. | `{ machine, version, target?, reason?, attempt?, ignored? }` |
 | `update_skew_blocked` | kept for a node held back by protocol skew (updates §4.2); nothing raises it yet | |
 | `connection` | kept for a node's Connections service (`docs/design/secret-store/README.md`, `AlertSink`); nothing raises it yet | |
 

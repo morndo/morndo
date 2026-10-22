@@ -232,6 +232,9 @@ export const STEP_UP_OPS: ReadonlySet<OpName> = new Set<OpName>(["connections.pr
 export type NodeUpdateHealth = {
   state: "current" | "staged" | "waiting" | "applying" | "rolled_back" | "rollback_failed";
   version: string; target?: string; reason?: string; failedCheck?: string;
+  // The updater's own id of the Update this report is about (its update.db row): a rollback counts once by it, not
+  // by its Version, so a second real rollback of the same Version after a resume halts again (review of #107).
+  attempt?: string;
 };
 export type Health = { memTotal: number; memAvailable: number; psiSome10: number | null; psiFull10: number | null;
   diskFreeHome: number; load1: number; tmuxOk: boolean; wallClock: number; spoolDepth: number; drops: number;
@@ -522,6 +525,7 @@ const OpErrorSchema = z.pipe(
 const UPDATE_HEALTH_FIELDS = {
   state: z.enum(["current", "staged", "waiting", "applying", "rolled_back", "rollback_failed"]),
   version: releaseVersion(), target: z.exactOptional(releaseVersion()), reason: z.exactOptional(label()), failedCheck: z.exactOptional(label()),
+  attempt: z.exactOptional(z.string().check(z.regex(/^[A-Za-z0-9._:-]{1,64}$/))),
 };
 const UpdateHealthSchema = z.object(UPDATE_HEALTH_FIELDS);
 // What a machine's updater last did, as it writes it to ~/.local/state/morndo-update/state.json (updates §7): a node's

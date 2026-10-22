@@ -94,7 +94,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   let rollouts!: Rollouts;
   const connections = new Connections({
     nodes, audit, events, log, now, onRevoked: node => lanes.dropNode(node), storeSeqs: new StoreSeqsStore(db, { now, log }),
-    updatePolicy: { aboveOwn: v => rollouts.aboveOwn(v), halted: v => rollouts.halted(v) },
+    updatePolicy: { aboveOwn: v => rollouts.aboveOwn(v), halted: v => rollouts.halted(v), asked: (n, v) => rollouts.asked(n, v) },
     ...(o.pingMs === undefined ? {} : { pingMs: o.pingMs }),
     ...(o.resultSlackMs === undefined ? {} : { resultSlackMs: o.resultSlackMs }), ...(o.instancePongMs === undefined ? {} : { instancePongMs: o.instancePongMs }),
   });

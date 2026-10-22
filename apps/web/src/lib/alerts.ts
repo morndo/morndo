@@ -82,7 +82,11 @@ export function alertWords(a: AlertWire): AlertWords {
         detail: `${str(d.machine, "A machine")} went back from it: ${str(d.reason, "a check failed")}. No other machine takes ${version} until you resume it in Settings → Updates, or a newer release comes.`,
         urgent: urgentAlert(a) };
     }
-    case "update_rolled_back": return {
+    case "update_rolled_back": if (typeof d.ignored === "string") return {
+      title: `${str(d.machine, node)} reported a rollback the fleet didn't count`,
+      detail: `Nothing was halted: ${d.ignored}.`,
+      urgent: urgentAlert(a) };
+      return {
       title: `${node} went back to ${str(d.version, "its last version")}`,
       detail: `The update to ${str(d.target, "a new version")} failed: ${str(d.reason, "a check failed")}. ${node} runs its last version again, and that release goes no further.`,
       urgent: urgentAlert(a) };

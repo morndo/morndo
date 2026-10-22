@@ -60,7 +60,7 @@ export class Connections {
   #pingMs: number;
   #instancePongMs: number;
   #onRevoked: (node: string) => void;
-  #updates: { aboveOwn(version: string): boolean; halted(version: string): boolean } | null;
+  #updates: { aboveOwn(version: string): boolean; halted(version: string): boolean; asked?(node: string, version: string): void } | null;
   #revocations = new Map<string, number>();             // node → the revokedAt already acted on
   #sweep: ReturnType<typeof setInterval> | null = null;
   #bulk = new Map<string, BulkQueue>();
@@ -72,7 +72,7 @@ export class Connections {
     // The updates design's two rules (§5.4), injected so this service holds none of the Rollout: whether a Version is
     // above the one this control plane runs (RL11), and whether the Rollout of a Version is halted (RL12). Null in
     // tests that ask for none of it.
-    updatePolicy?: { aboveOwn(version: string): boolean; halted(version: string): boolean };
+    updatePolicy?: { aboveOwn(version: string): boolean; halted(version: string): boolean; asked?(node: string, version: string): void };
     storeSeqs: StoreSeqs;                                 // fleet.db's
   }) {
     this.#nodes = p.nodes;
@@ -261,6 +261,7 @@ export class Connections {
           return Promise.resolve(failed("not_allowed", `update.apply on ${node} for ${version}: a node never runs a Version newer than its control plane (RL11)`));
         if (this.#updates.halted(version))
           return Promise.resolve(failed("not_allowed", `update.apply on ${node} for ${version}: the Rollout of ${version} is halted: resume it first (RL12)`));
+        this.#updates.asked?.(node, version);              // an offer: that node's rollback from it may halt (review of #107)
       }
     }
     const text = (op === "pane.send" || op === "lane.deliver" || op === "lane.start") && typeof args === "object" && args !== null

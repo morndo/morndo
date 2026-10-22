@@ -116,7 +116,9 @@ const BEFORE: Record<string, () => Promise<void>> = {
     const { controlPlane } = await fleet.client.rollout();
     const dir = join(fleet.home, ".local", "state", "morndo-update");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "state.json"), JSON.stringify({ state: "rolled_back", version: controlPlane.version, target: controlPlane.version, failedCheck: "fleet health", at: Date.now() }));
+    // it ran a pre-release of the Version before (lower by SemVer precedence), and rolled back from that Version
+    const before = controlPlane.version.includes("-") ? controlPlane.version.replace(/-.*$/, "-0") : `${controlPlane.version}-0`;
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ state: "rolled_back", version: before, target: controlPlane.version, failedCheck: "fleet health", attempt: "doc-1", at: Date.now() }));
     await until("the halt from the control plane's own rollback", async () => (await fleet.client.rollout()).rollout?.halted === true, 15_000);
   },
 };
