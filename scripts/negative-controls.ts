@@ -3287,7 +3287,7 @@ export const CONTROLS: Control[] = [
     find: "      if (foreign.length > 0) {", replace: "      if (false) {",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "abandons the apply before anything is recorded" },
   { id: "c2b-confirmation-outlives-failed-start", task: "c2b", file: "apps/updater/src/cli.ts",
-    find: "        rmSync(rollbackConfirmedFile, { force: true });\n        io.err(`the apply unit did not run", replace: "        io.err(`the apply unit did not run",
+    find: "        rmSync(rollbackConfirmedFile, { force: true });\n        startError =", replace: "        startError =",
     run: ["apps/updater/test/cli-apply.test.ts"], expect: "leaves no confirmation behind" },
   // 5b round 5, found by the 5d run on a throwaway machine: a first install, and the apply unit's answer.
   { id: "c2b-install-foreign-from-releases", task: "c2b", file: "apps/updater/src/cli.ts",
