@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { UpdateStateFileSchema, UpdateStatusSchema, UPDATER_ARGS } from "@morndo/protocol";
+import { RollbackPreviewSchema, UpdateStateFileSchema, UpdateStatusSchema, UPDATER_ARGS } from "@morndo/protocol";
 import type { UpdaterCli } from "../application/updates-ports.ts";
 
 const runFile = promisify(execFile);
@@ -51,6 +51,15 @@ export function updaterCli(o: { bin?: string; env?: NodeJS.ProcessEnv; run?: Upd
       } catch { return null; }
     },
     async applyDetached(version: string) { await run(bin, UPDATER_ARGS.apply(version)); },
-    async rollbackDetached() { await run(bin, UPDATER_ARGS.rollback); },
+    // What a rollback would drop (§11.4), read-only; null when the updater did not answer or its answer didn't
+    // fit the schema — the hub never moves its own machine on a guess, and never invents what a restore drops.
+    async rollbackPreview() {
+      try {
+        const { stdout } = await run(bin, UPDATER_ARGS.rollbackPreview, { timeoutMs: STATUS_TIMEOUT_MS });
+        const parsed = RollbackPreviewSchema.safeParse(JSON.parse(stdout));
+        return parsed.success ? parsed.data : null;
+      } catch { return null; }
+    },
+    async rollbackDetached(word?: string) { await run(bin, UPDATER_ARGS.rollback(word)); },
   };
 }

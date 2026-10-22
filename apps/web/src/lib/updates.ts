@@ -84,6 +84,23 @@ const reasonWords = (reason: string): string => {
 // a different one when it doesn't.
 const movingTo = (u: NodeUpdateHealth): string => u.target ?? "a Version it did not name";
 
+// §11.4's ask, worded as the CLI words it (apps/updater/src/cli.ts): one line per database a rollback's restore
+// would put back, naming the Backup's own moment and the span of writes the restore drops — the same sentence the
+// terminal prints before the word. `at` is the preview's ISO text; the moment is shown as this device reads it.
+const two = (n: number): string => String(n).padStart(2, "0");
+const rollbackAgeWords = (ms: number): string => {
+  if (ms < 60_000) return "less than a minute";
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.round(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+};
+export const rollbackRestoreLine = (r: { db: string; at: string }, now = Date.now()): string => {
+  const t = new Date(r.at);
+  const stamp = `${t.getFullYear()}-${two(t.getMonth() + 1)}-${two(t.getDate())} ${two(t.getHours())}:${two(t.getMinutes())}`;
+  return `The ${r.db} database goes back to its backup from ${stamp} (${rollbackAgeWords(now - t.getTime())} of writes since are dropped).`;
+};
+
 const nodeState = (n: UpdatesNode, rollout: RolloutWire | null, controlPlane: string): string => {
   if (n.status === "offline") return "offline";
   const running = n.update?.version ?? n.version;

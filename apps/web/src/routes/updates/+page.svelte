@@ -10,13 +10,17 @@
   import type { UpdatesView } from "@morndo/protocol";
   import { api, ApiError, explain } from "$lib/api.ts";
   import { withStepUp } from "$lib/stepup.ts";
-  import { rolloutLine, updatesRows, type UpdatesRow } from "$lib/updates.ts";
+  import { rollbackRestoreLine, rolloutLine, updatesRows, type UpdatesRow } from "$lib/updates.ts";
 
   type Page = { kind: "loading" } | { kind: "off" } | { kind: "failed"; message: string } | { kind: "ready" };
   let page = $state<Page>({ kind: "loading" });
   let view = $state<UpdatesView | null>(null);
   let busy = $state(false);
   let confirming = $state<string | null>(null);        // the machine whose Roll back is asked about, as the devices page asks about a revoke
+  // §11.4's word, asked for after the hub answered needs_word (review round 1): what the restore drops, and the
+  // field the word goes in. Only the exact word enables the second Roll back.
+  let wordAsk = $state<{ machine: string; restores: { db: string; at: string }[] } | null>(null);
+  let typed = $state("");
   let notice = $state("");
   let problem = $state<string | null>(null);
 
@@ -54,9 +58,41 @@
   const apply = (row: UpdatesRow) =>
     run(`Asked ${row.machine === "control-plane" ? "this machine" : row.title} to take ${row.apply}.`,
       () => withStepUp(() => api.post("/api/updates/apply", { machine: row.machine, version: row.apply }), () => {}));
-  const rollback = (row: UpdatesRow) =>
-    run(`Asked this machine to roll back to ${row.rollback}.`,
-      () => withStepUp(() => api.post("/api/updates/rollback", { machine: row.machine }), () => {}));
+
+  // The first press asks the plain question (§8.1's [y/N] through the hub). When the rollback would restore a
+  // database, the hub answers needs_word with what it drops (§11.4, review round 1): that answer is not a problem
+  // but the ask itself, so it becomes the typed-word ask instead of a refusal line.
+  async function rollback(row: UpdatesRow): Promise<void> {
+    busy = true; notice = ""; problem = null;
+    try {
+      await withStepUp(() => api.post("/api/updates/rollback", { machine: row.machine }), () => {});
+      notice = `Asked this machine to roll back to ${row.rollback}.`;
+      confirming = null; wordAsk = null; typed = "";
+      await load();
+    } catch (e) {
+      if (e instanceof ApiError && e.code === "needs_word" && Array.isArray(e.data.restores)) {
+        confirming = null;
+        wordAsk = { machine: row.machine, restores: e.data.restores as { db: string; at: string }[] };
+        typed = "";
+      } else {
+        problem = refusal(e);
+      }
+    } finally { busy = false; }
+  }
+
+  // The second press, under the word itself: the body carries it, and the hub's updater takes it as --typed.
+  async function rollbackWord(row: UpdatesRow): Promise<void> {
+    busy = true; notice = ""; problem = null;
+    try {
+      await withStepUp(() => api.post("/api/updates/rollback", { machine: row.machine, word: "rollback" }), () => {});
+      notice = `Asked this machine to roll back to ${row.rollback}.`;
+      confirming = null; wordAsk = null; typed = "";
+      await load();
+    } catch (e) {
+      problem = refusal(e);
+    } finally { busy = false; }
+  }
+
   const resume = (version: string) =>
     run(`Resumed the Rollout of ${version}.`,
       () => withStepUp(() => api.post("/api/updates/resume", { version }), () => {}));
@@ -128,14 +164,26 @@
                 <button class="pbtn small primary" onclick={() => apply(row)} disabled={busy}>Update now</button>
               {/if}
               {#if row.rollback !== null}
-                {#if confirming === row.machine}
+                {#if wordAsk !== null && wordAsk.machine === row.machine}
+                  <span class="confirm" data-needs-word>
+                    {#each wordAsk.restores as r (r.db)}
+                      <span class="drop">{rollbackRestoreLine(r)}</span>
+                    {/each}
+                    <label class="word">
+                      Type rollback to go on
+                      <input data-word bind:value={typed} autocomplete="off" spellcheck="false" />
+                    </label>
+                    <button class="pbtn small" onclick={() => rollbackWord(row)} disabled={busy || typed !== "rollback"}>Roll back</button>
+                    <button class="pbtn small" onclick={() => { wordAsk = null; typed = ""; }}>Keep</button>
+                  </span>
+                {:else if confirming === row.machine}
                   <span class="confirm">
                     Roll back to {row.rollback}?
                     <button class="pbtn small" onclick={() => rollback(row)} disabled={busy}>Roll back</button>
                     <button class="pbtn small" onclick={() => (confirming = null)}>Keep</button>
                   </span>
                 {:else}
-                  <button class="pbtn small" onclick={() => { confirming = row.machine; notice = ""; problem = null; }}>Roll back…</button>
+                  <button class="pbtn small" onclick={() => { confirming = row.machine; wordAsk = null; notice = ""; problem = null; }}>Roll back…</button>
                 {/if}
               {/if}
               {#if row.rollbackNote !== null}<span class="note">{row.rollbackNote}</span>{/if}
@@ -174,6 +222,13 @@
   .state { margin: 0; font: 400 15px/21px var(--body); }
   .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
   .confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font: 400 14px/20px var(--body); }
+  /* What a restore drops (§11.4): a loss, named as the updater names it. */
+  .confirm .drop { flex-basis: 100%; color: var(--bad-text); }
+  .confirm .word { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .confirm input {
+    width: 9rem; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--bg); color: var(--fg); font: 400 14px/20px var(--body);
+  }
   .halt { color: var(--bad-text); }
   .ok { margin: 0; font: 400 14px/20px var(--body); color: var(--ok-text); }
 </style>

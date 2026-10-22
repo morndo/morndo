@@ -7,7 +7,7 @@
 // Version (§5.4); a node's rollback is refused (not_yet): it is that machine's own hand, never a remote one. No I/O
 // here: the fleet, the CLI, the signer, the audit and the build are ports (updates-ports.ts).
 import { CONTROL_FRESHNESS_MS, mayCommand, type AccessPolicy, type UpdateCommanded } from "@morndo/domain";
-import type { FleetNode, PrincipalAsk, RolloutWire, UpdatesNode, UpdatesView } from "@morndo/protocol";
+import type { FleetNode, PrincipalAsk, RollbackPreview, RolloutWire, UpdatesNode, UpdatesView } from "@morndo/protocol";
 import type { Authenticated } from "./access-service.ts";
 import type { FleetForUpdates, FleetWriteOutcome, UpdaterCli } from "./updates-ports.ts";
 import type { Store } from "../adapters/store.ts";
@@ -23,6 +23,10 @@ export type UpdatesCommandOutcome =
   | { ok: false; problem: "unknown_machine"; message: string }
   // A node's rollback is its own hand: `morndo update --rollback` on that machine, never a remote one (§5.4).
   | { ok: false; problem: "not_yet"; message: string }
+  // §11.4's typed word (review round 1): a rollback whose restore drops a database's writes runs only under the
+  // word, and the hub's own --yes is not it. The answer carries what would be dropped, so the screen can show it
+  // and ask for the word; nothing has run.
+  | { ok: false; problem: "needs_word"; message: string; restores: RollbackPreview["restores"] }
   | { ok: false; problem: "refused"; code: string; message: string }
   | { ok: false; problem: "unavailable"; message: string };
 
@@ -89,12 +93,26 @@ export class UpdatesService {
     return this.#done(r, a, "update.apply", machine, version);
   }
 
-  async rollback(a: Authenticated, machine: string): Promise<UpdatesCommandOutcome> {
+  async rollback(a: Authenticated, machine: string, word?: string): Promise<UpdatesCommandOutcome> {
     if (!this.#command(a)) return { ok: false, problem: "step_up" };
     if (machine !== CONTROL_PLANE_MACHINE) {
       return { ok: false, problem: "not_yet", message: `run morndo update --rollback on ${machine}` };
     }
-    try { await this.#cli.rollbackDetached(); }
+    // What this rollback would drop (§11.4, review round 1), asked before anything runs: the hub's own command
+    // answers --yes, which a terminal reads as the [y/N] alone — the typed word a restore demands has to come
+    // from the principal, through the body, or the rollback stops here with what it would drop.
+    const preview = await this.#cli.rollbackPreview();
+    if (preview === null) {
+      return { ok: false, problem: "unavailable", message: "the control plane's updater did not answer (update --rollback --preview --json)" };
+    }
+    if (preview.restores.length > 0 && word !== "rollback") {
+      return {
+        ok: false, problem: "needs_word",
+        message: `rolling back to ${preview.to} restores a database's backup and drops the writes since; type rollback to go on`,
+        restores: preview.restores,
+      };
+    }
+    try { await this.#cli.rollbackDetached(word); }
     catch (e) { return { ok: false, problem: "unavailable", message: `the control plane's updater did not take the command: ${(e as Error).message}` }; }
     this.#audit(a, "update.rollback", machine, null);
     return { ok: true };
