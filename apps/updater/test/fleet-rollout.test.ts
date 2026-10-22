@@ -740,3 +740,17 @@ describe("6b review: the attempt in the unit, the boot apply, offline nodes, a r
   }, 120_000);
 });
 
+// RL7 after a resume (found by 6d's design): the fleet offers the Version again, the node had rolled it back.
+describe("a Version this node rolled back, offered again after a resume", () => {
+  it("the tick never applies it: waiting bad_here, the node stays where it is", async () => {
+    const w = await tickWorld();
+    w.fleet.word = word();                                          // B committed, unhalted, offered (the resume)
+    w.store.recordBad(B, Date.now() - HOUR);                        // B rolled back here an hour ago
+    const r = await w.run(["update", "tick"], { random: () => 0, timing: SMALL_WALLS });
+    expect(r.code, r.err).toBe(75);
+    expect(w.current()).toBe(A);
+    expect(stateFile(w.statePath)).toMatchObject({ state: "waiting", version: A, target: B, reason: "bad_here" });
+    expect(w.services.tape.filter(t => t.startsWith("stop:"))).toEqual([]);
+  }, 90_000);
+});
+

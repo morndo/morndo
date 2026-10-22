@@ -37,7 +37,8 @@ describe("the fleet client (spec §5.6)", () => {
     const c = new FleetClient(fleet.socketPath);
     expect(await c.caps()).toEqual({ api: [1], stickyLanes: ["manager"] });        // the fake fleet's default sticky lane (Task 12)
     expect(await checkFleet(c)).toBe("ok");
-    expect(await c.nodes()).toEqual([{ name: "pc", status: "online", health: null, agent: "fake" }]);
+    // A fleet from before the updates design names no commit, protocols or updater report: read as null, never a mismatch.
+    expect(await c.nodes()).toEqual([{ name: "pc", status: "online", health: null, agent: "fake", commit: null, proto: null, update: null }]);
     expect(await c.lanes()).toEqual([{ name: "alpha", node: "pc", workerId: PC1, conflict: false }]);
     expect(fleet.clients.length).toBeGreaterThan(0);
     expect(new Set(fleet.clients)).toEqual(new Set(["hub"]));                        // x-morndo-client, for the fleet's audit
@@ -153,7 +154,7 @@ describe("the fleet client (spec §5.6)", () => {
     mkdirSync(odd);
     fleet = await startFakeFleet({ nodes: [pcNode()], socketPath: join(odd, "fleet.sock") });
     const c = new FleetClient(fleet.socketPath);
-    expect(await c.nodes()).toEqual([{ name: "pc", status: "online", health: null, agent: "fake" }]);     // HTTP: the raw path
+    expect(await c.nodes()).toEqual([{ name: "pc", status: "online", health: null, agent: "fake", commit: null, proto: null, update: null }]);     // HTTP: the raw path
     const seen: FleetEvent[] = [];
     stops.push(c.events(e => seen.push(e)));
     await until(() => seen.some(e => e.t === "inventory" && e.node === "pc"));

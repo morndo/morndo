@@ -5,7 +5,7 @@
 // is one of §8.1's answers, and the CLI maps them to exits (§8.4: 75 for a deferred, 1 for a rolled back, 70 for a
 // rollback that failed). Only an install this updater made is ever touched (RL14).
 import {
-  DATABASES, DEFAULT_CHANNEL, DEFAULT_MODE, RECORD_FORMAT, beginRollback, beginUpdate, formatVersion, higherOf,
+  DATABASES, DEFAULT_CHANNEL, DEFAULT_MODE, RECORD_FORMAT, beginRollback, beginUpdate, compareVersions, formatVersion, higherOf,
   parseVersion, planMigrations, maySwap, type DatabaseName, type DbState, type Installation, type MigrationStep,
   type UpdateService, type Version, type Window,
 } from "@morndo/domain";
@@ -100,6 +100,12 @@ export class ApplyService {
       if (staged === null || !installer.has(staged.version)) return { kind: "nothing_staged" };
       const target = parseVersion(staged.version);
       if (target === null) return { kind: "abandoned", reason: `the staged version ${staged.version} does not parse` };
+      // RL7: a Version that failed here is never walked again, by any door — not after the fleet resumes its
+      // Rollout, not from a staged record that outlived its rollback. Nothing is begun; state.json says why.
+      if (store.badVersions().some(text => { const bad = parseVersion(text); return bad !== null && compareVersions(bad, target) === 0; })) {
+        state.write({ state: "waiting", version: layout.current, target: staged.version, reason: "bad_here", at: clock.now() });
+        return { kind: "deferred", reason: "bad_here", blockers: [] };
+      }
       // The Manifest exactly as the check recorded it, re-read through the wire schema and re-hashed against the
       // record's own digest: the plan stands on the bytes that were verified, or not at all.
       const manifestText = store.manifestOf(staged.version);

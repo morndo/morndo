@@ -157,6 +157,48 @@ describe("the Updates page", () => {
     } finally { await page.close(); }
   });
 
+  // §11.4 through the hub (review round 1): a rollback that restores answers needs_word, and the card shows what
+  // the restore drops — worded as the CLI words it — beside the field the typed word goes in. Only the exact word
+  // enables the second Roll back, and that press carries it.
+  it("a needs_word answer shows the restore lines and a field; only the exact word enables the second Roll back, which carries it", async () => {
+    const page = await open();
+    try {
+      const cp = page.locator("[data-machine=control-plane]");
+      await page.evaluate(() => {
+        const w = globalThis as unknown as Win;
+        const at = new Date(Date.now() - 3 * 3600_000).toISOString();
+        w.__commands = [{
+          status: 409,
+          body: {
+            error: "needs_word",
+            message: "rolling back to 0.4.1 restores a database's backup and drops the writes since; type rollback to go on",
+            restores: [{ db: "hub", at }],
+          },
+        }];
+      });
+      await cp.getByRole("button", { name: "Roll back…" }).click();
+      await cp.getByRole("button", { name: "Roll back", exact: true }).click();
+      const ask = page.locator("[data-needs-word]");
+      await ask.waitFor();
+      const text = await ask.textContent();
+      expect(text).toContain("The hub database goes back to its backup from");
+      expect(text).toContain("(3 hours of writes since are dropped)");
+      expect(text).toContain("Type rollback to go on");
+      const go = cp.getByRole("button", { name: "Roll back", exact: true });
+      expect(await go.isDisabled()).toBe(true);            // nothing typed: the word is not there
+      await page.locator("[data-word]").fill("rollbac");
+      expect(await go.isDisabled()).toBe(true);            // almost the word is not the word
+      await page.locator("[data-word]").fill("rollback");
+      expect(await go.isEnabled()).toBe(true);
+      await go.click();
+      await page.waitForFunction(() => (globalThis as unknown as Win).__posts.length === 2);
+      expect((await win(page)).__posts).toEqual([
+        { path: "/api/updates/rollback", body: { machine: "control-plane" } },
+        { path: "/api/updates/rollback", body: { machine: "control-plane", word: "rollback" } },
+      ]);
+    } finally { await page.close(); }
+  });
+
   it("a halted Rollout says who and why, offers Resume (which posts resume), and no node offers Update now", async () => {
     const page = await open("halted");
     try {

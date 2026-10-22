@@ -329,12 +329,14 @@ export function startHttp(p: {
 
   // An updates command's answer (updates §8.1): 403 a step-up too old, 409 the refusal with the fleet's own words
   // (its code when the fleet refused), 503 what couldn't be asked. The routes stay thin (round 2, R4): every look
-  // and every gate is the service's, so a refused command never costs a round trip first.
+  // and every gate is the service's, so a refused command never costs a round trip first. A rollback that needs
+  // §11.4's word answers 409 with what it would drop (review round 1), so the screen can ask for the word.
   const updatesAnswer = (res: ServerResponse, r: UpdatesCommandOutcome) => {
     if (r.ok) return json(res, 200, { ok: true });
     const status = r.problem === "step_up" ? 403 : r.problem === "unavailable" ? 503 : 409;
     const error = r.problem === "refused" ? r.code : r.problem;
-    return json(res, status, r.problem === "step_up" ? { error } : { error, message: r.message });
+    if (r.problem === "step_up") return json(res, status, { error });
+    return json(res, status, r.problem === "needs_word" ? { error, message: r.message, restores: r.restores } : { error, message: r.message });
   };
 
   // ADR-0023: file, restate, list and close a decision brief. Same door as the board (a bearer token, no cookie).
@@ -755,7 +757,8 @@ export function startHttp(p: {
     if (path === "/api/updates/rollback" && method === "POST") {
       if (!p.updatesService) return json(res, 404, { error: "updates_off" });
       limited(buckets.commands.take(a.endpoint.id));
-      return updatesAnswer(res, await p.updatesService.rollback(a, (await readBody(req, UpdatesRollbackBody)).machine));
+      const body = await readBody(req, UpdatesRollbackBody);
+      return updatesAnswer(res, await p.updatesService.rollback(a, body.machine, body.word));
     }
     if (path === "/api/updates/resume" && method === "POST") {
       if (!p.updatesService) return json(res, 404, { error: "updates_off" });

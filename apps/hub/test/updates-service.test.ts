@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONTROL_FRESHNESS_MS, type AccessPolicy, type UpdateCommanded } from "@morndo/domain";
-import { PRINCIPAL_SIGN_PREFIX, UPDATER_ARGS, decodePrincipalHeader, type FleetNode, type PrincipalAsk, type RolloutWire } from "@morndo/protocol";
+import { PRINCIPAL_SIGN_PREFIX, UPDATER_ARGS, decodePrincipalHeader, type FleetNode, type PrincipalAsk, type RollbackPreview, type RolloutWire } from "@morndo/protocol";
 import { productVersion } from "@morndo/service-kit";
 import { startInProcessHub } from "./inprocess-hub.ts";
 import { UpdatesService } from "../src/application/updates-service.ts";
@@ -31,13 +31,16 @@ const identity: HubIdentity = {
   sign: data => signEd(null, data, pair.privateKey),
 };
 
-// The control plane's updater as the fake runner runs it: one status standing staged, and every argument list it got.
-const cliWith = (standStaged: string | null, o: { stateFile?: string } = {}) => {
+// The control plane's updater as the fake runner runs it: one status standing staged, the rollback preview when
+// asked (round 1: what a rollback would drop, as `--rollback --preview --json` answers it; default: a rollback
+// with nothing to restore), and every argument list it got.
+const cliWith = (standStaged: string | null, o: { stateFile?: string; preview?: RollbackPreview } = {}) => {
   const runs: { file: string; args: string[] }[] = [];
   const cli = updaterCli({
     stateFile: o.stateFile ?? join(tmpdir(), "morndo-no-state-file-here", "state.json"),
     run: async (file, args) => {
       runs.push({ file, args });
+      if (args.includes("--preview")) return { stdout: JSON.stringify(o.preview ?? { from: "0.4.2", to: "0.4.1", restores: [] }) };
       return { stdout: JSON.stringify({
         installMethod: "updater", channel: "stable", mode: "apply", pin: null, window: null,
         current: "0.4.2", previous: "0.4.1", good: "0.4.2", staged: standStaged,
@@ -139,9 +142,35 @@ describe("the updates service (no HTTP)", () => {
     const svc = service(fleet, cli.cli, () => now, events);
     const node = await svc.rollback(fresh, "pc");
     expect(node).toMatchObject({ ok: false, problem: "not_yet", message: "run morndo update --rollback on pc" });
+    // Nothing is restored in this preview, so no word is needed: the hub's own --yes is the whole ask.
     expect(await svc.rollback(fresh, "control-plane")).toEqual({ ok: true });
-    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollback]);
+    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollbackPreview, UPDATER_ARGS.rollback()]);
     expect(sent).toHaveLength(0);
+    expect(events).toEqual([{ type: "UpdateCommanded", command: "update.rollback", endpointId: "e-1", machine: "control-plane", version: null, at: now }]);
+  });
+
+  // §11.4 through the hub (review round 1): a rollback whose restore drops a database's writes runs only under
+  // the word the updater asks for on a terminal. The hub asks the preview first; without the word it answers
+  // needs_word carrying what would be dropped, and nothing runs; the word rides UPDATER_ARGS.rollback's --typed.
+  it("rollback with a restore needs the typed word: needs_word carries the restores and runs nothing; the word goes on", async () => {
+    let now = 1_800_000_000_000;
+    const fresh = who(now, now);
+    const at = new Date(now - 3 * 3600_000).toISOString();
+    const cli = cliWith("0.5.0", { preview: { from: "0.4.2", to: "0.4.1", restores: [{ db: "hub", at }] } });
+    const { fleet } = fleetWith();
+    const events: UpdateCommanded[] = [];
+    const svc = service(fleet, cli.cli, () => now, events);
+    const asked = await svc.rollback(fresh, "control-plane");
+    expect(asked).toMatchObject({ ok: false, problem: "needs_word", restores: [{ db: "hub", at }] });
+    expect((asked as { message: string }).message).toMatch(/rollback/);
+    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollbackPreview]);   // the look, and no command
+    expect(events).toHaveLength(0);                                              // nothing commanded, nothing audited
+    // any other word is the same ask, not a command
+    expect(await svc.rollback(fresh, "control-plane", "nope")).toMatchObject({ ok: false, problem: "needs_word" });
+    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollbackPreview, UPDATER_ARGS.rollbackPreview]);
+    // the word itself: the CLI runs the hub's rollback command with it
+    expect(await svc.rollback(fresh, "control-plane", "rollback")).toEqual({ ok: true });
+    expect(cli.runs.at(-1)!.args).toEqual(UPDATER_ARGS.rollback("rollback"));
     expect(events).toEqual([{ type: "UpdateCommanded", command: "update.rollback", endpointId: "e-1", machine: "control-plane", version: null, at: now }]);
   });
 
@@ -227,6 +256,28 @@ describe("the updates routes", () => {
     expect(cli.runs).toEqual([]);                        // no 10 s CLI status, no command
     expect(asks).toEqual({ rollout: 0, nodes: 0 });      // not even the fleet was asked
     expect(sent).toHaveLength(0);
+    await hub.close();
+  });
+
+  it("a rollback that restores answers 409 needs_word with what would be dropped; the word goes on", async () => {
+    let now = 1_800_000_000_000;
+    const at = new Date(now - 3 * 3600_000).toISOString();
+    const { fleet } = fleetWith();
+    const cli = cliWith("0.5.0", { preview: { from: "0.4.2", to: "0.4.1", restores: [{ db: "hub", at }] } });
+    const hub = await startInProcessHub({ now: () => now, updates: { fleet, cli: cli.cli } });
+    const cookie = await hub.cookie();
+    const asked = await hub.post("/api/updates/rollback", { machine: "control-plane" }, { cookie: `__Host-morndo=${cookie}` });
+    expect(asked.status).toBe(409);
+    expect(await asked.json()).toEqual({
+      error: "needs_word",
+      message: expect.stringContaining("rollback"),
+      restores: [{ db: "hub", at }],
+    });
+    // the typed word, posted in the body, is the command the updater takes; the preview is asked again first, as
+    // every rollback asks it
+    const done = await hub.post("/api/updates/rollback", { machine: "control-plane", word: "rollback" }, { cookie: `__Host-morndo=${cookie}` });
+    expect(done.status).toBe(200);
+    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollbackPreview, UPDATER_ARGS.rollbackPreview, UPDATER_ARGS.rollback("rollback")]);
     await hub.close();
   });
 
