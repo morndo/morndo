@@ -8,7 +8,7 @@
 // are not: a lost code is issued again, and the others are refreshed on the next connection.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type Database from "better-sqlite3";
-import { LIMITS, NODE_NAME } from "@morndo/protocol";
+import { LIMITS, isNodeName } from "@morndo/protocol";
 import { synced } from "./db.ts";
 import { parsePublicKey } from "./keys.ts";
 
@@ -49,10 +49,10 @@ export class NodesStore {
     this.#now = now;
   }
 
-  // A code for `name`: refused for a name that isn't NODE_NAME or a node that is registered and not revoked (revoke
+  // A code for `name`: refused for a name that isn't NODE_NAME, a reserved one (control-plane), or a node that is registered and not revoked (revoke
   // it first). A revoked name can be joined again, with a new key.
   issueCode(name: string): Issued {
-    if (!NODE_NAME.test(name)) return { ok: false, refused: "bad_name" };
+    if (!isNodeName(name)) return { ok: false, refused: "bad_name" };          // the shape, and no reserved name
     if (this.active(name)) return { ok: false, refused: "exists" };
     const now = this.#now();
     const bytes = randomBytes(CODE_BYTES);
