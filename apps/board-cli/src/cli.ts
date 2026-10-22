@@ -3,7 +3,7 @@
 // given streams, so the tests drive it against an in-process hub and the entry point (main.ts) wires the real ones.
 // Exit codes: 0 done, 1 the hub refused (one line on stderr, in words an agent can act on), 2 usage, 3 the hub can't
 // be reached or didn't answer in a shape this CLI knows.
-import type { Task, TaskEvent, TaskStatus } from "@morndo/domain";
+import type { MergedView, Task, TaskEvent, TaskStatus } from "@morndo/domain";
 import { promptFor } from "./prompt.ts";
 
 export type Io = {
@@ -24,7 +24,9 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   block T-12 --why "…"                  blocked, with the reason
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
-  done T-12 --why "…"                   accept it, naming what you checked (manager only)
+  merged T-12 <sha> [--repo owner/name]   record the commit its PR merged as (default repo morndo/morndo; manager, or the task's lane)
+  unmerged T-12 <sha> [--repo …]   clear a wrong merge record (manager only); to replace one, unmerged then merged
+  done T-12 --why "…" [--not-live "<reason>"]  accept it, naming what you checked; refused while its morndo/morndo merge is not live on every node (manager only)
   todo T-12                             put it back
   move T-12 <status> [--why "…"]        any move the rules allow
   comment T-12 "…"                      a line on the task's record
@@ -40,8 +42,8 @@ const LIST_ORDER: TaskStatus[] = ["doing", "blocked", "review", "todo", "backlog
 const STATUSES = new Set<string>(LIST_ORDER);
 const PRIORITIES = new Set(["high", "normal", "low"]);
 
-// Why the hub refused, in words an agent can act on.
-function explain(error: string, other: string | undefined, from: string | undefined): string {
+// Why the hub refused, in words an agent can act on. `detail`: what the board sees (B11, not_live).
+function explain(error: string, other: string | undefined, from: string | undefined, detail: string | undefined): string {
   switch (error) {
     case "not_allowed": return "only the manager (or the principal) may do that";
     case "not_yours": return "that task is assigned to someone else";
@@ -61,6 +63,12 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "lane_needed": return "which lane? set MORNDO_LANE, or run inside the lane's tmux window";
     case "rate_limited": return "too many calls; wait a moment";
     case "board_off": return "the hub has no board";
+    case "not_live": return `its merge is not live${detail ? `: ${detail}` : ""}; if you accept it anyway: done T-12 --why "…" --not-live "<reason>"`;
+    case "bad_sha": return "that isn't a commit hash (7 to 40 hex characters)";
+    case "bad_repo": return "that isn't a repo name (owner/name)";
+    case "too_many": return "a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>";
+    case "no_commit": return "the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout";
+    case "no_merge": return "that merge isn't recorded on this task (see show)";
     default: return error;
   }
 }
@@ -73,10 +81,12 @@ function changeText(e: TaskEvent): string {
   const c = e.change;
   switch (c.kind) {
     case "created": return `filed it in ${c.status}${c.assignee ? `, for ${c.assignee}` : ""}`;
-    case "moved": return `${c.from} → ${c.to}${c.reason ? `: ${c.reason}` : ""}`;
+    case "moved": return `${c.from} → ${c.to}${c.reason ? `: ${c.reason}` : ""}${c.notLive !== undefined ? ` (done while not live: ${c.notLive})` : ""}`;
     case "assigned": return c.to ? `assigned it to ${c.to}` : `took it from ${c.from ?? "nobody"}`;
     case "edited": return `edited ${Object.keys(c).filter(k => k !== "kind").join(", ")}`;
     case "commented": return c.text.includes("\n") ? `commented:\n      ${c.text.replace(/\n/g, "\n      ")}` : `commented: ${c.text}`;
+    case "merged": return `recorded its merge: ${c.repo} ${c.sha.slice(0, 7)}`;
+    case "unmerged": return `cleared its merge record: ${c.repo} ${c.sha.slice(0, 7)}`;
   }
 }
 const line = (t: Task) =>
@@ -130,7 +140,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       try { data = await res.json(); } catch { throw new Unreachable(`the hub at ${hub} answered ${res.status} without JSON`); }
       if (typeof data !== "object" || data === null) throw new Unreachable(`the hub answered ${res.status} in a shape this CLI doesn't know`);
       const d = data as Record<string, unknown>;
-      if (!res.ok) throw new Refused(explain(typeof d.error === "string" ? d.error : `http_${res.status}`, typeof d.other === "string" ? d.other : undefined, typeof d.from === "string" ? d.from : undefined));
+      if (!res.ok) throw new Refused(explain(typeof d.error === "string" ? d.error : `http_${res.status}`, typeof d.other === "string" ? d.other : undefined, typeof d.from === "string" ? d.from : undefined, typeof d.detail === "string" ? d.detail : undefined));
       return d;
     };
     const key = (s: string | undefined) => {
@@ -142,6 +152,15 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       const t = d.task as Task;
       io.out(`${t.key}  ${t.title}`);
       io.out(`  ${STATUS_WORDS[t.status]}${t.blockedReason ? ` (${t.blockedReason})` : ""} · ${t.assignee ? `assigned to ${t.assignee}` : "nobody assigned"} · priority ${t.priority} · rev ${t.rev}`);
+      // B11: the task's merges as the hub sees them, its label saying where they stand.
+      const merged = d.merged as MergedView | null | undefined;
+      if (merged && merged.merges.length > 0) {
+        for (const m of merged.merges) {
+          io.out(`  Merged: ${m.repo} ${m.sha.slice(0, 7)} (by ${m.by}, ${when(m.at)})`);
+          if (m.override) io.out(`  Accepted as done while not live: ${m.override}`);
+        }
+        if (merged.label) io.out(`  ${merged.label}`);
+      }
       if (t.description) io.out(`  ${t.description.replace(/\n/g, "\n  ")}`);
       const events = (d.events as TaskEvent[] | undefined) ?? [];
       if (events.length) io.out("  History:");
@@ -178,12 +197,19 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         if (flags.json === true) { io.out(JSON.stringify(tasks.map(t => orphans.has(t.key) ? { ...t, orphan: true } : t))); return 0; }
         if (!tasks.length) { io.out(flags.mine === true ? `nothing assigned to ${me ?? "you"}` : "the board is empty"); return 0; }
         const lanes = new Set(d.lanes as string[]);
+        // B11: each task's merges by key, so a row can say where its merge stands (the hub's label, its own brackets).
+        const mergedBy = new Map((Array.isArray(d.merged) ? d.merged as MergedView[] : []).map(m => [m.key, m]));
         for (const s of LIST_ORDER) {
           const rows = tasks.filter(t => t.status === s);
           if (!rows.length) continue;
           io.out(`${STATUS_WORDS[s]} (${rows.length})`);
           // An orphan's lane is gone for good, not merely not running: the marker says which is which.
-          for (const t of rows) io.out(`  ${line(t)}${orphans.has(t.key) ? "  [orphan: its lane is gone; reassign it]" : t.assignee && lanes.size && !lanes.has(t.assignee) ? "  [lane not running]" : ""}`);
+          for (const t of rows) {
+            const m = mergedBy.get(t.key);
+            const merge = m !== undefined && m.merges.length > 0 ? m : undefined;   // a view with no merge says nothing
+            const override = merge?.merges.find(x => x.override)?.override ?? null;
+            io.out(`  ${line(t)}${orphans.has(t.key) ? "  [orphan: its lane is gone; reassign it]" : t.assignee && lanes.size && !lanes.has(t.assignee) ? "  [lane not running]" : ""}${merge ? `  [${merge.label}]` : ""}${override ? `  (done not live: ${override})` : ""}`);
+          }
         }
         return 0;
       }
@@ -209,7 +235,13 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       case "start": await act(key(rest[0]), { action: "move", to: "doing" }); return 0;
       case "resume": await act(key(rest[0]), { action: "move", to: "doing" }); return 0;
       case "todo": await act(key(rest[0]), { action: "move", to: "todo" }); return 0;
-      case "done": await act(key(rest[0]), { action: "move", to: "done", ...(text("why") !== undefined ? { reason: text("why") } : {}) }); return 0;
+      case "done": {
+        const k = key(rest[0]);
+        if (flags["not-live"] === true) throw new Usage("--not-live takes the reason it is accepted before it is live");
+        const notLive = text("not-live");
+        await act(k, { action: "move", to: "done", ...(text("why") !== undefined ? { reason: text("why") } : {}), ...(notLive !== undefined ? { notLive } : {}) });
+        return 0;
+      }
       case "block": {
         const k = key(rest[0]);
         const why = text("why");
@@ -222,6 +254,22 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         await act(k, { action: "move", to: "review" });
         const note = text("note");
         if (note) await act(k, { action: "comment", text: note });
+        return 0;
+      }
+      case "merged": {
+        const k = key(rest[0]);
+        const sha = rest[1];
+        const repo = flags.repo;                        // --repo with no value parses as true: it must name one
+        if (!sha || repo === true) throw new Usage("usage: morndo-board merged T-12 <sha> [--repo owner/name]");
+        await act(k, { action: "merged", sha, ...(repo !== undefined ? { repo } : {}) });
+        return 0;
+      }
+      case "unmerged": {
+        const k = key(rest[0]);
+        const sha = rest[1];
+        const repo = flags.repo;                        // --repo with no value parses as true: it must name one
+        if (!sha || repo === true) throw new Usage("usage: morndo-board unmerged T-12 <sha> [--repo owner/name]");
+        await act(k, { action: "unmerged", sha, ...(repo !== undefined ? { repo } : {}) });
         return 0;
       }
       case "move": {

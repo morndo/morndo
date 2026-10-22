@@ -6,6 +6,8 @@
 // and never rises on its own: an agent's Note rises only with evidence it did not produce, and a Note marked untrusted
 // (it came from outside content: a mail, a web page, a comment) rises only by the principal's approval (M5). The index a
 // lane receives has a size limit (M6). A Note past its re-check date is shown as stale, never silently dropped (M7).
+// Approval is the principal's (M8): an Endpoint under step-up, or the console with a one-time code that only an Endpoint
+// under step-up can mint (single use, bound to one Note, short-lived).
 // Pure: the caller passes the clock and the ids; nothing here reads a file, a database or a network.
 import { err, ok, type Result } from "./shared.ts";
 
@@ -104,7 +106,11 @@ export type MemoryProblem =
   | "invalidated" // M2: a superseded or invalidated Note does not change again
   | "mismatch" // a successor keeps its predecessor's kind and scope
   | "not_yours" // a lane invalidates only its own Notes
-  | "replaced_meanwhile"; // M2: the Note a successor replaces was replaced by another successor first
+  | "replaced_meanwhile" // M2: the Note a successor replaces was replaced by another successor first
+  | "step_up" // M8: the principal's answer needs a fresh verification (AC7)
+  | "code_needed" // M8: the console approves with a one-time code
+  | "bad_code" // M8: the code is wrong, already used, expired or burned
+  | "not_pending"; // M8: a code is minted only for a Note that waits for approval
 export type MemoryRefusal = { problem: MemoryProblem };
 
 export const MEMORY_LIMITS = { title: 120, summary: 400, body: 20_000, ref: 200, reason: 300 } as const;

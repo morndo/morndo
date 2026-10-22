@@ -31,6 +31,7 @@
   import DecisionsPanel from "./DecisionsPanel.svelte";
   import RightPanel from "./RightPanel.svelte";
   import { REFUSALS, waitingCount, type DecisionItem } from "./decisions.ts";
+  import { explainCodeProblem, type CodeOutcome } from "./memory-code.ts";
   import { clampRight, layoutIsNarrow, widthAfterWindowChange } from "./panel-width.ts";
   import type { AskOutcome } from "./answer-session.ts";
   import { api, ApiError, explain } from "../api.ts";
@@ -156,6 +157,17 @@
     }
   }
   function openScreen(workerId: string) { open(workerId); overlayOpen = false; screenRequest = { worker: workerId, n: (screenRequest?.n ?? 0) + 1 }; }
+  // The console's one-time approval code for a pending Memory note (ADR-0031 round 3): a Command under step-up like the
+  // approval itself, so a stale passkey check is redone first (AC7). The code crosses this once, into the card's reveal,
+  // and is never kept here.
+  async function memoryCode(noteId: string): Promise<CodeOutcome> {
+    try {
+      const r = await withStepUp(() => api.post<{ code: string; expiresAt: number }>(`/api/memory/notes/${encodeURIComponent(noteId)}/approval-code`), at => (verifiedAt = at));
+      return { ok: true, code: r.code, expiresAt: r.expiresAt };
+    } catch (e) {
+      return { ok: false, text: explainCodeProblem(e) };
+    }
+  }
   async function askForBrief(d: DecisionItem): Promise<AskOutcome> {
     return sharedAsk(d, feed.workers, c => onQueue({ target: c.worker, targetName: c.workerName, text: c.text, uploads: [], images: [], files: [], seen: c.seen }), async () => {
       if (verifiedFresh || navigator.onLine === false) return null;
@@ -343,7 +355,7 @@
 </script>
 
 {#snippet inlineCard(d: DecisionItem)}
-  <DecisionCard item={d} variant="inline" {now} {verifiedFresh} onAnswer={answer} onOpenScreen={openScreen} />
+  <DecisionCard item={d} variant="inline" {now} {verifiedFresh} onAnswer={answer} onOpenScreen={openScreen} onMemoryCode={memoryCode} />
 {/snippet}
 
 <div class="desk desk-tokens">
@@ -370,7 +382,7 @@
       onView={v => (view = v)} onManager={() => manager && open(manager.id)} onPreferences={t => (preferences = t)} />
     <div class="workspace">
       <div class="panel" class:over={narrow && rightShown} style:--right-w="{drawnRight}px" style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${drawnRight}px` : ''}">
-        <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines}
+        <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines} runs={feed.boardRuns}
           decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
           {prefsOf} onMenu={(id, x, y) => (menu = { x, y, id })}
           onSelect={open} onActivity={() => (view = "activity")} onCompose={() => { if (manager) { open(manager.id); setTimeout(() => composerEl?.focus(), 50); } }} />
@@ -382,7 +394,7 @@
           {:else if view === "dashboard"}
             <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane} />
           {:else if view === "board"}
-            <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} live={feed.boardAt !== null} {now} open={openTask} jobs={feed.jobs} counts={feed.jobCounts} more={feed.jobsMore} openJob={openJobId} onOpen={k => (openTask = k)} onOpenJob={id => (openJobId = id)} onLoadJobs={loadHiddenJobs}
+            <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} merged={feed.boardMerged} live={feed.boardAt !== null} {now} open={openTask} jobs={feed.jobs} counts={feed.jobCounts} more={feed.jobsMore} openJob={openJobId} onOpen={k => (openTask = k)} onOpenJob={id => (openJobId = id)} onLoadJobs={loadHiddenJobs}
               onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />
           {:else if current}
             <ChannelView worker={current} displayName={nameOf(current)} {feed} {verifiedAt} panel={rightShown}
@@ -402,7 +414,7 @@
         {#if rightShown}
           <RightPanel waiting={decisionsWaiting} width={drawnRight} chosen={rightWidth} onWidth={(n) => setRightWidth(n)} onCommit={(n) => setRightWidth(n, true)} onClose={closeRight}>
             <DecisionsPanel items={feed.decisions} ledger={feed.ledger} {now} {verifiedFresh} onAnswer={answer}
-              onOpenScreen={openScreen} onOpenChat={openChat} onAskBrief={askForBrief} />
+              onOpenScreen={openScreen} onOpenChat={openChat} onAskBrief={askForBrief} onMemoryCode={memoryCode} />
           </RightPanel>
         {/if}
       </div>

@@ -1,7 +1,7 @@
 // The phone as a chat app (ADR-0011): rows, previews, status lines, bubbles, delivery words, away and the keyboard.
 // Synthetic data.
 import { describe, expect, it } from "vitest";
-import type { Message, RosterEntry } from "@morndo/domain";
+import type { Message, RosterEntry, Run } from "@morndo/domain";
 import type { ChatRowWire } from "@morndo/protocol";
 import type { DecisionItem } from "../src/lib/desktop/decisions.ts";
 import type { OutboxRecord } from "../src/lib/outbox/state.ts";
@@ -18,6 +18,8 @@ const MIN = 60_000;
 const w = (name: string, o: Partial<RosterEntry> = {}): RosterEntry => ({ id: `%${name.length}${name[0]}` as RosterEntry["id"], name, location: "box", node: "", offline: false, state: "quiet", changedAt: NOW - 30 * MIN, title: null, lastMessageAt: null, needsYou: false, waitingOn: null, ...o });
 const m = (id: string, at: number, text: string, o: Partial<Message> = {}): Message => ({ id, at, author: { kind: "agent", name: "a" }, kind: "text", text, ...o });
 const row = (worker: RosterEntry, o: Partial<ChatRowWire> = {}): ChatRowWire => ({ worker: worker.id, name: worker.name, last: null, answer: null, unread: 0, lastAt: null, ...o });
+const run = (o: Partial<Run> = {}): Run => ({ lane: "builder", node: "pc", phase: "working", deadline: null, overdue: false, since: NOW - 6 * MIN, source: "session", ...o });
+const waiting = (o: Partial<Run> = {}): Run => run({ phase: "waiting", wait: { on: "background", tasks: [{ type: "shell", label: "gh run watch" }] }, ...o });
 
 describe("the chat list (H1, H2)", () => {
   it("manager first, newest activity next; a muted lane shows no count; an open ask makes a row wait", () => {
@@ -112,6 +114,27 @@ describe("the status view (H3)", () => {
     });
     expect(statusRows(rows).map(r => [r.name, r.status.label])).toEqual([["manager", "Idle since 09:00"], ["stuck", "Waits 20 min"], ["busy", "Working 12 min"], ["idle", "Idle since 09:00"]]);
     expect(statusRows(rows)[1]?.status.line).toBe("Waits for you: a prompt on its screen");
+  });
+});
+
+describe("a lane waiting on its own background work", () => {
+  it("is listed under Working", () => {
+    const rows = chatRows({ workers: [w("builder"), w("quiet")], chats: {}, decisions: [], muted: [], now: NOW, runs: new Map([["builder", waiting()]]) });
+    const builder = rows.find(r => r.name === "builder");
+    expect(builder?.status.kind).toBe("working");
+    expect(builder?.status.line).toBe("Working (background)");
+    expect(builder?.status.label).toBe("Working (background) 6 min");
+    expect(statusRows(rows).map(r => r.name)).toEqual(["builder", "quiet"]);   // ranked with the working ones
+  });
+  it("a lane waiting on the principal is not: a needs-you or declared run leaves an idle lane idle; an open decision still waits; an offline lane stays Offline", () => {
+    const one = (r: Run, over: Partial<RosterEntry> = {}) =>
+      chatRows({ workers: [w("builder", over)], chats: {}, decisions: [], muted: [], now: NOW, runs: new Map([["builder", r]]) })[0]?.status;
+    expect(one(run({ phase: "needs_you" }))?.kind).toBe("idle");
+    expect(one(waiting({ wait: { on: "declared", what: "the deploy" } }))?.kind).toBe("idle");
+    const decided = chatRows({ workers: [w("builder")], chats: {}, decisions: [ask()], muted: [], now: NOW, runs: new Map([["builder", waiting()]]) })[0]?.status;
+    expect(decided?.kind).toBe("waits");
+    expect(decided?.line).toContain("Waits for you");
+    expect(one(waiting(), { offline: true })?.label).toBe("Offline");
   });
 });
 
