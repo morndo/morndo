@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { UPDATE_SCOPE_SERVICES, type UpdateService } from "@morndo/domain";
 import type { ServiceManager } from "../application/ports.ts";
 import { updaterPaths } from "./paths.ts";
+import { legacyService } from "./services-systemd.ts";
 import { foreignIn, placeUnits, type UnitDir } from "./unit-files.ts";
 
 // The same shape as services-systemd's: one program, one argument list, no shell.
@@ -127,7 +128,10 @@ export class LaunchdServices implements ServiceManager {
   }
 
   private unitDir(): UnitDir {
-    return { dir: this.agentsDir, isUnit: isPlist, marked: t => t.split("\n", 2)[1] === PLIST_MARK };
+    return {
+      dir: this.agentsDir, isUnit: isPlist, marked: t => t.split("\n", 2)[1] === PLIST_MARK,
+      legacy: (n, t) => legacyService(n, t.match(/<key>ProgramArguments<\/key>\s*<array>[\s\S]*?<\/array>/)?.[0] ?? ""),
+    };
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {

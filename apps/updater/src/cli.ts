@@ -505,6 +505,9 @@ export async function runUpdater(
       try {
         await m.runApply("rollback");            // §5: the morndo-update-apply@rollback.service instance
       } catch (error) {
+        // The confirmation was for this run of the unit only: a unit that never started must not leave it valid
+        // for a later start of the rollback instance that no one confirmed.
+        rmSync(rollbackConfirmedFile, { force: true });
         io.err(`the apply unit did not run: ${error instanceof Error ? error.message : String(error)}\n`);
         return EXIT_TEMPFAIL;
       }

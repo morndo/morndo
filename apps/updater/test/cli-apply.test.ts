@@ -419,6 +419,18 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
     expect(w.services.tape.filter(t => t.startsWith("stop:")).length).toBeGreaterThan(0);   // the real walk ran
   });
 
+  it("a rollback unit that fails to start leaves no confirmation behind for a later start", async () => {
+    const w = await world();
+    await withPrevious(w);
+    w.services.runApplyScript = async () => { throw new Error("Job for morndo-update-apply@rollback.service failed"); };
+    const r = await w.run(["update", "--rollback", "--yes"]);
+    expect(r.code, r.err).toBe(75);
+    expect(existsSync(join(w.paths.state, "rollback-confirmed"))).toBe(false);
+    const later = await w.run(["update", "apply", "--version", "rollback"]);
+    expect(later.code, later.err).toBe(64);                 // no one confirmed this one
+    expect(w.current()).toBe(A);
+  });
+
   it("with no previous Version there is nothing to go back to: exit 78, nothing started", async () => {
     const w = await world({ preStageB: true });
     const r = await w.run(["update", "--rollback"]);

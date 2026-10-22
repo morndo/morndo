@@ -3339,6 +3339,16 @@ export const CONTROLS: Control[] = [
     find: "ExecStart=%h/.local/share/morndo-releases/good/bin/morndo-update update recover",
     replace: "ExecStart=%h/.local/bin/morndo-update update recover",
     run: ["apps/updater/test/units.test.ts"], expect: "recovery runs only while the applying mark exists" },
+  // 5b round 4 (md-rev5 on 49d6109): the setup before the updater is adopted, a foreign unit stops nothing.
+  { id: "c2b-legacy-not-adopted", task: "c2b", file: "apps/updater/src/adapters/services-systemd.ts",
+    find: "legacy: (n, t) => legacyService(n,", replace: "legacy: (n, t) => false && legacyService(n,",
+    run: ["apps/updater/test/services-systemd.test.ts"], expect: "adopts the setup before the updater" },
+  { id: "c2b-foreign-found-after-stop", task: "c2b", file: "apps/updater/src/application/apply-service.ts",
+    find: "      if (foreign.length > 0) {", replace: "      if (false) {",
+    run: ["apps/updater/test/apply-service.test.ts"], expect: "abandons the apply before anything is recorded" },
+  { id: "c2b-confirmation-outlives-failed-start", task: "c2b", file: "apps/updater/src/cli.ts",
+    find: "        rmSync(rollbackConfirmedFile, { force: true });\n        io.err(`the apply unit did not run", replace: "        io.err(`the apply unit did not run",
+    run: ["apps/updater/test/cli-apply.test.ts"], expect: "leaves no confirmation behind" },
   // F5: an open record the recovery cannot act on is one Alert, not one every 5 minutes.
   { id: "c2b-unknown-record-alert-every-run", task: "c2b", file: "apps/updater/src/application/recovery-service.ts",
     find: "if (store.firstAlert(open.id, \"update_unknown_record\", clock.now())) alerts.raise", replace: "alerts.raise",

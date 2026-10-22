@@ -124,6 +124,16 @@ describe("LaunchdServices (§4.6, §5)", () => {
     await expect(m.manager.foreignUnits("0.2.0")).resolves.toEqual([]);
   });
 
+  it("renderUnits adopts a plist from before the updater that runs our launcher, keeping it once", async () => {
+    const m = mac({ templates: "real" });
+    const before = "<?xml version=\"1.0\"?>\n<plist version=\"1.0\"><dict><key>ProgramArguments</key><array><string>/srv/example-user/.local/bin/morndo</string><string>serve</string></array></dict></plist>\n";
+    writeFileSync(join(m.agentsDir, "com.morndo.hub.plist"), before);
+    await expect(m.manager.foreignUnits("0.2.0")).resolves.toEqual([]);
+    await expect(m.manager.renderUnits("0.2.0")).resolves.toEqual([join(m.agentsDir, "com.morndo.hub.plist.before-morndo")]);
+    expect(readFileSync(join(m.agentsDir, "com.morndo.hub.plist.before-morndo"), "utf8")).toBe(before);
+    expect(readFileSync(join(m.agentsDir, "com.morndo.hub.plist"), "utf8")).toContain(PLIST_MARK);
+  });
+
   it("refuses to render a Version that ships no launchd templates rather than uninstall them", async () => {
     const m = mac();
     mkdirSync(join(m.home, ".local/share/morndo-releases/0.2.0/units/launchd"), { recursive: true });
