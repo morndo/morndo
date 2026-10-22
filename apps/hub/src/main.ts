@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
+import { DatabaseUnreadable, NotLocalDisk, RevocationJournal, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { shutdownStack, type Shutdown } from "./adapters/shutdown.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
@@ -44,6 +44,7 @@ import { BoardService } from "./application/board-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
 import { AgentAccess } from "./application/agent-access.ts";
+import { applyRevocationJournal } from "./application/revocations.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
 import { AlertsService, SEEN_MARK } from "./application/alerts-service.ts";
@@ -126,7 +127,14 @@ function openStore(dir: string): Store {
   }
 }
 const identity = loadOrCreateIdentity(config.dataDir);
-const access = new AccessService(store, passkeys(config));
+// RL10 (updates design §11.5): every revocation is journaled to revoked.log beside morndo.db before its database
+// write, and every start applies the journal again, so a database restored from an older copy brings no revoked
+// device or agent token back.
+const journal = new RevocationJournal(join(config.dataDir, "revoked.log"));
+const access = new AccessService(store, passkeys(config), Date.now, journal);
+const agents = new AgentAccess(store, config.managerWindow, Date.now, journal);
+const reapplied = applyRevocationJournal(journal, { access, agents });
+if (reapplied > 0) log.info(`re-applied ${reapplied} revocations from revoked.log`);
 const [cmd = "serve", ...args] = process.argv.slice(2);
 const when = (t: number | null) => (t === null ? "-" : new Date(t).toLocaleString());
 // The console commands' own output, for the person at the box (a pairing link must show as it is): not a log.
@@ -267,7 +275,6 @@ switch (cmd) {
     const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [] });
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); board.stop(); });
-    const agents = new AgentAccess(store, config.managerWindow);
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
     const memoryStore = openMemory(config.dataDir);
@@ -397,7 +404,7 @@ switch (cmd) {
   }
   // ADR-0015: the agents' credentials for the board, issued here (the trust root), shown once, kept as a hash.
   case "agent-token": {
-    const agents = new AgentAccess(store, config.managerWindow);
+    // `agents` is the one the start already made, with the revocation journal (RL10).
     const [sub, ...rest] = args;
     if (sub === "new") {
       // `--role R` and the name, in either order: the role's value is never taken as the name.

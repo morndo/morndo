@@ -5,9 +5,9 @@
 // and daily. A revoked node's lanes go whichever way it was revoked (the client API, or the console writing fleet.db).
 import type Database from "better-sqlite3";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import type { Delivery, Pane } from "@morndo/protocol";
-import { Flight, HoldWatch, assertLocalDisk, holdFile } from "@morndo/service-kit";
+import { Flight, HoldWatch, RevocationJournal, assertLocalDisk, holdFile } from "@morndo/service-kit";
 import type { FleetConfig } from "./config.ts";
 import { Audit } from "./adapters/audit.ts";
 import { startClientApi } from "./adapters/client-api.ts";
@@ -36,6 +36,7 @@ import { LaneEvents } from "./application/lane-events.ts";
 import { LaneEventsPush } from "./application/lane-events-push.ts";
 import { LaneRegistry } from "./application/lane-registry.ts";
 import { LaneWatch, REBUILD_WINDOW_MS } from "./application/lane-watch.ts";
+import { applyRevocationJournal } from "./application/revocations.ts";
 import { Router } from "./application/router.ts";
 import { Runs } from "./application/runs.ts";
 
@@ -65,7 +66,13 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   assertLocalDisk(dirname(config.dbPath));          // before the key file too, which lives beside it by default
   const key = loadOrCreateFleetKey(config.keyPath);
   const db = openFleetDb(config.dbPath);
-  const nodes = new NodesStore(db, now);
+  // RL10 (updates design §11.5): every revocation is journaled to revoked.log beside fleet.db before its database
+  // write, and each start applies the journal again, before anything below reads the nodes — so a fleet.db restored
+  // from an older copy (the updater's rollback) brings no revoked node back.
+  const journal = new RevocationJournal(join(dirname(config.dbPath), "revoked.log"));
+  const nodes = new NodesStore(db, now, journal);
+  const reapplied = applyRevocationJournal(journal, nodes);
+  if (reapplied > 0) log.info(`re-applied ${reapplied} revocations from revoked.log`);
   const events = new EventHub(e => log.error("an event subscriber failed", e));
   const audit = new Audit(db, { now, log, onAlert: a => events.emit({ t: "alert", node: a.node ?? "", body: a }) });
   // On start and daily; a busy or full fleet.db is logged and tried again the next day, never thrown out of the timer.

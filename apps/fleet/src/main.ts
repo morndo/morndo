@@ -2,9 +2,9 @@
 // morndo-fleet: the fleet service (ADR-0012). `node add|list|revoke` and `status` are its console; they open fleet.db
 // themselves (better-sqlite3 waits on the service's locks) and reach the running service through its Unix socket.
 import type Database from "better-sqlite3";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { LIMITS, NODE_NAME, formatJoinString } from "@morndo/protocol";
-import { NotLocalDisk, assertLocalDisk, exitAfterOutput, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
+import { NotLocalDisk, RevocationJournal, assertLocalDisk, exitAfterOutput, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { ConfigError, loadConfig, type FleetConfig } from "./config.ts";
 import { DatabaseUnreadable, openFleetDb } from "./adapters/db.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
@@ -115,7 +115,9 @@ try {
     if (!NODE_NAME.test(name)) fail(`a node name is 1 to 32 of a-z, 0-9 and "-": ${JSON.stringify(name)}`, EXIT_USAGE);
     const cfg = config();
     const db = openDb(cfg.dbPath);
-    const revoked = new NodesStore(db).revoke(name);
+    // The same revoked.log the service writes (RL10, updates design §11.5), so this revoke survives a fleet.db put
+    // back from an older copy as the service's own revocations do.
+    const revoked = new NodesStore(db, Date.now, new RevocationJournal(join(dirname(cfg.dbPath), "revoked.log"))).revoke(name);
     if (revoked) new Audit(db).record("cli", "node.revoke", name);
     db.close();
     if (!revoked) fail(`no active node ${name}`, 1);

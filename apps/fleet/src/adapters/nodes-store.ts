@@ -9,6 +9,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type Database from "better-sqlite3";
 import { LIMITS, NODE_NAME } from "@morndo/protocol";
+import type { RevocationJournal } from "@morndo/service-kit";
 import { synced } from "./db.ts";
 import { parsePublicKey } from "./keys.ts";
 
@@ -37,10 +38,12 @@ const hashOf = (bytes: Buffer) => createHash("sha256").update(bytes).digest();
 export class NodesStore {
   #db: Database.Database;
   #now: () => number;
+  #journal: RevocationJournal | null;
 
-  constructor(db: Database.Database, now: () => number = Date.now) {
+  constructor(db: Database.Database, now: () => number = Date.now, journal?: RevocationJournal) {
     this.#db = db;
     this.#now = now;
+    this.#journal = journal ?? null;
   }
 
   // A code for `name`: refused for a name that isn't NODE_NAME or a node that is registered and not revoked (revoke
@@ -98,6 +101,9 @@ export class NodesStore {
 
   // Revokes a registered node and withdraws its unused codes. False when there was no active node of that name.
   revoke(name: string): boolean {
+    // RL10 (updates design §11.5): journaled before the database write, so a crash between the two is repaired at the
+    // next start and a fleet.db restored from an older copy can't bring the node back.
+    if (this.active(name) !== null) this.#journal?.append({ kind: "node", id: name, at: this.#now() });
     return synced(this.#db, () => this.#db.transaction(() => {
       const changed = this.#db.prepare("UPDATE nodes SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL").run(this.#now(), name).changes > 0;
       this.#db.prepare("DELETE FROM join_codes WHERE node = ? AND used_at IS NULL").run(name);
