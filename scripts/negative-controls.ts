@@ -3496,6 +3496,10 @@ export const CONTROLS: Control[] = [
   { id: "c2b-launchd-adopts-env", task: "c2b", file: "apps/updater/src/adapters/services-launchd.ts",
     find: "legacy: (n, t) => !t.includes(\"<key>EnvironmentVariables</key>\")\n        && legacyService(", replace: "legacy: (n, t) => legacyService(",
     run: ["apps/updater/test/services-launchd.test.ts"], expect: "EnvironmentVariables is not adopted" },
+  // Found by the 5d run on a throwaway machine: the agent's own tmux client is not a tmux server (RL13).
+  { id: "c2b-tmux-client-is-server", task: "c2b", file: "apps/updater/src/adapters/services-systemd.ts",
+    find: "if (comm.startsWith(\"tmux\") && comm !== \"tmux: client\") return true;", replace: "if (comm.startsWith(\"tmux\")) return true;",
+    run: ["apps/updater/test/services-systemd.test.ts"], expect: "takes a tmux client in the group" },
   // F5: an open record the recovery cannot act on is one Alert, not one every 5 minutes.
   { id: "c2b-unknown-record-alert-every-run", task: "c2b", file: "apps/updater/src/application/recovery-service.ts",
     find: "if (store.firstAlert(open.id, \"update_unknown_record\", clock.now())) alerts.raise", replace: "alerts.raise",
