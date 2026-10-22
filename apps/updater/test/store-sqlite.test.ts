@@ -11,7 +11,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   beginRollback, beginStep, beginUpdate, parseVersion, RECORD_FORMAT, type Installation,
 } from "@morndo/domain";
-import { openUpdateStore } from "../src/adapters/store-sqlite.ts";
+import { MIGRATIONS, openUpdateStore } from "../src/adapters/store-sqlite.ts";
 import { DEFAULT_SETTINGS } from "./helpers/fakes.ts";
 
 let scratch = "";
@@ -404,7 +404,7 @@ describe("the step record (RL4, §6.2)", () => {
 
     const store = openUpdateStore({ db: join(state, "old2.db"), lock: join(state, "apply.lock") });
     const raw = new Database(join(state, "old2.db"), { readonly: true });
-    expect(raw.pragma("user_version", { simple: true })).toBe(5);   // every migration since, all additive
+    expect(raw.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);   // every migration since, all additive
     raw.close();
     expect(store.lastFeedCheck()).toMatchObject({ at: 40, feedSeq: 9 });   // the old rows read as they were
     expect(store.highestCommitted()).toBe("0.1.0");

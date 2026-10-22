@@ -13,7 +13,7 @@ import {
   type Channel, type KeySet, type Update, type Version,
 } from "@morndo/domain";
 import { errno, migrate as runMigrations, openPrivateDb, type Migration } from "@morndo/service-kit";
-import type { CheckRecord, StagedRecord, StoredUpdate, TrustState, UpdateHistory, UpdateStore } from "../application/ports.ts";
+import type { AlertKind, CheckRecord, StagedRecord, StoredUpdate, TrustState, UpdateHistory, UpdateStore } from "../application/ports.ts";
 
 // update.db's migrations, additive forever (§4.6, §11.2): an older updater must open what a newer one wrote —
 // the whole rollback story — so each one only adds. Exported for the additive linter's test.
@@ -119,6 +119,16 @@ export const MIGRATIONS: readonly Migration[] = [
     // walk) reads it back. Rows from before carry none, and read as "judge fresh".
     up: db => {
       db.exec("ALTER TABLE committed ADD COLUMN baseline TEXT");
+    },
+  },
+  {
+    version: 6,
+    name: "the Alerts an open record has raised (§6.6)",
+    compat: "additive",
+    // The recovery unit runs every 5 minutes while a record stays open; a record it cannot act on would raise
+    // the same Alert each time. One row per record and kind: the first raise writes it, every later one finds it.
+    up: db => {
+      db.exec("CREATE TABLE alerts_sent (update_id TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (update_id, kind))");
     },
   },
 ];
@@ -244,6 +254,7 @@ export class SqliteUpdateStore implements UpdateStore {
   readonly #bad: Database.Statement;
   readonly #writeHalt: Database.Statement;
   readonly #halts: Database.Statement;
+  readonly #writeAlertSent: Database.Statement;
   readonly #versions: Database.Statement;
   readonly #writeVersion: Database.Statement;
   readonly #insertCheck: Database.Statement;
@@ -282,6 +293,7 @@ export class SqliteUpdateStore implements UpdateStore {
     this.#bad = this.#db.prepare("SELECT version FROM bad ORDER BY at");
     this.#writeHalt = this.#db.prepare("INSERT INTO rollout_halts (version, reason, at) VALUES (?, ?, ?)");
     this.#halts = this.#db.prepare("SELECT version, reason, at FROM rollout_halts ORDER BY at DESC, rowid DESC");
+    this.#writeAlertSent = this.#db.prepare("INSERT OR IGNORE INTO alerts_sent (update_id, kind, at) VALUES (?, ?, ?)");
     this.#versions = this.#db.prepare("SELECT version, manifest_sha256, files_sha256, staged_at, manifest FROM versions");
     this.#writeVersion = this.#db.prepare(`INSERT INTO versions (version, manifest_sha256, files_sha256, staged_at, manifest)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(version) DO UPDATE SET manifest_sha256 = excluded.manifest_sha256,
@@ -433,6 +445,10 @@ export class SqliteUpdateStore implements UpdateStore {
 
   halts(): { version: string; reason: string; at: number }[] {
     return this.#halts.all() as { version: string; reason: string; at: number }[];
+  }
+
+  firstAlert(updateId: string, kind: AlertKind, at: number): boolean {
+    return this.#writeAlertSent.run(updateId, kind, at).changes === 1;
   }
 
   saveUpdate(u: StoredUpdate): void {

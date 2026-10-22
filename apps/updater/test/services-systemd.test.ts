@@ -8,7 +8,8 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SystemdServices, systemdUserManager, type Run } from "../src/adapters/services-systemd.ts";
+import { SystemdServices, systemdUserManager, UNIT_MARK, type Run } from "../src/adapters/services-systemd.ts";
+import { ForeignUnits } from "../src/adapters/unit-files.ts";
 
 let scratch = "";
 beforeAll(() => { scratch = mkdtempSync(join(tmpdir(), "morndo-upd-")); });
@@ -29,14 +30,16 @@ class Systemctl {
 
 // A machine: a home with a units directory, a release tree, and the adapter over a scripted systemctl.
 const machine = (o: {
-  installed?: string[];                       // unit files already in ~/.config/systemd/user
+  installed?: string[];                       // unit files a render of ours left in ~/.config/systemd/user
+  foreign?: string[];                         // unit files there that Morndo did not write
   releaseUnits?: Record<string, string>;      // <version>/units/<name> → text ("launchd/x" makes a directory)
   reply?: (args: string[]) => Answer;
 } = {}) => {
   const home = mkdtempSync(join(scratch, "home-"));
   const units = join(home, ".config/systemd/user");
   mkdirSync(units, { recursive: true });
-  for (const name of o.installed ?? []) writeFileSync(join(units, name), "# installed before\n");
+  for (const name of o.installed ?? []) writeFileSync(join(units, name), `${UNIT_MARK}\n# installed before\n`);
+  for (const name of o.foreign ?? []) writeFileSync(join(units, name), "# a person's own\n[Unit]\n");
   if (o.releaseUnits) {
     const from = join(home, ".local/share/morndo-releases/0.2.0/units");
     mkdirSync(from, { recursive: true });
@@ -122,8 +125,32 @@ describe("SystemdServices (§4.6, §5, §6.2 step 6)", () => {
       "morndo-update.timer",
       "unrelated.service",                // only Morndo's own files are ever removed
     ]);
-    expect(readFileSync(join(m.units, "morndo-hub.service"), "utf8")).toBe("[Unit]\nDescription=hub 0.2.0\n");
+    expect(readFileSync(join(m.units, "morndo-hub.service"), "utf8")).toBe(`${UNIT_MARK}\n[Unit]\nDescription=hub 0.2.0\n`);
     expect(m.sys.calls).toEqual([{ file: "systemctl", args: ["--user", "daemon-reload"] }]);
+  });
+
+  it("renderUnits removes only units Morndo wrote, and refuses to overwrite one it did not unless told to keep it aside", async () => {
+    const releaseUnits = {
+      "morndo-hub.service": "[Unit]\nDescription=hub 0.2.0\n",
+      "morndo-update.timer": "[Timer]\nOnBootSec=5min\n",
+    };
+    // a person's own morndo-* unit that no Version ships: never ours to remove
+    const kept = machine({ foreign: ["morndo-mine.service"], releaseUnits });
+    await kept.manager.renderUnits("0.2.0");
+    expect(readFileSync(join(kept.units, "morndo-mine.service"), "utf8")).toBe("# a person's own\n[Unit]\n");
+    // one of a shipped name: refused before anything is written or reloaded
+    const m = machine({ foreign: ["morndo-hub.service"], releaseUnits });
+    await expect(m.manager.foreignUnits("0.2.0")).resolves.toEqual([join(m.units, "morndo-hub.service")]);
+    await expect(m.manager.renderUnits("0.2.0")).rejects.toThrow(ForeignUnits);
+    expect(readdirSync(m.units).sort()).toEqual(["morndo-hub.service"]);
+    expect(readFileSync(join(m.units, "morndo-hub.service"), "utf8")).toBe("# a person's own\n[Unit]\n");
+    expect(m.sys.calls).toEqual([]);
+    // replaceForeign keeps it beside the new one first, and says where
+    await expect(m.manager.renderUnits("0.2.0", undefined, { replaceForeign: true }))
+      .resolves.toEqual([join(m.units, "morndo-hub.service.before-morndo")]);
+    expect(readFileSync(join(m.units, "morndo-hub.service.before-morndo"), "utf8")).toBe("# a person's own\n[Unit]\n");
+    expect(readFileSync(join(m.units, "morndo-hub.service"), "utf8")).toBe(`${UNIT_MARK}\n[Unit]\nDescription=hub 0.2.0\n`);
+    await expect(m.manager.foreignUnits("0.2.0")).resolves.toEqual([]);
   });
 
   it("refuses to render a Version that ships no units rather than uninstall them", async () => {

@@ -63,7 +63,9 @@ describe("the unit templates every Version ships (§5)", () => {
         expect(["h", "S", "i", "%"], `${name}: %${spec}`).toContain(spec!);
       }
       for (const [key, value] of Object.entries(ini.entries)) {
-        if (key === "ExecStart") expect(value.startsWith("%h/.local/bin/"), `${name}: ${value}`).toBe(true);
+        // recovery alone runs from `good` (§6.6): `current`, which ~/.local/bin links through, may be the broken one
+        const via = name === "morndo-update-recover.service" ? "%h/.local/share/morndo-releases/good/bin/" : "%h/.local/bin/";
+        if (key === "ExecStart") expect(value.startsWith(via), `${name}: ${value}`).toBe(true);
       }
     }
   });
@@ -104,7 +106,10 @@ describe("the unit templates every Version ships (§5)", () => {
     const { entries } = readIni(readFileSync(join(UNITS, "morndo-update-recover.service"), "utf8"));
     expect(entries.ConditionPathExists).toBe("%S/morndo-update/applying");
     expect(entries.After).toBe("morndo-hub.service morndo-fleet.service morndo-node.service");
-    expect(entries.ExecStart).toBe("%h/.local/bin/morndo-update update recover");
+    expect(entries.ExecStart).toBe("%h/.local/share/morndo-releases/good/bin/morndo-update update recover");
+    // launchd's recovery job the same: good's launcher, never the ~/.local/bin link through `current`
+    expect(readFileSync(join(UNITS, "launchd", "com.morndo.update-recover.plist"), "utf8"))
+      .toMatch(/<key>ProgramArguments<\/key>\s*<array>\s*<string>@HOME@\/\.local\/share\/morndo-releases\/good\/bin\/morndo-update<\/string>/);
     expect(readIni(readFileSync(join(UNITS, "morndo-update-recover.timer"), "utf8")).entries).toMatchObject({
       OnBootSec: "2min",
       OnUnitActiveSec: "5min",

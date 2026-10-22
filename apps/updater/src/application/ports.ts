@@ -141,6 +141,9 @@ export interface UpdateStore {
   recordHalt(version: string, reason: string, at: number): void;
   /** Every halt recorded here, newest first. */
   halts(): { version: string; reason: string; at: number }[];
+  /** True the first time this record raises this kind of Alert, false every later time: the recovery unit runs
+   *  every 5 minutes, and a record it cannot act on is one Alert, not one each run. */
+  firstAlert(updateId: string, kind: AlertKind, at: number): boolean;
 }
 
 export interface SettingsSource { read(): UpdateSettings }
@@ -157,8 +160,12 @@ export interface ServiceManager {
   /** How many times the service manager restarted it since `since` (systemd NRestarts). */
   restarts(s: UpdateService): Promise<number>;
   /** Render the units of `version` and reload the manager (§6.2 step 6). `role`, when given, renders only that
-   *  role's service units beside the update units — what `morndo install` writes for the role it was asked for. */
-  renderUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<void>;
+   *  role's service units beside the update units — what `morndo install` writes for the role it was asked for.
+   *  Only files Morndo wrote are replaced or removed: one of a shipped name without Morndo's mark throws, unless
+   *  `replaceForeign`, which keeps it aside first. Returns where each replaced file was kept. */
+  renderUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { replaceForeign?: boolean }): Promise<string[]>;
+  /** The unit files a render of `version` for `role` would replace that are not Morndo's (no mark of ours). */
+  foreignUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<string[]>;
   /** RL13: true when the tmux server sits inside the node agent's unit. */
   tmuxInAgentUnit(): Promise<boolean>;
   /** §6.2's apply runs as its own unit, so a crash of whoever asked for it never interrupts the walk: start
