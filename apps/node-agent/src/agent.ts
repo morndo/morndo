@@ -46,6 +46,9 @@ import { openJobRuntime, type JobRuntime } from "./ops/job-runtime.ts";
 import { nodeOpener } from "./ops/node-files.ts";
 import { createOpsRuntime } from "./ops/runtime.ts";
 import { agentPaths } from "./paths.ts";
+import { dropAgentTokenEnv, readBoardToken } from "./relay/board-token.ts";
+import { notLiveFromHub } from "./relay/board-view.ts";
+import { replyStyleAsk, type NotLiveOf } from "./relay/digest-check.ts";
 import { RelayFiles } from "./relay/relay-files.ts";
 import { startRelay, type Relay } from "./relay/server.ts";
 import { statusAsk, type JobsOf } from "./relay/status-ask.ts";
@@ -188,6 +191,15 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   // The waker ask's job check (W1, status-ask.ts). The job store opens after the relay, so until it does the node can't
   // tell whether a job will wake a lane, and only the status ask is made; a read that fails can't tell either.
   let jobsOf: JobsOf = () => null;
+  // The reply style ask's not-live rule (T-308, digest-check.ts): the board is read with the token in the board-token
+  // file, when a Stop needs it. The token is not read from the environment: it would be in the tmux server's and every
+  // lane's. Without a hub, or with no usable file, only the length and jargon rules run.
+  if (dropAgentTokenEnv()) log.warn(`MORNDO_AGENT_TOKEN was set in the node's environment: it is removed from it and ignored, as every lane it starts would hold it. Put the board token in ${paths.boardTokenFile} (mode 600)`);
+  const boardHub = config.hub ?? "";
+  const notLiveOf = (lane: string): NotLiveOf | undefined => boardHub === "" ? undefined : async () => {
+    const token = readBoardToken(paths.boardTokenFile);
+    return token === null ? null : notLiveFromHub({ hub: boardHub, token, lane });
+  };
   let relay: Relay;
   try {
     relay = await startRelay({
@@ -196,7 +208,8 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       // B6: a fresh read of the sessions directory per Stop or failure, no cache: a headless run's file may have appeared a
       // moment ago, and Stops are one per turn.
       foreign: foreignStop({ headless: id => ops.registry.headless(id) }),
-      ask: (body, window) => statusAsk(body, window, config.policy.statusContract, lane => jobsOf(lane)),
+      ask: async (body, window) =>
+        statusAsk(body, window, config.policy.statusContract, lane => jobsOf(lane)) ?? await replyStyleAsk(body, window, config.policy.statusContract, notLiveOf(window ?? "")),
     });
   } catch (e) {
     watch.stop();

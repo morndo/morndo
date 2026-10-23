@@ -1,7 +1,7 @@
 // morndo-keys. The design names this morndo-connections; this build uses the name the manager asked for.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { effectiveIsolation, engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
 import { findPreset as presetOf, firstPartyHost, floorOf } from "./application/catalog.ts";
@@ -25,6 +25,8 @@ import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
 import { FileRefused } from "./adapters/file-mode.ts";
 import { parsePin, pinFor, procReader, verifyClaudeParent } from "./adapters/caller-proof.ts";
+import { CLAUDE_RELEASE_FINGERPRINT, CLAUDE_RELEASE_FIRST_SIGNED } from "./adapters/claude-release-key.ts";
+import { compareVersions, installedVersions, isVersion, fileShaCache, parseReleasePin, releaseAdmits, syncReleases, type Fetch } from "./adapters/release-manifest.ts";
 import { DatabaseFromFuture } from "./adapters/store-migrations.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
@@ -32,11 +34,13 @@ const GATE = new Set(["off", "terms", "expired", "repo", "isolation", "dialect",
 const LEASES = 8;
 // The claude binary the owner pinned, in the connections home (adapters/caller-proof.ts); the lease reads it, not the env.
 const PIN_FILE = "claude-pin.json";
+// The signed-release pin (T-346): the key, the directory releases are installed in, the lowest version.
+const RELEASE_PIN_FILE = "claude-release-pin.json";
 const USAGE_WORDS = new Set(["missing argument", "isolation"]);
 
 // `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
 // `tty`: the command runs at an interactive terminal (stdin and stdout), which only pin-claude asks for.
-export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal; tty?: boolean };
+export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal; tty?: boolean; fetch?: Fetch };
 
 export type Parsed = { cmd: string; positionals: string[]; rest: string[]; get(name: string): string | undefined; all(name: string): string[] };
 
@@ -65,6 +69,11 @@ morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [-
   morndo-keys pin-claude [--path P] pins the claude binary a lease may be served to: its real path and its content (sha256,
   size, mtime, ctime, inode) and the API host of each connection it may serve (add a connection, pin again). Once, by the owner, at a terminal; an update needs a new pin. The terminal is advisory: it
   keeps an agent's plain tool call (which has none) from pinning, not a process of the same user that runs under a pty.
+  morndo-keys pin-claude --signed [--versions-dir D] [--floor V] pins Anthropic's release signing key (the fingerprint compiled
+  into this build), the directory claude's versions are installed in and the lowest version to accept, instead of one binary: a
+  lease then admits any version in that directory, at or above the floor, whose sha256 a signed manifest lists, so an update
+  needs no new pin. morndo-keys claude-releases sync [--only V] is the node job (no secret; run it on a timer and before a lane
+  starts) that fetches and verifies those manifests into the cache a lease reads; a lease makes no network call.
   The helper line is: ulimit -c 0; exec morndo-keys lease --connection <name> --lane <lane> --workspace <dir> --isolation os
   The ulimit keeps a crash from dumping the key (Node can neither wipe a string nor set its own core limit); the exec makes
   Claude Code the lease's parent, which is what it checks. For a connection whose floor is os (Z.ai today) the parent must
@@ -128,6 +137,7 @@ async function dispatch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     case "run": return launch(home, parsed, io);
     case "lease": return leaseKey(home, parsed, io);
     case "pin-claude": return pinClaude(home, parsed, io);
+    case "claude-releases": return claudeReleases(home, parsed, io);
     case "spend": return spend(home, need(name), io);
     case "usage": return usage(home, parsed, io);
     case "pool": return poolCommand(home, parsed, io);
@@ -342,8 +352,10 @@ async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   let proof: "verified" | "claimed" = "claimed";
   if (effectiveIsolation(connection, floorOf(preset)) === "os") {
     const pinFile = join(home.dir, PIN_FILE);
-    const checked = verifyClaudeParent({
+    const checked = await verifyClaudeParent({
       ppid: () => process.ppid, connection: name, pin: parsePin(procReader.file(pinFile)?.body ?? null),
+      release: parseReleasePin(procReader.file(join(home.dir, RELEASE_PIN_FILE))?.body ?? null),
+      verifyRelease: (version, sha256) => releaseAdmits(home.dir, version, sha256), shaCache: fileShaCache(home.dir),
       want: { denied: [home.vaultDir, home.db, home.identity], writeProtected: [home.vaultDir, home.db, home.identity, pinFile] },
     });
     seen = checked.ok ? "os" : "none";
@@ -386,11 +398,50 @@ function pinClaude(home: Opened, parsed: Parsed, io: Io): number {
     const url = presetOf(home.catalog, connection.vendor)?.runtimes.find(item => item.runtime === "claude")?.baseUrl ?? "";
     if (url !== "") baseUrls[connection.name] = url;
   }
+  if (parsed.get("signed") === "true") return pinReleases(home, parsed, io, baseUrls);
   const pin = pinFor(parsed.get("path") ?? "claude", home.env.PATH, baseUrls);
   if (pin === null) return fail(io, "missing");
   writeFileSync(join(home.dir, PIN_FILE), `${JSON.stringify(pin)}\n`, { mode: 0o600 });
   io.stdout(`${JSON.stringify(pin)}\n`);
   return 0;
+}
+
+// `morndo-keys pin-claude --signed [--versions-dir D] [--floor V]` (T-346): instead of one binary, the owner pins Anthropic's
+// release key (the fingerprint compiled into this build, shown here), the directory the installer keeps versions in (default
+// ~/.local/share/claude/versions) and the lowest version to accept (default: the version `claude` on this shell's PATH is). A
+// lease then admits any version in that directory, at or above the floor, whose sha256 a signed manifest lists: an update needs no
+// new pin. The manifests are fetched by `claude-releases sync`, never by a lease.
+function pinReleases(home: Opened, parsed: Parsed, io: Io, baseUrls: Record<string, string>): number {
+  let versionsDir: string;
+  try {
+    versionsDir = realpathSync(parsed.get("versions-dir") ?? join(home.env.HOME ?? "", ".local/share/claude/versions"));
+    if (!statSync(versionsDir).isDirectory()) return fail(io, "missing");
+  } catch { return fail(io, "missing"); }
+  let floor = parsed.get("floor");
+  if (floor === undefined) {
+    // the version the claude on this shell's PATH is, when it lives in that directory
+    const found = pinFor("claude", home.env.PATH, {})?.resolved;
+    if (found !== undefined && dirname(found) === versionsDir && isVersion(basename(found))) floor = basename(found);
+  }
+  if (floor === undefined || !isVersion(floor) || compareVersions(floor, CLAUDE_RELEASE_FIRST_SIGNED) < 0) return fail(io, "floor");
+  const pin = { fingerprint: CLAUDE_RELEASE_FINGERPRINT, versionsDir, floor, baseUrls };
+  writeFileSync(join(home.dir, RELEASE_PIN_FILE), `${JSON.stringify(pin)}\n`, { mode: 0o600 });
+  io.stdout(`${JSON.stringify(pin)}\n`);
+  return 0;
+}
+
+// `morndo-keys claude-releases sync [--only V]...` (T-346): the node job that keeps the release cache filled. It fetches the
+// manifest and its signature for each installed version at or above the pinned floor (and each --only), verifies them against the
+// compiled-in key, and caches them only then. No secret is involved, and a lease never calls it. A failure leaves the old cache and
+// exits 1, after the other versions are done; one JSON line per version says what happened.
+async function claudeReleases(home: Opened, parsed: Parsed, io: Io): Promise<number> {
+  if (parsed.positionals[0] !== "sync") return fail(io, "usage");
+  const pin = parseReleasePin(procReader.file(join(home.dir, RELEASE_PIN_FILE))?.body ?? null);
+  if (pin === null) return fail(io, "no_release_pin");
+  const versions = [...new Set([...installedVersions(pin.versionsDir, pin.floor), ...parsed.all("only").filter(isVersion).filter(version => compareVersions(version, pin.floor) >= 0)])];
+  const results = await syncReleases({ home: home.dir, versions, ...(io.fetch === undefined ? {} : { fetch: io.fetch }) });
+  for (const result of results) io.stdout(`${JSON.stringify(result)}\n`);
+  return results.some(result => result.status === "failed") ? 1 : 0;
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
@@ -766,7 +817,7 @@ function parse(argv: readonly string[]): Parsed {
   const values = new Map<string, string[]>();
   for (let i = 1; i < ours.length; i++) {
     const token = ours[i] ?? "";
-    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep") {
+    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep" || token === "--signed") {
       values.set(token.slice(2), ["true"]);
       continue;
     }
