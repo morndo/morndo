@@ -754,3 +754,36 @@ describe("a Version this node rolled back, offered again after a resume", () => 
   }, 90_000);
 });
 
+// Found by 6d's two-machine run: the control plane's own node agent moves with the control plane, in the same
+// install, so the skew gate (RL11) never counts it — or no Release that drops a protocol could ever apply there.
+describe("the control plane's skew gate and its own node", () => {
+  const ownNode = (w: TickWorld, name: string): void => {
+    const file = join(w.home, ".local", "state", "morndo-node", "status.json");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify({ node: name })}\n`);
+  };
+  const fleetOf = (nodes: { name: string; agentProtocol: number }[]): FakeFleetView => {
+    const f = new FakeFleetView();
+    f.nodesWord = nodes.map(n => ({ ...n, joined: true, revoked: false }));
+    return f;
+  };
+
+  it("leaves out the node this machine's own agent is: the target goes on to the walk", async () => {
+    const w = await tickWorld({ controlPlane: true, fleet: fleetOf([{ name: "cp-node", agentProtocol: 1 }]), protocol: { agent: [2, 2], clientApi: [1, 1] } });
+    ownNode(w, "cp-node");
+    w.services.tmuxIn = true;                                       // the walk defers right after the gate: fast
+    const r = await w.run(["update", "tick"]);
+    expect(r.code, r.err).toBe(75);
+    expect(stateFile(w.statePath).reason).not.toMatch(/^skew_blocked/);
+    expect(w.store.recentUpdates(1)[0]?.state).toBe("abandoned");   // the walk began: the gate let it through
+  }, 90_000);
+
+  it("still names every other node it would cut off", async () => {
+    const w = await tickWorld({ controlPlane: true, fleet: fleetOf([{ name: "cp-node", agentProtocol: 1 }, { name: "n2", agentProtocol: 1 }]), protocol: { agent: [2, 2], clientApi: [1, 1] } });
+    ownNode(w, "cp-node");
+    const r = await w.run(["update", "tick"]);
+    expect(r.code, r.err).toBe(75);
+    expect(stateFile(w.statePath)).toMatchObject({ state: "waiting", reason: "skew_blocked: n2" });
+  }, 90_000);
+});
+
