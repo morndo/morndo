@@ -336,9 +336,40 @@ try {
     browser ??= await chromium.launch();
     const paired = await pairedPage(browser, { pairUrl: () => pairUrl });
     page = paired.page;
+    // What the page saw, for a failed web step's evidence: console errors and every /api/ answer's status.
+    page.on("console", m => { if (m.type() === "error") seen.push(`console: ${m.text()}`); });
+    page.on("pageerror", e => seen.push(`pageerror: ${e.message}`));
+    page.on("response", r => { if (r.url().includes("/api/")) seen.push(`${r.request().method()} ${new URL(r.url()).pathname} -> ${r.status()}`); });
+  }
+  const seen: string[] = [];
+  // A failed (or probed) web step's evidence: a screenshot, the URL, the visible text, and what the page saw.
+  async function capture(name: string): Promise<void> {
+    if (page === null) return;
+    try {
+      await page.screenshot({ path: join(outDir, `web-${name}.png`), fullPage: true });
+      const text = await page.evaluate(() => document.body.innerText).catch(() => "(no text)");
+      writeFileSync(join(outDir, `web-${name}.txt`), `url: ${page.url()}\n\n${text.slice(0, 4000)}\n\n--- seen\n${seen.slice(-60).join("\n")}\n`);
+    } catch (error) {
+      writeFileSync(join(outDir, `web-${name}.txt`), `capture failed: ${(error as Error).message}\n--- seen\n${seen.slice(-60).join("\n")}\n`);
+    }
   }
 
-  if (ONLY !== "install") {
+  if (ONLY === "web") {
+    // The web alone (after step 1): pair, open /updates, give it 20 s, and record what it shows.
+    try {
+      await pairBrowser();
+      await page!.goto(`${ORIGIN}/updates`);
+      await new Promise(r => setTimeout(r, 20_000));
+      await capture("probe");
+      const rows = await page!.locator("li.card[data-machine]").count();
+      hostCheck("web:probe", rows >= 2, `/updates shows ${rows} machine rows (want control-plane and e2e-node); evidence web-probe.png/.txt`);
+    } catch (e) {
+      hostCheck("web:probe", false, (e as Error).message.split("\n")[0] ?? String(e));
+      await capture("probe-failed");
+    }
+  }
+
+  if (ONLY !== "install" && ONLY !== "web") {
     // ---- 2: the order of the fleet. cp's soak set to two minutes; feeds to B on both machines; the node stages B
     // and its tick defers (the control plane has not moved); cp commits B (its state carries the two-minute soak);
     // the node's tick defers again — inside the soak now.
@@ -363,6 +394,7 @@ try {
       hostCheck("web:update-now-b", true, "Update now clicked; the step-up ran; the hub asked e2e-node to take 0.2.0");
     } catch (e) {
       hostCheck("web:update-now-b", false, (e as Error).message.split("\n")[0] ?? String(e));
+      await capture("update-now-b-failed");
       page = null;                                     // a dead page is re-paired at the next web step
     }
     await machineStep("node", "node-current-b", { timeoutMs: 12 * 60_000 });
@@ -375,6 +407,7 @@ try {
       hostCheck("web:node-at-b", true, "/updates shows e2e-node up to date at 0.2.0");
     } catch (e) {
       hostCheck("web:node-at-b", false, (e as Error).message.split("\n")[0] ?? String(e));
+      await capture("node-at-b-failed");
       page = null;
     }
 
@@ -406,6 +439,7 @@ try {
       hostCheck("web:resume", true, "Resume clicked; the step-up ran; the Rollout of 0.3.0 resumed");
     } catch (e) {
       hostCheck("web:resume", false, (e as Error).message.split("\n")[0] ?? String(e));
+      await capture("resume-failed");
       page = null;
     }
     await machineStep("cp", "rollout-resumed");
@@ -421,6 +455,7 @@ try {
         `RL7 wanted a refusal that halts nothing; /updates' Rollout card says: ${card}`);
     } catch (e) {
       hostCheck("web:rollout-after-node-tick", false, (e as Error).message.split("\n")[0] ?? String(e));
+      await capture("rollout-after-node-tick-failed");
       page = null;
     }
 
@@ -442,6 +477,7 @@ try {
         `the control plane's row says: ${said}`);
     } catch (e) {
       hostCheck("web:cp-waiting", false, (e as Error).message.split("\n")[0] ?? String(e));
+      await capture("cp-waiting-failed");
       page = null;
     }
     await machineStep("cp", "revoke-node");
