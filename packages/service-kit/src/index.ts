@@ -7,4 +7,5 @@ export * from "./migration-lint.ts";
 export * from "./migrate.ts";
 export * from "./rate-limit.ts";
 export * from "./local-disk.ts";
+export * from "./revocation-journal.ts";
 export * from "./open-private-db.ts";

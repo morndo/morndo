@@ -1,7 +1,7 @@
 // This device's outbox (ADR-0008 phase C), as the desktop and the phone both start it: the IndexedDB store, one sender
 // across tabs through a Web Lock, the other tabs told of every change, and the one POST that sends a Command. Moved here
 // from Desktop.svelte unchanged (ADR-0009), so a reply from a catch-up card goes through the same outbox (S4–S8).
-import { api, ApiError } from "../api.ts";
+import { api, ApiError, seenHubStore } from "../api.ts";
 import { Outbox, type CancelOutcome, type PostOutcome } from "./outbox.ts";
 import { commandDelivery, type OutboxRecord } from "./state.ts";
 import { openStore } from "./store.ts";
@@ -14,7 +14,7 @@ export async function post(r: OutboxRecord, signal: AbortSignal): Promise<PostOu
     // Written to the manager while it had no window: to its role, which the hub sends to whichever window it has now, or
     // queues for it (POST /api/manager/send).
     const url = r.worker === ABSENT_MANAGER ? "/api/manager/send" : `/api/workers/${encodeURIComponent(r.worker)}/send`;
-    const res = await api.post<{ at?: unknown; delivery?: unknown }>(url, { text: r.text, requestId: r.id, uploads: r.uploads, seen: r.seen, name: r.workerName, createdAt: r.createdAt, ...(r.again ? { again: true } : {}) }, signal);
+    const res = await api.post<{ at?: unknown; delivery?: unknown }>(url, { text: r.text, requestId: r.id, uploads: r.uploads, seen: r.seen, name: r.workerName, createdAt: r.createdAt, ...(r.again ? { again: true } : {}), ...(r.hubStore ? { hubStore: r.hubStore } : {}) }, signal);
     // ok, or 200 "duplicate": typed before. `at` is the hub's time of the typing (review M2). `delivery`: the manager's
     // queue has it (fleet-clients §9.1), and where it stands there. `createdAt`: a message to the manager waits up to 24
     // hours from when it was written (ruling 83). `again`: the phone's Send again (ADR-0011), never a status read.
@@ -61,6 +61,8 @@ export function startDeviceOutbox(o: { connected: () => boolean; onChange: (reco
       store, post, cancel: cancelDelivery, active: !locks,
       timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id as ReturnType<typeof setTimeout>) },
       connected: o.connected,
+      // RL10 (§11.5): each Command goes out stamped with the hub store this device saw before its first attempt.
+      hubStore: seenHubStore,
       // Its own changes only: a refresh shows what another tab already told of, and a change made while one runs is still
       // this tab's own, so the others hear of it (the two-tab QA: a message written in each tab at once).
       onChange: (records, fromRefresh) => { o.onChange(records); if (!fromRefresh && !stopped) channel?.postMessage("changed"); },   // closed once stopped

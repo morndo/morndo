@@ -162,7 +162,7 @@ async function child(dir: string, variant: Variant) {
   };
   const remote = new RemoteService({ store, terminal, panes: () => ["%1"], desktop: () => null });
   const http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000),
+    config, identity: loadOrCreateIdentity(dir), access, store, observation: new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, Date.now, undefined, null, () => "none"), escalations, remote,
   });
   await http.ready;

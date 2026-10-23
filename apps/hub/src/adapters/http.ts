@@ -14,6 +14,7 @@ import { chats, digest } from "../application/chats.ts";
 import type { PresenceService } from "../application/presence-service.ts";
 import type { Config } from "../config.ts";
 import type { HubIdentity } from "./identity.ts";
+import type { Store } from "./store.ts";
 import type { AccessService, Authenticated } from "../application/access-service.ts";
 import type { ObservationService, OlderResult } from "../application/observation-service.ts";
 import type { SendResult, SteeringService } from "../application/steering-service.ts";
@@ -210,7 +211,7 @@ export function healthDetail(opts: { remoteAddress: string | undefined; proxyLog
 
 export function startHttp(p: {
   config: Config; identity: HubIdentity; access: AccessService; observation: ObservationService; steering: SteeringService; escalations: EscalationService;
-  remote: RemoteService; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
+  remote: RemoteService; store: Store; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
   reading?: ReadingService | null;
   updates?: { schema?: number; holdPath?: string; now?: () => number };
   presence?: PresenceService | null;                                        // ADR-0011: his last activity per device
@@ -296,9 +297,11 @@ export function startHttp(p: {
     return json(res, 200, { ...productStamp(), schema: schemaVersion, ready: true, held: watch.held, inFlight: flight.list() });
   }
 
-  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).
+  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2). Each names the
+  // database's store (RL10, §11.5), so a device can stamp each Command with the hub store it saw before its first
+  // attempt and a restored hub — another store — answers it uncertain instead of typing it twice.
   const json = (res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}, path = "") => {
-    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
+    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", "Morndo-Store": p.store.storeId, ...extra });
     res.end(JSON.stringify(redactResponse(path, body)));
   };
   const setCookie = (secret: string) =>
@@ -326,12 +329,14 @@ export function startHttp(p: {
 
   // An updates command's answer (updates §8.1): 403 a step-up too old, 409 the refusal with the fleet's own words
   // (its code when the fleet refused), 503 what couldn't be asked. The routes stay thin (round 2, R4): every look
-  // and every gate is the service's, so a refused command never costs a round trip first.
+  // and every gate is the service's, so a refused command never costs a round trip first. A rollback that needs
+  // §11.4's word answers 409 with what it would drop (review round 1), so the screen can ask for the word.
   const updatesAnswer = (res: ServerResponse, r: UpdatesCommandOutcome) => {
     if (r.ok) return json(res, 200, { ok: true });
     const status = r.problem === "step_up" ? 403 : r.problem === "unavailable" ? 503 : 409;
     const error = r.problem === "refused" ? r.code : r.problem;
-    return json(res, status, r.problem === "step_up" ? { error } : { error, message: r.message });
+    if (r.problem === "step_up") return json(res, status, { error });
+    return json(res, status, r.problem === "needs_word" ? { error, message: r.message, restores: r.restores } : { error, message: r.message });
   };
 
   // ADR-0023: file, restate, list and close a decision brief. Same door as the board (a bearer token, no cookie).
@@ -611,13 +616,13 @@ export function startHttp(p: {
     if (sendTo !== null && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody, SEND_MAX_BODY);
-      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true));
+      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true, body.hubStore));
     }
     // The manager by its role: its window, or, while it has none, the fleet's queue for its sticky lane (steering).
     if (path === "/api/manager/send" && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody, SEND_MAX_BODY);
-      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true));
+      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true, body.hubStore));
     }
     // The principal's cancel of one of his messages to the manager still waiting in the fleet's queue (ruling 83; spec
     // §9.1): 200 with where it stands now (given up, cancelled), 409 only when it is too late (already typed), 404 for
@@ -755,7 +760,8 @@ export function startHttp(p: {
     if (path === "/api/updates/rollback" && method === "POST") {
       if (!p.updatesService) return json(res, 404, { error: "updates_off" });
       limited(buckets.commands.take(a.endpoint.id));
-      return updatesAnswer(res, await p.updatesService.rollback(a, (await readBody(req, UpdatesRollbackBody)).machine));
+      const body = await readBody(req, UpdatesRollbackBody);
+      return updatesAnswer(res, await p.updatesService.rollback(a, body.machine, body.word));
     }
     if (path === "/api/updates/resume" && method === "POST") {
       if (!p.updatesService) return json(res, 404, { error: "updates_off" });

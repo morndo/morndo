@@ -39,7 +39,7 @@ beforeAll(async () => {
   const access = new AccessService(store, passkeys(config));
   const tmux = { listWorkers: async () => [], capture: async () => null, captureMany: async () => new Map<string, string | null>(), send: async () => ({ problem: null, typedAt: Date.now() }) };
   http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access,
+    config, identity: loadOrCreateIdentity(dir), access, store,
     observation: new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux),
     escalations: new EscalationService({

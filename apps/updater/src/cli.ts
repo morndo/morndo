@@ -59,7 +59,8 @@ const EXIT_CONFIG = 78;
 const USAGE = `usage: morndo-update update [--yes] [--now] [--detach] [--staged <v>]   check, then apply what stands staged (asks first on a terminal; --staged applies only <v>)
        morndo-update update --check [--json]        check the channel feed, verify, and stage what passes
        morndo-update update --status [--json]       what this machine believes, the last updates included
-       morndo-update update --rollback [--yes] [--detach]   back to the previous Version (a restore asks for the typed word)
+       morndo-update update --rollback [--yes] [--detach] [--typed rollback]   back to the previous Version (a restore asks for the typed word; --typed carries it under --yes)
+       morndo-update update --rollback --preview --json   what a rollback would drop, as JSON; writes and starts nothing
        morndo-update update apply --version <v> [--attempt <id>]   one apply, as the apply unit runs it
        morndo-update update tick | boot | recover   the timer's, the boot unit's and the recovery unit's commands
        morndo-update install --role control-plane|node [--channel stable|latest] [--force]
@@ -212,7 +213,7 @@ export async function runUpdater(
     | { cmd: "status" }
     | { cmd: "doctor" }
     | { cmd: "update"; yes: boolean; now: boolean; detach: boolean; staged?: string }
-    | { cmd: "rollback"; yes: boolean; detach: boolean }
+    | { cmd: "rollback"; yes: boolean; detach: boolean; preview: boolean; typed?: string }
     | { cmd: "apply-unit"; version: string; attempt?: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
     | { cmd: "install"; role: "control-plane" | "node"; channel: Channel; force: boolean };
@@ -236,8 +237,38 @@ export async function runUpdater(
   } else {
     // update: one subcommand, or one flag set — never two asks in one line. Bare `update` is the ask itself.
     // The rollback is read before the update's own set so `--rollback --yes` and `--yes --rollback` are one ask.
-    if (flags.includes("--rollback") && flags.every(f => f === "--rollback" || f === "--yes" || f === "--detach")) {
-      parsed = { cmd: "rollback", yes: flags.includes("--yes"), detach: flags.includes("--detach") };
+    if (flags.includes("--rollback")) {
+      // The ask's own words: --yes answers it, --detach hands the walk to §5's unit (PR 6c), --preview --json is
+      // the hub's read-only look, and --typed carries the word a restore demands even under --yes (§11.4, review
+      // round 1) — the hub's --yes must not skip what a terminal would make a person type.
+      let yes = false, detach = false, preview = false, asJson = false, typed: string | undefined;
+      let wellFormed = true;
+      for (let i = 0; i < flags.length; i++) {
+        const f = flags[i]!;
+        if (f === "--rollback") continue;
+        else if (f === "--yes") yes = true;
+        else if (f === "--detach") detach = true;
+        else if (f === "--preview") preview = true;
+        else if (f === "--json") asJson = true;
+        else if (f === "--typed") {
+          const word = flags[i + 1];
+          if (word === undefined || word.startsWith("--")) { wellFormed = false; break; }
+          typed = word;
+          i += 1;
+        } else { wellFormed = false; break; }
+      }
+      if (!wellFormed) return usage();
+      // The preview is exactly the hub's form — a look, nothing to answer or start: no --yes to answer, no unit
+      // to detach, no word to carry; and --json rides the rollback for it alone.
+      if (preview && (!asJson || yes || detach || typed !== undefined)) return usage();
+      if (!preview && asJson) return usage();
+      // The word answers --yes's ask: a terminal types it at the prompt, not on the command line.
+      if (typed !== undefined && !yes) return usage();
+      if (typed !== undefined && typed !== "rollback") {
+        io.err(`--typed wants the word rollback — the same word the terminal asks for when a restore drops writes — not ${JSON.stringify(typed)}\n`);
+        return EXIT_USAGE;
+      }
+      parsed = { cmd: "rollback", yes, detach, preview, ...(typed === undefined ? {} : { typed }) };
     } else if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json" || flags[0] === "--detach" || flags[0] === "--staged") {
       // `--staged <v>` (PR 6c round 2, R3) names the Version the hub's Updates screen pressed — the only one this
       // run applies (the guard below), so a Release staged between the screen's look and the press never starts by
@@ -453,7 +484,7 @@ export async function runUpdater(
       services, probe,
       schemas: new SqliteSchemas({ paths: dbPaths }),
       backup: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }),
-      revocations: new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") }),
+      revocations: new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups"), releases: paths.releases }),
       hold: new HoldFileWriter({ home, env }),
       applying: new ApplyingFileMarker({ state: paths.state }),
       installer, store, clock: systemClock, sleeper: realSleeper, alerts, verifier,
@@ -729,11 +760,28 @@ export async function runUpdater(
         try { at = statSync(file).mtimeMs; } catch { /* no file: the update's own start stands in for it */ }
         return { db, at };
       });
+      // The hub's read-only look (review round 1): the same preview the human text prints, as one JSON object the
+      // hub parses — each Backup's own moment as ISO text — with nothing written and nothing started.
+      if (parsed.preview) {
+        io.out(`${JSON.stringify({
+          from: layout.current, to: layout.previous,
+          restores: dropped.map(({ db, at }) => ({ db, at: new Date(at).toISOString() })),
+        })}\n`);
+        return EXIT_OK;
+      }
       io.out(restores.length === 0
         ? `Back to ${layout.previous} from ${layout.current}; no database is restored.\n`
         : `Back to ${layout.previous} from ${layout.current}.\n`);
       for (const { db, at } of dropped) {
         io.out(`The ${db} database goes back to its backup from ${stampOf(at)} (${ageWords(systemClock.now() - at)} of writes since are dropped).\n`);
+      }
+      // §11.4's word under --yes (review round 1): --yes answers the [y/N], never the typed word. A restore that
+      // drops writes refuses --yes alone, naming what it would drop and the way on — the hub's own command, which
+      // always runs --yes, gets its word from --typed.
+      if (parsed.yes && restores.length > 0 && parsed.typed === undefined) {
+        const names = dropped.map(({ db, at }) => `the ${db} database's backup from ${stampOf(at)} (${ageWords(systemClock.now() - at)} of writes dropped)`);
+        io.err(`--yes alone cannot go on: rolling back restores ${names.join(", ")}; add --typed rollback, the word the terminal asks for.\n`);
+        return EXIT_USAGE;
       }
       if (!parsed.yes) {
         if (io.tty !== true) {
@@ -889,7 +937,7 @@ export async function runUpdater(
       const outcome = await new RecoveryService({
         services: m, probe,
         backup: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }),
-        revocations: new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") }),
+        revocations: new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups"), releases: paths.releases }),
         hold: new HoldFileWriter({ home, env }),
         applying: new ApplyingFileMarker({ state: paths.state }),
         installer, store, clock: systemClock, sleeper: realSleeper, alerts,

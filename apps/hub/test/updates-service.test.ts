@@ -7,9 +7,12 @@
 // carrying the hub's signed assertion (§5.4). A node's rollback is refused: it is that machine's own hand
 // (`morndo update --rollback` there), never a remote one.
 import { createPublicKey, generateKeyPairSync, sign as signEd, verify as verifyEd } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CONTROL_FRESHNESS_MS, type AccessPolicy, type UpdateCommanded } from "@morndo/domain";
-import { PRINCIPAL_SIGN_PREFIX, UPDATER_ARGS, decodePrincipalHeader, type FleetNode, type PrincipalAsk, type RolloutWire } from "@morndo/protocol";
+import { PRINCIPAL_SIGN_PREFIX, UPDATER_ARGS, decodePrincipalHeader, type FleetNode, type PrincipalAsk, type RollbackPreview, type RolloutWire } from "@morndo/protocol";
 import { productVersion } from "@morndo/service-kit";
 import { startInProcessHub } from "./inprocess-hub.ts";
 import { UpdatesService } from "../src/application/updates-service.ts";
@@ -28,12 +31,16 @@ const identity: HubIdentity = {
   sign: data => signEd(null, data, pair.privateKey),
 };
 
-// The control plane's updater as the fake runner runs it: one status standing staged, and every argument list it got.
-const cliWith = (standStaged: string | null) => {
+// The control plane's updater as the fake runner runs it: one status standing staged, the rollback preview when
+// asked (round 1: what a rollback would drop, as `--rollback --preview --json` answers it; default: a rollback
+// with nothing to restore), and every argument list it got.
+const cliWith = (standStaged: string | null, o: { stateFile?: string; preview?: RollbackPreview } = {}) => {
   const runs: { file: string; args: string[] }[] = [];
   const cli = updaterCli({
+    stateFile: o.stateFile ?? join(tmpdir(), "morndo-no-state-file-here", "state.json"),
     run: async (file, args) => {
       runs.push({ file, args });
+      if (args.includes("--preview")) return { stdout: JSON.stringify(o.preview ?? { from: "0.4.2", to: "0.4.1", restores: [] }) };
       return { stdout: JSON.stringify({
         installMethod: "updater", channel: "stable", mode: "apply", pin: null, window: null,
         current: "0.4.2", previous: "0.4.1", good: "0.4.2", staged: standStaged,
@@ -135,9 +142,35 @@ describe("the updates service (no HTTP)", () => {
     const svc = service(fleet, cli.cli, () => now, events);
     const node = await svc.rollback(fresh, "pc");
     expect(node).toMatchObject({ ok: false, problem: "not_yet", message: "run morndo update --rollback on pc" });
+    // Nothing is restored in this preview, so no word is needed: the hub's own --yes is the whole ask.
     expect(await svc.rollback(fresh, "control-plane")).toEqual({ ok: true });
-    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollback]);
+    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollbackPreview, UPDATER_ARGS.rollback()]);
     expect(sent).toHaveLength(0);
+    expect(events).toEqual([{ type: "UpdateCommanded", command: "update.rollback", endpointId: "e-1", machine: "control-plane", version: null, at: now }]);
+  });
+
+  // §11.4 through the hub (review round 1): a rollback whose restore drops a database's writes runs only under
+  // the word the updater asks for on a terminal. The hub asks the preview first; without the word it answers
+  // needs_word carrying what would be dropped, and nothing runs; the word rides UPDATER_ARGS.rollback's --typed.
+  it("rollback with a restore needs the typed word: needs_word carries the restores and runs nothing; the word goes on", async () => {
+    let now = 1_800_000_000_000;
+    const fresh = who(now, now);
+    const at = new Date(now - 3 * 3600_000).toISOString();
+    const cli = cliWith("0.5.0", { preview: { from: "0.4.2", to: "0.4.1", restores: [{ db: "hub", at }] } });
+    const { fleet } = fleetWith();
+    const events: UpdateCommanded[] = [];
+    const svc = service(fleet, cli.cli, () => now, events);
+    const asked = await svc.rollback(fresh, "control-plane");
+    expect(asked).toMatchObject({ ok: false, problem: "needs_word", restores: [{ db: "hub", at }] });
+    expect((asked as { message: string }).message).toMatch(/rollback/);
+    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollbackPreview]);   // the look, and no command
+    expect(events).toHaveLength(0);                                              // nothing commanded, nothing audited
+    // any other word is the same ask, not a command
+    expect(await svc.rollback(fresh, "control-plane", "nope")).toMatchObject({ ok: false, problem: "needs_word" });
+    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollbackPreview, UPDATER_ARGS.rollbackPreview]);
+    // the word itself: the CLI runs the hub's rollback command with it
+    expect(await svc.rollback(fresh, "control-plane", "rollback")).toEqual({ ok: true });
+    expect(cli.runs.at(-1)!.args).toEqual(UPDATER_ARGS.rollback("rollback"));
     expect(events).toEqual([{ type: "UpdateCommanded", command: "update.rollback", endpointId: "e-1", machine: "control-plane", version: null, at: now }]);
   });
 
@@ -164,7 +197,7 @@ describe("the updates service (no HTTP)", () => {
     const { fleet, rollout, nodes } = fleetWith();
     const svc = service(fleet, cliWith("0.5.0").cli, () => now, []);
     expect(await svc.view()).toEqual({
-      controlPlane: { version: "0.4.2", commit: null, status: expect.objectContaining({ staged: "0.5.0" }) },
+      controlPlane: { version: "0.4.2", commit: null, status: expect.objectContaining({ staged: "0.5.0" }), state: null },
       rollout, aboveControlPlane: [],
       nodes: [{ name: "pc", status: "online", version: "0.4.2", proto: [1], update: nodes[0]!.update }],
     });
@@ -226,6 +259,28 @@ describe("the updates routes", () => {
     await hub.close();
   });
 
+  it("a rollback that restores answers 409 needs_word with what would be dropped; the word goes on", async () => {
+    let now = 1_800_000_000_000;
+    const at = new Date(now - 3 * 3600_000).toISOString();
+    const { fleet } = fleetWith();
+    const cli = cliWith("0.5.0", { preview: { from: "0.4.2", to: "0.4.1", restores: [{ db: "hub", at }] } });
+    const hub = await startInProcessHub({ now: () => now, updates: { fleet, cli: cli.cli } });
+    const cookie = await hub.cookie();
+    const asked = await hub.post("/api/updates/rollback", { machine: "control-plane" }, { cookie: `__Host-morndo=${cookie}` });
+    expect(asked.status).toBe(409);
+    expect(await asked.json()).toEqual({
+      error: "needs_word",
+      message: expect.stringContaining("rollback"),
+      restores: [{ db: "hub", at }],
+    });
+    // the typed word, posted in the body, is the command the updater takes; the preview is asked again first, as
+    // every rollback asks it
+    const done = await hub.post("/api/updates/rollback", { machine: "control-plane", word: "rollback" }, { cookie: `__Host-morndo=${cookie}` });
+    expect(done.status).toBe(200);
+    expect(cli.runs.map(r => r.args)).toEqual([UPDATER_ARGS.rollbackPreview, UPDATER_ARGS.rollbackPreview, UPDATER_ARGS.rollback("rollback")]);
+    await hub.close();
+  });
+
   it("GET /api/answers the view; the fleet's refusal is 409 with its words, unreachable 503, off 404; not_yet for a node's rollback", async () => {
     let now = 1_800_000_000_000;
     const refused = fleetWith({ apply: { ok: false, problem: "refused", code: "not_allowed", message: "the Rollout of 0.5.0 is halted; resume it first" } });
@@ -271,3 +326,24 @@ describe("the updates routes", () => {
     await off.close();
   });
 });
+
+// The review of 6c part 2: the control plane's own waiting record, read from its updater's state file.
+describe("the control plane's state record in the view", () => {
+  it("carries the updater's state.json when it parses, and null when it is missing or not the protocol's shape", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-state-"));
+    try {
+      const file = join(dir, "state.json");
+      const { fleet } = fleetWith();
+      const read = async () => (await service(fleet, cliWith("0.5.0", { stateFile: file }).cli, () => 0, []).view()).controlPlane.state;
+      expect(await read()).toBeNull();
+      const record = { state: "waiting", version: "0.4.2", target: "0.5.0", reason: "skew_blocked: n3", at: 1_800_000_000_000 };
+      writeFileSync(file, `${JSON.stringify(record)}\n`);
+      expect(await read()).toEqual(record);
+      writeFileSync(file, "{ not json");
+      expect(await read()).toBeNull();
+      writeFileSync(file, JSON.stringify({ ...record, extra: 1 }));
+      expect(await read()).toBeNull();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+});
+

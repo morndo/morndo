@@ -11,7 +11,7 @@ import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { writeFloor } from "@morndo/service-kit";
 import { parseVersion, type DatabaseName, type MigrationStep, type UpdateService } from "@morndo/domain";
-import { UpdateStatusSchema, UPDATER_ARGS } from "@morndo/protocol";
+import { RollbackPreviewSchema, UpdateStatusSchema, UPDATER_ARGS } from "@morndo/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApplyTiming } from "../src/application/apply-steps.ts";
 import { DirsInstaller } from "../src/adapters/installer-dirs.ts";
@@ -305,14 +305,31 @@ describe("the hub's argument lists (UPDATER_ARGS, PR 6c R1): the updater reads e
     expect(applied.code, applied.err).toBe(0);
     expect(applied.err).not.toMatch(/usage:/);
     expect(w.services.calls.find(c => c.op === "runApply")).toMatchObject({ version: B, wait: false });
-    // rollback needs a machine with somewhere to go back to
+    // rollback needs a machine with somewhere to go back to; the preview is read-only, and — with a restore —
+    // the hub's word rides --typed (§11.4, review round 1), exactly as UPDATER_ARGS spells it
     const back = await world();
     await withPrevious(back);
-    const rolled = await back.run(UPDATER_ARGS.rollback);
+    const seen = await back.run(UPDATER_ARGS.rollbackPreview);
+    expect(seen.code, seen.err).toBe(0);
+    expect(seen.err).not.toMatch(/usage:/);
+    expect(RollbackPreviewSchema.parse(JSON.parse(seen.out))).toEqual({ from: A, to: "0.0.9", restores: [] });
+    expect(back.services.calls.filter(c => c.op === "runApply")).toEqual([]);        // a preview starts nothing
+    const rolled = await back.run(UPDATER_ARGS.rollback());
     expect(rolled.code, rolled.err).toBe(0);
     expect(rolled.err).not.toMatch(/usage:/);
     expect(back.services.calls.find(c => c.op === "runApply")).toMatchObject({ version: "rollback", wait: false });
-  }, 90_000);   // two worlds, each a signed feed and unpacked releases
+    const restoring = await world();
+    const backupAt = await withPrevious(restoring, { restoreFleet: true });
+    const asked = await restoring.run(UPDATER_ARGS.rollbackPreview);
+    expect(asked.code, asked.err).toBe(0);
+    expect(RollbackPreviewSchema.parse(JSON.parse(asked.out))).toEqual({
+      from: A, to: "0.0.9", restores: [{ db: "fleet", at: new Date(backupAt!).toISOString() }],
+    });
+    const withWord = await restoring.run(UPDATER_ARGS.rollback("rollback"));
+    expect(withWord.code, withWord.err).toBe(0);
+    expect(withWord.err).not.toMatch(/usage:/);
+    expect(restoring.services.calls.filter(c => c.op === "runApply")).toMatchObject([{ version: "rollback", wait: false }]);
+  }, 150_000);   // four worlds, each a signed feed and unpacked releases
 });
 
 describe("`morndo update tick` — the timer's own command (§6.1, §8.3)", () => {
@@ -407,8 +424,8 @@ const RESTORES_FLEET: Record<DatabaseName, MigrationStep> = {
 
 // A machine with somewhere to go back to: 0.0.9 installed and linked as previous. With `restoreFleet`, the
 // commit that put A here is on record with the plan above, and its fleet Backup sits on disk three hours old —
-// the span §11.4's ask names.
-const withPrevious = async (w: World, o: { restoreFleet?: boolean } = {}): Promise<void> => {
+// the span §11.4's ask names. Answers the Backup's own moment, the `at` a preview must repeat.
+const withPrevious = async (w: World, o: { restoreFleet?: boolean } = {}): Promise<number | null> => {
   const stale = versionFixture({ version: "0.0.9", schemas: SCHEMAS_A });
   const archive = join(w.home, "stale.tar.gz");
   writeFileSync(archive, stale.archive);
@@ -417,7 +434,7 @@ const withPrevious = async (w: World, o: { restoreFleet?: boolean } = {}): Promi
   if (!unpacked.ok) throw new Error(`0.0.9 did not unpack: ${unpacked.reason}`);
   installer.promote(stale.version, { manifestSha256: stale.manifestSha256, filesSha256: stale.filesSha256, at: NOW });
   installer.swap({ current: A, previous: stale.version });
-  if (o.restoreFleet !== true) return;
+  if (o.restoreFleet !== true) return null;
   const backupAt = Date.now() - 3 * 3600_000;
   w.store.saveUpdate({
     id: "upd-commit", kind: "update", target: parseVersion(A)!, preUpdate: { current: parseVersion(stale.version)!, previous: null },
@@ -428,6 +445,7 @@ const withPrevious = async (w: World, o: { restoreFleet?: boolean } = {}): Promi
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, "the fleet database as it was at the backup", { mode: 0o600 });
   utimesSync(file, new Date(backupAt), new Date(backupAt));
+  return backupAt;
 };
 
 // The apply unit's whole work as a script, as `update`'s test scripts it: one rollback-kind record, ended.
@@ -515,6 +533,85 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
     expect(w.current()).toBe(A);                           // the unit, not this process, walks it back
     expect(w.services.tape.filter(t => t !== "runApply:rollback")).toEqual([]);
   });
+
+  // The hub's read-only look (review round 1): what a rollback would drop, as one JSON object the hub parses, at
+  // the same moment the human text prints — and nothing written, nothing started, whatever it says.
+  it("--rollback --preview --json answers what a rollback would drop, and starts nothing", async () => {
+    // with a restore: from, to, and each Backup's own moment as ISO text
+    {
+      const w = await world();
+      const backupAt = await withPrevious(w, { restoreFleet: true });
+      const r = await w.run(["update", "--rollback", "--preview", "--json"]);
+      expect(r.code, r.err).toBe(0);
+      expect(RollbackPreviewSchema.parse(JSON.parse(r.out))).toEqual({
+        from: A, to: "0.0.9", restores: [{ db: "fleet", at: new Date(backupAt!).toISOString() }],
+      });
+      expect(w.services.tape).toEqual([]);
+      expect(existsSync(join(w.paths.state, "rollback-confirmed"))).toBe(false);
+    }
+    // without a restore: the same object, no restores
+    {
+      const w = await world();
+      await withPrevious(w);
+      const r = await w.run(["update", "--rollback", "--preview", "--json"]);
+      expect(r.code, r.err).toBe(0);
+      expect(RollbackPreviewSchema.parse(JSON.parse(r.out))).toEqual({ from: A, to: "0.0.9", restores: [] });
+      expect(w.services.tape).toEqual([]);
+    }
+    // the refusals are --rollback's own: with no previous Version there is nothing to preview either
+    {
+      const w = await world();
+      const r = await w.run(["update", "--rollback", "--preview", "--json"]);
+      expect(r.code, r.err).toBe(78);
+      expect(r.err).toMatch(/no previous|nothing to roll back/i);
+      expect(w.services.tape).toEqual([]);
+    }
+  }, 120_000);   // three worlds, each a signed feed and unpacked releases
+
+  // §11.4's word, carried for the hub (review round 1): --yes answers the [y/N], never the typed word, so a
+  // restore that drops writes refuses --yes alone and goes on only under the word itself.
+  it("with a restore, --yes alone is refused and names what would be dropped; --typed rollback goes on", async () => {
+    // --yes alone: 64, one sentence naming the drop and the way on, and nothing started
+    {
+      const w = await world();
+      await withPrevious(w, { restoreFleet: true });
+      const r = await w.run(["update", "--rollback", "--yes"]);
+      expect(r.code, r.err).toBe(64);
+      expect(r.err).toMatch(/fleet database.*backup.*dropped|backup from .* writes .*dropped/);
+      expect(r.err).toMatch(/--typed rollback/);
+      expect(w.services.tape).toEqual([]);
+      expect(existsSync(join(w.paths.state, "rollback-confirmed"))).toBe(false);
+    }
+    // the word itself, under --yes: the hub's command goes on and starts the unit (PR 6c's --detach)
+    {
+      const w = await world();
+      await withPrevious(w, { restoreFleet: true });
+      const r = await w.run(["update", "--rollback", "--yes", "--detach", "--typed", "rollback"]);
+      expect(r.code, r.err).toBe(0);
+      expect(r.out).toMatch(/[Ss]tarted/);
+      expect(w.services.calls.find(c => c.op === "runApply")).toMatchObject({ version: "rollback", wait: false });
+    }
+    // any other word is refused with its own sentence, not the usage text
+    {
+      const w = await world();
+      await withPrevious(w, { restoreFleet: true });
+      const r = await w.run(["update", "--rollback", "--yes", "--typed", "nope"]);
+      expect(r.code, r.err).toBe(64);
+      expect(r.err).not.toMatch(/usage:/);
+      expect(r.err).toMatch(/--typed/);
+      expect(w.services.tape).toEqual([]);
+    }
+    // --typed never rides without --yes: the ask it answers is not there
+    {
+      const w = await world();
+      await withPrevious(w, { restoreFleet: true });
+      const r = await w.run(["update", "--rollback", "--typed", "rollback"]);
+      expect(r.code, r.err).toBe(64);
+      expect(r.err).toMatch(/usage:/);
+      expect(w.services.tape).toEqual([]);
+    }
+  }, 150_000);   // four worlds, each a signed feed and unpacked releases
+
 
   // The apply unit's own command is a command line anyone can type: the rollback it runs must be one --rollback asked
   // for and the principal confirmed (§11.4), never a way around that ask (review of 2026-10-22, HIGH).
