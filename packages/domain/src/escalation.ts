@@ -117,6 +117,7 @@ export type EscalationAnswered = {
 };
 
 export const LEDGER_GRACE_MS = 10 * 60_000;          // E10: the manager may post buttons before it files the item
+export const WORKER_ASK_GRACE_MS = 10 * 60_000;      // N2, a worker's question or menu reaches the principal as an Ask only after this long open (the manager answers most first)
 export const TAP_TTL_MS = 24 * 3_600_000;            // E10: an id that isn't on the list expires after a day
 export const HUB_TTL_MS = 7 * 24 * 3_600_000;        // E14: a hub-tracked ask expires seven days after its due
 export const KEEP_SETTLED_MS = 3 * 24 * 3_600_000;   // how long decided items stay listed once no source shows them

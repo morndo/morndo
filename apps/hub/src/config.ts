@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { WORKER_ASK_GRACE_MS } from "@morndo/domain";
 
 export type Config = {
   dataDir: string;
@@ -41,9 +42,16 @@ export type Config = {
   // services a test runs besides the browsers' own (never in production).
   pushContact?: string;
   pushExtraOrigins?: string[];
+  // MORNDO_WORKER_ASK_GRACE_MS: how long a worker's question or menu waits before it is the principal's Ask (N2), for
+  // tests only (the e2e offices); the default is WORKER_ASK_GRACE_MS (10 minutes). Never an app setting.
+  workerAskGraceMs?: number;
 };
 
 const bool = (v: string | undefined) => v === "1" || v === "true";
+
+// MORNDO_WORKER_ASK_GRACE_MS (tests only): a string of digits only — so "0" is accepted, and the grace is off — is that
+// many milliseconds; anything else (unset, empty, negative, decimals, text) is the default, WORKER_ASK_GRACE_MS.
+const graceOf = (v: string | undefined) => (/^\d+$/.test(v ?? "") ? Number(v) : WORKER_ASK_GRACE_MS);
 
 // The contact a push service sees in the VAPID token (RFC 8292 section 2.1: a mailto or https URI). The project's own
 // address by default, never the hub's.
@@ -120,6 +128,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // to start with one they wouldn't take (isPushContact).
     pushContact: env.MORNDO_PUSH_CONTACT || DEFAULT_PUSH_CONTACT,
     pushExtraOrigins: (env.MORNDO_PUSH_EXTRA_ORIGINS ?? "").split(",").map(s => s.trim()).filter(Boolean),
+    workerAskGraceMs: graceOf(env.MORNDO_WORKER_ASK_GRACE_MS),
   };
 }
 

@@ -17,7 +17,7 @@
     "check:build": "npm run check:build -w @morndo/web --",
     "hub": "node apps/hub/src/main.ts",
     "fleet": "node apps/fleet/src/main.ts",
-    "e2e": "npm run build && npm run check:build && node e2e/web-endpoint.e2e.ts && node e2e/desktop.e2e.ts && node e2e/ink.e2e.ts && node e2e/signal.e2e.ts && node e2e/push.e2e.ts && node e2e/catchup.e2e.ts && node e2e/catchup-edges.e2e.ts && node e2e/horizon.e2e.ts && node e2e/readability.e2e.ts && node e2e/fleet-two-node.e2e.ts && node e2e/gallery.e2e.ts && node e2e/engines.e2e.ts && node e2e/board.e2e.ts && node e2e/home.e2e.ts && node e2e/phone-chat.e2e.ts && node e2e/uploads.e2e.ts && node e2e/briefs.e2e.ts",
+    "e2e": "npm run build && npm run check:build && node e2e/web-endpoint.e2e.ts && node e2e/desktop.e2e.ts && node e2e/ink.e2e.ts && node e2e/signal.e2e.ts && node e2e/push.e2e.ts && node e2e/catchup.e2e.ts && node e2e/catchup-edges.e2e.ts && node e2e/worker-grace.e2e.ts && node e2e/horizon.e2e.ts && node e2e/readability.e2e.ts && node e2e/fleet-two-node.e2e.ts && node e2e/gallery.e2e.ts && node e2e/engines.e2e.ts && node e2e/board.e2e.ts && node e2e/home.e2e.ts && node e2e/phone-chat.e2e.ts && node e2e/uploads.e2e.ts && node e2e/briefs.e2e.ts",
     "lint": "oxlint --format=stylish",
     "knowledge:sop-check": "node knowledge/skills/recurring-job/scripts/sop-check.mjs",
     "knowledge:build": "node knowledge/tools/sop-check/build.ts",
