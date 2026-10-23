@@ -233,6 +233,10 @@ describe("the node's gate before an apply (§6.7, §7, RL11, RL12)", () => {
       .toEqual({ ok: false, error: { reason: "not_committed" } });
     expect(standing(w => { w.word.rollout = roll({ halted: true, haltedBy: "office-2", haltReason: "nodes:node-b", haltedAt: Date.now() - HOUR }); }))
       .toEqual({ ok: false, error: { reason: "halted" } });
+    // As the fleet sends a halted Rollout (6d's two-machine run): it offers the halted Version to no node, and the
+    // node still says halted — not "not committed", which the Updates page would show as a Rollout never committed.
+    expect(standing(w => { w.word.rollout = roll({ halted: true, haltedBy: "e2e-node", haltReason: "node: no_report", haltedAt: Date.now() - HOUR }); w.word.offer = null; }))
+      .toEqual({ ok: false, error: { reason: "halted" } });
   });
 
   it("inside the soak it waits; past the soak and inside its own drawn delay it waits on the same draw", () => {
