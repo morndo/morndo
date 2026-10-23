@@ -479,7 +479,7 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     const fleet = await startTestFleet({ rolloutAuthority: OPEN });
     const api = client(fleet.config.socketPath);
     const b = await fleet.online("n2", { caps: [CAP_UPDATE] });
-    b.health(health({ update: { state: "current", version: "0.1.0" } }));   // V is 0.0.0: n2 runs above it
+    b.health(health({ update: { state: "current", version: `${Number(V.split(".")[0]) + 1}.0.0` } }));   // n2 runs a major above V, whatever V is
     await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.nodesAhead).toEqual(["n2"]));
     const op = await api.post("/v1/op", { node: "n2", op: "update.apply", args: { version: V }, key: "hub:u-ahead" });
     expect(op?.body).toMatchObject({ ok: false, error: { code: "not_allowed", executed: "no" } });

@@ -4,6 +4,7 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "@morndo/protocol";
+import { productVersion } from "@morndo/service-kit";
 import { FleetConnection, UNSUPPORTED_RETRY_MS, type ConnectionOptions, type Welcomed } from "../src/conn/connection.ts";
 import { formatStatus, type ConnStatus } from "../src/conn/status-file.ts";
 import { createNodeKey, fleetPublicKey, type NodeKey } from "../src/identity.ts";
@@ -57,7 +58,7 @@ describe("handshake", () => {
     expect(c.conn.status().connEpoch).toBe(7);
     expect(hellos()[0]).toMatchObject({
       v: 1, t: "hello", node: "pc", instanceId: INSTANCE, streamId: STREAM, proto: [1],
-      agent: { version: "0.0.0" }, claude: { version: "2.1.286" }, caps: ["inventory.get"],
+      agent: { version: productVersion() }, claude: { version: "2.1.286" }, caps: ["inventory.get"],
     });
     expect(String(hellos()[0]?.clientNonce)).toMatch(/^[A-Za-z0-9_-]{43}$/);   // 32 random bytes
     expect(fleet.received.some(r => r.msg.t === "proof")).toBe(true);          // the fake verified it, or it closes 4401

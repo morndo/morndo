@@ -3994,6 +3994,16 @@ export const CONTROLS: Control[] = [
   { id: "t398-job-wait-begins-at-the-turn-end", task: "T-398", file: "packages/domain/src/run.ts",
     find: `t !== null && "outcome" in said ? Math.max(firstJob, t.at) : firstJob`, replace: `firstJob`,
     run: ["packages/domain/test/run.test.ts", "packages/domain/test/board.test.ts"], expect: "began at the turn's end" },
+  // ---- T-411: commit-traces admits the release App as a whole identity and nothing wider, each guard removed once.
+  { id: "t411-release-bot-name-and-address", task: "T-411", file: "scripts/git-hooks/commit-traces",
+    find: `[ "$an" = "$RELEASE_BOT_NAME" ] && [ "$ae" = "$RELEASE_BOT_MAIL" ]`, replace: `[ "$an" = "$RELEASE_BOT_NAME" ]`,
+    run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "refuses lookalikes" },
+  { id: "t411-release-bot-committer-only-beside-its-author", task: "T-411", file: "scripts/git-hooks/commit-traces",
+    find: ` && [ "$ce" = "$RELEASE_BOT_MAIL" ] && [ -z "$an" ]`, replace: ` && [ "$ce" = "$RELEASE_BOT_MAIL" ]`,
+    run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "refuses the App's identity as the committer" },
+  { id: "t411-release-bot-address", task: "T-411", file: "scripts/git-hooks/commit-traces",
+    find: `RELEASE_BOT_MAIL='345868531+morndo-release[bot]@users.noreply.github.com'`, replace: `RELEASE_BOT_MAIL='1+morndo-release[bot]@users.noreply.github.com'`,
+    run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "passes the release App" },
 ];
 
 // ---- the runner

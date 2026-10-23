@@ -6,6 +6,7 @@ import { createServer } from "node:net";
 import { join as joinPath } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { formatJoinString, parseJoinString } from "@morndo/protocol";
+import { productVersion } from "@morndo/service-kit";
 import { loadConfig } from "../src/config.ts";
 import { loadNodeKey } from "../src/identity.ts";
 import { JoinError, join } from "../src/join.ts";
@@ -37,7 +38,7 @@ describe("join", () => {
       expect(config).toMatchObject({ node: "pc", fleetUrl: fleet.url, fleetKey: fleet.fleetKey, relayPort: 8787 });
       // The key the fleet was given is the key on disk, and only this user can read it.
       const sent = fleet.received.find(r => r.msg.t === "join")?.msg;
-      expect(sent).toMatchObject({ v: 1, t: "join", node: "pc", proto: [1], agent: { version: "0.0.0" } });
+      expect(sent).toMatchObject({ v: 1, t: "join", node: "pc", proto: [1], agent: { version: productVersion() } });
       expect(sent?.publicKey).toBe(loadNodeKey(config.keyPath).publicKey);
       expect(statSync(config.keyPath).mode & 0o777).toBe(0o600);
       expect(statSync(agentPaths(h).configFile).mode & 0o777).toBe(0o600);

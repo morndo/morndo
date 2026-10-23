@@ -5,8 +5,11 @@
 #   sh commit-traces message FILE
 #   sh commit-traces range <git rev-list args>
 #   sh commit-traces mails <git rev-list args>
-# A dependabot[bot] author, committer, or trailer is allowed. Any other
-# [bot] identity is not. Install the commit-msg hook with
+# A dependabot[bot] author, committer, or trailer is allowed. So is the release
+# App's own identity, as a whole (RELEASE_BOT_NAME with RELEASE_BOT_MAIL, the exact
+# name and address its release commit carries): as the author, and as the committer
+# when it is that same identity. A name or an address alone, a lookalike, or any
+# other [bot] identity is not. Install the commit-msg hook with
 # scripts/install-git-hooks.sh.
 # COMMIT_TRACES_LEGACY: full commit ids, separated by spaces, whose author and
 # committer addresses are not checked. For a commit already in the published
@@ -20,6 +23,10 @@
 set -eu
 
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
+# The release App (Release Please commits the release PR as this identity). It is the id of the App's bot user and its
+# slug, the address GitHub gives every App; nothing else is admitted by it.
+RELEASE_BOT_NAME='morndo-release[bot]'
+RELEASE_BOT_MAIL='345868531+morndo-release[bot]@users.noreply.github.com'
 robot=$(printf '\360\237\244\226')
 fs=$(printf '\037')
 err=$(mktemp)
@@ -87,7 +94,16 @@ check_commit() {
   if bad_message "$msg"; then
     fail "$sha message attributes the change to an assistant"
   fi
-  ident=$(git log -1 --format='%an%n%ae%n%cn%n%ce' "$sha")
+  # The release App's identity is judged as a whole: its name with its address, never either alone. Whichever of author
+  # and committer is exactly that identity is left out of the identity text; the other is judged as always, so another
+  # bot, or an assistant, beside it still fails.
+  an=$(git log -1 --format='%an' "$sha")
+  ae=$(git log -1 --format='%ae' "$sha")
+  cn=$(git log -1 --format='%cn' "$sha")
+  ce=$(git log -1 --format='%ce' "$sha")
+  if [ "$an" = "$RELEASE_BOT_NAME" ] && [ "$ae" = "$RELEASE_BOT_MAIL" ]; then an=''; ae=''; fi
+  if [ "$cn" = "$RELEASE_BOT_NAME" ] && [ "$ce" = "$RELEASE_BOT_MAIL" ] && [ -z "$an" ]; then cn=''; ce=''; fi
+  ident=$(printf '%s\n%s\n%s\n%s' "$an" "$ae" "$cn" "$ce")
   if bad_ident "$ident"; then
     fail "$sha author or committer names an assistant or a bot other than dependabot[bot]"
   fi

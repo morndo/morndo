@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ServiceHealth } from "@morndo/protocol";
+import { productVersion } from "@morndo/service-kit";
 import { SCHEMA_VERSION } from "../src/adapters/migrations.ts";
 import { startTestFleet } from "./helpers/fleet.ts";
 import { client } from "./helpers/socket-client.ts";
@@ -13,7 +14,7 @@ describe("a hold on the fleet", () => {
   it("refuses a send with 503 and executed no, and still answers health, caps, and a revocation", async () => {
     const dir = tempDir();
     writeFileSync(join(dir, "hold.json"), JSON.stringify({
-      services: ["fleet"], reason: "drain", version: "0.0.0", since: new Date().toISOString(),
+      services: ["fleet"], reason: "drain", version: productVersion(), since: new Date().toISOString(),
     }));
     const fleet = await startTestFleet({ dir });
     const agent = await fleet.online("pc");
@@ -21,7 +22,7 @@ describe("a hold on the fleet", () => {
     const health = await api.get("/v1/health");
     expect(health?.status).toBe(200);
     expect(ServiceHealth.safeParse(health?.body).success).toBe(true);
-    expect(health?.body).toMatchObject({ version: "0.0.0", schema: SCHEMA_VERSION, ready: true, held: true });   // its ack of the hold
+    expect(health?.body).toMatchObject({ version: productVersion(), schema: SCHEMA_VERSION, ready: true, held: true });   // its ack of the hold
     expect((await api.get("/v1/caps"))?.status).toBe(200);
     const sent = await api.raw("/v1/op", {
       method: "POST",
@@ -43,7 +44,7 @@ describe("a hold on the fleet", () => {
   it("does not record a job notice while held", async () => {
     const dir = tempDir();
     writeFileSync(join(dir, "hold.json"), JSON.stringify({
-      services: ["fleet"], reason: "drain", version: "0.0.0", since: new Date().toISOString(),
+      services: ["fleet"], reason: "drain", version: productVersion(), since: new Date().toISOString(),
     }));
     const fleet = await startTestFleet({ dir });
     const agent = await fleet.online("pc");
@@ -68,7 +69,7 @@ describe("a hold on the fleet", () => {
   it("still narrows, stops a lane and cancels a job while a send is refused", async () => {
     const dir = tempDir();
     writeFileSync(join(dir, "hold.json"), JSON.stringify({
-      services: ["fleet"], reason: "drain", version: "0.0.0", since: new Date().toISOString(),
+      services: ["fleet"], reason: "drain", version: productVersion(), since: new Date().toISOString(),
     }));
     const fleet = await startTestFleet({ dir });
     const agent = await fleet.online("pc");
