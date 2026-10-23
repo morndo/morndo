@@ -252,6 +252,20 @@ describe("SystemdServices (§4.6, §5, §6.2 step 6)", () => {
     await expect(manager.tmuxInAgentUnit()).resolves.toBe(false);
   });
 
+  it("tmuxInAgentUnit() takes a tmux client in the group (the agent's own poll) for no server; a server under any name counts", async () => {
+    // tmux 3.4 names its processes "tmux: server" and "tmux: client". The agent runs a client for every poll of its
+    // panes, so a client caught in the group is the agent at work, not a server a stop would take along. A process
+    // named plainly "tmux" (an older tmux, or one that has not renamed itself yet) still counts: the safe side.
+    const guard = (comm: string) => {
+      const f = fakeMachine({ procs: { "user.slice/morndo-node.service": ["200", "310"] }, comm: { "200": "morndo-node", "310": comm } });
+      const m = machine({ reply: a => a.includes("ControlGroup") ? { stdout: "/user.slice/morndo-node.service\n" } : {} });
+      return new SystemdServices({ home: m.home, units: m.units, run: m.sys.run, cgroupRoot: f.cgroupRoot, procRoot: f.procRoot }).tmuxInAgentUnit();
+    };
+    await expect(guard("tmux: client")).resolves.toBe(false);
+    await expect(guard("tmux: server")).resolves.toBe(true);
+    await expect(guard("tmux")).resolves.toBe(true);
+  });
+
   it("tmuxInAgentUnit() is false when the unit has no control group (not loaded)", async () => {
     const m = machine({ reply: a => a.includes("ControlGroup") ? { stdout: "\n" } : {} });
     await expect(m.manager.tmuxInAgentUnit()).resolves.toBe(false);

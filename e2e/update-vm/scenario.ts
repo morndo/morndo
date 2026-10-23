@@ -27,6 +27,7 @@ import { get as httpsGet } from "node:https";
 import { request as httpRequest } from "node:http";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
+import { recoverUnitRan, saysDiskFull } from "./checks.ts";
 
 const HOME = homedir();
 const E2E = join(HOME, "e2e");
@@ -421,8 +422,7 @@ async function main(): Promise<number> {
   // properties alone can read as defaults): it must have started and finished, and said so, by the timer's hand.
   const ran2 = run("journalctl", ["--user", "-u", "morndo-update-recover.service", "--since", `@${killedAtSec}`, "--no-pager", "-o", "cat"]);
   writeFileSync(join(EVIDENCE, "2-recover-journal.txt"), `${ran2.out}\n${ran2.err}\n`);
-  const recoverRan2 = /Starting morndo-update-recover\.service/.test(ran2.out) && /Finished morndo-update-recover\.service/.test(ran2.out)
-    && !/morndo-update-recover\.service: (Failed|Main process exited, code=exited, status=[1-9])/.test(ran2.out);
+  const recoverRan2 = recoverUnitRan(ran2.out);
   const last2 = lastRecord();
   check("2-recover-unit-ran", recoverRan2,
     recoverRan2 ? "the recovery unit started and finished after the kill (user journal)" : `the recovery unit's journal since the kill: ${ran2.out.split("\n").slice(-6).join(" | ")}`);
@@ -637,7 +637,7 @@ async function main(): Promise<number> {
   } catch { /* the check below says it in its own words */ }
   const last9 = lastRecord();
   check("9-not-applied", to40.code === 75 && (to40.out + to40.err).includes("The apply did not finish (abandoned)")
-    && unitLines9.some(l => l.includes("Not applied: hub:") && /disk is full|SQLITE_FULL|ENOSPC/i.test(l))
+    && unitLines9.some(saysDiskFull)
     && last9?.target === VERSION_F && last9.state === "abandoned"
     && linkName("current") === VERSION_A && !existsSync(join(UPDATE_STATE, "applying")),
     `update --yes exited ${to40.code}: ${firstLines(to40, 3)}; the apply unit said: ${unitLines9.join(" | ")}`);
