@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { additiveViolations, lintMigrations, writeFloor } from "@morndo/service-kit";
 import { approveNote, invalidateNote, noteId, proposeNote, type MemoryActor, type Note, type NoteDraft } from "@morndo/domain";
-import { MEMORY_MIGRATIONS, MemoryFromFuture } from "../src/adapters/memory-migrations.ts";
+import { MEMORY_MIGRATIONS, MemoryFromFuture, migrateMemory } from "../src/adapters/memory-migrations.ts";
 import { MemoryStore, ftsQuery } from "../src/adapters/memory-store.ts";
 
 const NOW = Date.UTC(2026, 9, 20, 12);
@@ -26,6 +26,8 @@ function note(store: MemoryStore, d: Partial<NoteDraft>, actor: MemoryActor = la
   return r.value.note;
 }
 const ids = (notes: Note[]) => notes.map(n => n.id);
+const tablesOf = (db: Database.Database): string[] =>
+  (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as { name: string }[]).map(r => r.name);
 
 describe("Memory's migrations", () => {
   it("are linted like the hub's: the one breaking migration is v1, breaking only for its FTS5 table", () => {
@@ -58,6 +60,22 @@ describe("Memory's migrations", () => {
     const after = new Database(join(dir, "memory.db"), { readonly: true });
     expect(after.pragma("user_version", { simple: true })).toBe(MEMORY_MIGRATIONS.length + 1);
     after.close();
+  });
+
+  it("migration 2 only adds approval_codes and is additive", () => {
+    const second = MEMORY_MIGRATIONS.find(m => m.version === 2);
+    if (!second) throw new Error("no migration 2");
+    expect(second.compat).toBe("additive");
+    expect(additiveViolations(second)).toEqual([]);
+    const dir = tmp();
+    const raw = new Database(join(dir, "memory.db"));
+    migrateMemory(raw, MEMORY_MIGRATIONS.slice(0, 1));
+    const before = tablesOf(raw);
+    migrateMemory(raw, MEMORY_MIGRATIONS);
+    expect(tablesOf(raw).filter(t => !before.includes(t))).toEqual(["approval_codes"]);
+    expect(raw.pragma("user_version", { simple: true })).toBe(MEMORY_MIGRATIONS.length);
+    expect((raw.prepare("PRAGMA table_info(approval_codes)").all() as { name: string }[]).map(c => c.name)).toEqual(["note", "hash", "expires_at", "failures"]);
+    raw.close();
   });
 });
 

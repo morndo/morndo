@@ -197,7 +197,10 @@ export class FakeServices implements ServiceManager {
     return o?.replaceForeign === true ? this.foreign.map(p => `${p}.before-morndo`) : [];
   }
 
-  async foreignUnits(): Promise<string[]> {
+  /** Where each foreignUnits call read its units from: the tree it was given, or the releases. */
+  readonly foreignFrom: string[] = [];
+  async foreignUnits(version: string, _role?: unknown, o?: { tree?: string }): Promise<string[]> {
+    this.foreignFrom.push(o?.tree ?? `releases/${version}`);
     return [...this.foreign];
   }
 

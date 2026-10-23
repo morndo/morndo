@@ -162,6 +162,8 @@ describe("`morndo install --role control-plane` (§10.3)", () => {
     const forced = await w.run(["install", "--role", "control-plane", "--force"]);
     expect(forced.code, forced.err).toBe(0);
     expect(w.services.tape).toContain(`renderUnits:${VERSION} (hub,fleet,node) replacing foreign`);
+    // the first install's check reads the tree being installed: its Version is not in the releases yet
+    expect(w.services.foreignFrom).toEqual([w.tree, w.tree]);
     expect(forced.out).toMatch(/kept the unit Morndo replaced as \/srv\/example-user\/.*morndo-hub\.service\.before-morndo/);
   });
 

@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { UPDATE_SCOPE_SERVICES, type UpdateService } from "@morndo/domain";
 import type { ServiceManager } from "../application/ports.ts";
 import { updaterPaths } from "./paths.ts";
+import { legacyService } from "./services-systemd.ts";
 import { foreignIn, placeUnits, type UnitDir } from "./unit-files.ts";
 
 // The same shape as services-systemd's: one program, one argument list, no shell.
@@ -116,8 +117,9 @@ export class LaunchdServices implements ServiceManager {
       o?.replaceForeign === true);
   }
 
-  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<string[]> {
-    return foreignIn(this.unitDir(), this.shipped(join(this.releases, version, "units", "launchd"), role));
+  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { tree?: string }): Promise<string[]> {
+    const from = o?.tree === undefined ? join(this.releases, version, "units", "launchd") : join(o.tree, "units", "launchd");
+    return foreignIn(this.unitDir(), this.shipped(from, role));
   }
 
   private shipped(from: string, role?: { services: readonly UpdateService[] }): string[] {
@@ -127,7 +129,13 @@ export class LaunchdServices implements ServiceManager {
   }
 
   private unitDir(): UnitDir {
-    return { dir: this.agentsDir, isUnit: isPlist, marked: t => t.split("\n", 2)[1] === PLIST_MARK };
+    return {
+      dir: this.agentsDir, isUnit: isPlist, marked: t => t.split("\n", 2)[1] === PLIST_MARK,
+      // A plist that set its own environment cannot hand it on (launchd has no drop-ins): not adopted, so foreign —
+      // refused before anything stops, and only `morndo install --force` replaces it.
+      legacy: (n, t) => !t.includes("<key>EnvironmentVariables</key>")
+        && legacyService(n, t.match(/<key>ProgramArguments<\/key>\s*<array>[\s\S]*?<\/array>/)?.[0] ?? ""),
+    };
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {
@@ -145,7 +153,11 @@ export class LaunchdServices implements ServiceManager {
       child.on("error", () => resolve({ code: 127 }));
       child.on("exit", code => resolve({ code }));
     });
-    if (done.code !== 0) throw new Error(`morndo-update apply --version ${version}: exit ${done.code ?? "?"}`);
+    // As the systemd unit's SuccessExitStatus: an apply that ended in one of §8.4's own exits answered; anything
+    // else is a crash. The caller reads the answer from the record or the apply's result file.
+    if (done.code === null || ![0, 1, 64, 65, 70, 75, 78].includes(done.code)) {
+      throw new Error(`morndo-update apply --version ${version}: exit ${done.code ?? "?"}`);
+    }
   }
 
   async enable(units: readonly string[]): Promise<void> {

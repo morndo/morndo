@@ -68,7 +68,7 @@ Not open any more: a restored database catching up (running keyed ops until its 
 | `keyPath` | `~/.config/morndo-node/node-key.pem` | This node's private key. |
 | `dbPath` | `~/.local/state/morndo-node/agent.db` | The agent's database. |
 | `relayPort` | `8787` | The hook relay, on 127.0.0.1 only. A test agent beside a live one takes another port. |
-| `hub` | none | This node's hub, an `http://` or `https://` URL. The agent reads it from this file. `MORNDO_HUB` is a lane's variable and is not used here. A job start while `hub` is absent is refused; it is not treated as the hub being down. |
+| `hub` | none | This node's hub, an `https://` URL, or `http://` to this machine (`127.0.0.1`, `localhost` or `[::1]`): the node sends tokens there. The agent reads it from this file. `MORNDO_HUB` is a lane's variable and is not used here. A job start while `hub` is absent is refused; it is not treated as the hub being down. |
 
 `HOME` itself is where `~/.claude` is read and the root of the file rules.
 
@@ -165,13 +165,15 @@ It answers after the event is in the durable stream, and before any network I/O.
 | Path | Answer | Kept | When the spool can't be written |
 |---|---|---|---|
 | `/cc`, `/sl` | 204, empty | the latest per session | still 204 (a session never stalls); counted in `health.drops` |
-| `/hook/stop` | 200 `{ ok: true, queued: true }`, or an ask (the status ask or the waker ask): 200 `{ decision: "block", reason }` | every event (an asked one marked `statusAsked`) | 503, so the hook script's fallback runs |
+| `/hook/stop` | 200 `{ ok: true, queued: true }`, or an ask (the status ask, the waker ask or the reply style ask): 200 `{ decision: "block", reason }` | every event (an asked one marked `statusAsked`) | 503, so the hook script's fallback runs |
 | `/hook/failure`, `/notify` | 202 | every event | 503 |
 | `/file` | 202 (413 over 25 MiB; 400 for a path that isn't absolute; 403 where files are never shared; 404 when missing) | a copy under `relay-files/`, by today's file rules | 503 |
 
 **The status ask** (reliable lanes §3.1). A lane's answer starts with one status line: `STATUS: DONE`, `STATUS: BLOCKED`, `STATUS: NEEDS DECISION` or `STATUS: WAITING <on what> [for <N> min|h]`. When Claude Code's own `Stop` body comes from a placed window whose answer has none, with `stop_hook_active` false and no background task or wake-up pending, the relay answers `{ "decision": "block", "reason": … }` and keeps the Stop with `statusAsked: true` in its body (subscribers get its answer; the fleet makes no lane event of it): Claude Code writes the line and stops again, and that Stop (now `stop_hook_active`) is the turn's end. So it asks at most once per turn. Off with `statusContract.mode: "off"`; never for `statusContract.exempt`.
 
 **The waker ask** (ADR-0032, W1: [`docs/design/agent-board`](../../docs/design/agent-board/README.md) §5). A `Stop` that passes the same rules, whose status line is `STATUS: WAITING`, is asked once for a waker when nothing will end the wait: its `background_tasks` and `session_crons` are both empty arrays, and no job of that lane is queued, starting or running on this node (one it started, or one whose notice goes to it). The reason names what it said it waits on and gives three ways out: a one-time wake-up (Claude Code's `ScheduleWakeup` or `CronCreate`), the wait as a job (`morndo job start --notify lane:<this lane> -- <command>`), or a settled `STATUS: DONE`, `BLOCKED` or `NEEDS DECISION`; then the status line again. It is answered and kept as the status ask is (`statusAsked: true`), and the Stop after it (`stop_hook_active`) is the turn's end. A Stop without either array, or with one that isn't an array, means Claude Code couldn't read its task registry: not asked. Nor is a lane whose jobs the node can't read (the job store not open yet, or a read that failed, which is logged). A Stop with no status line at all gets the status ask, as before.
+
+**The reply style ask** (T-308). For the lanes in `statusContract.exempt` (the manager), a `## Digest` or `### Digest` or a card (an answer whose last line is a `[buttons …]` line, read as kira reads it) whose visible part (outside `<details>` and code fences) is over 8 lines or 120 words, carries ticket numbers, hashes or ask ids, or lists a task as done whose merge the hub's board has not live (unless "not live" is said of that task) is asked once, with the reason. It reads the board for up to one second with the token in `~/.config/morndo-node/board-token` (a plain file, mode 600, read when used; never `MORNDO_AGENT_TOKEN` in the node's environment, which the tmux server and every lane would inherit: `run` removes it from its environment first, with a warning); without the file only the first two rules run.
 
 Anything but POST on the four kept paths is 405 and an unknown path 404. A request with an `Origin` header comes from a web page, not a hook: the kept paths answer it 403, progress paths drop it (204). A body over 448 KiB is 413 (dropped, for progress). A write the spool refuses changes nothing and counts one drop.
 

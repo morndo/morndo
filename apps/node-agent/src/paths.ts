@@ -1,5 +1,6 @@
 // Where the node agent keeps its files (spec §5.5, §6). Configuration lives under ~/.config/morndo-node: config.json
-// (written by `morndo-node join`), policy.json (the owner's to edit) and the node's private key. State lives under
+// (written by `morndo-node join`), policy.json (the owner's to edit), the node's private key and board-token (the token the
+// reply style ask reads the hub's board with: a file only its owner can read, never an environment variable). State lives under
 // ~/.local/state/morndo-node: the database, the hook relay's file copies, the upload inbox, the job socket, Memory's
 // skills as memory.sync staged and committed them (memory/, ADR-0031: what the hub sends again, so state rather than
 // data, beside the node's other files and under the same deny root), copies of the drafts the deliverer stashed (drafts/,
@@ -8,7 +9,7 @@
 import { join } from "node:path";
 
 export type AgentPaths = {
-  configDir: string; configFile: string; policyFile: string; keyPath: string;
+  configDir: string; configFile: string; policyFile: string; keyPath: string; boardTokenFile: string;
   stateDir: string; dbPath: string; statusFile: string; relayFilesDir: string; inboxDir: string; jobSock: string; memoryDir: string; draftsDir: string;
   fleetViewFile: string;
 };
@@ -21,6 +22,7 @@ export function agentPaths(home: string): AgentPaths {
     configFile: join(configDir, "config.json"),
     policyFile: join(configDir, "policy.json"),
     keyPath: join(configDir, "node-key.pem"),
+    boardTokenFile: join(configDir, "board-token"),
     stateDir,
     dbPath: join(stateDir, "agent.db"),
     statusFile: join(stateDir, "status.json"),
