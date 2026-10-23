@@ -30,7 +30,7 @@ const FEED_URL = "https://127.0.0.1:8443/";                   // build.ts's FEED
 const MORNDO = join(HOME, ".local/bin/morndo");
 const MORNDO_FLEET = join(HOME, ".local/bin/morndo-fleet");
 const MORNDO_NODE = join(HOME, ".local/bin/morndo-node");
-const MORNDO_UPDATE = join(HOME, ".local/bin/morndo-update");   // `tick` is the updater's own word, not `morndo update`'s
+const MORNDO_UPDATE = join(HOME, ".local/bin/morndo-update");   // its tick is "update tick": argv[0] must be update (cli.ts), the same door `morndo update` opens
 const RELEASES = join(HOME, ".local/share/morndo-releases");
 const UPDATE_STATE = join(HOME, ".local/state/morndo-update");
 const UPDATE_DB = join(UPDATE_STATE, "update.db");
@@ -47,7 +47,11 @@ const VERSION_B = "0.2.0";
 const VERSION_G = "0.3.0";
 const VERSION_H = "0.4.0";
 const NODE_NAME = "e2e-node";
+const CP_NODE_NAME = "e2e-cp";                                  // the control plane's own node, joined in step 1 (#109's own step 1 joins it)
 const SERVICE_UNITS = IS_CP ? ["morndo-hub.service", "morndo-fleet.service"] : ["morndo-node.service"];
+// Once cp's own node is joined, every cp apply restarts the agent with the rest (the safe point probes it), so
+// cp's applies wait for all three — #109's single machine waits for all three too.
+const APPLY_UNITS = IS_CP ? [...SERVICE_UNITS, "morndo-node.service"] : SERVICE_UNITS;
 
 const ENV = {
   ...process.env, HOME,
@@ -222,8 +226,10 @@ async function stepSetup(): Promise<void> {
   check("setup-feed", probe === 200, `the feed answers on ${FEED_URL}keys/1.json inside ${MACHINE} (HTTP ${probe})`);
 }
 
-// Step 1a: install A on the control plane. Its own node agent is not joined (a control plane does not need one),
-// so the hub and the fleet are the services that must come up; the hub answers on its own forwarded port.
+// Step 1a: install A on the control plane, then join the machine's own node agent as e2e-cp — the install prints
+// "the agent waits to join", and without the agent no cp apply ever finds its safe point (the walk defers
+// "node: no_answer" and ends abandoned, run 2's evidence). #109's own step 1 joins it on the single machine the
+// same way; the skew gate never counts it, because it moves with the control plane's own install (4b069d5).
 async function stepInstallCp(): Promise<void> {
   if (!IS_CP) { check("install-cp", false, "this step belongs on the control plane, not the node"); return; }
   const tree = join(E2E, "tree-a");
@@ -239,6 +245,18 @@ async function stepInstallCp(): Promise<void> {
   const fleet = units === null ? null : await waitUntil("fleet", 90_000, () => fleetVersion());
   check("1-cp-healthy", units !== null && hub === VERSION_A && fleet === VERSION_A,
     units === null ? "the hub and fleet units did not come active" : `hub ${hub} fleet ${fleet} (want ${VERSION_A})`);
+  if (failed) return journals("1-install-cp");
+  const ownAdded = command("1-cp-node-add", MORNDO_FLEET, ["node", "add", CP_NODE_NAME]);
+  const ownJoinLine = ownAdded.out.split("\n").find(l => l.startsWith("morndo-join:1:")) ?? "";
+  const ownJoined = ownJoinLine === "" ? { code: 1, out: "", err: `no join string in: ${ownAdded.out}` }
+    : command("1-cp-node-join", MORNDO_NODE, ["join", ownJoinLine], { timeoutMs: 60_000 });
+  check("1-cp-node-joined", ownJoined.code === 0 && ownJoined.out.includes("Joined the fleet"),
+    `cp's own node add/join as ${CP_NODE_NAME}: ${firstLines(ownJoined)}`);
+  if (failed) return journals("1-install-cp");
+  run("systemctl", ["--user", "start", "morndo-node.service"]);
+  const ownOnline = await waitUntil("cp's own node online", 90_000, () => nodeVersion());
+  check("1-cp-node-online", ownOnline === VERSION_A,
+    `cp's own node agent reports ${ownOnline ?? "nothing"} (want online at ${VERSION_A})`);
   if (failed) return journals("1-install-cp");
   const links = linkName("current") === VERSION_A && linkName("good") === VERSION_A;
   check("1-cp-links", links, `current=${linkName("current")} good=${linkName("good")}`);
@@ -296,22 +314,24 @@ async function stepInstallNode(): Promise<void> {
   if (failed) journals("1-install-node");
 }
 
-// Step 1d: the node as the fleet sees it (updates §7): online, the protocol its hello named, its updater's last
-// report (null before it ever applied anything — an honest word, not a guess).
+// Step 1d: the nodes as the fleet sees them (updates §7): online, the protocol its hello named, its updater's
+// last report (null before it ever applied anything — an honest word, not a guess). The control plane's own
+// e2e-cp (joined in step 1a) sits beside the node machine's e2e-node.
 async function stepNodesView(): Promise<void> {
   if (!IS_CP) { check("nodes-view", false, "this step belongs on the control plane, not the node"); return; }
   type Row = { name?: unknown; status?: unknown; proto?: unknown; update?: { state?: unknown; version?: unknown } | null };
   const rows = await waitUntil("nodes", 30_000, async () => {
     const list = await fleetGet<Row[]>("/v1/nodes");
-    return list !== null && list.some(n => n.name === NODE_NAME) ? "" : null;
+    return list !== null && list.some(n => n.name === NODE_NAME) && list.some(n => n.name === CP_NODE_NAME) ? "" : null;
   });
   const list = await fleetGet<Row[]>("/v1/nodes");
-  const row = list?.find(n => n.name === NODE_NAME) ?? null;
-  const proto = Array.isArray(row?.proto) ? row!.proto as unknown[] : [];
-  const update = row?.update ?? null;
-  const ok = rows !== null && row !== null && row.status === "online" && proto.includes(1)
-    && (update === null || update.state === "current");
-  check("1-nodes-view", ok, `GET /v1/nodes: ${JSON.stringify(row)}`);
+  const seen = (name: string): Row | null => list?.find(n => n.name === name) ?? null;
+  const rowOk = (row: Row | null): boolean => row !== null && row.status === "online"
+    && (Array.isArray(row.proto) ? row.proto as unknown[] : []).includes(1)
+    && ((row.update ?? null) === null || row.update?.state === "current");
+  const nodeRow = seen(NODE_NAME), cpRow = seen(CP_NODE_NAME);
+  const ok = rows !== null && rowOk(nodeRow) && rowOk(cpRow);
+  check("1-nodes-view", ok, `GET /v1/nodes: ${NODE_NAME} ${JSON.stringify(nodeRow)}; ${CP_NODE_NAME} ${JSON.stringify(cpRow)}`);
 }
 
 // Step 2a: cp's own soak, two minutes (§4.5's settings key, UpdateConfigSchema's soakMinutes) — the number the
@@ -350,7 +370,7 @@ async function stepCheckStages(version: string): Promise<void> {
 // the feed's word alone): exit 75, a waiting record whose reason names why, and the machine still on A.
 async function stepTickDefersEarly(): Promise<void> {
   if (IS_CP) { check("tick-defers-early", false, "this step belongs on the node machine, not the control plane"); return; }
-  const tick = command("tick-early", MORNDO_UPDATE, ["tick"], { timeoutMs: 120_000 });
+  const tick = command("tick-early", MORNDO_UPDATE, ["update", "tick"], { timeoutMs: 120_000 });
   const state = stateFile();
   const reason = typeof state?.reason === "string" ? state.reason : "(none)";
   const accepted = ["node_ahead", "not_committed", "waiting_control_plane"];   // fleet-follow.ts's words for a Rollout the control plane has not committed
@@ -370,7 +390,7 @@ async function stepCpTo(version: string, label: string): Promise<void> {
   check(`${label}-committed`, committed, `update --yes exited ${update.code}: ${firstLines(update)}`);
   snapshot(`update-${version}`);
   if (!committed) return journals(`update-${version}`);
-  const units = await waitUnits(SERVICE_UNITS, 120_000);
+  const units = await waitUnits(APPLY_UNITS, 120_000);
   const hub = units === null ? null : await waitUntil("hub", 120_000, () => hubVersion());
   const fleet = units === null ? null : await waitUntil("fleet", 120_000, () => fleetVersion());
   check(`${label}-healthy`, units !== null && hub === version && fleet === version,
@@ -387,7 +407,7 @@ async function stepCpTo(version: string, label: string): Promise<void> {
 // Step 2e: the node's tick inside the soak — the same deferral, the soak's own word.
 async function stepTickDefersSoak(): Promise<void> {
   if (IS_CP) { check("tick-defers-soak", false, "this step belongs on the node machine, not the control plane"); return; }
-  const tick = command("tick-soak", MORNDO_UPDATE, ["tick"], { timeoutMs: 120_000 });
+  const tick = command("tick-soak", MORNDO_UPDATE, ["update", "tick"], { timeoutMs: 120_000 });
   const state = stateFile();
   const ok = tick.code === 75 && state?.state === "waiting" && state.reason === "waiting_soak"
     && linkName("current") === VERSION_A && nodeVersion() === VERSION_A;
@@ -454,7 +474,7 @@ async function stepRolloutSoaked(): Promise<void> {
 // Step 4b: the test sets the node's drawn delay for G to the past — a row in update.db's rollout_jitter the
 // updater's own INSERT OR IGNORE then keeps (nodeGate draws only when jitterOf finds nothing).
 async function stepPinJitter(): Promise<void> {
-  if (!IS_CP) { check("pin-jitter", false, "this step belongs on the node machine, not the control plane"); return; }
+  if (IS_CP) { check("pin-jitter", false, "this step belongs on the node machine, not the control plane"); return; }
   const until = Date.now() - 60_000;
   const write = run("sqlite3", [UPDATE_DB, `INSERT OR IGNORE INTO rollout_jitter (version, until) VALUES ('${VERSION_G}', ${until});`]);
   const row = sqlite(UPDATE_DB, `SELECT until FROM rollout_jitter WHERE version = '${VERSION_G}'`);
@@ -466,7 +486,7 @@ async function stepPinJitter(): Promise<void> {
 // state.json rolled_back under the fleet-issued attempt, the links back on B, the agent online at B again.
 async function stepTickAppliesG(): Promise<void> {
   if (IS_CP) { check("tick-applies-g", false, "this step belongs on the node machine, not the control plane"); return; }
-  const tick = command("tick-g", MORNDO_UPDATE, ["tick"], { timeoutMs: 20 * 60_000 });
+  const tick = command("tick-g", MORNDO_UPDATE, ["update", "tick"], { timeoutMs: 20 * 60_000 });
   const state = stateFile();
   check("4-node-rolled-back-g",
     tick.code === 1 && (tick.out + tick.err).includes(`Rolled back from ${VERSION_G}`)
@@ -504,7 +524,7 @@ async function stepRolloutHalted(): Promise<void> {
 // Step 4e: a second tick on the node refuses G — the Rollout is halted, and the machine's own bad record says why.
 async function stepTickRefusesG(): Promise<void> {
   if (IS_CP) { check("tick-refuses-g", false, "this step belongs on the node machine, not the control plane"); return; }
-  const tick = command("tick-g-refused", MORNDO_UPDATE, ["tick"], { timeoutMs: 5 * 60_000 });
+  const tick = command("tick-g-refused", MORNDO_UPDATE, ["update", "tick"], { timeoutMs: 5 * 60_000 });
   const state = stateFile();
   const bad = sqlite(UPDATE_DB, `SELECT count(*) FROM bad WHERE version = '${VERSION_G}'`);
   check("4-node-refuses-g", tick.code === 75 && state?.state === "waiting" && state.reason === "halted" && bad === "1",
@@ -514,18 +534,20 @@ async function stepTickRefusesG(): Promise<void> {
 
 // Step 5b (the principal resumed the Rollout in the browser in between): the node's tick against a resumed
 // Rollout of a Version it rolled back. RL7's word — "the target is marked bad on this machine and is not tried
-// again automatically" — is what this check asserts; what the code does instead (nodeGate reads only the wire,
-// fleet-follow.ts, and the bad/halt records the rollback wrote are read by no gate on the tick's path) is
-// printed below either way. See REPORT-6d.md's "Open finding".
+// again automatically" — is the walk's own first gate since b1a0c22 (apply-service reads badVersions before
+// anything is begun), so the tick defers: exit 75, state.json waiting with reason bad_here, the machine still on
+// B, no new update record — and the Rollout stays resumed (step 5c says so).
 async function stepTickAfterResume(): Promise<void> {
   if (IS_CP) { check("tick-after-resume", false, "this step belongs on the node machine, not the control plane"); return; }
   const before = sqlite(UPDATE_DB, "SELECT count(*) FROM updates");
-  const tick = command("tick-after-resume", MORNDO_UPDATE, ["tick"], { timeoutMs: 20 * 60_000 });
+  const tick = command("tick-after-resume", MORNDO_UPDATE, ["update", "tick"], { timeoutMs: 20 * 60_000 });
   const after = sqlite(UPDATE_DB, "SELECT count(*) FROM updates");
   const state = stateFile();
-  const refused = tick.code === 75 && linkName("current") === VERSION_B && after === before;
+  const reason = typeof state?.reason === "string" ? state.reason : "(none)";
+  const refused = tick.code === 75 && state?.state === "waiting" && reason === "bad_here"
+    && linkName("current") === VERSION_B && after === before;
   check("5-node-refuses-g-forever", refused,
-    `RL7 wanted a refusal (75, still on ${VERSION_B}, no new record); the tick exited ${tick.code} (75 deferred, 1 rolled back), current=${linkName("current")}, update records ${before} -> ${after}, state.json ${JSON.stringify(state)}: ${firstLines(tick, 3)}`);
+    `RL7's refusal: the tick deferred (exit ${tick.code}, reason ${reason}), still on ${VERSION_B}, update records ${before} -> ${after}, current=${linkName("current")}, state.json ${JSON.stringify(state)}: ${firstLines(tick, 3)}`);
   snapshot("tick-after-resume");
   if (!refused) journals("tick-after-resume");
 }
@@ -548,7 +570,8 @@ async function stepRolloutResumed(): Promise<void> {
 }
 
 // Step 6a: H is held by the skew gate (RL11) while the node still speaks protocol 1 — cp's own update exits 75,
-// its state names the node, and the machine stays on G.
+// its state names e2e-node and nobody else (the control plane's own e2e-cp never holds the gate, 4b069d5), and
+// the machine stays on G.
 async function stepCpHeldH(): Promise<void> {
   if (!IS_CP) { check("cp-held-h", false, "this step belongs on the control plane, not the node"); return; }
   const update = command("update-h-held", MORNDO, ["update", "--yes"], { timeoutMs: 20 * 60_000 });
@@ -556,9 +579,9 @@ async function stepCpHeldH(): Promise<void> {
   const reason = typeof state?.reason === "string" ? state.reason : "(none)";
   const hub = await hubVersion();
   check("6-cp-holds-h",
-    update.code === 75 && reason.startsWith("skew_blocked") && reason.includes(NODE_NAME)
+    update.code === 75 && reason === `skew_blocked: ${NODE_NAME}`
       && linkName("current") === VERSION_G && hub === VERSION_G,
-    `update --yes exited ${update.code}; state.json ${JSON.stringify(state)}; cp runs ${linkName("current")}, hub ${hub}: ${firstLines(update, 3)}`);
+    `update --yes exited ${update.code}; state.json ${JSON.stringify(state)} — the hold names ${NODE_NAME} only, never cp's own ${CP_NODE_NAME}; cp runs ${linkName("current")}, hub ${hub}: ${firstLines(update, 3)}`);
   snapshot("update-h-held");
   if (failed) journals("update-h-held");
 }
