@@ -4,12 +4,15 @@
 // window missing from a report is kept until its reset time has passed (U2); the sessions reporting are kept while
 // fresh (U3); usage grants and decides nothing (U4): it is a read model, like Observation.
 import { cleanLength, cleanNote, takePercent } from "./usage-reading.ts";
+import type { DisagreeView, SeatView, SourceView } from "./usage-view.ts";
 
 export type UsageWindow = { usedPercentage: number; resetsAt: number | null };            // resetsAt in ms
 export type SpendWindow = UsageWindow & { usedUsd: number | null; limitUsd: number | null; period: string | null };
 // A window the account names itself (Cursor's "Cursor models"), with the calendar date the provider printed
 // (`resetsOn`, YYYY-MM-DD) when the reset is a day rather than an instant.
-export type NamedWindow = UsageWindow & { label: string; resetsOn: string | null; lengthMins?: number | null; rolling?: boolean; note?: string | null };
+// `title` (U7): the cadence title the hub computed from the window's own numbers, never a caption the provider
+// printed. Optional, so every account stored before it exists parses as it is.
+export type NamedWindow = UsageWindow & { label: string; resetsOn: string | null; lengthMins?: number | null; rolling?: boolean; note?: string | null; title?: string | null };
 export type SessionUsage = { sessionId: string; lane: string | null; model: string | null; contextUsed: number | null; at: number };
 
 // One status-line report, as the adapter translates it (the raw shape is the agent CLI's own).
@@ -28,6 +31,11 @@ export type AccountUsage = {
   limits: NamedWindow[] | null; onDemand: string | null;
   profile: AccountProfile | null;
   sessions: SessionUsage[];
+  // The S2 view fields (plan 4.4): each source's health, the account's seat, and any disagreement between sources.
+  // All optional, so an older hub's account (and every stored row) parses as it is.
+  sources?: readonly SourceView[];
+  seat?: SeatView | null;
+  disagree?: readonly DisagreeView[];
 };
 
 export const ACCOUNT_NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,79}$/;

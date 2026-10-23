@@ -1,7 +1,7 @@
 // Usage on the wire (ADR-0016): the status-line report an agent's session posts to the hub (the agent CLI's own JSON,
 // of which only these fields are read; the rest is dropped), the accounts the hub pushes to the app (the `usage` feed
 // frame), and the principal's GET. Types are the domain's own.
-import { USAGE_SOURCES, type AccountUsage } from "@morndo/domain";
+import { USAGE_FIXES, USAGE_REASONS, USAGE_SOURCES, type AccountUsage } from "@morndo/domain";
 import * as z from "./z.ts";
 
 const text = () => z.string();
@@ -46,18 +46,35 @@ const spendSchema = z.object({ usedPercentage: num(), resetsAt: z.nullable(num()
 const namedSchema = z.object({
   label: text(), usedPercentage: num(), resetsAt: z.nullable(num()), resetsOn: z.nullable(text()),
   lengthMins: z.exactOptional(z.nullable(num())), rolling: z.exactOptional(z.boolean()), note: z.exactOptional(z.nullable(text())),
+  title: z.exactOptional(z.nullable(text())),
 });
 // The profile the hub overlays on an account (ADR-0034): optional on the wire, so an older hub's account still parses.
 const profileSchema = z.object({ email: z.nullable(text()), org: z.nullable(z.enum(["team", "personal"])), plan: z.nullable(text()) });
+// The S2 view fields (plan 4.4): where each source's numbers came from and how it is doing, the account's seat, and
+// any two sources that disagree about one window. All optional and caught, so an older hub's account still parses.
+const sourceViewSchema = z.object({
+  source: z.enum(USAGE_SOURCES), node: z.nullable(text()), state: z.enum(["available", "stale", "unavailable", "missing"]),
+  since: z.nullable(num()), asOf: z.nullable(num()), reason: z.nullable(z.enum(USAGE_REASONS)), fix: z.nullable(z.enum(USAGE_FIXES)), hint: z.nullable(text()),
+});
+const seatViewSchema = z.object({
+  state: z.enum(["logged-out", "retired", "out", "low", "ok"]), why: z.nullable(z.enum(["usage_limit", "refused", "signed_out", "plan_ended", "billing", "by_hand"])),
+  since: num(), backAt: z.nullable(num()), owner: z.enum(["derived", "pool"]), by: text(), fix: z.nullable(z.enum(USAGE_FIXES)),
+});
+const disagreeSide = z.object({ source: z.enum(USAGE_SOURCES), usedPercent: num(), capturedAt: num() });
+const disagreeSchema = z.object({ window: text(), a: disagreeSide, b: disagreeSide });
 export const AccountUsageSchema = z.object({
   account: text(), reportedAt: num(),
   fiveHour: orElse(z.nullable(windowSchema), null), sevenDay: orElse(z.nullable(windowSchema), null), spend: orElse(z.nullable(spendSchema), null),
   limits: orElse(z.nullable(z.array(namedSchema)), null), onDemand: orElse(z.nullable(text()), null),
   profile: orElse(z.nullable(profileSchema), null),
   sessions: z.array(z.object({ sessionId: text(), lane: z.nullable(text()), model: z.nullable(text()), contextUsed: z.nullable(num()), at: num() })),
+  sources: z.exactOptional(orElse(z.readonly(z.array(sourceViewSchema)), [])),
+  seat: z.exactOptional(orElse(z.nullable(seatViewSchema), null)),
+  disagree: z.exactOptional(orElse(z.readonly(z.array(disagreeSchema)), [])),
 });
-// Every connected account, whole, after each hello and whenever a report changed what is shown.
-export const UsageFrameSchema = z.object({ t: z.literal("usage"), accounts: z.array(z.unknown()), at: num() });
+// Every connected account, whole, after each hello and whenever a report changed what is shown. The S2 notices
+// (plan 4.4) ride along; an older hub's frame, without them, still parses.
+export const UsageFrameSchema = z.object({ t: z.literal("usage"), accounts: z.array(z.unknown()), at: num(), notices: z.exactOptional(z.array(z.unknown())) });
 
 // A usage reading a source posts (U14): the windows it can see now, or the one reason it cannot. Epoch seconds here,
 // milliseconds in the domain. A bad window row is caught to an empty row and dropped later; it never rejects the
@@ -77,6 +94,7 @@ export const UsageReadingsBody = z.looseObject({
   captured_at: num(),
   every_s: z.exactOptional(z.nullable(num())),
   plan: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
+  lease_id: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
   windows: z.exactOptional(z.array(readingsWindow)),
   failure: z.exactOptional(z.nullable(z.looseObject({
     reason: z.string().check(z.maxLength(40)),
@@ -84,6 +102,15 @@ export const UsageReadingsBody = z.looseObject({
   }))),
 });
 export type UsageReadingsBody = z.output<typeof UsageReadingsBody>;
+
+// The principal's own forget of a source (plan 4.4, AT-23): the account, and the source (and node) to drop; without
+// a source, the whole account is forgotten.
+export const UsageForgetBody = z.looseObject({
+  account: z.string().check(z.minLength(1), z.maxLength(80)),
+  source: z.exactOptional(z.enum(USAGE_SOURCES)),
+  node: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
+});
+export type UsageForgetBody = z.output<typeof UsageForgetBody>;
 
 // A seat's limit hit as the source reports it (U9): the kind is one closed list, the words around it are free. The
 // fix is free text here too; the hub only ever shows a fix from the domain's closed list.

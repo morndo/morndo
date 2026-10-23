@@ -59,3 +59,8 @@ export function cleanLength(v: unknown): number | null {
   if (typeof v !== "number" || !Number.isFinite(v) || v <= 0 || !Number.isInteger(v)) return null;
   return v;
 }
+// The fix a failed source's reason names (plan 4.4): one closed list, never free text; a reason with no fix of its
+// own (a meter that will come back, a hub that could not reach it) shows none.
+export function fixForReason(r: UsageReason): UsageFix | null {
+  throw new Error("not implemented");
+}

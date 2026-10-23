@@ -350,6 +350,11 @@ switch (cmd) {
     const poolRefresh = setInterval(lookAtPool, 60_000);
     poolRefresh.unref();
     shutdown.onStop(() => clearInterval(poolRefresh));
+    // Usage S2 (plan 4.3): the silence and forgetting pass — a source quiet for two weeks is forgotten, with one
+    // notice. Once a minute is plenty: nothing it decides is nearer than days.
+    const sweepUsage = setInterval(() => usage.sweep(), 60_000);
+    sweepUsage.unref();
+    shutdown.onStop(() => clearInterval(sweepUsage));
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
     // The runs read once, which applies what is due since the hub last ran; never in the way of the hub's start (a fleet
