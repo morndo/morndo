@@ -9,6 +9,7 @@
 // plane's own applies are held while any joined node's protocol falls outside the target's range (RL11). state.json
 // says what the updater last did at every outcome, in the protocol's own shape, every record of one Update carrying
 // the same attempt id. The tick asks the feed at most every six hours; between asks it still follows the Rollout.
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -761,10 +762,11 @@ describe("a Version this node rolled back, offered again after a resume", () => 
 // Found by 6d's two-machine run: the control plane's own node agent moves with the control plane, in the same
 // install, so the skew gate (RL11) never counts it — or no Release that drops a protocol could ever apply there.
 describe("the control plane's skew gate and its own node", () => {
-  const ownNode = (w: TickWorld, name: string): void => {
+  // This machine's own agent, as its status.json says: by default alive (this process's pid) and online.
+  const ownNode = (w: TickWorld, name: string, o: { state?: string; pid?: number } = {}): void => {
     const file = join(w.home, ".local", "state", "morndo-node", "status.json");
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify({ node: name })}\n`);
+    writeFileSync(file, `${JSON.stringify({ node: name, state: o.state ?? "online", pid: o.pid ?? process.pid })}\n`);
   };
   const fleetOf = (nodes: { name: string; agentProtocol: number }[]): FakeFleetView => {
     const f = new FakeFleetView();
@@ -781,6 +783,19 @@ describe("the control plane's skew gate and its own node", () => {
     expect(stateFile(w.statePath).reason).not.toMatch(/^skew_blocked/);
     expect(w.store.recentUpdates(1)[0]?.state).toBe("abandoned");   // the walk began: the gate let it through
   }, 90_000);
+
+  it("a stale status file excludes nobody: an agent that is gone, or one the fleet no longer admits under that name", async () => {
+    // Review of #116 (finding 3): the name may since belong to another machine. Only this machine's live agent,
+    // online under the name (the fleet admitted its key for it), takes its node out of the gate.
+    const gone = spawnSync(process.execPath, ["-e", ""]).pid!;     // a pid that has exited: nobody
+    for (const status of [{ state: "online", pid: gone }, { state: "refused", pid: process.pid }]) {
+      const w = await tickWorld({ controlPlane: true, fleet: fleetOf([{ name: "cp-node", agentProtocol: 1 }]), protocol: { agent: [2, 2], clientApi: [1, 1] } });
+      ownNode(w, "cp-node", status);
+      const r = await w.run(["update", "tick"]);
+      expect(r.code, `${JSON.stringify(status)}: ${r.err}`).toBe(75);
+      expect(stateFile(w.statePath), JSON.stringify(status)).toMatchObject({ state: "waiting", reason: "skew_blocked: cp-node" });
+    }
+  }, 120_000);
 
   it("still names every other node it would cut off", async () => {
     const w = await tickWorld({ controlPlane: true, fleet: fleetOf([{ name: "cp-node", agentProtocol: 1 }, { name: "n2", agentProtocol: 1 }]), protocol: { agent: [2, 2], clientApi: [1, 1] } });
