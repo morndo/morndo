@@ -28,7 +28,7 @@ const blockersOf = (inFlight: readonly { kind: string; id: string }[]): string[]
 
 // A pid names a live writer or it names nobody: signal 0 asks without sending anything. EPERM still names a
 // process (one this user may not signal); ESRCH names none.
-const pidAlive = (pid: number): boolean => {
+export const pidAlive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; }
   catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
 };

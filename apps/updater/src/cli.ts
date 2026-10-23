@@ -27,7 +27,7 @@ import { ApplyingFileMarker } from "./adapters/applying-file.ts";
 import { HttpsArtifacts } from "./adapters/artifacts-https.ts";
 import { SqliteBackup } from "./adapters/backup-sqlite.ts";
 import { FleetSocketView } from "./adapters/fleet-socket.ts";
-import { FleetStatusView, machineNameOf } from "./adapters/fleet-status.ts";
+import { FleetStatusView, machineNameOf, ownOnlineNodeOf } from "./adapters/fleet-status.ts";
 import { HttpsFeed } from "./adapters/feed-https.ts";
 import { HoldFileWriter } from "./adapters/hold-file.ts";
 import { DirsInstaller } from "./adapters/installer-dirs.ts";
@@ -393,7 +393,7 @@ export async function runUpdater(
       // two-machine run found it counted — no Release dropping a protocol could ever have applied here).
       const gate = await controlPlaneSkew({
         fleet: keepingNodes(await fleetOf(), o.boot === true), controlPlane: running, target, targetProtocol: o.targetProtocol,
-        ownNode: machineName === "control-plane" ? null : machineName,
+        ownNode: ownOnlineNodeOf(nodeStatusPath),
       });
       if (gate.ok) return null;
       if (gate.error.reason === "fleet_unreachable" && o.boot === true) {

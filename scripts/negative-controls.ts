@@ -2050,6 +2050,10 @@ export const CONTROLS: Control[] = [
   { id: "c3b-skew-own-node-counted", task: "315", file: "apps/updater/src/application/fleet-follow.ts",
     find: "nodes: nodes.filter(n => n.name !== p.ownNode)", replace: "nodes: nodes.filter(() => true)",
     run: ["apps/updater/test/fleet-rollout.test.ts"], expect: "skew_blocked: cp-node" },
+  // Review of #116: a stale status.json (its agent gone) takes no node out of the skew gate.
+  { id: "c3b-skew-stale-own-node", task: "315", file: "apps/updater/src/adapters/fleet-status.ts",
+    find: "s.pid > 0 && pidAlive(s.pid) ? s.node : null", replace: "s.pid > 0 ? s.node : null",
+    run: ["apps/updater/test/fleet-rollout.test.ts"], expect: "skew_blocked: cp-node" },
   { id: "pr1-rl12-halt-ignored", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (rollout.halted) return err(\"halted\");", replace: "if (false) return err(\"halted\");",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "halted" },
