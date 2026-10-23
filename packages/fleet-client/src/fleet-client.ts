@@ -117,11 +117,12 @@ const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "al
 // for a script path no subscriber takes (ADR-0012 decision 8; detail { path, events }). "delivery_waiting" and
 // "subscriber_lagging": fleet clients §4.5, §6. "job_failed" and "job_unnoticed": ADR-0017. "connection": the
 // connections store (ADR-0025). "engine_fallback": ADR-0027. "draft_stashed": a lane's unsent draft put away so its
-// deliveries went in (#64). The four update kinds: the updates design §7.
+// deliveries went in (#64). The four update kinds: the updates design §7. "journal_unreadable": a revocation journal
+// line the fleet skipped (updates design §11.5).
 // tests/rollout.test.ts checks this copy against the protocol's, so neither drifts from the other.
 export const ALERT_KINDS = new Set<string>(["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter",
   "backlog_full", "unrouted_hook", "delivery_waiting", "subscriber_lagging", "job_failed", "job_unnoticed", "connection", "engine_fallback", "draft_stashed",
-  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked"] satisfies AlertKind[]);
+  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked", "journal_unreadable"] satisfies AlertKind[]);
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // A store sequence as the fleet passes it on, or null: absent, null, or not a count (never guessed at).
@@ -137,6 +138,8 @@ const opErrorOf = (v: unknown): OpError | null =>
 const nodeOf = (v: unknown): FleetNode | null => {
   if (!isRecord(v) || typeof v.name !== "string" || typeof v.status !== "string" || !STATUSES.has(v.status)
     || !(v.health === null || isRecord(v.health)) || !(v.agent === null || typeof v.agent === "string")) return null;
+  // B11: a commit that is neither a string nor null is a mismatch, never guessed at; absent reads as null.
+  if (v.commit !== undefined && v.commit !== null && typeof v.commit !== "string") return null;
   const update = v.update === undefined || v.update === null ? null : UpdateHealthSchema.safeParse(v.update);
   return {
     name: v.name, status: v.status as FleetNode["status"],

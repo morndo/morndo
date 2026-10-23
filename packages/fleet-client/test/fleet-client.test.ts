@@ -56,7 +56,8 @@ describe("the fleet client (spec §5.6)", () => {
     await new Promise<void>(resolve => server.listen(path, () => resolve()));
     try {
       const c = new FleetClient(path);
-      expect(await c.nodes()).toEqual(body);
+      // the updates design's fields read as null where a fleet names none; an absent commit reads as null too
+      expect(await c.nodes()).toEqual((body as Record<string, unknown>[]).map(n => ({ ...n, commit: n.commit ?? null, proto: null, update: null })));
       body = [{ name: "pc", status: "online", health: null, agent: "fake", commit: 7 }];
       const e = await c.nodes().catch((x: unknown) => x);
       expect(e).toBeInstanceOf(FleetMismatch);                     // a commit that isn't a string or null: never guessed at
