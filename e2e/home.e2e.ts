@@ -92,14 +92,17 @@ try {
     await page.locator('[data-account="max-1"]').getByRole("group", { name: "5-hour window: 80% used, Running low" }).waitFor({ timeout: 8000 });
   });
 
-  await check("the pool's file is absent: the cards name the accounts alone; once it exists, a reload adds email, organization and plan", async () => {
+  await check("the pool's file is absent: the cards name the accounts alone; once it exists, the hub's next look adds email, organization and plan", async () => {
     const one = page.locator('[data-account="max-1"]');
     assert((await one.locator("header").innerText()).split("\n")[0] === "max-1", "the card names more than the account before the file");
     assert(!(await page.getByLabel("Usage at a glance").innerText()).includes("example.test"), "an email shows without the file");
     await page.screenshot({ path: join(OUT, "3-labels-before-desktop.png") });
     writeFileSync(poolFile, poolLines);
+    await office!.restartHub();                // the hub looks at the file at its start, then every minute
+    paired.errors.length = 0;                  // the restart refused the open feed once
     await page.reload();
-    await one.waitFor({ timeout: 10_000 });
+    await one.waitFor({ timeout: 15_000 });
+    await one.locator(".ident").waitFor({ timeout: 15_000 });   // the first look is asynchronous: the label follows the card
     const head = await one.locator("header").innerText();
     assert(/max-1\s*·\s*ada@example\.test\s*·\s*Team\s*·\s*Max 5x/.test(head), `max-1 header: ${head}`);
     const two = await page.locator('[data-account="max-2"] header').innerText();

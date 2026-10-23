@@ -46,8 +46,8 @@ const EMPTY: ReadonlyMap<string, AccountProfile> = new Map();
 const same = (a: ReadonlyMap<string, AccountProfile>, b: ReadonlyMap<string, AccountProfile>) => JSON.stringify([...a]) === JSON.stringify([...b]);
 
 export type PoolProfiles = {
-  current(): ReadonlyMap<string, AccountProfile>;       // what the last look found; never reads, never waits
-  refresh(): Promise<boolean>;                           // look at the file again (when it changed); true when the profiles changed
+  current: () => ReadonlyMap<string, AccountProfile>;    // what the last look found; never reads, never waits
+  refresh: () => Promise<boolean>;                        // look at the file again (when it changed); true when the profiles changed
 };
 
 // The profiles of the pool's file, looked at on demand and never in the event loop's way. No path: always empty. A file
