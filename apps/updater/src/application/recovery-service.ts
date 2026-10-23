@@ -9,7 +9,8 @@ import {
   runRollback, timingOf,
 } from "./apply-steps.ts";
 import type {
-  AlertSink, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper, UpdateStore,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager,
+  Sleeper, UpdateStateSink, UpdateStore,
 } from "./ports.ts";
 
 export type RecoverOutcome =
@@ -25,29 +26,47 @@ export type RecoverOutcome =
 export class RecoveryService {
   readonly #p: {
     services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
-    installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
+    alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    state: UpdateStateSink; soakMinutes: number;
   };
 
   constructor(p: {
     services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
-    installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
+    alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    state: UpdateStateSink; soakMinutes: number;
   }) {
     this.#p = p;
   }
 
   async recover(): Promise<RecoverOutcome> {
-    const { services, probe, backup, revocations, hold, installer, store, clock, sleeper, alerts } = this.#p;
+    const {
+      services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts,
+      state, soakMinutes,
+    } = this.#p;
     const timing = timingOf(this.#p.timing);
-    const deps: ApplyDeps = { services, probe, backup, revocations, hold, installer, store, clock, sleeper, alerts };
+    const deps: ApplyDeps = {
+      services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts,
+      state, soakMinutes,
+    };
     const lock = store.tryLock();                   // §6.6: whatever runs next takes the apply lock first
     if (lock === null) return { kind: "busy" };
     try {
       const open = store.openUpdate();
-      if (open === null) return { kind: "nothing_open" };
+      if (open === null) {
+        // The lock in hand and nothing open: no apply is standing, so a mark still on disk is the window a dead
+        // process left between its record's end and the mark's own removal (§5). It comes off here, or the
+        // recovery unit — which runs only while the mark exists — would run forever with nothing to do.
+        applying.clear();
+        return { kind: "nothing_open" };
+      }
       const layout = installer.layout();
       const current = layout.method === "updater" && layout.current !== null ? parseVersion(layout.current) : null;
       if (current === null) {
-        alerts.raise("update_unknown_record", `an open record at ${formatVersion(open.target)} with no current Version`);
+        if (store.firstAlert(open.id, "update_unknown_record", clock.now())) {    // one Alert per record, not one per run
+          alerts.raise("update_unknown_record", `an open record at ${formatVersion(open.target)} with no current Version`);
+        }
         return { kind: "unknown_record", detail: "no current Version to recover around" };
       }
       const decision = decide({
@@ -59,7 +78,7 @@ export class RecoveryService {
       const running = services.services();
       switch (decision.value.act) {
         case "nothing":
-          alerts.raise("update_unknown_record", decision.value.unknown);
+          if (store.firstAlert(open.id, "update_unknown_record", clock.now())) alerts.raise("update_unknown_record", decision.value.unknown);
           return { kind: "unknown_record", detail: decision.value.unknown };
         case "abandon":
           // Nothing swapped: the old units back if the swap had begun, the hold off, the services on the old
@@ -69,10 +88,10 @@ export class RecoveryService {
         case "continue_apply":
         case "judge_health":
           // The swap finished (or the services are up, or will be): the same walk from the starts, judged against
-          // a fresh baseline and a fresh deadline.
-          return await continueAfterSwap(ctx, { running, baseline: null });
+          // the baseline the record carries when it has one — a boot apply's own (§6.7) — or a fresh one.
+          return await continueAfterSwap(ctx, { running, baseline: open.judgeBaseline ?? null });
         case "continue_rollback":
-          return await runRollback(ctx, { running, cause: "recovered mid-rollback", baseline: null });
+          return await runRollback(ctx, { running, cause: "recovered mid-rollback", baseline: open.judgeBaseline ?? null });
         case "finish_commit":
           return await runCommit(ctx);
       }

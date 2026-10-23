@@ -40,6 +40,10 @@ export const SendBody = z.object({
   // Set only by the phone's Send again (ADR-0011) of a message to the manager the queue gave up: queued once more, as a
   // new attempt. A plain repeat, the phone's status check included, is a read and never queues another copy.
   again: z.exactOptional(z.boolean()),
+  // RL10 (updates design §11.5): the hub store this device saw before its first attempt of this Command, from the
+  // Morndo-Store header of an answer. A hub restored from another database — another store — answers it "uncertain"
+  // and never types it (S5). Absent from an older app, or a record written before any answer: as before.
+  hubStore: z.exactOptional(z.uuid()),
 });
 // The principal's cancel of one of his messages to the manager still waiting in the fleet's delivery queue (ruling 83).
 export const CancelBody = z.object({ requestId });

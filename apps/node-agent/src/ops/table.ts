@@ -23,6 +23,7 @@ import { nodeOpener, relayRef } from "./node-files.ts";
 import { paneOps, type GuardInput } from "./pane-ops.ts";
 import { transcriptOps } from "./transcript-ops.ts";
 import type { UploadInbox } from "./upload-inbox.ts";
+import { updateOps, type CommandRunner } from "./update-ops.ts";
 import { worktreeOps } from "./worktree-ops.ts";
 
 export type OpsDeps = {
@@ -41,6 +42,7 @@ export type OpsDeps = {
   deliverer: () => Deliverer;                              // late: made from the executor this table goes into
   send: (req: Request) => Promise<Reply>;                  // late: that executor (lane.stop's /exit and its answer)
   laneWaits?: Partial<LaneWaits>;
+  runCommand?: CommandRunner;                              // update.apply's start, faked in tests (update-ops.ts)
 };
 
 export function claudeDir(home: string): string { return join(home, ".claude"); }
@@ -84,5 +86,6 @@ export function buildOps(d: OpsDeps): OpTable {
     ...worktreeOps({ repoRoots: policy.repoRoots, home: config.home, stateDir: paths.stateDir }),
     ...deliveryOps({ deliverer: d.deliverer, panes: d.panes, policy }),
     ...memoryOps({ root: paths.memoryDir, skillDirs: skillDirsOf(policy.memory.skillDirs, config.home) }),
+    ...updateOps({ home: config.home, ...(d.runCommand ? { run: d.runCommand } : {}) }),
   };
 }

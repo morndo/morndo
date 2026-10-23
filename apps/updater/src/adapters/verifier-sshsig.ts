@@ -6,7 +6,7 @@
 // RFC 8709 for the ssh-ed25519 key and signature encodings. The exact signed bytes — "SSHSIG", then namespace,
 // reserved, hash algorithm and the message's SHA-512, each as an SSH string, and no version field — were also
 // checked live against `ssh-keygen -Y sign` output (apps/updater/test/verifier-sshsig.test.ts).
-import { createHash, createPublicKey, verify } from "node:crypto";
+import { createHash, createPublicKey, verify, randomBytes } from "node:crypto";
 import { createReadStream } from "node:fs";
 import type { SignatureFact, Verifier } from "../application/ports.ts";
 
@@ -144,3 +144,7 @@ export function fingerprintOfPublicKeyLine(line: string): string {
   if (field === "" || !BASE64.test(field)) throw new Error("not an OpenSSH public key line");
   return fingerprintOf(Buffer.from(field, "base64"));
 }
+
+// The control plane's own attempt id (updates §5.4, PR 6b): 16 random bytes, base64url, the fleet's own shape. Here
+// because this module is the updater's one door to node:crypto (architecture test, §4.7).
+export const randomAttemptId = (): string => randomBytes(16).toString("base64url");

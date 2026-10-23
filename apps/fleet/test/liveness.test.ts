@@ -55,7 +55,8 @@ describe("liveness", () => {
     await vi.waitFor(() => expect(seen.map(e => e.t)).toEqual(["status", "inventory", "health"]));
     // An agent that sends no session state (one from before it): the fleet reads both as null (fleet clients §5).
     expect(seen[1]).toEqual({ t: "inventory", node: "pc", body: { panes: [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/work/api", status: null, pid: null }], invVersion: 2 } });
-    expect(fleet.connections.list()).toEqual([{ name: "pc", status: "online", health: expect.objectContaining({ load1: 1.25 }), agent: "test-agent/1", commit: null }]);
+    expect(fleet.connections.list()).toEqual([{ name: "pc", status: "online", health: expect.objectContaining({ load1: 1.25 }), agent: "test-agent/1", commit: null,
+      proto: expect.any(Array), update: null }]);
   });
 });
 

@@ -58,11 +58,11 @@ describe("errors and keys", () => {
   it("the side-effecting ops carry keys, keystrokes don't", () => {
     expect([...KEYED_OPS].sort()).toEqual([
       "connections.narrow", "connections.priority", "connections.revoke", "connections.role",
-      "file.put", "job.notice", "lane.start", "lane.stop", "memory.sync", "pane.send", "worktree.add",
+      "file.put", "job.notice", "lane.start", "lane.stop", "memory.sync", "pane.send", "update.apply", "worktree.add",
     ]);
     expect(KEYED_OPS.has("pane.keys")).toBe(false);
     expect(KEYED_OPS.has("job.cancel")).toBe(false);
-    expect(OP_NAMES).toHaveLength(27);
+    expect(OP_NAMES).toHaveLength(28);
     expect(Object.keys(OP_ARGS).sort()).toEqual([...OP_NAMES].sort());
     expect(Object.keys(OP_RESULTS).sort()).toEqual([...OP_NAMES].sort());
   });
@@ -238,6 +238,7 @@ describe("op results (what a node reports: shape)", () => {
       "memory.sync": { committed: true, written: 2, removed: 1, skillDirs: ["/home/u/.claude/skills"], conflicts: [] },
       "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
       "connections.priority": { ok: true }, "connections.role": { ok: true }, "connections.revoke": { ok: true }, "connections.narrow": { ok: true },
+      "update.apply": { accepted: true },
     };
     for (const op of OP_NAMES) expect(z.safeParse(OP_RESULTS[op], results[op]).success, op).toBe(true);
     expect(z.safeParse(OP_RESULTS["pane.send"], { problem: "exploded", typedAt: 1 }).success).toBe(false);

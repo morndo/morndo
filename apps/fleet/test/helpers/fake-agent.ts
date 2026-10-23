@@ -45,6 +45,7 @@ export const validResult = (op: string, node: string): unknown => {
     "delivery.cancel": { delivery: { id: "hub:fake", node: node || "node", target: { lane: "fake" }, state: "given_up", queuedAt: 1, notAfter: 2, why: "cancelled" } },
     "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
     "connections.priority": { ok: true }, "connections.role": { ok: true }, "connections.revoke": { ok: true }, "connections.narrow": { ok: true },
+    "update.apply": { accepted: true },
   };
   return Object.hasOwn(results, op) ? results[op as keyof OpResult] : {};
 };

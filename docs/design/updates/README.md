@@ -320,6 +320,7 @@ Recovery runs from `good`, the last committed Version, because that code has pas
 Claude Code's promise is that the next start runs the new Version [U1]. For services the next start is usually a reboot. On Linux, `morndo-update-boot.service` runs before the services when a Version is staged, automatic updates are on and there is no pin:
 - It takes the apply lock, fetches the Feed again and runs `admit` (withdrawn, halted, bad here). Without a network it doesn't apply.
 - **Only on a machine that is its own control plane.** A node can't know at boot whether its control plane still runs the target or has halted the Rollout (RL11, RL12): its agent isn't connected yet. So a node applies through the tick, once its agent has connected and the fleet's view is less than 10 minutes old.
+- Skew (section 7) still applies, but the fleet isn't running yet. The control plane's updater keeps the node list from its last successful read of `GET /v1/nodes` (`fleet-nodes.json` in its state directory), and the boot apply decides on that list if it is at most 10 minutes old. With no such list, it applies nothing and leaves the Version to the tick, which runs once the fleet answers.
 - It records the same marks as section 6.2 (`backing_up`, `swapping`, `starting`), writes `hold.json` when RL9 applies, then backs up and swaps while nothing runs: a safe point by construction.
 - The services then start on the new Version. The recovery unit, ordered after them, judges health and commits or rolls back as in section 6.6. With nothing running to read a baseline from, the baseline is the health recorded at the last commit.
 
@@ -333,7 +334,7 @@ launchd has no ordering, so on macOS the staged Version applies at the first saf
 2. Its commit starts the soak: 30 minutes by default.
 3. Each node applies once the control plane runs the target or newer (RL11), the Rollout isn't halted (RL12), the soak has passed, and after a random delay of up to 15 minutes, so two nodes rarely restart at once.
 
-A node learns the control plane's Version and the Rollout's state from the fleet's `welcome` and a new `rollout` event (optional fields: protocol 1 still parses). It reports its own update state in its `health` message (optional fields too).
+A node learns the control plane's Version and the Rollout's state from the fleet's `welcome` (optional fields, so an agent that predates them still parses the frame) and from the `rollout` message the fleet sends on every change — but only once the node announced the `rollout` capability in its hello's caps, because an agent closes an unknown frame type (1008) rather than skipping it: the fleet sends the message only to agents that asked for it. It reports its own update state in its `health` message (optional fields too).
 
 **Skew rules.**
 
@@ -344,6 +345,12 @@ A node learns the control plane's Version and the Rollout's state from the fleet
 | web app and hub | The same Release. The hub accepts the previous Release's web app: the protocol package only adds optional fields from one Release to the next, and removing one takes two Releases, as the agent protocol does. | An open tab sees `updated` and offers a reload (below). |
 
 **Changing the agent protocol takes two Releases.** Release A speaks N and N+1. Release B drops N. The control plane defers B, naming the nodes, until every joined, non-revoked node reports A or newer (RL11). `manifest.protocol` carries each Release's range, so the check needs no knowledge of what changed.
+
+**The control plane's own node never counts.** Its node agent is updated in the control plane's own install, so the skew gate leaves out the node this machine's agent reports as its name; otherwise no Release that drops a protocol could ever apply on a control plane that runs its own node. It does so only while that agent is alive and online under the name (its status file's pid answers, and the fleet admitted its key): a file an exited or refused agent left behind excludes nobody, because the name may since belong to another machine. At boot the agent has not started yet, so a protocol-dropping Release that a control plane's own node is the only one to hold is not applied by the boot unit; it waits (exit 75, `skew_blocked`) and the tick applies it once the agent is online. That is the safe side, and a Release that drops a protocol is rare. The status file is writable by the same user, like every file the services trust (ADR-0004's limit; the threat model above): a process of the user that rewrites it can take a node out of the gate, as it could edit the installed tree.
+
+**An offline node still counts.** `GET /v1/nodes` reports an offline node's protocols from its last hello, so the control plane's skew gate counts a node that is switched off. A joined node that never said its protocols holds the control plane too, named as unknown in the hold and its alert. Revoking a node that will never come back lets a Release past it.
+
+**After the control plane rolls back.** The control plane's rollback, the principal's included, announces its own attempt id and halts the Version it left. Nodes that already took that Version now run above the control plane. Nothing moves them by itself: the fleet lists them as `nodesAhead`, refuses every `update.apply` to them, and their ticks take nothing lower. They wait until the control plane runs that Version again, or until the owner rolls each one back on the node with `morndo update --rollback`.
 
 **A bad Release.** When one machine rolls back, the Rollout halts and no other machine takes that Version automatically (RL12). The hub shows which machine failed and which check. `morndo update --resume-rollout <version>` or a newer Release continues. The maintainers can withdraw a Release in the Feed: machines stop being offered it, and machines already on it are told and stay (RL2). The fix goes out as a new Release.
 
@@ -573,6 +580,8 @@ ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n re
 | Network attacker | TLS and signatures |
 | A crafted archive (paths with `..`, absolute paths, links outside, devices, setuid) | Section 6.1, step 4; and only after RL1 |
 | A same-user process edits the installed tree | Not prevented: the node is not an isolation boundary (ADR-0012). `morndo doctor` detects it against the signed file list. Read-only modes stop accidents only. |
+| A same-user process adds or cuts lines in `revoked.log` | Accepted, the same residual: the journal is not signed. Such a process can revoke or un-revoke in the database itself as well. |
+| A same-user process writes `rollback-confirmed` itself | Accepted, the same residual: it lets the rollback unit run without the typed word, which that process could have typed itself (`morndo update --rollback` takes it from any process of the user). The file is consumed on use, valid 10 minutes, for the running Version only, and voided when the unit fails to start. |
 | A downgrade through the Channel or a withdrawal | RL2 |
 | "Update now" used to push something | It is a principal Command with step-up; the operation names a Version only; the node still applies RL1 and RL2; a node's policy can deny `update.apply`. |
 
@@ -611,7 +620,13 @@ Only in a rollback that needs it (RL8), or by the principal's `--allow-downgrade
 - **Hub.** A restored database forgets the sends it typed after the Backup. So the hub's database gets a store id, renewed by every restore, and every answer names it. A device keeps the store it last saw and stamps each Command with it before the first attempt. The hub answers a Command stamped with another store, whose request id it doesn't hold, as `uncertain` and never types it (RL10). The device's clock plays no part (FL13). The one false `uncertain` is a Command first sent in the moments before the device heard of the new store, which errs the safe way: the principal checks and sends again.
 - **Node.** A restored database starts a new store, and anything in doubt stays `uncertain` (FL7, the store sequence).
 - **Fleet.** During a probation that may restore, the fleet acknowledges no hook events, so the agents keep them and send them again (RL9). After a manual restore post-commit, hook events acknowledged since the Backup are gone; the confirmation says so.
-- **Revocations, in every service.** A revocation (`morndo revoke`, `morndo agent-token revoke`, `morndo-fleet node revoke`, or the same from the app) is written to its database and appended, synced, to a journal beside it (`revoked.log`). Each service applies the journal at every start, idempotently. A restored database therefore can't bring back a revoked device, agent token or node (AC4, FL4), whoever restored it and however old the Backup.
+- **Revocations, in the hub and the fleet.** A revocation (`morndo revoke`, `morndo agent-token revoke`, `morndo-fleet node revoke`, or the same from the app) is appended, synced, to a journal beside its database (`revoked.log`) before the database write. Each service applies the journal at every start, idempotently. A restored database therefore can't bring back a revoked device, agent token or node (AC4, FL4), whoever restored it and however old the Backup. Details:
+  - A node keeps its name across a revoke and a join again, so a node's entry names the enrolment it revoked (the join that made its key). A later enrolment under the same name is never revoked by an older entry.
+  - A line the journal cannot read is skipped and reported (the fleet raises a `journal_unreadable` Alert; the hub logs it). The rest still applies, and the service starts. A last line cut short by a crash is skipped quietly, and the next append cuts it off.
+  - Past 1 MiB, a start rewrites the journal with one entry per thing revoked.
+  - The updater lets a restore drop only the revocations the journal will apply again: those the Version going back in applies journals for (a Version from before the journals applies none), and for a node, only the enrolment the Backup brings back.
+  - The connections store has no journal: its revoked secrets and Connections still refuse a restore.
+- **The hub's store id after a restore.** The updater's restore removes the store row from the copy before it renames it in, so the hub's next start makes a new store id even when the file lands on the inode it had. A file found under another inode (a restore by hand) gets one too.
 
 ### 11.6 Configuration files
 

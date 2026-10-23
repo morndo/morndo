@@ -1,0 +1,12 @@
+# The boot apply (design §5, §6.7): a staged Version is applied before the services start, so they start on
+# the new one — ordered Before them only, never their parent, and it runs from `current`, resolved once.
+[Unit]
+Description=Apply a staged Morndo update before the services start
+Before=morndo-hub.service morndo-fleet.service morndo-node.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/morndo-update update boot
+
+[Install]
+WantedBy=default.target

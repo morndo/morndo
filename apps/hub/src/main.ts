@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { DatabaseUnreadable, NotLocalDisk, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
+import { DatabaseUnreadable, NotLocalDisk, RevocationJournal, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, productStamp, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { shutdownStack, type Shutdown } from "./adapters/shutdown.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
@@ -14,7 +14,11 @@ import { ReadingService } from "./application/reading-service.ts";
 import { PresenceService } from "./application/presence-service.ts";
 import { NotificationService } from "./application/notification-service.ts";
 import { loadOrCreateVapid, pushSender } from "./adapters/webpush.ts";
-import { loadOrCreateIdentity } from "./adapters/identity.ts";
+import { loadOrCreateIdentity, writeIdentityPub } from "./adapters/identity.ts";
+import { fleetForUpdates } from "./adapters/fleet-updates.ts";
+import { principalSigner } from "./adapters/principal-signer.ts";
+import { updaterCli } from "./adapters/updater-cli.ts";
+import { UpdatesService } from "./application/updates-service.ts";
 import { passkeys } from "./adapters/passkeys.ts";
 import { denyConfigFromEnv, denyConfigWithClaudeDir, denyRoots, paneLock } from "@morndo/node-ops";
 import { CLIENT_API } from "@morndo/protocol";
@@ -47,6 +51,7 @@ import { gitAncestry, gitHasCommit } from "./adapters/git-ancestry.ts";
 import { MergeLiveness } from "./application/merge-liveness.ts";
 import { NodeBuilds } from "./application/node-builds.ts";
 import { AgentAccess } from "./application/agent-access.ts";
+import { applyRevocationJournal, raiseUnreadable } from "./application/revocations.ts";
 import { UsageService } from "./application/usage-service.ts";
 import { JobsService } from "./application/jobs-service.ts";
 import { AlertsService, SEEN_MARK } from "./application/alerts-service.ts";
@@ -107,10 +112,10 @@ const crash = exitOnCrash(log);
 // `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
 // on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
 if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
-// `morndo update` and `morndo doctor` (design §4.8) run here too, before the hub's settings and database are read:
-// they need neither, and a machine with no hub still updates. The hub runs the updater's program, as it runs the
-// engines CLI, and leaves with its exit code.
-if (process.argv[2] === "update" || process.argv[2] === "doctor")
+// `morndo update`, `morndo doctor` and `morndo install` (design §4.8, §10.3) run here too, before the hub's
+// settings and database are read: they need neither, and a machine with no hub still updates and installs. The
+// hub runs the updater's program, as it runs the engines CLI, and leaves with its exit code.
+if (process.argv[2] === "update" || process.argv[2] === "doctor" || process.argv[2] === "install")
   await exitAfterOutput(await runUpdaterProgram(process.argv.slice(2)));
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
 const EXIT_DATABASE_FROM_FUTURE = EXIT_CONFIG;          // see openStore below
@@ -130,7 +135,21 @@ function openStore(dir: string): Store {
   }
 }
 const identity = loadOrCreateIdentity(config.dataDir);
-const access = new AccessService(store, passkeys(config));
+// The same key where the fleet reads it (PR 6c round 2, R2): every start rewrites identity.pub, so a production
+// fleet without a pinned principalKey finds the hub's key without anyone installing it by hand.
+writeIdentityPub(config.dataDir, identity.publicKeyRaw);
+// RL10 (updates design §11.5): every revocation is journaled to revoked.log beside morndo.db before its database
+// write, and every start applies the journal again, so a database restored from an older copy brings no revoked
+// device or agent token back.
+const journal = new RevocationJournal(join(config.dataDir, "revoked.log"));
+const access = new AccessService(store, passkeys(config), Date.now, journal);
+const agents = new AgentAccess(store, config.managerWindow, Date.now, journal);
+const reapplied = applyRevocationJournal(journal, { access, agents });
+if (reapplied.applied > 0) log.info(`re-applied ${reapplied.applied} revocations from revoked.log`);
+// A bad line is reported and skipped, never a refusal to start: logged here, and an urgent Alert once `serve` has its
+// Alerts (raiseUnreadable).
+for (const b of reapplied.bad) log.error(`revoked.log line ${b.line} skipped, not a revocation entry: ${b.why}`);
+if (journal.compact()) log.info("revoked.log compacted to one entry per revocation");
 const [cmd = "serve", ...args] = process.argv.slice(2);
 const when = (t: number | null) => (t === null ? "-" : new Date(t).toLocaleString());
 // The console commands' own output, for the person at the box (a pairing link must show as it is): not a log.
@@ -179,7 +198,9 @@ switch (cmd) {
     shutdown.onStop(() => jobs.close());
     // The fleet's alerts in the app; an urgent new one is a push (counts only), told once the notifications exist below.
     let alertPush: (urgent: boolean) => void = () => {};
-    const alerts = config.fleetSocket ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
+    // A hub without a fleet has Alerts only when its own journal had a line it could not read (the start's, above).
+    const alerts = config.fleetSocket || reapplied.bad.length > 0 ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
+    if (alerts !== null) raiseUnreadable(alerts, reapplied.bad, Date.now());
     const fleet = config.fleetSocket ? await running(openFleet(config.fleetSocket, files, jobs, alerts, shutdown)) : null;
     const ports: HubPorts = fleet?.ports ?? legacyPorts(config, { files });
     // Engine lanes on this machine, only when MORNDO_ENGINE_SESSIONS names their registry. Off otherwise: nothing is read.
@@ -276,6 +297,18 @@ switch (cmd) {
     const engines = config.enginesBin ? new EnginesService({ cli: enginesCli(config.enginesBin), store, policy: () => access.policy() }) : null;
     // The connections program, named like the engines CLI. A private home only, and never the engines program.
     const connections = openConnections(access.policy.bind(access));
+    // Updates §8.1 (PR 6c): every machine's Version, the owner's one screen. The control plane's own updater CLI runs
+    // beside the hub, but without a fleet there is no Rollout to move and no node to command, so the page stays off.
+    // The fleet's `rollout` events keep the service's last word on where the Rollout stands, for a view the fleet
+    // can't answer (its own subscription, like the runs' and the deliveries').
+    const updatesService = fleet ? new UpdatesService({
+      fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: principalSigner(identity), store,
+      policy: () => access.policy(), build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
+    }) : null;
+    const stopRolloutEvents = fleet && updatesService
+      ? fleet.client.events(e => { if (e.t === "rollout") updatesService.onRolloutEvent(e.body); })
+      : null;
+    if (stopRolloutEvents) shutdown.onStop(stopRolloutEvents);
     // Said once at start: a CLI older than the page needs, or one that can't run (the page says it again when opened).
     engines?.ready().then(why => { if (why) log.warn(`engines: ${why}`); }, e => log.warn("engines: the CLI can't run", e));
     // ADR-0015: the board, changed by the principal (a Command) and by the agents (their tokens, issued below).
@@ -298,7 +331,6 @@ switch (cmd) {
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
-    const agents = new AgentAccess(store, config.managerWindow);
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
     const memoryStore = openMemory(config.dataDir);
@@ -346,9 +378,9 @@ switch (cmd) {
     shutdown.onStop(() => transcription.close());
     void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
     const http = startHttp({
-      config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
+      config, identity, access, observation, steering, escalations, remote, store, files, inbox, reading, presence,
       push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
-      transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
+      transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) }, updatesService,
     });
     shutdown.onStop(async () => { await http.idle(); await http.close(); });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
@@ -429,7 +461,7 @@ switch (cmd) {
   }
   // ADR-0015: the agents' credentials for the board, issued here (the trust root), shown once, kept as a hash.
   case "agent-token": {
-    const agents = new AgentAccess(store, config.managerWindow);
+    // `agents` is the one the start already made, with the revocation journal (RL10).
     const [sub, ...rest] = args;
     if (sub === "new") {
       // `--role R` and the name, in either order: the role's value is never taken as the name.

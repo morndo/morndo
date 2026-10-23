@@ -5,12 +5,13 @@ import { request } from "node:http";
 
 export type SocketAnswer = { status: number; body: unknown };
 
-export function socketRequest(socketPath: string, method: string, path: string, body?: unknown, timeoutMs = 3000): Promise<SocketAnswer | null> {
+export function socketRequest(socketPath: string, method: string, path: string, body?: unknown, timeoutMs = 3000,
+  extraHeaders: Record<string, string> = {}): Promise<SocketAnswer | null> {
   return new Promise(resolve => {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const req = request({
       socketPath, method, path, timeout: timeoutMs,
-      headers: payload === undefined ? {} : { "content-type": "application/json", "content-length": Buffer.byteLength(payload) },
+      headers: { ...extraHeaders, ...(payload === undefined ? {} : { "content-type": "application/json", "content-length": Buffer.byteLength(payload) }) },
     }, res => {
       const chunks: Buffer[] = [];
       res.on("data", (c: Buffer) => chunks.push(c));

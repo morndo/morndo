@@ -1,0 +1,18 @@
+# The hub's user unit (design §5): rendered from a Version's units/ at install and at every swap, so it names
+# no Version's own path — the launcher at %h/.local/bin/morndo resolves `current` once, at start. Specifiers
+# per systemd.unit(5) (systemd 255, the design's U18): %h is the user's home.
+[Unit]
+Description=Morndo hub
+
+[Service]
+# The hub works through this machine's fleet (fleet-core design §16): its client socket at the fleet's default path.
+# Environment= expands %h (systemd.exec(5), systemd 255: "Specifier expansion is performed").
+Environment=MORNDO_FLEET_SOCKET=%h/.local/state/morndo-fleet/fleet.sock
+ExecStart=%h/.local/bin/morndo serve
+Restart=on-failure
+RestartSec=5
+# Exit 78 is "fix the setup, don't restart" in every Morndo service (EX_CONFIG, §8.4).
+RestartPreventExitStatus=78
+
+[Install]
+WantedBy=default.target

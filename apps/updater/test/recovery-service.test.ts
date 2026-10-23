@@ -35,6 +35,7 @@ const killedApply = async (w: ApplyWorld, arm: (die: Die) => void): Promise<void
   w.die.after = null;
   expect(interrupted, "the apply died mid-step").toBe(true);
   expect(w.store.openUpdate(), "the record stands open at its mark").not.toBeNull();
+  expect(w.applying.present(), "the applying mark stands with it (§5)").toBe(true);
 };
 
 // One service never answers at the target: the health judge's no_report, on the apply's road and recovery's alike.
@@ -49,6 +50,7 @@ const endsWhole = async (w: ApplyWorld, version: string, state: string): Promise
   expect(w.current()).toBe(version);
   for (const path of Object.values(w.dbPaths)) expect(quickCheck(path)).toBe("ok");
   expect(holdText(w.holdPath)).toBeNull();
+  expect(w.applying.present(), "the applying mark left with the record's end (§5)").toBe(false);
   expect(w.store.openUpdate()).toBeNull();
   expect(w.store.recentUpdates(1)[0]!.state).toBe(state);
   for (const s of w.services.services()) {
@@ -87,6 +89,19 @@ describe("the recovery unit (§6.6, §13)", () => {
     expect(await w.recoverWithLockHeld().recover()).toEqual({ kind: "busy" });
     expect(w.tape.length).toBe(tapeAtKill);
     expect(w.store.openUpdate(), "the record still stands open").not.toBeNull();
+    expect(w.applying.present(), "and its mark with it").toBe(true);
+  });
+
+  it("clears a mark a dead process left behind with no open record", async () => {
+    // The record closes before the mark comes off (§5's finish); a crash in that window leaves nothing open under
+    // a mark, and the recovery unit — which runs only while the mark exists — would run forever. The next recovery
+    // holds the lock, finds nothing to do, and takes the mark off.
+    const w = await buildApplyWorld(scratch);
+    await killedApply(w, die => { die.on = { op: "stop", call: 1 }; });
+    expect(await w.recover().recover()).toEqual({ kind: "abandoned" });
+    w.applying.set("upd-left-behind");
+    expect(await w.recover().recover()).toEqual({ kind: "nothing_open" });
+    expect(w.applying.present()).toBe(false);
   });
 
   for (const mark of UPDATE_MARKS) {
@@ -161,6 +176,7 @@ describe("the recovery unit (§6.6, §13)", () => {
     expect(w.alerts.raised.some(x => x.kind === "update_unknown_record" && x.detail.includes("format 2"))).toBe(true);
     expect(w.tape.length, "nothing was done to the machine").toBe(tapeAtKill);
     expect(w.store.openUpdate(), "the record stands untouched").not.toBeNull();
+    expect(w.applying.present(), "and its mark with it: a newer build must still find it").toBe(true);
     expect(w.current()).toBe(A);
   });
 
@@ -180,6 +196,11 @@ describe("the recovery unit (§6.6, §13)", () => {
     expect(out.detail).toContain("teleporting");
     expect(w.alerts.raised.some(x => x.kind === "update_unknown_record" && x.detail.includes("teleporting"))).toBe(true);
     expect(w.store.openUpdate(), "the record stands untouched").not.toBeNull();
+    expect(w.applying.present(), "and its mark with it").toBe(true);
+    // the recovery unit runs again every 5 minutes while the mark stands: the record is one Alert, not one a run
+    await expect(w.recover().recover()).resolves.toMatchObject({ kind: "unknown_record" });
+    await expect(w.recover().recover()).resolves.toMatchObject({ kind: "unknown_record" });
+    expect(w.alerts.raised.filter(x => x.kind === "update_unknown_record")).toHaveLength(1);
     expect(w.current()).toBe(A);
   });
 
@@ -189,11 +210,11 @@ describe("the recovery unit (§6.6, §13)", () => {
     const w = await buildApplyWorld(scratch);
     await killedApply(w, die => { die.on = { op: "swap" }; });
     expect(w.current()).toBe(A);
-    expect(w.tape).toContain(`renderUnits:${B}`);
+    expect(w.tape.some(t => t.startsWith(`renderUnits:${B}`))).toBe(true);
     const at = w.tape.length;
     expect(await w.recover().recover()).toEqual({ kind: "abandoned" });
     const after = w.tape.slice(at);
-    const render = after.indexOf(`renderUnits:${A}`);
+    const render = after.findIndex(t => t.startsWith(`renderUnits:${A}`));
     expect(render, "A's units rendered again").toBeGreaterThan(-1);
     expect(render).toBeLessThan(after.findIndex(t => t.startsWith("start:")));
   });

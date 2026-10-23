@@ -4,13 +4,13 @@
 // Sleeper and the Clock, so the machine's walls are the only walls there are.
 import {
   DATABASES, HEALTH_DEADLINE_MS, PROBATION_MS, advance, beginStep, formatVersion, holdsWrites, judgeHealth,
-  judgeProbation, mayRestore, rollbackRestores, safeToApply,
+  judgeProbation, mayRestore, parseVersion, rollbackRestores, safeToApply,
   type BackupRecord, type DatabaseName, type HealthReport, type MigrationStep, type SafePointReport, type SafeWait,
-  type Update, type UpdateMark, type UpdateService, type UpdateState, type Version,
+  type Update, type UpdateMark, type UpdateService, type UpdateState, type Version, type Window,
 } from "@morndo/domain";
 import type {
-  AlertSink, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper, StoredUpdate,
-  UpdateStore,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager,
+  Sleeper, StoredUpdate, UpdateStateSink, UpdateStore,
 } from "./ports.ts";
 
 // What the tests kill with: an interruption, not a failure. Every catch below lets it through — a dead process
@@ -22,10 +22,18 @@ export class ApplyInterrupted extends Error {
   }
 }
 
-// The ports every shared step needs; the apply and the recovery services each hold their own view of these.
+// The ports every shared step needs; the apply and the recovery services each hold their own view of these. The
+// state sink carries PR 6's Rollout word out (§4.5, §7): every ending writes state.json — the commit with its soak,
+// a rollback with the attempt id the fleet holds its halt against — and the fleet itself reads the file. There is
+// no fleet port here: the updater has no write door into the fleet (§4.3), so nothing to call and nothing to
+// retry; a word the fleet never took is a word it still owes itself, on its own next read.
 export type ApplyDeps = {
   services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
-  installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper; alerts: AlertSink;
+  applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
+  alerts: AlertSink;
+  state: UpdateStateSink;
+  /** The soak this machine's settings name (§4.5); the composition root has already applied the default. */
+  soakMinutes: number;
 };
 
 // §6.2's walls: the drain's patience, the polls, §6.4's health deadline and probation.
@@ -47,7 +55,8 @@ export const timingOf = (t?: Partial<ApplyTiming>): ApplyTiming => ({
 export type StepCtx = { deps: ApplyDeps; timing: ApplyTiming; u: StoredUpdate };
 
 const withKept = (u: StoredUpdate, next: Update): StoredUpdate =>
-  ({ ...next, format: u.format, startedAt: u.startedAt, doneMarks: u.doneMarks });
+  ({ ...next, format: u.format, startedAt: u.startedAt, doneMarks: u.doneMarks, judgeBaseline: u.judgeBaseline,
+    backupOf: u.backupOf, attempt: u.attempt });
 
 // Records the mark before the step it names runs. No-op when the record already stands there: a recovery picking
 // up at exactly this mark is in order, not out of it.
@@ -73,6 +82,15 @@ export function moveTo(ctx: StepCtx, state: UpdateState): void {
   if (!moved.ok) throw new Error(`cannot move ${ctx.u.state} to ${state}`);
   ctx.u = withKept(ctx.u, moved.value);
   ctx.deps.store.saveUpdate(ctx.u);
+}
+
+// The attempt's one ending: the record closes, then the `applying` mark comes off (§5) — the recovery unit runs
+// only while the mark exists, so every terminal state takes it along. What keeps the mark is what keeps the record
+// open: a rollback waiting on tmux, and an attempt a dead process left mid-step. The record closes first: a crash
+// in between leaves nothing open under a mark, which the next recovery clears with nothing left to do.
+export function finish(ctx: StepCtx, state: "committed" | "abandoned" | "rolled_back" | "rollback_failed"): void {
+  ctx.deps.store.finishUpdate(ctx.u.id, state, ctx.deps.clock.now());
+  ctx.deps.applying.clear();
 }
 
 // A record that predates its plan (or a hand-made one) plans nothing: no database migrates, nothing is held or
@@ -119,18 +137,27 @@ async function safePointRound(deps: ApplyDeps, running: readonly UpdateService[]
 const blockerNames = (waits: readonly SafeWait[]): string[] =>
   waits.map(w => (w.kind === "in_flight" ? `${w.service}: ${w.blocker}` : w.kind));
 
+// §8.3's window is local hours of the day; the clock answers epoch milliseconds, and the local day's minutes are
+// the Date's own local getters — the one conversion there is, kept where the wait lives.
+const localMinutes = (now: number): number => {
+  const t = new Date(now);
+  return t.getHours() * 60 + t.getMinutes();
+};
+
 // Polls until no service reports work in flight, or the drain's wall passes. Null is the safe point; otherwise the
 // blockers, one line each, for the deferred outcome's own list. Work in flight is never skipped, however urgent the
-// ask: `now` lifts only the attending and window waits, and this walk is never the automatic one.
+// ask: `now` lifts only the attending and window waits. The automatic walk (§8.3's tick) is the only one that waits
+// for its window; attending is always "nobody is" for now — the hub reports no attending signal yet, and the
+// settings step (PR 6) is where that answer comes from.
 export async function waitSafePoint(
-  ctx: StepCtx, running: readonly UpdateService[], o: { now: boolean },
+  ctx: StepCtx, running: readonly UpdateService[], o: { now: boolean; automatic?: boolean; window?: Window | null },
 ): Promise<string[] | null> {
   const deadline = ctx.deps.clock.now() + ctx.timing.drainMs;
   for (;;) {
     const reports = await safePointRound(ctx.deps, running);
     const judged = safeToApply({
-      reports, automatic: false, machineRunsHub: running.includes("hub"),
-      attending: false, window: null, localMinutes: 0, now: o.now,
+      reports, automatic: o.automatic ?? false, machineRunsHub: running.includes("hub"),
+      attending: false, window: o.window ?? null, localMinutes: localMinutes(ctx.deps.clock.now()), now: o.now,
     });
     if (judged.ok) return null;
     if (ctx.deps.clock.now() >= deadline) return blockerNames(judged.error);
@@ -267,8 +294,22 @@ export type RollbackOutcome =
 // rolling_back for the recovery unit to pick up again, with the critical Alert (RL13). A rollback that cannot put
 // the old Version back healthy is the loudest outcome there is, and it stops there: no loop, and the services are
 // left to the service manager (§4.4).
+//
+// One walk, two records. An update's own rollback goes back to preUpdate.current and blames its target; the
+// principal's rollback (§8.1, kind "rollback") is its own Update, whose target IS where it goes and whose blame
+// is the Version it leaves behind — preUpdate.current. Its Backups and its plan are the commit's own, named by
+// the record's backupOf: the update that put the running Version here planned the migrations and took what a
+// restore gives back (§6.5), so its record owns both.
 const revocationsDropped = (db: string, dropped: readonly string[], target: string, cause: string): string =>
   `${db}: restoring its backup would drop the revocation of ${dropped.join(", ")}, made since the backup; ${target} keeps running (${cause})`;
+
+// state.json's own word cap (the wire's label, 200): a cause longer than that is clipped, never refused.
+const clip = (text: string): string => (text.length <= 200 ? text : `${text.slice(0, 199)}…`);
+// A health failure's cause is "service: check" (§6.4); the check's own name is what failedCheck wants.
+const failedCheckOf = (cause: string): string | undefined => /^[\w-]+: ([\w.-]+)$/.exec(cause)?.[1];
+// The record's attempt id (§5.4), when it has one — null is the records written before the field was, and absent
+// is what state.json says of those.
+const attemptOf = (u: StoredUpdate): { attempt: string } | {} => (u.attempt === null ? {} : { attempt: u.attempt });
 
 export async function runRollback(ctx: StepCtx, o: {
   running: readonly UpdateService[];
@@ -278,77 +319,96 @@ export async function runRollback(ctx: StepCtx, o: {
   const { deps } = ctx;
   // A failed rollback is the target failing here all the same: bad on this machine (RL7) and its Rollout halted
   // (RL12) go on record before the alert, so nothing auto-installs it again and the fleet stops it elsewhere.
-  const failed = (reason: string): RollbackOutcome => {
-    deps.store.recordBad(formatVersion(ctx.u.target), deps.clock.now());
-    deps.store.recordHalt(formatVersion(ctx.u.target), reason, deps.clock.now());
+  const blameText = ctx.u.kind === "rollback" ? formatVersion(ctx.u.preUpdate.current) : formatVersion(ctx.u.target);
+  const backText = ctx.u.kind === "rollback" ? formatVersion(ctx.u.target) : formatVersion(ctx.u.preUpdate.current);
+  // §6.5's Backups belong to the update that took them; a rollback-kind record points at their owner.
+  const backupOf = ctx.u.backupOf ?? ctx.u.id;
+  const failed = async (reason: string): Promise<RollbackOutcome> => {
+    deps.store.recordBad(blameText, deps.clock.now());
+    deps.store.recordHalt(blameText, reason, deps.clock.now());
     deps.alerts.raise("update_rollback_failed", reason);
+    // The blamed Version still runs (§6.4: the services are left to the manager); the state says what it is, under
+    // the attempt id this Update began with (§5.4) — the fleet reads the halt here, not from a call.
+    deps.state.write({ state: "rollback_failed", version: blameText, reason: clip(reason), ...attemptOf(ctx.u), at: deps.clock.now() });
     done(ctx, "rolling_back");
-    deps.store.finishUpdate(ctx.u.id, "rollback_failed", deps.clock.now());
+    finish(ctx, "rollback_failed");
     return { kind: "rollback_failed", reason };
   };
   mark(ctx, "rolling_back");
-  const targetText = formatVersion(ctx.u.target);
-  const oldText = formatVersion(ctx.u.preUpdate.current);
   try {
     if (await deps.services.tmuxInAgentUnit()) {
       // §6.5 step 1 (RL13): the tmux server sits inside the agent's unit, so the agent is not stopped and nothing
       // else moves either. The record stays open at rolling_back, never finished: the recovery unit (every
       // 5 minutes) walks this again once tmux no longer sits there.
-      const reason = `tmux inside the node agent's unit; the rollback from ${targetText} waits (${o.cause})`;
+      const reason = `tmux inside the node agent's unit; the rollback from ${blameText} waits (${o.cause})`;
       // The hold is taken again on every visit while the rollback waits: a hold older than 10 minutes is ignored (§5),
       // and the writes a later restore would drop must stay held for as long as that restore may still come (RL9).
-      holdForProbation(deps, o.running, { plan: planOf(ctx.u.migrations), version: targetText });
+      holdForProbation(deps, o.running, { plan: planOf(ctx.u.migrations), version: blameText });
       deps.alerts.raise("update_rollback_waiting", reason);
       return { kind: "rollback_waiting", reason };
     }
     // RL8 and RL10, settled before anything moves: what a migration changed goes back only when the old Version truly
     // cannot open it; a restore with the Backup gone is refused, never forced; and a restore that would bring back a
     // device, agent token or node revoked since the Backup was taken is refused too — the services kept taking
-    // revocations during probation (RL9), and until the revocation journals arrive (PR 5c) those rows live only in
-    // the database a restore would replace. The target keeps running; the principal decides.
+    // revocations during probation (RL9), and what their journals do not hold lives only in the database a restore
+    // would replace (the journal's own ids the adapter already leaves out; §11.5). The target keeps running; the
+    // principal decides.
     const plan = planOf(ctx.u.migrations);
     const restores = rollbackRestores(plan);
     for (const db of restores) {
       const allowed = mayRestore({
-        database: db, restoreOnRollback: plan[db].restoreOnRollback, backupPresent: deps.backup.has(ctx.u.id, db),
+        database: db, restoreOnRollback: plan[db].restoreOnRollback, backupPresent: deps.backup.has(backupOf, db),
       });
-      if (!allowed.ok) return failed(`${db}: ${allowed.error} (${o.cause})`);
-      const dropped = deps.revocations.droppedBy(ctx.u.id, db);
-      if (dropped.length > 0) return failed(revocationsDropped(db, dropped, targetText, o.cause));
+      if (!allowed.ok) return await failed(`${db}: ${allowed.error} (${o.cause})`);
+      const dropped = deps.revocations.droppedBy(backupOf, db, backText);
+      if (dropped.length > 0) return await failed(revocationsDropped(db, dropped, blameText, o.cause));
     }
     await stopServices(deps, o.running);
     // Again now that nothing runs: a revoke that landed between the check above and the stop lives only in the
     // database the restore would replace. Then the target's services start again and the rollback fails loudly.
     for (const db of restores) {
-      const dropped = deps.revocations.droppedBy(ctx.u.id, db);
+      const dropped = deps.revocations.droppedBy(backupOf, db, backText);
       if (dropped.length > 0) {
         await startServices(deps, o.running);
-        return failed(revocationsDropped(db, dropped, targetText, o.cause));
+        return await failed(revocationsDropped(db, dropped, blameText, o.cause));
       }
     }
     // The pair goes back as it was recorded (§6.5 step 2): the units, then the links — current first, then
     // previous, so a crash in between leaves both links on the known-good Version.
-    await deps.services.renderUnits(oldText);
+    await deps.services.renderUnits(backText, { services: o.running });
     deps.installer.swapBack({
-      current: oldText,
-      previous: ctx.u.preUpdate.previous === null ? null : formatVersion(ctx.u.preUpdate.previous),
+      current: backText,
+      // The pair as it stood before the attempt being undone: for an update, what preUpdate recorded (no
+      // previous then means no link now); for a rollback, the Version it left — so another rollback can return.
+      previous: ctx.u.kind === "rollback"
+        ? formatVersion(ctx.u.preUpdate.current)
+        : ctx.u.preUpdate.previous === null ? null : formatVersion(ctx.u.preUpdate.previous),
     });
-    for (const db of restores) deps.backup.restore(ctx.u.id, db);
+    for (const db of restores) deps.backup.restore(backupOf, db);
     await startServices(deps, o.running);
     const baseline = o.baseline ?? await baselineNow(deps, o.running);
-    const healthy = await waitHealthy(ctx, o.running, { baseline, target: ctx.u.preUpdate.current });
-    if (!healthy.ok) return failed(`${oldText} did not come back healthy: ${healthy.reason}`);
+    const healthy = await waitHealthy(ctx, o.running, { baseline, target: parseVersion(backText)! });
+    if (!healthy.ok) return await failed(`${backText} did not come back healthy: ${healthy.reason}`);
     // Whole again: the hold comes off, the Version is bad here forever (RL7), the Alert says what happened.
     deps.hold.clear();
-    deps.store.recordBad(targetText, deps.clock.now());
-    deps.store.recordHalt(targetText, o.cause, deps.clock.now());      // RL12: the fleet halts the Rollout (PR 6)
-    deps.alerts.raise("update_rolled_back", `${targetText} rolled back to ${oldText}: ${o.cause}`);
+    deps.store.recordBad(blameText, deps.clock.now());
+    deps.store.recordHalt(blameText, o.cause, deps.clock.now());      // RL12: the local halt record, read by the gates
+    deps.alerts.raise("update_rolled_back", `${blameText} rolled back to ${backText}: ${o.cause}`);
+    // The machine is back on the old Version; the state says which, what it left, and why (§6.3) — under the
+    // attempt id this Update began with, which is the fleet's whole word of the halt (§5.4, RL12): it reads the
+    // file here on the control plane, and on a node the agent carries the same record in its health.
+    deps.state.write({
+      state: "rolled_back", version: backText, target: blameText, reason: clip(o.cause),
+      ...(failedCheckOf(o.cause) ? { failedCheck: failedCheckOf(o.cause)! } : {}),
+      ...attemptOf(ctx.u),
+      at: deps.clock.now(),
+    });
     done(ctx, "rolling_back");
-    deps.store.finishUpdate(ctx.u.id, "rolled_back", deps.clock.now());
-    return { kind: "rolled_back", version: oldText, reason: o.cause };
+    finish(ctx, "rolled_back");
+    return { kind: "rolled_back", version: backText, reason: o.cause };
   } catch (error) {
     if (error instanceof ApplyInterrupted) throw error;
-    return failed(error instanceof Error ? error.message : String(error));
+    return await failed(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -359,10 +419,10 @@ export async function runRollback(ctx: StepCtx, o: {
 // starts (review of 2026-10-21). Then the hold comes off, the services start on the old Version, and the attempt ends.
 export async function abandonAttempt(ctx: StepCtx, running: readonly UpdateService[]): Promise<void> {
   const { deps } = ctx;
-  if (ctx.u.mark === "swapping") await deps.services.renderUnits(formatVersion(ctx.u.preUpdate.current));
+  if (ctx.u.mark === "swapping") await deps.services.renderUnits(formatVersion(ctx.u.preUpdate.current), { services: running });
   deps.hold.clear();
   await startServices(deps, running);
-  deps.store.finishUpdate(ctx.u.id, "abandoned", deps.clock.now());
+  finish(ctx, "abandoned");
 }
 
 // ---- the commit (§6.2 step 10)
@@ -377,9 +437,16 @@ export async function runCommit(ctx: StepCtx): Promise<{ kind: "committed"; vers
   const oldText = formatVersion(ctx.u.preUpdate.current);
   deps.hold.clear();
   deps.installer.setGood(targetText);
-  deps.store.recordCommitted(targetText, deps.clock.now());
+  // §6.7: the baseline this attempt was judged against goes down with the commit, so the next boot apply judges
+  // the services against what passed here — a machine that was already sick at this Version is not held to it.
+  deps.store.recordCommitted(targetText, deps.clock.now(), ctx.u.judgeBaseline ?? null);
   done(ctx, "committing");
-  deps.store.finishUpdate(ctx.u.id, "committed", deps.clock.now());
+  finish(ctx, "committed");
+  // The machine runs the target; the state says so, and that record is the commit itself (§4.5, §7): the fleet
+  // reads it, takes the soak from it, and counts the soak from its own `at` — so a fleet that reads it twice,
+  // after a restart among them, restarts nothing. On a control plane this is the Rollout's beginning; on a node
+  // the agent carries the same record to the fleet in its health. No call follows: there is no door to call.
+  deps.state.write({ state: "current", version: targetText, ...attemptOf(ctx.u), soakMinutes: deps.soakMinutes, at: deps.clock.now() });
   const layout = deps.installer.layout();
   deps.installer.prune([targetText, oldText, layout.good ?? targetText]);
   const committedIds = deps.store.recentUpdates(50)
@@ -407,6 +474,10 @@ export async function continueAfterSwap(ctx: StepCtx, o: {
     done(ctx, "starting");
     moveTo(ctx, "probation");
     const baseline = o.baseline ?? await baselineNow(deps, o.running);
+    // What this attempt is judged against travels in the record (§6.7): the commit writes it down, and a recovery
+    // that finishes the walk still knows it.
+    ctx.u = { ...ctx.u, judgeBaseline: baseline };
+    deps.store.saveUpdate(ctx.u);
     const healthy = await waitHealthy(ctx, o.running, { baseline, target: ctx.u.target });
     if (!healthy.ok) {
       return await runRollback(ctx, { running: o.running, cause: healthy.reason, baseline: o.baseline });

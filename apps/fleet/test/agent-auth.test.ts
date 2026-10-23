@@ -70,7 +70,8 @@ describe("hello, challenge, proof", () => {
     const fleet = await startTestFleet();
     const a = await fleet.joined("pc");
     const r = await a.connect();
-    expect(r).toEqual({ ok: true, welcome: { v: 1, t: "welcome", connEpoch: 1, ackSeq: 0, streamKnown: false } });
+    expect(r).toEqual({ ok: true, welcome: { v: 1, t: "welcome", connEpoch: 1, ackSeq: 0, streamKnown: false,
+      controlPlane: { version: expect.any(String), commit: expect.toSatisfy((c: unknown) => c === null || typeof c === "string") }, rollout: null } });
     expect(fleet.connections.status("pc")).toBe("online");
     expect(fleet.nodes.active("pc")?.agentVersion).toBe("test-agent/1");
     expect(fleet.nodes.active("pc")?.lastSeenAt).not.toBeNull();
@@ -264,7 +265,8 @@ describe("a session the fleet closed", () => {
     };
     const endpoint = startAgentEndpoint({
       host: "127.0.0.1", port: 0, handshakeLimits: WIDE,
-      deps: { connections: fleet.connections, nodes: fleet.nodes, audit: fleet.audit, fleetKey: fleet.key, hooks, deliveries: fleet.deliveries, jobs: fleet.jobs, log: quiet },
+      deps: { connections: fleet.connections, nodes: fleet.nodes, audit: fleet.audit, fleetKey: fleet.key, hooks, deliveries: fleet.deliveries, jobs: fleet.jobs, log: quiet,
+        rollouts: fleet.rollouts, build: fleet.rollouts.controlPlane() },
     });
     await endpoint.ready;
     const terminate = vi.spyOn(WebSocket.prototype, "terminate");

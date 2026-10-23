@@ -46,6 +46,13 @@ export function readStatus(p: { installer: Installer; store: UpdateStore; settin
       at: iso(checks[0].at), channel: checks[0].channel, outcome: checks[0].outcome, detail: clipped(checks[0].detail), version: checks[0].version,
     },
     checks: checks.map(row => ({ at: iso(row.at), channel: row.channel, outcome: row.outcome, detail: clipped(row.detail), version: row.version })),
+    updates: p.store.recentUpdates(10).map(row => ({
+      id: row.id,
+      target: formatVersion(row.target),
+      state: row.state,
+      startedAt: iso(row.startedAt),
+      finishedAt: row.finishedAt === null ? null : iso(row.finishedAt),
+    })),
   });
 }
 
@@ -64,5 +71,6 @@ export function formatStatus(s: Status): string {
     `key set: ${s.keySet === null ? NONE : `${s.keySet.version} (expires ${s.keySet.expiresAt})`}`,
     `feed: ${s.feed === null ? NONE : `${s.feed.channel} ${s.feed.seq} (expires ${s.feed.expiresAt})`}`,
     `last check: ${s.lastCheck === null ? "never" : `${s.lastCheck.outcome}${s.lastCheck.version === null ? "" : ` ${s.lastCheck.version}`} at ${s.lastCheck.at}`}`,
+    `updates: ${(s.updates ?? []).length === 0 ? NONE : (s.updates ?? []).map(row => `${row.state} ${row.target}`).join(" · ")}`,
   ].join("\n");
 }

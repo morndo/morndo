@@ -28,6 +28,7 @@ import type { LaneWaits } from "./lane-ops.ts";
 import type { GuardInput } from "./pane-ops.ts";
 import { jobOps, type JobControl } from "./job-ops.ts";
 import { buildOps, claudeDir, enginesSessionsDir, enginesTranscriptsDir } from "./table.ts";
+import type { CommandRunner } from "./update-ops.ts";
 import { panePidsOf } from "./tmux-panes.ts";
 import { TranscriptTitles } from "./transcript-titles.ts";
 import { UploadInbox } from "./upload-inbox.ts";
@@ -59,6 +60,7 @@ export type RuntimeOptions = {
   flight?: Flight;
   emitDelivery?: (d: Delivery) => void;                   // each change of a delivery (agent.ts: ev.delivery)
   laneWaits?: Partial<LaneWaits>;                         // a test's shorter lane.start and lane.stop waits
+  runCommand?: CommandRunner;                             // update.apply's start, faked in tests (update-ops.ts)
 };
 
 const acceptAny = () => true;
@@ -89,6 +91,7 @@ export function createOpsRuntime(o: RuntimeOptions): OpsRuntime {
     config, paths, db: o.db, doneKeys, inventory, inbox, registry, now, tmux, panes,
     deliverer: () => deliverer, send: req => executor.handle(req),
     ...(guard ? { guard } : {}), ...(o.lock ? { lock: o.lock } : {}), ...(o.laneWaits ? { laneWaits: o.laneWaits } : {}),
+    ...(o.runCommand ? { runCommand: o.runCommand } : {}),
   });
   const executor = new OpExecutor({
     ops, allowed: new Set(config.policy.ops), doneKeys, invVersion: () => inventory.invVersion, log: o.log,

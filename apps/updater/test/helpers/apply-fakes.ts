@@ -3,10 +3,15 @@
 // parts a unit test cannot run. Everything the services drive is taped in order, and every fake can die at a named
 // call (ApplyInterrupted) to stand a process killed after a mark was saved (§13's power-loss table), which is how
 // the recovery tests reach each recorded step.
+import type { UpdateStateSink } from "../../src/application/ports.ts";
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
-import { PROBATION_MS, type DatabaseName, type HealthReport, type SafePointReport, type SchemaInfo, type UpdateService } from "@morndo/domain";
+import {
+  DEFAULT_SOAK_MINUTES, PROBATION_MS,
+  type DatabaseName, type HealthReport, type SafePointReport, type SchemaInfo, type UpdateService,
+} from "@morndo/domain";
 import { holdFile, writeFloor } from "@morndo/service-kit";
 import { artifactName, buildManifest } from "../../../../scripts/release/manifest.ts";
 import type { TreeFile } from "../../../../scripts/release/archive.ts";
@@ -14,16 +19,20 @@ import { ApplyInterrupted } from "../../src/application/apply-steps.ts";
 import { ApplyService } from "../../src/application/apply-service.ts";
 import { RecoveryService } from "../../src/application/recovery-service.ts";
 import type {
-  AlertKind, AlertSink, Backup, Clock, HoldWriter, Installer, Layout, RoleProbe, ServiceManager, Sleeper,
+  AlertKind, AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Layout, RoleProbe, ServiceManager,
+  Sleeper,
 } from "../../src/application/ports.ts";
+import { ApplyingFileMarker } from "../../src/adapters/applying-file.ts";
 import { SqliteBackup } from "../../src/adapters/backup-sqlite.ts";
 import { HoldFileWriter } from "../../src/adapters/hold-file.ts";
 import { DirsInstaller } from "../../src/adapters/installer-dirs.ts";
 import { SqliteRevocations } from "../../src/adapters/revocations-sqlite.ts";
 import { SqliteSchemas } from "../../src/adapters/schema-sqlite.ts";
+import { StateFileWriter } from "../../src/adapters/state-file.ts";
 import { openUpdateStore, SqliteUpdateStore } from "../../src/adapters/store-sqlite.ts";
 import { databasePaths, updaterPaths, type DatabasePaths } from "../../src/adapters/paths.ts";
 import { SshSigVerifier } from "../../src/adapters/verifier-sshsig.ts";
+import { FakeFleetView } from "./fakes.ts";
 import { buildRelease } from "./tar-fixtures.ts";
 import { sha256hex } from "./release-fixtures.ts";
 
@@ -52,7 +61,9 @@ export type VersionFixture = {
   version: string; filesSha256: string; manifestText: string; manifestSha256: string; archive: Buffer;
 };
 
-export function versionFixture(o: { version: string; schemas: Record<DatabaseName, SchemaInfo> }): VersionFixture {
+export function versionFixture(o: {
+  version: string; schemas: Record<DatabaseName, SchemaInfo>; protocol?: { agent: [number, number]; clientApi: [number, number] };
+}): VersionFixture {
   const tree: TreeFile[] = [
     { path: "README.md", mode: "0444", bytes: Buffer.from(`morndo ${o.version}\n`) },
     { path: "app/run.sh", mode: "0555", bytes: Buffer.from(`#!/bin/sh\necho ${o.version}\n`) },
@@ -65,7 +76,7 @@ export function versionFixture(o: { version: string; schemas: Record<DatabaseNam
     commit: "0123456789abcdef0123456789abcdef01234567",
     publishedAt: NOW - 86_400_000,
     repository: "example/morndo",
-    protocol: { agent: [1, 2], clientApi: [1, 1] },
+    protocol: o.protocol ?? { agent: [1, 2], clientApi: [1, 1] },
     schemas: o.schemas,
     artifacts: [{ platform: "linux-x64", name, size: built.gz.length, sha256: sha256hex(built.gz), filesSha256: built.filesSha256, node: "24.21.0" }],
   });
@@ -131,6 +142,8 @@ export class FakeServices implements ServiceManager {
   /** The Morndo services this machine runs (§6.2 stops and starts only these, in a fixed order). */
   running: UpdateService[];
   tmuxIn = false;
+  /** Unit files a render would replace that are not Morndo's: what foreignUnits answers. */
+  foreign: string[] = [];
   /** Per-service restart counts the manager would report since the start (probation, RL7). */
   restartCounts: Partial<Record<UpdateService, number>> = {};
   /** Runs when a service starts, told the Version that is current: a test's stand-in for the service's own startup
@@ -138,6 +151,12 @@ export class FakeServices implements ServiceManager {
   onStart: ((s: UpdateService, current: string | null) => void) | null = null;
   /** Runs as a stop lands: what a service still did in its last moment (a revocation that came in, say). */
   onStop: ((s: UpdateService, current: string | null) => void) | null = null;
+  /** Runs in place of the apply unit's whole run (§6.2): a test's stand-in for what the unit does to the store. */
+  runApplyScript: ((version: string) => Promise<void>) | null = null;
+  /** What lingerEnabled answers (§10.3's install refuses without it). */
+  linger = true;
+  /** Every enable call's unit list, in order (§10.3). */
+  readonly enables: string[][] = [];
   readonly calls: { op: string; service?: UpdateService; version?: string }[] = [];
   readonly tape: string[];
   readonly die: Die;
@@ -171,16 +190,42 @@ export class FakeServices implements ServiceManager {
     return this.restartCounts[s] ?? 0;
   }
 
-  async renderUnits(version: string): Promise<void> {
+  async renderUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { replaceForeign?: boolean }): Promise<string[]> {
     this.die.check("renderUnits");
     this.calls.push({ op: "renderUnits", version });
-    this.tape.push(`renderUnits:${version}`);
+    this.tape.push(`renderUnits:${version}${role === undefined ? "" : ` (${role.services.join(",")})`}${o?.replaceForeign === true ? " replacing foreign" : ""}`);
+    return o?.replaceForeign === true ? this.foreign.map(p => `${p}.before-morndo`) : [];
+  }
+
+  /** Where each foreignUnits call read its units from: the tree it was given, or the releases. */
+  readonly foreignFrom: string[] = [];
+  async foreignUnits(version: string, _role?: unknown, o?: { tree?: string }): Promise<string[]> {
+    this.foreignFrom.push(o?.tree ?? `releases/${version}`);
+    return [...this.foreign];
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {
     this.calls.push({ op: "tmuxInAgentUnit" });
     this.tape.push(`tmux:${this.tmuxIn}`);
     return this.tmuxIn;
+  }
+
+  async runApply(version: string, o?: { wait?: boolean }): Promise<void> {
+    this.calls.push({ op: "runApply", version, ...(o?.wait === false ? { wait: false } : { wait: true }) });
+    this.tape.push(`runApply:${version}`);
+    if (o?.wait === false) return;                         // --detach: the unit, not this process, walks the steps
+    if (this.runApplyScript !== null) await this.runApplyScript(version);
+  }
+
+  async enable(units: readonly string[]): Promise<void> {
+    this.calls.push({ op: "enable" });
+    this.enables.push([...units]);
+    this.tape.push(`enable:${units.join(",")}`);
+  }
+
+  async lingerEnabled(): Promise<boolean> {
+    this.calls.push({ op: "lingerEnabled" });
+    return this.linger;
   }
 }
 
@@ -335,9 +380,15 @@ export type ApplyWorld = {
   backup: TapedBackup;
   revocations: SqliteRevocations;
   hold: TapedHold;
+  /** The `applying` mark (§5), real like the hold: the recovery unit runs only while it exists. */
+  applying: ApplyingMarker;
+  applyingPath: string;
   timeline: FakeTimeline;
   alerts: AlertRecorder;
   verifier: SshSigVerifier;
+  /** The fleet's word (§7) and the state file's path, the two things PR 6b's outcomes reach outside the walk. */
+  fleet: FakeFleetView;
+  statePath: string;
   a: VersionFixture;
   b: VersionFixture;
   /** A fresh apply service over the world as it stands, on the tests' small walls. */
@@ -352,6 +403,8 @@ export type ApplyWorld = {
 };
 
 export type WorldOptions = {
+  /** A sink for state.json writes in place of the real file (to read their order). */
+  stateSink?: UpdateStateSink;
   /** B's Manifest's schemas (the migration cases). */
   bSchemas?: Record<DatabaseName, SchemaInfo>;
   /** What the previous link points at before the update (default: nothing, a first update) — the pair a rollback
@@ -363,6 +416,13 @@ export type WorldOptions = {
   dbFloors?: Partial<Record<DatabaseName, number>>;
   /** The lock answers held before anything runs: another process's apply (the cross-process part is store-sqlite's test). */
   lockHeldByAnother?: boolean;
+  /** The fleet's word (§7); default: none, a fleet nobody has asked. The world keeps it for the tests; the apply
+   *  itself has no fleet door anymore — its only word out is the state file. */
+  fleet?: FakeFleetView;
+  /** The soak this machine's settings name (§4.5); default: the domain's own. */
+  soakMinutes?: number;
+  /** The attempt id the apply mints when its caller brings none (§5.4); default: the real random one. */
+  mintAttempt?: () => string;
 };
 
 // The real store with its lock answering held: tryLock is where the store's own cross-process rule lives.
@@ -424,9 +484,10 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   const holdPathOf = holdFile(home, {});
   const realHold = new HoldFileWriter({ home, env: {} });
   const hold = new TapedHold({ tape, die, real: realHold });
+  const applying = new ApplyingFileMarker({ state: paths.state });
   const backup = new TapedBackup({ tape, die, real: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }) });
   const schemas = new SqliteSchemas({ paths: dbPaths });
-  const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") });
+  const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups"), releases: paths.releases });
   const timeline = new FakeTimeline(NOW);                   // ms since the epoch, as Clock.now answers
   probe.seesHoldScript = () => {                            // HoldWatch re-reads hold.json every second
     const text = holdText(holdPathOf);
@@ -435,21 +496,33 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   const alerts = new AlertRecorder();
   const verifier = new SshSigVerifier();
 
+  // PR 6b's additions, shared by every service the world builds: the state sink every outcome writes, the soak a
+  // commit's record carries, and the mint behind every attempt the updater itself owns (§5.4). The fleet stays in the
+  // world for the tests to read; no service below is given it.
+  const fleet = o.fleet ?? new FakeFleetView();
+  const stateSink: UpdateStateSink = o.stateSink ?? new StateFileWriter({ path: join(paths.state, "state.json") });
+  const soakMinutes = o.soakMinutes ?? DEFAULT_SOAK_MINUTES;
+  const mintAttempt = o.mintAttempt ?? ((): string => randomBytes(16).toString("base64url"));
   return {
     home, releases: paths.releases, holdPath: holdFile(home, {}), updateDb: paths.db, dbPaths,
     backupsDir: join(paths.state, "backups"), tape, die, store, installer, services, probe, schemas, backup, revocations, hold,
-    timeline, alerts, verifier, a, b,
+    applying, applyingPath: join(paths.state, "applying"),
+    timeline, alerts, verifier, fleet, statePath: join(paths.state, "state.json"), a, b,
     apply: () => new ApplyService({
-      services, probe, schemas, backup, revocations, hold, installer, store, clock: timeline, sleeper: timeline, alerts, verifier,
-      timing: TIMING,
+      services, probe, schemas, backup, revocations, hold, applying, installer, store, clock: timeline, sleeper: timeline,
+      alerts, verifier, timing: TIMING,
+      state: stateSink, soakMinutes, mintAttempt,
     }),
     recover: () => new RecoveryService({
-      services, probe, backup, revocations, hold, installer, store, clock: timeline, sleeper: timeline, alerts, timing: TIMING,
+      services, probe, backup, revocations, hold, applying, installer, store, clock: timeline, sleeper: timeline, alerts,
+      timing: TIMING,
+      state: stateSink, soakMinutes,
     }),
     recoverWithLockHeld: () => new RecoveryService({
-      services, probe, backup, revocations, hold, installer,
+      services, probe, backup, revocations, hold, applying, installer,
       store: new LockHeldStore({ db: paths.db, lock: paths.lock }),
       clock: timeline, sleeper: timeline, alerts, timing: TIMING,
+      state: stateSink, soakMinutes,
     }),
     reopenStore: () => openUpdateStore({ db: paths.db, lock: paths.lock }),
     current,
