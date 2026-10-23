@@ -2046,6 +2046,10 @@ export const CONTROLS: Control[] = [
   { id: "c3b-rl7-bad-walked", task: "315", file: "apps/updater/src/application/apply-service.ts",
     find: "if (store.badVersions().some(text =>", replace: "if (false && store.badVersions().some(text =>",
     run: ["apps/updater/test/apply-service.test.ts"], expect: "recorded bad" },
+  // T-315 (6b, found by 6d's two-machine run): the control plane's own node never holds its skew gate.
+  { id: "c3b-skew-own-node-counted", task: "315", file: "apps/updater/src/application/fleet-follow.ts",
+    find: "nodes: nodes.filter(n => n.name !== p.ownNode)", replace: "nodes: nodes.filter(() => true)",
+    run: ["apps/updater/test/fleet-rollout.test.ts"], expect: "its own agent is" },
   { id: "pr1-rl12-halt-ignored", task: "pr1", file: "packages/domain/src/releases.ts",
     find: "if (rollout.halted) return err(\"halted\");", replace: "if (false) return err(\"halted\");",
     run: ["packages/domain/test/releases-invariants.test.ts"], expect: "halted" },

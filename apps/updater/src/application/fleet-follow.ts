@@ -125,13 +125,16 @@ export function applyUnitGate(p: {
 export type SkewHold = { reason: "fleet_unreachable" } | { reason: "skew_blocked"; nodes: string[]; unknown: string[] };
 export async function controlPlaneSkew(p: {
   fleet: Pick<FleetView, "nodes">; controlPlane: Version; target: Version; targetProtocol: ProtocolRange;
+  /** This machine's own node, which moves with the control plane in the same install: never counted (null: none). */
+  ownNode?: string | null;
 }): Promise<{ ok: true } | { ok: false; error: SkewHold }> {
   let nodes: FleetNode[] | null;
   try { nodes = await p.fleet.nodes(); } catch { nodes = null; }
   if (nodes === null) return err({ reason: "fleet_unreachable" });
   const word = skew({
     machine: "control_plane", controlPlane: p.controlPlane, target: p.target, targetProtocol: p.targetProtocol,
-    nodes: nodes.map(n => ({ name: n.name, version: null, agentProtocol: n.agentProtocol, joined: n.joined, revoked: n.revoked })),
+    nodes: nodes.filter(n => n.name !== p.ownNode)
+      .map(n => ({ name: n.name, version: null, agentProtocol: n.agentProtocol, joined: n.joined, revoked: n.revoked })),
   });
   if (!word.ok) {
     // This machine is the control plane, whose only refusal is protocol_dropped (RL11) — node_ahead is a node's

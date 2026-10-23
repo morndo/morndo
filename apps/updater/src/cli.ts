@@ -389,7 +389,12 @@ export async function runUpdater(
         io.err("the staged record cannot be read\n");
         return EXIT_TEMPFAIL;
       }
-      const gate = await controlPlaneSkew({ fleet: keepingNodes(await fleetOf(), o.boot === true), controlPlane: running, target, targetProtocol: o.targetProtocol });
+      // This machine's own node agent is updated in this very install: it never holds the control plane (6d's
+      // two-machine run found it counted — no Release dropping a protocol could ever have applied here).
+      const gate = await controlPlaneSkew({
+        fleet: keepingNodes(await fleetOf(), o.boot === true), controlPlane: running, target, targetProtocol: o.targetProtocol,
+        ownNode: machineName === "control-plane" ? null : machineName,
+      });
       if (gate.ok) return null;
       if (gate.error.reason === "fleet_unreachable" && o.boot === true) {
         stateSink.write({ state: "waiting", version: o.running ?? o.target, target: o.target, reason: "fleet_unreachable", at: systemClock.now() });

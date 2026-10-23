@@ -346,6 +346,8 @@ A node learns the control plane's Version and the Rollout's state from the fleet
 
 **Changing the agent protocol takes two Releases.** Release A speaks N and N+1. Release B drops N. The control plane defers B, naming the nodes, until every joined, non-revoked node reports A or newer (RL11). `manifest.protocol` carries each Release's range, so the check needs no knowledge of what changed.
 
+**The control plane's own node never counts.** Its node agent is updated in the control plane's own install, so the skew gate leaves out the node this machine's agent reports as its name; otherwise no Release that drops a protocol could ever apply on a control plane that runs its own node.
+
 **An offline node still counts.** `GET /v1/nodes` reports an offline node's protocols from its last hello, so the control plane's skew gate counts a node that is switched off. A joined node that never said its protocols holds the control plane too, named as unknown in the hold and its alert. Revoking a node that will never come back lets a Release past it.
 
 **After the control plane rolls back.** The control plane's rollback, the principal's included, announces its own attempt id and halts the Version it left. Nodes that already took that Version now run above the control plane. Nothing moves them by itself: the fleet lists them as `nodesAhead`, refuses every `update.apply` to them, and their ticks take nothing lower. They wait until the control plane runs that Version again, or until the owner rolls each one back on the node with `morndo update --rollback`.
