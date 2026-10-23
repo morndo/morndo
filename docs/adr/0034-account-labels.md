@@ -24,7 +24,14 @@ same machine as the hub.
 3. **The label rule.** `accountLabel` joins the name and the parts that exist, in order email, organization word
    (`Team`, `personal`), plan: "a3 · ada@example.test · Team · Max 5x". A missing part is not shown; no profile is
    the name alone. The two named tiers map to "Max 5x" and "Max 20x"; any other tier shows the plan as written.
-4. **The privacy rule.** The profile goes only to the principal's session: the `usage` feed frame and
+   Retired and logged-out accounts keep their label: it exists to say which account is which, whatever its state.
+4. **A guarded read.** The hub looks at the file once at start and then every minute, asynchronously, so nothing in
+   the file can hold up the event loop. It opens the file without waiting for a writer (`O_NONBLOCK`; a named pipe
+   would block an ordinary open), checks the open handle, and reads only a regular file of at most 1 MiB; a pipe, a
+   directory, a device or an oversize file is refused with one log line (the path and the size, never content) and the
+   last good profiles stay. A line cut in the middle (the file caught mid-write) keeps its account's last good profile;
+   a complete line with nothing to show, or an account gone from the file, drops it.
+5. **The privacy rule.** The profile goes only to the principal's session: the `usage` feed frame and
    `GET /api/usage`. The agent door's reply to `POST /api/agent/usage` carries no profile — it stays `null` there.
 
 ### Where things live

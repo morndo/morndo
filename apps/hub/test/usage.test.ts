@@ -203,9 +203,12 @@ describe("account labels from the pool's file (U5)", () => {
   let poolDir = "";
   const writePool = (lines: unknown[]) => writeFileSync(join(poolDir, "usage.jsonl"), `${lines.map(l => JSON.stringify(l)).join("\n")}\n`);
   const a3 = (tier: string) => ({ name: "a3", email: "ada@example.test", org: "claude_team", tier, plan: "max", orgId: "org-0001" });
+  let pool: ReturnType<typeof poolProfiles>;
   const restart = async () => {
     await hub.close();
-    hub = await startInProcessHub({ now: () => now, profiles: poolProfiles(join(poolDir, "usage.jsonl")) });
+    pool = poolProfiles(join(poolDir, "usage.jsonl"));
+    await pool.refresh();
+    hub = await startInProcessHub({ now: () => now, profiles: pool.current });
     workerToken = hub.agents.issue("lanes", "worker").secret;
   };
   const accountsOf = async (cookie: string) => (await json(await fetch(`${hub.base}/api/usage`, { headers: { cookie: `__Host-morndo=${cookie}` } }))).accounts as Body[];
@@ -241,6 +244,7 @@ describe("account labels from the pool's file (U5)", () => {
     expect((((await f.next("usage", mark)).accounts as Body[])[0] as Body).profile).toEqual({ email: "ada@example.test", org: "team", plan: "Max 5x" });
     mark = f.seen.length;
     writePool([a3("default_claude_max_20x")]);                                 // the file changed, with every lane quiet
+    await pool.refresh();
     hub.usage.refreshProfiles();
     expect((((await f.next("usage", mark)).accounts as Body[])[0] as Body).profile).toMatchObject({ plan: "Max 20x" });
     mark = f.seen.length;

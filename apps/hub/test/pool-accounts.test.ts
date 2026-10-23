@@ -1,10 +1,11 @@
 // The pool's usage file as the hub reads it (ADR-0034): each line one account, only the label fields read, a bad line
-// or a badly named one skipped, and the file re-read only when it changed. Synthetic accounts only.
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+// or a badly named one skipped, and the file re-read only when it changed. A file that is not a regular one, or is over the cap, is not read. Synthetic accounts only.
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { parsePoolAccounts, poolProfiles } from "../src/adapters/pool-accounts.ts";
+import { POOL_FILE_MAX_BYTES, parsePoolAccounts, poolProfiles } from "../src/adapters/pool-accounts.ts";
 
 let dir = "";
 const file = () => join(dir, "usage.jsonl");
@@ -44,19 +45,106 @@ describe("the pool's lines", () => {
   });
 });
 
-describe("the getter", () => {
-  it("no path, and a file that isn't there, are an empty map", () => {
-    expect(poolProfiles(null)().size).toBe(0);
-    expect(poolProfiles(join(dir, "nope.jsonl"))().size).toBe(0);
+const warned = () => { const lines: string[] = []; return { lines, log: { warn: (m: string) => { lines.push(m); } } }; };
+
+describe("the reader", () => {
+  it("no path, and a file that isn't there, are an empty map", async () => {
+    const none = poolProfiles(null);
+    await none.refresh();
+    expect(none.current().size).toBe(0);
+    const absent = poolProfiles(join(dir, "nope.jsonl"));
+    await absent.refresh();
+    expect(absent.current().size).toBe(0);
   });
 
-  it("a changed file is re-read; an unchanged one is served from the cache", () => {
+  it("before the first read there is nothing; a changed file is re-read; an unchanged one is served from the cache", async () => {
     write([{ name: "a1", ...team5 }]);
-    const profiles = poolProfiles(file());
-    expect(profiles().get("a1")?.plan).toBe("Max 5x");
-    const cached = profiles();
-    expect(profiles()).toBe(cached);              // unchanged: the same map, not a re-read
+    const pool = poolProfiles(file());
+    expect(pool.current().size).toBe(0);
+    expect(await pool.refresh()).toBe(true);
+    expect(pool.current().get("a1")?.plan).toBe("Max 5x");
+    const cached = pool.current();
+    expect(await pool.refresh()).toBe(false);     // unchanged: nothing read, nothing changed
+    expect(pool.current()).toBe(cached);
     write([{ name: "a1", ...team5, tier: "default_claude_max_20x", note: "long enough to change the file's size" }]);
-    expect(profiles().get("a1")?.plan).toBe("Max 20x");
+    expect(await pool.refresh()).toBe(true);
+    expect(pool.current().get("a1")?.plan).toBe("Max 20x");
+  });
+
+  it("a symbolic link to a regular file is read; a file that goes away empties the map", async () => {
+    write([{ name: "a1", ...team5 }]);
+    const link = join(dir, "link.jsonl");
+    symlinkSync(file(), link);
+    const pool = poolProfiles(link);
+    await pool.refresh();
+    expect(pool.current().get("a1")?.org).toBe("team");
+    rmSync(file());
+    await pool.refresh();
+    expect(pool.current().size).toBe(0);
+  });
+});
+
+describe("what is not read (negative controls)", () => {
+  it("a named pipe is refused at once, without waiting for a writer, and the last good profiles stay", async () => {
+    write([{ name: "a1", ...team5 }]);
+    const w = warned();
+    const pool = poolProfiles(file(), w.log);
+    await pool.refresh();
+    rmSync(file());
+    execFileSync("mkfifo", [file()]);
+    const t0 = Date.now();
+    await pool.refresh();                         // a blocking open or read would hang here, the test would time out
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(pool.current().get("a1")?.plan).toBe("Max 5x");
+    expect(w.lines).toHaveLength(1);
+    expect(w.lines[0]).toContain(file());
+    expect(w.lines[0]).toMatch(/not a regular file/);
+  });
+
+  it("a directory and a device are refused, said once each time they change nothing", async () => {
+    const w = warned();
+    mkdirSync(file());
+    const pool = poolProfiles(file(), w.log);
+    await pool.refresh();
+    await pool.refresh();
+    expect(pool.current().size).toBe(0);
+    expect(w.lines).toHaveLength(1);              // the same failure twice is said once
+    const zero = poolProfiles("/dev/zero", w.log);
+    await zero.refresh();                         // /dev/zero read whole would never end
+    expect(zero.current().size).toBe(0);
+  });
+
+  it("a file over the cap is not read: the path and the size are said, the last good profiles stay", async () => {
+    write([{ name: "a1", ...team5 }]);
+    const w = warned();
+    const pool = poolProfiles(file(), w.log);
+    await pool.refresh();
+    writeFileSync(file(), `${JSON.stringify({ name: "a1", ...team5, pad: "x".repeat(POOL_FILE_MAX_BYTES) })}\n`);
+    await pool.refresh();
+    expect(pool.current().get("a1")?.plan).toBe("Max 5x");
+    expect(w.lines).toHaveLength(1);
+    expect(w.lines[0]).toContain(file());
+    expect(w.lines[0]).toMatch(/too large \(\d+ bytes\)/);
+    expect(w.lines[0]).not.toContain("example.test");   // nothing of the content in the log
+  });
+
+  it("a file caught mid-write: a damaged line keeps the account's last good profile; a complete line without data drops it", async () => {
+    write([{ name: "a1", ...team5 }, { name: "a2", email: "lin@example.test", org: "self", tier: "default_claude_max_20x" }]);
+    const pool = poolProfiles(file());
+    await pool.refresh();
+    const whole = JSON.stringify({ name: "a2", email: "lin@example.test", org: "self", tier: "default_claude_max_20x" });
+    // a1's line is cut in the middle, a2's is whole
+    writeFileSync(file(), `{"name":"a1","email":"ada@exam\n${whole}\n`);
+    await pool.refresh();
+    expect(pool.current().get("a1")).toEqual({ email: "ada@example.test", org: "team", plan: "Max 5x" });
+    expect(pool.current().get("a2")?.plan).toBe("Max 20x");
+    // the next full write has no data for a1: that is a real change, and the label goes
+    write([{ name: "a1", email: "", org: "", tier: "" }, { name: "a2", email: "lin@example.test", org: "self", tier: "default_claude_max_20x", extra: 1 }]);
+    await pool.refresh();
+    expect(pool.current().has("a1")).toBe(false);
+    // an account that is no longer in the file at all goes too
+    write([{ name: "a2", email: "lin@example.test", org: "self", tier: "default_claude_max_20x" }]);
+    await pool.refresh();
+    expect([...pool.current().keys()]).toEqual(["a2"]);
   });
 });

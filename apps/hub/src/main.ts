@@ -341,9 +341,13 @@ switch (cmd) {
     const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
     // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens. ADR-0034: their
     // labels (email, organization, plan) come from the pool's usage file, read by the one adapter and overlaid on the
-    // principal's view only. The file can change with every lane quiet, so it is looked at again every minute.
-    const usage = new UsageService({ store, profiles: poolProfiles(config.poolUsageFile ?? null, log) });
-    const poolRefresh = setInterval(() => usage.refreshProfiles(), 60_000);
+    // principal's view only. The file can change with every lane quiet, so it is looked at again every minute (never
+    // blocking: ADR-0034).
+    const pool = poolProfiles(config.poolUsageFile ?? null, log);
+    const usage = new UsageService({ store, profiles: pool.current });
+    const lookAtPool = () => { void pool.refresh().then(changed => { if (changed) usage.refreshProfiles(); }, e => log.warn("the pool's usage file could not be looked at", e)); };
+    lookAtPool();
+    const poolRefresh = setInterval(lookAtPool, 60_000);
     poolRefresh.unref();
     shutdown.onStop(() => clearInterval(poolRefresh));
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
