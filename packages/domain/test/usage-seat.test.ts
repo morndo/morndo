@@ -18,6 +18,8 @@ describe("seat limits (U9, U13)", () => {
     expect(clearsMark(mark(), read({ capturedAt: T + 65 * MIN, windows: [{ id: "five-hour", usedPercent: 80, resetsAt: T + 3 * HOUR, lengthMins: 300 }] }))).toBe(false);
     // the same fresh read without a lease holds
     expect(clearsMark(mark(), read({ leased: false }))).toBe(false);
+    // a read after the back time that shows the same cycle reset as the one recorded holds, though its length would put the cycle start after the mark
+    expect(clearsMark(mark(), read({ windows: [{ id: "five-hour", usedPercent: 20, resetsAt: T + 3 * HOUR, lengthMins: 60 }] }))).toBe(false);
     // a first-ever hit has no cycle reset; the stale read's cycle began before the mark, so it holds
     expect(clearsMark(mark({ cycleReset: null }), read({ capturedAt: T + 65 * MIN, windows: [{ id: "five-hour", usedPercent: 80, resetsAt: T + 3 * HOUR, lengthMins: 300 }] }))).toBe(false);
     // an unknown length can never clear
