@@ -4011,6 +4011,13 @@ export const CONTROLS: Control[] = [
   { id: "t406-token-not-said", task: "T-406", file: "apps/hub/src/adapters/token-file.ts",
     find: "warn(`github token file ${path}: readable by others, not used (chmod 600)`);", replace: "warn(`github token file ${path}: readable by others, not used (chmod 600) ${readFileSync(path, \"utf8\")}`);",
     run: ["apps/hub/test/token-file.test.ts"], expect: "not to contain" },
+  // ---- Proof of work, step 4 (board T-406): the --why lint and the hub's reads.
+  { id: "t406-why-lint", task: "T-406", file: "apps/board-cli/src/cli.ts",
+    find: `if (why !== undefined && whyTokens(why).length > 0) {`, replace: `if (false) {`,
+    run: ["apps/board-cli/test/cli.test.ts"], expect: "which the board did not verify" },
+  { id: "t406-agent-reads-carry-proof", task: "T-406", file: "apps/hub/src/adapters/http.ts",
+    find: `...(p.board.proof ? { proof: p.board.proof.view(task[1] ?? "") } : {})`, replace: "",
+    run: ["apps/hub/test/board.test.ts"], expect: "proof" },
   // ---- T-398: a DONE with a wake-up scheduled or a job running still moves the task to review, each guard removed once.
   { id: "t398-d1-wakeup-and-job", task: "T-398", file: "packages/domain/src/board.ts",
     find: `(run.wait?.on === "wakeup" || run.wait?.on === "job") && run.outcome === "done"`, replace: `false`,

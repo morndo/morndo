@@ -100,6 +100,11 @@ export const REFUSALS: Record<string, string> = {
   no_merge: "That merge isn't recorded on this task.",
   too_many: "A task holds at most 5 merge records.",
   no_commit: "The hub's checkout doesn't have that commit yet.",
+  // B14 to B16 (ADR-0035): the proof gate's refusals.
+  proof_not_green: "Its proof isn't green yet; accepting it anyway is recorded.",
+  bad_ref: "That isn't a whole reference: owner/repo#PR@sha.",
+  ref_unrelated: "A ci reference must hang off a pull request of the same brief.",
+  ref_repo: "The board doesn't check that repository.",
 };
 
 // Who made a change, in the record's words: you, a lane or the manager by its name, the control plane's console

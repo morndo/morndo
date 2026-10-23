@@ -7,7 +7,7 @@
 // credential), judges the answer with the domain's pure functions, and stores the row. Triggers ride on the board's own
 // events (a move to review, a brief filed), a timer pass re-reads what is still pending or was rate-limited, and a Done
 // attempt re-reads first whatever has gone stale — all through `record`, so none of it ever writes a task or an event.
-import { MORNDO_REPO, YOUNG_MS, currentBrief, judgeCi, judgePr, parseProofRef, proofOf, type BriefInput, type Judged, type ProofBrief, type ProofGate, type ProofMode, type ProofRef, type ProofState, type RefResult, type TaskActor, type TaskEvent } from "@morndo/domain";
+import { MORNDO_REPO, YOUNG_MS, currentBrief, judgeCi, judgePr, parseProofRef, proofOf, type BriefInput, type Judged, type ProofBrief, type ProofGate, type ProofMode, type ProofRef, type ProofState, type RefResult, type Task, type TaskActor, type TaskEvent } from "@morndo/domain";
 import { redactKeyMaterial } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import { RETRYABLE_DETAIL, type ForgeChecks, type ForgeFailure } from "./ports.ts";
@@ -80,6 +80,18 @@ export class ProofService {
     if (current === null) return { rev: null, brief: null, results: [], state: proofOf(null, []) };
     const results = this.#store.proofResultsOf(key, current.rev);
     return { rev: current.rev, brief: current.brief, results, state: proofOf(current.brief, results) };
+  }
+
+  // The one line per task in review (B15), for the board view the agents read: keyed by task, `no brief` included, so
+  // a glance at the board says which reviews hold something to check. Tasks in any other state are absent.
+  lines(tasks: readonly Task[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const t of tasks) {
+      if (t.status !== "review") continue;
+      const v = this.view(t.key);
+      if (v !== null) out[t.key] = v.state.line;
+    }
+    return out;
   }
 
   // One reference's state, as a row: never the task, never an event, never a push. Stored only for the brief that

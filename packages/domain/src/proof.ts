@@ -74,12 +74,13 @@ export type ProofBriefProblem = "empty" | "too_long" | "bad_text" | "too_many" |
 export type ProofBriefRefusal = { problem: ProofBriefProblem; detail?: string };
 
 // The same rule as board.ts text(): control characters except \n and \t are refused, line endings of any kind become
-// \n, each field is trimmed and bounded. Here the refusal names the brief's own rule, not the board's.
-const briefText = (v: string, max: number, allowEmpty: boolean): Result<string, ProofBriefRefusal> => {
-  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(v)) return err({ problem: "bad_text" });
+// \n, each field is trimmed and bounded. Here the refusal names the brief's own rule, not the board's, and the field
+// it broke, so the one line a filer reads says what to fix.
+const briefText = (v: string, max: number, allowEmpty: boolean, field: string): Result<string, ProofBriefRefusal> => {
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(v)) return err({ problem: "bad_text", detail: field });
   const t = v.replace(/\r\n?/g, "\n").trim();
-  if (!t && !allowEmpty) return err({ problem: "empty" });
-  if (t.length > max) return err({ problem: "too_long" });
+  if (!t && !allowEmpty) return err({ problem: "empty", detail: field });
+  if (t.length > max) return err({ problem: "too_long", detail: field });
   return ok(t);
 };
 
@@ -91,24 +92,24 @@ const sameCommit = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
 // reference must hang off a pull request of the same brief or a merge record of the task, so a lane cannot point the
 // board at any green commit of anyone's pull request. `noCode` stands in for the references (a memo, an analysis).
 export function checkBrief(input: BriefInput, ctx: { allowedRepos: readonly string[]; merges: readonly { repo: string; sha: string }[] }): Result<ProofBrief, ProofBriefRefusal> {
-  const summary = briefText(input.summary, BRIEF_LIMITS.summary, false);
+  const summary = briefText(input.summary, BRIEF_LIMITS.summary, false, "summary");
   if (!summary.ok) return summary;
-  const decisions = briefText(input.decisions ?? "", BRIEF_LIMITS.decisions, true);
+  const decisions = briefText(input.decisions ?? "", BRIEF_LIMITS.decisions, true, "decisions");
   if (!decisions.ok) return decisions;
-  const leftOut = briefText(input.leftOut, BRIEF_LIMITS.leftOut, false);
+  const leftOut = briefText(input.leftOut, BRIEF_LIMITS.leftOut, false, "leftOut");
   if (!leftOut.ok) return leftOut;
-  const limits = briefText(input.limits, BRIEF_LIMITS.limits, false);
+  const limits = briefText(input.limits, BRIEF_LIMITS.limits, false, "limits");
   if (!limits.ok) return limits;
-  const noCode = briefText(input.noCode ?? "", BRIEF_LIMITS.noCode, true);
+  const noCode = briefText(input.noCode ?? "", BRIEF_LIMITS.noCode, true, "noCode");
   if (!noCode.ok) return noCode;
   const attestedIn = input.attested ?? [];
   const hows: string[] = [];
   for (const a of attestedIn) {
-    const how = briefText(a.how, BRIEF_LIMITS.how, false);
+    const how = briefText(a.how, BRIEF_LIMITS.how, false, "attested.how");
     if (!how.ok) return how;
     hows.push(how.value);
   }
-  if (attestedIn.length > BRIEF_LIMITS.attested) return err({ problem: "too_many" });
+  if (attestedIn.length > BRIEF_LIMITS.attested) return err({ problem: "too_many", detail: "attested" });
   const attested: Attested[] = [];
   for (let i = 0; i < attestedIn.length; i++) {
     const kind = attestedIn[i]!.kind;
@@ -116,7 +117,7 @@ export function checkBrief(input: BriefInput, ctx: { allowedRepos: readonly stri
     attested.push({ kind: kind as AttestedKind, how: hows[i]! });
   }
   const refsIn = input.refs ?? [];
-  if (refsIn.length > BRIEF_LIMITS.refs) return err({ problem: "too_many" });
+  if (refsIn.length > BRIEF_LIMITS.refs) return err({ problem: "too_many", detail: "refs" });
   const repos = new Set([...ctx.allowedRepos, ...ctx.merges.map(m => m.repo)].map(r => r.toLowerCase()));
   const parsed: ProofRef[] = [];
   const refs: string[] = [];
@@ -168,14 +169,15 @@ export type RefResult = { ref: string; state: RefState; detail: string | null; c
 export type ProofKind = "no_brief" | "unchecked" | "pending" | "failing" | "unfetchable" | "not_checked" | "verified" | "attested_only";
 export type ProofState = { kind: ProofKind; green: number; total: number; accepts: boolean; line: string };
 
-const MARK: Record<RefState, string> = { green: "✓", red: "✗", mismatch: "≠", missing: "?", unfetchable: "!", pending: "…", not_checked: "○" };
-const WORD: Record<RefState, string> = { green: "green", red: "failed", mismatch: "mismatch", missing: "missing", unfetchable: "unfetchable", pending: "pending", not_checked: "not checked" };
+export const MARK: Record<RefState, string> = { green: "✓", red: "✗", mismatch: "≠", missing: "?", unfetchable: "!", pending: "…", not_checked: "○" };
+export const WORD: Record<RefState, string> = { green: "green", red: "failed", mismatch: "mismatch", missing: "missing", unfetchable: "unfetchable", pending: "pending", not_checked: "not checked" };
 
 // What the card shows of one brief against the results the hub holds (B15): one line, whatever the references' states.
 // Verified proof only — attested items never move it (B14), one reference the board could not read is never green, and
 // one red reference makes the whole task failing whatever else is green. A reference with no row yet counts as pending.
+export const NO_BRIEF_LINE = "proof: no brief";   // proofOf's own line for no brief, for readers that skip it
 export function proofOf(brief: ProofBrief | null, results: readonly RefResult[]): ProofState {
-  if (brief === null) return { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" };
+  if (brief === null) return { kind: "no_brief", green: 0, total: 0, accepts: false, line: NO_BRIEF_LINE };
   if (brief.refs.length === 0) {
     if (brief.noCode !== "") return { kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" };
     return { kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" };

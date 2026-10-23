@@ -126,6 +126,28 @@ describe("the brief (B13, B14)", () => {
       value: { summary: "Totals row rounds to cents", decisions: "", leftOut: "nothing", limits: "none known", refs: [PR, CI], attested: [{ kind: "tests", how: "npm test: 14 passed" }], noCode: "" },
     });
   });
+
+  it("checkBrief: a refusal names the field", () => {
+    const cases: [BriefInput, { problem: string; detail: string }][] = [
+      [input({ summary: " " }), { problem: "empty", detail: "summary" }],
+      [input({ summary: "a\u0007b" }), { problem: "bad_text", detail: "summary" }],
+      [input({ summary: "x".repeat(BRIEF_LIMITS.summary + 1) }), { problem: "too_long", detail: "summary" }],
+      [input({ decisions: "a\u0007b" }), { problem: "bad_text", detail: "decisions" }],
+      [input({ decisions: "x".repeat(BRIEF_LIMITS.decisions + 1) }), { problem: "too_long", detail: "decisions" }],
+      [input({ leftOut: " " }), { problem: "empty", detail: "leftOut" }],
+      [input({ limits: " " }), { problem: "empty", detail: "limits" }],
+      [input({ noCode: "a\u0007b" }), { problem: "bad_text", detail: "noCode" }],
+      [input({ noCode: "x".repeat(BRIEF_LIMITS.noCode + 1) }), { problem: "too_long", detail: "noCode" }],
+      [input({ attested: [{ kind: "tests", how: " " }] }), { problem: "empty", detail: "attested.how" }],
+      [input({ attested: [{ kind: "tests", how: "a\u0007b" }] }), { problem: "bad_text", detail: "attested.how" }],
+      [input({ attested: [{ kind: "tests", how: "x".repeat(BRIEF_LIMITS.how + 1) }] }), { problem: "too_long", detail: "attested.how" }],
+      [input({ attested: Array.from({ length: BRIEF_LIMITS.attested + 1 }, () => ({ kind: "tests", how: "npm test: 14 passed" })) }), { problem: "too_many", detail: "attested" }],
+      [input({ refs: Array.from({ length: BRIEF_LIMITS.refs + 1 }, (_, i) => `acme/shop#4${i + 1}@${SHA}`) }), { problem: "too_many", detail: "refs" }],
+      // and the one refusal that already had its detail keeps it
+      [input({ attested: [{ kind: "quick", how: "had a look" }] }), { problem: "bad_text", detail: "attested kind" }],
+    ];
+    for (const [given, want] of cases) expect(refusal(checkBrief(given, ctx())), JSON.stringify(given)).toEqual(want);
+  });
 });
 
 describe("the proof state (B14, B15)", () => {

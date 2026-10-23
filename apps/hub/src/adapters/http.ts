@@ -324,7 +324,7 @@ export function startHttp(p: {
   // console is the whole identity (agent-access.ts), and a worker token says which lane it acts as (X-Morndo-Lane).
   // A refusal spends the caller's refusal bucket; a call spends the token's.
   const boardProblemStatus = (problem: string) =>
-    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" || problem === "too_many" || problem === "no_commit" ? 409 : 400;
+    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" || problem === "proof_not_green" || problem === "too_many" || problem === "no_commit" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
     r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}), ...(r.detail ? { detail: r.detail } : {}) });
 
@@ -456,12 +456,17 @@ export function startHttp(p: {
       const r = p.usage.report(await readBody(req, UsageReportBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
       return r.ok ? json(res, 200, { account: r.account }) : json(res, 400, { error: r.problem });
     }
-    if (path === "/api/agent/board" && method === "GET") return json(res, 200, service.view());
+    if (path === "/api/agent/board" && method === "GET") {
+      // ADR-0035 step 4: the agents' board read carries each task in review's proof line beside the board itself; the
+      // principal's own routes answer without it.
+      const v = service.view();
+      return json(res, 200, { ...v, ...(p.board.proof ? { proof: p.board.proof.lines(v.tasks) } : {}) });
+    }
     if (path === "/api/agent/board/tasks" && method === "POST") return boardAnswer(res, service.create(await readBody(req, BoardCreateBody), who.actor));
     const task = /^\/api\/agent\/board\/tasks\/(T-\d{1,9})$/.exec(path);
     if (task && method === "GET") {
       const t = service.task(task[1] ?? "");
-      return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
+      return t ? json(res, 200, { ...t, ...(p.board.proof ? { proof: p.board.proof.view(task[1] ?? "") } : {}) }) : json(res, 404, { error: "unknown" });
     }
     if (task && method === "POST") {
       const body = await readBody(req, BoardActionBody);

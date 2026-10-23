@@ -30,4 +30,13 @@ describe("the prompt blocks in docs/agents/board.md", () => {
       expect(`${MANAGER_PROMPT}\n${WORKER_PROMPT}`).toContain(`morndo-board ${cmd}`);
     }
   });
+  it("the worker's block tells a lane to file its brief with whole references", () => {
+    expect(WORKER_PROMPT).toContain("morndo-board brief T-12");
+    expect(WORKER_PROMPT).toContain("--no-code");
+    expect(WORKER_PROMPT).toContain("--test");
+  });
+  it("the manager's block names proof_not_green and --proof-override", () => {
+    expect(MANAGER_PROMPT).toContain("proof_not_green");
+    expect(MANAGER_PROMPT).toContain("--proof-override");
+  });
 });

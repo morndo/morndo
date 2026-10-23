@@ -24,6 +24,11 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - A task in review is the lane's word, not proof. Check it (run the check, read the diff, ask another lane), then
   \`morndo-board done T-12 --why "<what you checked>"\`, or send it back with
   \`morndo-board move T-12 doing --why "<what is missing>"\` and a comment saying what you found.
+- A task in review shows its proof line in \`morndo-board list\` and \`show\`: references the board checked itself are
+  marked ✓ ✗ ≠ ? ! … ○; the lane's own checks are only its word. When the gate is on, a done with a reference that is
+  not green is refused (\`proof_not_green\`); accept it only with \`--proof-override "<what you looked at instead>"\`, and
+  never over a red reference without saying what you saw. \`done --why\` names a commit or \`#n\` the board did not verify:
+  it warns, and still sends.
 - When a task's PR has merged, record it: \`morndo-board merged T-12 <sha>\`. Done is then refused until the merge is on every
   node's build; the board says which node is behind. Accept it earlier only with \`--not-live "<why>"\`.
 - A wrong sha: \`morndo-board unmerged T-12 <sha>\`, then record the right one.
@@ -56,6 +61,12 @@ your turns. The principal reads the board instead of asking you.
   \`morndo-board new "<what>" --desc "<why>"\`. It lands in the backlog for the manager; don't start it yourself.
 - Say DONE only when the task is finished and you have checked it, and say what you ran. You can't mark a task done;
   the manager does, after checking. Don't claim it is done elsewhere before the board says so.
+- File your brief before you end the turn, at the latest when the task is in review: \`morndo-board brief T-12
+  --summary "<what changed, for whom>" --left-out nothing --limit "none known" --pr owner/repo#42@<sha> --ci
+  owner/repo@<sha>:ci,lint --test "<command: result>"\`. A reference is whole (repository, number, sha) and the board
+  checks it itself; what you ran yourself goes in \`--test\`, \`--manual\`, \`--ui\`, \`--data\` or \`--infra\` and is shown as
+  your word, never as verified. A task with no code change says \`--no-code "<what it is>"\`. \`morndo-board brief T-12
+  --show\` says how each reference checked out.
 - Keep the task's comments as your log: \`morndo-board comment T-12 "<one fact>"\` for a finding, a decision you
   made, a thing the manager must know, what you ran and its result. Short, one fact per line. Never a secret.
 - If you need to stop work on a task without finishing: \`morndo-board todo T-12\` and a comment on where it stands.

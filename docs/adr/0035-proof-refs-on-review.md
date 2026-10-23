@@ -1,8 +1,8 @@
-# ADR-0035: Proof on a task in review is a brief with references the hub verifies (draft)
+# ADR-0035: Proof on a task in review is a brief with references the hub verifies
 
-- **Status:** Proposed, 2026-10-23. Draft that goes with `docs/plans/2026-10-19-proof-of-work.md` (revision 2); no code yet.
+- **Status:** Accepted, 2026-10-23: the owner chose option B (verified references and a brief) of `docs/plans/2026-10-19-proof-of-work.md` (revision 2). Built in morndo/morndo#120.
 - **Builds on:** ADR-0015 (the board), ADR-0032 (the board follows the fleet), B11 (merge records and the done gate).
-- **Rules:** B13 to B16, proposed for `docs/domain.md`. Numbers (ADR, rules, migration 26) are re-checked when the PR opens.
+- **Rules:** B13 to B16 in `docs/domain.md`. Migration 26 (`board_proofs`).
 
 ## Context
 
@@ -25,6 +25,14 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
    principal's click), in a mode `off | warn | on`. Verification is started by hub events (brief filed, task entered
    review, a timer, a Done attempt), never by reading a Run.
 5. **Results are rows, not events,** so a re-check never changes the task's `rev`.
+6. **Private repositories are read with an optional credential.** The repositories the hub may read are the ones its
+   settings list (`MORNDO_PROOF_REPOS`, default `morndo/morndo`); anything else is never asked. The credential is a
+   read-only token in a file the settings name (`MORNDO_GITHUB_TOKEN_FILE`, mode 600), read once at start and never an
+   environment value, a setting or a word in a log. Without it a private repository answers as one that does not exist,
+   and the reference reads `private repo: not checked`: its own state, neither red nor unfetchable, not retried, and not
+   verified, so a Done is held for it like for any reference that is not green, and the override is recorded.
+7. **The mode starts at `warn`.** The first week records what the gate would have refused, with every override and its
+   reason, before `MORNDO_PROOF_GATE=on` is set.
 
 ## Consequences
 
@@ -33,3 +41,10 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
 - The hub makes outbound calls to `api.github.com` built from validated parts only, against a repository allowlist.
 - A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff.
 - Screenshots and per-item human marks are not in this decision; they are a later one (plan, option C).
+- GitHub's documentation (read 2026-10-23) lists `Pull requests: read` and `Contents: read` for the pull request
+  endpoint with fine-grained tokens and lists no fine-grained permission for the check-runs endpoint (`Checks` is a
+  GitHub App permission). Whether a fine-grained token reads check runs is therefore tried once with the real token at
+  setup; the documented fallback is the workflow-runs endpoint with `Actions: read`, added test-first only if needed.
+- The assigner's proof list (what proof the work needs, set when the task is assigned, matched against the brief, with
+  `not covered` shown for what has nothing against it) is the next decision, in the same pull request, and is not part of
+  this one.
