@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { endpointId, sessionId, type Decision } from "@morndo/domain";
+import { WORKER_ASK_GRACE_MS, endpointId, sessionId, type Decision } from "@morndo/domain";
 import { Store } from "../src/adapters/store.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
 import { EscalationService, type Watch } from "../src/application/escalation-service.ts";
@@ -77,6 +77,8 @@ describe("a restart restores the answers to asks still open, whatever their age 
     now = T0 + 8 * DAY;
     screens["%3"] = MENU;                                 // a later pane %3 shows a menu of its own
     const after = start();
+    after.poll();                                         // first sight; a worker's menu waits WORKER_ASK_GRACE_MS (N2)
+    now += WORKER_ASK_GRACE_MS;
     after.poll();
     expect(item(after, "menu-3")).toMatchObject({ status: "open", decision: null });
   });
@@ -88,6 +90,8 @@ describe("a restart restores the answers to asks still open, whatever their age 
     now = T0 + 6 * DAY;
     screens["%3"] = MENU;
     const after = start();
+    after.poll();                                         // first sight; a worker's menu waits WORKER_ASK_GRACE_MS (N2)
+    now += WORKER_ASK_GRACE_MS;
     after.poll();
     expect(item(after, "menu-3")).toMatchObject({ status: "answered", decision: { choice: { key: "1" } } });
   });

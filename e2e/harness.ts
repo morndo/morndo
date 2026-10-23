@@ -48,7 +48,9 @@ export async function startOffice(name: string, extraEnv: Record<string, string>
   const socket = `morndo-${name}-${process.pid}`;
   const port = await freePort();
   const office = buildOffice({ home, socket, vncPort: await freePort() });
-  const env = { ...process.env, ...office.env(port), ...extraEnv };
+  // The offices' worker menus and questions reach the principal at once (N2's 10-minute grace would hold them), unless
+  // a test sets its own value in `extraEnv`.
+  const env = { ...process.env, ...office.env(port), MORNDO_WORKER_ASK_GRACE_MS: "0", ...extraEnv };
   let hub: ChildProcess | null = null;
   const log = join(home, "hub.log");
   const startHub = async () => {
