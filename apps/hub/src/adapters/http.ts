@@ -320,9 +320,9 @@ export function startHttp(p: {
   // console is the whole identity (agent-access.ts), and a worker token says which lane it acts as (X-Morndo-Lane).
   // A refusal spends the caller's refusal bucket; a call spends the token's.
   const boardProblemStatus = (problem: string) =>
-    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" ? 409 : 400;
+    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" || problem === "too_many" || problem === "no_commit" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
-    r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}) });
+    r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}), ...(r.detail ? { detail: r.detail } : {}) });
 
   // An updates command's answer (updates §8.1): 403 a step-up too old, 409 the refusal with the fleet's own words
   // (its code when the fleet refused), 503 what couldn't be asked. The routes stay thin (round 2, R4): every look
@@ -457,7 +457,7 @@ export function startHttp(p: {
       const t = service.task(task[1] ?? "");
       return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
     }
-    if (task && method === "POST") return boardAnswer(res, service.act(task[1] ?? "", await readBody(req, BoardActionBody), who.actor));
+    if (task && method === "POST") return boardAnswer(res, await service.actChecked(task[1] ?? "", await readBody(req, BoardActionBody), who.actor));
     throw new HttpError(404, "no such route");
   }
 
@@ -770,6 +770,18 @@ export function startHttp(p: {
       const q = new URL(req.url ?? "/", "http://hub").searchParams;
       if (q.get("hidden") === "1" || q.has("before")) return json(res, 200, p.jobs.page(q.get("before")));
       return json(res, 200, p.jobs.view());
+    }
+    // ADR-0031 (M8): the console's one-time approval code, minted in the app for one Note that waits. A Command under
+    // step-up, like the approval itself; the code is said once here and never logged or stored but its hash — the
+    // console spends it (`morndo memory approve <id>`, the code read from stdin). No body to read. Not an agent route: only a session
+    // reaches it (the agents' door has no such path).
+    const approvalCode = /^\/api\/memory\/notes\/(N-\d{1,9})\/approval-code$/.exec(path);
+    if (approvalCode && method === "POST") {
+      if (!p.memory) return json(res, 404, { error: "memory_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const r = p.memory.service.issueApprovalCode(a, approvalCode[1] ?? "");
+      if (r.ok) return json(res, 200, { code: r.code, expiresAt: r.expiresAt });
+      return json(res, r.problem === "step_up" ? 403 : r.problem === "not_found" ? 404 : 409, { error: r.problem });
     }
     // ADR-0015: the board. Reading is a look; a change is a Command (AC7).
     if (path.startsWith("/api/board")) {

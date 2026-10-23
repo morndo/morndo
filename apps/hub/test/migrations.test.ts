@@ -239,6 +239,20 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     expect(() => MIGRATIONS[22]?.up(db)).not.toThrow();
   });
 
+  // B11: the board's merge records, a new table only, so an older hub opens the database as it is (the floor stays 0).
+  it("migration 24 gives a database at 23 board_merges, keeps its tasks, and changes nothing run again", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 23));
+    expect(version(db)).toBe(23);
+    db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, created_at, updated_at, created_by, rev)
+      VALUES ('T-1', 1, 'A task', '', 'review', 'builder', 'normal', 100, 250, '{"kind":"console"}', 2)`).run();
+    expect(migrate(db, MIGRATIONS.slice(0, 24))).toEqual({ from: 23, to: 24 });
+    expect(tables(db)).toContain("board_merges");
+    expect(columns(db, "board_merges")).toEqual(["key", "repo", "sha", "at", "by", "override"]);
+    expect(db.prepare("SELECT key, status FROM board_tasks").all()).toEqual([{ key: "T-1", status: "review" }]);
+    expect(() => MIGRATIONS[23]?.up(db)).not.toThrow();               // guarded: the table is there already
+  });
+
   // A hub from before migration 23 opens a database at 23 as it is (the floor is additive), and its saves leave
   // state_changed_at as it was. Opened again by this hub, no Run may read as newer than a move made meanwhile (D6).
   it("the Store takes state_changed_at from the task's events when a hub that does not know it saved the task since", () => {

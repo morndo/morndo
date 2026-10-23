@@ -44,6 +44,28 @@ describe("the fleet client (spec §5.6)", () => {
     expect(new Set(fleet.clients)).toEqual(new Set(["hub"]));                        // x-morndo-client, for the fleet's audit
   });
 
+  // B11: a node's listing may name the commit its build runs, for the board's "merged, not live".
+  it("a node may name its build's commit; absent, null or a string is fine, anything else is a mismatch", async () => {
+    const path = join(dir, "nodes.sock");
+    let body: unknown = [
+      { name: "pc", status: "online", health: null, agent: "fake", commit: "a".repeat(40) },
+      { name: "srv01", status: "online", health: null, agent: "fake", commit: null },
+      { name: "old", status: "online", health: null, agent: "fake" },
+    ];
+    const server = createServer((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(body)); });
+    await new Promise<void>(resolve => server.listen(path, () => resolve()));
+    try {
+      const c = new FleetClient(path);
+      // the updates design's fields read as null where a fleet names none; an absent commit reads as null too
+      expect(await c.nodes()).toEqual((body as Record<string, unknown>[]).map(n => ({ ...n, commit: n.commit ?? null, proto: null, update: null })));
+      body = [{ name: "pc", status: "online", health: null, agent: "fake", commit: 7 }];
+      const e = await c.nodes().catch((x: unknown) => x);
+      expect(e).toBeInstanceOf(FleetMismatch);                     // a commit that isn't a string or null: never guessed at
+    } finally {
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  });
+
   it("posts an op with its target, args, key and deadline, and returns the node's answer", async () => {
     const c = new FleetClient(fleet.socketPath);
     const r = await c.op({ node: "pc" }, "pane.captureMany", { workerIds: [PC1] }, { timeoutMs: 1500 });

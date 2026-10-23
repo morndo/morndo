@@ -4,7 +4,7 @@
 // manager this machine runs. The command line is parsed here and nowhere else; the exit codes are sysexits.h's,
 // as in the rest of Morndo. The applies run as the machine's own units (§6.2): `morndo update` starts the apply
 // unit and reports its record; the tick, the boot and the recovery units run the same services themselves.
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import {
   compareVersions, formatVersion, parseVersion, rollbackRestores, DEFAULT_SOAK_MINUTES,
@@ -509,6 +509,32 @@ export async function runUpdater(
     // word is typed (or --yes), naming the Version it leaves, and consumed by the unit. The unit's own command line is
     // one anyone can type; without this record it runs no rollback (review of 2026-10-22).
     const rollbackConfirmedFile = join(paths.state, "rollback-confirmed");
+    // The apply unit's own answer (§8.1, §8.4): its instance, when it ended, its exit and the lines it said. systemd
+    // forgets an inactive unit's exit status once it unloads the unit, so the command that started the unit reads
+    // this instead; an apply that left no record (deferred, refused, busy) still answers in its own words.
+    const applyResultFile = join(paths.state, "apply-result.json");
+    // What a run of the apply unit started at `startedAt` answered: the record that run began, as §8.1 says, or the
+    // unit's own result; a start that failed with neither is a unit that never ran.
+    const answerOfUnit = (instance: string, startedAt: number, startError: string | null): number => {
+      const last = store.recentUpdates(1)[0] ?? null;
+      if (last !== null && last.startedAt >= startedAt) return recordExit(last, io);
+      type Result = { instance?: unknown; at?: unknown; code?: unknown; lines?: unknown };
+      const readResult = (): Result | null => {
+        try { return JSON.parse(readFileSync(applyResultFile, "utf8")) as Result; } catch { return null; }
+      };
+      const result = readResult();
+      if (result !== null && result.instance === instance && typeof result.at === "number" && result.at >= startedAt
+        && typeof result.code === "number" && Array.isArray(result.lines)) {
+        for (const line of result.lines) if (typeof line === "string") printOutcome(line, result.code);
+        return result.code;
+      }
+      if (startError !== null) {
+        io.err(`the apply unit did not run: ${startError}\n`);
+        return EXIT_TEMPFAIL;
+      }
+      io.err("the apply unit recorded nothing; try again\n");
+      return EXIT_TEMPFAIL;
+    };
     const ROLLBACK_CONFIRMED_FOR_MS = 10 * 60_000;
 
     if (parsed.cmd === "update") {
@@ -570,24 +596,34 @@ export async function runUpdater(
         io.out(`Started the apply unit for ${staged.version}; it walks the steps from here — morndo update --status tells how it ends.\n`);
         return EXIT_OK;
       }
-      try {
-        await m.runApply(staged.version);
-      } catch (error) {
-        rmSync(applyNowFile, { force: true });
-        io.err(`the apply unit did not run: ${error instanceof Error ? error.message : String(error)}\n`);
-        return EXIT_TEMPFAIL;
-      }
+      const startedAt = Date.now();
+      let startError: string | null = null;
+      // A unit whose apply ended in one of §8.4's own exits counts as a success to systemd (the unit's
+      // SuccessExitStatus); a failed start is a crash, or a unit that never ran — the answer below tells which.
+      try { await m.runApply(staged.version); }
+      catch (error) { startError = error instanceof Error ? error.message : String(error); }
       rmSync(applyNowFile, { force: true });                           // a unit that never read it leaves none behind
-      // The unit's record is the answer (§8.1): the exit follows the state it ended in.
-      const last = store.recentUpdates(1)[0] ?? null;
-      if (last === null) {
-        io.err("the apply unit recorded nothing; try again\n");
-        return EXIT_TEMPFAIL;
-      }
-      return recordExit(last, io);
+      return answerOfUnit(staged.version, startedAt, startError);
     }
 
     if (parsed.cmd === "apply-unit") {
+      // Every line the unit says goes into its result too, for the command that started it (applyResultFile).
+      const lines: string[] = [];
+      const said = { out: (t: string) => { lines.push(t.replace(/\n$/, "")); io.out(t); }, err: (t: string) => { lines.push(t.replace(/\n$/, "")); io.err(t); } };
+      const code = await applyUnit(said);
+      const temp = `${applyResultFile}.new`;
+      writeFileSync(temp, `${JSON.stringify({ instance: parsed.version, at: Date.now(), code, lines })}\n`, { mode: 0o600 });
+      renameSync(temp, applyResultFile);
+      return code;
+    }
+
+    async function applyUnit(io: { out(t: string): void; err(t: string): void }): Promise<number> {
+      if (parsed.cmd !== "apply-unit") return EXIT_SOFTWARE;
+      const printOutcome = (line: string, code: number): number => {
+        if (code === EXIT_OK) io.out(`${line}\n`);
+        else io.err(`${line}\n`);
+        return code;
+      };
       // What the apply unit runs (§6.2): one apply, of the Version the unit was named for, in its own process.
       // The instance named "rollback" runs the principal's own rollback (§8.1) — the one `morndo update
       // --rollback` starts, so that no service the walk stops is its parent.
@@ -719,7 +755,8 @@ export async function runUpdater(
       }
       const m = needManager();
       if (m === null) return EXIT_CONFIG;
-      writeFileSync(rollbackConfirmedFile, `${JSON.stringify({ from: layout.current, at: Date.now() })}\n`, { mode: 0o600 });
+      const startedAt = Date.now();
+      writeFileSync(rollbackConfirmedFile, `${JSON.stringify({ from: layout.current, at: startedAt })}\n`, { mode: 0o600 });
       // PR 6c's --detach, the hub's rollback command: start §5's morndo-update-apply@rollback.service instance
       // and answer at once; the unit walks the machine back and records its own end.
       if (parsed.detach) {
@@ -732,19 +769,16 @@ export async function runUpdater(
         io.out("Started the rollback unit; it walks the machine back from here — morndo update --status tells how it ends.\n");
         return EXIT_OK;
       }
+      let startError: string | null = null;
       try {
         await m.runApply("rollback");            // §5: the morndo-update-apply@rollback.service instance
       } catch (error) {
-        io.err(`the apply unit did not run: ${error instanceof Error ? error.message : String(error)}\n`);
-        return EXIT_TEMPFAIL;
+        // The confirmation was for this run of the unit only: a unit that failed must not leave it valid for a
+        // later start of the rollback instance that no one confirmed.
+        rmSync(rollbackConfirmedFile, { force: true });
+        startError = error instanceof Error ? error.message : String(error);
       }
-      // The unit's record is the answer (§8.1): the exit follows the state it ended in.
-      const last = store.recentUpdates(1)[0] ?? null;
-      if (last === null) {
-        io.err("the apply unit recorded nothing; try again\n");
-        return EXIT_TEMPFAIL;
-      }
-      return recordExit(last, io);
+      return answerOfUnit("rollback", startedAt, startError);
     }
 
     if (parsed.cmd === "tick") {
@@ -926,7 +960,7 @@ export async function runUpdater(
     // The unit files, checked before anything is written too: a unit of one of our names that Morndo did not
     // write is someone's own, and only --force replaces it — kept beside it as <name>.before-morndo.
     const roleServices: readonly UpdateService[] = parsed.role === "control-plane" ? ["hub", "fleet", "node"] : ["node"];
-    const foreign = await m.foreignUnits(versionText, { services: roleServices });
+    const foreign = await m.foreignUnits(versionText, { services: roleServices }, { tree });   // not installed yet: the tree's own units
     if (foreign.length > 0 && !parsed.force) {
       io.err(`${foreign.join(", ")}: not written by Morndo; move ${foreign.length === 1 ? "it" : "them"} away, or run with --force to keep ${foreign.length === 1 ? "it" : "them"} as <name>.before-morndo; nothing was installed\n`);
       return EXIT_CONFIG;

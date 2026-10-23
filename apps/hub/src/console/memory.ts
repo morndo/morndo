@@ -2,7 +2,8 @@
 // for the principal ({kind: "principal", via: "console"}), as `pair` and `revoke` do. It opens memory.db directly, as
 // the other console commands open the hub's database, so it works whether the hub runs or not.
 // - list, show: the Notes, as the principal sees them (every one, the pending and the invalidated among them);
-// - approve: M4, M5, the principal's approval of a Procedure or an untrusted Note;
+// - approve: M4, M5, M8, the principal's approval of a Procedure or an untrusted Note — at the console it needs a
+//   one-time code (XXXX-XXXX-XXXX) that only the app, under step-up, can mint for the note, read from stdin (never argv: ps shows it);
 // - invalidate: M2, with the reason;
 // - import: an agent's own markdown notes (frontmatter `name`, `description`) as {kind: "import", label}: tier 3, facts
 //   unless named with --procedure, and a procedure still waits for approve;
@@ -16,6 +17,8 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
 import { FleetClient, FleetMismatch, FleetUnavailable } from "@morndo/fleet-client";
+import { createInterface } from "node:readline/promises";
+import type { Readable } from "node:stream";
 import { DatabaseUnreadable } from "@morndo/service-kit";
 import { MEMORY_LIMITS, TIER_LABELS, parseScope, type MemoryChange, type Note } from "@morndo/domain";
 import { MemoryFromFuture } from "../adapters/memory-migrations.ts";
@@ -25,23 +28,40 @@ import { MemorySync, type MemoryFleet } from "../application/memory-sync.ts";
 
 export const MEMORY_EXIT = { ok: 0, refused: 1, usage: 2, unavailable: 69, data: 78 } as const;
 
-export type MemoryIo = { env: NodeJS.ProcessEnv; out(text: string): Promise<void>; err(text: string): Promise<void> };
+// `readCode`: the one-time code for `approve`, read from stdin (readCodeLine): never from argv, where `ps` shows it.
+export type MemoryIo = { env: NodeJS.ProcessEnv; out(text: string): Promise<void>; err(text: string): Promise<void>; readCode?: () => Promise<string> };
+
+// The first line of `input`, trimmed: what is typed at the prompt on a terminal, or piped in. On a terminal it asks first
+// (`ask` writes the prompt, to stderr, so a pipe's stdout stays clean). No input at all is the empty code.
+export async function readCodeLine(input: Readable, tty: boolean, ask: (text: string) => void): Promise<string> {
+  // No `output`, on purpose: on a terminal readline then puts the input in raw mode (the tty driver echoes nothing) and has
+  // nowhere to echo to, so the typed code is never shown (checked on a real pseudo-terminal, 2026-10-21; Node 24
+  // readline `terminal` and `output`, https://nodejs.org/api/readline.html). The prompt goes through `ask`, not readline.
+  const rl = createInterface({ input, terminal: tty });
+  try {
+    if (tty) ask("One-time code: ");
+    for await (const line of rl) return line.trim();
+    return "";
+  } finally { rl.close(); }
+}
 
 export const MEMORY_USAGE = `usage: morndo memory list [--scope S] [--pending] [--all]
        morndo memory show <id>
-       morndo memory approve <id>
+       morndo memory approve <id>            (asks for the one-time code on stdin)
        morndo memory invalidate <id> --reason R
        morndo memory import --dir D --scope S [--label L] [--procedure FILE]...
        morndo memory sync
 A scope is repo:<name>, project:<name>, user or org. import reads D's *.md files with YAML frontmatter (name,
-description); the files named by --procedure become procedures, which wait for approve. sync pushes the skills to every
-online node now, through MORNDO_FLEET_SOCKET (default ~/.local/state/morndo-fleet/fleet.sock).`;
+description); the files named by --procedure become procedures, which wait for approve. Approving at the console needs a
+one-time code from the app (M8), typed at the prompt or piped on stdin: never as an argument, where ps shows it. sync pushes the skills to every online node now, through MORNDO_FLEET_SOCKET (default
+~/.local/state/morndo-fleet/fleet.sock).`;
 
 const OPTIONS = {
   scope: { type: "string" }, pending: { type: "boolean" }, all: { type: "boolean" }, reason: { type: "string" },
-  dir: { type: "string" }, label: { type: "string" }, procedure: { type: "string", multiple: true }, help: { type: "boolean", short: "h" },
+  dir: { type: "string" }, label: { type: "string" }, procedure: { type: "string", multiple: true }, code: { type: "string" },
+  help: { type: "boolean", short: "h" },
 } as const;
-type Values = { scope?: string; pending?: boolean; all?: boolean; reason?: string; dir?: string; label?: string; procedure?: string[]; help?: boolean };
+type Values = { scope?: string; pending?: boolean; all?: boolean; reason?: string; dir?: string; label?: string; procedure?: string[]; code?: string; help?: boolean };
 // The options and the positionals each command takes; anything else is a usage error.
 const COMMANDS: Record<string, { options: readonly string[]; ids: number }> = {
   list: { options: ["scope", "pending", "all"], ids: 0 }, show: { options: [], ids: 1 }, approve: { options: [], ids: 1 },
@@ -66,6 +86,10 @@ export async function runMemory(argv: string[], io: MemoryIo, o: { dataDir: stri
   const command = Object.hasOwn(COMMANDS, sub) ? COMMANDS[sub] : undefined;
   if (!command) { await io.err(`${sub ? `no such memory command: ${sub}\n` : ""}${MEMORY_USAGE}`); return MEMORY_EXIT.usage; }
   const extra = Object.keys(v).filter(k => !command.options.includes(k));
+  if (sub === "approve" && extra.includes("code")) {
+    await io.err("--code is not taken: an argument shows in the process list (ps). Run `morndo memory approve <id>` and type the one-time code when asked, or pipe it on stdin: echo CODE | morndo memory approve <id>");
+    return MEMORY_EXIT.usage;
+  }
   if (extra.length || ids.length !== command.ids) {
     await io.err(`${extra.length ? `memory ${sub} takes no --${extra.join(", --")}\n` : ""}${MEMORY_USAGE}`);
     return MEMORY_EXIT.usage;
@@ -110,7 +134,18 @@ export async function runMemory(argv: string[], io: MemoryIo, o: { dataDir: stri
         return MEMORY_EXIT.ok;
       }
       case "approve": {
-        const r = service.approve(id);
+        // A note that does not exist is refused before the code is asked for (nothing to prompt about).
+        if (!service.show(id)) { await io.err(`${id}: not_found`); return MEMORY_EXIT.refused; }
+        const code = (await io.readCode?.()) ?? "";
+        const r = service.approve("console", id, code.trim() === "" ? {} : { code });
+        if (!r.ok && r.problem === "code_needed") {
+          await io.err(`approving at the console needs a one-time code from the app (ask for one on the note, then run morndo memory approve ${id} and enter it when asked, or pipe it on stdin)`);
+          return MEMORY_EXIT.refused;
+        }
+        if (!r.ok && r.problem === "bad_code") {
+          await io.err("that code is wrong, already used or expired; ask the app for a new one");
+          return MEMORY_EXIT.refused;
+        }
         if (!r.ok && r.problem === "replaced_meanwhile") {
           await io.err(`${id}: the note it replaces was replaced by another successor first; look at both (morndo memory show) and, if this one should win, have it proposed again against the version that holds now`);
           return MEMORY_EXIT.refused;

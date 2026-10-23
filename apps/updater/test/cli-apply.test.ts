@@ -176,6 +176,36 @@ describe("`morndo update` — check, then apply what stands staged (§8.1)", () 
     }
   }, 120_000);   // four worlds, each a signed feed and two unpacked releases (68 s alone on this box)
 
+  it("an apply that ends with no record answers in the unit's own words, never with an older record's", async () => {
+    // The real unit command runs as the unit would; another process holds the apply lock, so it ends busy (75) and
+    // records nothing. An attempt from a day before stands on record: it is not this run's answer.
+    const w = await world({ preStageB: true });
+    w.store.saveUpdate({
+      id: "upd-yesterday", kind: "update", target: parseVersion(B)!, preUpdate: { current: parseVersion(A)!, previous: null },
+      state: "staged", mark: null, backups: [], migrations: null,
+      format: 1, startedAt: Date.now() - DAY, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null,
+    });
+    w.store.finishUpdate("upd-yesterday", "committed", Date.now() - DAY);
+    let unit: { code: number; err: string } | null = null;
+    w.services.runApplyScript = async version => {
+      const held = w.store.tryLock();                        // taken while the unit runs, not before the command
+      try { unit = await w.run(["update", "apply", "--version", version]); } finally { held?.release(); }
+    };
+    const r = await w.run(["update", "--yes"]);
+    expect(unit, "the unit ran").toMatchObject({ code: 75, err: expect.stringMatching(/Busy/) });
+    expect(r.code, r.err).toBe(75);
+    expect(r.err).toMatch(/Busy: another process holds the apply lock/);
+    expect(r.err + r.out).not.toMatch(/Committed|did not run/);
+  });
+
+  it("a unit that crashed before it answered is a unit that did not run", async () => {
+    const w = await world({ preStageB: true });
+    w.services.runApplyScript = async () => { throw new Error("Job for morndo-update-apply@0.2.0.service failed"); };
+    const r = await w.run(["update", "--yes"]);
+    expect(r.code).toBe(75);
+    expect(r.err).toMatch(/the apply unit did not run: Job for/);
+  });
+
   it("--now writes the apply-now file before the unit starts, and the unit's apply consumes it", async () => {
     const w = await world({ preStageB: true });
     w.services.runApplyScript = async () => {
@@ -431,11 +461,11 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
       const w = await world();
       await withPrevious(w, { restoreFleet: true });
       const r = await w.run(["update", "--rollback"], {}, { tty: true, answer: "y" });
+      expect(r.out).toMatch(/Not rolled back\./);                // first: a "y" that went on would fail here
       expect(r.code, r.err).toBe(0);
       expect(r.out).toMatch(/Back to 0\.0\.9 from 0\.1\.0\./);
       expect(r.out).toMatch(/The fleet database goes back to its backup from \d{4}-\d{2}-\d{2} \d{2}:\d{2} \(3 hours of writes since are dropped\)\./);
       expect(r.prompts.join("")).toMatch(/Type rollback to go on:/);
-      expect(r.out).toMatch(/Not rolled back\./);
       expect(w.services.tape).toEqual([]);
     }
     // the word itself: the rollback runs in its own unit (§5), and the record it leaves is the answer
@@ -514,6 +544,18 @@ describe("`morndo update --rollback` — asks first on a preview, then its own u
     expect(w.store.badVersions()).toContain(A);            // RL7: the Version left behind is never auto-installed here again
     expect(w.store.openUpdate()).toBeNull();
     expect(w.services.tape.filter(t => t.startsWith("stop:")).length).toBeGreaterThan(0);   // the real walk ran
+  });
+
+  it("a rollback unit that fails to start leaves no confirmation behind for a later start", async () => {
+    const w = await world();
+    await withPrevious(w);
+    w.services.runApplyScript = async () => { throw new Error("Job for morndo-update-apply@rollback.service failed"); };
+    const r = await w.run(["update", "--rollback", "--yes"]);
+    expect(r.code, r.err).toBe(75);
+    expect(existsSync(join(w.paths.state, "rollback-confirmed"))).toBe(false);
+    const later = await w.run(["update", "apply", "--version", "rollback"]);
+    expect(later.code, later.err).toBe(64);                 // no one confirmed this one
+    expect(w.current()).toBe(A);
   });
 
   it("with no previous Version there is nothing to go back to: exit 78, nothing started", async () => {

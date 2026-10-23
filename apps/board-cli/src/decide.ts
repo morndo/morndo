@@ -1,9 +1,10 @@
 // morndo-decide, the agents' way to file a decision brief (ADR-0023): a thin client of the hub's /api/agent/decisions
-// routes, plus `lint` and `template`, which call the same lintBrief the hub does and need no hub. Pure of I/O: `run`
-// takes the arguments, the environment, a fetch, a file reader and a way to learn this lane's name.
+// routes, plus `card`, `lint` and `template`, which need no hub: `lint` calls the same lintBrief the hub does, and
+// `card` lints a short card and prints the lines to post. Pure of I/O: `run` takes the arguments, the environment,
+// a fetch, a file reader and a way to learn this lane's name.
 // Exit codes, as morndo-board: 0 done, 1 the hub (or the lint) refused, 2 usage, 3 the hub can't be reached.
-import { lintBrief, briefMarkdown, type BriefProblem, type DecisionBrief } from "@morndo/domain";
-import { BRIEF_TEMPLATE, parseBriefMarkdown } from "@morndo/protocol";
+import { lintBrief, briefMarkdown, lintCard, cardText, type BriefProblem, type DecisionBrief } from "@morndo/domain";
+import { BRIEF_TEMPLATE, parseBriefMarkdown, CARD_TEMPLATE, parseCardMarkdown } from "@morndo/protocol";
 import { parseArgs } from "./cli.ts";
 import { decidePromptFor } from "./prompt.ts";
 
@@ -22,6 +23,8 @@ export const HELP = `morndo-decide: a decision brief for the principal.
 
   template                                print the blank
   lint <file.md|->                        check a brief; files nothing
+  card <file.md|->                        check a short card (outcome, 2 to 4 options, a recommendation, a default); prints the card to post
+  card --template                         print the blank card
   new <file.md|-> [--json]                file it; prints the id and any warnings
   restate <id> <file.md|-> [--json]       the next version; answers to the old one are refused
   show <id> [--json]                      the brief as filed, its status, and the answer once given
@@ -106,6 +109,20 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       const warnings = errors.length ? [] : lint.problems.filter(p => p.level === "warning");
       for (const p of [...errors, ...warnings]) io.err(problemLine(p));
       return errors.length ? 1 : 0;
+    }
+    if (cmd === "card") {
+      if (flags.template === true) { io.out(CARD_TEMPLATE.replace(/\n$/, "")); return 0; }
+      const path = rest[0];
+      if (!path) throw new Usage("usage: morndo-decide card <file.md|-> | card --template");
+      const raw = await io.read(path);
+      const parsed = flags.json === true ? { draft: JSON.parse(raw) as unknown, problems: [] as BriefProblem[] } : parseCardMarkdown(raw);
+      const lint = lintCard(parsed.draft);
+      const errors = [...parsed.problems.filter(p => p.level === "error"), ...lint.problems.filter(p => p.level === "error")];
+      const warnings = errors.length ? [] : lint.problems.filter(p => p.level === "warning");
+      for (const p of [...errors, ...warnings]) io.err(problemLine(p));
+      if (errors.length) return 1;
+      for (const line of cardText(lint.card!)) io.out(line);
+      return 0;
     }
 
     const hub = (env.MORNDO_HUB ?? "").replace(/\/+$/, "");

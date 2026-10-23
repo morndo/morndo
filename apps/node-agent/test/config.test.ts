@@ -37,7 +37,19 @@ describe("config.json", () => {
     expect(loadConfig(h).hub).toBe("http://127.0.0.1:8788");
     const bad = home();
     writeConfig(bad, { hub: "ws://127.0.0.1:8788" });
-    expect(() => loadConfig(bad)).toThrow(/hub must be an http or https URL/);
+    expect(() => loadConfig(bad)).toThrow(/hub must be an https URL, or an http URL to this machine/);
+  });
+  it("refuses a plain http hub on another machine, where the node's token would cross the network; https anywhere and http to this machine pass", () => {
+    for (const hub of ["http://100.64.0.1:8788", "http://hub.tail1234.ts.net", "http://0.0.0.0:8788", "http://127.0.0.1.nip.io", "http://127.0.0.1@evil.example/", "http://hub.example"]) {
+      const h = home();
+      writeConfig(h, { hub });
+      expect(() => loadConfig(h), hub).toThrow(/hub must be an https URL, or an http URL to this machine \(127\.0\.0\.1, localhost or \[::1\]\)/);
+    }
+    for (const hub of ["https://hub.tail1234.ts.net", "http://127.0.0.1:8788", "http://127.4.5.6:8788/", "http://localhost:8788", "http://[::1]:8788"]) {
+      const h = home();
+      writeConfig(h, { hub });
+      expect(loadConfig(h).hub, hub).toBe(hub);
+    }
   });
   it("refuses a bad node name or URL, naming the field", () => {
     const a = home();

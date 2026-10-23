@@ -52,18 +52,22 @@ export type Task = {
 
 export type TaskChange =
   | { kind: "created"; status: TaskStatus; assignee: string | null }
-  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null }
+  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string }
   | { kind: "assigned"; from: string | null; to: string | null }
   | { kind: "edited"; title?: string; description?: string; priority?: TaskPriority }
-  | { kind: "commented"; text: string };
+  | { kind: "commented"; text: string }
+  | { kind: "merged"; repo: string; sha: string }
+  | { kind: "unmerged"; repo: string; sha: string };
 export type TaskEvent = { key: TaskKey; rev: number; at: number; actor: TaskActor; change: TaskChange };
 
 export type NewTask = { title: string; description?: string; assignee?: string | null; priority?: TaskPriority; status?: TaskStatus };
 export type TaskAction =
-  | { action: "move"; to: TaskStatus; reason?: string; ifRev?: number }
+  | { action: "move"; to: TaskStatus; reason?: string; notLive?: string; ifRev?: number }
   | { action: "assign"; to: string | null; ifRev?: number }
   | { action: "edit"; title?: string; description?: string; priority?: TaskPriority; ifRev?: number }
-  | { action: "comment"; text: string };
+  | { action: "comment"; text: string }
+  | { action: "merged"; sha: string; repo?: string }
+  | { action: "unmerged"; sha: string; repo?: string };
 
 export type BoardProblem =
   | "not_allowed"       // a worker tried what only the manager or the principal may (B2, B3)
@@ -74,9 +78,15 @@ export type BoardProblem =
   | "one_doing"         // the assignee already has a task in progress (B5); `other` names it
   | "changed"           // the task moved since the rev the change named (B6)
   | "same"              // the change changes nothing
+  | "not_live"          // done waits for the task's merges to be live on every node (B11)
+  | "bad_sha" | "bad_repo"  // a merge record's commit or repository isn't one (B11)
+  | "no_merge"          // the merge named to clear is not on the task (B11)
+  | "too_many"          // the task already holds MAX_MERGES merge records (B11)
+  | "no_commit"         // a lane named a commit the hub's checkout does not hold (B11; judged by the hub, which has the checkout)
   | "empty" | "too_long" | "bad_name" | "bad_text";
-// `other`: the task in the way (one_doing); `from`: where the task is (bad_transition), so a refusal can say so.
-export type BoardRefusal = { problem: BoardProblem; other?: TaskKey; from?: TaskStatus };
+// `other`: the task in the way (one_doing); `from`: where the task is (bad_transition), so a refusal can say so;
+// `detail`: the not_live label, so a refusal can say what the board sees (B11).
+export type BoardRefusal = { problem: BoardProblem; other?: TaskKey; from?: TaskStatus; detail?: string };
 
 export const TITLE_MAX = 120;
 export const DESCRIPTION_MAX = 4000;
@@ -86,8 +96,8 @@ export const LANE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 // Done tasks stay on the board this long, then only in the record.
 export const DONE_SHOWN_MS = 7 * 24 * 3_600_000;
 
-const refuse = (problem: BoardProblem, other?: TaskKey, from?: TaskStatus): Result<never, BoardRefusal> =>
-  err({ problem, ...(other ? { other } : {}), ...(from ? { from } : {}) });
+const refuse = (problem: BoardProblem, other?: TaskKey, from?: TaskStatus, detail?: string): Result<never, BoardRefusal> =>
+  err({ problem, ...(other ? { other } : {}), ...(from ? { from } : {}), ...(detail !== undefined ? { detail } : {}) });
 
 // One line: a title or a reason never holds a line break (any kind, CRLF included: collapsed to a space) or a control
 // character; a description or a comment keeps its lines and tabs. Each is trimmed and bounded.
@@ -144,6 +154,70 @@ export const mayMove = (a: TaskActor, from: TaskStatus, to: TaskStatus) =>
 export const workingOn = (board: readonly Task[], laneName: string): Task | null =>
   board.find(t => t.status === "doing" && t.assignee === laneName) ?? null;
 
+// B11: the repository whose merges the board follows onto the nodes, a task's merge record, and liveness: a merge is
+// live when it is an ancestor of (or equal to) every enrolled node's build. Unknown is never live: nothing says it is.
+export const MORNDO_REPO = "morndo/morndo";
+export const REPO_NAME = /^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
+export const MERGE_SHA = /^[0-9a-f]{7,40}$/;
+export const PRINCIPAL_NOT_LIVE = "accepted by the principal";
+// A task holds this many merge records at most: each one is a git check per node, and a lane can record any sha it likes.
+export const MAX_MERGES = 5;
+export const isMorndoRepo = (repo: string) => repo.toLowerCase() === MORNDO_REPO;
+
+// One recorded merge of a task's PR. `by`: the name of who recorded it ("principal", "console", or the manager's/lane's
+// name). `override`: set when the task was accepted as done while this merge was not live: the reason given.
+export type MergeRecord = { repo: string; sha: string; at: number; by: string; override: string | null };
+// What a node reports: its build's commit (40 hex) or null (never reported / agent too old).
+export type NodeBuild = { node: string; commit: string | null };
+export type AncestryAnswer = "ancestor" | "not_ancestor" | "unknown";
+// A node that keeps a merge from being live: `on` is its build's commit when it is behind (not an ancestor), null when unknown.
+export type Blocker = { node: string; on: string | null };
+export type Liveness = { live: true } | { live: false; blockers: Blocker[] };
+
+// The merge ancestor-or-equal of every node's build is live. No node listed => not live (nothing says it is). A node
+// with a null commit, or whose answer is "unknown" => a blocker with on null; "not_ancestor" => a blocker with the node's commit.
+export function livenessOf(sha: string, builds: readonly NodeBuild[], ancestry: (merge: string, build: string) => AncestryAnswer): Liveness {
+  if (builds.length === 0) return { live: false, blockers: [] };
+  const blockers: Blocker[] = [];
+  for (const b of builds) {
+    if (b.commit === null) { blockers.push({ node: b.node, on: null }); continue; }
+    const answer = ancestry(sha, b.commit);
+    if (answer === "ancestor") continue;
+    blockers.push({ node: b.node, on: answer === "not_ancestor" ? b.commit : null });
+  }
+  return blockers.length === 0 ? { live: true } : { live: false, blockers };
+}
+
+// The one-line label. Live => "merged, live". Not live => "merged, not live: pc on abc1234, srv01 unknown" (blockers in
+// input order, `on` shown as its first 7 chars; with no blockers and no nodes: "merged, not live: no node reports a
+// build"). For several merges the union per node: a node blocks if it blocks any merge, the first blocker seen for a node wins.
+export function mergeLabel(lives: readonly Liveness[]): string {
+  const blockers = new Map<string, Blocker>();
+  let live = true;
+  for (const l of lives) {
+    if (l.live) continue;
+    live = false;
+    for (const b of l.blockers) if (!blockers.has(b.node)) blockers.set(b.node, b);
+  }
+  if (live) return "merged, live";
+  if (blockers.size === 0) return "merged, not live: no node reports a build";
+  return `merged, not live: ${[...blockers.values()].map(b => `${b.node} ${b.on === null ? "unknown" : `on ${b.on.slice(0, 7)}`}`).join(", ")}`;
+}
+
+// What the board shows of a task's merges. `live`: null when none of the task's merges is in morndo/morndo (then
+// `label` is `merged in <repo>` of the first non-morndo merge); otherwise true only when every morndo/morndo merge is live.
+export type MergedView = { key: TaskKey; merges: MergeRecord[]; live: boolean | null; label: string };
+export function mergedView(key: TaskKey, merges: readonly MergeRecord[], liveness: (sha: string) => Liveness): MergedView {
+  const morndo = merges.filter(m => isMorndoRepo(m.repo));
+  if (morndo.length === 0) return { key, merges: [...merges], live: null, label: merges.length > 0 ? `merged in ${merges[0]?.repo}` : "" };
+  const lives = morndo.map(m => liveness(m.sha));
+  return { key, merges: [...merges], live: lives.every(l => l.live), label: mergeLabel(lives) };
+}
+
+// What applyAction judges a move to done against (B11): the task's recorded merges, and liveness per sha. Absent: done
+// is not held for any merge (a board without the fleet knows none).
+export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness };
+
 // `board`: the tasks in progress now, for B5 when a task is filed straight into progress.
 export function createTask(input: NewTask, actor: BoardActor | { kind: "console" }, n: number, now: number, board: readonly Task[] = []): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
   const title = line(input.title, TITLE_MAX);
@@ -169,8 +243,9 @@ export function createTask(input: NewTask, actor: BoardActor | { kind: "console"
   return ok({ task, event: { key, rev: 1, at: now, actor, change: { kind: "created", status, assignee } } });
 }
 
-// One change to one task, by one actor, judged against the board as it is (B5 needs the assignee's other tasks).
-export function applyAction(task: Task, action: TaskAction, actor: TaskActor, now: number, board: readonly Task[]): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
+// One change to one task, by one actor, judged against the board as it is (B5 needs the assignee's other tasks; B11
+// needs the task's merges and their liveness for a move to done).
+export function applyAction(task: Task, action: TaskAction, actor: TaskActor, now: number, board: readonly Task[], gate?: DoneGate): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
   if ("ifRev" in action && action.ifRev !== undefined && action.ifRev !== task.rev) return refuse("changed");
   const mine = laneOf(actor) !== null && task.assignee === laneOf(actor);
   const next = (t: Task, change: TaskChange, state = true): Result<{ task: Task; event: TaskEvent }, BoardRefusal> => {
@@ -198,8 +273,26 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
         const other = workingOn(board.filter(t => t.key !== task.key), task.assignee);
         if (other) return refuse("one_doing", other.key);
       }
+      // B11: done waits for the task's morndo merges to be live on every node. The manager may accept one that is not,
+      // saying why; that reason is the recorded override. Without a gate, or with nothing pending, notLive is ignored.
+      let notLive: string | undefined;
+      if (action.to === "done" && gate) {
+        const pending = gate.merges.filter(m => isMorndoRepo(m.repo) && !gate.liveness(m.sha).live);
+        if (pending.length > 0) {
+          if ((action.notLive ?? "").trim() === "") {
+            // The principal's own click (the app's "Accept as done") is the override: it has no field for a reason, and the
+            // owner is never locked out of his board. It is recorded all the same.
+            if (actor.kind !== "principal") return refuse("not_live", undefined, undefined, mergeLabel(pending.map(m => gate.liveness(m.sha))));
+            notLive = PRINCIPAL_NOT_LIVE;
+          } else {
+            const why = line(action.notLive ?? "", REASON_MAX);
+            if (!why.ok) return why;
+            notLive = why.value;
+          }
+        }
+      }
       const moved: Task = { ...task, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null };
-      return next(moved, { kind: "moved", from: task.status, to: action.to, reason });
+      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }) });
     }
     case "assign": {
       if (!runsTheBoard(actor)) return refuse("not_allowed");                // D5: never the board
@@ -238,6 +331,31 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       if (!r.ok) return r;
       return next({ ...task, comments: task.comments + 1 }, { kind: "commented", text: r.value }, false);
     }
+    case "merged": {
+      // B11: a merge record is not a change of state. Who may record one is who may comment on the work: the board's
+      // hands, or the lane the task is assigned to (never the board itself, D5).
+      if (actor.kind === "board") return refuse("not_allowed");
+      if (!runsTheBoard(actor) && !mine) return refuse("not_yours");
+      const sha = action.sha.trim().toLowerCase();
+      if (!MERGE_SHA.test(sha)) return refuse("bad_sha");
+      const repo = (action.repo ?? MORNDO_REPO).trim();
+      if (!REPO_NAME.test(repo)) return refuse("bad_repo");
+      if (gate?.merges.some(m => m.repo.toLowerCase() === repo.toLowerCase() && m.sha === sha)) return refuse("same");
+      if ((gate?.merges.length ?? 0) >= MAX_MERGES) return refuse("too_many");
+      return next(task, { kind: "merged", repo, sha }, false);
+    }
+    case "unmerged": {
+      // B11: clearing a merge record is the board's hands' alone (a lane may record one, never erase it): the record is
+      // what done was held for, so who may drop it is who runs the board. Replacing a wrong sha is an unmerged of it
+      // then a merged of the right one.
+      if (!runsTheBoard(actor)) return refuse("not_allowed");
+      const sha = action.sha.trim().toLowerCase();
+      if (!MERGE_SHA.test(sha)) return refuse("bad_sha");
+      const repo = (action.repo ?? MORNDO_REPO).trim();
+      if (!REPO_NAME.test(repo)) return refuse("bad_repo");
+      if (!gate?.merges.some(m => m.repo.toLowerCase() === repo.toLowerCase() && m.sha === sha)) return refuse("no_merge");
+      return next(task, { kind: "unmerged", repo, sha }, false);
+    }
   }
 }
 
@@ -268,17 +386,25 @@ export const boardChanged = (e: TaskEvent): BoardChanged => ({
     : { kind: e.actor.kind, name: e.actor.name, endpointId: null, token: e.actor.token },
 });
 
+// B12: the task a lane's status line names ("STATUS: DONE T-285 …"), as the hub read it from the Run's line (the protocol's
+// parser; the domain imports no wire package). Only a turn's end, or a wait, is the line's word; a working Run's line is the last turn's.
+export type NamedStatus = { key: TaskKey; status: "done" | "blocked" | "needs_decision" | "waiting" };
+
 // B10, D1 to D6: the move the board makes by itself for `task`, following its assignee's Run, or null. D6: a Run whose
 // phase began at or before the task's last change of state (status, assignee, description; a comment is not one) moves
 // nothing, so the board never undoes what a person or a lane did after it. D5: never to Done, never an assignment (the board's actor can't: runsTheBoard is false for it).
 export const GONE_REASON = "its lane stopped without DONE";
 export const BACKGROUND_REASON = "background work still running";
-export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
+export function derivedMove(task: Task, run: Run, board: readonly Task[], named: NamedStatus | null = null): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
   if (task.assignee === null || task.assignee !== run.lane || run.since <= task.stateChangedAt) return null;
+  // B12: the key counts only when the line is the turn's word: a turn's end, or a wait.
+  const keyed = run.phase === "ended" || run.phase === "waiting" ? named : null;
   // The reason is the run's status line as one clean line: a control character in it (a lane's odd output) is a space,
   // never a refused move (line(), bad_text).
   const said = (run.line ?? "").replace(/[\x00-\x1f\x7f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, REASON_MAX) || null;
   if (task.status === "doing") {
+    // B12: a keyed line is about the task it names only (D1, D2); a gone run carries none (D3).
+    if (keyed !== null && keyed.key !== task.key) return null;
     // D1: DONE is the turn's word even while its background work runs (the Run keeps the outcome; phase is waiting).
     if (run.phase === "ended" && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
     if (run.phase === "waiting" && run.wait?.on === "background" && run.outcome === "done") return { to: "review", reason: BACKGROUND_REASON, rule: "D1" };
@@ -288,16 +414,33 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[]): { to:
   }
   if (task.status === "todo" || task.status === "blocked" || task.status === "review") {
     if (run.phase !== "working" && run.phase !== "waiting") return null;
-    // D4: the lane's one task it works on now. Its to do or blocked one, when it has exactly one; else its one in review
-    // (taken up again). Two candidates, or a task already in progress (B5), and the board moves nothing.
     const mine = board.filter(t => t.assignee === run.lane);
+    if (keyed !== null) {
+      // B12: a keyed WAITING that names this task takes it up again (D1). Any other keyed line naming a task not in
+      // progress moves nothing, and no other task moves while the line is current.
+      if (keyed.key !== task.key || keyed.status !== "waiting" || mine.some(t => t.status === "doing")) return null;
+      return { to: "doing", reason: said, rule: "D1" };
+    }
+    // D4: the lane's one task to take up, when it has exactly one to do. B12: only to do → in progress; a task in review or
+    // blocked leaves its column by an explicit move or a keyed WAITING that names it (D1). Two to dos, or a task already
+    // in progress (B5), and the board moves nothing.
     if (mine.some(t => t.status === "doing")) return null;
-    const waiting = mine.filter(t => t.status === "todo" || t.status === "blocked");
-    const reviews = mine.filter(t => t.status === "review");
-    const pick = waiting.length === 1 ? waiting[0] : waiting.length === 0 && reviews.length === 1 ? reviews[0] : undefined;
-    return pick?.key === task.key ? { to: "doing", reason: null, rule: "D4" } : null;
+    const todos = mine.filter(t => t.status === "todo");
+    return todos.length === 1 && todos[0]?.key === task.key ? { to: "doing", reason: null, rule: "D4" } : null;
   }
   return null;
+}
+
+// B12: a keyed line naming a task that is not one of the lane's open tasks moves nothing (derivedMove); the board leaves one
+// line about it, so it is never silent: in the history of the lane's own task in progress, else of the named task. D6: a run
+// that began at or before that task in progress last changed state says nothing new (a stale ended run adds no note).
+export function keyMismatch(run: Run, named: NamedStatus | null, board: readonly Task[]): { key: TaskKey; text: string } | null {
+  if (named === null || (run.phase !== "ended" && run.phase !== "waiting")) return null;
+  const mine = board.filter(t => t.assignee === run.lane);
+  if (mine.some(t => t.key === named.key)) return null;
+  const doing = mine.find(t => t.status === "doing");
+  if (doing && run.since <= doing.stateChangedAt) return null;
+  return { key: (doing ?? { key: named.key }).key, text: `${run.lane}'s status line at ${new Date(run.since).toISOString()} names ${named.key}, which is not its open task; the board moved nothing` };
 }
 
 // B10, D3 for a lane the fleet doesn't list at all (it ended before runs were kept, or its Run dropped): there is no Run to
