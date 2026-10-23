@@ -797,6 +797,22 @@ describe("the control plane's skew gate and its own node", () => {
     }
   }, 120_000);
 
+  it("at boot, before its own agent runs, the own node counts: a protocol-dropping Release waits for the tick (fail-safe)", async () => {
+    // Review of #116 (LOW): the boot unit runs before the services, so this machine's agent is not online yet and
+    // its node is counted like any other. The boot apply defers (75); the tick applies once the agent is online.
+    const w = await tickWorld({ controlPlane: true, fleet: fleetOf([{ name: "cp-node", agentProtocol: 1 }]), protocol: { agent: [2, 2], clientApi: [1, 1] } });
+    ownNode(w, "cp-node");
+    w.services.tmuxIn = true;
+    expect((await w.run(["update", "tick"])).code).toBe(75);       // a live read: the list is kept (and the walk defers)
+    ownNode(w, "cp-node", { state: "stopped" });                    // boot: the agent has not started yet
+    w.fleet.throwNodes = true;                                      // nor has the fleet
+    w.services.tmuxIn = false;
+    const r = await w.run(["update", "boot"]);
+    expect(r.code, r.err).toBe(75);
+    expect(stateFile(w.statePath)).toMatchObject({ state: "waiting", reason: "skew_blocked: cp-node" });
+    expect(w.current()).toBe(A);
+  }, 120_000);
+
   it("still names every other node it would cut off", async () => {
     const w = await tickWorld({ controlPlane: true, fleet: fleetOf([{ name: "cp-node", agentProtocol: 1 }, { name: "n2", agentProtocol: 1 }]), protocol: { agent: [2, 2], clientApi: [1, 1] } });
     ownNode(w, "cp-node");
