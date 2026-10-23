@@ -2,6 +2,7 @@
 // the two principal's writes with the signed assertion riding x-morndo-principal (§5.4). A fleet that can't be
 // asked is `unavailable` with its own words; a refusal is the fleet's code and words, passed on as they are — the
 // owner reads what the fleet said, not the hub's paraphrase of it.
+import { randomBytes } from "node:crypto";
 import { FleetClient, FleetOpFailed } from "@morndo/fleet-client";
 import type { FleetForUpdates, FleetWriteOutcome } from "../application/updates-ports.ts";
 
@@ -36,9 +37,20 @@ export function fleetForUpdates(client: FleetClient): FleetForUpdates {
       try { return { ok: true, nodes: await client.nodes() }; }
       catch (e) { return unavailable(e); }
     },
+    // update.apply is one of the fleet's keyed ops (a retry never acts twice): each press of "Update now" is its own
+    // key, under the hub's own `hub:` prefix (the 6d run found the op refused without one).
     applyUpdate: (node, version, principal) =>
-      write(client.op({ node }, "update.apply", { version }, { principal })),
-    resumeRollout: (version, principal) =>
-      write(client.resumeRollout(version, { principal })),
+      write(client.op({ node }, "update.apply", { version }, { principal, key: `hub:update.apply:${randomBytes(12).toString("base64url")}` })),
+    // A rollout write answers the Rollout now in force, and throws the fleet's refusal (FleetOpFailed): taken is
+    // ok, whatever Rollout it names (the 6d run found a resume the fleet took read as "a shape this hub doesn't know").
+    resumeRollout: async (version, principal) => {
+      try {
+        await client.resumeRollout(version, { principal });
+        return { ok: true };
+      } catch (e) {
+        if (e instanceof FleetOpFailed) return { ok: false, problem: "refused", code: e.error.code, message: e.error.message };
+        return unavailable(e);
+      }
+    },
   };
 }

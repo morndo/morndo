@@ -3380,6 +3380,10 @@ export const CONTROLS: Control[] = [
     find: 'run && onOwnWork(run) && (s.kind === "idle" || s.kind === "finished")', replace: "false",
     run: ["apps/web/test/phone-chat.test.ts"], expect: "is listed under Working" },
   // ---- T-315 (updates PR 6c, round 2): the hub's real updater command line, and the fleet's key from the hub's file.
+  // T-315 (6c, found by 6d's two-machine run): update.apply is a keyed op; the hub's port sends a key with each press.
+  { id: "c3c-apply-without-key", task: "315", file: "apps/hub/src/adapters/fleet-updates.ts",
+    find: "{ principal, key: `hub:update.apply:${randomBytes(12).toString(\"base64url\")}` }", replace: "{ principal }",
+    run: ["test/fleet/updates-hub.test.ts"], expect: "needs a key" },
   { id: "c3c-status-args", task: "315", file: "packages/protocol/src/updates.ts",
     find: 'status: ["update", "--status", "--json"],', replace: 'status: ["--status", "--json"],',
     run: ["apps/updater/test/cli-apply.test.ts"], expect: "argument lists" },
