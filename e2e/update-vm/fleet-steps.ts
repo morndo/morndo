@@ -407,6 +407,16 @@ async function stepCpTo(version: string, label: string): Promise<void> {
 // Step 2e: the node's tick inside the soak — the same deferral, the soak's own word.
 async function stepTickDefersSoak(): Promise<void> {
   if (IS_CP) { check("tick-defers-soak", false, "this step belongs on the node machine, not the control plane"); return; }
+  // The fleet tells the node of the commit by its `rollout` message: the agent writes it into its fleet view a moment
+  // later. Wait for that word (B committed, offered to this node) before the tick asks; run 8 ticked in between.
+  const viewFile = join(HOME, ".local/state/morndo-node/fleet-view.json");
+  const heard = await waitUntil("the node's fleet view carries B's committed Rollout", 60_000, () => {
+    try {
+      const v = JSON.parse(readFileSync(viewFile, "utf8")) as { rollout?: { version?: string; controlPlaneCommittedAt?: number | null } | null; offer?: { version?: string } | null };
+      return v.rollout?.version === VERSION_B && typeof v.rollout.controlPlaneCommittedAt === "number" && v.offer?.version === VERSION_B ? "" : null;
+    } catch { return null; }
+  });
+  check("2-node-heard-commit", heard !== null, `the node's ${viewFile} carries B's committed Rollout and its offer`);
   const tick = command("tick-soak", MORNDO_UPDATE, ["update", "tick"], { timeoutMs: 120_000 });
   const state = stateFile();
   const ok = tick.code === 75 && state?.state === "waiting" && state.reason === "waiting_soak"
