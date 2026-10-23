@@ -210,9 +210,10 @@ export class FakeServices implements ServiceManager {
     return this.tmuxIn;
   }
 
-  async runApply(version: string): Promise<void> {
-    this.calls.push({ op: "runApply", version });
+  async runApply(version: string, o?: { wait?: boolean }): Promise<void> {
+    this.calls.push({ op: "runApply", version, ...(o?.wait === false ? { wait: false } : { wait: true }) });
     this.tape.push(`runApply:${version}`);
+    if (o?.wait === false) return;                         // --detach: the unit, not this process, walks the steps
     if (this.runApplyScript !== null) await this.runApplyScript(version);
   }
 
@@ -486,7 +487,7 @@ export async function buildApplyWorld(scratch: string, o: WorldOptions = {}): Pr
   const applying = new ApplyingFileMarker({ state: paths.state });
   const backup = new TapedBackup({ tape, die, real: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }) });
   const schemas = new SqliteSchemas({ paths: dbPaths });
-  const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") });
+  const revocations = new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups"), releases: paths.releases });
   const timeline = new FakeTimeline(NOW);                   // ms since the epoch, as Clock.now answers
   probe.seesHoldScript = () => {                            // HoldWatch re-reads hold.json every second
     const text = holdText(holdPathOf);

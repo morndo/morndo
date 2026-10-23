@@ -83,6 +83,12 @@ describe("fleet config", () => {
     expect(loadConfig(withFile({ laneWatch: { waitingMin: 1440, nudge: false } })).laneWatch).toEqual({ waitingMin: 1440, noStatusMin: 15, nudge: false });
   });
 
+  it("takes the principal's pinned public key, and stays closed without one (updates §5.4)", () => {
+    expect(loadConfig(withFile({})).principalKey).toBeUndefined();
+    const key = Buffer.alloc(32, 7).toString("base64");
+    expect(loadConfig(withFile({ principalKey: key })).principalKey).toBe(key);
+  });
+
   it("refuses a file that doesn't fit, naming the setting", () => {
     const cases: [unknown, RegExp][] = [
       ["{not json", /not valid JSON/],
@@ -117,6 +123,8 @@ describe("fleet config", () => {
       [{ laneEvents: { header: "two\nlines" } }, /laneEvents.header must be one line/],
       [{ laneEvents: { ignore: "pooltest*" } }, /laneEvents.ignore must be a list of lane names/],
       [{ laneEvents: { batchMs: 10 } }, /laneEvents.batchMs must be a whole number of milliseconds from 100 to 60000/],
+      [{ principalKey: "" }, /principalKey must be the hub's public key/],
+      [{ principalKey: Buffer.alloc(31, 7).toString("base64") }, /principalKey must be 32 bytes.*this is 31/],
     ];
     for (const [content, message] of cases) {
       const { home, env } = withFile(content);

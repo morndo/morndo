@@ -71,7 +71,7 @@ beforeEach(async () => {
   });
   const remote = new RemoteService({ store, terminal: { frame: async () => null, keys: async () => false }, panes: () => [], desktop: () => null, policy: () => access.policy(), now: () => now });
   http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000),
+    config, identity: loadOrCreateIdentity(dir), access, store, observation: new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, () => now, () => access.policy()), escalations, remote,
   });
   await http.ready;

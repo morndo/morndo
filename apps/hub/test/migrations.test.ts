@@ -63,6 +63,23 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     expect(migrate(db)).toEqual({ from: LATEST, to: LATEST });          // nothing pending: a no-op
   });
 
+  it("a dev hub that ran the unmerged hub_store as migration 24 still gets main's board_merges (24) from migration 25", () => {
+    // Before the stack met main, #106 numbered hub_store 24, the number main gave board_merges. A hub that ran that
+    // build stands at user_version 24 with hub_store and without board_merges; migration 25 must not leave it so.
+    const dir = tempDir();
+    const db = new Database(join(dir, "dev.db"));
+    try {
+      migrate(db, MIGRATIONS.filter(m => m.version <= 23));
+      db.exec("CREATE TABLE hub_store (id INTEGER PRIMARY KEY CHECK (id = 1), store TEXT NOT NULL, identity TEXT NOT NULL)");
+      db.pragma("user_version = 24");
+      migrate(db);
+      const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(t => t.name);
+      expect(tables).toContain("board_merges");
+      expect(tables).toContain("hub_store");
+      expect(db.pragma("user_version", { simple: true })).toBe(MIGRATIONS[MIGRATIONS.length - 1]!.version);
+    } finally { db.close(); }
+  });
+
   it("migration 1 is today's schema and migration 2 is sessions.verified_at", () => {
     expect(MIGRATIONS.map(m => m.version)).toEqual(MIGRATIONS.map((_, i) => i + 1));    // numbered 1, 2, 3, … with no gaps
     expect(MIGRATIONS[0]?.name).toMatch(/schema/);

@@ -248,6 +248,20 @@ export const MIGRATIONS: readonly Migration[] = [
       key TEXT NOT NULL, repo TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, by TEXT NOT NULL, override TEXT,
       PRIMARY KEY (key, repo, sha))`),
   },
+  {
+    version: 25,
+    name: "hub_store: the store id of this database file, renewed by every restore, so a Command stamped with another store is answered uncertain and never typed twice (RL10, amending S5)",
+    compat: "additive",
+    up: db => {
+      db.exec(`CREATE TABLE IF NOT EXISTS hub_store (
+        id INTEGER PRIMARY KEY CHECK (id = 1), store TEXT NOT NULL, identity TEXT NOT NULL)`);
+      // Before the updater's PR 5c met main it numbered hub_store 24, main's number for board_merges: a dev hub that
+      // ran that build stands at 24 without board_merges and would never get it. Migration 24's own up, run again,
+      // makes it (CREATE ... IF NOT EXISTS: a hub that has it is unchanged). No released hub ever had that numbering.
+      const known = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_merges'").get();
+      if (known === undefined) MIGRATIONS.find(m => m.version === 24)!.up(db);
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

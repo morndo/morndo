@@ -4,7 +4,7 @@
 // language, RL1–RL14, the Update state machine, the recovery table and the fleet's rollout and skew rules. It is
 // pure: no signature is verified here (the Verifier port reports facts: "these bytes verify under this key, under
 // that namespace"), no service is stopped, no store is opened, and no clock is read — every function takes `now`.
-import { err, ok, type Result } from "./shared.ts";
+import { err, ok, type Result, type EndpointId } from "./shared.ts";
 
 // ---- Version (SemVer 2.0.0; https://semver.org/#spec-item/11, read 2026-10-11)
 
@@ -634,3 +634,18 @@ export type ReleaseEvent =
   | { type: "RolloutHalted"; version: string; by: string; at: number }
   | { type: "RolloutResumed"; version: string; at: number }
   | { type: "SkewBlocked"; detail: string; at: number };
+
+// ---- The hub's own audit of the owner's update commands (updates §8.1, PR 6c)
+
+// What the hub records when the owner commands an update through it, after the step-up let it: which command, the
+// endpoint that asked at the moment it ran, and exactly what was asked — which machine ("control-plane" for this
+// machine through its updater CLI, a node's name for update.apply, "fleet" for a resume) and which Version (null
+// for a rollback, which names none). The domain's word for it; the hub's store keeps the rows.
+export type UpdateCommanded = {
+  type: "UpdateCommanded";
+  command: "update.apply" | "update.rollback" | "rollout.resume";
+  endpointId: EndpointId;
+  machine: string;
+  version: string | null;
+  at: number;
+};

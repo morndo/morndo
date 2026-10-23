@@ -167,7 +167,7 @@ beforeEach(async () => {
     desktop: () => ({ host: "127.0.0.1", port: vnc.port, password: null }),
   });
   http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000),
+    config, identity: loadOrCreateIdentity(dir), access, store, observation: new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, () => now, () => access.policy()), escalations, remote,
   });
   await http.ready;

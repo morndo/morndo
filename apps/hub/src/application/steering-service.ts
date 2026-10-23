@@ -7,7 +7,7 @@
 // The same key goes with the text to the node (fleet core §3.1), so a node that typed it already doesn't type it again.
 // And a Command is judged on arrival against the needs-you state it was written for (S6): "stale" if that changed.
 import { createHash } from "node:crypto";
-import { DEFAULT_POLICY, attachable, commandText, mayCommand, type AccessEvent, type AccessPolicy, type AttachRefusal } from "@morndo/domain";
+import { DEFAULT_POLICY, attachable, commandText, hubAnswerAfterRestore, mayCommand, type AccessEvent, type AccessPolicy, type AttachRefusal } from "@morndo/domain";
 import type { SendProblem } from "@morndo/node-ops";
 import { LIMITS, type ErrorCode, type QueuedCommand } from "@morndo/protocol";
 import { ownerFileNote } from "../adapters/attachment-note.ts";
@@ -117,7 +117,9 @@ export class SteeringService {
   // `createdAt`: when he wrote it, on the device's clock (S7): a message to the manager waits up to 24 hours from then.
   // `again`: the phone's Send again (ADR-0011) of a message to the manager the queue gave up: queued once more, as a new
   // attempt under the same request id. A plain repeat is a status read and never queues anything.
-  async send(a: Authenticated, workerId: string, text: string, requestId: string, uploads: string[] = [], seen?: string, name?: string, createdAt?: number, again = false): Promise<SendResult> {
+  // `hubStore`: the hub store the device stamped the Command with, the one it saw before its first attempt (RL10,
+  // §11.5). Absent (an older app, or a record written before any answer): as before.
+  async send(a: Authenticated, workerId: string, text: string, requestId: string, uploads: string[] = [], seen?: string, name?: string, createdAt?: number, again = false, hubStore?: string): Promise<SendResult> {
     const now = this.#now();
     const key = `${a.endpoint.id}:${requestId}`;
     // A repeat first: it may come after the window or the worker moved on, and must still learn what became of it.
@@ -152,6 +154,16 @@ export class SteeringService {
     }
     const known = this.#store.send(key);
     if (known?.state === "done") return { ok: false, problem: "duplicate", at: known.typedAt ?? known.at };
+    // RL10 (§11.5), amending S5: a Command this store stamped was its own to type (below, as any send); one stamped with
+    // another store — a hub whose database was put back, whose sends this store forgot — is never typed when this store
+    // does not hold its request id: nothing recorded, `uncertain`, and the principal's Retry settles it (S7). An id this
+    // store holds was recorded by this store, whatever the stamp, so it answers as today: duplicate, or asked of its
+    // node. No stamp (an older app) is as before, and no clock decides any of this (FL13).
+    if (known === null && hubStore !== undefined
+      && hubAnswerAfterRestore({ hubStore: this.#store.storeId, stampedStore: hubStore, held: false }) === "uncertain") {
+      log.info(`send to ${workerId} refused: stamped with another hub store (${hubStore}, not ${this.#store.storeId}) and its request id is not held here; it stays uncertain`);
+      return { ok: false, problem: "uncertain" };
+    }
     // Registered before the first await (the node asked about a send in doubt, the images staged), so a repeat arriving
     // meanwhile waits for this one: two repeats of a send in doubt at once paste it at most once.
     const job = this.#judge(a, key, workerId, text, uploads, now, known?.state === "started", seen, name, createdAt);
@@ -165,11 +177,11 @@ export class SteeringService {
   // which holds it on the node that last had it until a window of that name is back (fleet-clients §4.1, §10). With the
   // queue off, or without a fleet, nothing can hold it: no_pane. Files go onto the manager's machine, so none while it has
   // no window. Written to the role, not to a window: neither the question it waited on nor the window's name is checked.
-  async sendToManager(a: Authenticated, text: string, requestId: string, uploads: string[] = [], createdAt?: number, again = false): Promise<SendResult> {
+  async sendToManager(a: Authenticated, text: string, requestId: string, uploads: string[] = [], createdAt?: number, again = false, hubStore?: string): Promise<SendResult> {
     const pane = this.#managerPane();
-    if (pane !== null) return this.send(a, pane, text, requestId, uploads, undefined, undefined, createdAt, again);
+    if (pane !== null) return this.send(a, pane, text, requestId, uploads, undefined, undefined, createdAt, again, hubStore);
     if (!this.#manager?.queue.on || uploads.length) return { ok: false, problem: "no_pane" };
-    return this.send(a, this.#absent, text, requestId, [], undefined, undefined, createdAt, again);
+    return this.send(a, this.#absent, text, requestId, [], undefined, undefined, createdAt, again, hubStore);
   }
   // Whether a message to the manager can wait for it while it has no window (the app's `manager` frame).
   get managerQueue(): boolean { return this.#manager?.queue.on === true; }

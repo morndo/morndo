@@ -43,7 +43,7 @@ import { chmodSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery } from "@morndo/protocol";
+import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery, type PrincipalAsk } from "@morndo/protocol";
 import { Flight, productStamp } from "@morndo/service-kit";
 import type { Connections } from "../application/connections.ts";
 import type { Deliveries } from "../application/deliveries.ts";
@@ -87,11 +87,13 @@ export type ClientApiDeps = {
 export type ClientApi = { close(): Promise<void> };
 
 // Who may move a Rollout forward (review of #107, finding 3). `updater`: the control plane's updater reporting its
-// commit or halt. `principal`: the owner's resume and update.apply, which carry a fresh passkey (STEP_UP_OPS) through
-// the hub. A halt through a route is closed too (a lane could pre-halt a Version nothing could resume yet): the
-// rollbacks that halt come by the internal paths, a node's health and the control plane's updater state file. Until
-// a check exists, both say no.
-export type RolloutAuthority = { updater(req: IncomingMessage): boolean; principal(req: IncomingMessage): boolean };
+// commit or halt. `principal`: the owner's resume and update.apply, through the hub — one request, one signed
+// assertion for exactly its ask (updates §5.4), the x-morndo-principal header, checked by the authority the
+// config's pinned principalKey builds (adapters/principal-check.ts); the ask is this request's own, so a proof for
+// another machine or Version opens nothing. A halt through a route stays closed (a lane could pre-halt a Version
+// nothing could resume yet): the rollbacks that halt come by the internal paths, a node's health and the control
+// plane's updater state file. No check, no.
+export type RolloutAuthority = { updater(req: IncomingMessage): boolean; principal(req: IncomingMessage, ask: PrincipalAsk): boolean };
 export const CLOSED_ROLLOUT_AUTHORITY: RolloutAuthority = { updater: () => false, principal: () => false };
 
 const CLIENT = /^[a-z]{1,16}$/;
@@ -239,8 +241,14 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const parsed = parseOpBody(body);
       if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message), store: null, storeSeq: null });
       const b = parsed.body;
-      if (b.op === "update.apply" && !d.rolloutAuthority.principal(req)) {
-        return json(res, 200, { ok: false, error: opError("not_allowed", "update.apply is the principal's, with a fresh passkey through the hub, which the fleet cannot check yet: refused"), store: null, storeSeq: null });
+      if (b.op === "update.apply") {
+        // The proof is for exactly this ask (§5.4) — one node, one Version. args' shape the router checks only
+        // after this gate, so a version that is not a string here is simply an ask no honest proof names.
+        const ask: PrincipalAsk = { op: "update.apply", version: typeof b.args.version === "string" ? b.args.version : "" };
+        if ("node" in b.target) ask.node = b.target.node;
+        if (!d.rolloutAuthority.principal(req, ask)) {
+          return json(res, 200, { ok: false, error: opError("not_allowed", "update.apply is the principal's: it carries the hub's signed assertion (x-morndo-principal, updates §5.4) for exactly this node and Version, which the fleet cannot check here: refused"), store: null, storeSeq: null });
+        }
       }
       if (b.op === "lane.deliver" || b.op === "delivery.cancel") {
         return json(res, 400, { ok: false, error: opError("bad_args", `${b.op} is not sent as an op: use /v1/deliveries`), store: null, storeSeq: null });
@@ -303,8 +311,8 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         return json(res, 403, { error: "not_allowed", message: "only the control plane's updater commits a Rollout, and the fleet cannot check it yet: refused" });
       if (parsed.kind === "halt" && !d.rolloutAuthority.updater(req))
         return json(res, 403, { error: "not_allowed", message: "a halt comes from a machine's own rollback (its health, or the control plane's updater) or the principal, which the fleet cannot check here yet: refused" });
-      if (parsed.kind === "resume" && !d.rolloutAuthority.principal(req))
-        return json(res, 403, { error: "not_allowed", message: "a resume is the principal's, with a fresh passkey through the hub, which the fleet cannot check yet: refused" });
+      if (parsed.kind === "resume" && !d.rolloutAuthority.principal(req, { op: "rollout.resume", version: parsed.version }))
+        return json(res, 403, { error: "not_allowed", message: "a resume is the principal's: it carries the hub's signed assertion (x-morndo-principal, updates §5.4) for exactly this Version, which the fleet cannot check here: refused" });
       if (parsed.kind === "committed") {
         const r = d.rollouts.committed(parsed.version, parsed.soakMinutes);
         if (!r.ok) return json(res, 409, { error: r.refused, message: r.message });

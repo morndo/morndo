@@ -69,6 +69,8 @@ describe("join codes", () => {
     expect(nodes.redeem(`${codeOf(nodes.issueCode("pc"))}=`, "pc", spki())).toEqual({ ok: false, refused: "unknown" });
     expect(nodes.redeem(codeOf(nodes.issueCode("pc")), "pc", "not-a-key")).toEqual({ ok: false, refused: "bad_key" });
     for (const name of ["PC", "", "a".repeat(33), "pc.1", "pc/x", "pc ü"]) expect(nodes.issueCode(name)).toEqual({ ok: false, refused: "bad_name" });
+    // reserved: "control-plane" names the control plane's own machine (the fleet's Rollout records, the hub's Updates)
+    expect(nodes.issueCode("control-plane")).toEqual({ ok: false, refused: "bad_name" });
   });
 
   it("an active node gets no new code until it is revoked; a revoked node joins again with a new key", () => {

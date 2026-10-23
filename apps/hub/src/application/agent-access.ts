@@ -5,6 +5,7 @@
 // claims is recorded with each change as what it claimed, and the app marks an assignee that isn't a running lane.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { LANE_NAME, type BoardActor } from "@morndo/domain";
+import type { RevocationJournal } from "@morndo/service-kit";
 import type { AgentToken, Store } from "../adapters/store.ts";
 
 export const TOKEN_PREFIX = "mat_";                     // "morndo agent token"
@@ -16,8 +17,9 @@ export class AgentAccess {
   #store: Store;
   #now: () => number;
   #managerName: string;
-  constructor(store: Store, managerName: string, now: () => number = Date.now) {
-    this.#store = store; this.#managerName = managerName; this.#now = now;
+  #journal: RevocationJournal | null;
+  constructor(store: Store, managerName: string, now: () => number = Date.now, journal?: RevocationJournal) {
+    this.#store = store; this.#managerName = managerName; this.#now = now; this.#journal = journal ?? null;
   }
 
   // A new token for the console. The secret is returned once; the store keeps its hash.
@@ -31,6 +33,9 @@ export class AgentAccess {
   revoke(id: string): boolean {
     const t = this.#store.agentToken(id);
     if (!t || t.revokedAt !== null) return false;
+    // RL10 (updates design §11.5): journaled before the store write, so a crash between the two is repaired at the
+    // next start and a database restored from an older copy can't bring the token back.
+    this.#journal?.append({ kind: "agent_token", id, at: this.#now() });
     this.#store.saveAgentToken({ ...t, revokedAt: this.#now() });
     return true;
   }

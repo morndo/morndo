@@ -20,17 +20,20 @@ const rollout: RolloutWire = {
 let dir: string;
 let server: Server;
 let seen: Seen[] = [];
+let heads: Record<string, unknown>[] = [];
 let answer: unknown = {};
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "morndo-rollout-"));
   seen = [];
+  heads = [];
   server = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", c => chunks.push(c as Buffer));
     req.on("end", () => {
       const raw = Buffer.concat(chunks).toString("utf8");
       seen.push({ method: req.method ?? "", path: req.url ?? "", body: raw === "" ? null : JSON.parse(raw) });
+      heads.push(req.headers);
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify(answer));
     });
@@ -77,5 +80,32 @@ describe("the fleet client's rollout routes", () => {
       { method: "POST", path: "/v1/rollout/resume", body: { version: "0.4.2" } },
       { method: "POST", path: "/v1/rollout/committed", body: { version: "0.4.2", soakMinutes: 45 } },
     ]);
+  });
+
+  // The principal's proof rides the two writes the fleet takes only with it (updates §5.4): update.apply and resume.
+  it("update.apply and resumeRollout carry x-morndo-principal when the caller gives one, and nothing when it doesn't", async () => {
+    answer = { ok: true, result: { accepted: true }, invVersion: 1, store: "pc", storeSeq: 1 };
+    const c = new FleetClient(join(dir, "f.sock"));
+    await c.op({ node: "pc" }, "update.apply", { version: "0.4.2" }, { key: "hub:u-1", principal: "the-hubs-proof" });
+    answer = { ok: true, rollout };
+    await c.resumeRollout("0.4.2", { principal: "the-hubs-proof" });
+    expect(heads.slice(-2).map(h => h["x-morndo-principal"])).toEqual(["the-hubs-proof", "the-hubs-proof"]);
+    await c.resumeRollout("0.4.2");
+    expect(heads.at(-1)).not.toHaveProperty("x-morndo-principal");
+  });
+
+  it("nodes() keeps each node's commit, protocol versions and its updater's last report (§7)", async () => {
+    answer = [
+      { name: "pc", status: "online", health: null, agent: "0.4.2", commit: "1f".repeat(20), proto: [1, 2], update: { state: "staged", version: "0.4.2", target: "0.5.0" } },
+      { name: "mac", status: "offline", health: null, agent: null, commit: null, proto: null, update: null },
+    ];
+    const c = new FleetClient(join(dir, "f.sock"));
+    expect(await c.nodes()).toEqual(answer);
+    // a fleet from before the updates design says none of it: null everywhere, still a node list
+    answer = [{ name: "pc", status: "online", health: null, agent: "0.4.2" }];
+    expect(await c.nodes()).toEqual([{ name: "pc", status: "online", health: null, agent: "0.4.2", commit: null, proto: null, update: null }]);
+    // a report this client cannot read reads as none, never as a guess
+    answer = [{ name: "pc", status: "online", health: null, agent: null, commit: null, proto: null, update: { state: "quantum", version: "0.4.2" } }];
+    expect((await c.nodes())[0]!.update).toBeNull();
   });
 });

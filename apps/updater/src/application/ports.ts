@@ -209,8 +209,10 @@ export interface ServiceManager {
   /** RL13: true when the tmux server sits inside the node agent's unit. */
   tmuxInAgentUnit(): Promise<boolean>;
   /** §6.2's apply runs as its own unit, so a crash of whoever asked for it never interrupts the walk: start
-   *  `morndo-update-apply@<version>.service` and return when the unit's own run has ended. */
-  runApply(version: string): Promise<void>;
+   *  `morndo-update-apply@<version>.service` and return when the unit's own run has ended. `wait: false`
+   *  (PR 6c's --detach, the hub's one command) returns at the start — systemd's --no-block — and the unit's
+   *  own record, not this caller, tells how the walk ended. */
+  runApply(version: string, o?: { wait?: boolean }): Promise<void>;
   /** `morndo install`'s last act: enable and start the update timers, the boot and recovery units, and the
    *  role's own services (systemd enable --now; launchd bootstraps the plists). */
   enable(units: readonly string[]): Promise<void>;
@@ -256,5 +258,5 @@ export interface AlertSink { raise(kind: AlertKind, detail: string): void }
 export interface Revocations {
   /** The ids revoked in the live database that are not revoked in this update's Backup of it: what a restore would
    *  bring back. Empty for a database that holds no revocations, or when there is no Backup to compare. */
-  droppedBy(updateId: string, db: DatabaseName): string[];
+  droppedBy(updateId: string, db: DatabaseName, target: string): string[];
 }
