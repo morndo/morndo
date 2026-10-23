@@ -312,6 +312,19 @@ describe("the updates routes", () => {
     expect(await none.json()).toEqual({ error: "updates_off" });
     await off.close();
   });
+
+  it("/api/me says whether this hub has the updates screen, so no page ever probes /api/updates for a 404", async () => {
+    // CI's web e2e found every page logging that 404 as a console error on a hub without a fleet (review of #114).
+    const { fleet } = fleetWith();
+    const on = await startInProcessHub({ updates: { fleet, cli: cliWith(null).cli } });
+    const meOf = async (hub: { base: string; cookie(): Promise<string> }) =>
+      (await (await fetch(`${hub.base}/api/me`, { headers: { cookie: `__Host-morndo=${await hub.cookie()}` } })).json()) as { updates?: unknown };
+    expect((await meOf(on)).updates).toBe(true);
+    await on.close();
+    const off = await startInProcessHub({});
+    expect((await meOf(off)).updates).toBe(false);
+    await off.close();
+  });
 });
 
 // The review of 6c part 2: the control plane's own waiting record, read from its updater's state file.
