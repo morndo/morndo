@@ -67,3 +67,42 @@ describe("named windows carry their length, rolling flag and note", () => {
     expect(without?.limits?.[0]).toEqual({ label: "Weekly", usedPercentage: 50, resetsAt: 2, resetsOn: null });
   });
 });
+
+describe("a percentage outside 0..101 is not a reading, on every path (U14)", () => {
+  it("a status line's window with an epoch value or a negative one parses to null and the good window beside it stays", () => {
+    const b = parseBody(UsageReportBody, {
+      session_id: "s1",
+      rate_limits: {
+        five_hour: { used_percentage: 1_700_000_000, resets_at: 1_700_000_000 }, seven_day: { used_percentage: 41.2, resets_at: 1_700_100_000 },
+        spend_limit: { used_percentage: -3, resets_at: 1_700_100_000, used_usd: 1, limit_usd: 2, period: "monthly" },
+      },
+    });
+    expect(b?.rate_limits?.five_hour?.used_percentage).toBeNull();
+    expect(b?.rate_limits?.seven_day?.used_percentage).toBe(41.2);
+    expect(b?.rate_limits?.spend_limit?.used_percentage).toBeNull();
+  });
+
+  it("101 is tolerated, 101.5 and NaN-like values are not", () => {
+    const at = (v: unknown) => parseBody(UsageReportBody, { session_id: "s1", rate_limits: { five_hour: { used_percentage: v, resets_at: 1 } } })?.rate_limits?.five_hour?.used_percentage;
+    expect(at(0)).toBe(0);
+    expect(at(100)).toBe(100);
+    expect(at(101)).toBe(101);
+    expect(at(101.5)).toBeNull();
+    expect(at("50")).toBeNull();
+  });
+
+  it("a named row and a readings row drop an out-of-range percentage the same way", () => {
+    const r = parseBody(UsageReportBody, { session_id: "s1", limits: [{ label: "A", used_percentage: 150, resets_at: 1 }, { label: "B", used_percentage: 50, resets_at: 1 }] });
+    expect(r?.limits?.[0]).toMatchObject({ label: "A", used_percentage: null });
+    expect(r?.limits?.[1]).toMatchObject({ label: "B", used_percentage: 50 });
+    const b = parseBody(UsageReadingsBody, { source: "app-server", captured_at: 1, windows: [{ id: "a", used_percent: 1_700_000_000 }, { id: "b", used_percent: 55 }, { id: "c", used_percent: -1 }] });
+    expect(b?.windows?.map(w => w.used_percent)).toEqual([null, 55, null]);
+  });
+
+  it("an account frame never carries a percentage outside 0..100", () => {
+    const base = { account: "seat-a", reportedAt: 1, fiveHour: null, sevenDay: null, spend: null, sessions: [] };
+    expect(parseBody(AccountUsageSchema, { ...base, fiveHour: { usedPercentage: 140, resetsAt: 2 }, sevenDay: { usedPercentage: 40, resetsAt: 2 } })).toMatchObject({ fiveHour: null, sevenDay: { usedPercentage: 40 } });
+    expect(parseBody(AccountUsageSchema, { ...base, spend: { usedPercentage: -1, resetsAt: 2, usedUsd: 1, limitUsd: 2, period: "m" } })?.spend).toBeNull();
+    expect(parseBody(AccountUsageSchema, { ...base, limits: [{ label: "A", usedPercentage: 140, resetsAt: 2, resetsOn: null }] })?.limits).toBeNull();
+  });
+});

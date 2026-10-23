@@ -3,15 +3,19 @@
 // later reading agrees, so one odd reading says nothing (AT-28). A window whose usage falls hard while its reset
 // stands still is a drop of points, not a reset; a rolling window never drops.
 export type PlanWindow = { id: string; lengthMins: number | null; usedPercent: number | null; resetsAt: number | null; rolling: boolean };   // resetsAt in ms
-export type PlanFact = { plan: string | null; identity: string | null; windows: readonly PlanWindow[] };
-export type PlanChange = { kind: "name" | "account" | "cadence" | "windows" | "drop"; window: string | null; from: string | null; to: string | null };
-export type PlanWatch = { baseline: PlanFact | null; held: { changes: readonly PlanChange[]; at: number } | null; rolling: readonly string[]; lastAt: number };
+// `complete`: this reading names every window the account has (a source that reports them all), so a window missing from it is
+// really gone. A status line leaves a window out when it resets or when no turn has run, so it is never complete.
+export type PlanFact = { plan: string | null; identity: string | null; windows: readonly PlanWindow[]; complete?: boolean };
+// `resetsAt`: for a drop, the reset time the window stood still at (a drop is the same drop at any new percentage).
+export type PlanChange = { kind: "name" | "account" | "cadence" | "windows" | "drop"; window: string | null; from: string | null; to: string | null; resetsAt?: number | null };
+// `seen`: every window id this account has ever shown, so a window that comes back after the status line left it out is not new.
+export type PlanWatch = { baseline: PlanFact | null; held: { changes: readonly PlanChange[]; at: number } | null; rolling: readonly string[]; lastAt: number; seen: readonly string[] };
 export const PLAN_DROP_POINTS = 20;
 export const RESET_SAME_MS = 60_000;      // resets this close together count as the same reset time
-export const noPlanWatch: PlanWatch = { baseline: null, held: null, rolling: [], lastAt: 0 };
+export const noPlanWatch: PlanWatch = { baseline: null, held: null, rolling: [], lastAt: 0, seen: [] };
 const byId = (ws: readonly PlanWindow[], id: string): PlanWindow | undefined => ws.find(w => w.id === id);
 
-export function observePlan(before: PlanFact, after: PlanFact, now: number, rolling: readonly string[] = []): PlanChange[] {
+export function observePlan(before: PlanFact, after: PlanFact, now: number, rolling: readonly string[] = [], seen: readonly string[] = []): PlanChange[] {
   // A different account is the whole difference: the baseline restarts with it.
   if (before.identity !== null && after.identity !== null && before.identity !== after.identity)
     return [{ kind: "account", window: null, from: before.identity, to: after.identity }];
@@ -20,7 +24,10 @@ export function observePlan(before: PlanFact, after: PlanFact, now: number, roll
     changes.push({ kind: "name", window: null, from: before.plan, to: after.plan });
   const beforeIds = before.windows.map(w => w.id);
   const afterIds = after.windows.map(w => w.id);
-  if (!(beforeIds.length === afterIds.length && beforeIds.every(id => afterIds.includes(id))))
+  // A window never seen before is new; one gone is gone only when the reading says it names them all.
+  const added = afterIds.filter(id => !beforeIds.includes(id) && !seen.includes(id));
+  const gone = after.complete === true ? beforeIds.filter(id => !afterIds.includes(id)) : [];
+  if (added.length > 0 || gone.length > 0)
     changes.push({ kind: "windows", window: null, from: [...beforeIds].sort().join(","), to: [...afterIds].sort().join(",") });
   const ids = [...new Set([...beforeIds, ...afterIds])].sort();
   for (const id of ids) {
@@ -34,7 +41,7 @@ export function observePlan(before: PlanFact, after: PlanFact, now: number, roll
     // A fall of points with the reset standing still and still ahead: a drop, not a reset.
     if (a.usedPercent === null || b.usedPercent === null || a.usedPercent - b.usedPercent < PLAN_DROP_POINTS) continue;
     if (a.resetsAt === null || b.resetsAt === null || Math.abs(b.resetsAt - a.resetsAt) > RESET_SAME_MS || b.resetsAt <= now) continue;
-    changes.push({ kind: "drop", window: id, from: String(a.usedPercent), to: String(b.usedPercent) });
+    changes.push({ kind: "drop", window: id, from: String(a.usedPercent), to: String(b.usedPercent), resetsAt: b.resetsAt });
   }
   return changes;
 }
@@ -43,7 +50,7 @@ export function watchPlan(w: PlanWatch, fact: PlanFact, capturedAt: number): { w
   // A reading not later than the last one taken says nothing new.
   if (capturedAt <= w.lastAt) return { watch: w, told: [] };
   // The first fact ever is a baseline, never a change.
-  if (w.baseline === null) return { watch: { ...w, baseline: fact, held: null, lastAt: capturedAt }, told: [] };
+  if (w.baseline === null) return { watch: { ...w, baseline: fact, held: null, lastAt: capturedAt, seen: fact.windows.map(x => x.id) }, told: [] };
   // Rolling memory: a fall while the reset slid later, before the old cycle ended, is a rolling window from now on.
   const rolling = [...w.rolling];
   for (const b of w.baseline.windows) {
@@ -53,13 +60,33 @@ export function watchPlan(w: PlanWatch, fact: PlanFact, capturedAt: number): { w
       b.resetsAt !== null && f.resetsAt !== null && f.resetsAt - b.resetsAt > RESET_SAME_MS && b.resetsAt > capturedAt &&
       !rolling.includes(b.id)) rolling.push(b.id);
   }
-  const changes = observePlan(w.baseline, fact, capturedAt, rolling);
-  if (changes.length === 0) return { watch: { baseline: fact, held: null, rolling, lastAt: capturedAt }, told: [] };
-  const heldSig = w.held ? [...w.held.changes.map(changeSignature)].sort().join(",") : null;
-  if (heldSig !== null && heldSig === [...changes.map(changeSignature)].sort().join(","))
-    return { watch: { baseline: fact, held: null, rolling, lastAt: capturedAt }, told: changes };
+  const seenBefore = w.seen ?? [];
+  const seen = [...new Set([...seenBefore, ...w.baseline.windows.map(x => x.id), ...fact.windows.map(x => x.id)])];
+  const changes = observePlan(w.baseline, fact, capturedAt, rolling, seenBefore);
+  if (changes.length === 0) return { watch: { baseline: fact, held: null, rolling, lastAt: capturedAt, seen }, told: [] };
+  if (w.held !== null && confirms(w.held.changes, changes))
+    return { watch: { baseline: fact, held: null, rolling, lastAt: capturedAt, seen }, told: changes };
   // The first reading of a difference only holds it; a later one that agrees tells it.
-  return { watch: { ...w, baseline: w.baseline, held: { changes, at: capturedAt }, rolling, lastAt: capturedAt }, told: [] };
+  // (what it showed is not yet "seen": the second reading must still find it new)
+  return { watch: { ...w, baseline: w.baseline, held: { changes, at: capturedAt }, rolling, lastAt: capturedAt, seen: [...new Set([...seenBefore, ...w.baseline.windows.map(x => x.id)])] }, told: [] };
 }
 
-export function changeSignature(c: PlanChange): string { return `${c.kind}|${c.window ?? ""}|${c.to ?? ""}`; }
+// A later reading agrees with a held difference when it shows the same changes: the same kind of change to the same
+// window, to the same value; a drop is the same drop at any new percentage, as long as the reset it stood still at is the same.
+const order = (cs: readonly PlanChange[]) => [...cs].sort((a, b) => `${a.kind}|${a.window ?? ""}`.localeCompare(`${b.kind}|${b.window ?? ""}`));
+function confirms(held: readonly PlanChange[], now: readonly PlanChange[]): boolean {
+  if (held.length !== now.length) return false;
+  const a = order(held), b = order(now);
+  return a.every((h, i) => {
+    const n = b[i];
+    if (!n || h.kind !== n.kind || h.window !== n.window) return false;
+    if (h.kind !== "drop") return h.to === n.to;
+    return h.resetsAt != null && n.resetsAt != null && Math.abs(h.resetsAt - n.resetsAt) <= RESET_SAME_MS;
+  });
+}
+
+// What a notice is deduplicated by. A drop is signed by its window and its reset, not by the percentage it fell to.
+export function changeSignature(c: PlanChange): string {
+  if (c.kind === "drop") return `drop|${c.window ?? ""}|${c.resetsAt == null ? "" : Math.round(c.resetsAt / 60_000)}`;
+  return `${c.kind}|${c.window ?? ""}|${c.to ?? ""}`;
+}

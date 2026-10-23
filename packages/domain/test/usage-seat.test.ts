@@ -27,6 +27,8 @@ describe("seat limits (U9, U13)", () => {
     // a read not later than the mark, and one not later than the back time, hold
     expect(clearsMark(mark(), read({ capturedAt: T - 30 * MIN }))).toBe(false);
     expect(clearsMark(mark(), read({ capturedAt: T + 30 * MIN }))).toBe(false);
+    // a mark whose back time is earlier than the mark itself still needs a read taken after the mark
+    expect(clearsMark(mark({ backAt: T - HOUR }), read({ capturedAt: T - 30 * MIN }))).toBe(false);
     // a flag read: only an explicit yes with no limit type reached clears
     expect(clearsMark(mark(), read({ windows: [], ordinaryUsageAllowed: true, rateLimitReachedType: null }))).toBe(true);
     expect(clearsMark(mark(), read({ windows: [], ordinaryUsageAllowed: false }))).toBe(false);
