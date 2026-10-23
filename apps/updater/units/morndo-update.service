@@ -1,0 +1,8 @@
+# The updater's tick (design §5, §6.1): check, stage, and apply at a safe point. Started by its timer, never
+# enabled on its own, so it carries no [Install] section.
+[Unit]
+Description=Morndo update tick
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/morndo-update update tick

@@ -15,6 +15,13 @@ describe("alert words", () => {
       expect(w.title.length, k).toBeGreaterThan(5);
     }
   });
+  it("an unreadable revocation journal line names the line, says the rest applied, and is urgent", () => {
+    expect(alertWords(a("journal_unreadable", { file: "revoked.log", line: 3, why: "not an object" }))).toEqual({
+      title: "A line of the fleet's revocation journal could not be read",
+      detail: "revoked.log line 3 was skipped (not an object); every other revocation was applied again. Check that the nodes you revoked are still revoked.",
+      urgent: true,
+    });
+  });
   it("an engine fallback names the lane, what ran and what it passed over", () => {
     expect(alertWords(a("engine_fallback", { lane: "api", role: "implement", entry: "beta:mid-3", skipped: [{ entry: "acme:large-2", reason: "out of quota" }] }))).toEqual({
       title: "api started on a fallback: beta:mid-3", detail: "Its role implement passed over acme:large-2 on pc.", urgent: false,

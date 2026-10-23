@@ -390,6 +390,14 @@ describe("RL11 skew stays inside the window", () => {
     const r = skew({ machine: "control_plane", controlPlane: v("0.5.1"), nodes, target: v("0.6.0"), targetProtocol: drop });
     expect(r).toEqual({ ok: false, error: { reason: "protocol_dropped", nodes: ["node-a"] } });   // node-c is revoked
   });
+  it("a joined node whose protocol is unknown (never said one) holds the control plane too, named as unknown", () => {
+    const silent = { name: "node-d", version: null, agentProtocol: null, joined: true, revoked: false };
+    const r = skew({ machine: "control_plane", controlPlane: v("0.5.1"), nodes: [...nodes.slice(1), silent], target: v("0.6.0"), targetProtocol: drop });
+    expect(r).toEqual({ ok: false, error: { reason: "protocol_dropped", nodes: ["node-d"], unknown: ["node-d"] } });
+    // revoked, it no longer counts: revoking is how the owner lets a Release past a node that will not come back
+    const gone = skew({ machine: "control_plane", controlPlane: v("0.5.1"), nodes: [...nodes.slice(1), { ...silent, revoked: true }], target: v("0.6.0"), targetProtocol: drop });
+    expect(gone).toEqual({ ok: true, value: true });
+  });
   it("with every joined node inside the protocol window, the control plane applies", () => {
     const r = skew({ machine: "control_plane", controlPlane: v("0.5.1"), nodes: nodes.slice(1), target: v("0.6.0"), targetProtocol: drop });
     expect(r).toEqual({ ok: true, value: true });

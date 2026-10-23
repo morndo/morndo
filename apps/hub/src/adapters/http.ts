@@ -14,6 +14,7 @@ import { chats, digest } from "../application/chats.ts";
 import type { PresenceService } from "../application/presence-service.ts";
 import type { Config } from "../config.ts";
 import type { HubIdentity } from "./identity.ts";
+import type { Store } from "./store.ts";
 import type { AccessService, Authenticated } from "../application/access-service.ts";
 import type { ObservationService, OlderResult } from "../application/observation-service.ts";
 import type { SendResult, SteeringService } from "../application/steering-service.ts";
@@ -32,6 +33,7 @@ import type { UsageService } from "../application/usage-service.ts";
 import type { TranscriptionService } from "../application/transcription-service.ts";
 import type { BriefService } from "../application/brief-service.ts";
 import type { MemoryService } from "../application/memory-service.ts";
+import type { UpdatesCommandOutcome, UpdatesService } from "../application/updates-service.ts";
 import { BRIEF_TEMPLATE } from "./brief-template.ts";
 import { bridgeDesktop } from "./rfb.ts";
 import { servingHeaders, type Files } from "./files.ts";
@@ -40,7 +42,7 @@ import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
-  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UsageReportBody,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageReportBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -209,12 +211,13 @@ export function healthDetail(opts: { remoteAddress: string | undefined; proxyLog
 
 export function startHttp(p: {
   config: Config; identity: HubIdentity; access: AccessService; observation: ObservationService; steering: SteeringService; escalations: EscalationService;
-  remote: RemoteService; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
+  remote: RemoteService; store: Store; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
   reading?: ReadingService | null;
   updates?: { schema?: number; holdPath?: string; now?: () => number };
   presence?: PresenceService | null;                                        // ADR-0011: his last activity per device
   push?: { publicKey: Buffer; notifications: NotificationService } | null;   // web push (phase F); null: off
   engines?: EnginesService | null;                                          // ADR-0013: the Engines page; null: not connected
+  updatesService?: UpdatesService | null;                                   // updates §8.1 (PR 6c): every machine's Version; null: no fleet and no CLI
   connections?: ConnectionsPageService | null;                              // ADR-0018: LLM connections; null: no home set
   board?: { service: BoardService; agents: AgentAccess } | null;            // ADR-0015: the board; null: off
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
@@ -291,12 +294,14 @@ export function startHttp(p: {
       authenticated: auth(req) !== null,
     });
     if (detail === "ready") return json(res, 200, { ready: true });
-    return json(res, 200, { ...productStamp(), schema: schemaVersion, ready: true, inFlight: flight.list() });
+    return json(res, 200, { ...productStamp(), schema: schemaVersion, ready: true, held: watch.held, inFlight: flight.list() });
   }
 
-  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).
+  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2). Each names the
+  // database's store (RL10, §11.5), so a device can stamp each Command with the hub store it saw before its first
+  // attempt and a restored hub — another store — answers it uncertain instead of typing it twice.
   const json = (res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}, path = "") => {
-    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
+    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", "Morndo-Store": p.store.storeId, ...extra });
     res.end(JSON.stringify(redactResponse(path, body)));
   };
   const setCookie = (secret: string) =>
@@ -321,6 +326,18 @@ export function startHttp(p: {
     problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" || problem === "too_many" || problem === "no_commit" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
     r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}), ...(r.detail ? { detail: r.detail } : {}) });
+
+  // An updates command's answer (updates §8.1): 403 a step-up too old, 409 the refusal with the fleet's own words
+  // (its code when the fleet refused), 503 what couldn't be asked. The routes stay thin (round 2, R4): every look
+  // and every gate is the service's, so a refused command never costs a round trip first. A rollback that needs
+  // §11.4's word answers 409 with what it would drop (review round 1), so the screen can ask for the word.
+  const updatesAnswer = (res: ServerResponse, r: UpdatesCommandOutcome) => {
+    if (r.ok) return json(res, 200, { ok: true });
+    const status = r.problem === "step_up" ? 403 : r.problem === "unavailable" ? 503 : 409;
+    const error = r.problem === "refused" ? r.code : r.problem;
+    if (r.problem === "step_up") return json(res, status, { error });
+    return json(res, status, r.problem === "needs_word" ? { error, message: r.message, restores: r.restores } : { error, message: r.message });
+  };
 
   // ADR-0023: file, restate, list and close a decision brief. Same door as the board (a bearer token, no cookie).
   const briefStatus = (problem: string) =>
@@ -528,6 +545,9 @@ export function startHttp(p: {
         engines: p.engines ? (await p.engines.ready().then(why => why === null, () => false)) : false,
         connections: p.connections != null,
         transcription: p.transcription ? p.transcription.me() : false,
+        // The Updates screen (updates §8.2): this hub has it when it runs with a fleet. Said here so no page probes
+        // /api/updates for a 404 (CI's web e2e: every page logged it as a console error, review of #114).
+        updates: p.updatesService != null,
       });
     }
     if (path === "/api/logout" && method === "POST") {
@@ -596,13 +616,13 @@ export function startHttp(p: {
     if (sendTo !== null && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody, SEND_MAX_BODY);
-      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true));
+      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true, body.hubStore));
     }
     // The manager by its role: its window, or, while it has none, the fleet's queue for its sticky lane (steering).
     if (path === "/api/manager/send" && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, SendBody, SEND_MAX_BODY);
-      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true));
+      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true, body.hubStore));
     }
     // The principal's cancel of one of his messages to the manager still waiting in the fleet's queue (ruling 83; spec
     // §9.1): 200 with where it stands now (given up, cancelled), 409 only when it is too late (already typed), 404 for
@@ -721,6 +741,32 @@ export function startHttp(p: {
       if (result.ok) return json(res, 200, result.view);
       const status = result.problem === "step_up" ? 403 : result.problem === "conflict" ? 409 : 400;
       return json(res, status, { error: result.problem });
+    }
+    // Updates §8.1 (PR 6c): the owner's one screen over every machine's Version. Reading is a look; each command is
+    // a Command (AC7), the fleet's refusal 409 with the fleet's own words, what can't be asked 503.
+    if (path === "/api/updates" && method === "GET") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.engineReads.take(a.endpoint.id));
+      return json(res, 200, await p.updatesService.view());
+    }
+    if (path === "/api/updates/apply" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      // Thin on purpose (round 2, R4): the service gates the command before any look — the unknown-machine check
+      // rides behind it, on the fleet's own node list alone — so a stale step-up answers without a round trip.
+      const body = await readBody(req, UpdatesApplyBody);
+      return updatesAnswer(res, await p.updatesService.apply(a, body.machine, body.version));
+    }
+    if (path === "/api/updates/rollback" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UpdatesRollbackBody);
+      return updatesAnswer(res, await p.updatesService.rollback(a, body.machine, body.word));
+    }
+    if (path === "/api/updates/resume" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      return updatesAnswer(res, await p.updatesService.resume(a, (await readBody(req, UpdatesResumeBody)).version));
     }
     // ADR-0016: the accounts' usage, a look.
     if (path === "/api/usage" && method === "GET") return p.usage ? json(res, 200, p.usage.view()) : json(res, 404, { error: "usage_off" });

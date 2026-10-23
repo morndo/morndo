@@ -4,14 +4,20 @@
 // The store mirrors the real one's ratchet (RL3); the artifacts mirror the real adapter's cap semantics.
 import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compareVersions, DEFAULT_CHANNEL, DEFAULT_MODE, parseVersion, type Channel, type UpdateSettings } from "@morndo/domain";
+import {
+  compareVersions, DEFAULT_CHANNEL, DEFAULT_MODE, parseVersion, TERMINAL_UPDATE_STATES,
+  type Channel,
+} from "@morndo/domain";
 import { ARTIFACT_NAME } from "@morndo/protocol";
 import { DirsInstaller } from "../../src/adapters/installer-dirs.ts";
 import {
-  FetchFailed, type ArtifactStore, type CheckRecord, type Clock, type Download, type Installer, type Layout,
-  type ReleaseFeed, type SettingsSource, type Signed, type StagedRecord, type TreeFinding, type TrustState,
+  FetchFailed, type ArtifactStore, type CheckRecord, type Clock, type Download, type FleetNode, type FleetView,
+  type FleetWord,
+  type Installer, type Layout, type MachineSettings, type ReleaseFeed, type SettingsSource, type Signed,
+  type StagedRecord, type StoredUpdate, type TreeFinding, type TrustState, type UpdateHistory, type UpdateStateSink,
   type UpdateStore,
 } from "../../src/application/ports.ts";
+import type { UpdateStateFile } from "@morndo/protocol";
 
 // Removes a directory tree however it is left: a promoted Version is read-only (files 0444, directories 0555, §5),
 // and deleting needs the write bit back on every directory first.
@@ -167,6 +173,26 @@ export class FakeInstaller implements Installer {
     this.real.removeVersion(version);
   }
 
+  swap(pair: { current: string; previous: string | null }): void {
+    this.calls.push({ op: "swap", version: pair.current });
+    this.real.swap(pair);
+  }
+
+  swapBack(pair: { current: string; previous: string | null }): void {
+    this.calls.push({ op: "swapBack", version: pair.current });
+    this.real.swapBack(pair);
+  }
+
+  setGood(version: string): void {
+    this.calls.push({ op: "setGood", version });
+    this.real.setGood(version);
+  }
+
+  prune(keep: readonly string[]): void {
+    this.calls.push({ op: "prune" });
+    this.real.prune(keep);
+  }
+
   verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]> {
     return this.real.verifyTree(version, filesSha256);
   }
@@ -182,6 +208,7 @@ export class FakeStore implements UpdateStore {
   readonly versions = new Map<string, StagedRecord>();
   readonly checkLog: CheckRecord[] = [];
   private readonly committedList: string[] = [];
+  private readonly committedBaselines: (Record<string, string[]> | null)[] = [];
   private readonly badList: string[] = [];
   private held: { release(): void } | null = null;
   /** Flip to true and tryLock answers null, as another process holding the lock would. */
@@ -217,9 +244,70 @@ export class FakeStore implements UpdateStore {
     this.calls.push(`saveTrust(key set ${keySet === null ? "none" : keySet.version}, stable ${this.trustState.highestFeedSeq.stable})`);
   }
 
-  /** What PR 5's apply writes; the check service only reads it. */
-  commit(version: string): void { this.committedList.push(version); }
-  markBad(version: string): void { this.badList.push(version); }
+  /** What the apply writes; the check service only reads it. */
+  recordCommitted(version: string, _at: number, baseline: Record<string, string[]> | null = null): void {
+    this.committedList.push(version);
+    this.committedBaselines.push(baseline);
+    this.calls.push(`recordCommitted(${version})`);
+  }
+
+  /** §6.7: the last commit's recorded baseline, as the SQLite store answers it. */
+  commitBaseline(): Record<string, string[]> | null {
+    return this.committedBaselines.at(-1) ?? null;
+  }
+
+  recordBad(version: string, _at: number): void {
+    this.badList.push(version);
+    this.calls.push(`recordBad(${version})`);
+  }
+
+  // The step record (RL4), mirrored: save before the step runs, finish ends the attempt.
+  readonly updates: UpdateHistory[] = [];
+
+  saveUpdate(u: StoredUpdate): void {
+    const at = this.updates.findIndex(row => row.id === u.id);
+    if (at === -1) this.updates.push({ ...u, finishedAt: null });
+    else this.updates[at] = { ...u, finishedAt: this.updates[at]!.finishedAt };
+    this.calls.push(`saveUpdate(${u.id} ${u.state})`);
+  }
+
+  openUpdate(): StoredUpdate | null {
+    const live = this.updates.filter(row => !(TERMINAL_UPDATE_STATES as readonly string[]).includes(row.state));
+    if (live.length === 0) return null;
+    const newest = live.reduce((best, row) => (row.startedAt >= best.startedAt ? row : best));
+    const { finishedAt: _ended, ...open } = newest;   // the end is null by definition while it runs
+    return open;
+  }
+
+  finishUpdate(id: string, state: UpdateHistory["state"], at: number): void {
+    const row = this.updates.find(r => r.id === id);
+    if (row === undefined) throw new Error(`${id}: no update to finish`);
+    row.state = state;
+    row.finishedAt = at;
+    this.calls.push(`finishUpdate(${id} ${state})`);
+  }
+
+  readonly haltRows: { version: string; reason: string; at: number }[] = [];
+  recordHalt(version: string, reason: string, at: number): void { this.haltRows.unshift({ version, reason, at }); }
+  halts(): { version: string; reason: string; at: number }[] { return [...this.haltRows]; }
+
+  // §7's drawn delay, as the SQLite store keeps it: drawn once per Version, kept whatever later draws say.
+  readonly jitterRows = new Map<string, number>();
+  jitterOf(version: string): number | null { return this.jitterRows.get(version) ?? null; }
+  recordJitter(version: string, until: number): void {
+    if (!this.jitterRows.has(version)) this.jitterRows.set(version, until);
+  }
+  readonly alertsSent = new Set<string>();
+  firstAlert(updateId: string, kind: string): boolean {
+    const key = `${updateId} ${kind}`;
+    if (this.alertsSent.has(key)) return false;
+    this.alertsSent.add(key);
+    return true;
+  }
+
+  recentUpdates(limit: number): UpdateHistory[] {
+    return [...this.updates].sort((a, b) => b.startedAt - a.startedAt).slice(0, limit);
+  }
 
   highestCommitted(): string | null {
     return this.committedList.reduce<string | null>((best, version) => {
@@ -252,6 +340,8 @@ export class FakeStore implements UpdateStore {
 
   versionRecord(version: string): StagedRecord | null { return this.versions.get(version) ?? null; }
 
+  manifestOf(version: string): string | null { return this.versions.get(version)?.manifest ?? null; }
+
   recordCheck(r: CheckRecord): void {
     this.checkLog.push(r);
     this.calls.push(`recordCheck(${r.outcome})`);
@@ -265,18 +355,50 @@ export class FakeStore implements UpdateStore {
   }
 }
 
-// ---- settings and clock
+// ---- settings, clock, and the fleet's word
 
-export const DEFAULT_SETTINGS: UpdateSettings = { channel: DEFAULT_CHANNEL, mode: DEFAULT_MODE, pin: null, window: null };
+export const DEFAULT_SETTINGS: MachineSettings = {
+  channel: DEFAULT_CHANNEL, mode: DEFAULT_MODE, pin: null, window: null, soakMinutes: null,
+};
 
 export class FakeSettings implements SettingsSource {
-  value: UpdateSettings;
-  constructor(value: UpdateSettings = DEFAULT_SETTINGS) { this.value = value; }
-  read(): UpdateSettings { return this.value; }
+  value: MachineSettings;
+  constructor(value: MachineSettings = DEFAULT_SETTINGS) { this.value = value; }
+  read(): MachineSettings { return this.value; }
 }
 
 export class FakeClock implements Clock {
   nowMs: number;
   constructor(nowMs: number) { this.nowMs = nowMs; }
   now(): number { return this.nowMs; }
+}
+
+// The fleet's word (§7), as a test stands it: what view() says, what nodes() answers (the control plane's skew gate,
+// RL11), and the log of every read — the fleet has no write door for the updater anymore (the state file is its only
+// word out), so `calls` is how a test proves nothing else was asked. thrown flips either read into the unreachable
+// fleet a deferral must outlast.
+export class FakeFleetView implements FleetView {
+  word: FleetWord | null = null;
+  nodesWord: FleetNode[] | null = null;
+  throwView = false;
+  throwNodes = false;
+  /** Every fleet read, in order: "view" and "nodes". A write would have nowhere to land. */
+  readonly calls: string[] = [];
+
+  async view(): Promise<FleetWord | null> {
+    this.calls.push("view");
+    if (this.throwView) throw new Error("the fleet cannot be asked");
+    return this.word;
+  }
+  async nodes(): Promise<FleetNode[] | null> {
+    this.calls.push("nodes");
+    if (this.throwNodes) throw new Error("the fleet cannot be asked");
+    return this.nodesWord;
+  }
+}
+
+// The state file's sink (§6.3), recording what was written instead of writing it.
+export class FakeStateSink implements UpdateStateSink {
+  readonly written: UpdateStateFile[] = [];
+  write(s: UpdateStateFile): void { this.written.push(s); }
 }

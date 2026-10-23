@@ -6,10 +6,8 @@
 set -eu
 
 MORNDO_RELEASE_VERSION='0.0.0-unstamped'
-# 'no' until the hub has an install command (a later change of the releases plan sets it to 'yes').
-# Without it the hub treats `install` as an unknown command, creates its database and identity,
-# prints help and exits 0, so this script would report success and install nothing.
-MORNDO_HAS_INSTALL='no'
+# The hub forwards `install` to the updater's program (design §10.3), so a stamped release can install.
+MORNDO_HAS_INSTALL='yes'
 
 usage() {
   echo "usage: sh install.sh --role control-plane|node [--channel stable|latest] --signers FILE" >&2

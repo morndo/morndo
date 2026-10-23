@@ -68,6 +68,23 @@ describe("HoldWatch", () => {
   });
 });
 
+describe("HoldWatch onChange", () => {
+  it("is told when the service starts and stops seeing the hold, and only then", () => {
+    const path = join(dir(), "hold.json");
+    const t = Date.parse("2026-10-11T08:20:00.000Z");
+    const seen: boolean[] = [];
+    const watch = new HoldWatch({ path, service: "hub", now: () => t, onChange: held => seen.push(held) });
+    watch.refresh();
+    writeFileSync(path, hold({ since: "2026-10-11T08:20:00.000Z" }));
+    watch.refresh();
+    watch.refresh();
+    rmSync(path);
+    watch.refresh();
+    expect(seen).toEqual([true, false]);
+    watch.stop();
+  });
+});
+
 describe("Flight", () => {
   it("is idle at once when nothing is running, and waits for what is", async () => {
     const flight = new Flight();
@@ -90,5 +107,14 @@ describe("Flight", () => {
     expect(flight.list()).toHaveLength(1);
     end();
     expect(flight.list()).toEqual([]);
+  });
+  it("calls onChange after an item begins and after it ends, with the list already moved", () => {
+    const sizes: number[] = [];
+    const flight = new Flight({ onChange: () => sizes.push(flight.list().length) });
+    const end = flight.begin({ kind: "pane.send", id: "hub:1" });
+    expect(sizes).toEqual([1]);
+    end();
+    end();                                            // a second end of the same item changes nothing
+    expect(sizes).toEqual([1, 0]);
   });
 });

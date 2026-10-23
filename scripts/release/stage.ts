@@ -42,7 +42,7 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     const lock: unknown = JSON.parse(readFileSync(lockPath, "utf8"));
     if (isLock(lock)) files.push({ path: "LICENSES/NOTICE", bytes: Buffer.from(thirdPartyNotice(lock)), mode: "0444" });
   } catch { /* a fixture may omit the lock */ }
-  files.push({ path: "units", mode: "0555", directory: true }, { path: "trust", mode: "0555", directory: true });
+  files.push({ path: "units", mode: "0555", directory: true }, ...unitTemplates(p.repo), { path: "trust", mode: "0555", directory: true });
   // trust/ is the Key set this Version ships with (design §5): the repo's keys.json and root's signature over it. An
   // installer refuses a tree without trust/keys.json (T-354). The release build verifies the signature against the pinned
   // root signer before and after staging (check-key-set.sh); a keys.json without a readable, non-empty signature is
@@ -66,6 +66,21 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     else if ("link" in file) symlinkSync(file.link, dest);
     else writeFileSync(dest, file.bytes, { mode: file.mode === "0555" ? 0o555 : 0o444 });
   }
+}
+
+// The service templates (design §5): apps/updater/units/** ships inside every Version as units/, read-only
+// like the rest of the tree, so the signed file list covers what renderUnits writes for the service manager.
+// A fixture repository without the directory keeps the empty units/ this function always made.
+function unitTemplates(repo: string): TreeFile[] {
+  const dir = join(repo, "apps/updater/units");
+  if (!existsSync(dir)) return [];
+  const walk = (from: string, prefix: string): TreeFile[] =>
+    readdirSync(from).sort().flatMap(name => {
+      const abs = join(from, name);
+      return lstatSync(abs).isDirectory() ? walk(abs, `${prefix}${name}/`)
+        : [{ path: `${prefix}${name}`, bytes: readFileSync(abs), mode: "0444" as const }];
+    });
+  return walk(dir, "units/");
 }
 
 function walkCopied(

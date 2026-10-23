@@ -26,11 +26,12 @@
 //   it; the events go into the spool on "/lane" and to the fleet with the hooks (lane-state.ts).
 import { randomUUID } from "node:crypto";
 import { fleetRecord } from "@morndo/domain";
-import { CAP_LONG_TEXT, ERROR_EXECUTED, LIMITS, type AgentMessage, type Delivery, type OpError } from "@morndo/protocol";
+import { CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE, ERROR_EXECUTED, LIMITS, type AgentMessage, type Delivery, type OpError } from "@morndo/protocol";
 import { healthProbe, tmuxAdapter } from "@morndo/node-ops";
 import { Flight, HoldWatch, holdFile, productVersion } from "@morndo/service-kit";
 import { ConfigError, isOpName, jobLimits, jobsConfigProblem, jobTimeouts, type AgentConfig } from "./config.ts";
 import { FleetConnection, type ReqMessage } from "./conn/connection.ts";
+import { FleetView } from "./conn/fleet-view.ts";
 import type { RetryOptions } from "./conn/retry.ts";
 import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
@@ -45,6 +46,7 @@ import { typeJobNotice } from "./ops/job-delivery.ts";
 import { openJobRuntime, type JobRuntime } from "./ops/job-runtime.ts";
 import { nodeOpener } from "./ops/node-files.ts";
 import { createOpsRuntime } from "./ops/runtime.ts";
+import { readUpdateHealth, updateStateFile, updaterInstalled, type CommandRunner } from "./ops/update-ops.ts";
 import { agentPaths } from "./paths.ts";
 import { dropAgentTokenEnv, readBoardToken } from "./relay/board-token.ts";
 import { notLiveFromHub } from "./relay/board-view.ts";
@@ -77,6 +79,7 @@ export type AgentOptions = {
   diskBudgetBytes?: number;                                // LIMITS.spoolMaxBytes; a test sets a smaller one
   flight?: Flight;                                        // a test holds one item so stop's wait can be seen
   stopWaitMs?: number;                                    // how long stop waits for in-flight work; default 10s
+  runCommand?: CommandRunner;                             // a test sees the apply unit's exact start (update.apply)
 };
 export type RunningAgent = {
   instanceId: string;
@@ -110,11 +113,19 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   const budget = o.diskBudgetBytes ?? LIMITS.spoolMaxBytes;
   const held = (): number => files.bytes() + ops.inbox.bytes();
   const room = (): number => budget - spool.bytes() - held();
-  const flight = o.flight ?? new Flight();
+  // The agent's in-flight work lands in status.json the moment it changes (updates design §6.3): an updater watching
+  // for a safe point reads it while the work runs, not at the next health tick. saveStatus never throws (its write is
+  // caught), so a failing disk cannot disturb the op that began or ended the item.
+  const flight = o.flight ?? new Flight({ onChange: () => saveStatus() });
+  // Seeing the hold or no longer seeing it lands in status.json at once too: the updater waits for the node's word that
+  // it has seen the hold before it judges the drain. The status writer is defined below; until then there is nothing
+  // to rewrite.
+  let statusReady = false;
   const watch = new HoldWatch({
     path: holdFile(config.home),
     service: "node",
     onStale: message => log.warn(message),
+    onChange: () => { if (statusReady) saveStatus(); },
   });
   watch.start();
   let draining = false;
@@ -122,6 +133,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     config, db: adb.db, log, hooks, room: () => room(), held: () => watch.held || draining, flight,
     emitDelivery: d => { sendDelivery(d); },
     ...(hooks.dropAfterStarted !== undefined ? { afterStarted: dropOnce(hooks.dropAfterStarted, () => conn?.drop()) } : {}),
+    ...(o.runCommand ? { runCommand: o.runCommand } : {}),
   });
   const spool: Spool = new Spool(adb.db, streamId, { failWrites: hooks.spoolFail === true, maxBytes: budget, held: cachedFor(1000, held) });
   const open = nodeOpener({ home: config.home, stateDir: paths.stateDir, configDir: paths.configDir, ...(config.policy.fileRoots ? { fileRoots: config.policy.fileRoots } : {}) });
@@ -139,6 +151,9 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     } catch (e) { log.warn("could not read the deliveries to send after a welcome", e); }
   };
   const sender = new StreamSender({ spool, node: config.node, send: m => send(m), log });
+  // What the agent last heard from the fleet (updates §6.7): written on every welcome and every `rollout` frame,
+  // refreshed at every health tick while online, read by this node's updater as the word it follows.
+  const fleetView = new FleetView({ path: paths.fleetViewFile, log });
   const states = new LaneStates({
     spool, appended: () => sender.kick(), screen: pane => ops.tmux.capture(pane, { lines: 50, attributes: false }),
     now: ops.now, changed: () => ops.deliverer.kick("status"), log,
@@ -146,23 +161,33 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   const events = new EventLoops({
     inventory: ops.inventory, send: m => send(m), log,
     onInventory: async s => { ops.deliverer.kick("inventory"); await states.observe(s.lanes); },
-    health: async () => ({
-      ...(await healthProbe(config.home, { tmuxSocket: config.policy.tmuxSocket })), wallClock: ops.now(), spoolDepth: spool.depth(), drops: spool.drops,
-      tzOffsetMin: utcOffsetMin(),
-      ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
-    }),
+    health: async () => {
+      // The health tick is the agent's pulse while it is online, so the fleet view's word is heard now (updates
+      // §6.7): a quiet fleet still counts, and the node's updater keeps following it. The updater's own state, when
+      // it is installed and its file says something, rides along (updates §6.3).
+      fleetView.refresh(ops.now());
+      const update = readUpdateHealth(updateStateFile(config.home));
+      return {
+        ...(await healthProbe(config.home, { tmuxSocket: config.policy.tmuxSocket })), wallClock: ops.now(), spoolDepth: spool.depth(), drops: spool.drops,
+        tzOffsetMin: utcOffsetMin(),
+        ...(update !== null ? { update } : {}),
+        ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
+      };
+    },
     ...(o.pollMs !== undefined ? { pollMs: o.pollMs } : {}),
     ...(o.healthMs !== undefined ? { healthMs: o.healthMs } : {}),
   });
   const status = (): AgentStatus => ({
     ...(conn?.status() ?? { state: "stopped", since: Date.now(), connEpoch: null, lastClose: null, retryInMs: null }),
     node: config.node, instanceId, pid: process.pid, spoolDepth: spool.depth(), drops: spool.drops,
-    version: productVersion(), ready: true,
+    version: productVersion(), ready: true, held: watch.held,
+    inFlight: flight.list().slice(0, 100),               // the protocol's cap; what a restart would interrupt
     ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
   });
   const saveStatus = () => {
     try { writeStatus(paths.statusFile, status()); } catch (e) { log.warn("could not write status.json", e); }
   };
+  statusReady = true;
   const errorRes = (id: string, error: OpError): AgentMessage =>
     ({ v: 1, t: "res", id, invVersion: ops.inventory.invVersion, store: streamId, ok: false, error, storeSeq: ops.doneKeys.seq() });
 
@@ -259,10 +284,18 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   conn = new FleetConnection({
     url: config.fleetUrl, node: config.node, instanceId, streamId, fleetKey, nodeKey,
     // CAP_LONG_TEXT beside the ops: this agent takes pane.send and lane.deliver text up to LIMITS.maxMessageText.
-    caps: [...config.policy.ops, CAP_LONG_TEXT], log,
+    // CAP_ROLLOUT always (updates §7): this agent takes the `rollout` frame and keeps the fleet view. CAP_UPDATE
+    // only when the updater is installed here and the policy allows update.apply — a node that cannot apply says
+    // so, and the fleet sends it no update.apply (updates §7).
+    caps: [
+      ...config.policy.ops, CAP_LONG_TEXT, CAP_ROLLOUT,
+      ...(config.policy.ops.includes("update.apply") && updaterInstalled(config.home) ? [CAP_UPDATE] : []),
+    ], log,
     claudeVersion: () => [...sessions().values()].find(s => s.version)?.version ?? null,
     admit: w => !restored(w),
+    onRollout: (r, offer) => { fleetView.rollout(r, offer ?? null, ops.now()); },
     onWelcome: w => {
+      fleetView.heard(w, ops.now());
       sender.online(w);
       events.online();
       replayDeliveries();

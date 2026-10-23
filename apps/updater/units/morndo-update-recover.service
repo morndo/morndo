@@ -1,0 +1,16 @@
+# The recovery unit (design §5, §6.6): runs from `good` after a crash or a power loss, after the services so
+# it can judge them, and only while the `applying` mark exists — present from the drain until the Update
+# commits or is abandoned. It execs good's own launcher, not ~/.local/bin's link through `current`: a crash
+# mid-swap can leave `current` naming a Version that does not start. %S is the user's state directory,
+# ~/.local/state (systemd.unit(5), systemd 255).
+[Unit]
+Description=Recover a half-applied Morndo update
+ConditionPathExists=%S/morndo-update/applying
+After=morndo-hub.service morndo-fleet.service morndo-node.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/morndo-releases/good/bin/morndo-update update recover
+
+[Install]
+WantedBy=default.target

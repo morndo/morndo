@@ -47,7 +47,7 @@ async function hub(o: { board: boolean; memory: boolean; limits?: Limits }): Pro
   const agents = new AgentAccess(store, "manager");
   const memory = new MemoryService({ store: memoryStore });
   const http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000), steering: new SteeringService(store, tmux), escalations, remote,
+    config, identity: loadOrCreateIdentity(dir), access, store, observation: new ObservationService(tmux, 1000), steering: new SteeringService(store, tmux), escalations, remote,
     board: o.board ? { service: new BoardService({ store, policy: () => access.policy() }), agents } : null,
     memory: o.memory ? { service: memory, agents } : null,
     ...(o.limits ? { limits: o.limits } : {}),

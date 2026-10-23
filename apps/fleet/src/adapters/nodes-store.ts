@@ -8,24 +8,31 @@
 // are not: a lost code is issued again, and the others are refreshed on the next connection.
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type Database from "better-sqlite3";
-import { LIMITS, NODE_NAME } from "@morndo/protocol";
+import { LIMITS, isNodeName } from "@morndo/protocol";
+import type { RevocationJournal } from "@morndo/service-kit";
 import { synced } from "./db.ts";
 import { parsePublicKey } from "./keys.ts";
 
 export type NodeRow = {
   name: string; publicKey: string; createdAt: number; revokedAt: number | null; lastSeenAt: number | null;
   lastSource: string | null; agentVersion: string | null; connEpoch: number;
+  lastProto: number[] | null;                          // the protocols its last hello named (migration 17)
 };
 export type Issued = { ok: true; code: string; expiresAt: number } | { ok: false; refused: "bad_name" | "exists" };
 export type Redeemed = { ok: true; node: string } | { ok: false; refused: "unknown" | "expired" | "used" | "wrong_node" | "exists" | "bad_key" };
 
 type Row = {
   name: string; public_key: string; created_at: number; revoked_at: number | null; last_seen_at: number | null;
-  last_source: string | null; agent_version: string | null; conn_epoch: number;
+  last_source: string | null; agent_version: string | null; conn_epoch: number; last_proto?: string | null;
+};
+const protoFrom = (text: string | null | undefined): number[] | null => {
+  if (typeof text !== "string") return null;
+  try { const v: unknown = JSON.parse(text); return Array.isArray(v) && v.every(n => Number.isInteger(n)) ? v as number[] : null; }
+  catch { return null; }
 };
 const nodeFrom = (r: Row): NodeRow => ({
   name: r.name, publicKey: r.public_key, createdAt: r.created_at, revokedAt: r.revoked_at, lastSeenAt: r.last_seen_at,
-  lastSource: r.last_source, agentVersion: r.agent_version, connEpoch: r.conn_epoch,
+  lastSource: r.last_source, agentVersion: r.agent_version, connEpoch: r.conn_epoch, lastProto: protoFrom(r.last_proto),
 });
 
 type CodeRow = { hash: string; node: string; expires_at: number; used_at: number | null };
@@ -37,16 +44,18 @@ const hashOf = (bytes: Buffer) => createHash("sha256").update(bytes).digest();
 export class NodesStore {
   #db: Database.Database;
   #now: () => number;
+  #journal: RevocationJournal | null;
 
-  constructor(db: Database.Database, now: () => number = Date.now) {
+  constructor(db: Database.Database, now: () => number = Date.now, journal?: RevocationJournal) {
     this.#db = db;
     this.#now = now;
+    this.#journal = journal ?? null;
   }
 
-  // A code for `name`: refused for a name that isn't NODE_NAME or a node that is registered and not revoked (revoke
+  // A code for `name`: refused for a name that isn't NODE_NAME, a reserved one (control-plane), or a node that is registered and not revoked (revoke
   // it first). A revoked name can be joined again, with a new key.
   issueCode(name: string): Issued {
-    if (!NODE_NAME.test(name)) return { ok: false, refused: "bad_name" };
+    if (!isNodeName(name)) return { ok: false, refused: "bad_name" };          // the shape, and no reserved name
     if (this.active(name)) return { ok: false, refused: "exists" };
     const now = this.#now();
     const bytes = randomBytes(CODE_BYTES);
@@ -76,8 +85,10 @@ export class NodesStore {
       if (match.node !== node) return { ok: false, refused: "wrong_node" };
       if (this.active(match.node)) return { ok: false, refused: "exists" };
       this.#db.prepare("UPDATE join_codes SET used_at = ? WHERE hash = ?").run(now, match.hash);
-      this.#db.prepare(`INSERT INTO nodes (name, public_key, created_at) VALUES (?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET public_key = excluded.public_key, revoked_at = NULL, last_source = NULL`).run(match.node, publicKey, now);
+      // The enrolment is the code's own hash: one per join, so a revocation of this one never reaches the next.
+      this.#db.prepare(`INSERT INTO nodes (name, public_key, created_at, enrolment) VALUES (?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET public_key = excluded.public_key, revoked_at = NULL, last_source = NULL,
+        enrolment = excluded.enrolment`).run(match.node, publicKey, now, match.hash);
       return { ok: true, node: match.node };
     }).immediate());
   }
@@ -96,10 +107,35 @@ export class NodesStore {
     return (this.#db.prepare("SELECT * FROM nodes ORDER BY name").all() as Row[]).map(nodeFrom);
   }
 
+  // The enrolment of the node of that name while it is active: which join its key came from.
+  activeEnrolment(name: string): string | null {
+    const r = this.#db.prepare("SELECT enrolment FROM nodes WHERE name = ? AND revoked_at IS NULL").get(name) as { enrolment: string | null } | undefined;
+    return r?.enrolment ?? null;
+  }
+
   // Revokes a registered node and withdraws its unused codes. False when there was no active node of that name.
   revoke(name: string): boolean {
+    // RL10 (updates design §11.5): journaled before the database write, so a crash between the two is repaired at the
+    // next start and a fleet.db restored from an older copy can't bring the node back. The entry names the enrolment
+    // it revokes: a join again under the same name later is a new enrolment, which this entry never revokes.
+    const enrolment = this.activeEnrolment(name);
+    if (enrolment !== null) this.#journal?.append({ kind: "node", id: name, enrolment, at: this.#now() });
+    return this.#revokeWhere(name, null);
+  }
+
+  // A journal entry's revoke at start: the node of that name only while it is still that enrolment. False when it is
+  // not active, or is a later enrolment (a join again after the revocation), which stays as it is.
+  revokeEnrolment(name: string, enrolment: string): boolean {
+    if (this.activeEnrolment(name) !== enrolment) return false;
+    return this.#revokeWhere(name, enrolment);
+  }
+
+  #revokeWhere(name: string, enrolment: string | null): boolean {
     return synced(this.#db, () => this.#db.transaction(() => {
-      const changed = this.#db.prepare("UPDATE nodes SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL").run(this.#now(), name).changes > 0;
+      const changed = (enrolment === null
+        ? this.#db.prepare("UPDATE nodes SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL").run(this.#now(), name)
+        : this.#db.prepare("UPDATE nodes SET revoked_at = ? WHERE name = ? AND revoked_at IS NULL AND enrolment = ?").run(this.#now(), name, enrolment)
+      ).changes > 0;
       this.#db.prepare("DELETE FROM join_codes WHERE node = ? AND used_at IS NULL").run(name);
       return changed;
     }).immediate());
@@ -112,9 +148,11 @@ export class NodesStore {
     return r.conn_epoch;
   }
 
-  seen(name: string, agentVersion?: string): void {
+  seen(name: string, agentVersion?: string, proto?: number[]): void {
     if (agentVersion === undefined) this.#db.prepare("UPDATE nodes SET last_seen_at = ? WHERE name = ?").run(this.#now(), name);
-    else this.#db.prepare("UPDATE nodes SET last_seen_at = ?, agent_version = ? WHERE name = ?").run(this.#now(), agentVersion, name);
+    else if (proto === undefined) this.#db.prepare("UPDATE nodes SET last_seen_at = ?, agent_version = ? WHERE name = ?").run(this.#now(), agentVersion, name);
+    else this.#db.prepare("UPDATE nodes SET last_seen_at = ?, agent_version = ?, last_proto = ? WHERE name = ?")
+      .run(this.#now(), agentVersion, JSON.stringify(proto), name);
   }
 
   // Records where a node connected from; returns the previous source when it was a different one (an alert, spec 8).

@@ -12,7 +12,9 @@ import { CheckService } from "../src/application/check-service.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE } from "../src/application/namespaces.ts";
 import { FetchFailed, type StagedRecord } from "../src/application/ports.ts";
 import { SshSigVerifier } from "../src/adapters/verifier-sshsig.ts";
-import { FakeArtifacts, FakeClock, FakeFeed, FakeInstaller, FakeSettings, FakeStore, wipe } from "./helpers/fakes.ts";
+import {
+  FakeArtifacts, FakeClock, FakeFeed, FakeFleetView, FakeInstaller, FakeSettings, FakeStateSink, FakeStore, wipe,
+} from "./helpers/fakes.ts";
 import {
   doctoredFeed, feedFixture, keySetDocument, makeKeys, makeSigningKey, manifestSignature, packWithList,
   releaseFixture, sha256hex, signed, type Keys, type ReleaseFixture,
@@ -40,6 +42,8 @@ type World = {
   store: FakeStore;
   settings: FakeSettings;
   clock: FakeClock;
+  fleet: FakeFleetView;
+  state: FakeStateSink;
   service: CheckService;
 };
 
@@ -62,11 +66,15 @@ const build = (bend: (w: World) => void = () => {}, o: { disableUpdates?: boolea
   const store = new FakeStore();
   const settings = new FakeSettings();
   const clock = new FakeClock(NOW);
+  const fleet = new FakeFleetView();
+  const state = new FakeStateSink();
   const world: World = {
     keys, ks1, rel, feedText: feed.text, feed: fakeFeed, artifacts, installer, store, settings, clock,
+    fleet, state,
     service: new CheckService({
       feed: fakeFeed, artifacts, verifier: new SshSigVerifier(), installer, store, settings, clock,
       platform: rel.platform, switches: { disableUpdates: o.disableUpdates ?? false },
+      fleet, state,
     }),
   };
   bend(world);
@@ -110,6 +118,7 @@ describe("the check service (§6.1, §10.2)", () => {
     expect(w.installer.has(OFFERED)).toBe(true);                    // .staging-0.2.0 became 0.2.0/
     expect(w.artifacts.downloads()).toEqual([]);                    // the download went after the promotion
     expect(w.store.versionRecord(OFFERED)).toMatchObject({ filesSha256: w.rel.filesSha256, manifestSha256: w.rel.manifestSha256 });
+    expect(w.store.manifestOf(OFFERED)).toBe(w.rel.manifestText);     // the verified Manifest's own text, for the apply
     expect(w.store.trust().highestFeedSeq).toEqual({ stable: 1, latest: 0 });
     expect(w.store.trust().keySet?.version).toBe(1);                // the shipped anchor, now the store's own
     recorded(w, "staged", null, OFFERED);
@@ -479,7 +488,7 @@ describe("the check service (§6.1, §10.2)", () => {
   });
 
   it("a Version marked bad here is skipped bad_here", async () => {
-    const w = build(w => w.store.markBad(OFFERED));
+    const w = build(w => w.store.recordBad(OFFERED, NOW));
     expect(await w.service.check()).toEqual({ kind: "skipped", reason: "bad_here", version: OFFERED });
     expect(w.artifacts.calls).toEqual([]);
     nothingLeft(w);
@@ -583,6 +592,7 @@ describe("the check service (§6.1, §10.2)", () => {
     expect(out).toEqual({ kind: "staged", version: OFFERED, already: true });
     expect(w.artifacts.calls.length).toBe(fetches);                // adopted: nothing downloaded
     expect(w.store.versionRecord(OFFERED)).toMatchObject({ filesSha256: w.rel.filesSha256, manifestSha256: w.rel.manifestSha256 });
+    expect(w.store.manifestOf(OFFERED)).toBe(w.rel.manifestText);     // the adopted path records it too
     recorded(w, "staged", null, OFFERED);
     expect(w.store.checks(1)[0]!.detail).toBe("adopted a verified directory left without its record");
   });

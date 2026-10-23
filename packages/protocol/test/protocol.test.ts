@@ -130,6 +130,14 @@ describe("HTTP bodies", () => {
     expect(parseBody(SendBody, { text: "", requestId: UUID, seen: "none", uploads: ["a", "b"] })).toEqual({ text: "", requestId: UUID, seen: "none", uploads: ["a", "b"] });
     expect(parseBody(SendBody, { text: "", requestId: UUID, seen: "none", uploads: Array.from({ length: 13 }, (_, i) => `u${i}`) })).toBeNull();
   });
+  // RL10 (updates design §11.5): a Command carries the hub store its device saw before its first attempt — a UUID, or
+  // nothing (an older app, or a record written before any answer).
+  it("a send's hubStore is a UUID when it is there, and only then", () => {
+    const OTHER = "1e2d94aa-3b4f-4c5d-9e8f-0a1b2c3d4e5f";
+    expect(parseBody(SendBody, { text: "hi", requestId: UUID, seen: "none", hubStore: OTHER })).toEqual({ text: "hi", requestId: UUID, seen: "none", hubStore: OTHER });
+    expect(parseBody(SendBody, { text: "hi", requestId: UUID, seen: "none", hubStore: "s-2" })).toBeNull();
+    expect(parseBody(SendBody, { text: "hi", requestId: UUID, seen: "none", hubStore: 7 })).toBeNull();
+  });
   it("an answer is an option key or words, each with a UUID request id", () => {
     expect(parseBody(AnswerBody, { key: "ship", requestId: UUID })).toEqual({ key: "ship", requestId: UUID });
     expect(parseBody(AnswerBody, { text: "hold it", requestId: UUID })).toEqual({ text: "hold it", requestId: UUID });

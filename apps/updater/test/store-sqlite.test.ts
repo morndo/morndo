@@ -8,7 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { openUpdateStore } from "../src/adapters/store-sqlite.ts";
+import {
+  beginRollback, beginStep, beginUpdate, parseVersion, RECORD_FORMAT, type Installation,
+} from "@morndo/domain";
+import { MIGRATIONS, openUpdateStore } from "../src/adapters/store-sqlite.ts";
+import { DEFAULT_SETTINGS } from "./helpers/fakes.ts";
 
 let scratch = "";
 let state = "";
@@ -41,6 +45,16 @@ const KEY_SET = (version: number) => ({
   schema: 1 as const, version, expiresAt: 1_800_000_000_000,
   root: [`SHA256:root-${version}`], release: [`SHA256:release-${version}`], feed: [`SHA256:feed-${version}`],
 });
+
+// A made-up Manifest text, the canonical shape the release scripts write (scripts/release/json.ts).
+const MANIFEST_TEXT = `${JSON.stringify({ schema: 1, product: "morndo", version: "0.2.0" }, null, 2)}\n`;
+
+// Whatever installation the apply read when it began: 0.1.0 running, nothing staged.
+const MACHINE: Installation = {
+  current: parseVersion("0.1.0")!, previous: null, staged: null, badVersions: [],
+  highestCommitted: parseVersion("0.1.0")!, keySet: null,
+  highestFeedSeq: { stable: 0, latest: 0 }, installMethod: "updater", settings: DEFAULT_SETTINGS,
+};
 
 describe("the update store (§4.6, §5)", () => {
   it("a fresh store: no trust, no checks, nothing staged or committed", () => {
@@ -170,9 +184,11 @@ describe("the update store (§4.6, §5)", () => {
 
   it("staged(): the highest staged Version above every committed one, or null", () => {
     const store = open();
-    store.recordStaged({ version: "0.2.0", manifestSha256: "a".repeat(64), filesSha256: "b".repeat(64), at: 10 });
-    store.recordStaged({ version: "0.3.0", manifestSha256: "c".repeat(64), filesSha256: "d".repeat(64), at: 20 });
-    expect(store.staged()).toEqual({ version: "0.3.0", manifestSha256: "c".repeat(64), filesSha256: "d".repeat(64), at: 20 });
+    store.recordStaged({ version: "0.2.0", manifestSha256: "a".repeat(64), filesSha256: "b".repeat(64), at: 10, manifest: MANIFEST_TEXT });
+    store.recordStaged({ version: "0.3.0", manifestSha256: "c".repeat(64), filesSha256: "d".repeat(64), at: 20, manifest: MANIFEST_TEXT });
+    expect(store.staged()).toEqual({
+      version: "0.3.0", manifestSha256: "c".repeat(64), filesSha256: "d".repeat(64), at: 20, manifest: MANIFEST_TEXT,
+    });
     expect(store.versionRecord("0.2.0")!.filesSha256).toBe("b".repeat(64));
     // a commit (written from PR 5 on) retires the staged Version above it and leaves the older one out too
     const raw = new Database(join(state, "update.db"));
@@ -180,7 +196,7 @@ describe("the update store (§4.6, §5)", () => {
     raw.close();
     expect(store.staged()).toBeNull();
     expect(store.highestCommitted()).toBe("0.3.0");
-    store.recordStaged({ version: "0.4.0", manifestSha256: "e".repeat(64), filesSha256: "f".repeat(64), at: 30 });
+    store.recordStaged({ version: "0.4.0", manifestSha256: "e".repeat(64), filesSha256: "f".repeat(64), at: 30, manifest: MANIFEST_TEXT });
     expect(store.staged()?.version).toBe("0.4.0");
     store.close();
   });
@@ -227,7 +243,7 @@ describe("the update store (§4.6, §5)", () => {
   it("reopening keeps everything, and the database file is private to its owner", () => {
     const store = open();
     store.saveTrust({ keySet: KEY_SET(3), highestFeedSeq: { stable: 8, latest: 6 } });
-    store.recordStaged({ version: "0.9.0", manifestSha256: "1".repeat(64), filesSha256: "2".repeat(64), at: 40 });
+    store.recordStaged({ version: "0.9.0", manifestSha256: "1".repeat(64), filesSha256: "2".repeat(64), at: 40, manifest: MANIFEST_TEXT });
     store.recordCheck({ at: 50, channel: "latest", outcome: "skipped", detail: "not newer", version: null, feedSeq: null, feedExpiresAt: null });
     store.close();
 
@@ -237,5 +253,168 @@ describe("the update store (§4.6, §5)", () => {
     expect(again.checks(10)).toEqual([{ at: 50, channel: "latest", outcome: "skipped", detail: "not newer", version: null, feedSeq: null, feedExpiresAt: null }]);
     again.close();
     expect(statSync(join(state, "update.db")).mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("the step record (RL4, §6.2)", () => {
+  it("saveUpdate and openUpdate round trip; finishUpdate ends the attempt and openUpdate answers null", () => {
+    const store = open();
+    expect(store.openUpdate()).toBeNull();
+    const begun = beginUpdate({ id: "upd-4907", target: parseVersion("0.2.0")!, machine: MACHINE });
+    store.saveUpdate({ ...begun, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null });
+    const live = store.openUpdate();
+    expect(live).toMatchObject({
+      id: "upd-4907", kind: "update", state: "staged", mark: null,
+      format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [],
+    });
+    expect(live!.target).toEqual(parseVersion("0.2.0"));
+    expect(live!.preUpdate).toEqual({ current: parseVersion("0.1.0"), previous: null });
+
+    // the drain step's own save: the mark it stands in, recorded done, before the step runs (§6.2)
+    const stepped = beginStep(live!, "draining", { lockHeld: true });
+    expect(stepped.ok).toBe(true);
+    if (stepped.ok) store.saveUpdate({ ...stepped.value, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: ["draining"], judgeBaseline: null, backupOf: null, attempt: null });
+    expect(store.openUpdate()).toMatchObject({ state: "draining", mark: "draining", doneMarks: ["draining"] });
+
+    store.finishUpdate("upd-4907", "abandoned", 2_000);
+    expect(store.openUpdate()).toBeNull();
+    const history = store.recentUpdates(10);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({
+      id: "upd-4907", state: "abandoned", mark: "draining", doneMarks: ["draining"], finishedAt: 2_000,
+    });
+    store.close();
+  });
+
+  it("openUpdate is the newest attempt not in a terminal state; the finished ones stay in the history", () => {
+    const store = open();
+    const first = beginUpdate({ id: "upd-1", target: parseVersion("0.2.0")!, machine: MACHINE });
+    const second = beginUpdate({ id: "upd-2", target: parseVersion("0.3.0")!, machine: MACHINE });
+    store.saveUpdate({ ...first, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null });
+    store.saveUpdate({ ...second, format: RECORD_FORMAT, startedAt: 5_000, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null });
+    expect(store.openUpdate()!.id).toBe("upd-2");
+    store.finishUpdate("upd-2", "abandoned", 6_000);
+    expect(store.openUpdate()!.id).toBe("upd-1");     // the older attempt is still live
+    expect(store.recentUpdates(10).map(row => row.id)).toEqual(["upd-2", "upd-1"]);   // newest by when it began
+    store.finishUpdate("upd-1", "abandoned", 7_000);
+    expect(store.openUpdate()).toBeNull();
+    store.close();
+  });
+
+  it("a rollback's record round trips: the previous Version as target, rolling_back as its first mark", () => {
+    const store = open();
+    const after: Installation = { ...MACHINE, current: parseVersion("0.2.0")!, previous: parseVersion("0.1.0")! };
+    const begun = beginRollback({ id: "rb-1", machine: after });
+    expect(begun.ok).toBe(true);
+    if (begun.ok) store.saveUpdate({ ...begun.value, format: RECORD_FORMAT, startedAt: 9_000, doneMarks: ["rolling_back"], judgeBaseline: null, backupOf: null, attempt: null });
+    const live = store.openUpdate()!;
+    expect(live).toMatchObject({ id: "rb-1", kind: "rollback", state: "rolling_back", mark: "rolling_back" });
+    expect(live.target).toEqual(parseVersion("0.1.0"));
+    expect(live.preUpdate).toEqual({ current: parseVersion("0.2.0"), previous: parseVersion("0.1.0") });
+    store.finishUpdate("rb-1", "rolled_back", 9_500);
+    expect(store.openUpdate()).toBeNull();
+    store.close();
+  });
+
+  it("recordCommitted raises highestCommitted; recordBad keeps a Version out (the tables exist)", () => {
+    const store = open();
+    store.recordCommitted("0.1.0", 50, null);         // a commit that judged nothing (data from before §6.7) is no baseline
+    expect(store.highestCommitted()).toBe("0.1.0");
+    store.recordCommitted("0.2.0", 100, { hub: ["ready"] });
+    expect(store.highestCommitted()).toBe("0.2.0");
+    store.recordCommitted("0.1.1", 200, null);        // an older Version never lowers it
+    expect(store.highestCommitted()).toBe("0.2.0");
+    store.recordBad("0.3.0", 300);
+    expect(store.badVersions()).toEqual(["0.3.0"]);
+    // §6.7: the last commit's own baseline is what a boot apply judges against — the newest commit's word,
+    // whatever it recorded; a stale one would forgive failures the machine has never passed
+    expect(store.commitBaseline()).toBeNull();
+    store.recordCommitted("0.2.1", 400, { hub: ["ready"], fleet: ["ready"] });
+    expect(store.commitBaseline()).toEqual({ hub: ["ready"], fleet: ["ready"] });
+    store.close();
+  });
+
+  it("manifestOf reads the Manifest text recorded at staging; a Version never staged reads null", () => {
+    const store = open();
+    store.recordStaged({ version: "0.2.0", manifestSha256: "a".repeat(64), filesSha256: "b".repeat(64), at: 10, manifest: MANIFEST_TEXT });
+    expect(store.manifestOf("0.2.0")).toBe(MANIFEST_TEXT);
+    expect(store.manifestOf("0.9.9")).toBeNull();
+    store.close();
+  });
+
+  it("records a Rollout halt and lists it, newest first (RL12)", () => {
+    const store = openUpdateStore({ db: join(state, "halts.db"), lock: join(state, "halts.lock") });
+    try {
+      store.recordHalt("0.2.0", "hub: no_report", 10);
+      store.recordHalt("0.3.0", "node: restarted", 20);
+      expect(store.halts()).toEqual([
+        { version: "0.3.0", reason: "node: restarted", at: 20 },
+        { version: "0.2.0", reason: "hub: no_report", at: 10 },
+      ]);
+    } finally { store.close(); }
+  });
+
+  it("an update.db at schema 2 migrates to the newest schema and keeps its rows", () => {
+    // Written by hand, as the updater before this step left it: migrations 1 and 2, version 2, a staged Version
+    // from before manifests were kept, the feed's word in its own row.
+    mkdirSync(state, { recursive: true });
+    const old = new Database(join(state, "old2.db"));
+    old.exec(`
+      CREATE TABLE trust (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        key_set TEXT,
+        seq_stable INTEGER NOT NULL DEFAULT 0,
+        seq_latest INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE versions (
+        version TEXT PRIMARY KEY,
+        manifest_sha256 TEXT NOT NULL,
+        files_sha256 TEXT NOT NULL,
+        staged_at INTEGER NOT NULL
+      );
+      CREATE TABLE committed (version TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE bad (version TEXT PRIMARY KEY, at INTEGER NOT NULL);
+      CREATE TABLE checks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        at INTEGER NOT NULL,
+        channel TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        version TEXT,
+        feed_seq INTEGER,
+        feed_expires_at INTEGER
+      );
+      CREATE TABLE last_feed (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        at INTEGER NOT NULL,
+        channel TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        version TEXT,
+        feed_seq INTEGER NOT NULL,
+        feed_expires_at INTEGER NOT NULL
+      );
+      INSERT INTO versions (version, manifest_sha256, files_sha256, staged_at) VALUES ('0.2.0', '${"a".repeat(64)}', '${"b".repeat(64)}', 30);
+      INSERT INTO committed (version, at) VALUES ('0.1.0', 20);
+      INSERT INTO last_feed (id, at, channel, outcome, detail, version, feed_seq, feed_expires_at)
+        VALUES (1, 40, 'stable', 'staged', 'verified 0.2.0', '0.2.0', 9, 12000);
+    `);
+    old.pragma("user_version = 2");
+    old.close();
+
+    const store = openUpdateStore({ db: join(state, "old2.db"), lock: join(state, "apply.lock") });
+    const raw = new Database(join(state, "old2.db"), { readonly: true });
+    expect(raw.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);   // every migration since, all additive
+    raw.close();
+    expect(store.lastFeedCheck()).toMatchObject({ at: 40, feedSeq: 9 });   // the old rows read as they were
+    expect(store.highestCommitted()).toBe("0.1.0");
+    // the staged row has no manifest (nothing wrote one yet): not a record this updater can use, and not an error
+    expect(store.versionRecord("0.2.0")).toBeNull();
+    expect(store.staged()).toBeNull();
+    // the next check re-stages the Version and the row heals
+    store.recordStaged({ version: "0.2.0", manifestSha256: "a".repeat(64), filesSha256: "b".repeat(64), at: 60, manifest: MANIFEST_TEXT });
+    expect(store.staged()?.version).toBe("0.2.0");
+    expect(store.manifestOf("0.2.0")).toBe(MANIFEST_TEXT);
+    store.close();
   });
 });

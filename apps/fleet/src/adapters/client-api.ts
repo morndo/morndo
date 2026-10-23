@@ -28,7 +28,12 @@
 //   GET  /v1/lane-watch                { lanes: LaneWatchEntry[] }: each
 //                                      lane's last turn as the lane watch holds it (reliable lanes §3.2, the brief)
 //   GET  /v1/runs                      { runs: RunView[] }: each lane's Run, by lane (ADR-0032, runs.ts)
-//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run", node, body };
+//   GET  /v1/rollout                   { controlPlane: { version, commit }, rollout: RolloutWire | null } (updates §7)
+//   POST /v1/rollout/committed         { version, soakMinutes? } → { ok: true, rollout }; 409 not_allowed for a
+//                                      Version the control plane doesn't run itself
+//   POST /v1/rollout/halt              { version, machine, reason } → { ok: true, rollout }
+//   POST /v1/rollout/resume            { version } → { ok: true, rollout }; 409 not_halted when nothing is halted
+//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run" | "rollout", node, body };
 //                                      a client more than eventsBufferBytes behind is closed with 1013 (it reconnects
 //                                      and gets the current state first)
 // The path is split on "/" before any segment is decoded, so a name or path holding "/" (as %2F) stays one segment
@@ -38,7 +43,7 @@ import { chmodSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery } from "@morndo/protocol";
+import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery, type PrincipalAsk } from "@morndo/protocol";
 import { Flight, productStamp } from "@morndo/service-kit";
 import type { Connections } from "../application/connections.ts";
 import type { Deliveries } from "../application/deliveries.ts";
@@ -49,6 +54,7 @@ import type { JobMirror } from "../application/job-mirror.ts";
 import type { LaneRegistry } from "../application/lane-registry.ts";
 import { SIDE_EFFECT_OPS, opError, type Outcome } from "../application/requests.ts";
 import type { Router } from "../application/router.ts";
+import type { Rollouts } from "../application/rollouts.ts";
 import type { Runs } from "../application/runs.ts";
 import type { Audit } from "./audit.ts";
 import { parseDeliveryBody } from "./delivery-body.ts";
@@ -56,6 +62,7 @@ import { streamFile } from "./files-route.ts";
 import type { Logger } from "./log.ts";
 import type { NodesStore } from "./nodes-store.ts";
 import { parseOpBody } from "./op-body.ts";
+import { parseRolloutBody } from "./rollout-body.ts";
 import { clearStaleSocket, prepareSocketDir } from "./socket-dir.ts";
 import { SCHEMA_VERSION } from "./migrations.ts";
 
@@ -72,10 +79,22 @@ class HttpError extends Error {
 export type ClientApiDeps = {
   router: Router; connections: Connections; lanes: LaneRegistry; nodes: NodesStore; audit: Audit; events: EventHub; jobs: JobMirror; log: Logger;
   deliveries: Deliveries; laneEvents: Pick<LaneEvents, "since">; laneWatch?: Pick<LaneWatch, "view">; runs?: Pick<Runs, "view">;
+  rollouts: Pick<Rollouts, "committed" | "halt" | "resume" | "latest" | "controlPlane" | "aboveControlPlane" | "nodesAhead">;
+  rolloutAuthority: RolloutAuthority;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
 };
 export type ClientApi = { close(): Promise<void> };
+
+// Who may move a Rollout forward (review of #107, finding 3). `updater`: the control plane's updater reporting its
+// commit or halt. `principal`: the owner's resume and update.apply, through the hub — one request, one signed
+// assertion for exactly its ask (updates §5.4), the x-morndo-principal header, checked by the authority the
+// config's pinned principalKey builds (adapters/principal-check.ts); the ask is this request's own, so a proof for
+// another machine or Version opens nothing. A halt through a route stays closed (a lane could pre-halt a Version
+// nothing could resume yet): the rollbacks that halt come by the internal paths, a node's health and the control
+// plane's updater state file. No check, no.
+export type RolloutAuthority = { updater(req: IncomingMessage): boolean; principal(req: IncomingMessage, ask: PrincipalAsk): boolean };
+export const CLOSED_ROLLOUT_AUTHORITY: RolloutAuthority = { updater: () => false, principal: () => false };
 
 const CLIENT = /^[a-z]{1,16}$/;
 // The client that asks, as it names itself; anything else is "unknown" (the socket is the owner's anyway, spec 8).
@@ -182,7 +201,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     const method = req.method ?? "GET";
     const [first, second, third] = s;
     if (method === "GET" && s.length === 1 && first === "health") {
-      return json(res, 200, { ...productStamp(), schema, ready: true, inFlight: flight.list() });
+      return json(res, 200, { ...productStamp(), schema, ready: true, held: held(), inFlight: flight.list() });
     }
     if (method === "GET" && s.length === 1 && first === "caps") return json(res, 200, { api: API_VERSIONS, stickyLanes: d.deliveries.stickyLanes });
     if (method === "GET" && s.length === 1 && first === "nodes") return json(res, 200, d.connections.list());
@@ -222,6 +241,15 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const parsed = parseOpBody(body);
       if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message), store: null, storeSeq: null });
       const b = parsed.body;
+      if (b.op === "update.apply") {
+        // The proof is for exactly this ask (§5.4) — one node, one Version. args' shape the router checks only
+        // after this gate, so a version that is not a string here is simply an ask no honest proof names.
+        const ask: PrincipalAsk = { op: "update.apply", version: typeof b.args.version === "string" ? b.args.version : "" };
+        if ("node" in b.target) ask.node = b.target.node;
+        if (!d.rolloutAuthority.principal(req, ask)) {
+          return json(res, 200, { ok: false, error: opError("not_allowed", "update.apply is the principal's: it carries the hub's signed assertion (x-morndo-principal, updates §5.4) for exactly this node and Version, which the fleet cannot check here: refused"), store: null, storeSeq: null });
+        }
+      }
       if (b.op === "lane.deliver" || b.op === "delivery.cancel") {
         return json(res, 400, { ok: false, error: opError("bad_args", `${b.op} is not sent as an op: use /v1/deliveries`), store: null, storeSeq: null });
       }
@@ -261,6 +289,46 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     }
     if (method === "GET" && s.length === 1 && first === "lane-watch") return json(res, 200, { lanes: d.laneWatch?.view() ?? [] });
     if (method === "GET" && s.length === 1 && first === "runs") return json(res, 200, { runs: d.runs?.view() ?? [] });
+    // The Rollout the fleet carries (updates §7): reads answer however the fleet stands; the writes share the ops'
+    // hold refusal (RL9) — nothing moves while the fleet updates itself.
+    if (method === "GET" && s.length === 1 && first === "rollout") {
+      return json(res, 200, {
+        controlPlane: d.rollouts.controlPlane(), rollout: d.rollouts.latest(), aboveControlPlane: d.rollouts.aboveControlPlane(),
+        nodesAhead: d.rollouts.nodesAhead(d.connections.list()),
+      });
+    }
+    if (method === "POST" && s.length === 2 && first === "rollout" && (second === "committed" || second === "halt" || second === "resume")) {
+      if (held()) return json(res, 503, { error: "updating", message: "the fleet is not taking new work while it updates" }, { "Retry-After": "1" });
+      let body: unknown;
+      try { body = await readJson(req); }
+      catch (e) {
+        if (!(e instanceof HttpError)) throw e;
+        return json(res, e.status, { error: e.message });
+      }
+      const parsed = parseRolloutBody(second, body);
+      if (!parsed.ok) throw new HttpError(400, parsed.message);
+      if (parsed.kind === "committed" && !d.rolloutAuthority.updater(req))
+        return json(res, 403, { error: "not_allowed", message: "only the control plane's updater commits a Rollout, and the fleet cannot check it yet: refused" });
+      if (parsed.kind === "halt" && !d.rolloutAuthority.updater(req))
+        return json(res, 403, { error: "not_allowed", message: "a halt comes from a machine's own rollback (its health, or the control plane's updater) or the principal, which the fleet cannot check here yet: refused" });
+      if (parsed.kind === "resume" && !d.rolloutAuthority.principal(req, { op: "rollout.resume", version: parsed.version }))
+        return json(res, 403, { error: "not_allowed", message: "a resume is the principal's: it carries the hub's signed assertion (x-morndo-principal, updates §5.4) for exactly this Version, which the fleet cannot check here: refused" });
+      if (parsed.kind === "committed") {
+        const r = d.rollouts.committed(parsed.version, parsed.soakMinutes);
+        if (!r.ok) return json(res, 409, { error: r.refused, message: r.message });
+        d.audit.record("client", "rollout.committed", null, { version: parsed.version, client: clientOf(req) });
+        return json(res, 200, { ok: true, rollout: r.rollout });
+      }
+      if (parsed.kind === "halt") {
+        const r = d.rollouts.halt(parsed.version, parsed.machine, parsed.reason);
+        if (r.changed) d.audit.record("client", "rollout.halted", null, { version: parsed.version, client: clientOf(req) });
+        return json(res, 200, { ok: true, rollout: r.rollout });
+      }
+      const r = d.rollouts.resume(parsed.version);
+      if (!r.ok) return json(res, 409, { error: r.refused, message: r.message });
+      d.audit.record("client", "rollout.resumed", null, { version: parsed.version, client: clientOf(req) });
+      return json(res, 200, { ok: true, rollout: r.rollout });
+    }
     if (method === "POST" && s.length === 1 && first === "deliveries") {
       let body: unknown;
       try { body = await readJson(req); }

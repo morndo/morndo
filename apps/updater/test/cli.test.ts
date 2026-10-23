@@ -1,8 +1,8 @@
 // The command line (design §8.1, §8.3, §8.4, §10.2 step 1): what `morndo update --check`, `--status` and `morndo
 // doctor` print and exit with, before anything touches the network. The refusals that come first are the ones the
 // e2e leaves alone: TLS switched off, no HOME, a feed URL that is not https, a settings file that is not the wire's
-// shape, and the commands that apply nothing yet. The deeper paths (a verified staging, every fault) are
-// check-stage.e2e.test.ts's, against a real feed.
+// shape, and the settings step's words that arrive later. The deeper paths (a verified staging, every fault)
+// are check-stage.e2e.test.ts's, against a real feed.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,7 +32,7 @@ const run = async (argv: string[], env: Record<string, string | undefined> = {})
   return { code, out: out.join(""), err: err.join("") };
 };
 
-const APPLIES_NOTHING = /applies nothing yet/;
+const APPLIES_NOTHING = /arrive with the settings step/;
 
 describe("the command line (§8.1, §8.4)", () => {
   // sysexits.h (§8.4): a refusal of the data is 65; anything that should simply be tried again later — the network,
@@ -97,14 +97,21 @@ describe("the command line (§8.1, §8.4)", () => {
     }
   });
 
-  it("the apply commands apply nothing yet, each with the same sentence and exit 64 (§8.1)", async () => {
+  it("the settings step's words — --to, --channel, pin, auto — are one sentence and exit 64 (§8.1)", async () => {
     for (const argv of [
-      ["update"], ["update", "--now"], ["update", "--to", "0.2.0"], ["update", "--rollback"],
-      ["update", "--channel", "latest"], ["update", "pin", "0.2.0"], ["update", "auto", "apply"],
+      ["update", "--to", "0.2.0"], ["update", "--channel", "latest"], ["update", "pin", "0.2.0"], ["update", "auto", "apply"],
     ]) {
       const r = await run(argv);
       expect(r.code, JSON.stringify(argv)).toBe(64);
       expect(r.err, JSON.stringify(argv)).toMatch(APPLIES_NOTHING);
+    }
+  });
+
+  it("the apply commands answer on a checkout as the check does: not_ours, exit 78 (RL14)", async () => {
+    for (const argv of [["update"], ["update", "--now"], ["update", "--rollback"]]) {
+      const r = await run(argv);
+      expect(r.code, JSON.stringify(argv)).toBe(78);
+      expect(r.err, JSON.stringify(argv)).toContain(CHECKOUT_SENTENCE);
     }
   });
 

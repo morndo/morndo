@@ -111,6 +111,20 @@ const BEFORE: Record<string, () => Promise<void>> = {
   "deliver-no-session": async () => { await sleep(Math.max(0, sh1At + GRACE_MS + 1000 - Date.now())); },
   "err-menu-open": async () => { await w1.control({ status: "waiting" }); await statusIs("w1", "waiting"); },
   "err-draft-present": async () => { w1.draft("half a thought"); await until("the draft on w1", () => w1.screen().includes("half a thought")); },
+  // the control plane's own rollback, as its updater's state file records it: the fleet halts that Version (§5.4)
+  "events-rollout": async () => {
+    const { controlPlane } = await fleet.client.rollout();
+    const dir = join(fleet.home, ".local", "state", "morndo-update");
+    mkdirSync(dir, { recursive: true });
+    // it ran a pre-release of the Version before (lower by SemVer precedence), and rolled back from that Version
+    const before = controlPlane.version.includes("-") ? controlPlane.version.replace(/-.*$/, "-0") : `${controlPlane.version}-0`;
+    // its updater announced its own random attempt id when it began applying, then rolled back under it
+    const attempt = "docAttemptQ1w2E3r4T5y6U7";
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ state: "applying", version: before, target: controlPlane.version, attempt, at: Date.now() }));
+    await sleep(1500);
+    writeFileSync(join(dir, "state.json"), JSON.stringify({ state: "rolled_back", version: before, target: controlPlane.version, failedCheck: "fleet health", attempt, at: Date.now() + 1 }));
+    await until("the halt from the control plane's own rollback", async () => (await fleet.client.rollout()).rollout?.halted === true, 15_000);
+  },
 };
 const AFTER: Record<string, () => Promise<void>> = {
   "delivery-expired": async () => { await w1.control({ status: "idle" }); await statusIs("w1", "idle"); },
@@ -187,14 +201,15 @@ describe("docs/fleet-api.md: every example against a real fleet, in the order wr
 const ALERT_KINDS = {
   instance_conflict: true, source_changed: true, clock_offset: true, rate_limited: true, lane_conflict: true, dead_letter: true,
   backlog_full: true, unrouted_hook: true, delivery_waiting: true, subscriber_lagging: true, job_failed: true, job_unnoticed: true, connection: true,
-  engine_fallback: true, draft_stashed: true,
+  engine_fallback: true, draft_stashed: true, rollout_halted: true, update_rolled_back: true, update_rollback_failed: true, update_skew_blocked: true, journal_unreadable: true,
 } satisfies Record<AlertKind, true>;
 const LANE_EVENTS = { finished: true, needs_input: true, answered: true, stop_failure: true, stale: true } satisfies Record<LaneEventName, true>;
-const EVENT_TYPES = ["status", "inventory", "health", "conflict", "alert", "delivery", "lane", "run"];
+const EVENT_TYPES = ["status", "inventory", "health", "conflict", "alert", "delivery", "lane", "run", "rollout"];
 const ROUTES: RegExp[] = [
   /^GET \/v1\/caps$/, /^GET \/v1\/nodes$/, /^POST \/v1\/nodes\/[^/]+\/revoke$/, /^GET \/v1\/lanes$/, /^GET \/v1\/lanes\/[^/]+$/,
   /^GET \/v1\/alerts$/, /^POST \/v1\/op$/, /^GET \/v1\/files\/[^/]+\/[^/]+$/, /^POST \/v1\/deliveries$/, /^GET \/v1\/deliveries\/[^/?]+$/,
   /^GET \/v1\/deliveries\?/, /^POST \/v1\/deliveries\/[^/]+\/cancel$/, /^GET \/v1\/lane-events\?since=/, /^GET \/v1\/lane-watch$/, /^GET \/v1\/runs$/, /^WS \/v1\/events$/,
+  /^GET \/v1\/rollout$/, /^POST \/v1\/rollout\/committed$/, /^POST \/v1\/rollout\/halt$/, /^POST \/v1\/rollout\/resume$/,
 ];
 
 describe("docs/fleet-api.md covers the whole client API", () => {

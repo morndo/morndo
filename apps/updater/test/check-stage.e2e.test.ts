@@ -145,7 +145,10 @@ const makeHome = (o: { install?: boolean } = {}): string => {
   const paths = updaterPaths(home);
   mkdirSync(paths.state, { recursive: true, mode: 0o700 });
   const store = openUpdateStore({ db: paths.db, lock: paths.lock });
-  try { store.recordStaged({ version: A, manifestSha256, filesSha256: listed.sha256, at: Date.now() }); }
+  try { store.recordStaged({
+    version: A, manifestSha256, filesSha256: listed.sha256, at: Date.now(),
+    manifest: `${JSON.stringify({ schema: 1, product: "morndo", version: A }, null, 2)}\n`,   // made up, like the digest
+  }); }
   finally { store.close(); }
   return home;
 };
@@ -333,6 +336,10 @@ describe.skipIf(platform === null)("check and stage end to end (§6.1, §10.2, �
     expect(statSync(vdir).mode & 0o777).toBe(0o555);                    // read-only from promotion on (§5)
     expect(statSync(join(vdir, "install.json")).mode & 0o777).toBe(0o444);
     expect(readdirSync(downloadsOf(home))).toEqual([]);                 // the download went after the staging
+
+    const store = openUpdateStore({ db: updaterPaths(home).db, lock: updaterPaths(home).lock });   // the real one
+    try { expect(store.manifestOf(B)).toBe(standardManifest); }         // the Manifest's own text, kept with the record
+    finally { store.close(); }
 
     const status = await run(home, ["update", "--status", "--json"]);
     expect(status.status, status.stderr).toBe(0);

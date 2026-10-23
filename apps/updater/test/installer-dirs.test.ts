@@ -1,8 +1,9 @@
 // The versioned-directories installer's contract (design §5, §6.1 steps 4–6, §13 fault injection): a good
 // Version unpacks into .staging-<version>, matches its signed file list file for file, self-tests and promotes
 // into a read-only <version>/ tree; every fault leaves the releases directory exactly as it was.
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -26,6 +27,26 @@ const TREE = (): TreeFile[] => [
 
 let scratch = "";
 let releases = "";
+let reader = "";   // the child that resolves current while the swaps run
+
+// A reader in another process (§6.2 step 6): it resolves the current link until the stop file appears, then
+// prints one JSON line — how many reads succeeded, how many found no link at all, and every target it saw.
+// A swap that could ever leave current missing shows up as exactly that.
+const READER_SOURCE = `
+const { readlinkSync, existsSync } = require("node:fs");
+const [link, stop] = process.argv.slice(2);
+let ok = 0, missing = 0, other = 0;
+const seen = new Set();
+const step = () => {
+  for (let i = 0; i < 100; i++) {
+    try { seen.add(readlinkSync(link)); ok++; }
+    catch (error) { if (error && error.code === "ENOENT") missing++; else other++; }
+  }
+  if (existsSync(stop)) { process.stdout.write(JSON.stringify({ ok, missing, other, seen: [...seen] })); process.exit(0); }
+  setImmediate(step);
+};
+step();
+`;
 
 // Removes a read-only Version tree (files 0444, directories 0555 — §5): deleting a file needs write on its
 // directory, so the write bit goes back before rm. The installer does the same through its own removeTree.
@@ -45,6 +66,8 @@ const wipe = (path: string): void => {
 beforeAll(() => {
   scratch = mkdtempSync(join(tmpdir(), "morndo-upd-"));
   releases = join(scratch, "releases");
+  reader = join(scratch, "link-reader.cjs");
+  writeFileSync(reader, READER_SOURCE);
 });
 afterAll(() => { wipe(scratch); });
 beforeEach(() => { wipe(releases); mkdirSync(releases, { recursive: true }); });
@@ -285,5 +308,103 @@ describe("DirsInstaller", () => {
     // a checkout's doctor runs before any release lands; the next beforeEach puts the directory back
     rmSync(releases, { recursive: true, force: true });
     expect(new DirsInstaller({ releases }).freeBytes()).toBeGreaterThan(0);
+  });
+
+  it("swap(): previous first, then current — a current that cannot land leaves both links on the old Version", async () => {
+    const { installer } = await installGood();
+    symlinkSync("0.1.0", join(releases, "current"));
+    mkdirSync(join(releases, ".current.new"));   // the temp name blocked: the current link cannot land
+    expect(() => installer.swap({ current: VERSION, previous: "0.1.0" })).toThrow();
+    expect(readlinkSync(join(releases, "previous"))).toBe("0.1.0");   // previous went first (§6.2 step 6)
+    expect(readlinkSync(join(releases, "current"))).toBe("0.1.0");    // and current never moved
+    rmSync(join(releases, ".current.new"), { recursive: true, force: true });
+    installer.swap({ current: VERSION, previous: "0.1.0" });
+    expect(readlinkSync(join(releases, "current"))).toBe(VERSION);
+    expect(readlinkSync(join(releases, "previous"))).toBe("0.1.0");
+  });
+
+  it("swap(): previous null removes the previous link (a first install has none to keep)", async () => {
+    const { installer } = await installGood();
+    symlinkSync("0.0.9", join(releases, "previous"));
+    installer.swap({ current: VERSION, previous: null });
+    expect(existsSync(join(releases, "previous"))).toBe(false);
+    expect(readlinkSync(join(releases, "current"))).toBe(VERSION);
+  });
+
+  it("swapBack(): current first, then previous — a previous that cannot land leaves current already on the old Version", async () => {
+    const { installer } = await installGood();
+    // the apply's swap left the machine on the new Version with the old one as previous
+    symlinkSync("0.1.0", join(releases, "current"));
+    symlinkSync(VERSION, join(releases, "previous"));
+    mkdirSync(join(releases, ".previous.new"));   // the temp name blocked: the previous link cannot land
+    expect(() => installer.swapBack({ current: "0.1.0", previous: "0.0.9" })).toThrow();
+    expect(readlinkSync(join(releases, "current"))).toBe("0.1.0");   // current went first (§6.5 step 2)
+    expect(readlinkSync(join(releases, "previous"))).toBe(VERSION);  // and previous never moved
+    rmSync(join(releases, ".previous.new"), { recursive: true, force: true });
+    installer.swapBack({ current: "0.1.0", previous: "0.0.9" });
+    expect(readlinkSync(join(releases, "current"))).toBe("0.1.0");
+    expect(readlinkSync(join(releases, "previous"))).toBe("0.0.9");  // the recorded pair, not the bad Version
+  });
+
+  it("swapBack(): previous null removes the previous link (there was none before the update)", async () => {
+    const { installer } = await installGood();
+    symlinkSync(VERSION, join(releases, "current"));
+    symlinkSync("0.1.0", join(releases, "previous"));
+    installer.swapBack({ current: "0.1.0", previous: null });
+    expect(readlinkSync(join(releases, "current"))).toBe("0.1.0");
+    expect(existsSync(join(releases, "previous"))).toBe(false);
+  });
+
+  it("swap(): a reader resolving current through 2,000 swaps never finds it missing", async () => {
+    const { installer, archive, filesSha256 } = good();
+    for (const v of ["0.1.0", VERSION]) {   // both ends of every swap, installed from the same archive
+      expect(await installer.unpack(archive, v, { filesSha256, maxBytes: 1 << 20 })).toEqual({ ok: true });
+      installer.promote(v, { manifestSha256: "a".repeat(64), filesSha256, at: INSTALLED_AT });
+    }
+    symlinkSync("0.1.0", join(releases, "current"));
+    const stop = join(scratch, "reader-stop");
+    const child = spawn(process.execPath, [reader, join(releases, "current"), stop], { stdio: ["ignore", "pipe", "inherit"] });
+    for (let i = 0; i < 2_000; i++) {
+      installer.swap({ current: i % 2 === 0 ? VERSION : "0.1.0", previous: "0.1.0" });
+    }
+    writeFileSync(stop, "");
+    const out = await new Promise<string>((resolve, reject) => {
+      let text = "";
+      child.stdout.on("data", chunk => { text += String(chunk); });
+      child.on("error", reject);
+      child.on("close", () => resolve(text));
+    });
+    const counted = JSON.parse(out) as { ok: number; missing: number; other: number; seen: string[] };
+    expect(counted.missing).toBe(0);                    // the invariant: rename(2) over the link, never without it
+    expect(counted.other).toBe(0);
+    expect(counted.ok).toBeGreaterThan(0);
+    expect(new Set(counted.seen)).toEqual(new Set(["0.1.0", VERSION]));
+  }, 120_000);
+
+  it("setGood(): the good link lands the same atomic way", async () => {
+    const { installer } = await installGood();
+    installer.setGood(VERSION);
+    expect(readlinkSync(join(releases, "good"))).toBe(VERSION);
+  });
+
+  it("prune(): every installed Version not named goes; current, previous and good never do", async () => {
+    const { installer, archive, filesSha256 } = good();
+    for (const v of ["0.1.0", VERSION, "0.3.0", "0.4.0"]) {
+      expect(await installer.unpack(archive, v, { filesSha256, maxBytes: 1 << 20 })).toEqual({ ok: true });
+      installer.promote(v, { manifestSha256: "a".repeat(64), filesSha256, at: INSTALLED_AT });
+    }
+    symlinkSync(VERSION, join(releases, "current"));
+    symlinkSync("0.1.0", join(releases, "previous"));
+    symlinkSync("0.1.0", join(releases, "good"));
+    installer.prune([VERSION]);                    // named: kept; the links' targets: kept without being named
+    expect(readdirSync(releases).sort()).toEqual(["0.1.0", VERSION, "current", "good", "previous"]);
+    expect(installer.has("0.3.0")).toBe(false);
+    expect(installer.has("0.4.0")).toBe(false);
+  });
+
+  it("prune(): a machine with nothing installed yet has nothing to remove", () => {
+    // the next beforeEach puts the releases directory back
+    rmSync(releases, { recursive: true, force: true });
+    expect(() => new DirsInstaller({ releases }).prune([VERSION])).not.toThrow();
   });
 });

@@ -1,8 +1,10 @@
 // What the running agent reports about itself, for `morndo-node status` (spec §5.2: a refused second instance shows the
-// conflict in status, and tries again every 5 minutes). The agent rewrites ~/.local/state/morndo-node/status.json atomically
-// on every connection change and with every health tick; `status` reads it and checks that the writer still lives.
+// conflict in status, and tries again every 5 minutes) and for an updater's node probe (updates design §6.3). The agent
+// rewrites ~/.local/state/morndo-node/status.json atomically on every connection change, with every health tick and the
+// moment its in-flight work changes; `status` reads it and checks that the writer still lives.
 import { readFileSync } from "node:fs";
 import { processAlive } from "@morndo/node-ops";
+import type { InFlight } from "@morndo/service-kit";
 import { writeFileAtomic } from "../atomic-write.ts";
 
 export type ConnState = "stopped" | "connecting" | "online" | "backoff" | "refused" | "conflict" | "unsupported";
@@ -15,7 +17,8 @@ export type ConnStatus = {
 };
 export type AgentStatus = ConnStatus & {
   node: string; instanceId: string; pid: number; spoolDepth: number; drops: number; jobs?: string;
-  version?: string; ready?: boolean;
+  version?: string; ready?: boolean; held?: boolean;
+  inFlight: InFlight[];                                  // work a restart would interrupt (updates design §6.3)
 };
 
 export function writeStatus(path: string, s: AgentStatus): void {

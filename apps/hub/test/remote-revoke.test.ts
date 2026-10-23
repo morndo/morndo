@@ -208,7 +208,7 @@ beforeEach(async () => {
     terminal: { frame: async () => frame, keys: async () => true },
     desktop: () => ({ host: "127.0.0.1", port: vnc.port, password: null }),
   });
-  http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000), steering: new SteeringService(store, tmux), escalations, remote });
+  http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, store, observation: new ObservationService(tmux, 1000), steering: new SteeringService(store, tmux), escalations, remote });
   await http.ready;
   port = (http.server.address() as AddressInfo).port;
 });

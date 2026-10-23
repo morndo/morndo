@@ -15,7 +15,9 @@ import { doctor, type DoctorReport } from "../src/application/doctor-service.ts"
 import { formatStatus, readStatus } from "../src/application/status-service.ts";
 import { SshSigVerifier } from "../src/adapters/verifier-sshsig.ts";
 import { openUpdateStore } from "../src/adapters/store-sqlite.ts";
-import { FakeArtifacts, FakeClock, FakeFeed, FakeInstaller, FakeSettings, FakeStore, wipe } from "./helpers/fakes.ts";
+import {
+  FakeArtifacts, FakeClock, FakeFeed, FakeFleetView, FakeInstaller, FakeSettings, FakeStateSink, FakeStore, wipe,
+} from "./helpers/fakes.ts";
 import { feedFixture, keySetDocument, makeKeys, manifestSignature, releaseFixture, signed, type Keys, type ReleaseFixture } from "./helpers/release-fixtures.ts";
 
 const NOW = 1_761_000_000_000;              // 2025-10-21T09:20:00Z, the same moment the check tests stand at
@@ -72,6 +74,7 @@ const build = (bend: (w: World) => void = () => {}, o: { manual?: boolean } = {}
   const service = new CheckService({
     feed: fakeFeed, artifacts, verifier: new SshSigVerifier(), installer, store, settings, clock,
     platform: rel.platform, switches: { disableUpdates: false },
+    fleet: new FakeFleetView(), state: new FakeStateSink(),
   });
   const world: World = {
     keys, ks1, rel, installer, store, settings, clock, ready: Promise.resolve(),
@@ -85,7 +88,7 @@ const build = (bend: (w: World) => void = () => {}, o: { manual?: boolean } = {}
       const done = await installer.unpack(archive, OFFERED, { filesSha256: rel.filesSha256, maxBytes: 16 * rel.archive.length });
       if (!done.ok) throw new Error(done.reason);
       installer.promote(OFFERED, { manifestSha256: rel.manifestSha256, filesSha256: rel.filesSha256, at: NOW });
-      store.recordStaged({ version: OFFERED, manifestSha256: rel.manifestSha256, filesSha256: rel.filesSha256, at: NOW });
+      store.recordStaged({ version: OFFERED, manifestSha256: rel.manifestSha256, filesSha256: rel.filesSha256, at: NOW, manifest: rel.manifestText });
     })();
     installer.layoutState = { method: "updater", current: OFFERED, previous: null, good: null };
     fresh(world);
@@ -262,7 +265,7 @@ describe("doctor (§8.1)", () => {
     const store = openUpdateStore({ db: join(state, "update.db"), lock: join(state, "apply.lock") });
     try {
       store.saveTrust({ keySet: w.ks1.decoded, highestFeedSeq: { stable: 1, latest: 0 } });
-      store.recordStaged({ version: OFFERED, manifestSha256: w.rel.manifestSha256, filesSha256: w.rel.filesSha256, at: NOW });
+      store.recordStaged({ version: OFFERED, manifestSha256: w.rel.manifestSha256, filesSha256: w.rel.filesSha256, at: NOW, manifest: w.rel.manifestText });
       store.recordCheck({ at: NOW, channel: "stable", outcome: "staged", detail: "manual", version: OFFERED, feedSeq: 1, feedExpiresAt: NOW + 14 * DAY });
       for (let n = 1; n <= 101; n++) {
         store.recordCheck({ at: NOW + n * 60_000, channel: "stable", outcome: "refused", detail: `file_list: refused ${n}`, version: null, feedSeq: null, feedExpiresAt: null });

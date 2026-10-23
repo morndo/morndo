@@ -19,7 +19,7 @@ describe("fleet.db migrations", () => {
     expect(db.pragma("user_version", { simple: true })).toBe(LATEST);
     expect(tables(db)).toEqual([
       "_morndo_schema", "audit", "dead_letters", "deliveries", "hook_unrouted", "job_alert_since", "job_alerts", "job_routes", "job_unnoticed", "jobs",
-      "join_codes", "lane_deliveries", "lane_events", "lanes", "nodes", "outbox", "sticky_lanes", "store_seqs", "stream_hwm",
+      "join_codes", "lane_deliveries", "lane_events", "lanes", "nodes", "outbox", "rollout_attempts", "rollouts", "sticky_lanes", "store_seqs", "stream_hwm",
     ]);
     expect(db.prepare("SELECT floor FROM _morndo_schema WHERE id = 1").get()).toEqual({ floor: 7 });   // migration 7 is the newest breaking one (§11.1)
     expect(columns(db, "job_unnoticed")).toEqual(["node", "id"]);
@@ -28,7 +28,7 @@ describe("fleet.db migrations", () => {
     expect(columns(db, "job_routes")).toEqual(["notice_id", "node", "job_id", "dest_node"]);
     expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'job_routes'").all()).toContainEqual({ name: "job_routes_job" });
     expect(columns(db, "jobs")).toEqual(["node", "id", "lane", "name", "class", "state", "outcome", "exit_code", "duration_sec", "notify", "task", "notice", "at", "tail", "position", "reason", "error", "ended", "notice_dest", "node_notice"]);
-    expect(columns(db, "nodes")).toEqual(["name", "public_key", "created_at", "revoked_at", "last_seen_at", "last_source", "agent_version", "conn_epoch"]);
+    expect(columns(db, "nodes")).toEqual(["name", "public_key", "created_at", "revoked_at", "last_seen_at", "last_source", "agent_version", "conn_epoch", "last_proto", "enrolment"]);
     expect(columns(db, "join_codes")).toEqual(["hash", "node", "expires_at", "used_at"]);
     expect(columns(db, "stream_hwm")).toEqual(["node", "stream_id", "seq"]);
     expect(columns(db, "lanes")).toEqual(["name", "node", "worker_id", "registered_at", "conflict"]);
