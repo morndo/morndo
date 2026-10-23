@@ -15,10 +15,11 @@
 
 1. **Reading health.** Per account and source: `reading`, `aged`, `cannot-read since T` with a reason class (U6). A source may declare how often it will read; silence beyond `max(4 x every, 30 min)` from such a source is `cannot-read`. A source that declares nothing, the status line, is only ever `aged`. Home replaces the meters of a `cannot-read` source with the time and the reason.
 2. **Cadence.** A window's title comes from its length when the source reports it, else from the cycle the hub has observed, else from the furthest reset distance seen ("about"), else from the reset alone (U7). A caption is never a title.
-3. **Plan change.** A changed plan name, window set or window length, or a used percentage that falls by 20 points or more with its reset still ahead, is told once with what changed (U8). Notice signatures are kept in the hub, so a restart does not repeat one.
-4. **One seat state.** A limit hit, refusal or sign-out from any actor sets the same state for the account, with a back-at time and one notice with the source's own fix string (U9). The state is shown and told, never routed on (U10, U4).
-5. **Routes.** `POST /api/agent/usage/failure` and `POST /api/agent/usage/limit` under an agent token; optional `length_mins` on a named row; `X-Morndo-Source` and `X-Morndo-Every` on a report.
-6. **Never:** a credential file, a web dashboard, a vendor bundle or internal endpoint as a source; a hub-invented fix command.
+3. **Plan change.** A changed plan name, window set or window length, or a used percentage that falls by 20 points or more with its reset **unchanged** and still ahead on a window not declared rolling, is told once with what changed (U8). A rolling window never counts a fall. Notice signatures are kept in the hub, so a restart does not repeat one.
+4. **One seat state.** A limit hit, refusal or sign-out from any reporter sets the same state for the account it resolves to, with a back-at time and one notice (U9). The state is the pool's own `SeatState` (`logged-out`, `retired`, `out`, `low`, `ok`) plus a `why`. The account is resolved from the failure hook's own field, then a lane record written at `lane.start` and refreshed by reports, then the fresh sessions, else `unknown`. The fleet taps `/hook/failure` before its manager filter. The state is shown and told, never routed on (U10, U4).
+5. **Routes.** `POST /api/agent/usage/failure` and `POST /api/agent/usage/limit` under an agent token; `POST /api/usage/forget` for the principal only; optional `length_mins` and `rolling` on a named row; `X-Morndo-Source` and `X-Morndo-Every` on a report. A source dead for 14 days is forgotten with one notice (U11).
+6. **Remedies are a closed list.** A Fix is one of a fixed set the hub words itself; text from an agent token is a Hint, shown as "the source says", 120 characters, no links, never in a push.
+7. **Never:** a credential file, a web dashboard, a vendor bundle or internal endpoint as a source; a command taken from a post.
 
 ## Alternatives
 
