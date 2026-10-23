@@ -6,11 +6,17 @@
 #   sh commit-traces range <git rev-list args>
 #   sh commit-traces mails <git rev-list args>
 # A dependabot[bot] author, committer, or trailer is allowed. So is the release
-# App's own identity, as a whole (RELEASE_BOT_NAME with RELEASE_BOT_MAIL, the exact
-# name and address its release commit carries): as the author, and as the committer
-# when it is that same identity. A name or an address alone, a lookalike, or any
-# other [bot] identity is not. Install the commit-msg hook with
-# scripts/install-git-hooks.sh.
+# App's own release commit, and only that: an author name and address are git
+# metadata any pusher can write, so the identity alone admits nothing. A commit is
+# admitted only when ALL hold: its author is exactly RELEASE_BOT_NAME with
+# RELEASE_BOT_MAIL; its committer is GitHub's web-flow; its whole id is a line of
+# the file named by COMMIT_TRACES_VERIFIED (the ids GitHub's own API reported as
+# verified; CI builds it, a local pre-push has none, so it admits no bot); it has
+# exactly one parent; and it changes, as modifications only, nothing but release
+# files: the version lines of package.json and package-lock.json, the root version of
+# .release-please-manifest.json, lines added to CHANGELOG.md. Any other [bot]
+# identity, a name or an address alone, or a lookalike is not admitted. Install the
+# commit-msg hook with scripts/install-git-hooks.sh.
 # COMMIT_TRACES_LEGACY: full commit ids, separated by spaces, whose author and
 # committer addresses are not checked. For a commit already in the published
 # history whose address cannot be rewritten; only its address is spared, by an
@@ -24,7 +30,7 @@ set -eu
 
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
 # The release App (Release Please commits the release PR as this identity). It is the id of the App's bot user and its
-# slug, the address GitHub gives every App; nothing else is admitted by it.
+# slug, the address GitHub gives every App. The identity is one of several conditions (release_commit below), never enough.
 RELEASE_BOT_NAME='morndo-release[bot]'
 RELEASE_BOT_MAIL='345868531+morndo-release[bot]@users.noreply.github.com'
 robot=$(printf '\360\237\244\226')
@@ -88,21 +94,62 @@ check_mails() {
   fi
 }
 
+# 0 when every line a diff changed is one of the allowed shapes. $1 and $2: the commit's parent and the commit; $3: the
+# file; $4: an extended regex the changed lines (without their +/-) must match. The first four lines of a diff of a
+# modified file are its headers.
+only_lines() {
+  git diff --no-renames --no-color -U0 "$1" "$2" -- "$3" | sed '1,4d' | grep -E '^[-+]' | grep -v -E "^[-+]($4)\$" | grep -q . && return 1
+  return 0
+}
+
+# 0 when the commit changes nothing but release files, as plain modifications: one parent, no deleted, added, renamed or
+# mode-changed file, the version lines of a package.json or package-lock.json, the root version of the release manifest, and
+# only added lines in CHANGELOG.md. Fail closed on anything else.
+release_files_only() {
+  rf_sha=$1
+  [ "$(git rev-list --parents -n 1 "$rf_sha" | wc -w)" -eq 2 ] || return 1
+  rf_parent="$rf_sha^1"
+  rf_files=$(git diff --no-renames --name-only --diff-filter=M "$rf_parent" "$rf_sha")
+  [ -n "$rf_files" ] || return 1
+  [ "$rf_files" = "$(git diff --no-renames --name-only "$rf_parent" "$rf_sha")" ] || return 1
+  [ -z "$(git diff --no-renames --summary "$rf_parent" "$rf_sha")" ] || return 1
+  version='[[:space:]]*"version": "[0-9A-Za-z.+-]+",?'
+  manifest='[[:space:]]*"[.]": "[0-9A-Za-z.+-]+",?'
+  for rf_file in $rf_files; do
+    case "$rf_file" in
+      package.json|*/package.json|package-lock.json|*/package-lock.json) only_lines "$rf_parent" "$rf_sha" "$rf_file" "$version" || return 1 ;;
+      .release-please-manifest.json) only_lines "$rf_parent" "$rf_sha" "$rf_file" "$manifest" || return 1 ;;
+      CHANGELOG.md)
+        [ "$(git diff --no-renames --numstat "$rf_parent" "$rf_sha" -- "$rf_file" | cut -f2)" = 0 ] || return 1 ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# 0 when the commit is the release App's own release commit (see the header): identity, GitHub as committer, listed as
+# verified, release files only. $1: the commit; $2 to $5: author name and address, committer name and address.
+release_commit() {
+  [ "$2" = "$RELEASE_BOT_NAME" ] && [ "$3" = "$RELEASE_BOT_MAIL" ] || return 1
+  [ "$4" = GitHub ] && [ "$5" = noreply@github.com ] || return 1
+  [ -n "${COMMIT_TRACES_VERIFIED:-}" ] && [ -f "$COMMIT_TRACES_VERIFIED" ] || return 1
+  grep -F -x -q "$1" "$COMMIT_TRACES_VERIFIED" || return 1
+  release_files_only "$1"
+}
+
 check_commit() {
   sha=$1
   msg=$(git log -1 --format='%B' "$sha")
   if bad_message "$msg"; then
     fail "$sha message attributes the change to an assistant"
   fi
-  # The release App's identity is judged as a whole: its name with its address, never either alone. Whichever of author
-  # and committer is exactly that identity is left out of the identity text; the other is judged as always, so another
-  # bot, or an assistant, beside it still fails.
+  # The release App's own release commit (release_commit) leaves its author identity out of the identity text; the
+  # committer, GitHub, is judged as always, and the message is judged above, so an assistant beside it still fails.
   an=$(git log -1 --format='%an' "$sha")
   ae=$(git log -1 --format='%ae' "$sha")
   cn=$(git log -1 --format='%cn' "$sha")
   ce=$(git log -1 --format='%ce' "$sha")
-  if [ "$an" = "$RELEASE_BOT_NAME" ] && [ "$ae" = "$RELEASE_BOT_MAIL" ]; then an=''; ae=''; fi
-  if [ "$cn" = "$RELEASE_BOT_NAME" ] && [ "$ce" = "$RELEASE_BOT_MAIL" ] && [ -z "$an" ]; then cn=''; ce=''; fi
+  if release_commit "$sha" "$an" "$ae" "$cn" "$ce"; then an=''; ae=''; fi
   ident=$(printf '%s\n%s\n%s\n%s' "$an" "$ae" "$cn" "$ce")
   if bad_ident "$ident"; then
     fail "$sha author or committer names an assistant or a bot other than dependabot[bot]"

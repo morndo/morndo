@@ -34,17 +34,29 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.event.after }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           zero=0000000000000000000000000000000000000000
           if [ "$EVENT_NAME" = "pull_request" ]; then
             test -n "$BASE_SHA"
             test -n "$HEAD_SHA"
-            exec sh scripts/git-hooks/commit-traces range "$BASE_SHA..$HEAD_SHA"
-          fi
-          if [ "$BEFORE_SHA" = "$zero" ]; then
+            set -- "$BASE_SHA..$HEAD_SHA"
+          elif [ "$BEFORE_SHA" = "$zero" ]; then
             set -- "$AFTER_SHA"
           else
             set -- "$BEFORE_SHA..$AFTER_SHA"
           fi
-          # Every commit in the pushed range is checked.
-          exec sh scripts/git-hooks/commit-traces range "$@"
+          # The release App's commit is admitted only when GitHub itself says it verified it (its signature, made by
+          # GitHub as web-flow): the author name and address are only git metadata any pusher can write. For each
+          # commit in the range whose author looks like the App, ask the commit API; the script then still requires
+          # the exact identity, GitHub as committer, and a diff of release files only. A commit the API does not
+          # know (one from a fork) or does not call verified is simply not listed.
+          verified="$RUNNER_TEMP/verified-commits"
+          : > "$verified"
+          for sha in $(git log --format=%H --author='morndo-release' "$@"); do
+            ok=$(gh api "repos/$REPO/commits/$sha" --jq '.commit.verification.verified and .committer.login == "web-flow"' 2>/dev/null || echo false)
+            if [ "$ok" = true ]; then echo "$sha" >> "$verified"; fi
+          done
+          # Every commit in the range is checked.
+          COMMIT_TRACES_VERIFIED="$verified" exec sh scripts/git-hooks/commit-traces range "$@"
