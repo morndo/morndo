@@ -540,6 +540,9 @@ export function startHttp(p: {
         engines: p.engines ? (await p.engines.ready().then(why => why === null, () => false)) : false,
         connections: p.connections != null,
         transcription: p.transcription ? p.transcription.me() : false,
+        // The Updates screen (updates §8.2): this hub has it when it runs with a fleet. Said here so no page probes
+        // /api/updates for a 404 (CI's web e2e: every page logged it as a console error, review of #114).
+        updates: p.updatesService != null,
       });
     }
     if (path === "/api/logout" && method === "POST") {
