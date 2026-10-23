@@ -82,6 +82,13 @@ describe("the unit templates every Version ships (§5)", () => {
     }
   });
 
+  it("the hub talks to this machine's fleet: MORNDO_FLEET_SOCKET names the fleet's default client socket", () => {
+    // fleet-core design §16 ("morndo-hub.service: MORNDO_FLEET_SOCKET set"); without it an installed control plane's
+    // hub runs on the local adapters and never sees its fleet (6d's two-machine run: GET /api/updates answered 404).
+    const { entries } = readIni(readFileSync(join(UNITS, "morndo-hub.service"), "utf8"));
+    expect(entries.Environment).toBe("MORNDO_FLEET_SOCKET=%h/.local/state/morndo-fleet/fleet.sock");
+  });
+
   it("the tick is a oneshot behind a 15-minute timer with 5 minutes of spread", () => {
     expect(readIni(readFileSync(join(UNITS, "morndo-update.service"), "utf8")).entries).toMatchObject({
       Type: "oneshot",
