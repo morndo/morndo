@@ -3,8 +3,8 @@
 // the brief that still counts once the task has been back in progress. Pure: results are the caller's, never fetched.
 import { describe, expect, it } from "vitest";
 import {
-  ATTESTED_KINDS, BRIEF_LIMITS, checkBrief, currentBrief, parseProofRef, proofOf, refString, taskKey,
-  type BriefInput, type ProofBrief, type RefResult, type RefState, type TaskChange, type TaskEvent,
+  ATTESTED_KINDS, BRIEF_LIMITS, checkBrief, currentBrief, judgeCi, judgePr, parseProofRef, proofOf, refString, taskKey, YOUNG_MS,
+  type BriefInput, type PrFacts, type ProofBrief, type RefResult, type RefState, type CheckRunFacts, type TaskChange, type TaskEvent,
 } from "../src/index.ts";
 
 const NOW = 1_700_000_000_000;
@@ -181,5 +181,96 @@ describe("the brief that counts (B13)", () => {
     expect(currentBrief([filed(3), event(4, { kind: "moved", from: "doing", to: "review", reason: null })])).toEqual({ brief: brief(), rev: 3 });
     expect(currentBrief([])).toBeNull();
     expect(currentBrief([backToDoing(5)])).toBeNull();
+  });
+});
+
+describe("judging a reference against what the forge said (B14)", () => {
+  // Facts as the hub read them, never fetched here: a pull request as the adapter answered it, and one check run by its
+  // id, name, status, conclusion and address.
+  const MOVED = "9c8b7a6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b";
+  const prFacts = (o: Partial<PrFacts> = {}): PrFacts => ({ state: "open", merged: false, headSha: FULL, mergeSha: null, ...o });
+  const run = (o: Partial<CheckRunFacts> = {}): CheckRunFacts => ({ id: 1, name: "ci", status: "completed", conclusion: "success", url: null, ...o });
+  const RUN_URL = "https://github.com/acme/shop/actions/runs/99";
+
+  it("judgePr: green at the head or at the merge commit, mismatch with both shas when the head moved, red when closed without merge", () => {
+    const ref = value(parseProofRef(PR));
+    if (ref.kind !== "pr") throw new Error("not a pr ref");
+    expect(judgePr(ref, prFacts())).toEqual({ state: "green", detail: null });                              // the head is the ref's commit
+    expect(judgePr(ref, prFacts({ headSha: FULL.toUpperCase() }))).toEqual({ state: "green", detail: null });   // shas meet lower case
+    expect(judgePr(ref, prFacts({ merged: true, headSha: MOVED, mergeSha: FULL }))).toEqual({ state: "green", detail: null });   // so is the merge's
+    expect(judgePr(ref, prFacts({ headSha: MOVED }))).toEqual({ state: "mismatch", detail: `head is ${MOVED.slice(0, 7)}, ref says ${SHA}` });
+    expect(judgePr(ref, prFacts({ state: "closed", merged: false, headSha: FULL }))).toEqual({ state: "red", detail: "closed without merge" });
+  });
+
+  it("judgeCi: all named runs green is green; one failure is red and names the run; an unfinished run is pending", () => {
+    const ci = value(parseProofRef(CI));
+    if (ci.kind !== "ci") throw new Error("not a ci ref");
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "lint" })], false)).toEqual({ state: "green", detail: null });
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "lint", conclusion: "failure", url: RUN_URL })], false))
+      .toEqual({ state: "red", detail: `"lint" failed ${RUN_URL}` });
+    // a selector by number names its run the same way
+    const byId = value(parseProofRef(`acme/shop@${SHA}:id=2`));
+    if (byId.kind !== "ci") throw new Error("not a ci ref");
+    expect(judgeCi(byId, [run({ id: 2, name: "lint", conclusion: "failure", url: RUN_URL })], false))
+      .toEqual({ state: "red", detail: `id 2 failed ${RUN_URL}` });
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "lint", status: "in_progress", conclusion: null })], false))
+      .toEqual({ state: "pending", detail: `"lint" in progress` });
+  });
+
+  it("judgeCi: a skipped or neutral named run is missing, not green", () => {
+    const ci = value(parseProofRef(CI));
+    if (ci.kind !== "ci") throw new Error("not a ci ref");
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "lint", conclusion: "skipped" })], false)).toEqual({ state: "missing", detail: `"lint" skipped` });
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "lint", conclusion: "neutral" })], false)).toEqual({ state: "missing", detail: `"lint" neutral` });
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "lint", conclusion: null })], false)).toEqual({ state: "missing", detail: `"lint" skipped` });   // no conclusion read as skipped
+  });
+
+  it("judgeCi: a named run that has not appeared is pending while the brief is young and missing after", () => {
+    const ci = value(parseProofRef(CI));
+    if (ci.kind !== "ci") throw new Error("not a ci ref");
+    expect(YOUNG_MS).toBe(15 * 60_000);
+    expect(judgeCi(ci, [run({ name: "ci" })], true)).toEqual({ state: "pending", detail: `"lint" not reported yet` });
+    expect(judgeCi(ci, [run({ name: "ci" })], false)).toEqual({ state: "missing", detail: `"lint" not found` });
+  });
+
+  it("judgeCi: the star needs one green run and none red or pending", () => {
+    const star = value(parseProofRef(`acme/shop@${SHA}:*`));
+    if (star.kind !== "ci") throw new Error("not a ci ref");
+    expect(judgeCi(star, [run({ name: "ci" }), run({ id: 2, name: "lint" })], false)).toEqual({ state: "green", detail: null });
+    expect(judgeCi(star, [run({ name: "ci" }), run({ id: 2, name: "lint", status: "queued", conclusion: null })], false)).toEqual({ state: "pending", detail: `"lint" queued` });
+    expect(judgeCi(star, [run({ id: 2, name: "lint", conclusion: "failure", url: RUN_URL })], false)).toEqual({ state: "red", detail: `"lint" failed ${RUN_URL}` });
+    expect(judgeCi(star, [], true)).toEqual({ state: "pending", detail: "no checks reported yet" });
+    expect(judgeCi(star, [], false)).toEqual({ state: "missing", detail: "no checks found" });
+    expect(judgeCi(star, [run({ conclusion: "skipped" }), run({ id: 2, name: "lint", conclusion: "neutral" })], false)).toEqual({ state: "missing", detail: "no check ran" });
+  });
+
+  it("judgeCi: a run address is kept only when it is a github.com one", () => {
+    const ci = value(parseProofRef(CI));
+    if (ci.kind !== "ci") throw new Error("not a ci ref");
+    const failed = (url: string | null) => [run({ name: "ci" }), run({ id: 2, name: "lint", conclusion: "failure", url })];
+    expect(judgeCi(ci, failed(RUN_URL), false).detail).toBe(`"lint" failed ${RUN_URL}`);
+    expect(judgeCi(ci, failed("https://example.test/builds/9"), false).detail).toBe(`"lint" failed`);              // not github.com: dropped
+    expect(judgeCi(ci, failed("https://evil.example/github.com/acme"), false).detail).toBe(`"lint" failed`);       // github.com only at the start
+    expect(judgeCi(ci, failed(`${RUN_URL}?check=1&x=2`), false).detail).toBe(`"lint" failed`);                     // characters outside the safe set: dropped
+    expect(judgeCi(ci, failed(null), false).detail).toBe(`"lint" failed`);                                        // no address: nothing to keep
+  });
+});
+
+describe("a reference the hub could not check (B14, private repositories)", () => {
+  const NOTE = "private repo: not checked (404 without a token)";
+
+  it("proofOf: a ref that was not checked is neither failing nor verified, and the line says so", () => {
+    expect(proofOf(brief({ refs: [PR, CI] }), [seen(PR, "green"), seen(CI, "not_checked", NOTE)]))
+      .toEqual({ kind: "not_checked", green: 1, total: 2, accepts: false, line: `proof: 1 of 2 green · ○ ${CI} ${NOTE}` });
+    // with no detail the line still says what it is
+    expect(proofOf(brief({ refs: [PR] }), [seen(PR, "not_checked")]).line).toBe(`proof: 0 of 1 green · ○ ${PR} not checked`);
+  });
+
+  it("proofOf: a failing, unfetchable or pending ref outranks a ref that was not checked", () => {
+    const refs = [PR, CI];
+    expect(proofOf(brief({ refs }), [seen(PR, "red", "lint"), seen(CI, "not_checked", NOTE)]).kind).toBe("failing");
+    expect(proofOf(brief({ refs }), [seen(PR, "unfetchable", "rate limit"), seen(CI, "not_checked", NOTE)]).kind).toBe("unfetchable");
+    expect(proofOf(brief({ refs }), [seen(PR, "pending"), seen(CI, "not_checked", NOTE)]).kind).toBe("pending");
+    expect(proofOf(brief({ refs }), [seen(PR, "green"), seen(CI, "not_checked", NOTE)]).accepts).toBe(false);
   });
 });

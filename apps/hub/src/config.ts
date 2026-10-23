@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { WORKER_ASK_GRACE_MS } from "@morndo/domain";
+import { MORNDO_REPO, REPO_NAME, WORKER_ASK_GRACE_MS, type ProofMode } from "@morndo/domain";
 
 export type Config = {
   dataDir: string;
@@ -48,6 +48,15 @@ export type Config = {
   // MORNDO_WORKER_ASK_GRACE_MS: how long a worker's question or menu waits before it is the principal's Ask (N2), for
   // tests only (the e2e offices); the default is WORKER_ASK_GRACE_MS (10 minutes). Never an app setting.
   workerAskGraceMs?: number;
+  // MORNDO_PROOF_GATE (ADR-0035 step 3): the Done gate's mode — off, warn (the default) or on (a Done with a reference
+  // that is not green is held). MORNDO_PROOF_REPOS: the repositories the hub's proof checks may read, owner/repository
+  // names; a repository not on the list is never asked, so a lane cannot aim the credential at work of its own choosing.
+  proofGate?: ProofMode;
+  proofRepos?: string[];
+  // MORNDO_GITHUB_TOKEN_FILE: an absolute path to a file holding a read-only forge token (adapters/token-file.ts reads
+  // it at start; the token is never a setting). Optional: without it only public repositories answer, the
+  // unauthenticated limit is 60 requests an hour, and a private repository's references read "not checked".
+  githubTokenFile?: string | null;
 };
 
 const bool = (v: string | undefined) => v === "1" || v === "true";
@@ -133,7 +142,40 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     pushContact: env.MORNDO_PUSH_CONTACT || DEFAULT_PUSH_CONTACT,
     pushExtraOrigins: (env.MORNDO_PUSH_EXTRA_ORIGINS ?? "").split(",").map(s => s.trim()).filter(Boolean),
     workerAskGraceMs: graceOf(env.MORNDO_WORKER_ASK_GRACE_MS),
+    proofGate: proofGateOf(env),
+    proofRepos: proofReposOf(env),
+    githubTokenFile: tokenFileOf(env),
   };
+}
+
+// MORNDO_PROOF_GATE: off, warn (the default) or on — anything else is refused in one sentence that says the three.
+function proofGateOf(env: NodeJS.ProcessEnv): ProofMode {
+  const v = env.MORNDO_PROOF_GATE;
+  if (v === undefined || v === "") return "warn";
+  if (v !== "off" && v !== "warn" && v !== "on")
+    throw new Error(`MORNDO_PROOF_GATE must be off, warn or on: ${v}`);
+  return v;
+}
+
+// MORNDO_GITHUB_TOKEN_FILE: unset or empty is none; otherwise an absolute path (a relative one would depend on where the
+// hub was started).
+function tokenFileOf(env: NodeJS.ProcessEnv): string | null {
+  const v = env.MORNDO_GITHUB_TOKEN_FILE;
+  if (v === undefined || v === "") return null;
+  if (!isAbsolute(v)) throw new Error(`MORNDO_GITHUB_TOKEN_FILE must be an absolute path: ${v}`);
+  return v;
+}
+
+// MORNDO_PROOF_REPOS: owner/repository names, comma-separated; unset or empty is the default, the project's own. Each
+// name must be whole (owner/repo), so one that is not never passes as a checkable repository.
+function proofReposOf(env: NodeJS.ProcessEnv): string[] {
+  const v = env.MORNDO_PROOF_REPOS;
+  if (v === undefined || v.trim() === "") return [MORNDO_REPO];
+  const repos = v.split(",").map(s => s.trim()).filter(Boolean);
+  for (const r of repos)
+    if (!REPO_NAME.test(r))
+      throw new Error(`MORNDO_PROOF_REPOS must be owner/repository names, like ${MORNDO_REPO}: ${r}`);
+  return repos;
 }
 
 // MORNDO_VNC=host:port names the desktop's VNC server; its password comes from MORNDO_VNC_PASSWORD_FILE (default the

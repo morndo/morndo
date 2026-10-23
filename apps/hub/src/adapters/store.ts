@@ -10,7 +10,7 @@ import type { DeliveryState } from "@morndo/protocol";
 import {
   endpointId, pairingTokenId, sessionId, REF_STATES,
   type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
-  type RefResult, type Session, type Task, type TaskEvent, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
+  type RefResult, type Session, type Task, type TaskEvent, type TaskStatus, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
 } from "@morndo/domain";
 
 // What the audit log holds: Access events, and the principal's Decisions (the words of a Decision never, only their
@@ -525,6 +525,10 @@ export class Store {
   // The tasks in progress now (B5), by the (status, assignee) index.
   tasksInProgress(): Task[] {
     return (this.db.prepare("SELECT * FROM board_tasks WHERE status = 'doing' ORDER BY n").all() as Row[]).map(taskFrom);
+  }
+  // Every task in one status (the proof timer asks for review), ordered by the board's own number.
+  tasksIn(status: TaskStatus): Task[] {
+    return (this.db.prepare("SELECT * FROM board_tasks WHERE status = ? ORDER BY n").all(status) as Row[]).map(taskFrom);
   }
   taskInProgressOf(lane: string): Task | null {
     const r = this.db.prepare("SELECT * FROM board_tasks WHERE status = 'doing' AND assignee = ? ORDER BY n LIMIT 1").get(lane) as Row | undefined;

@@ -158,16 +158,18 @@ function utf8Bytes(s: string): number {
   return n;
 }
 
-export type RefState = "green" | "pending" | "red" | "mismatch" | "missing" | "unfetchable";
+// `not_checked`: the hub was not able to look (a private repository and no credential): neither red nor unfetchable,
+// and not verified either — a Done waits for it like for any reference that is not green.
+export type RefState = "green" | "pending" | "red" | "mismatch" | "missing" | "unfetchable" | "not_checked";
 // The states this build knows, for a store that reads a row without guessing: a state not among them (a newer hub
 // wrote it) is never taken for one.
-export const REF_STATES: readonly RefState[] = ["green", "pending", "red", "mismatch", "missing", "unfetchable"];
+export const REF_STATES: readonly RefState[] = ["green", "pending", "red", "mismatch", "missing", "unfetchable", "not_checked"];
 export type RefResult = { ref: string; state: RefState; detail: string | null; checkedAt: number };   // ref: a brief's own canonical form
-export type ProofKind = "no_brief" | "unchecked" | "pending" | "failing" | "unfetchable" | "verified" | "attested_only";
+export type ProofKind = "no_brief" | "unchecked" | "pending" | "failing" | "unfetchable" | "not_checked" | "verified" | "attested_only";
 export type ProofState = { kind: ProofKind; green: number; total: number; accepts: boolean; line: string };
 
-const MARK: Record<RefState, string> = { green: "✓", red: "✗", mismatch: "≠", missing: "?", unfetchable: "!", pending: "…" };
-const WORD: Record<RefState, string> = { green: "green", red: "failed", mismatch: "mismatch", missing: "missing", unfetchable: "unfetchable", pending: "pending" };
+const MARK: Record<RefState, string> = { green: "✓", red: "✗", mismatch: "≠", missing: "?", unfetchable: "!", pending: "…", not_checked: "○" };
+const WORD: Record<RefState, string> = { green: "green", red: "failed", mismatch: "mismatch", missing: "missing", unfetchable: "unfetchable", pending: "pending", not_checked: "not checked" };
 
 // What the card shows of one brief against the results the hub holds (B15): one line, whatever the references' states.
 // Verified proof only — attested items never move it (B14), one reference the board could not read is never green, and
@@ -187,7 +189,8 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[])
   const green = states.filter(s => s === "green").length;
   const kind: ProofKind = states.some(s => s === "red" || s === "mismatch" || s === "missing") ? "failing"
     : states.some(s => s === "unfetchable") ? "unfetchable"
-    : states.some(s => s === "pending") ? "pending" : "verified";
+    : states.some(s => s === "pending") ? "pending"
+    : states.some(s => s === "not_checked") ? "not_checked" : "verified";
   const parts = brief.refs.map((ref, i) => states[i] === "green" ? "" : ` · ${MARK[states[i]!]} ${ref} ${latest.get(ref)?.detail ?? WORD[states[i]!]}`);
   const whole = `proof: ${green} of ${brief.refs.length} green${parts.join("")}`;
   return { kind, green, total: brief.refs.length, accepts: kind === "verified", line: whole.length > 600 ? `${cutText(whole, 599)}…` : whole };
@@ -201,6 +204,93 @@ export function currentBrief(events: readonly TaskEvent[]): { brief: ProofBrief;
   let best: { brief: ProofBrief; rev: number } | null = null;
   for (const e of events) if (e.change.kind === "briefed" && e.rev > back && (best === null || e.rev > best.rev)) best = { brief: e.change.brief, rev: e.rev };
   return best;
+}
+
+// B14: what the hub read of a reference, exactly as the adapter answered it, and the pure judging of those facts. The
+// hub reaches the forge and hands the facts in; these functions only decide, so every rule below is testable whole.
+export type PrFacts = { state: "open" | "closed"; merged: boolean; headSha: string; mergeSha: string | null };
+export type CheckRunFacts = { id: number; name: string; status: string; conclusion: string | null; url: string | null };
+// A named check that has not appeared yet reads as pending this long after the brief: a forge's report of a commit's
+// checks can trail the commit itself by minutes, so a young "not found" is still "on its way".
+export const YOUNG_MS = 15 * 60_000;
+export type Judged = { state: RefState; detail: string | null };
+
+// A pull request reference is green at the commit it names — the head, or the merge commit once it was merged (the head
+// moves on past it). Closed without a merge is the one thing a pull request is red at; a head somewhere else is a
+// mismatch, both shas said, so the person can see which moved.
+export function judgePr(ref: Extract<ProofRef, { kind: "pr" }>, facts: PrFacts): Judged {
+  if (facts.state === "closed" && !facts.merged) return { state: "red", detail: "closed without merge" };
+  const at = facts.headSha.toLowerCase().startsWith(ref.sha)
+    || (facts.merged && facts.mergeSha !== null && facts.mergeSha.toLowerCase().startsWith(ref.sha));
+  return at ? { state: "green", detail: null }
+    : { state: "mismatch", detail: `head is ${facts.headSha.slice(0, 7)}, ref says ${ref.sha.slice(0, 7)}` };
+}
+
+// One check run's own verdict: still running is pending, success is green, each failure has its word, and a run that
+// did not run (neutral, skipped, no conclusion read) is not evidence at all.
+type RunVerdict = { state: "green" | "pending" | "red" | "skipped"; word: string };
+const runVerdict = (run: CheckRunFacts): RunVerdict => {
+  if (run.status !== "completed") return { state: "pending", word: run.status === "in_progress" ? "in progress" : run.status.replace(/_/g, " ") };
+  switch (run.conclusion) {
+    case "success": return { state: "green", word: "green" };
+    case "failure": return { state: "red", word: "failed" };
+    case "cancelled": return { state: "red", word: "cancelled" };
+    case "timed_out": return { state: "red", word: "timed out" };
+    case "action_required": return { state: "red", word: "needs action" };
+    case null: return { state: "skipped", word: "skipped" };
+    default: return { state: "skipped", word: run.conclusion };
+  }
+};
+// Over one selector's runs the worst wins: red beats pending beats skipped beats green.
+const RUN_RANK: Record<RunVerdict["state"], number> = { red: 0, pending: 1, skipped: 2, green: 3 };
+// Across selectors: red beats missing beats pending beats green (a missing selector is worse than a pending one: the
+// card should not look nearly done when a named check never appeared).
+const SELECTOR_RANK: Record<"red" | "missing" | "pending" | "green", number> = { red: 0, missing: 1, pending: 2, green: 3 };
+// A run's address is kept in a detail only when it is a github.com one and plain enough for one line — letters, digits
+// and ./_:-: and nothing else (no query, no fragment, no other host hiding in it).
+const RUN_URL = /^https:\/\/github\.com\/[A-Za-z0-9./_:~-]*$/;
+const withUrl = (line: string, url: string | null): string => (url !== null && RUN_URL.test(url) ? `${line} ${url}` : line);
+
+// What judging one selector can say (judgeSelector): never a mismatch or unfetchable — those are a pull request's or
+// the hub's to say.
+type Selected = { state: "green" | "pending" | "red" | "missing"; detail: string | null };
+const judgeSelector = (label: string, runs: readonly CheckRunFacts[], young: boolean): Selected => {
+  if (runs.length === 0) return young ? { state: "pending", detail: `${label} not reported yet` } : { state: "missing", detail: `${label} not found` };
+  let worst: { verdict: RunVerdict; run: CheckRunFacts } | null = null;
+  for (const run of runs) {
+    const verdict = runVerdict(run);
+    if (worst === null || RUN_RANK[verdict.state] < RUN_RANK[worst.verdict.state]) worst = { verdict, run };
+  }
+  const w = worst!;
+  if (w.verdict.state === "green") return { state: "green", detail: null };
+  if (w.verdict.state === "red") return { state: "red", detail: withUrl(`${label} ${w.verdict.word}`, w.run.url) };
+  if (w.verdict.state === "pending") return { state: "pending", detail: `${label} ${w.verdict.word}` };
+  return { state: "missing", detail: `${label} ${w.verdict.word}` };        // a check that did not run is not evidence
+};
+
+// B14: a commit's checks, judged. Named selectors match runs by exact name or by the forge's own number; `checks: "*"`
+// asks only that some check ran and none failed or is still running. `young`: the brief is young, so a check that has
+// not appeared yet is on its way (pending), not missing.
+export function judgeCi(ref: Extract<ProofRef, { kind: "ci" }>, runs: readonly CheckRunFacts[], young: boolean): Judged {
+  if (ref.checks === "*") {
+    if (runs.length === 0) return young ? { state: "pending", detail: "no checks reported yet" } : { state: "missing", detail: "no checks found" };
+    const verdicts = runs.map(runVerdict);
+    const first = (state: RunVerdict["state"]) => verdicts.findIndex(v => v.state === state);
+    const at = (state: RunVerdict["state"]) => first(state) === -1 ? null : { i: first(state)!, verdict: verdicts[first(state)!]! };
+    const red = at("red");
+    if (red !== null) return { state: "red", detail: withUrl(`"${runs[red.i]!.name}" ${red.verdict.word}`, runs[red.i]!.url) };
+    const pending = at("pending");
+    if (pending !== null) return { state: "pending", detail: `"${runs[pending.i]!.name}" ${pending.verdict.word}` };
+    if (at("green") !== null) return { state: "green", detail: null };
+    return { state: "missing", detail: "no check ran" };
+  }
+  let best: Selected | null = null;
+  for (const check of ref.checks) {
+    const label = "name" in check ? `"${check.name}"` : `id ${check.id}`;
+    const judged = judgeSelector(label, runs.filter(r => ("name" in check ? r.name === check.name : r.id === check.id)), young);
+    if (best === null || SELECTOR_RANK[judged.state] < SELECTOR_RANK[best.state]) best = judged;
+  }
+  return best!;
 }
 
 // What applyAction judges a Done against (B16): the brief as filed, the results the hub read for its references, and

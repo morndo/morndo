@@ -2,7 +2,7 @@
 // and a synthetic terminal for pane %1. For tests that need the HTTP and WebSocket edges but no crash isolation
 // (crash tests use http-crash-fixture.ts). Synthetic data only.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import type { AccountProfile, Task } from "@morndo/domain";
+import { type AccountProfile, type ProofMode, type Task } from "@morndo/domain";
 import type { RunView, Transcriber, TranscriberProbe } from "@morndo/protocol";
 import type { Liveness } from "@morndo/domain";
 import { tmpdir } from "node:os";
@@ -37,7 +37,7 @@ import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
 import { fileOnDisk, TranscriptionService } from "../src/application/transcription-service.ts";
 import type { LedgerRead } from "../src/adapters/ledger.ts";
-import type { SendOutcome } from "../src/application/ports.ts";
+import type { ForgeChecks, SendOutcome } from "../src/application/ports.ts";
 import type { Config } from "../src/config.ts";
 import type { ManagerQueue } from "../src/application/manager-queue.ts";
 import { productStamp } from "@morndo/service-kit";
@@ -86,6 +86,12 @@ export async function startInProcessHub(o: {
   liveness?: (sha: string) => Liveness;
   knows?: (sha: string) => Promise<"yes" | "no" | "unknown">;
   orphans?: (tasks: readonly Task[], now: number) => string[];
+  // `forge`: the proof checks' port (a test's fake); without one the checks answer nothing, as a hub without a forge.
+  // `proofMode`, `proofRepos`: the gate's mode and the repositories it reads, as MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS
+  // would give them.
+  forge?: ForgeChecks;
+  proofMode?: ProofMode;
+  proofRepos?: string[];
   // `identity`: the hub's identity key (a test's own pair; default: one made in the temp dir) — it signs the
   // principal's assertions (updates §5.4). `updates`: the fleet and the updater CLI to run (a test's fakes); absent,
   // the updates routes answer 404 as with no fleet and no CLI wired.
@@ -144,7 +150,10 @@ export async function startInProcessHub(o: {
   // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
   const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}) });
   // ADR-0035: the proof of work, over the same store, wired as main.ts wires it.
-  const proof = new ProofService({ store, board, ...(o.now ? { now: o.now } : {}) });
+  const proof = new ProofService({
+    store, board, ...(o.now ? { now: o.now } : {}), ...(o.forge ? { forge: o.forge } : {}),
+    ...(o.proofMode ? { mode: o.proofMode } : {}), ...(o.proofRepos ? { allowedRepos: o.proofRepos } : {}),
+  });
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}) });
   const queue = o.queue ? o.queue(store) : null;

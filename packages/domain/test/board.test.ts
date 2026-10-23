@@ -647,6 +647,17 @@ describe("brief and proof (B13 to B16)", () => {
       .toMatchObject({ proofSeen: "proof: 1 of 1 green" });
   });
 
+  it("a done with a ref that was not checked is refused in on mode and recorded in warn mode", () => {
+    const NOTE = "private repo: not checked (404 without a token)";
+    const unchecked = (mode: ProofMode): DoneGate => gate(proof({ mode, results: [seen(PR, "not_checked", NOTE)] }));
+    const line = `proof: 0 of 1 green · ○ ${PR} ${NOTE}`;
+    expect(act(inReview(), { action: "move", to: "done", reason: "x" }, manager, unchecked("on")))
+      .toEqual({ ok: false, error: { problem: "proof_not_green", detail: line } });
+    expect(value(act(inReview(), { action: "move", to: "done", reason: "x" }, manager, unchecked("warn"))).event.change).toMatchObject({ proofSeen: line });
+    expect(value(act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: "private repo, checked by hand" }, manager, unchecked("on"))).event.change)
+      .toMatchObject({ proofSeen: `${line}; override: private repo, checked by hand` });
+  });
+
   it("with mode off the done carries no proofSeen", () => {
     const r = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, gate(proof({ mode: "off" })));
     expect(value(r).task.status).toBe("done");

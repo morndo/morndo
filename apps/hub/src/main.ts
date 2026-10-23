@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
-import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/domain";
+import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, type AccessPolicy } from "@morndo/domain";
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk } from "./config.ts";
 import { Store } from "./adapters/store.ts";
+import { GithubChecks } from "./adapters/github-checks.ts";
+import { readTokenFile } from "./adapters/token-file.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
 import { DatabaseUnreadable, NotLocalDisk, RevocationJournal, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, productStamp, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
@@ -330,8 +332,19 @@ switch (cmd) {
     });
     const following: { projector: BoardProjector | null } = { projector: null };
     const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null) });
-    // ADR-0035: the proof of work, over the same store — a brief filed on the board seeds its references as rows.
-    const proof = new ProofService({ store, board });
+    // ADR-0035: the proof of work, over the same store — a brief filed on the board seeds its references as rows. Step
+    // 3: the rows come from the forge (github-checks.ts holds the credential; nothing else reads it), the mode and the
+    // checked repositories from MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS. A pass every minute re-reads what is still
+    // pending or was rate-limited; on stop the timer is cleared and the checks in flight are awaited — registered after
+    // the store's close, so they end before it runs.
+    const githubToken = readTokenFile(config.githubTokenFile ?? null, m => log.warn(m));
+    const proof = new ProofService({
+      store, board, forge: new GithubChecks({ token: githubToken }), mode: config.proofGate ?? "warn",
+      allowedRepos: config.proofRepos ?? [MORNDO_REPO], authenticated: githubToken !== null,
+    });
+    const proofTimer = setInterval(() => { void proof.tick().catch((e: unknown) => log.error("proof: the timer pass failed", e)); }, 60_000);
+    proofTimer.unref();
+    shutdown.onStop(async () => { clearInterval(proofTimer); await proof.idle(); });
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });

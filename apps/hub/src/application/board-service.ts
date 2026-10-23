@@ -9,7 +9,7 @@
 // (orphans; the projector's, board-projector.ts), and a change of runs is pushed too, at most about once a second.
 // B11: each task's merges are kept with their liveness (merge-liveness.ts over the fleet's node builds), Done is judged
 // against them, and the view says for each task with merges where they stand ("merged, not live: pc on abc1234").
-import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
+import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
@@ -39,6 +39,11 @@ export class BoardService {
   #runsTimer: NodeJS.Timeout | null = null;
   #toldAt = -Infinity;                                   // performance.now() of the last push, for the runs' throttle
   #listeners = new Set<(b: BoardView) => void>();
+  // ADR-0035 (B14 to B16): the proof service's two hooks on the board. The board itself knows nothing of a forge: the
+  // gate it hands the domain is whatever the proof service says the task's proof is, and the refresh is the hub's own
+  // re-reading of a brief's references before a Done is judged.
+  #proof: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null = null;
+  #eventListeners = new Set<(e: TaskEvent) => void>();
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
@@ -53,6 +58,17 @@ export class BoardService {
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
+  // Each task event as it was written (B14: the proof triggers ride on the board's own events, never on a Run). Called
+  // after the transaction has committed and the board has been told, by whoever wrote the event (`act`, `create`,
+  // `follow` through `act`); one call per event.
+  onEvent(fn: (e: TaskEvent) => void): () => void {
+    this.#eventListeners.add(fn);
+    return () => { this.#eventListeners.delete(fn); };
+  }
+  // The proof service's hooks (ADR-0035): the gate the domain judges a Done and a brief against, and the refresh a
+  // Done attempt waits for first. null: none attached, Done is not held for proof.
+  attachProof(p: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null): void { this.#proof = p; }
+  #said(e: TaskEvent) { for (const l of this.#eventListeners) l(e); }
   // Every push carries the runs as they are then, so one due for the runs alone is dropped.
   #tell() {
     if (this.#runsTimer) { clearTimeout(this.#runsTimer); this.#runsTimer = null; }
@@ -106,6 +122,7 @@ export class BoardService {
     });
     if (!r.ok) return { ok: false, ...r.error };
     this.#tell();
+    this.#said(r.value.event);
     return { ok: true, ...r.value };
   }
 
@@ -121,9 +138,12 @@ export class BoardService {
         ...(action.title !== undefined ? { title: action.title === redactKeyMaterial(task.title) ? task.title : action.title } : {}),
         ...(action.description !== undefined ? { description: action.description === redactKeyMaterial(task.description) ? task.description : action.description } : {}),
       } : action;
-      // B5 needs only the tasks in progress, not the whole board. B11: Done is judged against the task's merges.
+      // B5 needs only the tasks in progress, not the whole board. B11: Done is judged against the task's merges. B16:
+      // the proof is in the gate only where the domain reads it — a brief (its repositories) and a move to Done.
+      const proof = this.#proof !== null && (action.action === "brief" || (action.action === "move" && action.to === "done"))
+        ? this.#proof.gate(key) : undefined;
       const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
-        { merges: this.#store.mergesOf(key), liveness: this.#liveness });
+        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}) });
       if (!applied.ok) return applied;
       this.#write(applied.value.task, applied.value.event);
       return applied;
@@ -131,6 +151,7 @@ export class BoardService {
     if (r === null) return { ok: false, problem: "unknown" };
     if (!r.ok) return { ok: false, ...r.error };
     this.#tell();
+    this.#said(r.value.event);
     return { ok: true, ...r.value };
   }
 
@@ -139,7 +160,10 @@ export class BoardService {
   // invents (a morndo/morndo record only). The manager's, the principal's and the console's records are not asked: they may come before the operator
   // brings the checkout up to date, and a refused record would leave the task with no merge to hold done for. "unknown"
   // (no checkout, git failing) takes the record.
+  // B16 (ADR-0035): a move to Done first re-reads the brief's references that have gone stale, so the Done is judged
+  // against what the forge says now, not what it said half an hour ago.
   async actChecked(key: string, action: TaskAction, actor: TaskActor): Promise<BoardResult> {
+    if (action.action === "move" && action.to === "done" && this.#proof) await this.#proof.refresh(key);
     if (action.action === "merged" && actor.kind === "worker" && this.#knows) {
       const sha = action.sha.trim().toLowerCase();
       // Only morndo/morndo: the checkout is a Morndo one and says nothing of another repo's commits.

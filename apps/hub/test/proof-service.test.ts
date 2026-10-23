@@ -4,11 +4,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_POLICY, type BriefInput, type TaskActor } from "@morndo/domain";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_POLICY, type BriefInput, type ProofMode, type TaskActor } from "@morndo/domain";
+import type { RunView } from "@morndo/protocol";
 import { Store } from "../src/adapters/store.ts";
+import { GithubChecks } from "../src/adapters/github-checks.ts";
 import { BoardService } from "../src/application/board-service.ts";
 import { ProofService } from "../src/application/proof-service.ts";
+import { startFakeForge, type FakeForge } from "./fake-forge.ts";
 
 const dirs: string[] = [];
 const tempDir = () => { const d = mkdtempSync(join(tmpdir(), "morndo-proof-svc-")); dirs.push(d); return d; };
@@ -178,5 +181,440 @@ describe("the proof service (B13)", () => {
     const r = await proof.file("T-1", { ...brief, refs: ["acme/shop#7@3e9d1a7"] }, lane);
     expect(r).toMatchObject({ ok: true, event: { change: { kind: "briefed", brief: { refs: ["acme/shop#7@3e9d1a7"] } } } });
     store.close();
+  });
+});
+
+describe("verifying (B14, B15)", () => {
+  // The hub's own checking of a brief's refs, against the local fake forge and a clock a test moves (plan 3.5: the
+  // adapter over the fake's base, the service driving it, rows written through `record` alone).
+  const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  const MOVED = "9c8b7a6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b";
+  const RUN_URL = "https://github.com/morndo/morndo/actions/runs/9";
+  const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
+  const greenRuns = () => [
+    { id: 1, name: "ci", status: "completed", conclusion: "success" },
+    { id: 2, name: "lint", status: "completed", conclusion: "success" },
+  ];
+  const redRuns = () => [
+    { id: 1, name: "ci", status: "completed", conclusion: "success" },
+    { id: 2, name: "lint", status: "completed", conclusion: "failure", url: RUN_URL },
+  ];
+  const RED_LINE = `proof: 1 of 2 green · ✗ morndo/morndo@3e9d1a7:ci,lint "lint" failed ${RUN_URL}`;
+  const asked = (f: FakeForge) => f.requests.map(r => r.path).sort();
+
+  let fake: FakeForge;
+  let clock = NOW;
+  const now = () => clock;
+  const withForge = (o: { mode?: ProofMode; allowedRepos?: readonly string[]; authenticated?: boolean; token?: string; runs?: () => RunView[] } = {}) => {
+    const store = new Store(tempDir());
+    const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now, ...(o.runs ? { runs: o.runs } : {}) });
+    const proof = new ProofService({
+      store, board, now,
+      forge: new GithubChecks({ baseUrl: fake.base, now, ...(o.token !== undefined ? { token: o.token } : {}) }),
+      mode: o.mode ?? "off",
+      ...(o.allowedRepos !== undefined ? { allowedRepos: o.allowedRepos } : {}),
+      ...(o.authenticated !== undefined || o.token !== undefined ? { authenticated: o.authenticated ?? true } : {}),
+    });
+    return { store, board, proof };
+  };
+
+  beforeEach(async () => { fake = await startFakeForge(); clock = NOW; });
+  afterEach(async () => { await fake.close(); });
+
+  it("a brief filed in review is verified at once", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, greenRuns());
+    const { store, board, proof } = withForge();
+    atReview(board);
+    expect((await proof.file("T-1", brief, lane)).ok).toBe(true);            // rev 4
+    await proof.idle();                                                       // the background verify finishes
+    expect(store.proofResultsOf("T-1", 4)).toEqual([
+      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW },
+    ]);
+    expect(proof.view("T-1")?.state.kind).toBe("verified");
+    expect(fake.requests).toHaveLength(2);
+    expect(asked(fake)).toEqual(["/repos/morndo/morndo/commits/3e9d1a7/check-runs", "/repos/morndo/morndo/pulls/42"]);
+    store.close();
+  });
+
+  it("a task moved to review by the board's D1 has its refs verified", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, greenRuns());
+    const { store, board, proof } = withForge();
+    board.create({ title: "Ship the totals row", assignee: "builder" }, manager);   // T-1, to do
+    board.act("T-1", { action: "move", to: "doing" }, lane);                        // rev 2
+    await proof.file("T-1", brief, lane);                                           // rev 3, filed while in progress
+    await proof.idle();
+    clock = NOW + 1_000;                                                            // later, so the rows show which check wrote them
+    fake.requests.length = 0;
+    const r = board.follow("T-1", { to: "review", reason: "builder ended its round", rule: "D1" }, "builder", 3);
+    expect(r.ok).toBe(true);
+    await proof.idle();
+    expect(asked(fake)).toEqual(["/repos/morndo/morndo/commits/3e9d1a7/check-runs", "/repos/morndo/morndo/pulls/42"]);
+    expect(store.proofResultsOf("T-1", 3)).toEqual([
+      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 1_000 },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW + 1_000 },
+    ]);
+    expect(store.task("T-1")?.status).toBe("review");
+    store.close();
+  });
+
+  it("a task moved to review by hand with a wake-up pending has its refs verified", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, greenRuns());
+    const waiting: RunView = { lane: "builder", node: "pc", phase: "waiting", wait: { on: "wakeup", next: NOW + 60_000 }, deadline: NOW + 60_000, overdue: false, since: NOW, source: "hook" };
+    const { store, board, proof } = withForge({ runs: () => [waiting] });
+    board.create({ title: "Ship the totals row", assignee: "builder" }, manager);
+    board.act("T-1", { action: "move", to: "doing" }, lane);
+    await proof.file("T-1", brief, lane);                                           // rev 3
+    await proof.idle();
+    clock = NOW + 1_000;
+    fake.requests.length = 0;
+    expect(board.act("T-1", { action: "move", to: "review", reason: "the wake-up is hours off" }, manager).ok).toBe(true);   // by hand, not by the board
+    await proof.idle();
+    expect(asked(fake)).toEqual(["/repos/morndo/morndo/commits/3e9d1a7/check-runs", "/repos/morndo/morndo/pulls/42"]);
+    expect(store.proofResultsOf("T-1", 3)).toEqual([
+      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 1_000 },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW + 1_000 },
+    ]);
+    store.close();
+  });
+
+  it("a pending ref turns green at the next timer pass without any lane action", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "in_progress", conclusion: null },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    const { store, board, proof } = withForge({ authenticated: true });             // a hub with a credential checks sooner
+    atReview(board);
+    await proof.file("T-1", brief, lane);                                           // rev 4
+    await proof.idle();
+    expect(store.proofResultsOf("T-1", 4)).toEqual([
+      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "pending", detail: `"ci" in progress`, checkedAt: NOW },
+    ]);
+    expect(store.tasksIn("review").map(t => t.key)).toEqual(["T-1"]);
+    expect(await proof.tick()).toBe(0);                                             // the interval (2 min) has not passed
+    expect(fake.requests).toHaveLength(2);
+    clock = NOW + 120_000;
+    fake.runs("morndo/morndo", FULL, greenRuns());                                  // the run finished since
+    expect(await proof.tick()).toBe(1);                                             // one ref due again: only the pending one
+    expect(fake.requests.filter(r => r.path.endsWith("/check-runs"))).toHaveLength(2);
+    expect(store.proofResultsOf("T-1", 4)).toEqual([
+      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW + 120_000 },
+    ]);
+    expect(proof.view("T-1")?.state.kind).toBe("verified");
+    store.close();
+  });
+
+  it("a ref that stays unfetchable keeps the task in review with the reason on the card", async () => {
+    const { store, board, proof } = withForge();
+    fake.fail("/repos/morndo/morndo/pulls/42", 500);
+    fake.fail("/repos/morndo/morndo/commits/3e9d1a7/check-runs", 500);
+    atReview(board);
+    await proof.file("T-1", brief, lane);                                           // rev 4
+    await proof.idle();
+    expect(store.task("T-1")?.status).toBe("review");                               // never a task change for a check
+    expect(proof.view("T-1")?.state).toEqual({
+      kind: "unfetchable", green: 0, total: 2, accepts: false,
+      line: "proof: 0 of 2 green · ! morndo/morndo#42@3e9d1a7 unexpected answer (500) · ! morndo/morndo@3e9d1a7:ci,lint unexpected answer (500)",
+    });
+    fake.requests.length = 0;
+    clock = NOW + 10 * 60_000;                                                      // the pass after the interval (10 min, no credential)
+    expect(await proof.tick()).toBe(0);                                             // a 500 is not one the hub retries
+    expect(fake.requests).toHaveLength(0);
+    board.create({ title: "A second task", assignee: "builder" }, manager);         // T-2
+    board.act("T-2", { action: "move", to: "doing" }, lane);
+    board.act("T-2", { action: "move", to: "review" }, lane);
+    fake.fail("/repos/morndo/morndo/pulls/43", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String((NOW + 10 * 60_000 + 60_000) / 1000) });
+    await proof.file("T-2", { ...brief, refs: ["morndo/morndo#43@3e9d1a7"] }, lane);
+    await proof.idle();
+    expect(store.proofResultsOf("T-2", 4)).toEqual([
+      { ref: "morndo/morndo#43@3e9d1a7", state: "unfetchable", detail: `rate limit, retry ${hhmm(NOW + 10 * 60_000 + 60_000)} UTC`, checkedAt: NOW + 10 * 60_000 },
+    ]);
+    fake.requests.length = 0;
+    clock = NOW + 20 * 60_000;
+    fake.pr("morndo/morndo", 43, { head: FULL });
+    expect(await proof.tick()).toBe(1);                                             // the rate limit is retried, T-1's 500 is not
+    expect(fake.requests.map(r => r.path)).toEqual(["/repos/morndo/morndo/pulls/43"]);
+    expect(store.proofResultsOf("T-2", 4)).toEqual([
+      { ref: "morndo/morndo#43@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 20 * 60_000 },
+    ]);
+    expect(store.task("T-1")?.status).toBe("review");
+    store.close();
+  });
+
+  it("a rate-limited answer stops calls until the reset time", async () => {
+    const { store, board, proof } = withForge();
+    const reset = String((NOW + 60_000) / 1000);
+    fake.fail("/repos/morndo/morndo/pulls/42", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset });
+    fake.fail("/repos/morndo/morndo/commits/3e9d1a7/check-runs", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": reset });
+    atReview(board);
+    await proof.file("T-1", brief, lane);
+    await proof.idle();                                                             // both refs asked, both walled off
+    expect(fake.requests).toHaveLength(2);
+    const wall = `rate limit, retry ${hhmm(NOW + 60_000)} UTC`;
+    expect(store.proofResultsOf("T-1", 4)).toEqual([
+      { ref: "morndo/morndo#42@3e9d1a7", state: "unfetchable", detail: wall, checkedAt: NOW },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "unfetchable", detail: wall, checkedAt: NOW },
+    ]);
+    await proof.verify("T-1");                                                      // nothing is asked while the wall stands
+    expect(fake.requests).toHaveLength(2);
+    clock = NOW + 61_000;
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, greenRuns());
+    await proof.verify("T-1");
+    expect(fake.requests).toHaveLength(4);
+    expect(proof.view("T-1")?.state.kind).toBe("verified");
+    store.close();
+  });
+
+  it("a repository outside the allowlist is never fetched", async () => {
+    const { store, board, proof } = withForge({ allowedRepos: ["acme/shop"] });
+    fake.pr("acme/shop", 7, { head: FULL });
+    atReview(board);
+    await proof.file("T-1", { ...brief, refs: ["acme/shop#7@3e9d1a7"] }, lane);      // the gate's allowlist lets the ref through
+    await proof.idle();
+    expect(store.proofResultsOf("T-1", 4)).toEqual([
+      { ref: "acme/shop#7@3e9d1a7", state: "green", detail: null, checkedAt: NOW },
+    ]);
+    fake.requests.length = 0;
+    const board2 = new BoardService({ store, policy: () => DEFAULT_POLICY, now });  // a second hub over the same store, its allowlist empty
+    const proof2 = new ProofService({ store, board: board2, now, forge: new GithubChecks({ baseUrl: fake.base, now }), mode: "off", allowedRepos: [] });
+    await proof2.verify("T-1");
+    expect(fake.requests).toHaveLength(0);                                          // judged unread, never fetched
+    expect(store.proofResultsOf("T-1", 4)).toEqual([
+      { ref: "acme/shop#7@3e9d1a7", state: "unfetchable", detail: "repository not checked", checkedAt: NOW },
+    ]);
+    store.close();
+  });
+
+  it("the hub fetches nothing for a url in a brief", async () => {
+    const { store, board, proof } = withForge();
+    atReview(board);
+    const url = "https://github.com/morndo/morndo/pull/42";
+    expect(await proof.file("T-1", { ...brief, refs: [url] }, lane)).toEqual({ ok: false, problem: "bad_ref", detail: `${url}: a url is not a reference` });
+    expect(store.proofResultsOf("T-1", 4)).toEqual([]);                             // nothing seeded, nothing to check
+    await proof.verify("T-1");
+    expect(fake.requests).toEqual([]);                                              // no address a lane wrote was ever fetched
+    store.close();
+  });
+
+  it("a pr whose head moved reports mismatch with both shas", async () => {
+    fake.pr("morndo/morndo", 42, { state: "open", head: MOVED });
+    fake.runs("morndo/morndo", FULL, greenRuns());
+    const { store, board, proof } = withForge();
+    atReview(board);
+    await proof.file("T-1", brief, lane);
+    await proof.idle();
+    expect(store.proofResultsOf("T-1", 4)).toEqual([
+      { ref: "morndo/morndo#42@3e9d1a7", state: "mismatch", detail: `head is ${MOVED.slice(0, 7)}, ref says 3e9d1a7`, checkedAt: NOW },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW },
+    ]);
+    expect(proof.view("T-1")?.state.kind).toBe("failing");
+    store.close();
+  });
+
+  it("a skipped named check is missing, not green", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "skipped" },
+    ]);
+    const { store, board, proof } = withForge();
+    atReview(board);
+    await proof.file("T-1", brief, lane);
+    await proof.idle();
+    expect(store.proofResultsOf("T-1", 4)).toEqual([
+      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "missing", detail: `"lint" skipped`, checkedAt: NOW },
+    ]);
+    expect(proof.view("T-1")?.state.kind).toBe("failing");                          // missing is not green
+    store.close();
+  });
+
+  it("re-checking never changes the task's rev", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, greenRuns());
+    const { store, board, proof } = withForge();
+    atReview(board);
+    await proof.file("T-1", brief, lane);                                           // rev 4
+    await proof.idle();
+    const task = store.task("T-1");
+    const events = store.taskEvents("T-1");
+    expect(events).toHaveLength(4);
+    clock = NOW + 60_000;
+    await proof.verify("T-1");                                                      // every ref again, later on the clock
+    await proof.tick();                                                             // and a pass that finds nothing due
+    expect(store.task("T-1")).toEqual(task);                                        // the task is exactly as it was
+    expect(store.taskEvents("T-1")).toEqual(events);                                // not one event more
+    expect(store.proofResultsOf("T-1", 4)).toEqual([                                // the rows alone moved
+      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 60_000 },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW + 60_000 },
+    ]);
+    store.close();
+  });
+
+  it("a done with a red ref is refused as proof_not_green in on mode", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, redRuns());
+    const { store, board, proof } = withForge({ mode: "on" });
+    atReview(board);
+    await proof.file("T-1", brief, lane);                                           // rev 4
+    await proof.idle();
+    expect(proof.view("T-1")?.state.line).toBe(RED_LINE);
+    const r = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
+    expect(r).toEqual({ ok: false, problem: "proof_not_green", detail: RED_LINE });
+    expect(fake.requests).toHaveLength(2);                                          // the rows are fresh: nothing was re-checked
+    expect(store.task("T-1")?.status).toBe("review");                               // a refused done moves nothing
+    expect(store.taskEvents("T-1")).toHaveLength(4);
+    store.close();
+  });
+
+  it("in warn mode the same done is accepted and the event records what was not green", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, redRuns());
+    const { store, board, proof } = withForge({ mode: "warn" });
+    atReview(board);
+    await proof.file("T-1", brief, lane);
+    await proof.idle();
+    const r = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
+    expect(r).toMatchObject({ ok: true, task: { status: "done", rev: 5 } });
+    expect(store.taskEvents("T-1").at(-1)?.change).toEqual({ kind: "moved", from: "review", to: "done", reason: "the row ships", proofSeen: RED_LINE });
+    store.close();
+  });
+
+  it("a done attempt refreshes results older than 30 seconds first", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, redRuns());
+    const { store, board, proof } = withForge({ mode: "on" });
+    atReview(board);                                                                // T-1
+    board.create({ title: "A second task", assignee: "builder" }, manager);         // T-2
+    board.act("T-2", { action: "move", to: "doing" }, lane);
+    board.act("T-2", { action: "move", to: "review" }, lane);
+    await proof.file("T-1", brief, lane);                                           // both red at NOW
+    await proof.file("T-2", brief, lane);
+    await proof.idle();
+    fake.requests.length = 0;
+    clock = NOW + 10_000;
+    expect(await board.actChecked("T-2", { action: "move", to: "done", reason: "the row ships" }, manager)).toMatchObject({ ok: false, problem: "proof_not_green" });
+    expect(fake.requests).toHaveLength(0);                                          // 10 s old: too fresh to re-check, so still red
+    clock = NOW + 31_000;
+    fake.runs("morndo/morndo", FULL, greenRuns());                                  // the forge says green since
+    const done = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
+    expect(done).toMatchObject({ ok: true, task: { status: "done", rev: 5 } });
+    expect(asked(fake)).toEqual(["/repos/morndo/morndo/commits/3e9d1a7/check-runs", "/repos/morndo/morndo/pulls/42"]);   // 31 s old: both refs re-read first
+    store.close();
+  });
+
+  it("mode off judges nothing and writes no proofSeen", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, redRuns());
+    const { store, board, proof } = withForge({ mode: "off" });
+    atReview(board);
+    await proof.file("T-1", brief, lane);
+    await proof.idle();
+    expect(store.proofResultsOf("T-1", 4)[1]?.state).toBe("red");                   // the checks ran; the gate just ignores them
+    const r = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
+    expect(r).toMatchObject({ ok: true, task: { status: "done", rev: 5 } });
+    expect(store.taskEvents("T-1").at(-1)?.change).toEqual({ kind: "moved", from: "review", to: "done", reason: "the row ships" });   // no proofSeen at all
+    store.close();
+  });
+
+  it("the manager's override reason lets a red done through and is recorded", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, redRuns());
+    const { store, board, proof } = withForge({ mode: "on" });
+    atReview(board);
+    await proof.file("T-1", brief, lane);
+    await proof.idle();
+    const r = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships", proofOverride: "the red lint is the old run" }, manager);
+    expect(r).toMatchObject({ ok: true, task: { status: "done", rev: 5 } });
+    expect(store.taskEvents("T-1").at(-1)?.change).toEqual({ kind: "moved", from: "review", to: "done", reason: "the row ships", proofSeen: `${RED_LINE}; override: the red lint is the old run` });
+    store.close();
+  });
+
+  describe("private repositories", () => {
+    // A private repository answers 404 to a caller without the token, as the forge does for what it may not show. The
+    // token is built here, never written in the source.
+    const TOKEN = ["fake", "forge", "token"].join("-");
+    const PRIV = "acme/vault";
+    const priv = { refs: [`${PRIV}#7@3e9d1a7`, `${PRIV}@3e9d1a7:ci,lint`] };
+    const NOTE = "private repo: not checked (404 without a token)";
+    const seed = () => {
+      fake.privateRepo(PRIV, TOKEN);
+      fake.pr(PRIV, 7, { head: FULL });
+      fake.runs(PRIV, FULL, greenRuns());
+    };
+
+    it("a ref in a private repository without a token is not checked: not red, not unfetchable, and no retry", async () => {
+      seed();
+      const { store, board, proof } = withForge({ mode: "on", allowedRepos: [PRIV] });
+      atReview(board);
+      expect((await proof.file("T-1", { ...brief, ...priv }, lane)).ok).toBe(true);        // rev 4
+      await proof.idle();
+      expect(store.proofResultsOf("T-1", 4)).toEqual([
+        { ref: `${PRIV}#7@3e9d1a7`, state: "not_checked", detail: NOTE, checkedAt: NOW },
+        { ref: `${PRIV}@3e9d1a7:ci,lint`, state: "not_checked", detail: NOTE, checkedAt: NOW },
+      ]);
+      expect(proof.view("T-1")?.state).toEqual({
+        kind: "not_checked", green: 0, total: 2, accepts: false,
+        line: `proof: 0 of 2 green · ○ ${PRIV}#7@3e9d1a7 ${NOTE} · ○ ${PRIV}@3e9d1a7:ci,lint ${NOTE}`,
+      });
+      expect(fake.requests.every(r => r.headers["authorization"] === undefined)).toBe(true);   // no credential was sent
+      fake.requests.length = 0;
+      clock = NOW + 60 * 60_000;
+      expect(await proof.tick()).toBe(0);                                                 // asking again would answer the same
+      expect(fake.requests).toHaveLength(0);
+      expect(store.task("T-1")?.status).toBe("review");
+      store.close();
+    });
+
+    it("the Done gate treats a ref that was not checked as not verified: held in on mode, overridable, recorded in warn", async () => {
+      seed();
+      const on = withForge({ mode: "on", allowedRepos: [PRIV] });
+      atReview(on.board);
+      await on.proof.file("T-1", { ...brief, ...priv }, lane);
+      await on.proof.idle();
+      const line = on.proof.view("T-1")!.state.line;
+      expect(await on.board.actChecked("T-1", { action: "move", to: "done", reason: "shipped" }, manager)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+      const overridden = await on.board.actChecked("T-1", { action: "move", to: "done", reason: "shipped", proofOverride: "private repo, read the CI page by hand" }, manager);
+      expect(overridden).toMatchObject({ ok: true, task: { status: "done" } });
+      expect(on.store.taskEvents("T-1").at(-1)?.change).toMatchObject({ proofSeen: `${line}; override: private repo, read the CI page by hand` });
+      on.store.close();
+      const warn = withForge({ mode: "warn", allowedRepos: [PRIV] });
+      atReview(warn.board);
+      await warn.proof.file("T-1", { ...brief, ...priv }, lane);
+      await warn.proof.idle();
+      expect(await warn.board.actChecked("T-1", { action: "move", to: "done", reason: "shipped" }, manager)).toMatchObject({ ok: true });
+      expect(warn.store.taskEvents("T-1").at(-1)?.change).toMatchObject({ proofSeen: line });
+      warn.store.close();
+    });
+
+    it("with the token the fake forge answers and the refs are green", async () => {
+      seed();
+      const { store, board, proof } = withForge({ mode: "on", allowedRepos: [PRIV], token: TOKEN });
+      atReview(board);
+      await proof.file("T-1", { ...brief, ...priv }, lane);
+      await proof.idle();
+      expect(proof.view("T-1")?.state.kind).toBe("verified");
+      expect(fake.requests).toHaveLength(2);
+      expect(fake.requests.every(r => r.headers["authorization"] === `Bearer ${TOKEN}`)).toBe(true);
+      expect(await board.actChecked("T-1", { action: "move", to: "done", reason: "shipped" }, manager)).toMatchObject({ ok: true, task: { status: "done" } });
+      store.close();
+    });
+
+    it("with the token, a repository it cannot see is unfetchable, not private", async () => {
+      fake.privateRepo(PRIV, "another-token");
+      const { store, board, proof } = withForge({ mode: "on", allowedRepos: [PRIV], token: TOKEN });
+      atReview(board);
+      await proof.file("T-1", { ...brief, refs: [`${PRIV}#7@3e9d1a7`] }, lane);
+      await proof.idle();
+      expect(store.proofResultsOf("T-1", 4)).toEqual([{ ref: `${PRIV}#7@3e9d1a7`, state: "unfetchable", detail: "not found or not visible", checkedAt: NOW }]);
+      store.close();
+    });
   });
 });
