@@ -16,23 +16,31 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "morndo-pool-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe("the pool's lines", () => {
-  it("maps the org and tier words: Team, personal, Max 5x, Max 20x, or the plan as written", () => {
+  it("maps the org and tier words: Team, personal, Max 5x, Max 20x; the free and an empty tier are no paid plan, any other tier shows its plan", () => {
     const m = parsePoolAccounts([
       { name: "a1", ...team5 },
       { name: "a2", email: "lin@example.test", org: "self", tier: "default_claude_max_20x" },
       { name: "a3", email: "sam@example.test", org: "self", tier: "team_trial", plan: "pro" },
+      { name: "a7", email: "kim@example.test", org: "self", tier: "default_claude_ai", plan: "max" },   // an ended subscription still says "max"
+      { name: "a8", email: "eli@example.test", org: "self", tier: "", plan: "max" },
+      { name: "a9", email: "joe@example.test", org: "self", tier: "default_claude_max_10x", plan: "max" },   // a Max tier the table doesn't know
+      { name: "a10", email: "ann@example.test", org: "claude_team", tier: "default_claude_team_standard", plan: "team" },   // a paid seat that isn't Max
       { name: "a4", org: "claude_team", tier: "default_claude_max_5x" },
     ].map(l => JSON.stringify(l)).join("\n"));
     expect(m.get("a1")).toEqual({ email: "ada@example.test", org: "team", plan: "Max 5x" });
     expect(m.get("a2")).toEqual({ email: "lin@example.test", org: "personal", plan: "Max 20x" });
     expect(m.get("a3")).toEqual({ email: "sam@example.test", org: "personal", plan: "pro" });
+    expect(m.get("a7")).toEqual({ email: "kim@example.test", org: "personal", plan: "no paid plan" });
+    expect(m.get("a8")?.plan).toBe("no paid plan");
+    expect(m.get("a9")?.plan).toBe("max");                                      // paid, only unnamed: shown as the file writes it
+    expect(m.get("a10")).toEqual({ email: "ann@example.test", org: "team", plan: "team" });   // an unknown paid seat is not "no paid plan"
     expect(m.get("a4")).toEqual({ email: null, org: "team", plan: "Max 5x" });   // no email: the rest still shown
     expect(JSON.stringify(m)).not.toContain("org-0001");                        // never read, never forwarded
   });
 
   it("skips a line with nothing to show, a bad line, a bad or missing name; a later line for a name wins", () => {
     const m = parsePoolAccounts([
-      { name: "a5", email: "", org: "", tier: "", plan: " " },
+      { name: "a5", email: "", org: "", plan: " " },                     // no tier at all: nothing to say, no label
       "{not json",
       { name: "bad name", email: "x@example.test" },
       { email: "noname@example.test" },
@@ -139,7 +147,7 @@ describe("what is not read (negative controls)", () => {
     expect(pool.current().get("a1")).toEqual({ email: "ada@example.test", org: "team", plan: "Max 5x" });
     expect(pool.current().get("a2")?.plan).toBe("Max 20x");
     // the next full write has no data for a1: that is a real change, and the label goes
-    write([{ name: "a1", email: "", org: "", tier: "" }, { name: "a2", email: "lin@example.test", org: "self", tier: "default_claude_max_20x", extra: 1 }]);
+    write([{ name: "a1", email: "", org: "" }, { name: "a2", email: "lin@example.test", org: "self", tier: "default_claude_max_20x", extra: 1 }]);
     await pool.refresh();
     expect(pool.current().has("a1")).toBe(false);
     // an account that is no longer in the file at all goes too
