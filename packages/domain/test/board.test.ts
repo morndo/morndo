@@ -2,8 +2,8 @@
 // work and never to Done, one task in progress per lane, every change an event with provenance and a revision.
 import { describe, expect, it } from "vitest";
 import {
-  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, MAX_MERGES, MORNDO_REPO, PRINCIPAL_NOT_LIVE, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, isOrphan, keyMismatch, livenessOf, mayMove, mergeLabel, mergedView, parseTaskKey, sessionId, taskKey, unregisteredMove, workingOn,
-  type AncestryAnswer, type BoardActor, type DoneGate, type Liveness, type MergeRecord, type NodeBuild, type Run, type Task, type TaskAction, type TaskActor,
+  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, MAX_MERGES, MORNDO_REPO, PRINCIPAL_NOT_LIVE, PRINCIPAL_PROOF_ACCEPT, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, isOrphan, keyMismatch, livenessOf, mayMove, mergeLabel, mergedView, parseTaskKey, proofOf, sessionId, taskKey, unregisteredMove, workingOn,
+  type AncestryAnswer, type BoardActor, type BriefInput, type DoneGate, type Liveness, type MergeRecord, type NodeBuild, type ProofBrief, type ProofGate, type ProofMode, type RefResult, type RefState, type Run, type Task, type TaskAction, type TaskActor,
 } from "../src/index.ts";
 
 const NOW = 1_700_000_000_000;
@@ -530,5 +530,106 @@ describe("merged, not live (B11)", () => {
     expect(twice.live).toBe(false);
     expect(twice.label).toBe("merged, not live: srv01 on abc1234");
     expect(mergedView(taskKey(4), [merge()], () => ({ live: true }))).toMatchObject({ live: true, label: "merged, live" });
+  });
+});
+
+// B13 to B16 (ADR-0035): the brief is the assignee's word, its own action that changes no state; its references are
+// judged against results the gate holds, never against the lane's say-so; the Done waits for them, mode by mode, and
+// an override (the manager's reason, the principal's click) is recorded in the event with what the board saw.
+describe("brief and proof (B13 to B16)", () => {
+  const PR = "acme/shop#42@3e9d1a7";
+  const LINE = `proof: 0 of 1 green · ✗ ${PR} lint`;              // one red ref: the gate's own line
+  const brief = (o: Partial<ProofBrief> = {}): ProofBrief => ({ summary: "Totals row rounds to cents", decisions: "", leftOut: "nothing", limits: "none known", refs: [PR], attested: [], noCode: "", ...o });
+  const filed: BriefInput = { summary: "Rounds the totals row to cents", leftOut: "nothing", limits: "none known" };
+  const seen = (ref: string, state: RefState, detail: string | null = null): RefResult => ({ ref, state, detail, checkedAt: NOW + 5 });
+  const proof = (o: Partial<ProofGate> = {}): ProofGate => ({ mode: "on", brief: brief(), results: [seen(PR, "red", "lint")], ...o });
+  const gate = (p: ProofGate): DoneGate => ({ merges: [], liveness: (): Liveness => { throw new Error("no merge to judge"); }, proof: p });
+  const act = (t: Task, a: TaskAction, by: TaskActor, g?: DoneGate, board: Task[] = [t]) => applyAction(t, a, by, NOW + 1, board, g);
+  const inReview = () => ({ ...make(1, { assignee: "builder" }), status: "review" as const });
+  const boardActor = (lane = "builder"): TaskActor => ({ kind: "board", rule: "D1", lane });
+
+  it("a done with a red ref is refused as proof_not_green naming the ref", () => {
+    expect(act(inReview(), { action: "move", to: "done", reason: "npm test: 14 passed" }, manager, gate(proof())))
+      .toEqual({ ok: false, error: { problem: "proof_not_green", detail: LINE } });
+  });
+
+  it("a done with no brief is refused in on mode and accepted in warn mode with proofSeen", () => {
+    const none = (mode: ProofMode): DoneGate => gate({ mode, brief: null, results: [] });
+    expect(act(inReview(), { action: "move", to: "done", reason: "x" }, manager, none("on")))
+      .toEqual({ ok: false, error: { problem: "proof_not_green", detail: "proof: no brief" } });
+    const warned = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, none("warn"));
+    expect(value(warned).task.status).toBe("done");
+    expect(value(warned).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: "proof: no brief" });
+  });
+
+  it("the principal's accept is recorded as the override", () => {
+    const r = act(inReview(), { action: "move", to: "done" }, principal, gate(proof()));
+    expect(value(r).task.status).toBe("done");
+    expect(value(r).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: `${LINE}; ${PRINCIPAL_PROOF_ACCEPT}` });
+  });
+
+  it("the manager's override reason is recorded in the done event", () => {
+    const r = act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: "flaky lint, rerun queued" }, manager, gate(proof()));
+    expect(value(r).task.status).toBe("done");
+    expect(value(r).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: `${LINE}; override: flaky lint, rerun queued` });
+    // an override that is not one clean line is refused as such, and one that says nothing is no override
+    expect(problem(act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: "a\u0007b" }, manager, gate(proof())))).toBe("bad_text");
+    expect(problem(act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: "  " }, manager, gate(proof())))).toBe("proof_not_green");
+  });
+
+  it("the board's D1 move to review is made with no brief and the card says no brief", () => {
+    const run: Run = { lane: "builder", node: "pc", phase: "ended", outcome: "done", line: "STATUS: DONE T-1", deadline: null, overdue: false, since: NOW + 10, source: "status" };
+    const t = { ...make(1, { assignee: "builder" }), status: "doing" as const };
+    expect(derivedMove(t, run, [t])).toMatchObject({ to: "review", rule: "D1" });   // the board's own move cannot be refused for want of a brief
+    expect(act(t, { action: "move", to: "review", reason: "STATUS: DONE T-1" }, boardActor(), gate(proof({ brief: null }))).ok).toBe(true);
+    expect(proofOf(null, [])).toEqual({ kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" });
+  });
+
+  it("a brief filed by the board actor is refused", () => {
+    expect(act(inReview(), { action: "brief", brief: filed }, boardActor())).toEqual({ ok: false, error: { problem: "not_allowed" } });
+  });
+
+  it("the same red done is accepted when the proof gate is off or absent (negative control)", () => {
+    const off = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, gate(proof({ mode: "off" })));
+    expect(value(off).task.status).toBe("done");
+    expect(value(off).event.change).not.toHaveProperty("proofSeen");
+    const absent = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, { merges: [], liveness: (): Liveness => { throw new Error("no merge to judge"); } });
+    expect(value(absent).task.status).toBe("done");
+    expect(value(absent).event.change).not.toHaveProperty("proofSeen");
+  });
+
+  it("a worker files a brief on its own task in doing or review, not on another's, not on a task in todo", () => {
+    const doing = { ...make(1, { assignee: "builder" }), status: "doing" as const };
+    const r = act(doing, { action: "brief", brief: filed }, builder);
+    expect(value(r).event.change).toEqual({ kind: "briefed", brief: { summary: "Rounds the totals row to cents", decisions: "", leftOut: "nothing", limits: "none known", refs: [], attested: [], noCode: "" } });
+    const review = value(apply(doing, { action: "move", to: "review" }, builder)).task;
+    expect(act(review, { action: "brief", brief: filed }, builder).ok).toBe(true);
+    expect(problem(act(doing, { action: "brief", brief: filed }, reviewer))).toBe("not_yours");
+    expect(act(make(2, { assignee: "builder" }), { action: "brief", brief: filed }, builder)).toEqual({ ok: false, error: { problem: "bad_transition", from: "todo" } });
+    // the board's hands file too (B13)
+    expect(act(doing, { action: "brief", brief: filed }, manager).ok).toBe(true);
+    expect(act(doing, { action: "brief", brief: filed }, principal).ok).toBe(true);
+  });
+
+  it("a brief changes no state: stateChangedAt and status stay, rev grows by one", () => {
+    const doing = { ...make(1, { assignee: "builder" }), status: "doing" as const };
+    const r = act(doing, { action: "brief", brief: filed }, builder);
+    expect(value(r).task).toMatchObject({ rev: doing.rev + 1, status: "doing", stateChangedAt: doing.stateChangedAt, updatedAt: NOW + 1 });
+  });
+
+  it("a verified done records proofSeen and is accepted in every mode", () => {
+    for (const mode of ["warn", "on"] as const) {
+      const r = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, gate(proof({ mode, results: [seen(PR, "green")] })));
+      expect(value(r).task.status, mode).toBe("done");
+      expect(value(r).event.change, mode).toMatchObject({ kind: "moved", to: "done", proofSeen: "proof: 1 of 1 green" });
+    }
+    expect(value(act(inReview(), { action: "move", to: "done", reason: "x" }, principal, gate(proof({ mode: "on", results: [seen(PR, "green")] })))).event.change)
+      .toMatchObject({ proofSeen: "proof: 1 of 1 green" });
+  });
+
+  it("with mode off the done carries no proofSeen", () => {
+    const r = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, gate(proof({ mode: "off" })));
+    expect(value(r).task.status).toBe("done");
+    expect(value(r).event.change).not.toHaveProperty("proofSeen");
   });
 });

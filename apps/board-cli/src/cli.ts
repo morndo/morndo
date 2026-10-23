@@ -81,10 +81,11 @@ function changeText(e: TaskEvent): string {
   const c = e.change;
   switch (c.kind) {
     case "created": return `filed it in ${c.status}${c.assignee ? `, for ${c.assignee}` : ""}`;
-    case "moved": return `${c.from} → ${c.to}${c.reason ? `: ${c.reason}` : ""}${c.notLive !== undefined ? ` (done while not live: ${c.notLive})` : ""}`;
+    case "moved": return `${c.from} → ${c.to}${c.reason ? `: ${c.reason}` : ""}${c.notLive !== undefined ? ` (done while not live: ${c.notLive})` : ""}${c.proofSeen !== undefined ? ` (proof: ${c.proofSeen})` : ""}`;
     case "assigned": return c.to ? `assigned it to ${c.to}` : `took it from ${c.from ?? "nobody"}`;
     case "edited": return `edited ${Object.keys(c).filter(k => k !== "kind").join(", ")}`;
     case "commented": return c.text.includes("\n") ? `commented:\n      ${c.text.replace(/\n/g, "\n      ")}` : `commented: ${c.text}`;
+    case "briefed": return `filed a brief: ${c.brief.summary.slice(0, 80)}`;
     case "merged": return `recorded its merge: ${c.repo} ${c.sha.slice(0, 7)}`;
     case "unmerged": return `cleared its merge record: ${c.repo} ${c.sha.slice(0, 7)}`;
   }

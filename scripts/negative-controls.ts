@@ -3981,6 +3981,13 @@ export const CONTROLS: Control[] = [
   { id: "t346-recheck-hash", task: "T-346", file: "apps/connections/src/adapters/caller-proof.ts",
     find: `  if (remembered !== null && remembered !== sha256) return no("the parent binary's hash changed while it was checked");\n`, replace: "",
     run: ["apps/connections/test/caller-proof.test.ts"], expect: "is not the one the cache holds for the file at the end" },
+  // ---- Proof of work, step 1 (board T-406, ADR-0035): the Done gate and the brief's author, each guard removed once.
+  { id: "t406-done-gate", task: "T-406", file: "packages/domain/src/board.ts",
+    find: `        else if (gate.proof.mode === "on") return refuse("proof_not_green", undefined, undefined, seen.line);\n`, replace: "",
+    run: ["packages/domain/test/board.test.ts"], expect: "proof_not_green" },
+  { id: "t406-brief-not-the-board", task: "T-406", file: "packages/domain/src/board.ts",
+    find: `      if (actor.kind === "board") return refuse("not_allowed");\n      if (actor.kind === "worker" && !mine) return refuse("not_yours");`, replace: `      if (actor.kind === "worker" && !mine) return refuse("not_yours");`,
+    run: ["packages/domain/test/board.test.ts"], expect: "not_allowed" },
 ];
 
 // ---- the runner
