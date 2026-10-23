@@ -25,11 +25,11 @@ describe("plan changes (U8)", () => {
 
   it("a drop needs the reset unchanged, and a rolling window never drops", () => {
     const drop = (after: PlanWindow) => observePlan(fact({ windows: [win("five-hour", { usedPercent: 80 })] }), fact({ windows: [after] }), NOW);
-    expect(drop(win("five-hour", { usedPercent: 20 }))).toEqual([{ kind: "drop", window: "five-hour", from: "80", to: "20" }]);        // the reset 3 days ahead and unchanged
+    expect(drop(win("five-hour", { usedPercent: 20 }))).toEqual([{ kind: "drop", window: "five-hour", from: "80", to: "20", resetsAt: NOW + 3 * DAY }]);        // the reset 3 days ahead and unchanged
     expect(drop(win("five-hour", { usedPercent: 5, resetsAt: NOW + 10 * DAY }))).toEqual([]);                                          // the reset moved a cycle on
     expect(drop(win("five-hour", { usedPercent: 61 }))).toEqual([]);                                                                   // a fall of 19 is no drop
     expect(drop(win("five-hour", { usedPercent: 45, rolling: true }))).toEqual([]);                                                    // declared rolling
-    expect(drop(win("five-hour", { usedPercent: 45 }))).toEqual([{ kind: "drop", window: "five-hour", from: "80", to: "45" }]);       // not rolling: it is a drop
+    expect(drop(win("five-hour", { usedPercent: 45 }))).toEqual([{ kind: "drop", window: "five-hour", from: "80", to: "45", resetsAt: NOW + 3 * DAY }]);       // not rolling: it is a drop
     expect(observePlan(fact({ windows: [win("five-hour", { usedPercent: 80 })] }), fact({ windows: [win("five-hour", { usedPercent: 45 })] }), NOW, ["five-hour"])).toEqual([]);   // remembered rolling
     // the rolling memory: a fall with the reset moving later, while the old cycle is still ahead, is remembered
     const w1 = watchPlan(noPlanWatch, fact({ windows: [win("five-hour", { usedPercent: 80, resetsAt: NOW + 4 * HOUR })] }), NOW);
@@ -41,6 +41,48 @@ describe("plan changes (U8)", () => {
     const c1 = watchPlan(noPlanWatch, fact({ windows: [win("five-hour", { usedPercent: 80, resetsAt: NOW + HOUR })] }), NOW);
     const c2 = watchPlan(c1.watch, fact({ windows: [win("five-hour", { usedPercent: 45, resetsAt: NOW + 5 * HOUR })] }), NOW + 2 * HOUR);
     expect(c2.watch.rolling).toEqual([]);
+  });
+
+  it("a drop is confirmed by a second drop of the same window and reset, not by the same number", () => {
+    const at = (pct: number, resetsAt = NOW + 3 * DAY) => fact({ windows: [win("five-hour", { usedPercent: pct, resetsAt })] });
+    const a = watchPlan(noPlanWatch, at(80), NOW);
+    const b = watchPlan(a.watch, at(20), NOW + MIN);
+    expect(b.told).toEqual([]);
+    const c = watchPlan(b.watch, at(22, NOW + 3 * DAY + 20_000), NOW + 2 * MIN);        // another number, the reset a few seconds apart
+    expect(c.told).toEqual([{ kind: "drop", window: "five-hour", from: "80", to: "22", resetsAt: NOW + 3 * DAY + 20_000 }]);
+    // a different window dropping, or the reset moved, is not the same change
+    const two = (w: PlanWindow) => fact({ windows: [win("five-hour", { usedPercent: 80 }), win("weekly", { lengthMins: 10080, usedPercent: 80 })].map(x => (x.id === w.id ? w : x)) });
+    const d1 = watchPlan(noPlanWatch, two(win("five-hour", { usedPercent: 80 })), NOW);
+    const d2 = watchPlan(d1.watch, two(win("five-hour", { usedPercent: 20 })), NOW + MIN);
+    const d3 = watchPlan(d2.watch, two(win("weekly", { lengthMins: 10080, usedPercent: 20 })), NOW + 2 * MIN);
+    expect(d3.told).toEqual([]);
+    expect(changeSignature({ kind: "drop", window: "five-hour", from: "80", to: "20", resetsAt: NOW + 3 * DAY })).toBe(changeSignature({ kind: "drop", window: "five-hour", from: "80", to: "26", resetsAt: NOW + 3 * DAY }));
+    expect(changeSignature({ kind: "drop", window: "five-hour", from: "80", to: "20", resetsAt: NOW + 3 * DAY })).not.toBe(changeSignature({ kind: "drop", window: "weekly", from: "80", to: "20", resetsAt: NOW + 3 * DAY }));
+  });
+
+  it("a window the status line leaves out is no change, however often it goes and comes back", () => {
+    const withBoth = fact();
+    const without = fact({ windows: [win("weekly", { lengthMins: 10080 })] });
+    let w = watchPlan(noPlanWatch, withBoth, NOW).watch;
+    let told: unknown[] = [];
+    for (const [i, f] of [without, without, withBoth, withBoth, without, without, withBoth, withBoth].entries()) {
+      const r = watchPlan(w, f, NOW + (i + 1) * MIN);
+      w = r.watch;
+      told = told.concat(r.told);
+    }
+    expect(told).toEqual([]);
+    // a reading that declares it carries the whole set can tell a removal, once a second such reading agrees
+    const complete = (ws: PlanWindow[]) => fact({ windows: ws, complete: true });
+    const c1 = watchPlan(noPlanWatch, complete([win("five-hour"), win("weekly", { lengthMins: 10080 })]), NOW);
+    const c2 = watchPlan(c1.watch, complete([win("weekly", { lengthMins: 10080 })]), NOW + MIN);
+    expect(c2.told).toEqual([]);
+    const c3 = watchPlan(c2.watch, complete([win("weekly", { lengthMins: 10080 })]), NOW + 2 * MIN);
+    expect(c3.told).toEqual([{ kind: "windows", window: null, from: "five-hour,weekly", to: "weekly" }]);
+    // a window never seen before is a change even from a reading that is not complete, and told once
+    const n1 = watchPlan(noPlanWatch, withBoth, NOW);
+    const n2 = watchPlan(n1.watch, fact({ windows: [...withBoth.windows, win("other")] }), NOW + MIN);
+    const n3 = watchPlan(n2.watch, fact({ windows: [...withBoth.windows, win("other")] }), NOW + 2 * MIN);
+    expect(n3.told.map(c => c.kind)).toEqual(["windows"]);
   });
 
   it("one odd reading tells nothing", () => {
