@@ -489,7 +489,8 @@ async function stepTickAppliesG(): Promise<void> {
   const tick = command("tick-g", MORNDO_UPDATE, ["update", "tick"], { timeoutMs: 20 * 60_000 });
   const state = stateFile();
   check("4-node-rolled-back-g",
-    tick.code === 1 && (tick.out + tick.err).includes(`Rolled back from ${VERSION_G}`)
+    // the tick says it in the alert's words ("0.3.0 rolled back to 0.2.0: …"); `update --yes` says "Rolled back from"
+    tick.code === 1 && ((tick.out + tick.err).includes(`${VERSION_G} rolled back to ${VERSION_B}`) || (tick.out + tick.err).includes(`Rolled back from ${VERSION_G}`))
       && state?.state === "rolled_back" && state.version === VERSION_B && state.target === VERSION_G
       && typeof state.attempt === "string" && state.attempt !== "",
     `tick exited ${tick.code}; state.json ${JSON.stringify(state)}: ${firstLines(tick, 3)}`);
