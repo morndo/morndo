@@ -12,7 +12,9 @@ import { CheckService } from "../src/application/check-service.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE } from "../src/application/namespaces.ts";
 import { FetchFailed, type StagedRecord } from "../src/application/ports.ts";
 import { SshSigVerifier } from "../src/adapters/verifier-sshsig.ts";
-import { FakeArtifacts, FakeClock, FakeFeed, FakeInstaller, FakeSettings, FakeStore, wipe } from "./helpers/fakes.ts";
+import {
+  FakeArtifacts, FakeClock, FakeFeed, FakeFleetView, FakeInstaller, FakeSettings, FakeStateSink, FakeStore, wipe,
+} from "./helpers/fakes.ts";
 import {
   doctoredFeed, feedFixture, keySetDocument, makeKeys, makeSigningKey, manifestSignature, packWithList,
   releaseFixture, sha256hex, signed, type Keys, type ReleaseFixture,
@@ -40,6 +42,8 @@ type World = {
   store: FakeStore;
   settings: FakeSettings;
   clock: FakeClock;
+  fleet: FakeFleetView;
+  state: FakeStateSink;
   service: CheckService;
 };
 
@@ -62,11 +66,15 @@ const build = (bend: (w: World) => void = () => {}, o: { disableUpdates?: boolea
   const store = new FakeStore();
   const settings = new FakeSettings();
   const clock = new FakeClock(NOW);
+  const fleet = new FakeFleetView();
+  const state = new FakeStateSink();
   const world: World = {
     keys, ks1, rel, feedText: feed.text, feed: fakeFeed, artifacts, installer, store, settings, clock,
+    fleet, state,
     service: new CheckService({
       feed: fakeFeed, artifacts, verifier: new SshSigVerifier(), installer, store, settings, clock,
       platform: rel.platform, switches: { disableUpdates: o.disableUpdates ?? false },
+      fleet, state,
     }),
   };
   bend(world);

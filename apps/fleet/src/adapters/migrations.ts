@@ -241,6 +241,37 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 16,
+    name: "the Rollout the fleet carries (updates §4.2, §7): one row per Version, the halted state durable",
+    compat: "additive",
+    up: db => db.exec(`
+      -- The Rollout of each Version the control plane committed (rollouts). halt_* are set when a node's rollback
+      -- stopped it (RL12) and cleared by a resume; they are synced (a halt must outlive the machine), so the fleet
+      -- answers GET /v1/rollout with the same Rollout after a restart. resumed_at: the last resume, for the audit's
+      -- story. No CHECK constraints (the additive lint's rule) — the application service holds the words.
+      CREATE TABLE IF NOT EXISTS rollouts (
+        version TEXT PRIMARY KEY, control_plane_committed_at INTEGER, soak_minutes INTEGER NOT NULL DEFAULT 30,
+        halted INTEGER NOT NULL DEFAULT 0, halted_by TEXT, halt_reason TEXT, halted_at INTEGER, resumed_at INTEGER,
+        updated_at INTEGER NOT NULL DEFAULT 0);
+      -- Every attempt id the fleet issued (rollout_attempts, review of #107 round 4): one per machine and Version it
+      -- offered (a Rollout a node may follow, an update.apply forwarded to it, the control plane's own announced
+      -- apply), random, spent (used_at) when a rollback report under it is accepted. A report halts only under an
+      -- issued, unspent id for that machine and Version. Pruned after 30 days, the newest offer of each kept.
+      CREATE TABLE IF NOT EXISTS rollout_attempts (attempt TEXT PRIMARY KEY, machine TEXT NOT NULL, version TEXT NOT NULL,
+        issued_at INTEGER NOT NULL DEFAULT 0, used_at INTEGER);
+    `),
+  },
+  {
+    version: 17,
+    name: "a node's last hello protocols (review of #111): the skew gate counts an offline node too",
+    compat: "additive",
+    up: db => db.exec(`
+      -- The agent protocols a node's last hello named, as JSON (nodes.last_proto): an offline node still depends on
+      -- them, so GET /v1/nodes reports them when it is offline and the control plane's skew gate counts them (RL11).
+      ALTER TABLE nodes ADD COLUMN last_proto TEXT;
+    `),
+  },
+  {
+    version: 18,
     name: "a node's enrolment: which join made its key, so a revocation names the enrolment it revoked (RL10)",
     compat: "additive",
     // A node keeps its name across a revoke and a join again; the revocation journal (updates design §11.5) keys a

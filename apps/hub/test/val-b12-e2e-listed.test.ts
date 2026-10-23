@@ -5,9 +5,11 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const scripts = (JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { scripts: Record<string, string> }).scripts;
-// The one e2e that runs on its own, never in `npm run e2e` or CI: the updater's throwaway-machine run (updates design
-// §13) needs Docker with CAP_SYS_ADMIN and some twenty minutes. It is not one that never runs: it has its own script.
-const OWN_SCRIPT: Record<string, string> = { "update.e2e.ts": "e2e:update" };
+// The e2e that run on their own, never in `npm run e2e` or CI: the updater's throwaway-machine runs (updates design
+// §13) need Docker with CAP_SYS_ADMIN and some twenty minutes or more — one machine, and the fleet's two (PR 6d: two
+// systemd containers and four Releases built, about half an hour, one heavy job at a time on a shared box). Neither
+// is one that never runs: each has its own script.
+const OWN_SCRIPT: Record<string, string> = { "update.e2e.ts": "e2e:update", "update-fleet.e2e.ts": "e2e:update-fleet" };
 const e2e = readdirSync(join(ROOT, "e2e")).filter(f => f.endsWith(".e2e.ts") && !(f in OWN_SCRIPT)).sort();
 const script = scripts.e2e ?? "";
 const ci = readFileSync(join(ROOT, ".github/workflows/ci.yml"), "utf8");

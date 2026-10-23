@@ -5,6 +5,12 @@
 // - `pane` is the number of tmux's own pane ID (`%N`), without leading zeros, so one pane has exactly one worker ID.
 // URL-safe, and opaque to the app. The legacy single-host hub keeps tmux's `%N` (LEGACY_PANE_ID).
 export const NODE_NAME = /^[a-z0-9-]{1,32}$/;
+// Names no node may take (review of #113): "control-plane" names the control plane's own machine in the updates
+// design — the fleet's Rollout records and attempt ids, the hub's Updates screen — so a node under it would be
+// indistinguishable from the machine that runs the fleet. NODE_NAME stays the wire's shape: a command may name it.
+export const RESERVED_NODE_NAMES: readonly string[] = ["control-plane"];
+// A name a node may join under: NODE_NAME's shape, and not reserved.
+export const isNodeName = (name: string): boolean => NODE_NAME.test(name) && !RESERVED_NODE_NAMES.includes(name);
 export const WORKER_ID = /^([a-z0-9-]{1,32})\.([0-9a-f]{8})\.(0|[1-9]\d{0,8})$/;
 export const LEGACY_PANE_ID = /^%\d{1,9}$/;
 

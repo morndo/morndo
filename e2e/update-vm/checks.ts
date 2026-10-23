@@ -51,12 +51,13 @@ const gone = (owner: string, procRoot: string): boolean => {
 /** A new build scratch in `dir`, owned from its first moment under the build's name: made under a name the sweep
  *  does not take (morndo-c2-new-…), its owner written, then renamed to morndo-c2-build-… with the same six
  *  characters. A sweep running meanwhile never sees it without its owner. `afterCreate` is the test's own moment. */
-export function makeOwnedScratch(dir: string, owner: string, hooks: { afterCreate?: () => void } = {}): string {
-  const made = mkdtempSync(join(dir, "morndo-c2-new-"));
+export function makeOwnedScratch(dir: string, owner: string, hooks: { afterCreate?: () => void; prefix?: string } = {}): string {
+  const prefix = hooks.prefix ?? "morndo-c2";                 // the fleet run's builds take "morndo-fleet" (PR 6d)
+  const made = mkdtempSync(join(dir, `${prefix}-new-`));
   try {
     hooks.afterCreate?.();
     writeFileSync(join(made, "owner"), owner);
-    const scratch = join(dir, `morndo-c2-build-${made.slice(made.length - 6)}`);
+    const scratch = join(dir, `${prefix}-build-${made.slice(made.length - 6)}`);
     renameSync(made, scratch);
     return scratch;
   } catch (error) {
@@ -69,10 +70,11 @@ export function makeOwnedScratch(dir: string, owner: string, hooks: { afterCreat
  *  what it removed. A live run's scratch stays, whoever's it is; a kept scratch (`keep`, from E2E_KEEP=1) is a
  *  person's to read and stays; only a real directory named exactly as the build makes them is removed; a failure to
  *  remove one is said through `say`, never thrown. */
-export function sweepScratch(dir: string, o: { keep: boolean; say: (line: string) => void; procRoot?: string }): string[] {
+export function sweepScratch(dir: string, o: { keep: boolean; say: (line: string) => void; procRoot?: string; prefix?: string }): string[] {
   if (o.keep) return [];
   const removed: string[] = [];
-  for (const name of readdirSync(dir).filter(n => SCRATCH_NAME.test(n))) {
+  const named = o.prefix === undefined ? SCRATCH_NAME : new RegExp(`^${o.prefix.replace(/[^a-z0-9-]/g, "")}-build-[A-Za-z0-9]{6}$`);
+  for (const name of readdirSync(dir).filter(n => named.test(n))) {
     const path = join(dir, name);
     try {
       if (!lstatSync(path).isDirectory()) continue;
@@ -96,13 +98,13 @@ export const OWNER_LABEL = "morndo-c2-e2e.owner";
  *  answers which. A live run's container stays; one with no owner (from before owners were labelled) is a gone run's. */
 export function sweepContainers(o: {
   list: () => { id: string; owner: string }[]; remove: (id: string) => { ok: boolean; err: string };
-  say: (line: string) => void; procRoot?: string;
+  say: (line: string) => void; procRoot?: string; what?: string;
 }): string[] {
   const removed: string[] = [];
   for (const c of o.list()) {
     if (!gone(c.owner, o.procRoot ?? "/proc")) continue;
     const done = o.remove(c.id);
-    o.say(`removed a container a gone run left behind (${c.id}): ${done.ok ? "ok" : done.err}`);
+    o.say(`removed a ${o.what ?? "container"} a gone run left behind (${c.id}): ${done.ok ? "ok" : done.err}`);
     if (done.ok) removed.push(c.id);
   }
   return removed;

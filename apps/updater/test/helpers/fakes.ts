@@ -6,15 +6,18 @@ import { chmodSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:f
 import { join } from "node:path";
 import {
   compareVersions, DEFAULT_CHANNEL, DEFAULT_MODE, parseVersion, TERMINAL_UPDATE_STATES,
-  type Channel, type UpdateSettings,
+  type Channel,
 } from "@morndo/domain";
 import { ARTIFACT_NAME } from "@morndo/protocol";
 import { DirsInstaller } from "../../src/adapters/installer-dirs.ts";
 import {
-  FetchFailed, type ArtifactStore, type CheckRecord, type Clock, type Download, type Installer, type Layout,
-  type ReleaseFeed, type SettingsSource, type Signed, type StagedRecord, type StoredUpdate, type TreeFinding,
-  type TrustState, type UpdateHistory, type UpdateStore,
+  FetchFailed, type ArtifactStore, type CheckRecord, type Clock, type Download, type FleetNode, type FleetView,
+  type FleetWord,
+  type Installer, type Layout, type MachineSettings, type ReleaseFeed, type SettingsSource, type Signed,
+  type StagedRecord, type StoredUpdate, type TreeFinding, type TrustState, type UpdateHistory, type UpdateStateSink,
+  type UpdateStore,
 } from "../../src/application/ports.ts";
+import type { UpdateStateFile } from "@morndo/protocol";
 
 // Removes a directory tree however it is left: a promoted Version is read-only (files 0444, directories 0555, §5),
 // and deleting needs the write bit back on every directory first.
@@ -287,6 +290,13 @@ export class FakeStore implements UpdateStore {
   readonly haltRows: { version: string; reason: string; at: number }[] = [];
   recordHalt(version: string, reason: string, at: number): void { this.haltRows.unshift({ version, reason, at }); }
   halts(): { version: string; reason: string; at: number }[] { return [...this.haltRows]; }
+
+  // §7's drawn delay, as the SQLite store keeps it: drawn once per Version, kept whatever later draws say.
+  readonly jitterRows = new Map<string, number>();
+  jitterOf(version: string): number | null { return this.jitterRows.get(version) ?? null; }
+  recordJitter(version: string, until: number): void {
+    if (!this.jitterRows.has(version)) this.jitterRows.set(version, until);
+  }
   readonly alertsSent = new Set<string>();
   firstAlert(updateId: string, kind: string): boolean {
     const key = `${updateId} ${kind}`;
@@ -345,18 +355,50 @@ export class FakeStore implements UpdateStore {
   }
 }
 
-// ---- settings and clock
+// ---- settings, clock, and the fleet's word
 
-export const DEFAULT_SETTINGS: UpdateSettings = { channel: DEFAULT_CHANNEL, mode: DEFAULT_MODE, pin: null, window: null };
+export const DEFAULT_SETTINGS: MachineSettings = {
+  channel: DEFAULT_CHANNEL, mode: DEFAULT_MODE, pin: null, window: null, soakMinutes: null,
+};
 
 export class FakeSettings implements SettingsSource {
-  value: UpdateSettings;
-  constructor(value: UpdateSettings = DEFAULT_SETTINGS) { this.value = value; }
-  read(): UpdateSettings { return this.value; }
+  value: MachineSettings;
+  constructor(value: MachineSettings = DEFAULT_SETTINGS) { this.value = value; }
+  read(): MachineSettings { return this.value; }
 }
 
 export class FakeClock implements Clock {
   nowMs: number;
   constructor(nowMs: number) { this.nowMs = nowMs; }
   now(): number { return this.nowMs; }
+}
+
+// The fleet's word (§7), as a test stands it: what view() says, what nodes() answers (the control plane's skew gate,
+// RL11), and the log of every read — the fleet has no write door for the updater anymore (the state file is its only
+// word out), so `calls` is how a test proves nothing else was asked. thrown flips either read into the unreachable
+// fleet a deferral must outlast.
+export class FakeFleetView implements FleetView {
+  word: FleetWord | null = null;
+  nodesWord: FleetNode[] | null = null;
+  throwView = false;
+  throwNodes = false;
+  /** Every fleet read, in order: "view" and "nodes". A write would have nowhere to land. */
+  readonly calls: string[] = [];
+
+  async view(): Promise<FleetWord | null> {
+    this.calls.push("view");
+    if (this.throwView) throw new Error("the fleet cannot be asked");
+    return this.word;
+  }
+  async nodes(): Promise<FleetNode[] | null> {
+    this.calls.push("nodes");
+    if (this.throwNodes) throw new Error("the fleet cannot be asked");
+    return this.nodesWord;
+  }
+}
+
+// The state file's sink (§6.3), recording what was written instead of writing it.
+export class FakeStateSink implements UpdateStateSink {
+  readonly written: UpdateStateFile[] = [];
+  write(s: UpdateStateFile): void { this.written.push(s); }
 }

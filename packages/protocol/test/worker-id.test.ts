@@ -1,7 +1,7 @@
 // Worker IDs across a fleet (docs/design/fleet-core/README.md §4): `<node>.<server>.<pane>`, parsed and formatted in
 // one place. Synthetic IDs only.
 import { describe, expect, it } from "vitest";
-import { formatWorkerId, isWorkerOrLegacyId, menuEscalationId, parseWorkerId } from "../src/index.ts";
+import { formatWorkerId, isNodeName, isWorkerOrLegacyId, menuEscalationId, parseWorkerId } from "../src/index.ts";
 
 describe("worker IDs", () => {
   it("format and parse are each other's inverse", () => {
@@ -48,3 +48,11 @@ describe("menu escalation IDs", () => {
     expect(menuEscalationId("%3")).toBe(legacy("%3"));
   });
 });
+
+describe("a node's name", () => {
+  it("is NODE_NAME's shape and none of the reserved names: control-plane names the control plane's own machine", () => {
+    for (const ok of ["pc", "srv01", "mac-studio", "a".repeat(32)]) expect(isNodeName(ok)).toBe(true);
+    for (const bad of ["control-plane", "PC", "", "a".repeat(33), "pc.1"]) expect(isNodeName(bad)).toBe(false);
+  });
+});
+

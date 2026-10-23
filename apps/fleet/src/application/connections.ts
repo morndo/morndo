@@ -16,7 +16,7 @@
 // Status: online after a welcome, stale from the first missed pong until terminated, offline once closed. The same
 // sweep re-checks that each node is still registered, so a revocation made while the service runs (the console writes
 // fleet.db directly) takes effect within one interval, for a node that is offline too (its lanes go: `onRevoked`).
-import { CAP_LONG_TEXT, CLOSE, LIMITS, type FleetMessage, type Health, type OpName, type Pane } from "@morndo/protocol";
+import { CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE, CLOSE, LIMITS, type FleetMessage, type Health, type NodeUpdateHealth, type OpName, type Pane, type RolloutWire } from "@morndo/protocol";
 import type { Audit } from "../adapters/audit.ts";
 import type { Logger } from "../adapters/log.ts";
 import type { NodesStore } from "../adapters/nodes-store.ts";
@@ -24,12 +24,16 @@ import type { EventHub } from "./events.ts";
 import { BULK_OPS, RESULT_SLACK_MS, Requests, failed, type Outcome, type Res, type StoreSeqs } from "./requests.ts";
 
 export type NodeStatus = "online" | "stale" | "offline";
-export type NodeView = { name: string; status: NodeStatus; health: Health | null; agent: string | null; commit: string | null };
+export type NodeView = { name: string; status: NodeStatus; health: Health | null; agent: string | null; commit: string | null;
+  // The protocol versions the node's hello named (null: not connected) and its updater's last report (null: none — an
+  // older node, or one that has not applied anything), updates §7.
+  proto: number[] | null; update: NodeUpdateHealth | null };
 
 // What the transport gives for one authenticated socket.
 export type Peer = { send(m: FleetMessage): void; ping(): void; close(code: number, reason: string): void; terminate(): void; open(): boolean };
 export type Admission = {
   node: string; instanceId: string; streamId: string; peer: Peer; source: string; agentVersion: string; agentCommit: string | null; claudeVersion: string | null; caps: string[];
+  proto: number[];                                        // the hello's, kept for GET /v1/nodes while it is connected
 };
 
 type Live = Admission & {
@@ -56,6 +60,7 @@ export class Connections {
   #pingMs: number;
   #instancePongMs: number;
   #onRevoked: (node: string) => void;
+  #updates: { aboveOwn(version: string): boolean; halted(version: string): boolean; issue?(node: string, version: string): string } | null;
   #revocations = new Map<string, number>();             // node → the revokedAt already acted on
   #sweep: ReturnType<typeof setInterval> | null = null;
   #bulk = new Map<string, BulkQueue>();
@@ -64,6 +69,10 @@ export class Connections {
   constructor(p: {
     nodes: NodesStore; audit: Audit; events: EventHub; log: Logger; now?: () => number; mono?: () => number; pingMs?: number;
     resultSlackMs?: number; instancePongMs?: number; onRevoked?: (node: string) => void;
+    // The updates design's two rules (§5.4), injected so this service holds none of the Rollout: whether a Version is
+    // above the one this control plane runs (RL11), and whether the Rollout of a Version is halted (RL12). Null in
+    // tests that ask for none of it.
+    updatePolicy?: { aboveOwn(version: string): boolean; halted(version: string): boolean; issue?(node: string, version: string): string };
     storeSeqs: StoreSeqs;                                 // fleet.db's
   }) {
     this.#nodes = p.nodes;
@@ -75,6 +84,7 @@ export class Connections {
     this.#pingMs = p.pingMs ?? LIMITS.pingMs;
     this.#instancePongMs = p.instancePongMs ?? LIMITS.instancePongMs;
     this.#onRevoked = p.onRevoked ?? (() => {});
+    this.#updates = p.updatePolicy ?? null;
     for (const n of this.#nodes.list()) if (n.revokedAt !== null) this.#revocations.set(n.name, n.revokedAt);   // done at start
     this.requests = new Requests((node, instanceId) => this.#live.get(node)?.instanceId === instanceId, p.resultSlackMs ?? RESULT_SLACK_MS, p.storeSeqs);
   }
@@ -145,7 +155,7 @@ export class Connections {
     const epoch = this.#nodes.nextEpoch(a.node);
     const previous = this.#nodes.recordSource(a.node, a.source);
     if (previous !== null) this.#audit.alert("source_changed", a.node, { from: previous, to: a.source });
-    this.#nodes.seen(a.node, a.agentVersion);
+    this.#nodes.seen(a.node, a.agentVersion, a.proto);
     this.#audit.record("agent", "conn.admitted", a.node, { instanceId: a.instanceId, epoch, source: a.source });
     const cur = this.#live.get(a.node);
     if (cur) {
@@ -236,6 +246,30 @@ export class Connections {
     // unknown_op (an old end reads that code safely), and nothing is sent. A node not live (offline or stale) keeps its
     // own answer.
     const c = this.#live.get(node);
+    // update.apply (updates §5.4) is refused the same way, on three counts: a live node whose hello never said
+    // CAP_UPDATE answers unknown_op, as an agent that never knew the op; a Version above the control plane's own is
+    // the skew RL11 refuses; a halted Rollout takes no asks until it is resumed (RL12). All before anything is sent,
+    // so every refusal answers executed: no.
+    if (op === "update.apply" && c !== undefined && !c.stale && this.#updates !== null) {
+      const version = typeof args === "object" && args !== null ? (args as { version?: unknown }).version : undefined;
+      if (typeof version !== "string")
+        return Promise.resolve(failed("bad_args", "update.apply needs a version"));
+      {
+        if (!c.caps.includes(CAP_UPDATE))
+          return Promise.resolve(failed("unknown_op", `${node}'s agent has no update.apply; update Morndo on it`));
+        if (this.#updates.aboveOwn(version))
+          return Promise.resolve(failed("not_allowed", `update.apply on ${node} for ${version}: a node never runs a Version newer than its control plane (RL11)`));
+        const runs = this.latest(node).health?.update?.version;
+        if (runs !== undefined && this.#updates.aboveOwn(runs))
+          return Promise.resolve(failed("not_allowed", `update.apply on ${node}: it runs ${runs}, above the control plane's own; it moves only once the control plane catches up, or roll it back on ${node} by hand (morndo update --rollback)`));
+        if (this.#updates.halted(version))
+          return Promise.resolve(failed("not_allowed", `update.apply on ${node} for ${version}: the Rollout of ${version} is halted: resume it first (RL12)`));
+        // The fleet's own attempt id for this ask, replacing any the caller sent: the id that node's rollback of it is
+        // reported under, and the only one that halts (review of #107, round 4).
+        const attempt = this.#updates.issue?.(node, version);
+        if (attempt !== undefined) args = { ...(args as Record<string, unknown>), version, attempt };
+      }
+    }
     const text = (op === "pane.send" || op === "lane.deliver" || op === "lane.start") && typeof args === "object" && args !== null
       ? (args as { text?: unknown; prompt?: unknown })[op === "lane.start" ? "prompt" : "text"] : undefined;
     if (typeof text === "string" && text.length > LIMITS.maxSendText && c !== undefined && !c.stale && !c.caps.includes(CAP_LONG_TEXT))
@@ -325,12 +359,26 @@ export class Connections {
     return this.#latest.get(node) ?? { inventory: null, health: null };
   }
 
-  // Every registered (not revoked) node, with its status, latest health and agent version.
+  // Every registered (not revoked) node, with its status, latest health, agent version, the protocol versions its
+  // hello named (null: not connected) and its updater's last report (null: none).
   list(): NodeView[] {
     return this.#nodes.list().filter(n => n.revokedAt === null).map(n => ({
       name: n.name, status: this.status(n.name), health: this.latest(n.name).health, agent: this.#live.get(n.name)?.agentVersion ?? n.agentVersion,
       commit: this.#live.get(n.name)?.agentCommit ?? null,
+      // live, or the last hello's while offline (review of #111): an offline node still speaks those (RL11)
+      proto: this.#live.get(n.name)?.proto ?? n.lastProto, update: this.latest(n.name).health?.update ?? null,
     }));
+  }
+
+  // The Rollout as it now stands, to every live agent whose hello said it takes one (CAP_ROLLOUT), each with its own
+  // offer (what it may follow, and the attempt id it reports a rollback of it under; none while there is nothing to
+  // follow); an agent from before the updates design is sent nothing — it would close on a frame it doesn't know.
+  pushRollout(rollout: RolloutWire, offerFor: (node: string) => { version: string; attempt: string } | null = () => null): void {
+    for (const c of this.#live.values()) {
+      if (c.stale || !c.caps.includes(CAP_ROLLOUT) || !c.peer.open()) continue;
+      const offer = offerFor(c.node);
+      c.peer.send({ v: 1, t: "rollout", rollout, ...(offer === null ? {} : { offer }) });
+    }
   }
 
   // The live instance of a node, for tests and status: null when offline.

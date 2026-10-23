@@ -19,7 +19,7 @@ const METHOD_WORDS = ["updater", "checkout", "package"] as const satisfies reado
 // A Version is SemVer 2.0.0, spelled exactly as the spec's official regex (https://semver.org/#is-there-a-suggested-
 // regular-expression-regex-to-check-a-semver-string, read 2026-10-11). The domain parses it again its own way; here it
 // only has to be a well-formed Version, or nothing.
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const version = () => z.string().check(z.regex(SEMVER));
 const sha256 = () => z.string().check(z.regex(/^[0-9a-f]{64}$/));
 const commit = () => z.string().check(z.regex(/^[0-9a-f]{40}$/));

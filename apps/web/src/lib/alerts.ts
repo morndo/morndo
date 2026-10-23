@@ -79,6 +79,32 @@ export function alertWords(a: AlertWire): AlertWords {
     case "job_unnoticed": return {
       title: `A job's notice didn't reach its lane: ${str(d.name, str(d.id, "a job"))}`,
       detail: "The job ended, but its lane never took the notice.", urgent: urgentAlert(a) };
+    case "rollout_halted": {
+      const version = str(d.version, "this release");
+      return {
+        title: `Updates to ${version} are stopped`,
+        detail: `${str(d.machine, "A machine")} went back from it: ${str(d.reason, "a check failed")}. No other machine takes ${version} until you resume it in Settings → Updates, or a newer release comes.`,
+        urgent: urgentAlert(a) };
+    }
+    case "update_rolled_back": if (typeof d.ignored === "string") return {
+      title: `${str(d.machine, node)} reported a rollback the fleet didn't count`,
+      detail: `Nothing was halted: ${d.ignored}.`,
+      urgent: urgentAlert(a) };
+      return {
+      title: `${node} went back to ${str(d.version, "its last version")}`,
+      detail: `The update to ${str(d.target, "a new version")} failed: ${str(d.reason, "a check failed")}. ${node} runs its last version again, and that release goes no further.`,
+      urgent: urgentAlert(a) };
+    case "update_rollback_failed": return {
+      title: `${node}'s update failed, and so did the way back`,
+      detail: `It couldn't return from ${str(d.target, "the new version")}: ${str(d.reason, "a check failed")}. Morndo's services there are left to the service manager; look at ${node} soon.`,
+      urgent: urgentAlert(a) };
+    case "update_skew_blocked": {
+      const nodes = Array.isArray(d.nodes) ? d.nodes.filter(n => typeof n === "string").join(", ") : "";
+      return {
+        title: `The update to ${str(d.version, "a new version")} waits${nodes ? ` for ${nodes}` : ""}`,
+        detail: `It drops a protocol ${nodes || "an older machine"} still speaks. Update ${nodes || "that machine"} first; then it goes on.`,
+        urgent: urgentAlert(a) };
+    }
     default: return { title: `${node}: ${a.kind.replace(/_/g, " ")}`, detail: "A newer fleet raised this alert.", urgent: urgentAlert(a) };
   }
 }

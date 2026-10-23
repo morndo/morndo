@@ -12,8 +12,8 @@ import {
 import { ChannelFeedSchema, KeySetSchema, ManifestSchema } from "@morndo/protocol";
 import { FEED_NAMESPACE, KEYS_NAMESPACE, RELEASE_NAMESPACE } from "./namespaces.ts";
 import {
-  FetchFailed, type ArtifactStore, type Clock, type Installer, type ReleaseFeed, type SettingsSource,
-  type Signed, type UpdateStore, type Verifier,
+  FetchFailed, type ArtifactStore, type Clock, type FleetView, type Installer, type ReleaseFeed,
+  type SettingsSource, type Signed, type UpdateStateSink, type UpdateStore, type Verifier,
 } from "./ports.ts";
 
 // §8.1's sentence for an install that is not the updater's to change (RL14). The doctor says the same thing.
@@ -62,18 +62,20 @@ export class CheckService {
     feed: ReleaseFeed; artifacts: ArtifactStore; verifier: Verifier; installer: Installer;
     store: UpdateStore; settings: SettingsSource; clock: Clock; platform: Platform;
     switches: { disableUpdates: boolean };
+    fleet: Pick<FleetView, "view">; state: UpdateStateSink;
   };
 
   constructor(p: {
     feed: ReleaseFeed; artifacts: ArtifactStore; verifier: Verifier; installer: Installer;
     store: UpdateStore; settings: SettingsSource; clock: Clock; platform: Platform;
     switches: { disableUpdates: boolean };
+    fleet: Pick<FleetView, "view">; state: UpdateStateSink;
   }) {
     this.#p = p;
   }
 
   async check(): Promise<CheckOutcome> {
-    const { feed, artifacts, verifier, installer, store, settings: settingsSource, clock, platform, switches } = this.#p;
+    const { feed, artifacts, verifier, installer, store, settings: settingsSource, clock, platform, switches, fleet, state } = this.#p;
     const settings = settingsSource.read();
     // What the store learns on the way (§4.5): the feed's word once accepted, the Version once offered.
     let feedSeq: number | null = null;
@@ -207,12 +209,17 @@ export class CheckService {
         installMethod: "updater",
         settings: { ...settings, mode: "apply" },
       };
+      // RL12 either way: the fleet's Rollout of the offered Version is halted, or this machine's own halt record
+      // of it stands (the record holds even while the fleet cannot be asked). No word from the fleet halts nothing.
+      const word = await fleet.view().catch(() => null);
+      const rolloutHalted = word?.rollout?.halted === true && word.rollout.version === best.text
+        || store.halts().some(h => h.version === best.text);
       const admitted = admit({
         machine,
         switches: { disableAutoUpdate: false, disableUpdates: false },
         ask: { kind: "auto" },
         offered: { version: best.version, feed: channelFeed },
-        rolloutHalted: false,                              // the Rollout is PR 6's
+        rolloutHalted,
       });
       if (!admitted.ok) {
         if (admitted.error === "not_newer") {
@@ -223,6 +230,7 @@ export class CheckService {
 
       // Already staged and installed: nothing is fetched (§6.1's step 1 decides before step 2 downloads).
       if (store.versionRecord(best.text) !== null && installer.has(best.text)) {
+        state.write({ state: "staged", version: layout.current, target: best.text, at: clock.now() });
         return finish({ kind: "staged", version: best.text, already: true }, "already staged", best.text);
       }
       stageVersion = best.text;
@@ -274,6 +282,7 @@ export class CheckService {
         const findings = await installer.verifyTree(best.text, artifact.filesSha256);
         if (findings.length === 0) {
           store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now(), manifest: manifestText });
+          state.write({ state: "staged", version: layout.current, target: best.text, at: clock.now() });
           return finish({ kind: "staged", version: best.text, already: true },
             "adopted a verified directory left without its record", best.text);
         }
@@ -312,6 +321,7 @@ export class CheckService {
       // §6.1 step 6: promote, remember, and let the download go.
       installer.promote(best.text, { manifestSha256, filesSha256: artifact.filesSha256, at: clock.now() });
       store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now(), manifest: manifestText });
+      state.write({ state: "staged", version: layout.current, target: best.text, at: clock.now() });
       return finish({ kind: "staged", version: best.text, already: false }, "verified and staged");
     } catch (error) {
       if (error instanceof FetchFailed) {

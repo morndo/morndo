@@ -5,7 +5,7 @@ import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { DatabaseUnreadable, NotLocalDisk, RevocationJournal, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
+import { DatabaseUnreadable, NotLocalDisk, RevocationJournal, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, productStamp, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
 import { shutdownStack, type Shutdown } from "./adapters/shutdown.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
@@ -14,7 +14,11 @@ import { ReadingService } from "./application/reading-service.ts";
 import { PresenceService } from "./application/presence-service.ts";
 import { NotificationService } from "./application/notification-service.ts";
 import { loadOrCreateVapid, pushSender } from "./adapters/webpush.ts";
-import { loadOrCreateIdentity } from "./adapters/identity.ts";
+import { loadOrCreateIdentity, writeIdentityPub } from "./adapters/identity.ts";
+import { fleetForUpdates } from "./adapters/fleet-updates.ts";
+import { principalSigner } from "./adapters/principal-signer.ts";
+import { updaterCli } from "./adapters/updater-cli.ts";
+import { UpdatesService } from "./application/updates-service.ts";
 import { passkeys } from "./adapters/passkeys.ts";
 import { denyConfigFromEnv, denyConfigWithClaudeDir, denyRoots, paneLock } from "@morndo/node-ops";
 import { CLIENT_API } from "@morndo/protocol";
@@ -131,6 +135,9 @@ function openStore(dir: string): Store {
   }
 }
 const identity = loadOrCreateIdentity(config.dataDir);
+// The same key where the fleet reads it (PR 6c round 2, R2): every start rewrites identity.pub, so a production
+// fleet without a pinned principalKey finds the hub's key without anyone installing it by hand.
+writeIdentityPub(config.dataDir, identity.publicKeyRaw);
 // RL10 (updates design §11.5): every revocation is journaled to revoked.log beside morndo.db before its database
 // write, and every start applies the journal again, so a database restored from an older copy brings no revoked
 // device or agent token back.
@@ -290,6 +297,18 @@ switch (cmd) {
     const engines = config.enginesBin ? new EnginesService({ cli: enginesCli(config.enginesBin), store, policy: () => access.policy() }) : null;
     // The connections program, named like the engines CLI. A private home only, and never the engines program.
     const connections = openConnections(access.policy.bind(access));
+    // Updates §8.1 (PR 6c): every machine's Version, the owner's one screen. The control plane's own updater CLI runs
+    // beside the hub, but without a fleet there is no Rollout to move and no node to command, so the page stays off.
+    // The fleet's `rollout` events keep the service's last word on where the Rollout stands, for a view the fleet
+    // can't answer (its own subscription, like the runs' and the deliveries').
+    const updatesService = fleet ? new UpdatesService({
+      fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: principalSigner(identity), store,
+      policy: () => access.policy(), build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
+    }) : null;
+    const stopRolloutEvents = fleet && updatesService
+      ? fleet.client.events(e => { if (e.t === "rollout") updatesService.onRolloutEvent(e.body); })
+      : null;
+    if (stopRolloutEvents) shutdown.onStop(stopRolloutEvents);
     // Said once at start: a CLI older than the page needs, or one that can't run (the page says it again when opened).
     engines?.ready().then(why => { if (why) log.warn(`engines: ${why}`); }, e => log.warn("engines: the CLI can't run", e));
     // ADR-0015: the board, changed by the principal (a Command) and by the agents (their tokens, issued below).
@@ -361,7 +380,7 @@ switch (cmd) {
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, store, files, inbox, reading, presence,
       push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
-      transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) },
+      transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) }, updatesService,
     });
     shutdown.onStop(async () => { await http.idle(); await http.close(); });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);

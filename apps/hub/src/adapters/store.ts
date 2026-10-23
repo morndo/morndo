@@ -9,8 +9,8 @@ import { migrate } from "./migrations.ts";
 import type { DeliveryState } from "@morndo/protocol";
 import {
   endpointId, pairingTokenId, sessionId,
-  type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type MergeRecord, type NotificationEvent, type PairingToken,
-  type Session, type Task, type TaskEvent, type Transcription, type Upload,
+  type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
+  type Session, type Task, type TaskEvent, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
 } from "@morndo/domain";
 
 // What the audit log holds: Access events, and the principal's Decisions (the words of a Decision never, only their
@@ -20,7 +20,7 @@ export type BriefAudit = {
   type: "BriefFiled" | "BriefRestated" | "BriefWithdrawn" | "BriefSettled" | "BriefForwarded" | "BriefDeclined";
   id: string; version: number; asker: { kind: "manager" | "worker"; name: string }; token: string; at: number;
 };
-export type AuditEvent = AccessEvent | NotificationEvent | (EscalationAnswered & { length?: number; digest?: string }) | EnginesChanged | BoardChanged | BriefAudit;
+export type AuditEvent = AccessEvent | NotificationEvent | (EscalationAnswered & { length?: number; digest?: string }) | EnginesChanged | BoardChanged | BriefAudit | UpdateCommanded;
 
 export type BriefState = "draft" | "open" | "withdrawn" | "settled" | "expired" | "declined";
 // One version of a filed brief. A restate is the next row; the earlier JSON stays.

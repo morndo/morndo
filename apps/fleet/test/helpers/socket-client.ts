@@ -10,10 +10,10 @@ import { whenTrue } from "./when-true.ts";
 
 export type Raw = { status: number; headers: Record<string, string | string[] | undefined>; body: Buffer; complete: boolean };
 
-export function client(socketPath: string) {
+export function client(socketPath: string, headers: Record<string, string> = {}) {
   return {
-    get: (path: string) => socketRequest(socketPath, "GET", path),
-    post: (path: string, body?: unknown) => socketRequest(socketPath, "POST", path, body, 10_000),
+    get: (path: string) => socketRequest(socketPath, "GET", path, undefined, 3000, headers),
+    post: (path: string, body?: unknown) => socketRequest(socketPath, "POST", path, body, 10_000, headers),
     raw: (path: string, o: { method?: string; headers?: Record<string, string>; body?: string } = {}) => new Promise<Raw>((resolve, reject) => {
       const req = request({ socketPath, path, method: o.method ?? "GET", headers: o.headers ?? {} }, res => {
         const chunks: Buffer[] = [];

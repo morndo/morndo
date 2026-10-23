@@ -3,7 +3,7 @@
 // themselves (better-sqlite3 waits on the service's locks) and reach the running service through its Unix socket.
 import type Database from "better-sqlite3";
 import { dirname, join } from "node:path";
-import { LIMITS, NODE_NAME, formatJoinString } from "@morndo/protocol";
+import { LIMITS, NODE_NAME, formatJoinString, isNodeName } from "@morndo/protocol";
 import { NotLocalDisk, RevocationJournal, assertLocalDisk, exitAfterOutput, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { ConfigError, loadConfig, type FleetConfig } from "./config.ts";
 import { DatabaseUnreadable, openFleetDb } from "./adapters/db.ts";
@@ -89,6 +89,7 @@ try {
   } else if (cmd === "node" && sub === "add") {
     const name = args[0] ?? "";
     if (!NODE_NAME.test(name)) fail(`a node name is 1 to 32 of a-z, 0-9 and "-": ${JSON.stringify(name)}`, EXIT_USAGE);
+    if (!isNodeName(name)) fail(`${JSON.stringify(name)} is reserved: it names the control plane's own machine`, EXIT_USAGE);
     const cfg = config();
     localDisk(cfg.dbPath);                                  // before the key file or the database is made
     const key = fleetKey(cfg.keyPath);

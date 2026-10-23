@@ -10,7 +10,10 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { WebSocket, type ClientOptions } from "ws";
 import { Store } from "../src/adapters/store.ts";
-import { loadOrCreateIdentity } from "../src/adapters/identity.ts";
+import { loadOrCreateIdentity, type HubIdentity } from "../src/adapters/identity.ts";
+import { principalSigner } from "../src/adapters/principal-signer.ts";
+import { UpdatesService } from "../src/application/updates-service.ts";
+import type { FleetForUpdates, UpdaterCli } from "../src/application/updates-ports.ts";
 import { startHttp, type Limits } from "../src/adapters/http.ts";
 import type { Passkeys } from "../src/adapters/passkeys.ts";
 import { uploadInbox } from "../src/adapters/uploads.ts";
@@ -36,11 +39,12 @@ import type { LedgerRead } from "../src/adapters/ledger.ts";
 import type { SendOutcome } from "../src/application/ports.ts";
 import type { Config } from "../src/config.ts";
 import type { ManagerQueue } from "../src/application/manager-queue.ts";
+import { productStamp } from "@morndo/service-kit";
 
 export const ORIGIN = "https://hub.example.test";
 
 export type InProcessHub = {
-  base: string; store: Store; access: AccessService; dir: string;
+  base: string; store: Store; access: AccessService; dir: string; identity: HubIdentity;
   notifications: NotificationService;
   board: BoardService;
   agents: AgentAccess;
@@ -78,6 +82,11 @@ export async function startInProcessHub(o: {
   liveness?: (sha: string) => Liveness;
   knows?: (sha: string) => Promise<"yes" | "no" | "unknown">;
   orphans?: (tasks: readonly Task[], now: number) => string[];
+  // `identity`: the hub's identity key (a test's own pair; default: one made in the temp dir) — it signs the
+  // principal's assertions (updates §5.4). `updates`: the fleet and the updater CLI to run (a test's fakes); absent,
+  // the updates routes answer 404 as with no fleet and no CLI wired.
+  identity?: HubIdentity;
+  updates?: { fleet: FleetForUpdates; cli: UpdaterCli };
 } = {}): Promise<InProcessHub> {
   const dir = mkdtempSync(join(tmpdir(), "morndo-inproc-"));
   const web = join(dir, "web");
@@ -149,21 +158,27 @@ export async function startInProcessHub(o: {
     },
   });
   await transcription.start();
+  const identity = o.identity ?? loadOrCreateIdentity(dir);
   const http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access, store, observation: o.observation ?? new ObservationService(tmux, 1000),
+    config, identity, access, store, observation: o.observation ?? new ObservationService(tmux, 1000),
     steering: o.steering ? o.steering(store) : new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox, undefined, undefined, undefined, null,
       queue ? { queue, isManager: id => id === o.manager } : null, () => o.manager ?? null),
     escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now), queue, ...(o.alerts ? { alerts: o.alerts } : {}),
     push: { publicKey: vapid.publicKey, notifications },
     board: { service: board, agents }, usage, jobs, briefs,
     engines: o.engines ? new EnginesService({ cli: enginesCli(o.engines.bin, o.engines.env), store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}) }) : null,
+    updatesService: o.updates ? new UpdatesService({
+      fleet: o.updates.fleet, cli: o.updates.cli, sign: principalSigner(identity), store,
+      policy: () => access.policy(), ...(o.now ? { now: o.now } : {}),
+      build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
+    }) : null,
     transcription,
     ...(o.limits ? { limits: o.limits } : {}), ...(o.heartbeatMs ? { heartbeatMs: o.heartbeatMs } : {}), ...(o.now ? { now: o.now } : {}),
   });
   await http.ready;
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
   return {
-    base, store, access, dir, notifications, board, agents, briefs, escalations, usage, jobs, pushes,
+    base, store, access, dir, identity, notifications, board, agents, briefs, escalations, usage, jobs, pushes,
     async cookie() {
       const opts = await access.pairOptions(access.issueConsoleToken().secret, "phone");
       if (!("flowId" in opts)) throw new Error(opts.refused);

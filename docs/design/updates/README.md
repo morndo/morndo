@@ -320,6 +320,7 @@ Recovery runs from `good`, the last committed Version, because that code has pas
 Claude Code's promise is that the next start runs the new Version [U1]. For services the next start is usually a reboot. On Linux, `morndo-update-boot.service` runs before the services when a Version is staged, automatic updates are on and there is no pin:
 - It takes the apply lock, fetches the Feed again and runs `admit` (withdrawn, halted, bad here). Without a network it doesn't apply.
 - **Only on a machine that is its own control plane.** A node can't know at boot whether its control plane still runs the target or has halted the Rollout (RL11, RL12): its agent isn't connected yet. So a node applies through the tick, once its agent has connected and the fleet's view is less than 10 minutes old.
+- Skew (section 7) still applies, but the fleet isn't running yet. The control plane's updater keeps the node list from its last successful read of `GET /v1/nodes` (`fleet-nodes.json` in its state directory), and the boot apply decides on that list if it is at most 10 minutes old. With no such list, it applies nothing and leaves the Version to the tick, which runs once the fleet answers.
 - It records the same marks as section 6.2 (`backing_up`, `swapping`, `starting`), writes `hold.json` when RL9 applies, then backs up and swaps while nothing runs: a safe point by construction.
 - The services then start on the new Version. The recovery unit, ordered after them, judges health and commits or rolls back as in section 6.6. With nothing running to read a baseline from, the baseline is the health recorded at the last commit.
 
@@ -333,7 +334,7 @@ launchd has no ordering, so on macOS the staged Version applies at the first saf
 2. Its commit starts the soak: 30 minutes by default.
 3. Each node applies once the control plane runs the target or newer (RL11), the Rollout isn't halted (RL12), the soak has passed, and after a random delay of up to 15 minutes, so two nodes rarely restart at once.
 
-A node learns the control plane's Version and the Rollout's state from the fleet's `welcome` and a new `rollout` event (optional fields: protocol 1 still parses). It reports its own update state in its `health` message (optional fields too).
+A node learns the control plane's Version and the Rollout's state from the fleet's `welcome` (optional fields, so an agent that predates them still parses the frame) and from the `rollout` message the fleet sends on every change — but only once the node announced the `rollout` capability in its hello's caps, because an agent closes an unknown frame type (1008) rather than skipping it: the fleet sends the message only to agents that asked for it. It reports its own update state in its `health` message (optional fields too).
 
 **Skew rules.**
 
@@ -344,6 +345,12 @@ A node learns the control plane's Version and the Rollout's state from the fleet
 | web app and hub | The same Release. The hub accepts the previous Release's web app: the protocol package only adds optional fields from one Release to the next, and removing one takes two Releases, as the agent protocol does. | An open tab sees `updated` and offers a reload (below). |
 
 **Changing the agent protocol takes two Releases.** Release A speaks N and N+1. Release B drops N. The control plane defers B, naming the nodes, until every joined, non-revoked node reports A or newer (RL11). `manifest.protocol` carries each Release's range, so the check needs no knowledge of what changed.
+
+**The control plane's own node never counts.** Its node agent is updated in the control plane's own install, so the skew gate leaves out the node this machine's agent reports as its name; otherwise no Release that drops a protocol could ever apply on a control plane that runs its own node. It does so only while that agent is alive and online under the name (its status file's pid answers, and the fleet admitted its key): a file an exited or refused agent left behind excludes nobody, because the name may since belong to another machine. At boot the agent has not started yet, so a protocol-dropping Release that a control plane's own node is the only one to hold is not applied by the boot unit; it waits (exit 75, `skew_blocked`) and the tick applies it once the agent is online. That is the safe side, and a Release that drops a protocol is rare. The status file is writable by the same user, like every file the services trust (ADR-0004's limit; the threat model above): a process of the user that rewrites it can take a node out of the gate, as it could edit the installed tree.
+
+**An offline node still counts.** `GET /v1/nodes` reports an offline node's protocols from its last hello, so the control plane's skew gate counts a node that is switched off. A joined node that never said its protocols holds the control plane too, named as unknown in the hold and its alert. Revoking a node that will never come back lets a Release past it.
+
+**After the control plane rolls back.** The control plane's rollback, the principal's included, announces its own attempt id and halts the Version it left. Nodes that already took that Version now run above the control plane. Nothing moves them by itself: the fleet lists them as `nodesAhead`, refuses every `update.apply` to them, and their ticks take nothing lower. They wait until the control plane runs that Version again, or until the owner rolls each one back on the node with `morndo update --rollback`.
 
 **A bad Release.** When one machine rolls back, the Rollout halts and no other machine takes that Version automatically (RL12). The hub shows which machine failed and which check. `morndo update --resume-rollout <version>` or a newer Release continues. The maintainers can withdraw a Release in the Feed: machines stop being offered it, and machines already on it are told and stay (RL2). The fix goes out as a new Release.
 

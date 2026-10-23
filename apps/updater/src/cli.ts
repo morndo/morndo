@@ -6,22 +6,28 @@
 // unit and reports its record; the tick, the boot and the recovery units run the same services themselves.
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
-import { compareVersions, formatVersion, parseVersion, rollbackRestores, type Channel, type Platform, type UpdateService } from "@morndo/domain";
-import { KeySetSchema, UpdateStatusSchema } from "@morndo/protocol";
+import {
+  compareVersions, formatVersion, parseVersion, rollbackRestores, DEFAULT_SOAK_MINUTES,
+  type Channel, type Platform, type ProtocolRange, type UpdateService,
+} from "@morndo/domain";
+import { ATTEMPT_ID, KeySetSchema, ManifestSchema, UpdateStatusSchema } from "@morndo/protocol";
 import { ApplyService, type ApplyOutcome } from "./application/apply-service.ts";
 import { planOf, type ApplyTiming } from "./application/apply-steps.ts";
 import { CHECKOUT_SENTENCE, CheckService, type CheckOutcome } from "./application/check-service.ts";
 import { doctor } from "./application/doctor-service.ts";
+import { FEED_CHECK_MS, FRESH_VIEW_MS, applyUnitGate, controlPlaneSkew, deferSentence, nodeGate } from "./application/fleet-follow.ts";
 import type { RecoverOutcome } from "./application/recovery-service.ts";
 import { RecoveryService } from "./application/recovery-service.ts";
 import { formatStatus, readStatus } from "./application/status-service.ts";
 import type {
-  AlertSink, ArtifactStore, ReleaseFeed, RoleProbe, ServiceManager, UpdateHistory,
+  AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, UpdateHistory,
 } from "./application/ports.ts";
 import { ConfigFile, ConfigInvalid } from "./adapters/config-file.ts";
 import { ApplyingFileMarker } from "./adapters/applying-file.ts";
 import { HttpsArtifacts } from "./adapters/artifacts-https.ts";
 import { SqliteBackup } from "./adapters/backup-sqlite.ts";
+import { FleetSocketView } from "./adapters/fleet-socket.ts";
+import { FleetStatusView, machineNameOf, ownOnlineNodeOf } from "./adapters/fleet-status.ts";
 import { HttpsFeed } from "./adapters/feed-https.ts";
 import { HoldFileWriter } from "./adapters/hold-file.ts";
 import { DirsInstaller } from "./adapters/installer-dirs.ts";
@@ -29,10 +35,11 @@ import { LaunchdServices } from "./adapters/services-launchd.ts";
 import { ServiceProbes } from "./adapters/probes.ts";
 import { SqliteRevocations } from "./adapters/revocations-sqlite.ts";
 import { SqliteSchemas } from "./adapters/schema-sqlite.ts";
+import { StateFileWriter } from "./adapters/state-file.ts";
 import { SystemdServices, systemdUserManager } from "./adapters/services-systemd.ts";
 import { databasePaths, updaterPaths } from "./adapters/paths.ts";
 import { openUpdateStore, SqliteUpdateStore, UpdateDbFromFuture } from "./adapters/store-sqlite.ts";
-import { SshSigVerifier } from "./adapters/verifier-sshsig.ts";
+import { SshSigVerifier, randomAttemptId } from "./adapters/verifier-sshsig.ts";
 
 // Q4: the feed lives on the GitHub Pages of the public repository. A mirror may override it (§8.3): the address
 // decides nothing about trust, the signatures do.
@@ -49,11 +56,12 @@ const EXIT_SOFTWARE = 70;
 const EXIT_TEMPFAIL = 75;
 const EXIT_CONFIG = 78;
 
-const USAGE = `usage: morndo-update update [--yes] [--now]       check, then apply what stands staged (asks first on a terminal)
+const USAGE = `usage: morndo-update update [--yes] [--now] [--detach] [--staged <v>]   check, then apply what stands staged (asks first on a terminal; --staged applies only <v>)
        morndo-update update --check [--json]        check the channel feed, verify, and stage what passes
        morndo-update update --status [--json]       what this machine believes, the last updates included
-       morndo-update update --rollback [--yes]      back to the previous Version (a restore asks for the typed word)
-       morndo-update update apply --version <v>     one apply, as the apply unit runs it
+       morndo-update update --rollback [--yes] [--detach] [--typed rollback]   back to the previous Version (a restore asks for the typed word; --typed carries it under --yes)
+       morndo-update update --rollback --preview --json   what a rollback would drop, as JSON; writes and starts nothing
+       morndo-update update apply --version <v> [--attempt <id>]   one apply, as the apply unit runs it
        morndo-update update tick | boot | recover   the timer's, the boot unit's and the recovery unit's commands
        morndo-update install --role control-plane|node [--channel stable|latest] [--force]
        morndo-update doctor [--json]                re-verify the installed tree
@@ -159,6 +167,10 @@ export type UpdaterDeps = {
   probe?: RoleProbe;
   feed?: ReleaseFeed;
   artifacts?: ArtifactStore;
+  /** The fleet's word, both roles' gates and the control plane's reporting (§7); tests fake it. */
+  fleet?: FleetView;
+  /** The node's own drawn delay (§7) comes from here; tests fix the draw. */
+  random?: () => number;
   timing?: Partial<ApplyTiming>;
   /** §10.3's tree the program runs from; production discovers it around argv[1]. */
   tree?: string;
@@ -200,9 +212,9 @@ export async function runUpdater(
     = { cmd: "check" }
     | { cmd: "status" }
     | { cmd: "doctor" }
-    | { cmd: "update"; yes: boolean; now: boolean }
-    | { cmd: "rollback"; yes: boolean }
-    | { cmd: "apply-unit"; version: string }
+    | { cmd: "update"; yes: boolean; now: boolean; detach: boolean; staged?: string }
+    | { cmd: "rollback"; yes: boolean; detach: boolean; preview: boolean; typed?: string }
+    | { cmd: "apply-unit"; version: string; attempt?: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
     | { cmd: "install"; role: "control-plane" | "node"; channel: Channel; force: boolean };
   const usage = (): number => { io.err(`${USAGE}\n`); return EXIT_USAGE; };
@@ -225,20 +237,79 @@ export async function runUpdater(
   } else {
     // update: one subcommand, or one flag set — never two asks in one line. Bare `update` is the ask itself.
     // The rollback is read before the update's own set so `--rollback --yes` and `--yes --rollback` are one ask.
-    if (flags.includes("--rollback") && flags.every(f => f === "--rollback" || f === "--yes")) {
-      parsed = { cmd: "rollback", yes: flags.includes("--yes") };
-    } else if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json") {
-      if (flags.some(f => f !== "--yes" && f !== "--now" && f !== "--json")) return usage();
-      parsed = { cmd: "update", yes: flags.includes("--yes"), now: flags.includes("--now") };
+    if (flags.includes("--rollback")) {
+      // The ask's own words: --yes answers it, --detach hands the walk to §5's unit (PR 6c), --preview --json is
+      // the hub's read-only look, and --typed carries the word a restore demands even under --yes (§11.4, review
+      // round 1) — the hub's --yes must not skip what a terminal would make a person type.
+      let yes = false, detach = false, preview = false, asJson = false, typed: string | undefined;
+      let wellFormed = true;
+      for (let i = 0; i < flags.length; i++) {
+        const f = flags[i]!;
+        if (f === "--rollback") continue;
+        else if (f === "--yes") yes = true;
+        else if (f === "--detach") detach = true;
+        else if (f === "--preview") preview = true;
+        else if (f === "--json") asJson = true;
+        else if (f === "--typed") {
+          const word = flags[i + 1];
+          if (word === undefined || word.startsWith("--")) { wellFormed = false; break; }
+          typed = word;
+          i += 1;
+        } else { wellFormed = false; break; }
+      }
+      if (!wellFormed) return usage();
+      // The preview is exactly the hub's form — a look, nothing to answer or start: no --yes to answer, no unit
+      // to detach, no word to carry; and --json rides the rollback for it alone.
+      if (preview && (!asJson || yes || detach || typed !== undefined)) return usage();
+      if (!preview && asJson) return usage();
+      // The word answers --yes's ask: a terminal types it at the prompt, not on the command line.
+      if (typed !== undefined && !yes) return usage();
+      if (typed !== undefined && typed !== "rollback") {
+        io.err(`--typed wants the word rollback — the same word the terminal asks for when a restore drops writes — not ${JSON.stringify(typed)}\n`);
+        return EXIT_USAGE;
+      }
+      parsed = { cmd: "rollback", yes, detach, preview, ...(typed === undefined ? {} : { typed }) };
+    } else if (flags.length === 0 || flags[0] === "--yes" || flags[0] === "--now" || flags[0] === "--json" || flags[0] === "--detach" || flags[0] === "--staged") {
+      // `--staged <v>` (PR 6c round 2, R3) names the Version the hub's Updates screen pressed — the only one this
+      // run applies (the guard below), so a Release staged between the screen's look and the press never starts by
+      // a press of an older name. It rides --yes: the hub's own command, whose ask that flag has already answered.
+      let yes = false, now = false, detach = false, staged: string | undefined;
+      for (let i = 0; i < flags.length; i++) {
+        const f = flags[i]!;
+        if (f === "--yes") yes = true;
+        else if (f === "--now") now = true;
+        else if (f === "--json") continue;                  // read above; the outcome's JSON stays one shape
+        else if (f === "--detach") detach = true;
+        else if (f === "--staged") {
+          const v = flags[i + 1];
+          if (v === undefined || v.startsWith("--")) return usage();
+          staged = v;
+          i += 1;
+        } else return usage();
+      }
+      if (detach && now) return usage();   // two asks: --now's file is removed by a waited start (§6.2); --detach cannot own it
+      if (staged !== undefined && !yes) return usage();
+      parsed = { cmd: "update", yes, now, detach, ...(staged === undefined ? {} : { staged }) };
     } else if (flags[0] === "tick" && flags.length === 1) parsed = { cmd: "tick" };
     else if (flags[0] === "boot" && flags.length === 1) parsed = { cmd: "boot" };
     else if (flags[0] === "recover" && flags.length === 1) parsed = { cmd: "recover" };
     else if (flags[0] === "apply") {
       // "rollback" is the one instance name that is not a Version: the apply unit the rollback command starts
-      // (§5) is named for what it does, and what it does is not an apply of a staged Version.
-      if (flags.length !== 3 || flags[1] !== "--version"
-        || (flags[2] !== "rollback" && parseVersion(flags[2]!) === null)) return usage();
-      parsed = { cmd: "apply-unit", version: flags[2]! };
+      // (§5) is named for what it does, and what it does is not an apply of a staged Version. §5.4's attempt id
+      // rides the command line when the unit was handed one (its template reads MORNDO_ATTEMPT from the
+      // environment file the agent wrote); an empty value is absence — systemd's own expansion of an unset
+      // variable — and the shape is judged where the apply runs, not here.
+      const versionAt = (i: number): boolean => flags[i] !== undefined && flags[i] === "--version";
+      if (flags.length === 3 && versionAt(1) && (flags[2] === "rollback" || parseVersion(flags[2]!) !== null)) {
+        parsed = { cmd: "apply-unit", version: flags[2]! };
+      } else if (flags.length === 5 && versionAt(1) && flags[3] === "--attempt" && parseVersion(flags[2]!) !== null) {
+        parsed = { cmd: "apply-unit", version: flags[2]!, attempt: flags[4]! };
+      } else if (flags.length === 4 && versionAt(1) && flags[3]!.startsWith("--attempt=")
+        && (flags[2] === "rollback" || parseVersion(flags[2]!) !== null)) {
+        // the unit's own form: `--attempt=${MORNDO_ATTEMPT}` stays one word when the value is unset (systemd.service(5):
+        // "${FOO}" is one argument), so an empty value reaches here as "--attempt=" and is judged below, by name
+        parsed = { cmd: "apply-unit", version: flags[2]!, attempt: flags[3]!.slice("--attempt=".length) };
+      } else return usage();
     } else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
     else if (flags.includes("--status") && flags.every(f => f === "--status" || f === "--json")) parsed = { cmd: "status" };
     else return usage();
@@ -302,13 +373,114 @@ export async function runUpdater(
     const alerts: AlertSink = {
       raise: (kind, detail) => { io.err(`${kind}: ${detail}\n`); },
     };
+    // The fleet's word (§7), by role: a control plane — running the hub and the fleet, as the boot apply asks —
+    // asks the fleet over its socket and tells it what it committed and what halted; a node reads what its own
+    // agent last wrote down. A test's fleet replaces whichever this machine is.
+    const nodeStatusPath = join(home, ".local/state/morndo-node/status.json");
+    const socketFleetView = new FleetSocketView({
+      socketPath: env.MORNDO_FLEET_SOCKET || join(home, ".local/state/morndo-fleet/fleet.sock"),
+      clock: systemClock,
+    });
+    const nodeFleetView = new FleetStatusView({ path: join(home, ".local/state/morndo-node/fleet-view.json") });
+    let fleetMemo: FleetView | undefined;
+    const fleetOf = async (): Promise<FleetView> => {
+      if (deps.fleet !== undefined) return deps.fleet;
+      if (fleetMemo !== undefined) return fleetMemo;
+      const m = await manager();
+      const running = m === null ? [] : m.services();
+      fleetMemo = running.includes("hub") && running.includes("fleet") ? socketFleetView : nodeFleetView;
+      return fleetMemo;
+    };
+    // §7's machine name — the node name the agent reports, "control-plane" without one — the updater's own state
+    // file, and the soak this machine's settings name (§4.5; null is the domain's default).
+    const machineName = machineNameOf(nodeStatusPath);
+    const stateSink = new StateFileWriter({ path: join(paths.state, "state.json") });
+    const soakOf = (): number => settings.read().soakMinutes ?? DEFAULT_SOAK_MINUTES;
+    // §5.4's attempt id, minted where no other source can name one — the control plane's own applies: 16 random
+    // bytes, base64url, the same shape the fleet's own ids come in.
+    const mintAttempt = randomAttemptId;
+    // The control plane's skew gate (§7, RL11), the same at every apply door: the fleet's own node list against
+    // the target's Manifest protocol range, asked live over the socket. A hold defers (75) and state.json names
+    // it — "skew_blocked:" with the nodes, or a fleet that could not be asked at all; a target whose staged
+    // record cannot be read never runs either. Null is the gate open.
+    // The fleet's node list as the last successful read saw it (review of #111): the boot apply runs before the
+    // fleet starts, so it decides on that list, if it is no older than ten minutes; with none, it applies nothing
+    // and the tick does it later.
+    const nodesKeptFile = join(paths.state, "fleet-nodes.json");
+    // A list older than the fleet view's own freshness bound is no word at all (review of #111 at 927859b).
+    const keptNodes = (): FleetNode[] | null => {
+      try {
+        const v = JSON.parse(readFileSync(nodesKeptFile, "utf8")) as { at?: unknown; nodes?: unknown };
+        if (typeof v.at !== "number" || systemClock.now() - v.at > FRESH_VIEW_MS) return null;
+        return Array.isArray(v.nodes) ? v.nodes as FleetNode[] : null;
+      } catch { return null; }
+    };
+    const keepingNodes = (real: FleetView, boot: boolean): Pick<FleetView, "nodes"> => ({
+      nodes: async () => {
+        let live: FleetNode[] | null = null;
+        try { live = await real.nodes(); } catch { live = null; }
+        if (live !== null) {
+          writeFileSync(nodesKeptFile, `${JSON.stringify({ at: systemClock.now(), nodes: live })}\n`, { mode: 0o600 });
+          return live;
+        }
+        const kept = boot ? keptNodes() : null;
+        if (kept !== null) return kept;
+        throw new Error("the fleet cannot be asked for its nodes");
+      },
+    });
+    const skewGate = async (o: {
+      running: string | null; target: string; targetProtocol: ProtocolRange | null; boot?: boolean;
+    }): Promise<number | null> => {
+      const target = parseVersion(o.target);
+      const running = parseVersion(o.running ?? "");
+      if (target === null || running === null || o.targetProtocol === null) {
+        stateSink.write({ state: "waiting", version: o.running ?? o.target, reason: "the staged record cannot be read", at: systemClock.now() });
+        io.err("the staged record cannot be read\n");
+        return EXIT_TEMPFAIL;
+      }
+      // This machine's own node agent is updated in this very install: it never holds the control plane (6d's
+      // two-machine run found it counted — no Release dropping a protocol could ever have applied here).
+      const gate = await controlPlaneSkew({
+        fleet: keepingNodes(await fleetOf(), o.boot === true), controlPlane: running, target, targetProtocol: o.targetProtocol,
+        ownNode: ownOnlineNodeOf(nodeStatusPath),
+      });
+      if (gate.ok) return null;
+      if (gate.error.reason === "fleet_unreachable" && o.boot === true) {
+        stateSink.write({ state: "waiting", version: o.running ?? o.target, target: o.target, reason: "fleet_unreachable", at: systemClock.now() });
+        io.out("the boot apply waits: the fleet has not told this machine its nodes yet, so the tick applies it once the fleet answers\n");
+        return EXIT_OK;
+      }
+      if (gate.error.reason === "fleet_unreachable") {
+        stateSink.write({ state: "waiting", version: o.running ?? o.target, target: o.target, reason: "fleet_unreachable", at: systemClock.now() });
+        io.err("the fleet cannot be asked for its nodes, so the apply waits (RL11)\n");
+        return EXIT_TEMPFAIL;
+      }
+      const nodes = gate.error.nodes.join(", ");
+      stateSink.write({ state: "waiting", version: o.running ?? o.target, target: o.target, reason: `skew_blocked: ${nodes}`, at: systemClock.now() });
+      const unknown = gate.error.unknown;
+      io.err(unknown.length === 0
+        ? `the target would drop an agent protocol these joined nodes still speak (RL11): ${nodes}\n`
+        : `the target would drop an agent protocol these joined nodes still speak, or their protocol is unknown (RL11): ${nodes}; unknown: ${unknown.join(", ")} (revoke a node that will not come back)\n`);
+      return EXIT_TEMPFAIL;
+    };
+    // The staged Manifest's protocol range, what skew asks about (RL11): re-read from the store's own copy, the
+    // same bytes the apply's plan stands on — or null, when there is nothing staged to read.
+    const protocolOf = (version: string): ProtocolRange | null => {
+      const text = store.manifestOf(version);
+      if (text === null) return null;
+      try {
+        const parsed = ManifestSchema.safeParse(JSON.parse(text));
+        return parsed.success ? parsed.data.protocol : null;
+      } catch { return null; }
+    };
     const checkOnce = async (switches: { disableUpdates: boolean }): Promise<CheckOutcome> =>
       await new CheckService({
         feed: deps.feed ?? new HttpsFeed({ base: feedBase }),
         artifacts: deps.artifacts ?? new HttpsArtifacts({ dir: paths.downloads }),
         verifier, installer, store, settings, clock: systemClock, platform, switches,
+        fleet: await fleetOf(), state: stateSink,
       }).check();
-    const applyWith = (services: ServiceManager): ApplyService => new ApplyService({
+    const applyWith = async (services: ServiceManager): Promise<ApplyService> => new ApplyService({
       services, probe,
       schemas: new SqliteSchemas({ paths: dbPaths }),
       backup: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }),
@@ -316,6 +488,7 @@ export async function runUpdater(
       hold: new HoldFileWriter({ home, env }),
       applying: new ApplyingFileMarker({ state: paths.state }),
       installer, store, clock: systemClock, sleeper: realSleeper, alerts, verifier,
+      state: stateSink, soakMinutes: soakOf(), mintAttempt,
       ...(deps.timing !== undefined ? { timing: deps.timing } : {}),
     });
     const printOutcome = (line: string, code: number): number => {
@@ -359,6 +532,10 @@ export async function runUpdater(
       return services;
     };
     const applyNowFile = join(paths.state, "apply-now");
+    // The attempt id the apply unit runs under (§5.4): a unit instance carries only its Version, so the starter
+    // writes the id here first (the node agent: the fleet's; morndo update --yes: a fresh one), and the unit reads
+    // it once (its template's EnvironmentFile) and removes it.
+    const applyEnvFile = join(paths.state, "apply.env");
     // The principal's confirmed rollback (§11.4), for the apply unit to find: written by `update --rollback` once the
     // word is typed (or --yes), naming the Version it leaves, and consumed by the unit. The unit's own command line is
     // one anyone can type; without this record it runs no rollback (review of 2026-10-22).
@@ -400,6 +577,13 @@ export async function runUpdater(
       if (json) io.out(`${JSON.stringify({ outcome })}\n`);
       else io.out(`${line}\n`);
       const staged = store.staged();
+      // The pressed Version (R3): when --staged named one and what stands staged is not it, nothing starts. The
+      // check above may have staged a newer Release between the screen's look and the press; this run moves the
+      // machine only under the name the principal pressed, and says both when they differ.
+      if (parsed.staged !== undefined && (staged === null || staged.version !== parsed.staged)) {
+        io.err(`what stands staged is ${staged?.version ?? "nothing"}, not ${parsed.staged}: nothing was started (--staged names the Version the screen pressed)\n`);
+        return EXIT_TEMPFAIL;
+      }
       if (staged === null || !installer.has(staged.version)) return EXIT_OK;   // up to date: nothing to apply
       const m = needManager();
       if (m === null) return EXIT_CONFIG;
@@ -415,8 +599,34 @@ export async function runUpdater(
           return EXIT_OK;
         }
       }
+      // The attempt the unit runs under (§5.4): the control plane mints its own; a node takes the one the fleet
+      // offered it for this Version, and without such an offer applies nothing — a rollback under an id the fleet
+      // never issued would halt nothing.
+      const running = m.services();
+      let attempt = mintAttempt();
+      if (!running.includes("hub") || !running.includes("fleet")) {
+        const offer = (await (await fleetOf()).view().catch(() => null))?.offer ?? null;
+        if (offer === null || offer.version !== staged.version) {
+          io.err(`the fleet has not offered ${staged.version} to this node, so it applies nothing yet; the control plane's Updates page or its rollout moves it\n`);
+          return EXIT_TEMPFAIL;
+        }
+        attempt = offer.attempt;
+      }
       // §6.2's `--now`: a file the apply unit reads, because arguments cannot cross a unit boundary.
       if (parsed.now) writeFileSync(applyNowFile, "");
+      writeFileSync(applyEnvFile, `MORNDO_ATTEMPT=${attempt}\n`, { mode: 0o600 });
+      // PR 6c's --detach — the hub's one command: start the unit, answer at once. The exit is the start's, not
+      // the walk's; the unit writes its own record, and a later --status reads it (§8.1).
+      if (parsed.detach) {
+        try {
+          await m.runApply(staged.version, { wait: false });
+        } catch (error) {
+          io.err(`the apply unit did not start: ${error instanceof Error ? error.message : String(error)}\n`);
+          return EXIT_TEMPFAIL;
+        }
+        io.out(`Started the apply unit for ${staged.version}; it walks the steps from here — morndo update --status tells how it ends.\n`);
+        return EXIT_OK;
+      }
       const startedAt = Date.now();
       let startError: string | null = null;
       // A unit whose apply ended in one of §8.4's own exits counts as a success to systemd (the unit's
@@ -452,6 +662,8 @@ export async function runUpdater(
       if (m === null) return EXIT_CONFIG;
       const goBack = "Going back to an older Version is morndo update --rollback: it says what a restore drops and asks first.";
       const running = installer.layout().current;
+      // apply.env is read once, by the unit that was started for it: gone now, a later start cannot reuse its id.
+      rmSync(applyEnvFile, { force: true });
       if (parsed.version === "rollback") {
         // Only the rollback `update --rollback` confirmed, for the Version still running, and lately.
         let confirmed: { from?: unknown; at?: unknown } | null = null;
@@ -463,7 +675,7 @@ export async function runUpdater(
           io.err(`${goBack}\n`);
           return EXIT_USAGE;
         }
-        const outcome = await applyWith(m).rollback();
+        const outcome = await (await applyWith(m)).rollback();
         return printOutcome(applyLine(outcome), applyCode(outcome));
       }
       // An apply moves up only (RL2): a Version at or below the running one is never an apply's target.
@@ -473,15 +685,52 @@ export async function runUpdater(
         io.err(`${goBack}\n`);
         return EXIT_USAGE;
       }
+      // §5.4's attempt id, handed to the unit by whoever asked for it: the agent's update.apply writes it into the
+      // environment file the unit's template reads; an empty value is absence — systemd's own expansion of an
+      // unset variable. An id of no shape is a usage error before anything runs; a node refuses an apply without
+      // one outright, because its rollback would halt nothing.
+      const attempt = parsed.attempt === undefined || parsed.attempt === "" ? null : parsed.attempt;
+      if (attempt === null && parsed.attempt !== undefined) {
+        io.err(`no attempt id reached this apply: whoever starts the apply unit writes MORNDO_ATTEMPT into ${applyEnvFile} first ` +
+          "(the node agent for the fleet's update.apply, morndo update --yes on the control plane); nothing ran\n");
+        return EXIT_USAGE;
+      }
+      if (attempt !== null && !ATTEMPT_ID.test(attempt)) {
+        io.err("--attempt wants an id the fleet issued (16 bytes, base64url)\n");
+        return EXIT_USAGE;
+      }
       const staged = store.staged();
       if (staged === null) { io.err("nothing stands staged to apply\n"); return EXIT_TEMPFAIL; }
       if (staged.version !== parsed.version) {
         io.err(`the staged version changed: ${staged.version} is staged, not ${parsed.version}\n`);
         return EXIT_TEMPFAIL;
       }
+      // On a node, even the principal's explicit "Update now" keeps RL11 and RL12 (§8.3): a fresh view, the
+      // control plane at or above the target, and a Rollout not halted — here or in the fleet, all under the
+      // attempt id the fleet issued this apply. The soak and the jitter, the fleet's own pacing, are the parts
+      // "now" skips. The control plane asks its own skew gate instead (§7) and mints its own id.
+      const runningServices = m.services();
+      if (!runningServices.includes("hub") || !runningServices.includes("fleet")) {
+        if (attempt === null) {
+          io.err("a node applies only under an attempt id the fleet issued (update.apply carries it; §5.4)\n");
+          return EXIT_USAGE;
+        }
+        const targetProtocol = protocolOf(parsed.version);
+        const word = await (await fleetOf()).view().catch(() => null);
+        const gate = targetProtocol === null ? null
+          : applyUnitGate({ word, now: systemClock.now(), target: asked!, targetProtocol, localHalts: store.halts() });
+        if (gate === null) { io.err("the staged record cannot be read\n"); return EXIT_TEMPFAIL; }
+        if (!gate.ok) { io.err(`${deferSentence(gate.error.reason)}\n`); return EXIT_TEMPFAIL; }
+        const now = existsSync(applyNowFile);
+        if (now) rmSync(applyNowFile, { force: true });
+        const outcome = await (await applyWith(m)).apply({ now, attempt });
+        return printOutcome(applyLine(outcome), applyCode(outcome));
+      }
+      const held = await skewGate({ running, target: parsed.version, targetProtocol: protocolOf(parsed.version) });
+      if (held !== null) return held;
       const now = existsSync(applyNowFile);
       if (now) rmSync(applyNowFile, { force: true });
-      const outcome = await applyWith(m).apply({ now });
+      const outcome = await (await applyWith(m)).apply({ now, ...(attempt === null ? {} : { attempt }) });
       return printOutcome(applyLine(outcome), applyCode(outcome));
     }
 
@@ -511,11 +760,28 @@ export async function runUpdater(
         try { at = statSync(file).mtimeMs; } catch { /* no file: the update's own start stands in for it */ }
         return { db, at };
       });
+      // The hub's read-only look (review round 1): the same preview the human text prints, as one JSON object the
+      // hub parses — each Backup's own moment as ISO text — with nothing written and nothing started.
+      if (parsed.preview) {
+        io.out(`${JSON.stringify({
+          from: layout.current, to: layout.previous,
+          restores: dropped.map(({ db, at }) => ({ db, at: new Date(at).toISOString() })),
+        })}\n`);
+        return EXIT_OK;
+      }
       io.out(restores.length === 0
         ? `Back to ${layout.previous} from ${layout.current}; no database is restored.\n`
         : `Back to ${layout.previous} from ${layout.current}.\n`);
       for (const { db, at } of dropped) {
         io.out(`The ${db} database goes back to its backup from ${stampOf(at)} (${ageWords(systemClock.now() - at)} of writes since are dropped).\n`);
+      }
+      // §11.4's word under --yes (review round 1): --yes answers the [y/N], never the typed word. A restore that
+      // drops writes refuses --yes alone, naming what it would drop and the way on — the hub's own command, which
+      // always runs --yes, gets its word from --typed.
+      if (parsed.yes && restores.length > 0 && parsed.typed === undefined) {
+        const names = dropped.map(({ db, at }) => `the ${db} database's backup from ${stampOf(at)} (${ageWords(systemClock.now() - at)} of writes dropped)`);
+        io.err(`--yes alone cannot go on: rolling back restores ${names.join(", ")}; add --typed rollback, the word the terminal asks for.\n`);
+        return EXIT_USAGE;
       }
       if (!parsed.yes) {
         if (io.tty !== true) {
@@ -539,6 +805,18 @@ export async function runUpdater(
       if (m === null) return EXIT_CONFIG;
       const startedAt = Date.now();
       writeFileSync(rollbackConfirmedFile, `${JSON.stringify({ from: layout.current, at: startedAt })}\n`, { mode: 0o600 });
+      // PR 6c's --detach, the hub's rollback command: start §5's morndo-update-apply@rollback.service instance
+      // and answer at once; the unit walks the machine back and records its own end.
+      if (parsed.detach) {
+        try {
+          await m.runApply("rollback", { wait: false });
+        } catch (error) {
+          io.err(`the apply unit did not start: ${error instanceof Error ? error.message : String(error)}\n`);
+          return EXIT_TEMPFAIL;
+        }
+        io.out("Started the rollback unit; it walks the machine back from here — morndo update --status tells how it ends.\n");
+        return EXIT_OK;
+      }
       let startError: string | null = null;
       try {
         await m.runApply("rollback");            // §5: the morndo-update-apply@rollback.service instance
@@ -552,21 +830,70 @@ export async function runUpdater(
     }
 
     if (parsed.cmd === "tick") {
-      // The timer's own command (§6.1, §8.3): the switches and the mode stop it before anything is fetched;
-      // then the check, and — in mode apply — the automatic apply inside its window.
+      // The timer's own command (§6.1, §8.3): the switches and the mode stop it before anything is fetched; then
+      // the check — the feed at most every six hours (§7) — and, in mode apply, the automatic apply inside its
+      // window, behind the node's own gate (§6.7) or the control plane's skew gate (§7, RL11). The control
+      // plane's word to the fleet is its state file (§4.5): the fleet reads it itself, so the tick tells it
+      // nothing — a commit or a halt the fleet missed is a word it still owes itself, on its own next read.
       if (env.MORNDO_DISABLE_UPDATES === "1" || env.MORNDO_DISABLE_AUTOUPDATE === "1") return EXIT_OK;
       const read = settings.read();
       if (read.mode === "off") return EXIT_OK;
-      const outcome = await checkOnce({ disableUpdates: false });
-      printOutcome(checkLine(outcome), checkCode(outcome));
-      if (read.mode !== "apply") return checkCode(outcome);
+      const m = await manager();
+      const running = m === null ? [] : m.services();
+      const controlPlane = running.includes("hub") && running.includes("fleet");
+      // The feed itself at most every six hours (§7): between asks the tick still follows the Rollout, so a
+      // control plane that committed five minutes ago is not waited out. A check that never carried the feed's
+      // word does not count — a fetch that failed an hour ago is retried now, not in six hours.
+      const lastFeed = store.lastFeedCheck();
+      let code = EXIT_OK;
+      if (lastFeed === null || systemClock.now() - lastFeed.at >= FEED_CHECK_MS) {
+        const outcome = await checkOnce({ disableUpdates: false });
+        printOutcome(checkLine(outcome), checkCode(outcome));
+        code = checkCode(outcome);
+      }
+      if (read.mode !== "apply") return code;
       const staged = store.staged();
-      if (staged === null || !installer.has(staged.version)) return checkCode(outcome);
-      const m = needManager();
-      if (m === null) return EXIT_CONFIG;
+      if (staged === null || !installer.has(staged.version)) return code;
+      if (m === null) { io.err(`${NO_MANAGER}\n`); return EXIT_CONFIG; }
+      let attempt: string | undefined;
+      if (!controlPlane) {
+        // The node's gate (§6.7, §7, RL11, RL12, §5.4): a fresh fleet view, the control plane at or above the
+        // target, the fleet's Rollout of this very Version — committed, past its soak, past this node's own drawn
+        // delay, and offered to this node, whose attempt id the Update runs under — and not halted anywhere.
+        // Every refusal is a deferral (exit 75), said again next tick.
+        const word = await (await fleetOf()).view().catch(() => null);
+        const target = parseVersion(staged.version);
+        const targetProtocol = protocolOf(staged.version);
+        const current = installer.layout().current;
+        if (target === null || targetProtocol === null) {
+          stateSink.write({ state: "waiting", version: current ?? staged.version, reason: "the staged record cannot be read", at: systemClock.now() });
+          io.err("the staged record cannot be read; it is tried again next tick\n");
+          return EXIT_TEMPFAIL;
+        }
+        const gate = nodeGate({
+          word, now: systemClock.now(), node: machineName, target, targetProtocol, store,
+          random: deps.random ?? Math.random,
+        });
+        if (!gate.ok) {
+          stateSink.write({ state: "waiting", version: current ?? staged.version, reason: gate.error.reason, at: systemClock.now() });
+          io.err(`${deferSentence(gate.error.reason)}; tried again next tick\n`);
+          return EXIT_TEMPFAIL;
+        }
+        attempt = gate.attempt;
+      } else {
+        // The control plane's own gate before an apply (§7, RL11): no Release that drops an agent protocol a
+        // joined node still speaks, and no apply at all without the fleet's own node list.
+        const held = await skewGate({
+          running: installer.layout().current, target: staged.version, targetProtocol: protocolOf(staged.version),
+        });
+        if (held !== null) return held;
+      }
       // The automatic walk (§6.3, §8.3): safeToApply with automatic true — the window is the settings' own, and
-      // attending is always "nobody is" until the hub reports an attending signal (PR 6).
-      const applied = await applyWith(m).apply({ now: false, automatic: true, window: read.window });
+      // attending is always "nobody is" until the hub reports an attending signal (PR 6). The attempt is the
+      // offer's on a node; the control plane mints its own inside the walk.
+      const applied = await (await applyWith(m)).apply({
+        now: false, automatic: true, window: read.window, ...(attempt === undefined ? {} : { attempt }),
+      });
       return printOutcome(applyLine(applied), applyCode(applied));
     }
 
@@ -590,7 +917,16 @@ export async function runUpdater(
         io.out(`the boot apply does not run: ${checkLine(outcome)}\n`);
         return EXIT_OK;
       }
-      const applied = await applyWith(m).apply({ now: false, boot: true });
+      // The control plane's own gate before an apply (§7, RL11), here too: a Release that drops a protocol a
+      // joined node still speaks never starts at boot either, and the hold is named for the waiting record.
+      const stagedNow = store.staged();
+      if (stagedNow !== null) {
+        const held = await skewGate({
+          running: installer.layout().current, target: stagedNow.version, targetProtocol: protocolOf(stagedNow.version), boot: true,
+        });
+        if (held !== null) return held;
+      }
+      const applied = await (await applyWith(m)).apply({ now: false, boot: true });
       return printOutcome(applyLine(applied), applyCode(applied));
     }
 
@@ -605,6 +941,7 @@ export async function runUpdater(
         hold: new HoldFileWriter({ home, env }),
         applying: new ApplyingFileMarker({ state: paths.state }),
         installer, store, clock: systemClock, sleeper: realSleeper, alerts,
+        state: stateSink, soakMinutes: soakOf(),
         ...(deps.timing !== undefined ? { timing: deps.timing } : {}),
       }).recover();
       return printOutcome(recoverLine(outcome), recoverCode(outcome));

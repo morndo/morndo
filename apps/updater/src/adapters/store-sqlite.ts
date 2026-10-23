@@ -131,6 +131,16 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec("CREATE TABLE alerts_sent (update_id TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (update_id, kind))");
     },
   },
+  {
+    version: 7,
+    name: "each Version's drawn node jitter (§7)",
+    compat: "additive",
+    // A node's own delay past the soak, drawn once per Version and kept across ticks (§7): the draw is persisted
+    // here so a restart does not redraw it, and INSERT OR IGNORE keeps the first forever.
+    up: db => {
+      db.exec("CREATE TABLE rollout_jitter (version TEXT PRIMARY KEY, until INTEGER NOT NULL)");
+    },
+  },
 ];
 
 export class UpdateDbFromFuture extends Error {
@@ -161,7 +171,7 @@ type UpdateRow = { id: string; format: number; record: string; started_at: numbe
 const updateText = (u: StoredUpdate): string => JSON.stringify({
   id: u.id, kind: u.kind, target: u.target, preUpdate: u.preUpdate, state: u.state, mark: u.mark,
   backups: u.backups, migrations: u.migrations, doneMarks: u.doneMarks,
-  judgeBaseline: u.judgeBaseline ?? null, backupOf: u.backupOf ?? null,
+  judgeBaseline: u.judgeBaseline ?? null, backupOf: u.backupOf ?? null, attempt: u.attempt ?? null,
 });
 
 // A Version as it comes back from JSON, re-parsed through the domain, so a row some other build wrote cannot
@@ -196,6 +206,9 @@ const storedUpdate = (row: UpdateRow): StoredUpdate => {
   if (parsed.backupOf !== null && parsed.backupOf !== undefined && typeof parsed.backupOf !== "string") {
     throw new Error(`update ${row.id}: not a backup owner`);
   }
+  if (parsed.attempt !== null && parsed.attempt !== undefined && typeof parsed.attempt !== "string") {
+    throw new Error(`update ${row.id}: not an attempt id`);
+  }
   return {
     id: row.id,
     kind: parsed.kind,
@@ -212,9 +225,11 @@ const storedUpdate = (row: UpdateRow): StoredUpdate => {
     startedAt: row.started_at,
     doneMarks: parsed.doneMarks,
     // §6.7's two: the baseline this attempt was judged against, and the rollback's Backup owner. A record from
-    // before either existed carries neither, and both read as none.
+    // before either existed carries neither, and both read as none. §5.4's attempt id is the same: a record from
+    // before it was carried reads as none, and its endings state their own.
     judgeBaseline: readBaseline(parsed.judgeBaseline, `update ${row.id}: baseline`),
     backupOf: parsed.backupOf === undefined || parsed.backupOf === null ? null : parsed.backupOf,
+    attempt: parsed.attempt === undefined || parsed.attempt === null ? null : parsed.attempt,
   };
 };
 
@@ -254,6 +269,8 @@ export class SqliteUpdateStore implements UpdateStore {
   readonly #bad: Database.Statement;
   readonly #writeHalt: Database.Statement;
   readonly #halts: Database.Statement;
+  readonly #writeJitter: Database.Statement;
+  readonly #jitterOf: Database.Statement;
   readonly #writeAlertSent: Database.Statement;
   readonly #versions: Database.Statement;
   readonly #writeVersion: Database.Statement;
@@ -293,6 +310,8 @@ export class SqliteUpdateStore implements UpdateStore {
     this.#bad = this.#db.prepare("SELECT version FROM bad ORDER BY at");
     this.#writeHalt = this.#db.prepare("INSERT INTO rollout_halts (version, reason, at) VALUES (?, ?, ?)");
     this.#halts = this.#db.prepare("SELECT version, reason, at FROM rollout_halts ORDER BY at DESC, rowid DESC");
+    this.#writeJitter = this.#db.prepare("INSERT OR IGNORE INTO rollout_jitter (version, until) VALUES (?, ?)");
+    this.#jitterOf = this.#db.prepare("SELECT until FROM rollout_jitter WHERE version = ?");
     this.#writeAlertSent = this.#db.prepare("INSERT OR IGNORE INTO alerts_sent (update_id, kind, at) VALUES (?, ?, ?)");
     this.#versions = this.#db.prepare("SELECT version, manifest_sha256, files_sha256, staged_at, manifest FROM versions");
     this.#writeVersion = this.#db.prepare(`INSERT INTO versions (version, manifest_sha256, files_sha256, staged_at, manifest)
@@ -445,6 +464,15 @@ export class SqliteUpdateStore implements UpdateStore {
 
   halts(): { version: string; reason: string; at: number }[] {
     return this.#halts.all() as { version: string; reason: string; at: number }[];
+  }
+
+  jitterOf(version: string): number | null {
+    const row = this.#jitterOf.get(version) as { until: number } | undefined;
+    return row === undefined ? null : row.until;
+  }
+
+  recordJitter(version: string, until: number): void {
+    this.#writeJitter.run(version, until);
   }
 
   firstAlert(updateId: string, kind: AlertKind, at: number): boolean {
