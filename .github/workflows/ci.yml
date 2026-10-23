@@ -111,6 +111,10 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/catchup-edges" }
         run: node e2e/catchup-edges.e2e.ts
+      - name: e2e worker-grace
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/worker-grace" }
+        run: node e2e/worker-grace.e2e.ts
       - name: e2e horizon
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/horizon" }

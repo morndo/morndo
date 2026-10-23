@@ -216,7 +216,8 @@ line he taps on his phone. Write it in the card file below and check it with `mo
 refuses a card with no recommendation, a default that is not one of the options, or, with a live risk named, options
 not marked stop or continue or a default that is not a stop, warns on ids he can't read, and prints the lines to post,
 the buttons line last. It files nothing and needs no hub, like `lint` and `template`: a card goes into the
-conversation, not the hub's record.
+conversation, not the hub's record. The relay checks a card's visible part, and the manager's `### Digest`, against
+the same limits (8 lines, 120 words, no ticket numbers or hashes) and sends a long one back once.
 
 ### The card template
 
