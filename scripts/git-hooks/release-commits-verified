@@ -1,0 +1,19 @@
+#!/bin/sh
+# The commits of a range that GitHub vouches for as the release App's own, one id per line.
+#   REPO=owner/name sh release-commits-verified <git log range arguments>
+# A commit's author name and address are only git metadata, so for each commit whose author looks like the App this asks
+# GitHub's own API two things, and lists the commit only when both answers hold:
+#   the commit:       GitHub reports it verified, and its committer is web-flow (GitHub signed it);
+#   its pull request: one of the pull requests holding the commit was opened by the App itself (a user of type Bot named
+#                     morndo-release[bot]) from a release-please branch of this same repository, not from a fork.
+# Anything else, and any failed API call, lists nothing. commit-traces still requires the exact identity, GitHub as
+# committer and a diff of release files only; CI passes this list to it as COMMIT_TRACES_VERIFIED. Needs gh and jq.
+set -eu
+: "${REPO:?set REPO to owner/name}"
+for sha in $(git log --format=%H --author='morndo-release' "$@"); do
+  commit=$(gh api "repos/$REPO/commits/$sha" 2>/dev/null) || continue
+  printf '%s' "$commit" | jq -e '.commit.verification.verified == true and .committer.login == "web-flow"' >/dev/null 2>&1 || continue
+  pulls=$(gh api "repos/$REPO/commits/$sha/pulls" 2>/dev/null) || continue
+  printf '%s' "$pulls" | jq -e --arg repo "$REPO" 'any(.[]; .user.login == "morndo-release[bot]" and .user.type == "Bot" and (.head.ref | startswith("release-please--")) and .head.repo.full_name == $repo)' >/dev/null 2>&1 || continue
+  echo "$sha"
+done
