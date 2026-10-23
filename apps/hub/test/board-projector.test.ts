@@ -129,6 +129,52 @@ describe("the board follows its assignee's run (B10)", () => {
     expect(boardMoves().map(e => e.actor.rule)).toEqual(["D1"]);       // exactly one move, and it is D1's
   });
 
+  // T-398: md-c1 ended a turn with this line while a wake-up was scheduled, the task stayed In progress, and the lane's stop
+  // then put it back to To do (D3) instead of leaving it in review.
+  const REAL_LINE = "STATUS: DONE T-1 merged afad93fc2, not live until the next Morndo release.";
+  const pending: { what: string; ended: Partial<RunView> & { phase: RunView["phase"] } }[] = [
+    { what: "nothing pending", ended: { phase: "ended" } },
+    { what: "a wake-up scheduled", ended: { phase: "waiting", source: "hook", wait: { on: "wakeup", next: T0 + 600_000 }, deadline: T0 + 900_000 } },
+    { what: "a job running", ended: { phase: "waiting", source: "job", wait: { on: "job", jobs: [{ id: "j1", name: "ci" }] } } },
+    { what: "background work", ended: { phase: "waiting", source: "hook", wait: { on: "background", tasks: [{ type: "shell", label: "gh run watch" }] }, deadline: T0 + 900_000 } },
+  ];
+  for (const { what, ended } of pending) {
+    it(`T-398: a DONE line naming the task, with ${what}, moves it to review, and the lane's stop afterwards leaves it there`, async () => {
+      const t = task("Merge the thing", "builder", T0, "doing");
+      expect(t.key).toBe("T-1");
+      source.list = [run("builder", "working", T0)];
+      await projector.start();
+      now = T0 + 60_000;
+      source.tell(run("builder", "working", T0 + 30_000, { source: "session" }));
+      now = T0 + 120_000;
+      source.tell(run("builder", ended.phase, T0 + 100_000, { ...ended, outcome: "done", line: REAL_LINE }));
+      expect(shown(t.key)?.status).toBe("review");
+      expect(lastEvent(t.key)).toMatchObject({ actor: { kind: "board", rule: "D1", lane: "builder" }, change: { kind: "moved", from: "doing", to: "review" } });
+      now = T0 + 140_000;                                              // lanes stop builder: the window goes
+      source.tell(run("builder", "gone", T0 + 135_000, { source: "session", line: REAL_LINE }));
+      expect(shown(t.key)?.status).toBe("review");
+      expect(boardMoves().map(e => e.actor.rule)).toEqual(["D1"]);     // one move, and no D3 after it
+      expect(logged.filter(l => l.level !== "info")).toEqual([]);
+    });
+  }
+
+  it("T-398 R1: DONE with a job pending, the job started before the task was taken up, then the lane's stop: one D1 move to review, no D3", async () => {
+    const jobStart = T0 - 60_000;
+    const t = task("Merge the thing", "builder", T0, "doing");          // in progress at T0, after the job began
+    source.list = [run("builder", "working", T0)];
+    await projector.start();
+    now = T0 + 120_000;
+    // what the fleet derives for it: waiting on the job, the turn's word kept, the phase begun at the turn's end
+    source.tell(run("builder", "waiting", T0 + 100_000, { source: "job", outcome: "done", line: "STATUS: DONE T-1 merged afad93fc2, not live until the next Morndo release.", wait: { on: "job", jobs: [{ id: "j1", name: "ci" }] } }));
+    expect(jobStart).toBeLessThan(T0);
+    expect(shown(t.key)?.status).toBe("review");
+    now = T0 + 140_000;
+    source.tell(run("builder", "gone", T0 + 135_000, { source: "session" }));
+    expect(shown(t.key)?.status).toBe("review");
+    expect(boardMoves().map(e => e.actor.rule)).toEqual(["D1"]);
+    expect(logged.filter(l => l.level !== "info")).toEqual([]);
+  });
+
   it("a task in progress whose lane the list does not hold is put back (D3), taken again when its run appears (D4), and finished by D1: three moves, each by its rule", async () => {
     const t = task("Ship it", "builder", T0, "doing");
     await projector.start();                                           // an empty list: builder is not registered

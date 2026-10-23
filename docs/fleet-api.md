@@ -851,13 +851,13 @@ Its `phase`, the first that applies, in this order:
 | `waiting` | a job of the lane is not ended (`wait.on: "job"`), or the last turn end left background tasks (`background`) or a wake-up (`wakeup`), or said `STATUS: WAITING` with nothing pending (`declared`) | `job`, `hook` or `status` |
 | `ended` | none of those: the last turn end's `outcome` is its status (`done`, `blocked`, `needs_decision`), else `no_status` | `status`, `hook` or `session` |
 
-A turn end that leaves background work or a wake-up is never `ended`, whatever its status line says: the lane waits on its own work until its next turn. A Run waiting on background tasks keeps the turn's `outcome` (`done`, `blocked`, `needs_decision`), so a client can tell a DONE with work left from a turn with no status. A job counts when it is the lane's own, or its notice goes to `lane:<the lane>`, queued, starting or running.
+A turn end that leaves background work or a wake-up is never `ended`, whatever its status line says: the lane waits on its own work until its next turn. A Run waiting on background tasks, on a wake-up or on a job keeps the turn's `outcome` (`done`, `blocked`, `needs_decision`), so a client can tell a DONE with work left from a turn with no status; a `STATUS: WAITING` line, or no status line, leaves `outcome` out. A job counts when it is the lane's own, or its notice goes to `lane:<the lane>`, queued, starting or running.
 
 `GET /v1/runs` answers `{ runs: { lane, node, sessionId?, phase, wait?, deadline, overdue, outcome?, line?, question?, since, source }[] }`, by lane, then node:
 - `wait`, for a `waiting` Run: `{ on: "background", tasks }` (the `tasks` of §7), `{ on: "wakeup", next }` (the next fire time, null when its node's UTC offset or its schedule can't be read), `{ on: "job", jobs: { id, name }[] }`, or `{ on: "declared", what }` (what the WAITING line names, or null): nothing will wake it.
 - `deadline` is when a wait should have shown a sign of life: the WAITING line's `for`, else the turn's end plus `laneWatch.waitingMin`; for a wake-up whose fire time is known, that time plus 5 minutes. Null for any other phase. `overdue` is true past the deadline with nothing from the lane since the turn end.
 - `line` is the last turn end's status line (its `firstLine`), `question` the open menu's.
-- `since` is when the phase began: the turn's end, the first hook of a new turn, a job's start (or, still queued, its queue time), or when the window or its node changed.
+- `since` is when the phase began: the turn's end, the first hook of a new turn, a job's start (or, still queued, its queue time; when the turn's `outcome` is on the Run, the later of that and the turn's end), or when the window or its node changed.
 - `sessionId` is the session in the window, or for a `gone` Run the one it had.
 
 A Run carries no command line and no prompt. A `gone` Run is kept for a day and then left out; a revoked node's Runs go at once. Neither is an event.
@@ -873,7 +873,7 @@ GET /v1/runs
   { "lane": "dup", "node": "n1", "phase": "ended", "deadline": null, "overdue": false, "outcome": "no_status", "since": "{{time}}", "source": "session" },
   { "lane": "manager", "node": "n1", "sessionId": "{{uuid:manager-session}}", "phase": "ended", "deadline": null, "overdue": false, "outcome": "no_status", "since": "{{time}}", "source": "session" },
   { "lane": "sh1", "node": "n1", "phase": "ended", "deadline": null, "overdue": false, "outcome": "no_status", "since": "{{time}}", "source": "session" },
-  { "lane": "w1", "node": "n1", "sessionId": "{{uuid:w1-session}}", "phase": "waiting", "wait": { "on": "wakeup", "next": null }, "deadline": "{{time}}", "overdue": false, "line": "STATUS: BLOCKED", "since": "{{time}}", "source": "hook" }
+  { "lane": "w1", "node": "n1", "sessionId": "{{uuid:w1-session}}", "phase": "waiting", "wait": { "on": "wakeup", "next": null }, "deadline": "{{time}}", "overdue": false, "outcome": "blocked", "line": "STATUS: BLOCKED", "since": "{{time}}", "source": "hook" }
 ] }
 ```
 

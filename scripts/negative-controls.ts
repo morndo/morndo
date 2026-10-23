@@ -3981,6 +3981,19 @@ export const CONTROLS: Control[] = [
   { id: "t346-recheck-hash", task: "T-346", file: "apps/connections/src/adapters/caller-proof.ts",
     find: `  if (remembered !== null && remembered !== sha256) return no("the parent binary's hash changed while it was checked");\n`, replace: "",
     run: ["apps/connections/test/caller-proof.test.ts"], expect: "is not the one the cache holds for the file at the end" },
+  // ---- T-398: a DONE with a wake-up scheduled or a job running still moves the task to review, each guard removed once.
+  { id: "t398-d1-wakeup-and-job", task: "T-398", file: "packages/domain/src/board.ts",
+    find: `(run.wait?.on === "wakeup" || run.wait?.on === "job") && run.outcome === "done"`, replace: `false`,
+    run: ["packages/domain/test/board.test.ts", "apps/hub/test/board-projector.test.ts"], expect: "moves doing to review (D1) too" },
+  { id: "t398-run-keeps-outcome-on-job", task: "T-398", file: "packages/domain/src/run.ts",
+    find: `wait: { on: "job", jobs }, ...said,`, replace: `wait: { on: "job", jobs },`,
+    run: ["packages/domain/test/run.test.ts"], expect: "stays on the Run while it waits" },
+  { id: "t398-run-keeps-outcome-on-wakeup", task: "T-398", file: "packages/domain/src/run.ts",
+    find: `wait: { on: "wakeup", next }, ...said,`, replace: `wait: { on: "wakeup", next },`,
+    run: ["packages/domain/test/run.test.ts", "apps/hub/test/board-projector.test.ts"], expect: "stays on the Run while it waits" },
+  { id: "t398-job-wait-begins-at-the-turn-end", task: "T-398", file: "packages/domain/src/run.ts",
+    find: `t !== null && "outcome" in said ? Math.max(firstJob, t.at) : firstJob`, replace: `firstJob`,
+    run: ["packages/domain/test/run.test.ts", "packages/domain/test/board.test.ts"], expect: "began at the turn's end" },
 ];
 
 // ---- the runner
