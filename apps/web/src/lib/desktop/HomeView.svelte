@@ -10,7 +10,7 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Users from "@lucide/svelte/icons/users";
   import Avatar from "./Avatar.svelte";
-  import { LEVEL_WORDS, ago, onDemandLine, pct, resetsIn, resetsOnLabel, shownLevel, tightestShown, usageLevel, usd, type AccountUsage, type UsageWindow } from "./usage.ts";
+  import { LEVEL_WORDS, accountLabel, ago, onDemandLine, pct, resetsIn, resetsOnLabel, shownLevel, tightestShown, usageLevel, usd, type AccountUsage, type UsageWindow } from "./usage.ts";
 
   let { accounts, at, now, live, onOpenLane }: { accounts: AccountUsage[]; at: number | null; now: number; live: boolean; onOpenLane: (name: string) => void } = $props();
 
@@ -18,6 +18,10 @@
   const five = $derived(tightestShown(accounts, "fiveHour"));
   const week = $derived(tightestShown(accounts, "sevenDay"));
   const headline = $derived(shownLevel(accounts));
+  // The label's tail (" · email · Team · plan") beside the name on the card; nothing when there is no profile.
+  const identOf = (a: AccountUsage) => { const label = accountLabel(a); return label === a.account ? "" : label.slice(a.account.length); };
+  // A headline tile names its account; with a profile, the label says which subscription that is.
+  const labelOf = (name: string) => accountLabel(accounts.find(a => a.account === name) ?? { account: name });
 </script>
 
 {#snippet meter(label: string, w: UsageWindow | null, when: string | null)}
@@ -52,11 +56,11 @@
       <div class="tile"><span class="tl"><Radio size={14} />Sessions reporting</span><b>{sessions}</b><span class="ts">in the last 10 minutes</span></div>
       <div class="tile l-{five ? usageLevel(five.window.usedPercentage) : 'none'}">
         <span class="tl">Tightest 5-hour window</span>
-        {#if five}<b>{pct(five.window.usedPercentage)}</b><span class="ts">{five.account}{resetsIn(five.window.resetsAt, now) ? ` · ${resetsIn(five.window.resetsAt, now)}` : ""}</span>{:else}<b class="muted">–</b><span class="ts">nobody reports one</span>{/if}
+        {#if five}<b>{pct(five.window.usedPercentage)}</b><span class="ts">{labelOf(five.account)}{resetsIn(five.window.resetsAt, now) ? ` · ${resetsIn(five.window.resetsAt, now)}` : ""}</span>{:else}<b class="muted">–</b><span class="ts">nobody reports one</span>{/if}
       </div>
       <div class="tile l-{week ? usageLevel(week.window.usedPercentage) : 'none'}">
         <span class="tl">Tightest weekly window</span>
-        {#if week}<b>{pct(week.window.usedPercentage)}</b><span class="ts">{week.account}{resetsIn(week.window.resetsAt, now) ? ` · ${resetsIn(week.window.resetsAt, now)}` : ""}</span>{:else}<b class="muted">–</b><span class="ts">nobody reports one</span>{/if}
+        {#if week}<b>{pct(week.window.usedPercentage)}</b><span class="ts">{labelOf(week.account)}{resetsIn(week.window.resetsAt, now) ? ` · ${resetsIn(week.window.resetsAt, now)}` : ""}</span>{:else}<b class="muted">–</b><span class="ts">nobody reports one</span>{/if}
       </div>
     </div>
     {#if headline !== "ok"}
@@ -71,8 +75,8 @@
     {:else}
       <div class="cards">
         {#each accounts as a (a.account)}
-          <article class="card" data-account={a.account} aria-label="Account {a.account}">
-            <header><Avatar name={a.account} kind="agent" size={28} /><h3>{a.account}</h3><span class="when">reported {ago(a.reportedAt, now)}</span></header>
+          <article class="card" data-account={a.account} aria-label="Account {accountLabel(a)}">
+            <header><Avatar name={a.account} kind="agent" size={28} /><div class="who"><h3>{a.account}</h3>{#if identOf(a)}<span class="ident">{identOf(a)}</span>{/if}</div><span class="when">reported {ago(a.reportedAt, now)}</span></header>
             {#if a.limits?.length}
               {#each a.limits as w, i (`${w.label}:${i}`)}
                 {@render meter(w.label, w, resetsOnLabel(w.resetsOn))}
@@ -116,7 +120,7 @@
   .tl { display: inline-flex; align-items: center; gap: 6px; font: 700 12px/16px var(--font); color: var(--muted); }
   .tile b { font: 600 30px/36px var(--font); color: var(--text); }       /* proportional figures on a standalone value */
   .tile b.muted { color: var(--muted); }
-  .ts { font: 400 12px/16px var(--font); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ts { font: 400 12px/16px var(--font); color: var(--muted); overflow-wrap: anywhere; }   /* a label and a reset time wrap, they are not cut */
   .tile.l-warning b { color: var(--warn-fg); }
   .tile.l-critical b { color: var(--bad-fg); }
   .note { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; padding: 8px 12px; border-radius: 8px; font: 400 13px/18px var(--font); }
@@ -130,6 +134,10 @@
   .card { display: grid; gap: 12px; padding: 14px 16px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--main-bg); }
   .card header { display: flex; align-items: center; gap: 10px; }
   .card h3 { margin: 0; font: 900 16px/22px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The name, then the email, organization and plan after it, one line of text that wraps (on a phone) and never cuts the name. */
+  .who { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .card .who h3 { display: inline; white-space: normal; }
+  .ident { font: 400 13px/18px var(--font); color: var(--muted); }
   .when { margin-left: auto; font: 400 12px/16px var(--font); color: var(--muted); white-space: nowrap; }
   /* The meter: a thin track in a lighter step of the same ramp; the fill carries the level, which the words and the
      icon below it say as well (never colour alone). */

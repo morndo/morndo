@@ -2,7 +2,7 @@
 // and a synthetic terminal for pane %1. For tests that need the HTTP and WebSocket edges but no crash isolation
 // (crash tests use http-crash-fixture.ts). Synthetic data only.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import type { Task } from "@morndo/domain";
+import type { AccountProfile, Task } from "@morndo/domain";
 import type { RunView, Transcriber, TranscriberProbe } from "@morndo/protocol";
 import type { Liveness } from "@morndo/domain";
 import { tmpdir } from "node:os";
@@ -60,6 +60,7 @@ export type InProcessHub = {
 };
 
 // `now`: the hub's clock for access and rate limits (a test moves it to expire tokens, requests and verifications).
+// `profiles`: the account-label source the usage view overlays (a test's own, over a fake pool file; default none).
 // `observation`: the service the feed reads from, when a test needs its own (default: one over an empty tmux).
 // `engines`: the engine layer's CLI to run (a test's fake) and its environment; absent, the Engines page is off.
 // `queue`: the manager's delivery queue, made on the hub's own store (fleet-clients §9.1; default none). This hub has no
@@ -72,6 +73,7 @@ export type InProcessHub = {
 // as the projector would flag them.
 export async function startInProcessHub(o: {
   limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService;
+  profiles?: () => ReadonlyMap<string, AccountProfile>;
   engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
   locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
   queue?: (store: Store) => ManagerQueue; manager?: string; typed?: string[]; alerts?: AlertsService;
@@ -97,7 +99,7 @@ export async function startInProcessHub(o: {
   const config: Config = {
     dataDir: dir, port: 0, origin: ORIGIN, rpId: "hub.example.test", rpName: "Morndo",
     requireProxyIdentity: false, principalLogin: null, tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: web, officeName: null, pollMs: 1000, quietAfterMs: 1000,
-    managerWindow: "manager", ledgerPath: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
+    managerWindow: "manager", ledgerPath: null, poolUsageFile: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
   };
   let n = 0;
   const passkeys: Passkeys = {
@@ -140,7 +142,7 @@ export async function startInProcessHub(o: {
   // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
   const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}) });
   const agents = new AgentAccess(store, "manager", o.now);
-  const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}) });
+  const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}) });
   const queue = o.queue ? o.queue(store) : null;
   const jobs = new JobsService({ store, board, ...(o.now ? { now: o.now } : {}) });
   // Wired as production main.ts wires it: the service is always constructed, with the plugin's answer when there is

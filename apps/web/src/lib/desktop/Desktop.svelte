@@ -368,7 +368,9 @@
       onSignedOut={() => { preferences = null; onSignedOut(); }} onClose={() => (preferences = null)} />
   {/if}
   {#if details && detailsWorker}
+    <!-- The account with a fresh session on this lane, for its label (ADR-0034); none when no account reports here. -->
     <DetailsModal worker={detailsWorker} displayName={nameOf(detailsWorker)} session={feed.details[detailsWorker.id]}
+      account={feed.usage.find(a => a.sessions.some(s => s.lane === detailsWorker.name)) ?? null}
       prefs={prefsOf(detailsWorker.name)} tab={details.tab} onPrefs={p => detailsWorker && setPrefs(detailsWorker.name, p)}
       onScreen={() => { if (detailsWorker) openScreen(detailsWorker.id); }}
       onClose={() => (details = null)} />

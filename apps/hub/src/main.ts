@@ -53,6 +53,7 @@ import { NodeBuilds } from "./application/node-builds.ts";
 import { AgentAccess } from "./application/agent-access.ts";
 import { applyRevocationJournal, raiseUnreadable } from "./application/revocations.ts";
 import { UsageService } from "./application/usage-service.ts";
+import { poolProfiles } from "./adapters/pool-accounts.ts";
 import { JobsService } from "./application/jobs-service.ts";
 import { AlertsService, SEEN_MARK } from "./application/alerts-service.ts";
 import { locateTranscriber } from "./adapters/transcriber-path.ts";
@@ -338,8 +339,17 @@ switch (cmd) {
     const memory = memoryStore ? new MemoryService({ store: memoryStore, policy: () => access.policy() }) : null;
     memoryHolder.service = memory;                              // Memory off (null): the board files no Ask
     const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
-    // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens.
-    const usage = new UsageService({ store });
+    // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens. ADR-0034: their
+    // labels (email, organization, plan) come from the pool's usage file, read by the one adapter and overlaid on the
+    // principal's view only. The file can change with every lane quiet, so it is looked at again every minute (never
+    // blocking: ADR-0034).
+    const pool = poolProfiles(config.poolUsageFile ?? null, log);
+    const usage = new UsageService({ store, profiles: pool.current });
+    const lookAtPool = () => { void pool.refresh().then(changed => { if (changed) usage.refreshProfiles(); }, e => log.warn("the pool's usage file could not be looked at", e)); };
+    lookAtPool();
+    const poolRefresh = setInterval(lookAtPool, 60_000);
+    poolRefresh.unref();
+    shutdown.onStop(() => clearInterval(poolRefresh));
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
     // The runs read once, which applies what is due since the hub last ran; never in the way of the hub's start (a fleet
