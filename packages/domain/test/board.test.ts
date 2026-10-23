@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, MAX_MERGES, MORNDO_REPO, PRINCIPAL_NOT_LIVE, TITLE_MAX, applyAction, boardChanged, boardOrder, createTask, derivedMove, endpointId, isOrphan, keyMismatch, livenessOf, mayMove, mergeLabel, mergedView, parseTaskKey, sessionId, taskKey, unregisteredMove, workingOn,
-  type AncestryAnswer, type BoardActor, type DoneGate, type Liveness, type MergeRecord, type NodeBuild, type Run, type Task, type TaskAction, type TaskActor,
+  type AncestryAnswer, type BoardActor, type DoneGate, type Liveness, type MergeRecord, type NodeBuild, type Run, type RunWait, type Task, type TaskAction, type TaskActor,
 } from "../src/index.ts";
 
 const NOW = 1_700_000_000_000;
@@ -219,6 +219,15 @@ describe("the board's own moves (B10, D1 to D6)", () => {
     // a wait that said nothing of DONE, and a wait on something else, still move nothing
     expect(derivedMove(doing(), run({ ...waiting, outcome: undefined }), [doing()])).toBeNull();
     expect(derivedMove(doing(), run({ ...waiting, wait: { on: "declared", what: "CI" } }), [doing()])).toBeNull();
+  });
+  it("DONE with a wake-up scheduled or a job running moves doing to review (D1) too; BLOCKED there moves nothing", () => {
+    const waits: RunWait[] = [{ on: "wakeup", next: NOW + 60_000 }, { on: "job", jobs: [{ id: "j1", name: "ci" }] }];
+    for (const wait of waits) {
+      const waiting = run({ phase: "waiting", wait, line: "STATUS: DONE T-1 merged afad93fc2, not live until the next release." });
+      expect(derivedMove(doing(), waiting, [doing()])).toEqual({ to: "review", reason: "STATUS: DONE T-1 merged afad93fc2, not live until the next release.", rule: "D1" });
+      expect(derivedMove(doing(), run({ ...waiting, outcome: undefined }), [doing()])).toBeNull();
+      expect(derivedMove(doing(), run({ ...waiting, outcome: "blocked" }), [doing()])).toBeNull();
+    }
   });
   it("a comment after the turn end does not stop D1", () => {
     const commented = value(apply(doing(), { action: "comment", text: "pushed, waiting on CI" }, builder, [doing()], NOW + 20)).task;

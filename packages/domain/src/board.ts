@@ -408,6 +408,8 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[], named:
     // D1: DONE is the turn's word even while its background work runs (the Run keeps the outcome; phase is waiting).
     if (run.phase === "ended" && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
     if (run.phase === "waiting" && run.wait?.on === "background" && run.outcome === "done") return { to: "review", reason: BACKGROUND_REASON, rule: "D1" };
+    // The same for a wake-up scheduled or a job running: the turn ended DONE, and its line is the reason (T-398).
+    if (run.phase === "waiting" && (run.wait?.on === "wakeup" || run.wait?.on === "job") && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
     if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) return { to: "blocked", reason: said ?? run.outcome, rule: "D2" };
     if (run.phase === "gone") return { to: "todo", reason: GONE_REASON, rule: "D3" };
     return null;

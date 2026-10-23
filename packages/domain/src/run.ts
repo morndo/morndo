@@ -99,17 +99,19 @@ export function deriveRun(f: RunFacts): Run {
   if (f.session === null && f.activity && after(f.activity.last) && f.now - f.activity.last < ACTIVE_MS) {
     return { ...base, phase: "working", deadline: null, overdue: false, since: f.activity.first, source: "hook", ...line };
   }
+  // The turn's own word stays on a Run that waits on work it left (a background task, a wake-up, a job): a DONE with work
+  // left is still DONE, and the board's D1 reads it. A WAITING line or no line says no outcome. `since` of a job's wait is
+  // when the job started, which may be before the turn's end; D6 then judges it against the task's last change as before.
+  const said = t === null || t.status === "waiting" || t.status === null ? {} : { outcome: t.status };
   if (f.jobs.length > 0) {
     const jobs = f.jobs.map(j => ({ id: j.id, name: j.name }));
-    return { ...base, phase: "waiting", wait: { on: "job", jobs }, deadline: null, overdue: false, since: Math.min(...f.jobs.map(j => j.startedAt)), source: "job", ...line };
+    return { ...base, phase: "waiting", wait: { on: "job", jobs }, ...said, deadline: null, overdue: false, since: Math.min(...f.jobs.map(j => j.startedAt)), source: "job", ...line };
   }
   if (t === null) return { ...base, phase: "ended", outcome: "no_status", deadline: null, overdue: false, since: f.changedAt, source: "session" };
   // Activity since the turn end ends a wait's overdue (the lane watch's stale needs "nothing since").
   const quiet = !(f.activity && f.activity.last > t.at);
   const lease = t.until ?? t.at + f.waitMs;
   if (t.tasks.length > 0) {
-    // The turn's own word stays on the Run: a DONE with background work left is still DONE (the board's D1 reads it).
-    const said = t.status === "waiting" || t.status === null ? {} : { outcome: t.status };
     return { ...base, phase: "waiting", wait: { on: "background", tasks: [...t.tasks] }, ...said, deadline: lease, overdue: quiet && f.now > lease, since: t.at, source: "hook", line: t.line };
   }
   if (t.wakes.length > 0) {
@@ -117,7 +119,7 @@ export function deriveRun(f: RunFacts): Run {
     const known = fires.filter((x): x is number => x !== null);
     const next = known.length > 0 ? Math.min(...known) : null;
     const deadline = next !== null ? next + WAKE_GRACE_MS : lease;
-    return { ...base, phase: "waiting", wait: { on: "wakeup", next }, deadline, overdue: quiet && f.now > deadline, since: t.at, source: "hook", line: t.line };
+    return { ...base, phase: "waiting", wait: { on: "wakeup", next }, ...said, deadline, overdue: quiet && f.now > deadline, since: t.at, source: "hook", line: t.line };
   }
   if (t.status === "waiting") {
     return { ...base, phase: "waiting", wait: { on: "declared", what: t.waitingOn }, deadline: lease, overdue: quiet && f.now > lease, since: t.at, source: "status", line: t.line };

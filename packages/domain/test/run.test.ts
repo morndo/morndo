@@ -46,6 +46,18 @@ describe("R2: a turn end with work pending is never ended", () => {
     expect(deriveRun(facts({ session: "busy", turn: turn({ tasks: [{ type: "shell", label: "x" }] }), activity: { first: T0 + 2 * MIN, last: T0 + 3 * MIN } })).phase).toBe("working");
     expect(deriveRun(facts({ turn: turn({ at: T0 + 5 * MIN }) })).phase).toBe("ended");
   });
+  it("the turn's own word stays on the Run while it waits on a wake-up or a job, as it does for background work (the board's D1 reads it)", () => {
+    const wake = [{ schedule: "30 12 * * *", recurring: false }];
+    for (const status of ["done", "blocked", "needs_decision"] as const) {
+      expect(deriveRun(facts({ turn: turn({ status, wakes: wake }) }))).toMatchObject({ phase: "waiting", wait: { on: "wakeup" }, outcome: status });
+      expect(deriveRun(facts({ turn: turn({ status }), jobs: [{ id: "j1", name: "ci", startedAt: T0 }] }))).toMatchObject({ phase: "waiting", wait: { on: "job" }, outcome: status });
+    }
+    // a WAITING line, or no line at all, says no outcome
+    expect(deriveRun(facts({ turn: turn({ status: "waiting", wakes: wake }) })).outcome).toBeUndefined();
+    expect(deriveRun(facts({ turn: turn({ status: null, wakes: wake }) })).outcome).toBeUndefined();
+    expect(deriveRun(facts({ turn: turn({ status: null }), jobs: [{ id: "j1", name: "ci", startedAt: T0 }] })).outcome).toBeUndefined();
+    expect(deriveRun(facts({ turn: null, jobs: [{ id: "j1", name: "ci", startedAt: T0 }] })).outcome).toBeUndefined();
+  });
   it("a scheduled wake-up makes it waiting on the wake-up", () => {
     expect(deriveRun(facts({ turn: turn({ status: null, wakes: [{ schedule: "30 12 * * *", recurring: false }] }) })).wait).toEqual({ on: "wakeup", next: T0 + 30 * MIN });
   });
