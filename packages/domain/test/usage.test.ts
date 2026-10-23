@@ -1,7 +1,7 @@
 // Usage (ADR-0016; U1–U4 in docs/domain.md): the newest report sets an account's windows, a missing window is kept
 // until its reset passes, sessions count while fresh, and the headline picks the account nearest its limit.
 import { describe, expect, it } from "vitest";
-import { SESSION_FRESH_MS, accountLabel, accountNow, applyReport, cleanProfile, pruneSessions, tightest, usageLevel, type AccountProfile, type AccountUsage, type UsageReport } from "../src/index.ts";
+import { SESSION_FRESH_MS, accountLabel, accountNow, applyReport, cleanProfile, pruneSessions, takeNamed, tightest, usageLevel, type AccountProfile, type AccountUsage, type NamedWindow, type UsageReport } from "../src/index.ts";
 
 const NOW = 1_700_000_000_000;
 const HOUR = 3_600_000;
@@ -32,10 +32,18 @@ describe("one report (U2)", () => {
     expect(a.fiveHour?.usedPercentage).toBe(23.5);
     expect(a.sessions.map(s => s.sessionId)).toEqual(["s1", "s2"]);
   });
-  it("a session's own older report never replaces its newer one; percentages are clamped to 0..100", () => {
+  it("a session's own older report never replaces its newer one; a limit window outside 0..101 is dropped, context still clamps", () => {
     const a = applyReport(applyReport(null, report({ contextUsed: 50 }), NOW), report({ at: NOW - 1, contextUsed: 10 }), NOW);
     expect(a.sessions[0]?.contextUsed).toBe(50);
-    expect(applyReport(null, report({ fiveHour: { usedPercentage: 140, resetsAt: null }, contextUsed: -3 }), NOW)).toMatchObject({ fiveHour: { usedPercentage: 100 }, sessions: [{ contextUsed: 0 }] });
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: 140, resetsAt: null }, contextUsed: -3 }), NOW)).toMatchObject({ fiveHour: null, sessions: [{ contextUsed: 0 }] });
+  });
+  it("a value that is not a percentage is not a reading", () => {
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: 1.7e9, resetsAt: NOW + 2 * HOUR } }), NOW).fiveHour).toBeNull();   // an epoch value, not a percentage
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: 101, resetsAt: NOW + 2 * HOUR } }), NOW).fiveHour?.usedPercentage).toBe(100);
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: -3, resetsAt: NOW + 2 * HOUR } }), NOW).fiveHour).toBeNull();
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: NaN, resetsAt: NOW + 2 * HOUR } }), NOW).fiveHour).toBeNull();
+    expect(applyReport(null, report({ fiveHour: null, sevenDay: null, limits: [{ label: "W", usedPercentage: 150, resetsAt: NOW + 24 * HOUR, resetsOn: null }] }), NOW).limits).toBeNull();
+    expect(applyReport(null, report({ fiveHour: null, sevenDay: null, spend: { usedPercentage: 1.7e9, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 1, limitUsd: 2, period: null } }), NOW).spend).toBeNull();
   });
   it("spend follows the same rule, with its dollars", () => {
     const a = applyReport(null, report({ spend: { usedPercentage: 62.8, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 314.12, limitUsd: 500, period: "monthly" } }), NOW);
@@ -107,6 +115,19 @@ describe("an account's own windows", () => {
     const kept = applyReport(first, { ...cursor(), at: NOW + 1, limits: [{ label: " ", usedPercentage: 9, resetsAt: NOW + HOUR, resetsOn: null }] }, NOW + 1);
     expect(kept.limits?.map(w => w.label)).toEqual(["Cursor models", "Other models"]);
     expect(kept.onDemand).toBe("off");
+  });
+
+  it("a named row's length, rolling flag and note survive takeNamed; a bad length or long note is cleaned", () => {
+    const row = (o: Partial<NamedWindow> = {}) => ({ label: "W", usedPercentage: 50, resetsAt: NOW + 24 * HOUR, resetsOn: null, ...o });
+    const rows = takeNamed([
+      row({ lengthMins: 10080, rolling: true, note: "shared with a second product" }),
+      row({ lengthMins: 0 }), row({ lengthMins: -5 }), row({ lengthMins: "x" as unknown as number }),
+      row({ note: "n".repeat(100) }),
+    ]);
+    expect(rows?.[0]).toMatchObject({ label: "W", lengthMins: 10080, rolling: true, note: "shared with a second product" });
+    expect([rows?.[1]?.lengthMins, rows?.[2]?.lengthMins, rows?.[3]?.lengthMins]).toEqual([null, null, null]);
+    expect(rows?.[4]?.note).toBe("n".repeat(40));
+    expect(rows?.[4]?.rolling).toBeUndefined();       // a field that is absent stays absent
   });
 });
 

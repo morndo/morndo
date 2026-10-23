@@ -7,7 +7,7 @@ export type UsageWindow = { usedPercentage: number; resetsAt: number | null };  
 export type SpendWindow = UsageWindow & { usedUsd: number | null; limitUsd: number | null; period: string | null };
 // A window the account names itself (Cursor's "Cursor models"), with the calendar date the provider printed
 // (`resetsOn`, YYYY-MM-DD) when the reset is a day rather than an instant.
-export type NamedWindow = UsageWindow & { label: string; resetsOn: string | null };
+export type NamedWindow = UsageWindow & { label: string; resetsOn: string | null; lengthMins?: number | null; rolling?: boolean; note?: string | null };
 export type SessionUsage = { sessionId: string; lane: string | null; model: string | null; contextUsed: number | null; at: number };
 
 // One status-line report, as the adapter translates it (the raw shape is the agent CLI's own).
