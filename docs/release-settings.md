@@ -8,18 +8,20 @@ repository: no workflow and no script of this repository changes a setting, and
 
 ## What the check requires
 
-`sh scripts/release/check-release-settings.sh [--repo <owner/name>] [--workflows <dir>] [--no-org-secrets]` prints one
-`FAIL:` line per problem and exits 1, and `check-release-settings: ok (...)` and exits 0 when there is none;
-`INFO:` and `KNOWN:` lines never fail. It checks, read-only and printing secret names only, never values:
+`sh scripts/release/check-release-settings.sh --reviewer-id <id> --app-id <app_id> [--repo <owner/name>] [--no-org-secrets]`
+prints one `FAIL:` line per problem and exits 1, and `check-release-settings: ok (...)` and exits 0 when there is none
+(2 for a usage error: both ids are required); `INFO:` and `KNOWN:` lines never fail. `<id>` is the release reviewer's
+user id (the second account) and `<app_id>` the release App's id, so the check compares numbers, never names. It checks,
+read-only and printing secret names only, never values:
 
 | What | Requirement |
 | --- | --- |
-| `release`, `feed`, `promote`, `withdraw` | exist; a `required_reviewers` rule with a non-empty reviewers list and Prevent self-review on; deployments from the branch `main` only |
-| `github-pages` | exists; deployments from the branch `main` only (it serves documents the clients verify, so it needs no reviewer) |
-| environments named by workflows | every environment a `.github/workflows/*.yml` names with `environment:` exists (a workflow naming a missing one creates it with no reviewer and no branch rule); `${{ ... }}` expressions are skipped |
-| the tag ruleset | one ruleset targeting tags that is active, covers exactly `refs/tags/v*`, holds the `creation`, `update` and `deletion` rules, and has exactly one bypass actor: the release App (an Integration) |
-| `RELEASE_SSH_KEY`, `FEED_SSH_KEY` | a secret of exactly the environment `release` / `feed`: of no other environment, and not a repository secret |
-| signing-key-shaped names | no repository or organisation secret whose name matches `SSH_KEY`, `SIGNING` or `PRIVATE_KEY` (case-insensitive), except the App's `RELEASE_APP_PRIVATE_KEY`, which is printed as `KNOWN:` until it moves (step 5) |
+| `release`, `feed`, `promote`, `withdraw` | exist; exactly one required reviewer, a `User` whose id is `--reviewer-id` (a team, the maintainer account or a second reviewer fails); Prevent self-review on; `can_admins_bypass` false (step 4); deployments from the branch `main` only |
+| `github-pages` | exists; deployments from the branch `main` only (it serves documents the clients verify, so it needs no reviewer and may let administrators bypass) |
+| the workflows | read from `main` through the API, never from a checkout, so a workflow change that is not merged yet is not checked; every environment a `.github/workflows/*.yml` names with `environment:` exists (a workflow naming a missing one creates it with no reviewer and no branch rule); `${{ ... }}` expressions are skipped |
+| the tag ruleset | one ruleset targeting tags that is active, covers exactly `refs/tags/v*`, holds the `creation`, `update` and `deletion` rules, and has exactly one bypass actor: an `Integration` whose id is `--app-id` |
+| key secrets | derived from the workflows, not from a name pattern: every `secrets.<NAME>` a job uses in `release`, `feed`, `promote` or `withdraw` must be a secret of exactly that environment, of no other environment, and neither a repository nor an organisation secret |
+| the App's secrets | `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`, used by a job with no environment, are printed as `KNOWN:` until they move (step 6); any other secret such a job uses is an `INFO:` line |
 | the `main` rulesets | their bypass actors are printed as `INFO:` lines for the owner to read |
 
 Two exposures stay open, stated so they are decided with open eyes (the release plan's section 1, decisions 9 and 10):
@@ -27,7 +29,7 @@ the account the lanes run as is a repository administrator that can merge a chan
 rule, and the approval screen shows the run, not the diff — so the check prints the `main` rulesets' bypass actors and
 the release card lists every change to the release-critical paths, and the owner decides with that in front of him.
 The release App's `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are repository secrets today, readable by a workflow
-from any branch, and step 5 moves them into an environment limited to `main`.
+from any branch, and step 6 moves them into an environment limited to `main`.
 
 ## The steps
 
@@ -67,7 +69,23 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    Expected: the first command prints the tag policy's id, the `DELETE` answers with no body, the third prints
    `main branch` and nothing else. Repeat all three for `feed` and `github-pages`.
 
-4. **Create the tag ruleset**, so only the release App can create or move a `v*` tag (Release Please tags with its
+4. **Turn off administrator bypass on `release`, `feed`, `promote` and `withdraw`.** The account the lanes run as is a
+   repository administrator; with the bypass on it could skip the required reviewer, so the reviewer would stop nothing.
+   GitHub documents this as a checkbox, not a REST parameter: Settings > Environments > the environment > deselect
+   "Allow administrators to bypass configured protection rules" > Save protection rules
+   (https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments, read
+   2026-10-24). The REST `GET` returns `can_admins_bypass` (read live 2026-10-24: `true` on `release`, `feed` and
+   `github-pages`), but the REST description does not list it as a `PUT` parameter, so this step uses the checkbox and
+   the check is the proof:
+
+   ```sh
+   gh api repos/morndo/morndo/environments --jq '.environments[] | {name, can_admins_bypass}'
+   ```
+
+   Expected: `can_admins_bypass` is `false` for `release`, `feed`, `promote` and `withdraw` (`github-pages` may stay
+   `true`). Do this for `promote` and `withdraw` right after step 1, before their workflows are merged.
+
+5. **Create the tag ruleset**, so only the release App can create or move a `v*` tag (Release Please tags with its
    App token). The App's id is on its page under Settings > GitHub Apps, or in the org's installations:
 
    ```sh
@@ -83,7 +101,7 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    Expected: the first command lists the org's installations and their `app_id`s; the second answers with the ruleset
    object, `"enforcement":"active"` among its fields.
 
-5. **Move the release App's two secrets into an environment limited to `main`** (decision 10). This also needs the
+6. **Move the release App's two secrets into an environment limited to `main`** (decision 10). This also needs the
    `release-please` job in `.github/workflows/release.yml` to name that environment — a workflow change that is not
    in this pull request — so run these commands only together with that change; until then the check prints `KNOWN:`
    for the two secrets and does not fail on them:
@@ -104,11 +122,12 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    Expected: the environment and its policy answer as in steps 1 and 2, the `secret set` commands report the secret
    names they stored, and the `secret delete` commands remove the two repository secrets.
 
-6. **Run the check and keep its output**:
+7. **Run the check and keep its output.** It needs the second account's user id (the number `gh api users/<login>
+   --jq .id` printed in step 1) and the release App's id (the `app_id` step 5 listed):
 
    ```sh
    gh auth status
-   sh scripts/release/check-release-settings.sh
+   sh scripts/release/check-release-settings.sh --reviewer-id <id> --app-id <app_id>
    ```
 
    Expected: `gh auth status` shows the token's scopes (organisation secrets need `admin:org`), the check prints
@@ -123,6 +142,7 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
 - https://docs.github.com/en/rest/deployments/branch-policies — list, add and delete deployment branch policies
 - https://docs.github.com/en/rest/repos/rules — rulesets, their conditions, rules and bypass actors
 - https://docs.github.com/en/rest/actions/secrets — repository, environment and organisation secret names
+- https://docs.github.com/en/rest/repos/contents — the workflow files on `main`, read with the raw media type
 
 All read 2026-10-23. What the pages say that these steps rely on: the environment `PUT` takes `reviewers` (up to six,
 `type` and `id`), `prevent_self_review` and a `deployment_branch_policy` whose two booleans are both required and must
