@@ -43,6 +43,18 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(w.store.recentUpdates(1)[0]!.doneMarks).toEqual(["draining", "stopping", "backing_up", "swapping", "starting", "committing"]);
   });
 
+  it("a unit of ours that Morndo did not write abandons the apply before anything is recorded, held or stopped", async () => {
+    const w = await buildApplyWorld(scratch);
+    w.services.foreign = ["/srv/example-user/.config/systemd/user/morndo-hub.service"];
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "abandoned", reason: expect.stringMatching(/morndo-hub\.service: not written by Morndo, so nothing was stopped/) });
+    expect(w.tape.filter(t => t.startsWith("stop:") || t.startsWith("renderUnits:"))).toEqual([]);
+    expect(holdText(w.holdPath)).toBeNull();
+    expect(w.store.recentUpdates(5)).toEqual([]);              // no record: nothing to recover
+    expect(w.applying.present()).toBe(false);
+    expect(w.current()).toBe(A);
+  });
+
   it("carries the applying mark from the drain to the commit (§5)", async () => {
     // §5: the mark exists from the drain until the Update commits, and the recovery unit runs only while it does.
     // The probe stands where a service would: what it observes under the drain's hold is what the machine saw.
@@ -57,6 +69,15 @@ describe("the apply service (§6.2–§6.5)", () => {
     expect(seen.length, "the drain read the safe point under the hold").toBeGreaterThan(0);
     expect(seen.every(present => present), "the mark stood through the drain").toBe(true);
     expect(w.applying.present(), "the mark is gone once committed").toBe(false);
+  });
+
+  it("a machine without one of the databases yet updates: its Backup is the absence (§11.3)", async () => {
+    // A machine that never made a connections store. The plan still covers the database; nothing to copy is no
+    // reason to abandon the update.
+    const w = await buildApplyWorld(scratch);
+    rmSync(w.dbPaths.connections, { force: true });
+    const out = await w.apply().apply({ now: false });
+    expect(out).toEqual({ kind: "committed", version: B });
   });
 
   it("apply waits for in-flight deliveries", async () => {

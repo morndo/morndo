@@ -3,7 +3,7 @@
 // private (0600 in a 0700 directory); a restore that puts the checked copy back and never leaves a stale -wal/-shm
 // beside it. better-sqlite3's backup restarts when the source is written meanwhile, so a busy writer is the case,
 // not the exception (§11.1, the connections store's rule).
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
@@ -68,10 +68,12 @@ describe("SqliteBackup (§11.3, §11.4)", () => {
     }
   });
 
-  it("a source that is not there answers ok:false, and nothing is left behind", async () => {
+  it("a source that is not a database answers ok:false, and nothing is left behind", async () => {
     const w = world();
     try {
-      const taken = await w.backup.take("u-1", "fleet");             // this home runs no fleet
+      mkdirSync(dirname(w.paths.fleet), { recursive: true });
+      writeFileSync(w.paths.fleet, "this is not an SQLite database at all, only text in its place");
+      const taken = await w.backup.take("u-1", "fleet");
       expect(taken.ok).toBe(false);
       if (!taken.ok) expect(taken.reason).toMatch(/fleet/);
       expect(w.backup.has("u-1", "fleet")).toBe(false);
@@ -100,6 +102,49 @@ describe("SqliteBackup (§11.3, §11.4)", () => {
     } finally {
       try { w.writer.close(); } catch { /* closed by the case */ }
     }
+  });
+
+  it("a database that does not exist yet is backed up as absent, and restoring that removes what was made since", async () => {
+    // A machine that never made a connections store: the update's plan still covers it (§11.3, a missing database is
+    // the nothing it is). Its Backup is "absent", and going back puts the absence back: the Version that never had
+    // the file starts without it, whatever the newer one wrote.
+    const home = mkdtempSync(join(scratch, "home-"));
+    const paths = databasePaths(home, {});
+    const backup = new SqliteBackup({ paths, backups: join(home, "state", "backups") });
+    expect(existsSync(paths.connections)).toBe(false);
+    expect(await backup.take("u-1", "connections")).toEqual({ ok: true, schema: 0 });
+    expect(backup.has("u-1", "connections")).toBe(true);
+    expect(backup.has("u-2", "connections")).toBe(false);
+    mkdirSync(dirname(paths.connections), { recursive: true });
+    const made = new Database(paths.connections);               // the newer Version makes it, and writes
+    made.exec("CREATE TABLE secrets (id TEXT)");
+    made.close();
+    writeFileSync(`${paths.connections}-wal`, "frames of a database that is going away");
+    backup.restore("u-1", "connections");
+    expect(existsSync(paths.connections)).toBe(false);
+    expect(existsSync(`${paths.connections}-wal`)).toBe(false);
+    expect(existsSync(`${paths.connections}-shm`)).toBe(false);
+  });
+
+  it("a database that is there but cannot be read fails its backup: it is never taken for absent", async () => {
+    // existsSync answers false on EACCES too. Taken for absent, a later restore would delete a store that was there.
+    const home = mkdtempSync(join(scratch, "home-"));
+    const paths = databasePaths(home, {});
+    mkdirSync(dirname(paths.connections), { recursive: true });
+    const made = new Database(paths.connections);
+    made.exec("CREATE TABLE secrets (reference TEXT)");
+    made.close();
+    const backup = new SqliteBackup({ paths, backups: join(home, "state", "backups") });
+    chmodSync(dirname(paths.connections), 0o000);               // the file is there; this user cannot reach it
+    try {
+      const taken = await backup.take("u-1", "connections");
+      expect(taken.ok).toBe(false);
+      if (!taken.ok) expect(taken.reason).toMatch(/connections: .*EACCES|permission denied/i);
+      expect(backup.has("u-1", "connections")).toBe(false);    // no marker, no copy: nothing to restore from
+    } finally {
+      chmodSync(dirname(paths.connections), 0o700);
+    }
+    expect(existsSync(paths.connections)).toBe(true);
   });
 
   it("has() answers per update id and database; prune keeps only the named ids", async () => {

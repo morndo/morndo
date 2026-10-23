@@ -2,16 +2,18 @@
 // principal learned, kept as Notes. Each change is judged by the domain (memory.ts) and written with its events in one
 // transaction. The agents come through the hub's agent door with their tokens (agent-access.ts): the manager's token
 // acts as the manager, a worker's as the lane it names, and that is the Note's provenance (M3), never the body. The
-// principal acts from the console. Memory grants nothing (M1): nothing here touches an Escalation, a Mandate or a
-// Decision. What reaches a lane, in a search or in its skills, is what the domain calls deliverable (M4, M5).
-import { createHash } from "node:crypto";
+// principal approves: an Endpoint under step-up, or the console with a one-time code that only a step-up session mints
+// (M8). Memory grants nothing (M1): nothing here touches an Escalation, a Mandate or a Decision. What reaches a lane,
+// in a search or in its skills, is what the domain calls deliverable (M4, M5).
+import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import {
-  NOTE_KINDS, actorLabel, approveNote, invalidateNote, isDeliverable, parseNoteId, parseScope, proposeNote, renderBundle, retireSuperseded,
-  supersedeNote,
-  type BoardActor, type MemoryActor, type MemoryEvent, type MemoryProblem, type Note, type NoteDraft, type NoteId, type NoteKind, type SkillFile,
+  DEFAULT_POLICY, NOTE_KINDS, actorLabel, approveNote, invalidateNote, isDeliverable, mayCommand, parseNoteId, parseScope, proposeNote, renderBundle,
+  retireSuperseded, supersedeNote,
+  type AccessPolicy, type BoardActor, type MemoryActor, type MemoryEvent, type MemoryProblem, type Note, type NoteDraft, type NoteId, type NoteKind, type SkillFile,
 } from "@morndo/domain";
 import { LIMITS, MEMORY_SEARCH, type MemoryRememberBody } from "@morndo/protocol";
 import type { MemoryStore } from "../adapters/memory-store.ts";
+import type { Authenticated } from "./access-service.ts";
 
 // Who asks: an agent as the agent door authenticated it, or the principal at the control plane's console.
 export type MemoryCaller = BoardActor | "console";
@@ -35,7 +37,24 @@ export type ImportOutcome = { file: string } & (
 
 // memory.sync's own cap on the files of one part (the protocol's op arguments).
 const FILES_PER_PART = 400;
+// How many pending Notes file an Ask at once (round 2): the board shows the oldest ten; the rest wait their turn.
+export const MEMORY_ASKS_MAX = 10;
 const normalBody = (s: string) => s.replace(/\r\n/g, "\n").trim();
+
+// M8: the console's one-time code, 12 characters of Crockford base32 (no I L O U, https://crockford.com/base32.html,
+// read 2026-10-21) shown as XXXX-XXXX-XXXX, valid ten minutes, single use, and burned after five wrong tries. Drawn
+// with node:crypto's randomInt, so nothing on this box can predict it (node:crypto docs, read 2026-10-21).
+export const APPROVAL_CODE_TTL_MS = 10 * 60_000;
+export const APPROVAL_CODE_FAILURES = 5;
+const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+// As it is typed at the console: upper-case, every non-alphanumeric gone, so case and dashes never decide.
+export const normalCode = (s: string): string => s.toUpperCase().replace(/[^0-9A-Z]/g, "");
+// Only this is stored: the sha256 (hex) of the normalised code, never the code itself.
+export const codeHash = (s: string): string => createHash("sha256").update(normalCode(s)).digest("hex");
+function mintCode(): string {
+  const chars = Array.from({ length: 12 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]);
+  return `${chars.slice(0, 4).join("")}-${chars.slice(4, 8).join("")}-${chars.slice(8).join("")}`;
+}
 
 // The bundle's version: the first 32 hex characters of a sha256 over every file's name and content, in order. Each
 // file is hashed as the JSON pair [name, content], so no two different bundles hash the same text.
@@ -67,9 +86,16 @@ export function bundleParts(files: readonly SkillFile[]): SkillFile[][] {
 export class MemoryService {
   #store: MemoryStore;
   #now: () => number;
+  #policy: () => AccessPolicy;
 
-  constructor(p: { store: MemoryStore; now?: () => number }) {
-    this.#store = p.store; this.#now = p.now ?? Date.now;
+  constructor(p: { store: MemoryStore; now?: () => number; policy?: () => AccessPolicy }) {
+    this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy ?? (() => DEFAULT_POLICY);
+  }
+
+  // M8: the principal's approval is his answer under step-up (AC7), exactly as the board takes it (BoardService.principal).
+  principal(a: Authenticated): BoardActor | { problem: "step_up" } {
+    if (!mayCommand(a.session, this.#now(), this.#policy())) return { problem: "step_up" };
+    return { kind: "principal", endpointId: a.endpoint.id, sessionId: a.session.id };
   }
 
   // A new Note, or with `supersedes` its successor (M2). A refused Note takes no number.
@@ -134,21 +160,81 @@ export class MemoryService {
     });
   }
 
-  // M4, M5: the principal's approval, taken at the console (slice 1).
-  approve(id: string): MemoryResult {
+  // M4, M5, M8: the principal's approval. An agent caller is refused by the domain (`not_principal`); a principal
+  // Endpoint is one `principal(a)` gave, under step-up; the console needs a one-time code, checked in the same
+  // transaction as the approval. A note that does not exist is not_found before any code is looked at, so a guess at
+  // ids learns nothing from the code's refusals.
+  approve(caller: MemoryCaller, id: string, proof: { code?: string } = {}): MemoryResult {
     return this.#store.transaction((): MemoryResult => {
       const n = this.#store.get(id);
       if (!n) return { ok: false, problem: "not_found" };
+      if (caller === "console") {
+        const wrong = this.#codeProblem(n.id, proof);
+        if (wrong !== null) return { ok: false, problem: wrong };
+      }
       const now = this.#now();
       const old = n.supersedes ? this.#store.get(n.supersedes) : null;
-      const r = approveNote(n, CONSOLE, now, old);
+      const r = approveNote(n, memoryActor(caller), now, old);
       if (!r.ok) return { ok: false, problem: r.error.problem };
       // A successor that waited for this approval now replaces the Note it supersedes (M2, M4).
       const retired = old && old.invalidatedAt === null ? retireSuperseded(old, r.value.note, now) : null;
       if (retired?.ok) this.#write([r.value.note, retired.value.note], [r.value.event, retired.value.event]);
       else this.#write([r.value.note], [r.value.event]);
+      // Single use: only an approval that succeeded spends the code (M8).
+      if (caller === "console") this.#store.dropApprovalCode(id);
       return { ok: true, note: r.value.note };
     });
+  }
+
+  // M8: the console's proof of the principal's answer. The problem, or null when the code holds for this note.
+  #codeProblem(note: string, proof: { code?: string }): MemoryProblem | null {
+    if (!normalCode(proof.code ?? "")) return "code_needed";
+    const row = this.#store.approvalCode(note);
+    if (row === null) return "bad_code";
+    if (row.expires_at <= this.#now()) { this.#store.dropApprovalCode(note); return "bad_code"; }
+    const given = Buffer.from(codeHash(proof.code ?? ""));
+    const kept = Buffer.from(row.hash);
+    if (given.length !== kept.length || !timingSafeEqual(given, kept)) {
+      if (this.#store.bumpApprovalFailures(note) >= APPROVAL_CODE_FAILURES) this.#store.dropApprovalCode(note);
+      return "bad_code";
+    }
+    return null;
+  }
+
+  // M8: mint the console's one-time code: only a step-up session can, only for a Note that waits for approval. The
+  // code is returned once and never stored; the app's Ask on the note is what asks for it.
+  issueApprovalCode(a: Authenticated, id: string): { ok: true; code: string; expiresAt: number } | { ok: false; problem: "step_up" | "not_found" | "not_pending" } {
+    const who = this.principal(a);
+    if ("problem" in who) return { ok: false, problem: who.problem };
+    const n = this.#store.get(id);
+    if (!n) return { ok: false, problem: "not_found" };
+    if (!waitsForApproval(n)) return { ok: false, problem: "not_pending" };
+    const code = mintCode();
+    const expiresAt = this.#now() + APPROVAL_CODE_TTL_MS;
+    this.#store.putApprovalCode(n.id, codeHash(code), expiresAt);   // one live code per note: this replaces it
+    return { ok: true, code, expiresAt };
+  }
+
+  // The app's answer to the Ask a pending Note files (M4, M5, M8), as EscalationService.answer hands it here after its
+  // own step-up check; `principal(a)` judges it again. A Note that is gone is not_found; one that no longer waits
+  // (approved or invalidated meanwhile) is changed — the Ask no longer says what the principal was shown (E12).
+  decide(a: Authenticated, id: string, decision: "approve" | "reject"): { ok: true } | { ok: false; problem: "step_up" | "not_found" | "changed" } {
+    const who = this.principal(a);
+    if ("problem" in who) return { ok: false, problem: "step_up" };
+    const n = this.#store.get(id);
+    if (!n) return { ok: false, problem: "not_found" };
+    if (!waitsForApproval(n)) return { ok: false, problem: "changed" };
+    const r = decision === "approve" ? this.approve(who, id) : this.invalidate(who, id, "rejected in the app");
+    return r.ok ? { ok: true } : { ok: false, problem: "changed" };
+  }
+
+  // The Notes that file an Ask on the Decisions board: what waits for the principal, oldest first, at most
+  // MEMORY_ASKS_MAX — a flood of proposals must not flood the board; the rest wait in order.
+  pendingApprovals(): Note[] {
+    const listed = this.list({ pending: true });
+    return (listed.ok ? listed.notes : [])
+      .sort((a, b) => a.createdAt - b.createdAt || Number(a.id.slice(2)) - Number(b.id.slice(2)))
+      .slice(0, MEMORY_ASKS_MAX);
   }
 
   // The console's list: live Notes in index order; `pending`, only those waiting for the principal's approval (a
@@ -199,11 +285,12 @@ export class MemoryService {
     return { version: bundleVersion(files), parts: bundleParts(files) };
   }
 
-  // The console sees every Note. An agent sees a deliverable one, or one it wrote (its label is the provenance, M3).
+  // The console and the principal's signed-in Endpoint see every Note. An agent sees a deliverable one, or one it wrote
+  // (its label is the provenance, M3) — which is why the principal's reject of a pending lane Note reaches it (M2).
   #visible(caller: MemoryCaller, id: string): Note | null {
     if (!parseNoteId(id)) return null;
     const n = this.#store.get(id);
-    if (!n || caller === "console") return n;
+    if (!n || caller === "console" || caller.kind === "principal") return n;
     return isDeliverable(n) || n.provenance.by === actorLabel(memoryActor(caller)) ? n : null;
   }
 

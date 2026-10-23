@@ -573,6 +573,7 @@ ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n re
 | Network attacker | TLS and signatures |
 | A crafted archive (paths with `..`, absolute paths, links outside, devices, setuid) | Section 6.1, step 4; and only after RL1 |
 | A same-user process edits the installed tree | Not prevented: the node is not an isolation boundary (ADR-0012). `morndo doctor` detects it against the signed file list. Read-only modes stop accidents only. |
+| A same-user process writes `rollback-confirmed` itself | Accepted, the same residual: it lets the rollback unit run without the typed word, which that process could have typed itself (`morndo update --rollback` takes it from any process of the user). The file is consumed on use, valid 10 minutes, for the running Version only, and voided when the unit fails to start. |
 | A downgrade through the Channel or a withdrawal | RL2 |
 | "Update now" used to push something | It is a principal Command with step-up; the operation names a Version only; the node still applies RL1 and RL2; a node's policy can deny `update.apply`. |
 
@@ -599,6 +600,7 @@ Capistrano, the common shape for versioned releases with a `current` link, keeps
 
 - Taken after the service stopped (RL5), with SQLite's online backup API through better-sqlite3, which makes "a bit-wise identical copy of the source database as it was when the copying commenced" [U20]. Then `PRAGMA quick_check` and the schema version are read from the copy, and the file and its directory are synced. (`VACUUM INTO` also makes "a consistent snapshot", but its copy "might be incomplete and corrupt" after a power loss unless `synchronous` is NORMAL or FULL [U20]; the backup API with an explicit sync is simpler to reason about.)
 - Mode 0600, under `~/.local/state/morndo-update/backups/` (a deny root of the node's file rules). Key files are never copied: they don't change in an Update.
+- A database the machine never made (no connections store yet, say) is backed up as absent: a marker, not a copy. Restoring it removes what the newer Version made since, so the Version that never had the file starts without it; every revocation in the removed file counts as one the restore would drop (RL10).
 - Kept for the last three committed Updates, then deleted. Free space is checked first (section 6.1).
 
 ### 11.4 Restore

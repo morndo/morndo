@@ -34,7 +34,8 @@ export type RelayDeps = {
   spool: Spool;
   files: RelayFiles;
   windowOf: (body: unknown) => string | null;
-  ask?: (body: unknown, window: string | null) => string | null;
+  // The reply style ask is async: it may read the hub's board (digest-check.ts).
+  ask?: (body: unknown, window: string | null) => string | null | Promise<string | null>;
   // B6: a Stop or a StopFailure from a session that positively says it is headless, answered and dropped.
   foreign?: (body: unknown) => boolean;
   onAppended: () => void;
@@ -96,7 +97,7 @@ export async function startRelay(d: RelayDeps): Promise<Relay> {
     }
     const session = field(body, "session_id");
     const event = { path: path as "/hook/stop" | "/hook/failure" | "/notify" | "/file", at: now(), session: typeof session === "string" ? session : null, window: d.windowOf(body) };
-    const asked = path === "/hook/stop" ? d.ask?.(body, event.window) ?? null : null;
+    const asked = path === "/hook/stop" ? await d.ask?.(body, event.window) ?? null : null;
     if (asked !== null) body = { ...(body as Record<string, unknown>), statusAsked: true };
     let appended: Appended;
     if (path === "/file") {
