@@ -350,8 +350,9 @@ export async function runRollback(ctx: StepCtx, o: {
     // RL8 and RL10, settled before anything moves: what a migration changed goes back only when the old Version truly
     // cannot open it; a restore with the Backup gone is refused, never forced; and a restore that would bring back a
     // device, agent token or node revoked since the Backup was taken is refused too — the services kept taking
-    // revocations during probation (RL9), and until the revocation journals arrive (PR 5c) those rows live only in
-    // the database a restore would replace. The target keeps running; the principal decides.
+    // revocations during probation (RL9), and what their journals do not hold lives only in the database a restore
+    // would replace (the journal's own ids the adapter already leaves out; §11.5). The target keeps running; the
+    // principal decides.
     const plan = planOf(ctx.u.migrations);
     const restores = rollbackRestores(plan);
     for (const db of restores) {
@@ -359,14 +360,14 @@ export async function runRollback(ctx: StepCtx, o: {
         database: db, restoreOnRollback: plan[db].restoreOnRollback, backupPresent: deps.backup.has(backupOf, db),
       });
       if (!allowed.ok) return await failed(`${db}: ${allowed.error} (${o.cause})`);
-      const dropped = deps.revocations.droppedBy(backupOf, db);
+      const dropped = deps.revocations.droppedBy(backupOf, db, backText);
       if (dropped.length > 0) return await failed(revocationsDropped(db, dropped, blameText, o.cause));
     }
     await stopServices(deps, o.running);
     // Again now that nothing runs: a revoke that landed between the check above and the stop lives only in the
     // database the restore would replace. Then the target's services start again and the rollback fails loudly.
     for (const db of restores) {
-      const dropped = deps.revocations.droppedBy(backupOf, db);
+      const dropped = deps.revocations.droppedBy(backupOf, db, backText);
       if (dropped.length > 0) {
         await startServices(deps, o.running);
         return await failed(revocationsDropped(db, dropped, blameText, o.cause));

@@ -484,7 +484,7 @@ export async function runUpdater(
       services, probe,
       schemas: new SqliteSchemas({ paths: dbPaths }),
       backup: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }),
-      revocations: new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") }),
+      revocations: new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups"), releases: paths.releases }),
       hold: new HoldFileWriter({ home, env }),
       applying: new ApplyingFileMarker({ state: paths.state }),
       installer, store, clock: systemClock, sleeper: realSleeper, alerts, verifier,
@@ -937,7 +937,7 @@ export async function runUpdater(
       const outcome = await new RecoveryService({
         services: m, probe,
         backup: new SqliteBackup({ paths: dbPaths, backups: join(paths.state, "backups") }),
-        revocations: new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups") }),
+        revocations: new SqliteRevocations({ paths: dbPaths, backups: join(paths.state, "backups"), releases: paths.releases }),
         hold: new HoldFileWriter({ home, env }),
         applying: new ApplyingFileMarker({ state: paths.state }),
         installer, store, clock: systemClock, sleeper: realSleeper, alerts,

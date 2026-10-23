@@ -160,7 +160,7 @@ export async function startInProcessHub(o: {
   await transcription.start();
   const identity = o.identity ?? loadOrCreateIdentity(dir);
   const http = startHttp({
-    config, identity, access, observation: o.observation ?? new ObservationService(tmux, 1000),
+    config, identity, access, store, observation: o.observation ?? new ObservationService(tmux, 1000),
     steering: o.steering ? o.steering(store) : new SteeringService(store, tmux, o.now ?? Date.now, () => access.policy(), inbox, undefined, undefined, undefined, null,
       queue ? { queue, isManager: id => id === o.manager } : null, () => o.manager ?? null),
     escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now), queue, ...(o.alerts ? { alerts: o.alerts } : {}),

@@ -270,6 +270,17 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE nodes ADD COLUMN last_proto TEXT;
     `),
   },
+  {
+    version: 18,
+    name: "a node's enrolment: which join made its key, so a revocation names the enrolment it revoked (RL10)",
+    compat: "additive",
+    // A node keeps its name across a revoke and a join again; the revocation journal (updates design §11.5) keys a
+    // node's revocation by this, so it never revokes the next enrolment under the same name. Rows from before get one
+    // of their own now, as if each had joined once.
+    up: db => db.exec(`
+      ALTER TABLE nodes ADD COLUMN enrolment TEXT;
+      UPDATE nodes SET enrolment = lower(hex(randomblob(16))) WHERE enrolment IS NULL;`),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

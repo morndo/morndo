@@ -61,6 +61,7 @@ export class Outbox {
   #connected: () => boolean;
   #onChange: (records: OutboxRecord[], fromRefresh: boolean) => void;
   #newId: () => string;
+  #hubStore: () => string | null;
   #records = new Map<string, OutboxRecord>();
   #running = new Set<string>();                    // workers whose queue is being worked through
   #waiters = new Set<() => void>();                // runners waiting for the connection, a timer, or a change
@@ -78,6 +79,9 @@ export class Outbox {
     // `fromRefresh`: the change is what the store already held (another tab's, or a reload's), not this tab's own: the
     // device tells the other tabs of its own changes only (review M5), so a refresh never echoes between them.
     onChange: (records: OutboxRecord[], fromRefresh: boolean) => void; newId?: () => string;
+    // The hub's store seen before a Command's first attempt (RL10, §11.5): read once when its record is written and
+    // stamped on it, never rewritten. Absent: every record goes out unstamped, as an older app's.
+    hubStore?: () => string | null;
     // false: another tab sends; this one only writes down and shows (activate() when it takes over; review M5).
     active?: boolean;
   }) {
@@ -88,6 +92,7 @@ export class Outbox {
     this.#connected = d.connected;
     this.#onChange = d.onChange;
     this.#newId = d.newId ?? (() => crypto.randomUUID());
+    this.#hubStore = d.hubStore ?? (() => null);
     this.#active = d.active ?? true;
   }
 
@@ -129,8 +134,10 @@ export class Outbox {
   // after its conversation was left: "Not sent: verify", sent on Retry).
   async enqueue(c: NewCommand, held?: string): Promise<OutboxRecord> {
     const now = this.#timers.now();
+    const stamp = this.#hubStore();
     const r: OutboxRecord = {
       id: this.#newId(), ...c, createdAt: now, budgetFrom: now, attempts: 0, sentAt: null, typedAt: null,
+      ...(stamp ? { hubStore: stamp } : {}),
       ...(held ? { state: "failed" as const, error: held } : { state: "queued" as const, error: null }),
     };
     await this.#store.put(r);

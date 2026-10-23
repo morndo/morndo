@@ -305,9 +305,11 @@ export type RunView = Run;
 // node rolled a Version back; update_rollback_failed — a rollback that did not reach the good Version;
 // update_skew_blocked — the control plane held its apply while a joined node's agent protocol falls outside the
 // target's range (RL11): nothing ran, and the hold names the nodes.
+// journal_unreadable: a line of the fleet's revocation journal it could not read and skipped (updates design §11.5).
 export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter", "backlog_full", "unrouted_hook",
   "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback", "draft_stashed",
-  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked"] as const;
+  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked",
+  "journal_unreadable"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type Alert = { id: number; at: number; node: string | null; kind: AlertKind; detail: Record<string, unknown> };
 // The alerts the app pushes (the owner, 2026-10-12): a node's key may be stolen (a new source, a second instance), events
@@ -321,6 +323,8 @@ export function urgentAlert(a: { kind: string; detail: Record<string, unknown> }
     // acts, and a node that rolled back is the fleet off its committed Version — each is a now, not a morning read.
     // update_skew_blocked stays quiet: the ask was refused, nothing ran (RL11), and the record is enough.
     case "rollout_halted": case "update_rolled_back": case "update_rollback_failed": return true;
+    // a revocation the journal holds may not have been applied again: someone should look
+    case "journal_unreadable": return true;
     case "delivery_waiting": return typeof a.detail.minutes === "number" && a.detail.minutes >= 15;
     default: return false;
   }

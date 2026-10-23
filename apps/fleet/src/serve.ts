@@ -5,10 +5,10 @@
 // and daily. A revoked node's lanes go whichever way it was revoked (the client API, or the console writing fleet.db).
 import type Database from "better-sqlite3";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { DEFAULT_SOAK_MINUTES } from "@morndo/domain";
 import type { Delivery, Health, Pane } from "@morndo/protocol";
-import { Flight, HoldWatch, assertLocalDisk, holdFile, productBuild } from "@morndo/service-kit";
+import { Flight, HoldWatch, RevocationJournal, assertLocalDisk, holdFile, productBuild } from "@morndo/service-kit";
 import type { FleetConfig } from "./config.ts";
 import { Audit } from "./adapters/audit.ts";
 import { startClientApi } from "./adapters/client-api.ts";
@@ -42,6 +42,7 @@ import { CONTROL_PLANE_MACHINE, Rollouts } from "./application/rollouts.ts";
 import type { RolloutAuthority } from "./adapters/client-api.ts";
 import { decodePrincipalKey, hubFilePrincipalAuthority, hubIdentityPubFile, principalAuthority } from "./adapters/principal-check.ts";
 import { UpdaterStateWatch, updaterStateFile } from "./adapters/updater-state-watch.ts";
+import { applyRevocationJournal } from "./application/revocations.ts";
 import { Router } from "./application/router.ts";
 import { Runs } from "./application/runs.ts";
 
@@ -83,9 +84,18 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   assertLocalDisk(dirname(config.dbPath));          // before the key file too, which lives beside it by default
   const key = loadOrCreateFleetKey(config.keyPath);
   const db = openFleetDb(config.dbPath);
-  const nodes = new NodesStore(db, now);
+  // RL10 (updates design §11.5): every revocation is journaled to revoked.log beside fleet.db before its database
+  // write, and each start applies the journal again, before anything below reads the nodes — so a fleet.db restored
+  // from an older copy (the updater's rollback) brings no revoked node back.
+  const journal = new RevocationJournal(join(dirname(config.dbPath), "revoked.log"));
+  const nodes = new NodesStore(db, now, journal);
   const events = new EventHub(e => log.error("an event subscriber failed", e));
   const audit = new Audit(db, { now, log, onAlert: a => events.emit({ t: "alert", node: a.node ?? "", body: a }) });
+  // A line the journal cannot read is an Alert, never a refusal to start: the rest of the journal still applies.
+  const reapplied = applyRevocationJournal(journal, nodes);
+  if (reapplied.applied > 0) log.info(`re-applied ${reapplied.applied} revocations from revoked.log`);
+  for (const b of reapplied.bad) audit.alert("journal_unreadable", null, { file: "revoked.log", line: b.line, why: b.why });
+  if (journal.compact()) log.info("revoked.log compacted to one entry per revocation");
   // On start and daily; a busy or full fleet.db is logged and tried again the next day, never thrown out of the timer.
   const pruneAudit = () => {
     try { const n = audit.prune(); if (n > 0) log.info(`audit: removed ${n} rows older than 90 days`); }
