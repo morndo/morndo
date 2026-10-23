@@ -20,6 +20,9 @@ export function reportFrom(body: UsageReportBody, account: string, actor: BoardA
   const spendWin = win(spendRaw);
   const ctx = body.context_window?.used_percentage;
   const limits = namedLimits(body.limits);
+  // U14: a window the status line carries but whose percentage is not readable (a timestamp, a null) is unknown, not absent.
+  const unreadable = (w: { used_percentage?: number | null } | null | undefined) => w != null && !(typeof w.used_percentage === "number" && Number.isFinite(w.used_percentage));
+  const unknown = ([["fiveHour", rl?.five_hour], ["sevenDay", rl?.seven_day], ["spend", spendRaw]] as const).filter(([, w]) => unreadable(w)).map(([k]) => k);
   return {
     account, sessionId: body.session_id, lane: actor.kind === "principal" ? null : actor.name, at,
     model: body.model?.display_name ?? body.model?.id ?? null,
@@ -27,6 +30,7 @@ export function reportFrom(body: UsageReportBody, account: string, actor: BoardA
     fiveHour: win(rl?.five_hour), sevenDay: win(rl?.seven_day),
     spend: spendWin ? { ...spendWin, usedUsd: num(spendRaw?.used_usd), limitUsd: num(spendRaw?.limit_usd), period: spendRaw?.period ?? null } : null,
     limits, onDemand: limits ? (typeof body.on_demand === "string" ? body.on_demand : null) : null,
+    ...(unknown.length > 0 ? { unknown } : {}),
   };
 }
 // Translate the wire rows and let the domain drop a bad one and cap what remains. No second label rule or cap here.

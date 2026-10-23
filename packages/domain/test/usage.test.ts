@@ -45,6 +45,22 @@ describe("one report (U2)", () => {
     expect(applyReport(null, report({ fiveHour: null, sevenDay: null, limits: [{ label: "W", usedPercentage: 150, resetsAt: NOW + 24 * HOUR, resetsOn: null }] }), NOW).limits).toBeNull();
     expect(applyReport(null, report({ fiveHour: null, sevenDay: null, spend: { usedPercentage: 1.7e9, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 1, limitUsd: 2, period: null } }), NOW).spend).toBeNull();
   });
+  it("a window the report carries but cannot read is unknown, not the old number kept fresh (U14)", () => {
+    const first = applyReport(null, report({ fiveHour: { usedPercentage: 60, resetsAt: NOW + 2 * HOUR }, spend: { usedPercentage: 30, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 1, limitUsd: 3, period: "monthly" } }), NOW);
+    expect(first.fiveHour?.usedPercentage).toBe(60);
+    // an epoch value in the field: that window is unknown, the other one is as reported
+    const bad = applyReport(first, report({ at: NOW + 10 * 60_000, fiveHour: { usedPercentage: 1_700_000_000, resetsAt: NOW + 2 * HOUR }, sevenDay: { usedPercentage: 12, resetsAt: NOW + 3 * 24 * HOUR } }), NOW + 10 * 60_000);
+    expect(bad.fiveHour).toBeNull();
+    expect(bad.sevenDay?.usedPercentage).toBe(12);
+    // a window the report flags as present but unreadable (the hub's adapter does this for a null percentage): unknown too, for spend as well
+    const flagged = applyReport(first, report({ at: NOW + 10 * 60_000, fiveHour: null, sevenDay: null, spend: null, unknown: ["fiveHour", "spend"] }), NOW + 10 * 60_000);
+    expect(flagged.fiveHour).toBeNull();
+    expect(flagged.spend).toBeNull();
+    // a window the report simply leaves out is still kept until its reset (U2)
+    const left = applyReport(first, report({ at: NOW + 10 * 60_000, fiveHour: null, sevenDay: null, spend: null }), NOW + 10 * 60_000);
+    expect(left.fiveHour?.usedPercentage).toBe(60);
+    expect(left.spend?.usedPercentage).toBe(30);
+  });
   it("spend follows the same rule, with its dollars", () => {
     const a = applyReport(null, report({ spend: { usedPercentage: 62.8, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 314.12, limitUsd: 500, period: "monthly" } }), NOW);
     expect(a.spend).toEqual({ usedPercentage: 62.8, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 314.12, limitUsd: 500, period: "monthly" });

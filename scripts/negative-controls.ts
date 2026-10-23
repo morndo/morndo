@@ -4084,6 +4084,15 @@ export const CONTROLS: Control[] = [
   { id: "t415-clear-from-another-window", task: "T-415", file: "packages/domain/src/usage-seat.ts",
     find: "r.windows.filter(w => w.id === m.windowId)", replace: "r.windows",
     run: ["packages/domain/test/usage-seat.test.ts"] },
+  { id: "t415-unreadable-window-keeps-old-number", task: "T-415", file: "packages/domain/src/usage.ts",
+    find: "(carried ? read : kept)", replace: "(read ?? kept)",
+    run: ["packages/domain/test/usage.test.ts"] },
+  { id: "t415-adapter-drops-the-unreadable-flag", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: ".filter(([, w]) => unreadable(w))", replace: ".filter(() => false)",
+    run: ["apps/hub/test/usage.test.ts"] },
+  { id: "t415-drop-signature-ignores-level", task: "T-415", file: "packages/domain/src/usage-plan.ts",
+    find: "|${Math.floor(Number(c.from) / 10)}`;", replace: "`;",
+    run: ["packages/domain/test/usage-plan.test.ts"] },
 ];
 
 // ---- the runner
