@@ -18,18 +18,44 @@ export type UsageReading = { source: UsageSource; node: string | null; capturedA
 export type ReadingFailure = { source: UsageSource; node: string | null; capturedAt: number; reason: UsageReason; hint: string | null; everyS: number | null };
 
 // A transient reason is worth retrying; a permanent one is not fixed by waiting.
-export const isTransientReason = (r: UsageReason): boolean => { throw new Error("not implemented"); };
+export const isTransientReason = (r: UsageReason): boolean => (TRANSIENT_REASONS as readonly string[]).includes(r);
 // U14: a used percentage that is not a finite number in 0..101 is not a reading of that window: dropped, never clamped.
-export function takePercent(v: unknown): number | null { throw new Error("not implemented"); }
+export function takePercent(v: unknown): number | null {
+  if (typeof v !== "number" || !Number.isFinite(v)) return null;
+  if (v < 0 || v > 101) return null;
+  return v > 100 ? 100 : v;
+}
 // The wire carries free strings; only the closed list counts, anything else reads as an unreadable screen.
-export function reasonOf(v: unknown): UsageReason { throw new Error("not implemented"); }
+export function reasonOf(v: unknown): UsageReason {
+  return typeof v === "string" && (USAGE_REASONS as readonly string[]).includes(v) ? (v as UsageReason) : "unknown_screen";
+}
+const listed = <T extends string>(list: readonly T[], v: unknown): T | null =>
+  (typeof v === "string" && (list as readonly string[]).includes(v) ? (v as T) : null);
 // Free text, minus control characters, links, addresses and extra whitespace; empty is nothing to say.
-export function cleanHint(v: unknown): string | null { throw new Error("not implemented"); }
+const cleanText = (v: unknown, limit: number): string | null => {
+  if (typeof v !== "string") return null;
+  let plain = "";
+  for (let i = 0; i < v.length; i++) {
+    const c = v.charCodeAt(i);
+    if (c >= 32 && c !== 127) plain += v.charAt(i);
+  }
+  // A token that is a link or holds an address is gone whole, not masked.
+  const kept = plain.split(/\s+/).filter(t => t !== "" && !t.includes("://") && !t.startsWith("www.") && !t.includes("@"));
+  const t = kept.join(" ").slice(0, limit).trim();
+  return t === "" ? null : t;
+};
+export const cleanHint = (v: unknown): string | null => cleanText(v, HINT_LIMIT);
 // A fix shown to the principal comes from the closed list; free text is no fix at all.
-export function fixOf(v: unknown): UsageFix | null { throw new Error("not implemented"); }
+export const fixOf = (v: unknown): UsageFix | null => listed(USAGE_FIXES, v);
 // How often a source may be read, kept between one minute and six hours.
-export function clampEvery(v: unknown): number | null { throw new Error("not implemented"); }
+export function clampEvery(v: unknown): number | null {
+  if (typeof v !== "number" || !Number.isFinite(v)) return null;
+  return Math.round(Math.min(EVERY_MAX_S, Math.max(EVERY_MIN_S, v)));
+}
 // A window note: the same cleaning as a hint, but shorter.
-export function cleanNote(v: unknown): string | null { throw new Error("not implemented"); }
+export const cleanNote = (v: unknown): string | null => cleanText(v, 40);
 // A window length is a finite positive whole number of minutes, else unknown.
-export function cleanLength(v: unknown): number | null { throw new Error("not implemented"); }
+export function cleanLength(v: unknown): number | null {
+  if (typeof v !== "number" || !Number.isFinite(v) || v <= 0 || !Number.isInteger(v)) return null;
+  return v;
+}

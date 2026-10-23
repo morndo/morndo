@@ -3,6 +3,8 @@
 // comes only through an agent token, named for an account (U1); per account the newest report sets the windows, and a
 // window missing from a report is kept until its reset time has passed (U2); the sessions reporting are kept while
 // fresh (U3); usage grants and decides nothing (U4): it is a read model, like Observation.
+import { cleanLength, cleanNote, takePercent } from "./usage-reading.ts";
+
 export type UsageWindow = { usedPercentage: number; resetsAt: number | null };            // resetsAt in ms
 export type SpendWindow = UsageWindow & { usedUsd: number | null; limitUsd: number | null; period: string | null };
 // A window the account names itself (Cursor's "Cursor models"), with the calendar date the provider printed
@@ -39,7 +41,18 @@ export type UsageLevel = "ok" | "warning" | "critical";
 export const usageLevel = (usedPercentage: number): UsageLevel => (usedPercentage >= USAGE_CRITICAL ? "critical" : usedPercentage >= USAGE_WARNING ? "warning" : "ok");
 
 const clampPct = (v: number) => Math.min(100, Math.max(0, v));
-const window = (w: UsageWindow | null): UsageWindow | null => (w ? { usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt } : null);
+// U14: a percentage that is not a finite number in 0..101 is not a reading of that window: dropped, never clamped
+// (contextUsed is not a limit window, so it keeps its clamp).
+const window = (w: UsageWindow | null): UsageWindow | null => {
+  if (!w) return null;
+  const usedPercentage = takePercent(w.usedPercentage);
+  return usedPercentage === null ? null : { usedPercentage, resetsAt: w.resetsAt };
+};
+const spendOf = (s: SpendWindow | null): SpendWindow | null => {
+  if (!s) return null;
+  const usedPercentage = takePercent(s.usedPercentage);
+  return usedPercentage === null ? null : { ...s, usedPercentage };
+};
 // A window kept from before is dropped once its reset time has passed (the CLI drops it then too).
 const keep = <W extends UsageWindow>(w: W | null, now: number): W | null => (w && (w.resetsAt === null || w.resetsAt > now) ? w : null);
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -87,8 +100,14 @@ export function resetsOnLabel(resetsOn: string | null): string | null {
 }
 const named = (w: NamedWindow): NamedWindow | null => {
   const label = labelOf(w.label);
-  if (!label || !Number.isFinite(w.usedPercentage)) return null;
-  return { label, usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
+  const usedPercentage = takePercent(w.usedPercentage);
+  if (!label || usedPercentage === null) return null;
+  // U14: the length, rolling flag and note are kept cleaned; a field that is absent stays absent.
+  const out: NamedWindow = { label, usedPercentage, resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
+  if (w.lengthMins !== undefined) out.lengthMins = cleanLength(w.lengthMins);
+  if (w.rolling !== undefined) out.rolling = w.rolling === true;
+  if (w.note !== undefined) out.note = cleanNote(w.note);
+  return out;
 };
 // An empty list is not named mode: every row dropped, or every window reset, falls back to the 5-hour and weekly rows.
 // A window that names no reset is kept for a day after the report that set it, not forever: nothing else would ever end it, and
@@ -131,7 +150,7 @@ export function applyReport(current: AccountUsage | null, r: UsageReport, now: n
     reportedAt: r.at,
     fiveHour: window(r.fiveHour) ?? keep(base.fiveHour, now),
     sevenDay: window(r.sevenDay) ?? keep(base.sevenDay, now),
-    spend: r.spend ? { ...r.spend, usedPercentage: clampPct(r.spend.usedPercentage) } : keep(base.spend, now),
+    spend: spendOf(r.spend) ?? keep(base.spend, now),
     limits,
     onDemand: namedNow ? demandOf(r.onDemand) : (limits === null ? null : base.onDemand),
     profile: base.profile ?? null,

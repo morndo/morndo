@@ -52,6 +52,12 @@ describe("source health (U6, U11)", () => {
     expect(sourceState(h, T0 + 13 * DAY)).toBe("stale");                // no declared every: never unavailable by silence
   });
 
+  it("a failure that declares nothing keeps the declared every", () => {
+    const failing = failedRead(okRead(health(), T0, 900), T0 + MIN, "timeout", null);
+    expect(failing.everyS).toBe(900);
+    expect(failedRead(failing, T0 + 2 * MIN, "timeout", 120).everyS).toBe(120);
+  });
+
   it("a declared every is clamped", () => {
     expect(okRead(health(), T0, 1e9).everyS).toBe(21_600);
   });

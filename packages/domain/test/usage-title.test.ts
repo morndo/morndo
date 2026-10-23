@@ -55,6 +55,7 @@ describe("window titles (U7)", () => {
     expect(resetsInLabel(NOW + 3 * DAY, NOW)).toBe("resets in 3 d");
     expect(resetsInLabel(NOW + 25 * HOUR, NOW)).toBe("resets in 1 d 1 h");
     expect(resetsInLabel(NOW + 2 * HOUR + 30 * MIN, NOW)).toBe("resets in 2 h 30 min");
+    expect(resetsInLabel(NOW + 2 * HOUR, NOW)).toBe("resets in 2 h");
     expect(resetsInLabel(NOW + 90 * MIN, NOW)).toBe("resets in 1 h 30 min");
     expect(resetsInLabel(NOW + 45 * MIN, NOW)).toBe("resets in 45 min");
     expect(resetsInLabel(NOW + 30 * 1000, NOW)).toBe("resets in 1 min");
