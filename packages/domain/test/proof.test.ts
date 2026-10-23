@@ -353,3 +353,20 @@ describe("a reference the hub could not check (B14, private repositories)", () =
     expect(proofOf(brief({ refs }), [seen(PR, "green"), seen(CI, "not_checked", NOTE)]).accepts).toBe(false);
   });
 });
+
+describe("the merge record's repository, re-applied at every reading (B14)", () => {
+  const VAULT = "acme/vault#9@3e9d1a7";
+  const merges = [{ repo: "acme/vault", sha: "1111111" }];
+
+  it("proofOf: a brief filed before a merge record, with no reference in its repository, is not accepted however green it is", () => {
+    const stale = proofOf(brief({ refs: [PR] }), [seen(PR, "green")], merges);
+    expect(stale).toEqual({ kind: "unchecked", green: 1, total: 1, accepts: false, line: "proof: the task records a merge in acme/vault; no reference in that repository" });
+    // without a merge record, or with a reference in the recorded repository (any case), it reads as before
+    expect(proofOf(brief({ refs: [PR] }), [seen(PR, "green")]).kind).toBe("verified");
+    expect(proofOf(brief({ refs: [PR, VAULT] }), [seen(PR, "green"), seen(VAULT, "green")], merges).kind).toBe("verified");
+    expect(proofOf(brief({ refs: [PR, "Acme/Vault#9@3e9d1a7"] }), [seen(PR, "green"), seen("Acme/Vault#9@3e9d1a7", "green")], merges).accepts).toBe(true);
+    // a red reference in the right repository is still failing, not hidden by the rule
+    expect(proofOf(brief({ refs: [PR, VAULT] }), [seen(PR, "green"), seen(VAULT, "red", "lint")], merges).kind).toBe("failing");
+  });
+});
+

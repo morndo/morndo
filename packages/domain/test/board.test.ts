@@ -686,6 +686,13 @@ describe("brief and proof (B13 to B16)", () => {
     expect(text.length).toBeLessThanOrEqual(900);
   });
 
+  it("a done is refused in on mode when the brief predates a merge record in another repository", () => {
+    const vault: MergeRecord = { repo: "acme/vault", sha: "1111111", at: NOW, by: "manager", override: null };
+    const g = { ...gate(proof({ mode: "on", results: [seen(PR, "green")] })), merges: [vault] };
+    const refused = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, g);
+    expect(refused).toEqual({ ok: false, error: { problem: "proof_not_green", detail: "proof: the task records a merge in acme/vault; no reference in that repository" } });
+  });
+
   it("with mode off the done carries no proofSeen", () => {
     const r = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, gate(proof({ mode: "off" })));
     expect(value(r).task.status).toBe("done");

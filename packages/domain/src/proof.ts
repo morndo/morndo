@@ -192,6 +192,16 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
     if (brief.noCode !== "") return { kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" };
     return { kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" };
   }
+  // The merge record's repository, re-applied at every reading (not only when the brief was filed): a merge recorded
+  // after the brief leaves a brief whose references sit elsewhere unverified, however green they are.
+  if (merges.length > 0) {
+    const mergeRepos = new Set(merges.map(m => m.repo.toLowerCase()));
+    if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {
+      const rows = new Map(results.map(r => [r.ref, r] as const));
+      const green = brief.refs.filter(ref => rows.get(ref)?.state === "green").length;
+      return { kind: "unchecked", green, total: brief.refs.length, accepts: false, line: `proof: the task records a merge in ${merges[0]!.repo}; no reference in that repository` };
+    }
+  }
   const latest = new Map<string, RefResult>();
   for (const row of results) {
     const kept = latest.get(row.ref);

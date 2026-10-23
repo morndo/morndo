@@ -4049,6 +4049,9 @@ export const CONTROLS: Control[] = [
   { id: "t406-token-not-in-details", task: "T-406", file: "apps/hub/src/adapters/github-checks.ts",
     find: `if (res.status === 401) return { ok: false, failure: { reason: "denied", detail: "access denied" } };`, replace: "if (res.status === 401) return { ok: false, failure: { reason: \"denied\", detail: `access denied ${this.#token}` } };",
     run: ["apps/hub/test/github-checks.test.ts"], expect: "not to contain" },
+  { id: "t406-proof-reapplies-merge-repo", task: "T-406", file: "packages/domain/src/proof.ts",
+    find: `if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
+    run: ["packages/domain/test/proof.test.ts", "packages/domain/test/board.test.ts"], expect: "no reference in that repository" },
   // ---- T-398: a DONE with a wake-up scheduled or a job running still moves the task to review, each guard removed once.
   { id: "t398-d1-wakeup-and-job", task: "T-398", file: "packages/domain/src/board.ts",
     find: `(run.wait?.on === "wakeup" || run.wait?.on === "job") && run.outcome === "done"`, replace: `false`,
