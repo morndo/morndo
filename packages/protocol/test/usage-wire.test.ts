@@ -109,6 +109,8 @@ describe("the S2 view fields on the wire (plan 4.4)", () => {
   it("a usage frame may carry the notices; one without them still parses", () => {
     expect(parseBody(UsageFrameSchema, { t: "usage", accounts: [], at: 1 })?.notices).toBeUndefined();
     expect(parseBody(UsageFrameSchema, { t: "usage", accounts: [], at: 1, notices: [{ id: "n1" }] })?.notices).toEqual([{ id: "n1" }]);
+  });
+});
 
 describe("a percentage outside 0..101 is not a reading, on every path (U14)", () => {
   it("a status line's window with an epoch value or a negative one parses to null and the good window beside it stays", () => {
