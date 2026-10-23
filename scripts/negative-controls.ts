@@ -3414,7 +3414,7 @@ export const CONTROLS: Control[] = [
     find: "  if (o.keep) return [];\n", replace: "",
     run: ["e2e/update-vm/checks.test.ts"], expect: "keeps everything when the scratch is kept" },
   { id: "c2d-sweep-any-name", task: "c2d", file: "e2e/update-vm/checks.ts",
-    find: "readdirSync(dir).filter(n => SCRATCH_NAME.test(n))", replace: "readdirSync(dir).filter(n => n.startsWith(\"morndo-c2-build-\"))",
+    find: "readdirSync(dir).filter(n => named.test(n))", replace: "readdirSync(dir).filter(n => n.startsWith(\"morndo-c2-build-\"))",
     run: ["e2e/update-vm/checks.test.ts"], expect: "removes only scratch whose run is gone" },
   { id: "c2d-sweep-removes-files", task: "c2d", file: "e2e/update-vm/checks.ts",
     find: "      if (!lstatSync(path).isDirectory()) continue;\n", replace: "",
@@ -3435,7 +3435,7 @@ export const CONTROLS: Control[] = [
   // R4 (md-rev6 on dbe25dd): a scratch is never under the build's name without its owner; an unreadable /proc
   // entry is not a gone run.
   { id: "c2d-scratch-made-under-build-name", task: "c2d", file: "e2e/update-vm/checks.ts",
-    find: "  const made = mkdtempSync(join(dir, \"morndo-c2-new-\"));", replace: "  const made = mkdtempSync(join(dir, \"morndo-c2-build-\"));",
+    find: "  const made = mkdtempSync(join(dir, `${prefix}-new-`));", replace: "  const made = mkdtempSync(join(dir, `${prefix}-build-`));",
     run: ["e2e/update-vm/checks.test.ts"], expect: "has no moment under the build's name without its owner" },
   { id: "c2d-unreadable-owner-gone", task: "c2d", file: "e2e/update-vm/checks.ts",
     find: "  if (seen.kind === \"unknown\") return true;\n", replace: "",
@@ -3856,6 +3856,10 @@ export const CONTROLS: Control[] = [
   { id: "c3c-apply-without-key", task: "315", file: "apps/hub/src/adapters/fleet-updates.ts",
     find: "{ principal, key: `hub:update.apply:${randomBytes(12).toString(\"base64url\")}` }", replace: "{ principal }",
     run: ["test/fleet/updates-hub.test.ts"], expect: "needs a key" },
+  // Review of #116: the two-machine run's sweep reads each leftover's owner; read as none, a live run's things would go.
+  { id: "c3d-sweep-ignores-owner", task: "315", file: "e2e/update-vm/fleet-sweep.ts",
+    find: "{ id: l.slice(0, at), owner: l.slice(at + 1).trim() }", replace: "{ id: l.slice(0, at), owner: \"\" }",
+    run: ["e2e/update-vm/fleet-sweep.test.ts"], expect: "keeps a live run's" },
   { id: "c3c-status-args", task: "315", file: "packages/protocol/src/updates.ts",
     find: 'status: ["update", "--status", "--json"],', replace: 'status: ["--status", "--json"],',
     run: ["apps/updater/test/cli-apply.test.ts"], expect: "argument lists" },

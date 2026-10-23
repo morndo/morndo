@@ -26,7 +26,7 @@
 // to prove the transport before the whole story.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,10 +34,14 @@ import type { Browser, Page } from "playwright";
 import { chromium } from "playwright";
 import { pairedPage } from "./harness.ts";
 import { buildWorld } from "./update-vm/build.ts";
+import { ownerOf, ownerText } from "./update-vm/checks.ts";
+import { FLEET_LABEL, FLEET_OWNER_LABEL, ownerLabels, sweepFleetLeftovers } from "./update-vm/fleet-sweep.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const IMAGE = "morndo-c3-fleet-e2e:local";
-const LABEL = "morndo-c3-fleet-e2e";
+const LABEL = FLEET_LABEL;
+// This run, as every container and the network it makes are labelled (fleet-sweep.ts ownerLabels): its pid and start time.
+const OWNER = ownerText(ownerOf(process.pid));
 const HEX = randomBytes(4).toString("hex");
 const CP = `morndo-c3-fleet-cp-${HEX}`;
 const NODE = `morndo-c3-fleet-node-${HEX}`;
@@ -138,31 +142,10 @@ for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]] as const) {
   });
 }
 
-// A run killed outright cannot clean up after itself: its things are removed here, by the label only this
-// harness puts on them — containers first, then the network. #109's morndo-c2-e2e label is never named.
-const leftovers = docker(["ps", "-a", "--filter", `label=${LABEL}`, "-q"]).out.split("\n").filter(id => id !== "");
-for (const id of leftovers) {
-  const gone = docker(["rm", "-f", id], { timeoutMs: 120_000 });
-  process.stdout.write(`removed a container a killed run left behind (${id}): ${gone.code === 0 ? "ok" : gone.err}\n`);
-}
-for (const id of docker(["network", "ls", "--filter", `label=${LABEL}`, "-q"]).out.split("\n").filter(n => n !== "")) {
-  const gone = docker(["network", "rm", id], { timeoutMs: 120_000 });
-  process.stdout.write(`removed a network a killed run left behind (${id}): ${gone.code === 0 ? "ok" : gone.err}\n`);
-}
-// Its build scratch too (build.ts's morndo-fleet-build-*, about 1.5 GB each); a kept scratch (E2E_KEEP=1) is a
-// person's to read and stays. Only a real directory named exactly build.ts's fleet prefix is ever removed.
-if (process.env.E2E_KEEP !== "1") {
-  for (const name of readdirSync(tmpdir()).filter(n => /^morndo-fleet-build-[A-Za-z0-9]{6}$/.test(n))) {
-    const path = join(tmpdir(), name);
-    try {
-      if (!lstatSync(path).isDirectory()) continue;
-      rmSync(path, { recursive: true, force: true });
-      process.stdout.write(`removed the build scratch a killed run left behind (${name})\n`);
-    } catch (error) {
-      process.stdout.write(`could not remove ${path}: ${error instanceof Error ? error.message : String(error)}\n`);
-    }
-  }
-}
+// A run killed outright cannot clean up after itself: what a gone run of this kind left — containers, then the
+// network, then the build scratch — is removed here; a live run's stays, and #109's morndo-c2-e2e is never named
+// (fleet-sweep.ts, review of #116: two runs on one box leave each other alone). A kept scratch (E2E_KEEP=1) stays.
+sweepFleetLeftovers({ docker, say: line => process.stdout.write(`${line}\n`), keep: process.env.E2E_KEEP === "1", tmp: tmpdir() });
 // The sweeps' own test (E2E_SWEEP_ONLY=1): stop here, with nothing built and no machine started.
 if (process.env.E2E_SWEEP_ONLY === "1") process.exit(0);
 
@@ -252,11 +235,11 @@ try {
   process.stdout.write(`building the machine image and starting cp and node…\n`);
   const built = docker(["build", "-t", IMAGE, "--label", `${LABEL}=1`, "-f", join(ROOT, "e2e/update-vm/Dockerfile.fleet"), join(ROOT, "e2e/update-vm")], { timeoutMs: 600_000 });
   if (built.code !== 0) throw new Error(`docker build failed: ${built.err}`);
-  const network = docker(["network", "create", "--label", `${LABEL}=1`, NETWORK]);
+  const network = docker(["network", "create", ...ownerLabels(OWNER), NETWORK]);
   if (network.code !== 0) throw new Error(`docker network create failed: ${network.err}`);
   networkUp = true;
   for (const [name, host, isCp] of [[CP, "cp", true], [NODE, "node", false]] as const) {
-    const startedRun = docker(["run", "-d", "--name", name, "--label", `${LABEL}=1`, "--hostname", host,
+    const startedRun = docker(["run", "-d", "--name", name, ...ownerLabels(OWNER), "--hostname", host,
       "--network", NETWORK, ...MACHINE_FLAGS, IMAGE]);
     if (startedRun.code !== 0) throw new Error(`docker run of ${name} failed: ${startedRun.err}`);
     if (isCp) cpUp = true; else nodeUp = true;
@@ -510,12 +493,13 @@ try {
   // The image stays (it is this run's own, and a rebuild costs minutes).
   if (browser !== null) await Promise.resolve(browser.close()).catch(() => {});
   cleanUp();
-  const leftContainers = docker(["ps", "-a", "--filter", `label=${LABEL}`, "-q"]).out;
+  const mine = `label=${FLEET_OWNER_LABEL}=${OWNER}`;              // this run's own; another live run's are its own to remove
+  const leftContainers = docker(["ps", "-a", "--filter", mine, "-q"]).out;
   if (leftContainers !== "") {
     process.stderr.write(`containers with the label ${LABEL} remain: ${leftContainers.split("\n").join(", ")}\n`);
     process.exitCode = 1;
   }
-  const leftNetworks = docker(["network", "ls", "--filter", `label=${LABEL}`, "-q"]).out;
+  const leftNetworks = docker(["network", "ls", "--filter", mine, "-q"]).out;
   if (leftNetworks !== "") {
     process.stderr.write(`networks with the label ${LABEL} remain: ${leftNetworks.split("\n").join(", ")}\n`);
     process.exitCode = 1;
