@@ -2,7 +2,7 @@
 // lines and a tap-buttons last line — under the brief's discipline in short form. lintCard refuses what a card may not
 // be, warns on ids the principal cannot read, and cardText is the text to post, the buttons line last.
 import { describe, expect, it } from "vitest";
-import { CARD_OUTCOME_MAX, CARD_RISK_MAX, cardText, lintCard } from "../src/index.ts";
+import { CARD_OUTCOME_MAX, CARD_RISK_MAX, cardText, jargonIn, lintCard } from "../src/index.ts";
 
 // A clean card: the recommended option first, a default among the options, no risk.
 const card = (over: Record<string, unknown> = {}) => ({
@@ -357,5 +357,16 @@ describe("lintCard", () => {
     const draft = lintCard("not a card");
     expect(draft.problems.map(p => p.code)).toEqual(["bad_draft"]);
     expect(draft.card).toBeNull();
+  });
+});
+
+describe("jargonIn", () => {
+  it("jargonIn finds a tracker number, a commit hash and an ask id, in order", () => {
+    expect(jargonIn("see #96 and 5b354d6, ny-538")).toEqual(["#96", "5b354d6", "ny-538"]);
+  });
+
+  it("jargonIn leaves a word of letters alone and a plain number alone", () => {
+    expect(jargonIn("defaced")).toEqual([]);
+    expect(jargonIn("1234567")).toEqual([]);
   });
 });

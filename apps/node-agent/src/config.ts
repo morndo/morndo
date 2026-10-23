@@ -392,7 +392,7 @@ export function loadConfig(home: string): AgentConfig {
   // The hub this node asks before a job starts. Absent is allowed: the agent still runs, and a start is refused.
   let hub: string | undefined;
   if (c.hub !== undefined) {
-    if (typeof c.hub !== "string" || !hubUrlOk(c.hub)) throw new ConfigError(`${where}: hub must be an http or https URL`);
+    if (typeof c.hub !== "string" || !hubUrlOk(c.hub)) throw new ConfigError(`${where}: hub must be an https URL, or an http URL to this machine (127.0.0.1, localhost or [::1]): the node sends its token there`);
     hub = c.hub;
   }
   return {
@@ -402,9 +402,14 @@ export function loadConfig(home: string): AgentConfig {
   };
 }
 
+// TLS on the network, as for the fleet URL: the node sends a token to the hub (job grants carry the lane's, the reply style
+// ask the board token), so a plain http URL is only ever this machine's own hub. The host is read by URL(), so
+// "http://127.0.0.1.nip.io" and "http://127.0.0.1@evil.example" are other machines.
+const LOOPBACK_HOST = /^(?:127(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}|localhost|\[::1\])$/;
 function hubUrlOk(value: string): boolean {
   try {
     const url = new URL(value);
-    return (url.protocol === "http:" || url.protocol === "https:") && url.hostname.length > 0;
+    if (url.hostname.length === 0) return false;
+    return url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK_HOST.test(url.hostname));
   } catch { return false; }
 }

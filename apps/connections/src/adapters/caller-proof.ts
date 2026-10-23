@@ -20,7 +20,9 @@
 // process of its own; same-user is not a boundary in Morndo (ADR-0004).
 import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, statSync } from "node:fs";
-import { delimiter, isAbsolute, join, resolve } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
+import { CLAUDE_RELEASE_FINGERPRINT } from "./claude-release-key.ts";
+import { compareVersions, isVersion, type ReleasePin, type ShaCache } from "./release-manifest.ts";
 import { sandboxReady } from "./runtime-claude.ts";
 
 // What the check reads about a process and the file system; injectable so the cases are shown without a process each.
@@ -235,7 +237,11 @@ export function settingsProof(settings: unknown, want: Wanted, real: (path: stri
 
 export type Check = {
   ppid: () => number;                  // the live parent: process.ppid reads it again each time
-  pin: Pin | null;
+  pin: Pin | null;                     // the one claude binary the owner pinned, or
+  release: ReleasePin | null;          // the signed releases the owner pinned (T-346): either admits the binary
+  // Is this sha256 in the signed manifest cached for this version? Offline (release-manifest.ts); the proof calls it, never the network.
+  verifyRelease?: (version: string, sha256: string) => Promise<Proof>;
+  shaCache?: ShaCache;                 // the sha256 of a binary already found in a signed manifest, by its identity (skips the hash)
   connection: string;                  // the connection the key is for: its API host is looked up in the pin
   want: Wanted;
   read?: ProcReader;
@@ -259,9 +265,41 @@ function sameBase(given: string | undefined, pinned: string): boolean | null {
 // Process start times come in ticks of 10 ms: a settings file written just before the fork can read as just after.
 const START_SLACK_MS = 20;
 
-export function verifyClaudeParent(check: Check): Proof {
+// The binary is the one pinned: this file, with the pinned content (size, mtime, ctime and inode as pinned, else the hash).
+function pinnedBinary(pin: Pin, path: string, read: ProcReader, parent: number): Proof {
+  if (path !== pin.resolved) return no("parent is not the pinned claude");
+  const running = read.exeIdentity(parent);
+  if (running === null) return no("parent binary unreadable");
+  if (running.size !== pin.size || running.mtimeMs !== pin.mtimeMs || running.ctimeMs !== pin.ctimeMs || running.ino !== pin.ino) {
+    if (read.exeSha256(parent) !== pin.sha256) return no("the claude binary is not the one that was pinned");
+  }
+  return { ok: true };
+}
+
+// Or the binary is a signed release: a file named by its version in the pinned directory, at or above the pinned floor, whose
+// sha256 (read from the running inode) a verified, cached manifest lists. The owner pinned the key, once; an update needs
+// nothing more, since the update's manifest is signed by the same key.
+const nope = (why: string): { proof: Proof; sha256: string | null } => ({ proof: no(why), sha256: null });
+
+async function signedRelease(release: ReleasePin, verify: Check["verifyRelease"], cache: ShaCache | undefined, path: string, read: ProcReader, parent: number): Promise<{ proof: Proof; sha256: string | null }> {
+  if (release.fingerprint.toLowerCase() !== CLAUDE_RELEASE_FINGERPRINT) return nope("the pinned release key is not the compiled-in one");
+  if (verify === undefined) return nope("no release verifier");
+  if (read.real(dirname(path)) !== read.real(release.versionsDir)) return nope("the parent binary is outside the pinned releases directory");
+  const version = basename(path);
+  if (!isVersion(version) || compareVersions(version, release.floor) < 0) return nope("the parent binary is not a release at or above the pinned floor");
+  // The hash of the running inode, from the cache when this very file (path, size, mtime, ctime, inode) was hashed and found in a
+  // signed manifest before; the manifest is verified again either way.
+  const identity = read.exeIdentity(parent);
+  const known = identity === null ? null : cache?.get(path, identity) ?? null;
+  const sha256 = known ?? read.exeSha256(parent);
+  if (sha256 === null) return nope("parent binary unreadable");
+  const proof = await verify(version, sha256);
+  if (proof.ok && known === null && identity !== null) cache?.put(path, identity, sha256);
+  return { proof, sha256: proof.ok ? sha256 : null };
+}
+
+export async function verifyClaudeParent(check: Check): Promise<Proof> {
   const read = check.read ?? procReader;
-  if (check.pin === null) return no("no pinned claude binary");
   const parent = check.ppid();
   const started = read.startMs(parent);
   const ticks = read.ticks(parent);
@@ -269,18 +307,25 @@ export function verifyClaudeParent(check: Check): Proof {
   const args = read.cmdline(parent);
   if (started === null || ticks === null || exe === null) return no("parent unreadable");
   if (args === null) return no("parent command line unreadable");
-  // The binary: the pinned file, which after an update reads "(deleted)" while that version still runs; and what it is: the
-  // inode the process runs has the pinned size, mtime, ctime and inode, or else the pinned content hash.
+  // The binary: the pinned file or a signed release; after an update it reads "(deleted)" while that version still runs.
   const path = exe.endsWith(DELETED) ? exe.slice(0, -DELETED.length) : exe;
-  if (path !== check.pin.resolved) return no("parent is not the pinned claude");
-  const running = read.exeIdentity(parent);
-  if (running === null) return no("parent binary unreadable");
-  if (running.size !== check.pin.size || running.mtimeMs !== check.pin.mtimeMs || running.ctimeMs !== check.pin.ctimeMs || running.ino !== check.pin.ino) {
-    if (read.exeSha256(parent) !== check.pin.sha256) return no("the claude binary is not the one that was pinned");
+  // What file this is, as the kernel has it: read before the binary is judged and again at the end.
+  const identity = read.exeIdentity(parent);
+  let baseUrls: Record<string, string> | null = null;
+  let refused: Proof = no("no pinned claude binary");
+  let sha256: string | null = null;
+  if (check.release !== null) {
+    const admitted = await signedRelease(check.release, check.verifyRelease, check.shaCache, path, read, parent);
+    if (admitted.proof.ok) { baseUrls = check.release.baseUrls; sha256 = admitted.sha256; } else refused = admitted.proof;
   }
+  if (baseUrls === null && check.pin !== null) {
+    const proof = pinnedBinary(check.pin, path, read, parent);
+    if (proof.ok) baseUrls = check.pin.baseUrls; else if (check.release === null) refused = proof;
+  }
+  if (baseUrls === null) return refused;
   // The API host: the parent's own environment, read from /proc, names the host the owner pinned for this connection.
   const entries = read.environ(parent);
-  const pinned = check.pin.baseUrls[check.connection];
+  const pinned = baseUrls[check.connection];
   if (entries === null || pinned === undefined) return no("the parent is not pointed at the pinned API host");
   // A name that occurs twice could be read one way here and taken the other way by the process: refused, for every name
   // that is checked.
@@ -326,7 +371,13 @@ export function verifyClaudeParent(check: Check): Proof {
     const file = read.real(isAbsolute(value) ? value : join(read.cwd(parent) ?? "", value));
     if (!denyWrite.some(entry => covers(entry, file))) return no("the settings file is not denied to writing");
   }
-  // Still the process the checks read: a pid that went away and was reused, or a parent that was replaced, is refused.
+  // Still the process the checks read: a pid that went away and was reused, or a parent that was replaced, is refused. And still the
+  // file: the same inode with the same size and times (a rewritten one has a new ctime), and the hash that was found in the manifest is
+  // the one the cache holds for it now.
   if (check.ppid() !== parent || read.ticks(parent) !== ticks || read.exe(parent) !== exe) return no("the parent changed while it was checked");
+  const after = read.exeIdentity(parent);
+  if (identity === null || after === null || after.ino !== identity.ino || after.size !== identity.size || after.mtimeMs !== identity.mtimeMs || after.ctimeMs !== identity.ctimeMs) return no("the parent binary changed while it was checked");
+  const remembered = sha256 === null ? null : check.shaCache?.get(path, after) ?? null;
+  if (remembered !== null && remembered !== sha256) return no("the parent binary's hash changed while it was checked");
   return { ok: true };
 }

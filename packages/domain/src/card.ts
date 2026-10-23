@@ -49,6 +49,14 @@ const JARGON = [
   /\bny-\d+\b/gi,
 ] as const;
 
+// Every jargon match in a text, in text order, as matched (T-308): lintCard warns on each in a card's fields, and the
+// node's relay asks the orchestrator's digest and cards the same question.
+export function jargonIn(text: string): string[] {
+  const found: { at: number; term: string }[] = [];
+  for (const re of JARGON) for (const m of text.matchAll(re)) found.push({ at: m.index ?? 0, term: m[0] });
+  return found.sort((a, b) => a.at - b.at).map(f => f.term);
+}
+
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isText = (v: unknown): v is string => typeof v === "string";
 const blank = (s: string) => s.trim() === "";
@@ -193,8 +201,8 @@ export function lintCard(draft: unknown): { card: ShortCard | null; problems: Br
   // Warnings, as a brief's: they come back with the card and never refuse. The default's label is named "default",
   // not by its option, so one label warns once: it is the line that says what happens when he does not answer.
   const jargon = (where: string, text: string) => {
-    for (const re of JARGON) for (const m of text.matchAll(re)) {
-      problems.push({ level: "warning", code: "jargon", where, text: `"${m[0]}" is a number or hash only the manager knows; say what it is in words` });
+    for (const term of jargonIn(text)) {
+      problems.push({ level: "warning", code: "jargon", where, text: `"${term}" is a number or hash only the manager knows; say what it is in words` });
     }
   };
   jargon("outcome", outcome);
