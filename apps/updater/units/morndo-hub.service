@@ -5,6 +5,9 @@
 Description=Morndo hub
 
 [Service]
+# The hub works through this machine's fleet (fleet-core design §16): its client socket at the fleet's default path.
+# Environment= expands %h (systemd.exec(5), systemd 255: "Specifier expansion is performed").
+Environment=MORNDO_FLEET_SOCKET=%h/.local/state/morndo-fleet/fleet.sock
 ExecStart=%h/.local/bin/morndo serve
 Restart=on-failure
 RestartSec=5
