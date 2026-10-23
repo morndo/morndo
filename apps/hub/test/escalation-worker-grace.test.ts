@@ -43,8 +43,8 @@ const pushes: PushStore = {
   record: e => { audit.push(...e); },
 };
 // A hub start, as main.ts builds it: a service on the database, its board fed to the Notification service.
-const start = () => {
-  const s = new EscalationService({ watch, ledger: ledgerReader(ledgerPath, () => Date.now()), store, managerName: "manager", now: () => Date.now(), send: async () => ({ problem: null, typedAt: Date.now() }) });
+const start = (workerGraceMs?: number) => {
+  const s = new EscalationService({ watch, ledger: ledgerReader(ledgerPath, () => Date.now()), store, managerName: "manager", now: () => Date.now(), send: async () => ({ problem: null, typedAt: Date.now() }), workerGraceMs });
   const n = new NotificationService({ store: pushes, send: async () => ({ status: 201 }) });
   n.board(s.board().items);
   s.subscribe(b => n.board(b.items));
@@ -171,6 +171,30 @@ describe("a worker's open question waits the same 10 minutes, from the moment it
     const { s } = start();
     s.poll();
     expect(ids(s)).toEqual(["q-toolu_q1"]);
+  });
+});
+
+describe("the tests-only override of the grace (workerGraceMs)", () => {
+  it("a grace of 0 (the tests-only override) shows a worker's menu and question at once", () => {
+    workers.push({ id: "%4", name: "coder" });            // the menu and the question on two workers: one with an open question shows no menu
+    screens["%3"] = MENU;
+    questions["%4"] = [question("q1", T0, "coder")];
+    const { s } = start(0);
+    s.poll();
+    expect(ids(s).sort()).toEqual(["menu-3", "q-toolu_q1"]);
+  });
+
+  it("a grace of 3000 holds a menu at 2 seconds and shows it at 3", () => {
+    screens["%3"] = MENU;
+    const { s } = start(3000);
+    s.poll();                                             // the first sight starts the menu's clock
+    expect(ids(s)).toEqual([]);
+    at(T0 + 2000);
+    s.poll();
+    expect(ids(s)).toEqual([]);
+    at(T0 + 3000);
+    s.poll();
+    expect(ids(s)).toEqual(["menu-3"]);
   });
 });
 

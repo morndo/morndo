@@ -146,6 +146,8 @@ export class EscalationService {
   #paneTaps = new Map<string, PaneTap>();
   // Memory's pending Notes, when the hub has Memory (ADR-0031): their Asks ride the board like any hub-held ask.
   #memory: (() => MemoryAsks | null) | null;
+  // How long a worker's ask is held from the principal (N2): the constructor's override, else WORKER_ASK_GRACE_MS.
+  #workerGraceMs: number;
 
   constructor(p: {
     watch: Watch; ledger: (() => LedgerRead) | null; store: Store; managerName: string;
@@ -161,6 +163,8 @@ export class EscalationService {
     // Memory's asks (ADR-0031 round 2): a pending Note files an Ask the principal answers in the app. Absent: a hub
     // without Memory files none.
     memory?: () => MemoryAsks | null;
+    // How long a worker's ask is held from the principal (N2); default WORKER_ASK_GRACE_MS. Tests only.
+    workerGraceMs?: number | undefined;
   }) {
     this.#queue = p.queue ?? null;
     this.#queue?.subscribe(c => this.#onDelivery(c.row, c.view));
@@ -174,6 +178,7 @@ export class EscalationService {
     this.#policy = p.policy ?? (() => DEFAULT_POLICY);
     this.#briefs = p.briefs ?? null;
     this.#memory = p.memory ?? null;
+    this.#workerGraceMs = p.workerGraceMs ?? WORKER_ASK_GRACE_MS;
     this.#firstSeen = this.#store.askFirstSeen();
     // A row kept by the manager's inbox (PR #29, removed) may also carry its key and the words' hash: they were the
     // service's, never the Decision's, so they never reach the board (code review B8).
@@ -525,8 +530,8 @@ export class EscalationService {
     for (const w of this.#watch.workers()) {
       const isManager = w.name === this.#managerName;
       const asker = { kind: isManager ? "manager" as const : "worker" as const, name: isManager ? "Manager" : w.name, workerId: w.id };
-      // N2: a worker's ask is held from the principal until WORKER_ASK_GRACE_MS has passed since it was asked; the manager's never is.
-      const held = (askedAt: number) => asker.kind === "worker" && now - askedAt < WORKER_ASK_GRACE_MS;
+      // N2: a worker's ask is held from the principal until the grace has passed since it was asked; the manager's never is.
+      const held = (askedAt: number) => asker.kind === "worker" && now - askedAt < this.#workerGraceMs;
       const questions = this.#watch.openQuestions(w.id);
       const read = this.#watch.screen(w.id);              // undefined: never read, offline or failed; no news about its menu
       const screen = read ?? "";
