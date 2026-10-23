@@ -100,12 +100,15 @@ export function deriveRun(f: RunFacts): Run {
     return { ...base, phase: "working", deadline: null, overdue: false, since: f.activity.first, source: "hook", ...line };
   }
   // The turn's own word stays on a Run that waits on work it left (a background task, a wake-up, a job): a DONE with work
-  // left is still DONE, and the board's D1 reads it. A WAITING line or no line says no outcome. `since` of a job's wait is
-  // when the job started, which may be before the turn's end; D6 then judges it against the task's last change as before.
+  // left is still DONE, and the board's D1 reads it. A WAITING line or no line says no outcome.
   const said = t === null || t.status === "waiting" || t.status === null ? {} : { outcome: t.status };
   if (f.jobs.length > 0) {
     const jobs = f.jobs.map(j => ({ id: j.id, name: j.name }));
-    return { ...base, phase: "waiting", wait: { on: "job", jobs }, ...said, deadline: null, overdue: false, since: Math.min(...f.jobs.map(j => j.startedAt)), source: "job", ...line };
+    // The phase began when the first job started, or, once the turn has said its word, when that turn ended: a job that
+    // started before the task was taken up must not make the DONE look older than the task (D6 would move nothing).
+    const firstJob = Math.min(...f.jobs.map(j => j.startedAt));
+    const jobSince = t !== null && "outcome" in said ? Math.max(firstJob, t.at) : firstJob;
+    return { ...base, phase: "waiting", wait: { on: "job", jobs }, ...said, deadline: null, overdue: false, since: jobSince, source: "job", ...line };
   }
   if (t === null) return { ...base, phase: "ended", outcome: "no_status", deadline: null, overdue: false, since: f.changedAt, source: "session" };
   // Activity since the turn end ends a wait's overdue (the lane watch's stale needs "nothing since").

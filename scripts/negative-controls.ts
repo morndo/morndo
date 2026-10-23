@@ -3988,6 +3988,9 @@ export const CONTROLS: Control[] = [
   { id: "t398-run-keeps-outcome-on-wakeup", task: "T-398", file: "packages/domain/src/run.ts",
     find: `wait: { on: "wakeup", next }, ...said,`, replace: `wait: { on: "wakeup", next },`,
     run: ["packages/domain/test/run.test.ts", "apps/hub/test/board-projector.test.ts"], expect: "stays on the Run while it waits" },
+  { id: "t398-job-wait-begins-at-the-turn-end", task: "T-398", file: "packages/domain/src/run.ts",
+    find: `t !== null && "outcome" in said ? Math.max(firstJob, t.at) : firstJob`, replace: `firstJob`,
+    run: ["packages/domain/test/run.test.ts", "packages/domain/test/board.test.ts"], expect: "began at the turn's end" },
 ];
 
 // ---- the runner

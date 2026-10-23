@@ -101,6 +101,18 @@ describe("R4: a declared wait has no waker", () => {
     const r = deriveRun(facts({ turn: turn({ status: "waiting", waitingOn: "the deploy", line: "STATUS: WAITING the deploy for 20 min" }) }));
     expect(r).toMatchObject({ phase: "waiting", wait: { on: "declared", what: "the deploy" }, source: "status" });
   });
+  it("a job's wait that carries the turn's word began at the turn's end, when the job started before it (T-398 R1)", () => {
+    const early = [{ id: "j1", name: "ci", startedAt: T0 - 5 * MIN }];
+    const at = T0 + 10 * MIN;
+    expect(deriveRun(facts({ turn: turn({ at, status: "done" }), jobs: early })).since).toBe(at);
+    expect(deriveRun(facts({ turn: turn({ at, status: "blocked" }), jobs: early })).since).toBe(at);
+    // a job that started after the turn's end keeps its own start; a WAITING line or none says no outcome: the job's start, as before
+    expect(deriveRun(facts({ turn: turn({ at, status: "done" }), jobs: [{ id: "j2", name: "ci", startedAt: at + MIN }] })).since).toBe(at + MIN);
+    expect(deriveRun(facts({ turn: turn({ at, status: "waiting" }), jobs: early })).since).toBe(T0 - 5 * MIN);
+    expect(deriveRun(facts({ turn: turn({ at, status: null }), jobs: early })).since).toBe(T0 - 5 * MIN);
+    // the earliest of several jobs, then the later of that and the turn's end
+    expect(deriveRun(facts({ turn: turn({ at, status: "done" }), jobs: [...early, { id: "j3", name: "x", startedAt: T0 }] })).since).toBe(at);
+  });
   it("a running job of the lane is a waker: waiting on the job, not declared", () => {
     const r = deriveRun(facts({ turn: turn({ status: "waiting" }), jobs: [{ id: "j7", name: "deploy", startedAt: T0 - MIN }] }));
     expect(r).toMatchObject({ phase: "waiting", wait: { on: "job", jobs: [{ id: "j7", name: "deploy" }] }, source: "job", since: T0 - MIN });
