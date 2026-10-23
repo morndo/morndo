@@ -4,6 +4,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import type { Task } from "@morndo/domain";
 import type { RunView, Transcriber, TranscriberProbe } from "@morndo/protocol";
+import type { Liveness } from "@morndo/domain";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -78,6 +79,8 @@ export async function startInProcessHub(o: {
   watch?: Watch; ledger?: (() => LedgerRead) | null;
   send?: (pane: string, text: string, key: string) => Promise<SendOutcome>;
   runs?: () => RunView[];
+  liveness?: (sha: string) => Liveness;
+  knows?: (sha: string) => Promise<"yes" | "no" | "unknown">;
   orphans?: (tasks: readonly Task[], now: number) => string[];
   // `identity`: the hub's identity key (a test's own pair; default: one made in the temp dir) — it signs the
   // principal's assertions (updates §5.4). `updates`: the fleet and the updater CLI to run (a test's fakes); absent,
@@ -133,8 +136,9 @@ export async function startInProcessHub(o: {
   notifications.board([]);
   access.onLinked(() => notifications.linked());
   const vapid = loadOrCreateVapid(dir, "mailto:test@example.test");
-  // ADR-0015: the board, with the lanes a test's observation lists (none by default).
-  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}) });
+  // ADR-0015: the board, with the lanes a test's observation lists (none by default). `liveness`: a merge's liveness as
+  // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
+  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}) });
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}) });
   const queue = o.queue ? o.queue(store) : null;

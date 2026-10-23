@@ -150,7 +150,7 @@ describe("the job list", () => {
     expect(hub.jobs.view().jobs.find(j => j.id === "quiet")).toMatchObject({ notice: "pending", noticeDetail: null });
     const jobs = new JobsService({
       store: hub.store, board: {
-        task: () => ({ task: hub!.board.task("T-1")!.task, events: [] }),
+        task: () => ({ task: hub!.board.task("T-1")!.task, events: [], merged: null }),
         act: () => ({ ok: false, problem: "bad_text" }),
       },
     });

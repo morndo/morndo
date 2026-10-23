@@ -13,6 +13,7 @@ import { hostTmuxServer } from "@morndo/node-ops";
 import { JoinError, join } from "./join.ts";
 import { log } from "./log.ts";
 import { agentPaths } from "./paths.ts";
+import { dropAgentTokenEnv } from "./relay/board-token.ts";
 import { TestHooksRefused, loadTestHooks, type TestHooks } from "./test-hooks.ts";
 
 const HELP = `morndo-node: this machine's agent in a Morndo fleet.
@@ -75,6 +76,9 @@ switch (cmd) {
     break;
   }
   case "run": {
+    // First, before tmux is hosted or any lane started: a MORNDO_AGENT_TOKEN in this environment would be inherited by the
+    // tmux server and every lane (board-token.ts). The board token is read from its file.
+    if (dropAgentTokenEnv()) log.warn(`MORNDO_AGENT_TOKEN was set in the node's environment and is removed from it at start, before tmux and the lanes: the board token is read from ${agentPaths(home).boardTokenFile} (mode 600)`);
     // Test hooks before anything else: with MORNDO_NODE_TEST_HOOKS set outside a test, the agent refuses to start.
     let hooks: TestHooks;
     try { hooks = loadTestHooks(process.env, { home, accountHome: accountHome() }); }

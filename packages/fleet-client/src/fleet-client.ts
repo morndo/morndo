@@ -137,6 +137,8 @@ const opErrorOf = (v: unknown): OpError | null =>
 const nodeOf = (v: unknown): FleetNode | null => {
   if (!isRecord(v) || typeof v.name !== "string" || typeof v.status !== "string" || !STATUSES.has(v.status)
     || !(v.health === null || isRecord(v.health)) || !(v.agent === null || typeof v.agent === "string")) return null;
+  // B11: a commit that is neither a string nor null is a mismatch, never guessed at; absent reads as null.
+  if (v.commit !== undefined && v.commit !== null && typeof v.commit !== "string") return null;
   const update = v.update === undefined || v.update === null ? null : UpdateHealthSchema.safeParse(v.update);
   return {
     name: v.name, status: v.status as FleetNode["status"],

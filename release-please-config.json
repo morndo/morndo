@@ -3,6 +3,7 @@
     ".": {
       "release-type": "node",
       "bump-minor-pre-major": true,
+      "initial-version": "0.1.0",
       "draft": true,
       "force-tag-creation": true,
       "include-component-in-tag": false,

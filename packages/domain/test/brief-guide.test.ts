@@ -9,11 +9,12 @@ import { lintBrief } from "../src/index.ts";
 
 const NOW = Date.UTC(2026, 9, 1, 8, 0);                       // 2026-10-01: the example is dated, so `now` is fixed
 
-// The guide's example: the last ```markdown block on the page (the template comes first and holds placeholders).
+// The guide's example: the last ```markdown block with a Decision section of its own (the template comes first and
+// holds placeholders; the short-card examples are no brief).
 function guideExample(): string {
   const page = readFileSync(join(import.meta.dirname, "../../../docs/agents/decision-requests.md"), "utf8");
   const blocks = [...page.matchAll(/```markdown\n([\s\S]*?)```/g)].map(m => m[1] ?? "");
-  const example = blocks.at(-1) ?? "";
+  const example = blocks.filter(b => b.includes("## Decision")).at(-1) ?? "";
   if (!example.includes("## Decision")) throw new Error("the guide's example block was not found");
   return example;
 }

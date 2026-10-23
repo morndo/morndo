@@ -660,4 +660,23 @@ describe("`morndo-node run` and test hooks", () => {
     }
     expect(await exited).toBe(0);
   });
+
+  it("`run` removes MORNDO_AGENT_TOKEN from its environment first, before it hosts tmux or starts the agent, and says so once", async () => {
+    const child = spawn(process.execPath, [MAIN, "run"], {
+      env: { ...process.env, HOME: home.home, NODE_ENV: "test", MORNDO_AGENT_TOKEN: "mgr_secret-token" },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    const exited = new Promise<number | null>(resolve => child.once("exit", code => resolve(code)));
+    let stderr = "";
+    child.stderr.on("data", (d: Buffer) => { stderr += d.toString("utf8"); });
+    try {
+      await fleet.waitFor(m => m.t === "hello", 10_000);
+      expect(stderr.match(/MORNDO_AGENT_TOKEN was set in the node's environment/g)).toHaveLength(1);
+      expect(stderr).toMatch(/removed from it at start, before tmux and the lanes/);
+      expect(stderr).not.toContain("mgr_secret-token");
+    } finally {
+      child.kill("SIGTERM");
+    }
+    expect(await exited).toBe(0);
+  });
 });

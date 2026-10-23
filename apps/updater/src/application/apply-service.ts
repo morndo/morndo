@@ -123,6 +123,13 @@ export class ApplyService {
       for (const db of DATABASES) databases[db] = schemas.read(db) ?? { schema: 0, floor: 0 };
       const plan = planMigrations({ databases, target: manifest.schemas, previous: previousManifest?.schemas ?? null });
       if (!plan.ok) return { kind: "abandoned", reason: `${plan.error.database}: ${plan.error.reason}` };
+      // The units the swap will render, judged now, before anything is recorded, held or stopped: a unit of one of
+      // our names that Morndo did not write (and is not the setup before it, which the render adopts) would fail the
+      // render after the services were down. Only `morndo install --force` replaces such a file.
+      const foreign = await services.foreignUnits(staged.version, { services: services.services() });
+      if (foreign.length > 0) {
+        return { kind: "abandoned", reason: `${foreign.join(", ")}: not written by Morndo, so nothing was stopped; move ${foreign.length === 1 ? "it" : "them"} away, or run morndo install --force` };
+      }
 
       // The record (RL4), begun with the machine as it stands and the plan inside it: a recovery reads both back.
       const machine = this.#installation(layout, store, target);

@@ -1,10 +1,10 @@
 // morndo-keys. The design names this morndo-connections; this build uses the name the manager asked for.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
+import { effectiveIsolation, engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
-import { findPreset as presetOf, firstPartyHost } from "./application/catalog.ts";
+import { findPreset as presetOf, firstPartyHost, floorOf } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
@@ -24,14 +24,23 @@ import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
 import { FileRefused } from "./adapters/file-mode.ts";
+import { parsePin, pinFor, procReader, verifyClaudeParent } from "./adapters/caller-proof.ts";
+import { CLAUDE_RELEASE_FINGERPRINT, CLAUDE_RELEASE_FIRST_SIGNED } from "./adapters/claude-release-key.ts";
+import { compareVersions, installedVersions, isVersion, fileShaCache, parseReleasePin, releaseAdmits, syncReleases, type Fetch } from "./adapters/release-manifest.ts";
 import { DatabaseFromFuture } from "./adapters/store-migrations.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
 const GATE = new Set(["off", "terms", "expired", "repo", "isolation", "dialect", "leases", "budget"]);
 const LEASES = 8;
+// The claude binary the owner pinned, in the connections home (adapters/caller-proof.ts); the lease reads it, not the env.
+const PIN_FILE = "claude-pin.json";
+// The signed-release pin (T-346): the key, the directory releases are installed in, the lowest version.
+const RELEASE_PIN_FILE = "claude-release-pin.json";
+const USAGE_WORDS = new Set(["missing argument", "isolation"]);
 
 // `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
-export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal };
+// `tty`: the command runs at an interactive terminal (stdin and stdout), which only pin-claude asks for.
+export type Io = { stdout: (text: string) => void; stderr: (text: string) => void; stdin?: string; gone?: AbortSignal; tty?: boolean; fetch?: Fetch };
 
 export type Parsed = { cmd: string; positionals: string[]; rest: string[]; get(name: string): string | undefined; all(name: string): string[] };
 
@@ -50,6 +59,38 @@ morndo-keys pool exec --runtime codex [--lane L] [--account A] -- exec … <prom
   A reader that is gone is noticed only when the bin writes to it. An agent that prints once at the end (claude with
   --output-format json) or goes quiet is not stopped before its next output, so its turn can be paid for in full: Node 24 has
   no way to see a pipe's reader close without a write. Use a streaming output format where this matters.
+
+morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [--isolation none|rules|os]
+  lease prints a key connection's key on stdout and nothing else, so it can be an apiKeyHelper: Claude Code runs the
+  command through the shell and reads its stdout as the credential (a non-zero exit is failure, the output is cached for
+  the TTL). One call is one lease — the gate runs, a KeyServed audit line is written, the lease closes; a call killed
+  before that is swept at the next lease, run or check. A refusal names its reason on stderr and exits 1, or 75 when the
+  gate refuses (off, terms, expired, repo, isolation, dialect, leases, budget).
+  morndo-keys pin-claude [--path P] pins the claude binary a lease may be served to: its real path and its content (sha256,
+  size, mtime, ctime, inode) and the API host of each connection it may serve (add a connection, pin again). Once, by the owner, at a terminal; an update needs a new pin. The terminal is advisory: it
+  keeps an agent's plain tool call (which has none) from pinning, not a process of the same user that runs under a pty.
+  morndo-keys pin-claude --signed [--versions-dir D] [--floor V] pins Anthropic's release signing key (the fingerprint compiled
+  into this build), the directory claude's versions are installed in and the lowest version to accept, instead of one binary: a
+  lease then admits any version in that directory, at or above the floor, whose sha256 a signed manifest lists, so an update
+  needs no new pin. morndo-keys claude-releases sync [--only V] is the node job (no secret; run it on a timer and before a lane
+  starts) that fetches and verifies those manifests into the cache a lease reads; a lease makes no network call.
+  The helper line is: ulimit -c 0; exec morndo-keys lease --connection <name> --lane <lane> --workspace <dir> --isolation os
+  The ulimit keeps a crash from dumping the key (Node can neither wipe a string nor set its own core limit); the exec makes
+  Claude Code the lease's parent, which is what it checks. For a connection whose floor is os (Z.ai today) the parent must
+  be the pinned binary (its path and content, read from /proc), started with --strict-mcp-config (and no --mcp-config), one
+  --settings (a file or inline JSON) and
+  --setting-sources "" (no user, project or local settings merge in), whose sandbox is enabled, failIfUnavailable true,
+  allowUnsandboxedCommands false and excludedCommands empty, with this node's vault, connections.db and identity in
+  sandbox.filesystem.denyRead and as Read rules in permissions.deny, not re-opened by allowRead or opened by allowWrite;
+  a settings file must not have changed since the parent started, be reached through no symlink and be in
+  sandbox.filesystem.denyWrite; the settings carry only the keys a lane turn may (apiKeyHelper, permissions.deny, and under
+  sandbox: enabled, failIfUnavailable, allowUnsandboxedCommands, filesystem.{denyRead,allowWrite,denyWrite},
+  network.allowedDomains): no hooks, env, statusLine, plugins, proxy or weakening key; and the parent's environment has
+  ANTHROPIC_BASE_URL set to the API host pinned for the connection (pin-claude records it from the preset), and no proxy
+  (HTTPS_PROXY, HTTP_PROXY, ALL_PROXY, any case), NODE_EXTRA_CA_CERTS, SSL_CERT_FILE, SSL_CERT_DIR or
+  NODE_TLS_REJECT_UNAUTHORIZED=0. Anything else
+  is refused with isolation.
+  --workspace are the caller's claims. run keeps its own helper, \`helper --lease <id>\`.
 `;
 
 export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
@@ -62,7 +103,8 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
     // A store from a newer helper is a configuration the caller must fix, not a crash to retry into: EX_CONFIG (78),
     // the exit the hub's main gives the same refusal. A file this helper refuses to touch keeps 70.
     if (parsed.cmd === "helper") return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
-    io.stderr(error instanceof Error ? error.message : "failed");
+    // A lease prints a reason word only: an error's message can carry a path (T-340).
+    io.stderr(parsed.cmd === "lease" ? `${error instanceof Error && USAGE_WORDS.has(error.message) ? error.message : "failed"}\n` : error instanceof Error ? error.message : "failed");
     return error instanceof FileRefused ? 70 : error instanceof DatabaseFromFuture ? 78 : 1;
   }
 }
@@ -70,6 +112,8 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
 async function command(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
   const home = openHome(env);
   try {
+    // A call killed with SIGKILL never closes its lease: the next lease, run or check ends the ones whose holder is gone.
+    if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") home.leases.sweep();
     const code = await dispatch(home, parsed, io);
     return code;
   } finally { home.close(); }
@@ -91,6 +135,9 @@ async function dispatch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     case "models": return models(home, need(name), io);
     case "check": return check(home, need(parsed.get("connection") ?? name), parsed, io);
     case "run": return launch(home, parsed, io);
+    case "lease": return leaseKey(home, parsed, io);
+    case "pin-claude": return pinClaude(home, parsed, io);
+    case "claude-releases": return claudeReleases(home, parsed, io);
     case "spend": return spend(home, need(name), io);
     case "usage": return usage(home, parsed, io);
     case "pool": return poolCommand(home, parsed, io);
@@ -280,6 +327,121 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
   // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
   return status === 70 || status === 75 || status === 78 ? 1 : status;
+}
+
+// `morndo-keys lease --connection <name>`: one call is one lease, as an apiKeyHelper takes it — the gate runs, the key
+// is printed once and nothing else, a KeyServed audit line is written, the lease closes.
+// Isolation: for a connection that has to run under os (its floor, ADR-0018 Q3), the caller's parent is read and must be a
+// Claude Code process started with a sandbox that is on, fail-closed and denies the vault and the key files
+// (adapters/caller-proof.ts); a bare --isolation never lifts it, and without the proof the gate refuses (`isolation`). For
+// a lower need, --isolation (default none) is the caller's claim and the audit line says `claimed`. --lane and --workspace
+// are claims too: the repo gate guards a mistake, not a lie. The key is in this process's memory for as long as it takes to
+// print it; Node can neither wipe a string nor set its own core limit, so the helper line sets `ulimit -c 0` and `exec`s.
+async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
+  const name = need(parsed.get("connection"));
+  const connection = findConnection(home.store.load().directory, name);
+  if (!connection) return fail(io, "missing");
+  if (connection.status === "revoked") return fail(io, "revoked");
+  if (connection.custody !== "morndo" || connection.kind !== "api-key" || connection.runtime !== "claude" || loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return fail(io, "not_leasable");
+  const preset = presetOf(home.catalog, connection.vendor);
+  if (!preset) return fail(io, "missing");
+  const holder = selfHolder(parsed.get("lane") ?? null);
+  if (!holder) return fail(io, "holder");
+  const vouched = isolationOf(parsed.get("isolation") ?? "none");
+  let seen = vouched;
+  let proof: "verified" | "claimed" = "claimed";
+  if (effectiveIsolation(connection, floorOf(preset)) === "os") {
+    const pinFile = join(home.dir, PIN_FILE);
+    const checked = await verifyClaudeParent({
+      ppid: () => process.ppid, connection: name, pin: parsePin(procReader.file(pinFile)?.body ?? null),
+      release: parseReleasePin(procReader.file(join(home.dir, RELEASE_PIN_FILE))?.body ?? null),
+      verifyRelease: (version, sha256) => releaseAdmits(home.dir, version, sha256), shaCache: fileShaCache(home.dir),
+      want: { denied: [home.vaultDir, home.db, home.identity], writeProtected: [home.vaultDir, home.db, home.identity, pinFile] },
+    });
+    seen = checked.ok ? "os" : "none";
+    proof = checked.ok ? "verified" : "claimed";
+  }
+  home.runtime.current = { isolation: () => seen, dialects: () => ["anthropic"], loginStatus: () => Promise.resolve("unknown" as const), launch: () => Promise.resolve({ id: "" }) };
+  const workspace = parsed.get("workspace") ?? home.env.PWD ?? process.cwd();
+  const granted = home.leases.lease(name, {
+    role: parsed.get("role") ?? "lease", entry: "lease", holder, workspacePath: workspace,
+    limit: LEASES, reserve: 0, margin: 0, probe: true,
+  });
+  if (!granted.ok) return fail(io, granted.error.problem, granted.error.exit);
+  let outcome = "failed";
+  try {
+    const secret = await home.open(connection.ref);
+    const served = home.leases.serve(name, granted.value.id, { pid: process.pid, ppid: process.ppid, lane: holder.lane, workspace, isolation: seen, proof });
+    if (!served.ok) return fail(io, served.error.problem);
+    io.stdout(`${secret}\n`);
+    outcome = "done";
+    return 0;
+  } catch {
+    io.stderr("failed\n");
+    return 1;
+  } finally { home.leases.close(name, granted.value.id, outcome, null); }
+}
+
+// `morndo-keys pin-claude [--path P]`: the owner says which claude binary a lease may be served to (P, else `claude` on this
+// shell's PATH), once, at a terminal: an agent's tool call has none, so it can't pin the binary it wants (advisory: a
+// process of the same user can run under a pty). It pins the file
+// itself, not its name: the real path, the sha256 of its content, and its size, mtime, ctime and inode, and the API host of
+// each connection it may serve. The pin goes to the
+// connections home, which an agent's sandbox denies, and what it pins is printed.
+function pinClaude(home: Opened, parsed: Parsed, io: Io): number {
+  if (io.tty !== true) return fail(io, "tty");
+  // For each key connection a lease may serve (a claude runtime), the API host its preset names: its claude is started
+  // with that ANTHROPIC_BASE_URL, and the lease reads the parent's environment against this, not against its own.
+  const baseUrls: Record<string, string> = {};
+  for (const connection of home.store.load().directory.connections) {
+    if (connection.custody !== "morndo" || connection.kind !== "api-key" || connection.runtime !== "claude") continue;
+    const url = presetOf(home.catalog, connection.vendor)?.runtimes.find(item => item.runtime === "claude")?.baseUrl ?? "";
+    if (url !== "") baseUrls[connection.name] = url;
+  }
+  if (parsed.get("signed") === "true") return pinReleases(home, parsed, io, baseUrls);
+  const pin = pinFor(parsed.get("path") ?? "claude", home.env.PATH, baseUrls);
+  if (pin === null) return fail(io, "missing");
+  writeFileSync(join(home.dir, PIN_FILE), `${JSON.stringify(pin)}\n`, { mode: 0o600 });
+  io.stdout(`${JSON.stringify(pin)}\n`);
+  return 0;
+}
+
+// `morndo-keys pin-claude --signed [--versions-dir D] [--floor V]` (T-346): instead of one binary, the owner pins Anthropic's
+// release key (the fingerprint compiled into this build, shown here), the directory the installer keeps versions in (default
+// ~/.local/share/claude/versions) and the lowest version to accept (default: the version `claude` on this shell's PATH is). A
+// lease then admits any version in that directory, at or above the floor, whose sha256 a signed manifest lists: an update needs no
+// new pin. The manifests are fetched by `claude-releases sync`, never by a lease.
+function pinReleases(home: Opened, parsed: Parsed, io: Io, baseUrls: Record<string, string>): number {
+  let versionsDir: string;
+  try {
+    versionsDir = realpathSync(parsed.get("versions-dir") ?? join(home.env.HOME ?? "", ".local/share/claude/versions"));
+    if (!statSync(versionsDir).isDirectory()) return fail(io, "missing");
+  } catch { return fail(io, "missing"); }
+  let floor = parsed.get("floor");
+  if (floor === undefined) {
+    // the version the claude on this shell's PATH is, when it lives in that directory
+    const found = pinFor("claude", home.env.PATH, {})?.resolved;
+    if (found !== undefined && dirname(found) === versionsDir && isVersion(basename(found))) floor = basename(found);
+  }
+  if (floor === undefined || !isVersion(floor) || compareVersions(floor, CLAUDE_RELEASE_FIRST_SIGNED) < 0) return fail(io, "floor");
+  const pin = { fingerprint: CLAUDE_RELEASE_FINGERPRINT, versionsDir, floor, baseUrls };
+  writeFileSync(join(home.dir, RELEASE_PIN_FILE), `${JSON.stringify(pin)}\n`, { mode: 0o600 });
+  io.stdout(`${JSON.stringify(pin)}\n`);
+  return 0;
+}
+
+// `morndo-keys claude-releases sync [--only V]...` (T-346): the node job that keeps the release cache filled. It fetches the
+// manifest and its signature for each installed version at or above the pinned floor (and each --only), verifies them against the
+// compiled-in key, and caches them only then. No secret is involved, and a lease never calls it. A failure leaves the old cache and
+// exits 1, after the other versions are done; one JSON line per version says what happened.
+async function claudeReleases(home: Opened, parsed: Parsed, io: Io): Promise<number> {
+  if (parsed.positionals[0] !== "sync") return fail(io, "usage");
+  const pin = parseReleasePin(procReader.file(join(home.dir, RELEASE_PIN_FILE))?.body ?? null);
+  if (pin === null) return fail(io, "no_release_pin");
+  const versions = [...new Set([...installedVersions(pin.versionsDir, pin.floor), ...parsed.all("only").filter(isVersion).filter(version => compareVersions(version, pin.floor) >= 0)])];
+  const results = await syncReleases({ home: home.dir, versions, ...(io.fetch === undefined ? {} : { fetch: io.fetch }) });
+  for (const result of results) io.stdout(`${JSON.stringify(result)}\n`);
+  return results.some(result => result.status === "failed") ? 1 : 0;
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
@@ -655,7 +817,7 @@ function parse(argv: readonly string[]): Parsed {
   const values = new Map<string, string[]>();
   for (let i = 1; i < ours.length; i++) {
     const token = ours[i] ?? "";
-    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep") {
+    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep" || token === "--signed") {
       values.set(token.slice(2), ["true"]);
       continue;
     }

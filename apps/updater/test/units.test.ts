@@ -131,6 +131,8 @@ describe("the unit templates every Version ships (§5)", () => {
       // "-": a control plane, which mints its own, has none
       EnvironmentFile: "-%h/.local/state/morndo-update/apply.env",
       ExecStart: "%h/.local/bin/morndo-update update apply --version %i --attempt=${MORNDO_ATTEMPT}",
+      // §8.4's own exits are answers, not a failed unit: `systemctl start` fails only for a crash
+      SuccessExitStatus: "1 64 65 70 75 78",
     });
   });
 

@@ -40,6 +40,21 @@ const unit = (s: UpdateService): string => `morndo-${s}.service`;
 const SERVICE_UNITS = new Set(UPDATE_SCOPE_SERVICES.map(s => unit(s)));
 const isUnitFile = (name: string): boolean => name.endsWith(".service") || name.endsWith(".timer");
 
+// The setup before the updater (§10.3, adopted once): a service unit of one of our names whose command runs that
+// service's own program — its source entry point from a checkout, or its launcher. A unit of our name running anything
+// else is someone else's, and only `morndo install --force` replaces it.
+const PROGRAM: Record<UpdateService, { entry: string; launcher: string }> = {
+  hub: { entry: "apps/hub/src/main.ts", launcher: "morndo" },
+  fleet: { entry: "apps/fleet/src/main.ts", launcher: "morndo-fleet" },
+  node: { entry: "apps/node-agent/src/main.ts", launcher: "morndo-node" },
+};
+export const legacyService = (name: string, command: string): boolean => {
+  const s = UPDATE_SCOPE_SERVICES.find(x => unit(x) === name || `com.morndo.${x}.plist` === name);
+  if (s === undefined) return false;
+  const p = PROGRAM[s];
+  return command.includes(p.entry) || new RegExp(`/${p.launcher}(\\s|<|$)`, "m").test(command);
+};
+
 // The first line of every unit file a render writes: what marks the file as Morndo's to replace or remove.
 export const UNIT_MARK = "# Morndo's own unit: every update rewrites it. Put changes in a drop-in (<unit>.d/*.conf).";
 
@@ -103,8 +118,10 @@ export class SystemdServices implements ServiceManager {
     return kept;
   }
 
-  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }): Promise<string[]> {
-    return foreignIn(this.unitDir(), this.shipped(join(this.releases, version, "units"), role));
+  async foreignUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { tree?: string }): Promise<string[]> {
+    // `tree`: the unpacked archive `morndo install` is about to install — its Version is not in the releases yet.
+    const from = o?.tree === undefined ? join(this.releases, version, "units") : join(o.tree, "units");
+    return foreignIn(this.unitDir(), this.shipped(from, role));
   }
 
   private shipped(from: string, role?: { services: readonly UpdateService[] }): string[] {
@@ -114,7 +131,26 @@ export class SystemdServices implements ServiceManager {
   }
 
   private unitDir(): UnitDir {
-    return { dir: this.units, isUnit: n => n.startsWith("morndo-") && isUnitFile(n), marked: t => t.startsWith(`${UNIT_MARK}\n`) };
+    return {
+      dir: this.units, isUnit: n => n.startsWith("morndo-") && isUnitFile(n), marked: t => t.startsWith(`${UNIT_MARK}\n`),
+      legacy: (n, t) => legacyService(n, t.split("\n").filter(l => l.trim().startsWith("ExecStart=")).join("\n")),
+      // The environment the earlier unit gave its service (a hub URL, paths) goes into a drop-in, which every later
+      // render leaves alone (systemd.unit(5), drop-in directories): the service starts with it as before.
+      carry: (n, t) => {
+        let inService = false;
+        const lines: string[] = [];
+        for (const raw of t.split("\n")) {
+          const line = raw.trim();
+          if (line.startsWith("[")) inService = line === "[Service]";
+          else if (inService && (line.startsWith("Environment=") || line.startsWith("EnvironmentFile="))) lines.push(line);
+        }
+        if (lines.length === 0) return null;
+        return {
+          path: join(this.units, `${n}.d`, "before-morndo.conf"),
+          text: `# Carried over from the unit before the updater (${n}.before-morndo).\n[Service]\n${lines.join("\n")}\n`,
+        };
+      },
+    };
   }
 
   async tmuxInAgentUnit(): Promise<boolean> {
@@ -145,11 +181,14 @@ export class SystemdServices implements ServiceManager {
   }
 
   // RL13: the group's own processes and every sub-group's, depth first — a fresh machine's tmux server
-  // lands in a sub-group the agent's own cgroup.procs does not name.
+  // lands in a sub-group the agent's own cgroup.procs does not name. A tmux client is not a server: the agent runs
+  // one for every poll of its panes, and tmux names it "tmux: client" (the server "tmux: server"; checked on tmux
+  // 3.4). Any other tmux name counts, an older tmux's plain "tmux" included: the safe side.
   private tmuxInCgroup(dir: string): boolean {
     for (const pid of readPids(join(dir, "cgroup.procs"))) {
       try {
-        if (readFileSync(join(this.procRoot, pid, "comm"), "utf8").startsWith("tmux")) return true;
+        const comm = readFileSync(join(this.procRoot, pid, "comm"), "utf8").trim();
+        if (comm.startsWith("tmux") && comm !== "tmux: client") return true;
       } catch { /* the process left between the two reads: it is not evidence of tmux */ }
     }
     let entries;

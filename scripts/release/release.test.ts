@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -584,6 +584,66 @@ describe("launchers follow the package bins", () => {
   });
 });
 
+// verify-node.sh against a stub curl and a stub gpgv (no network, no keyring): what it does with the text gpgv verified.
+// GnuPG 2.5.22 (Homebrew's, on the macos-15 runner) exits 0 with "Good signature" and leaves the verified text in
+// <output>.part, never renamed to the name given to --output; 2.4 (the Linux runners) writes <output> itself. The
+// first bench run failed at "shasum: SHASUMS256.txt: No such file or directory" on macOS.
+describe("verify-node.sh", () => {
+  const VERSION = "1.2.3";
+  const TRIPLE = "linux-x64";
+  function bench(gpgv: "writes" | "part-only" | "fails", sums: "right" | "wrong") {
+    const root = temp();
+    const bin = join(root, "bin");
+    const dist = join(root, "dist");
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(dist, { recursive: true });
+    const pkg = join(root, `node-v${VERSION}-${TRIPLE}`);
+    mkdirSync(join(pkg, "bin"), { recursive: true });
+    writeFileSync(join(pkg, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
+    const tarball = `node-v${VERSION}-${TRIPLE}.tar.gz`;
+    spawnSync("tar", ["-czf", join(dist, tarball), "-C", root, `node-v${VERSION}-${TRIPLE}`]);
+    const digest = createHash("sha256").update(readFileSync(join(dist, tarball))).digest("hex");
+    writeFileSync(join(dist, "SHASUMS256.txt.asc"), `${sums === "right" ? digest : "0".repeat(64)}  ${tarball}\n`);
+    // curl -fsSL -o FILE URL: the file named by the URL's last part, out of the fixture directory
+    writeFileSync(join(bin, "curl"), `#!/bin/sh\nout=$3; url=$4\ncp "${dist}/$(basename "$url")" "$out"\n`, { mode: 0o755 });
+    const write = {
+      writes: 'cat > "$out"\n',
+      "part-only": 'cat > "$out.part"\n',
+      fails: 'cat > "$out.part"; echo "gpgv: BAD signature" >&2; exit 1\n',
+    }[gpgv];
+    // gpgv --keyring=K --output FILE < asc
+    writeFileSync(join(bin, "gpgv"), `#!/bin/sh\nout=$3\n${write}`, { mode: 0o755 });
+    const dest = join(root, "node");
+    const r = spawnSync("sh", [fileURLToPath(new URL("./verify-node.sh", import.meta.url)), VERSION, TRIPLE, dest, join(root, "pubring.kbx")], {
+      encoding: "utf8", env: { PATH: `${bin}:/usr/bin:/bin`, HOME: root },
+    });
+    return { r, dest };
+  }
+
+  it("unpacks the Node it verified when gpgv writes the output file (GnuPG 2.4)", () => {
+    const { r, dest } = bench("writes", "right");
+    expect([r.status, r.stderr]).toEqual([0, ""]);
+    expect(existsSync(join(dest, "bin/node"))).toBe(true);
+  });
+
+  it("unpacks it when gpgv leaves the verified text in <output>.part and exits 0 (GnuPG 2.5 on macOS)", () => {
+    const { r, dest } = bench("part-only", "right");
+    expect([r.status, r.stderr]).toEqual([0, ""]);
+    expect(existsSync(join(dest, "bin/node"))).toBe(true);
+  });
+
+  it("refuses when gpgv fails, whatever text it left behind, and when the checksum is wrong", () => {
+    const failed = bench("fails", "right");
+    expect(failed.r.status).not.toBe(0);
+    expect(existsSync(join(failed.dest, "bin/node"))).toBe(false);
+    for (const mode of ["writes", "part-only"] as const) {
+      const wrong = bench(mode, "wrong");
+      expect(wrong.r.status, mode).not.toBe(0);
+      expect(existsSync(join(wrong.dest, "bin/node")), mode).toBe(false);
+    }
+  });
+});
+
 describe("stage, launchers, node pin, notice", () => {
   it("stages the build stamp: the Release's Version and commit, listed in files.json", () => {
     const repo = temp();
@@ -596,6 +656,63 @@ describe("stage, launchers, node pin, notice", () => {
     stageRelease({ repo, nodeDir, dest, version: "0.3.1", commit: STAMP_COMMIT });
     expect(JSON.parse(readFileSync(join(dest, "app/build.json"), "utf8"))).toEqual({ version: "0.3.1", commit: STAMP_COMMIT });
     expect(readFileSync(join(dest, "files.json"), "utf8")).toContain("app/build.json");
+  });
+
+  it("ships the repo's trust/keys.json and its signature in trust/, listed in files.json and packed (T-354)", () => {
+    const repo = temp();
+    const nodeDir = temp();
+    mkdirSync(join(repo, "trust"), { recursive: true });
+    mkdirSync(join(nodeDir, "bin"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0"}\n');
+    writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+    writeFileSync(join(repo, "trust/keys.json"), '{"version":1}\n');
+    writeFileSync(join(repo, "trust/keys.json.sig"), "-----BEGIN SSH SIGNATURE-----\nsig\n-----END SSH SIGNATURE-----\n");
+    writeFileSync(join(repo, "trust/release_allowed_signers"), "not shipped: the Key set is what a Version carries\n");
+    writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
+    const dest = join(temp(), "out");
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", commit: STAMP_COMMIT });
+    expect(readFileSync(join(dest, "trust/keys.json"), "utf8")).toBe('{"version":1}\n');
+    expect(readFileSync(join(dest, "trust/keys.json.sig"), "utf8")).toContain("BEGIN SSH SIGNATURE");
+    expect(statSync(join(dest, "trust/keys.json")).mode & 0o777).toBe(0o444);
+    expect(existsSync(join(dest, "trust/release_allowed_signers"))).toBe(false);
+    const listed = FileListSchema.parse(JSON.parse(readFileSync(join(dest, "files.json"), "utf8"))).map(e => e.path);
+    expect(listed).toContain("trust/keys.json");
+    expect(listed).toContain("trust/keys.json.sig");
+    expect(listed).not.toContain("trust/release_allowed_signers");
+    const tar = spawnSync("tar", ["-tzf", "-"], { input: packTree(readStaged(dest), 1_700_000_000), encoding: "utf8" });
+    expect(tar.stdout).toContain("trust/keys.json\n");
+    expect(tar.stdout).toContain("trust/keys.json.sig\n");
+  });
+
+  it("refuses a keys.json whose signature is missing or unreadable: the Key set ships signed or not at all", () => {
+    const stageWith = (sig: (repo: string) => void) => {
+      const repo = temp();
+      const nodeDir = temp();
+      mkdirSync(join(repo, "trust"), { recursive: true });
+      mkdirSync(join(nodeDir, "bin"), { recursive: true });
+      writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0"}\n');
+      writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+      writeFileSync(join(repo, "trust/keys.json"), '{"version":1}\n');
+      writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
+      sig(repo);
+      return () => stageRelease({ repo, nodeDir, dest: join(temp(), "out"), version: "0.1.0", commit: STAMP_COMMIT });
+    };
+    expect(stageWith(() => {})).toThrow(/keys\.json\.sig/);                                       // no signature at all
+    expect(stageWith(repo => mkdirSync(join(repo, "trust/keys.json.sig")))).toThrow(/keys\.json\.sig/);   // one that cannot be read
+    expect(stageWith(repo => writeFileSync(join(repo, "trust/keys.json.sig"), ""))).toThrow(/keys\.json\.sig/);   // an empty one
+    expect(stageWith(repo => writeFileSync(join(repo, "trust/keys.json.sig"), "sig\n"))).not.toThrow();   // control: a signature file stages
+  });
+
+  it("a repo with no trust/ still stages an empty trust/ (a fixture tree)", () => {
+    const repo = temp();
+    const nodeDir = temp();
+    mkdirSync(join(nodeDir, "bin"), { recursive: true });
+    writeFileSync(join(repo, "package.json"), '{"name":"morndo","version":"0.1.0"}\n');
+    writeFileSync(join(repo, "LICENSE.md"), "AGPL\n");
+    writeFileSync(join(nodeDir, "bin/node"), "#!/bin/sh\n", { mode: 0o755 });
+    const dest = join(temp(), "out");
+    stageRelease({ repo, nodeDir, dest, version: "0.1.0", commit: STAMP_COMMIT });
+    expect(readdirSync(join(dest, "trust"))).toEqual([]);
   });
 
   it("stages a fixture tree twice into archives with the same bytes", () => {
