@@ -77,6 +77,7 @@ export type ReleaseFixture = {
 
 export function releaseFixture(o: {
   version: string; platform?: Platform; now: number; name?: string;
+  protocol?: { agent: [number, number]; clientApi: [number, number] };
   tamper?: (tree: TreeFile[], filesJson: string) => Buffer;
 }): ReleaseFixture {
   const platform = o.platform ?? "linux-x64";
@@ -93,7 +94,7 @@ export function releaseFixture(o: {
     commit: "0123456789abcdef0123456789abcdef01234567",
     publishedAt: o.now,
     repository: "example/morndo",
-    protocol: { agent: [1, 2], clientApi: [1, 1] },
+    protocol: o.protocol ?? { agent: [1, 2], clientApi: [1, 1] },
     schemas,
     artifacts: [{ platform, name, size: archive.length, sha256: sha256hex(archive), filesSha256: built.filesSha256, node: "24.21.0" }],
   });

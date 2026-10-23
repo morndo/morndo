@@ -54,8 +54,8 @@ describe("the client API", () => {
     await fleet.joined("mac");
     await vi.waitFor(() => expect(fleet.connections.latest("pc").health).not.toBeNull());
     expect((await client(fleet.config.socketPath).get("/v1/nodes"))?.body).toEqual([
-      { name: "mac", status: "offline", health: null, agent: null, commit: null },
-      { name: "pc", status: "online", health: expect.objectContaining({ load1: 2 }), agent: "test-agent/1", commit: null },
+      { name: "mac", status: "offline", health: null, agent: null, commit: null, proto: null, update: null },
+      { name: "pc", status: "online", health: expect.objectContaining({ load1: 2 }), agent: "test-agent/1", commit: null, proto: [1], update: null },
     ]);
   });
 

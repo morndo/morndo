@@ -3,6 +3,7 @@ import type {
   Channel, DatabaseName, DbState, HealthReport, InstallMethod, KeySet, SafePointReport, Update, UpdateService,
   UpdateSettings,
 } from "@morndo/domain";
+import type { RolloutWire, UpdateStateFile } from "@morndo/protocol";
 
 // A signed document as fetched: its bytes and the bytes of the signature file beside it (`<url>.sig`), both unparsed.
 export type Signed = { bytes: Uint8Array; signature: Uint8Array };
@@ -91,14 +92,17 @@ export type CheckRecord = {
   feedSeq: number | null; feedExpiresAt: number | null;
 };
 // The step record (RL4, §6.2): the Update as it stands in update.db — the domain's own fields plus the format
-// its steps were written in, when the attempt began, the marks recorded done so far, and two fields only a
-// walking record carries: the health baseline this attempt was judged against (§6.7 — a commit writes it down
-// for the next boot apply, and a recovery that finishes the attempt still knows it), and, for a rollback, the
-// id of the update whose Backups it would restore (§6.5: the commit's own, not this attempt's).
+// its steps were written in, when the attempt began, the marks recorded done so far, the attempt id this Update
+// reports itself under (§5.4: the offer's on a node, the control plane's own minted one — the fleet's word, not
+// this row's id, and null for the records written before it), and two fields only a walking record carries: the
+// health baseline this attempt was judged against (§6.7 — a commit writes it down for the next boot apply, and a
+// recovery that finishes the attempt still knows it), and, for a rollback, the id of the update whose Backups it
+// would restore (§6.5: the commit's own, not this attempt's).
 export type StoredUpdate = Update & {
   format: number; startedAt: number; doneMarks: string[];
   judgeBaseline: Record<string, string[]> | null;
   backupOf: string | null;
+  attempt: string | null;
 };
 // A step record that has ended (recentUpdates, for --status): when it ended, or null while it runs.
 export type UpdateHistory = StoredUpdate & { finishedAt: number | null };
@@ -141,12 +145,47 @@ export interface UpdateStore {
   recordHalt(version: string, reason: string, at: number): void;
   /** Every halt recorded here, newest first. */
   halts(): { version: string; reason: string; at: number }[];
+  /** This node's drawn jitter for a Version's Rollout (§7), or null: none drawn yet. */
+  jitterOf(version: string): number | null;
+  /** Draws it once and keeps it (§7): a Version that already has an entry keeps the one it has. */
+  recordJitter(version: string, until: number): void;
   /** True the first time this record raises this kind of Alert, false every later time: the recovery unit runs
    *  every 5 minutes, and a record it cannot act on is one Alert, not one each run. */
   firstAlert(updateId: string, kind: AlertKind, at: number): boolean;
 }
 
-export interface SettingsSource { read(): UpdateSettings }
+// The fleet's word for the Rollout (updates §4.5, §6.7, §7): what the control plane committed, the Rollout itself,
+// and the offer this machine's agent last heard with it — the Version and the attempt id a node applies under
+// (§5.4). Only reads: the fleet's write routes are closed (§4.3), so the updater's own word out is its state file,
+// which the fleet reads itself; a node's view is what its agent last heard (fleet-view.json). view() null is "no
+// word": a fleet that cannot be asked, or an agent that never heard.
+export type FleetWord = {
+  controlPlane: { version: string; commit: string | null } | null;
+  rollout: RolloutWire | null;
+  offer: { version: string; attempt: string } | null;
+  observedAt: number;
+};
+// One node as the control plane's skew gate asks for it (§7, RL11): the highest agent protocol it speaks, null when
+// it is offline or unknown; `joined` and `revoked` as the fleet itself keeps them.
+export type FleetNode = { name: string; agentProtocol: number | null; joined: boolean; revoked: boolean };
+export interface FleetView {
+  view(): Promise<FleetWord | null>;
+  /** Every node the fleet knows (the control plane's skew gate, §7); null when the fleet cannot be asked. */
+  nodes(): Promise<FleetNode[] | null>;
+}
+
+// What the updater writes of itself (updates §6.3, §7): state.json, one write per outcome — staged, deferred,
+// applying, committed, rolled back, rollback_failed. A port so the application stays free of I/O; the adapter
+// writes atomically at 0600. Never throws: a state file that cannot be written changes no outcome.
+export interface UpdateStateSink {
+  write(s: UpdateStateFile): void;
+}
+
+// The settings file with the soak of §4.5: null is the domain's default. A MachineSettings is an UpdateSettings
+// everywhere the domain reads one.
+export type MachineSettings = UpdateSettings & { soakMinutes: number | null };
+
+export interface SettingsSource { read(): MachineSettings }
 export interface Clock { now(): number }
 
 // ---- the apply's own ports (§4.6); the adapters for the machine come with the apply's PR, tests fake them
@@ -170,8 +209,10 @@ export interface ServiceManager {
   /** RL13: true when the tmux server sits inside the node agent's unit. */
   tmuxInAgentUnit(): Promise<boolean>;
   /** §6.2's apply runs as its own unit, so a crash of whoever asked for it never interrupts the walk: start
-   *  `morndo-update-apply@<version>.service` and return when the unit's own run has ended. */
-  runApply(version: string): Promise<void>;
+   *  `morndo-update-apply@<version>.service` and return when the unit's own run has ended. `wait: false`
+   *  (PR 6c's --detach, the hub's one command) returns at the start — systemd's --no-block — and the unit's
+   *  own record, not this caller, tells how the walk ended. */
+  runApply(version: string, o?: { wait?: boolean }): Promise<void>;
   /** `morndo install`'s last act: enable and start the update timers, the boot and recovery units, and the
    *  role's own services (systemd enable --now; launchd bootstraps the plists). */
   enable(units: readonly string[]): Promise<void>;
@@ -217,5 +258,5 @@ export interface AlertSink { raise(kind: AlertKind, detail: string): void }
 export interface Revocations {
   /** The ids revoked in the live database that are not revoked in this update's Backup of it: what a restore would
    *  bring back. Empty for a database that holds no revocations, or when there is no Backup to compare. */
-  droppedBy(updateId: string, db: DatabaseName): string[];
+  droppedBy(updateId: string, db: DatabaseName, target: string): string[];
 }

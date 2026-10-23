@@ -22,7 +22,7 @@
 //   handed on (no `req` runs under the old store), and it dials again, naming the new store.
 import { randomBytes, type KeyObject } from "node:crypto";
 import { WebSocket } from "ws";
-import { CLOSE, FleetMessage, LIMITS, fleetSigPayload, fleetUrlOk, nodeSigPayload, parseBody, type AgentMessage } from "@morndo/protocol";
+import { CLOSE, FleetMessage, LIMITS, fleetSigPayload, fleetUrlOk, nodeSigPayload, parseBody, type AgentMessage, type RolloutWire } from "@morndo/protocol";
 import { signedBy } from "../identity.ts";
 import type { Logger } from "../log.ts";
 import { AGENT_COMMIT, AGENT_VERSION, PROTO_VERSIONS } from "../version.ts";
@@ -33,7 +33,15 @@ import type { ConnState, ConnStatus } from "./status-file.ts";
 
 export type ReqMessage = Extract<FleetMessage, { t: "req" }>;
 export type AckMessage = Extract<FleetMessage, { t: "ack" }>;
-export type Welcomed = { connEpoch: number; ackSeq: number; streamKnown: boolean; storeSeqSeen?: number };
+// A welcome's own words (updates §7), beside its stream bookkeeping: the build this fleet's control plane runs,
+// the Rollout as it stands, and the offer the fleet made this node (§5.4). Optional as the wire has them: a fleet
+// from before the updates design says none of them.
+export type Welcomed = {
+  connEpoch: number; ackSeq: number; streamKnown: boolean; storeSeqSeen?: number;
+  controlPlane?: { version: string; commit: string | null };
+  rollout?: RolloutWire | null;
+  offer?: { version: string; attempt: string };
+};
 
 export const UNSUPPORTED_RETRY_MS = 3_600_000;
 export const CONFLICT_SPREAD = 0.2;                       // a refused second instance retries 5 minutes ± 20 %
@@ -53,6 +61,9 @@ export type ConnectionOptions = {
   onRequest(m: ReqMessage): void;
   onBadRequest(id: string, op: unknown): void;
   onAck(m: AckMessage): void;
+  // The Rollout as it stands, on every change of it, with the offer that frame made this node (§5.4): absent when
+  // the frame carried none — an offer dies with the word that last said it.
+  onRollout?(r: RolloutWire, offer?: { version: string; attempt: string }): void;
   onDown(): void;
   onStatus(s: ConnStatus): void;
   retry?: RetryOptions;
@@ -181,7 +192,13 @@ export class FleetConnection {
         }
         case "welcome": {
           if (phase !== "proof") { protocolError("a welcome out of turn"); return; }
-          const w: Welcomed = { connEpoch: msg.connEpoch, ackSeq: msg.ackSeq, streamKnown: msg.streamKnown, ...(msg.storeSeqSeen === undefined ? {} : { storeSeqSeen: msg.storeSeqSeen }) };
+          const w: Welcomed = {
+            connEpoch: msg.connEpoch, ackSeq: msg.ackSeq, streamKnown: msg.streamKnown,
+            ...(msg.storeSeqSeen === undefined ? {} : { storeSeqSeen: msg.storeSeqSeen }),
+            ...(msg.controlPlane === undefined ? {} : { controlPlane: msg.controlPlane }),
+            ...(msg.rollout === undefined ? {} : { rollout: msg.rollout }),
+            ...(msg.offer === undefined ? {} : { offer: msg.offer }),
+          };
           this.#retry.reset();
           if (o.admit && !o.admit(w)) { phase = "turned down"; ws.terminate(); return; }   // decided before going online
           phase = "online";
@@ -197,6 +214,13 @@ export class FleetConnection {
         case "ack":
           if (phase !== "online") { protocolError("an ack before welcome"); return; }
           o.onAck(msg);
+          return;
+        case "rollout":
+          // The Rollout as it stands (updates §7), on every change of it: only to agents whose hello said
+          // CAP_ROLLOUT. Before the updates design this agent ignored the frame; now it hands it on, and a frame
+          // from before the welcome is the protocol error a req there would be.
+          if (phase !== "online") { protocolError("a rollout before welcome"); return; }
+          o.onRollout?.(msg.rollout, msg.offer);
           return;
       }
     });

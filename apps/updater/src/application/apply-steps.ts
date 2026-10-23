@@ -9,8 +9,8 @@ import {
   type Update, type UpdateMark, type UpdateService, type UpdateState, type Version, type Window,
 } from "@morndo/domain";
 import type {
-  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper,
-  StoredUpdate, UpdateStore,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager,
+  Sleeper, StoredUpdate, UpdateStateSink, UpdateStore,
 } from "./ports.ts";
 
 // What the tests kill with: an interruption, not a failure. Every catch below lets it through — a dead process
@@ -22,11 +22,18 @@ export class ApplyInterrupted extends Error {
   }
 }
 
-// The ports every shared step needs; the apply and the recovery services each hold their own view of these.
+// The ports every shared step needs; the apply and the recovery services each hold their own view of these. The
+// state sink carries PR 6's Rollout word out (§4.5, §7): every ending writes state.json — the commit with its soak,
+// a rollback with the attempt id the fleet holds its halt against — and the fleet itself reads the file. There is
+// no fleet port here: the updater has no write door into the fleet (§4.3), so nothing to call and nothing to
+// retry; a word the fleet never took is a word it still owes itself, on its own next read.
 export type ApplyDeps = {
   services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
   applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
   alerts: AlertSink;
+  state: UpdateStateSink;
+  /** The soak this machine's settings name (§4.5); the composition root has already applied the default. */
+  soakMinutes: number;
 };
 
 // §6.2's walls: the drain's patience, the polls, §6.4's health deadline and probation.
@@ -48,7 +55,8 @@ export const timingOf = (t?: Partial<ApplyTiming>): ApplyTiming => ({
 export type StepCtx = { deps: ApplyDeps; timing: ApplyTiming; u: StoredUpdate };
 
 const withKept = (u: StoredUpdate, next: Update): StoredUpdate =>
-  ({ ...next, format: u.format, startedAt: u.startedAt, doneMarks: u.doneMarks, judgeBaseline: u.judgeBaseline, backupOf: u.backupOf });
+  ({ ...next, format: u.format, startedAt: u.startedAt, doneMarks: u.doneMarks, judgeBaseline: u.judgeBaseline,
+    backupOf: u.backupOf, attempt: u.attempt });
 
 // Records the mark before the step it names runs. No-op when the record already stands there: a recovery picking
 // up at exactly this mark is in order, not out of it.
@@ -295,6 +303,14 @@ export type RollbackOutcome =
 const revocationsDropped = (db: string, dropped: readonly string[], target: string, cause: string): string =>
   `${db}: restoring its backup would drop the revocation of ${dropped.join(", ")}, made since the backup; ${target} keeps running (${cause})`;
 
+// state.json's own word cap (the wire's label, 200): a cause longer than that is clipped, never refused.
+const clip = (text: string): string => (text.length <= 200 ? text : `${text.slice(0, 199)}…`);
+// A health failure's cause is "service: check" (§6.4); the check's own name is what failedCheck wants.
+const failedCheckOf = (cause: string): string | undefined => /^[\w-]+: ([\w.-]+)$/.exec(cause)?.[1];
+// The record's attempt id (§5.4), when it has one — null is the records written before the field was, and absent
+// is what state.json says of those.
+const attemptOf = (u: StoredUpdate): { attempt: string } | {} => (u.attempt === null ? {} : { attempt: u.attempt });
+
 export async function runRollback(ctx: StepCtx, o: {
   running: readonly UpdateService[];
   cause: string;
@@ -307,10 +323,13 @@ export async function runRollback(ctx: StepCtx, o: {
   const backText = ctx.u.kind === "rollback" ? formatVersion(ctx.u.target) : formatVersion(ctx.u.preUpdate.current);
   // §6.5's Backups belong to the update that took them; a rollback-kind record points at their owner.
   const backupOf = ctx.u.backupOf ?? ctx.u.id;
-  const failed = (reason: string): RollbackOutcome => {
+  const failed = async (reason: string): Promise<RollbackOutcome> => {
     deps.store.recordBad(blameText, deps.clock.now());
     deps.store.recordHalt(blameText, reason, deps.clock.now());
     deps.alerts.raise("update_rollback_failed", reason);
+    // The blamed Version still runs (§6.4: the services are left to the manager); the state says what it is, under
+    // the attempt id this Update began with (§5.4) — the fleet reads the halt here, not from a call.
+    deps.state.write({ state: "rollback_failed", version: blameText, reason: clip(reason), ...attemptOf(ctx.u), at: deps.clock.now() });
     done(ctx, "rolling_back");
     finish(ctx, "rollback_failed");
     return { kind: "rollback_failed", reason };
@@ -331,26 +350,27 @@ export async function runRollback(ctx: StepCtx, o: {
     // RL8 and RL10, settled before anything moves: what a migration changed goes back only when the old Version truly
     // cannot open it; a restore with the Backup gone is refused, never forced; and a restore that would bring back a
     // device, agent token or node revoked since the Backup was taken is refused too — the services kept taking
-    // revocations during probation (RL9), and until the revocation journals arrive (PR 5c) those rows live only in
-    // the database a restore would replace. The target keeps running; the principal decides.
+    // revocations during probation (RL9), and what their journals do not hold lives only in the database a restore
+    // would replace (the journal's own ids the adapter already leaves out; §11.5). The target keeps running; the
+    // principal decides.
     const plan = planOf(ctx.u.migrations);
     const restores = rollbackRestores(plan);
     for (const db of restores) {
       const allowed = mayRestore({
         database: db, restoreOnRollback: plan[db].restoreOnRollback, backupPresent: deps.backup.has(backupOf, db),
       });
-      if (!allowed.ok) return failed(`${db}: ${allowed.error} (${o.cause})`);
-      const dropped = deps.revocations.droppedBy(backupOf, db);
-      if (dropped.length > 0) return failed(revocationsDropped(db, dropped, blameText, o.cause));
+      if (!allowed.ok) return await failed(`${db}: ${allowed.error} (${o.cause})`);
+      const dropped = deps.revocations.droppedBy(backupOf, db, backText);
+      if (dropped.length > 0) return await failed(revocationsDropped(db, dropped, blameText, o.cause));
     }
     await stopServices(deps, o.running);
     // Again now that nothing runs: a revoke that landed between the check above and the stop lives only in the
     // database the restore would replace. Then the target's services start again and the rollback fails loudly.
     for (const db of restores) {
-      const dropped = deps.revocations.droppedBy(backupOf, db);
+      const dropped = deps.revocations.droppedBy(backupOf, db, backText);
       if (dropped.length > 0) {
         await startServices(deps, o.running);
-        return failed(revocationsDropped(db, dropped, blameText, o.cause));
+        return await failed(revocationsDropped(db, dropped, blameText, o.cause));
       }
     }
     // The pair goes back as it was recorded (§6.5 step 2): the units, then the links — current first, then
@@ -368,18 +388,27 @@ export async function runRollback(ctx: StepCtx, o: {
     await startServices(deps, o.running);
     const baseline = o.baseline ?? await baselineNow(deps, o.running);
     const healthy = await waitHealthy(ctx, o.running, { baseline, target: parseVersion(backText)! });
-    if (!healthy.ok) return failed(`${backText} did not come back healthy: ${healthy.reason}`);
+    if (!healthy.ok) return await failed(`${backText} did not come back healthy: ${healthy.reason}`);
     // Whole again: the hold comes off, the Version is bad here forever (RL7), the Alert says what happened.
     deps.hold.clear();
     deps.store.recordBad(blameText, deps.clock.now());
-    deps.store.recordHalt(blameText, o.cause, deps.clock.now());      // RL12: the fleet halts the Rollout (PR 6)
+    deps.store.recordHalt(blameText, o.cause, deps.clock.now());      // RL12: the local halt record, read by the gates
     deps.alerts.raise("update_rolled_back", `${blameText} rolled back to ${backText}: ${o.cause}`);
+    // The machine is back on the old Version; the state says which, what it left, and why (§6.3) — under the
+    // attempt id this Update began with, which is the fleet's whole word of the halt (§5.4, RL12): it reads the
+    // file here on the control plane, and on a node the agent carries the same record in its health.
+    deps.state.write({
+      state: "rolled_back", version: backText, target: blameText, reason: clip(o.cause),
+      ...(failedCheckOf(o.cause) ? { failedCheck: failedCheckOf(o.cause)! } : {}),
+      ...attemptOf(ctx.u),
+      at: deps.clock.now(),
+    });
     done(ctx, "rolling_back");
     finish(ctx, "rolled_back");
     return { kind: "rolled_back", version: backText, reason: o.cause };
   } catch (error) {
     if (error instanceof ApplyInterrupted) throw error;
-    return failed(error instanceof Error ? error.message : String(error));
+    return await failed(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -413,6 +442,11 @@ export async function runCommit(ctx: StepCtx): Promise<{ kind: "committed"; vers
   deps.store.recordCommitted(targetText, deps.clock.now(), ctx.u.judgeBaseline ?? null);
   done(ctx, "committing");
   finish(ctx, "committed");
+  // The machine runs the target; the state says so, and that record is the commit itself (§4.5, §7): the fleet
+  // reads it, takes the soak from it, and counts the soak from its own `at` — so a fleet that reads it twice,
+  // after a restart among them, restarts nothing. On a control plane this is the Rollout's beginning; on a node
+  // the agent carries the same record to the fleet in its health. No call follows: there is no door to call.
+  deps.state.write({ state: "current", version: targetText, ...attemptOf(ctx.u), soakMinutes: deps.soakMinutes, at: deps.clock.now() });
   const layout = deps.installer.layout();
   deps.installer.prune([targetText, oldText, layout.good ?? targetText]);
   const committedIds = deps.store.recentUpdates(50)

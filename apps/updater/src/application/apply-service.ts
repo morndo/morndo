@@ -5,7 +5,7 @@
 // is one of §8.1's answers, and the CLI maps them to exits (§8.4: 75 for a deferred, 1 for a rolled back, 70 for a
 // rollback that failed). Only an install this updater made is ever touched (RL14).
 import {
-  DATABASES, DEFAULT_CHANNEL, DEFAULT_MODE, RECORD_FORMAT, beginRollback, beginUpdate, formatVersion, higherOf,
+  DATABASES, DEFAULT_CHANNEL, DEFAULT_MODE, RECORD_FORMAT, beginRollback, beginUpdate, compareVersions, formatVersion, higherOf,
   parseVersion, planMigrations, maySwap, type DatabaseName, type DbState, type Installation, type MigrationStep,
   type UpdateService, type Version, type Window,
 } from "@morndo/domain";
@@ -17,8 +17,8 @@ import {
   waitSafePoint,
 } from "./apply-steps.ts";
 import type {
-  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Layout, Revocations, RoleProbe, SchemaInspector,
-  ServiceManager, Sleeper, StoredUpdate, UpdateStore, Verifier,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Layout, Revocations, RoleProbe,
+  SchemaInspector, ServiceManager, Sleeper, StoredUpdate, UpdateStateSink, UpdateStore, Verifier,
 } from "./ports.ts";
 
 export type ApplyOutcome =
@@ -53,20 +53,35 @@ export class ApplyService {
     services: ServiceManager; probe: RoleProbe; schemas: SchemaInspector; backup: Backup; revocations: Revocations;
     hold: HoldWriter; applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock;
     sleeper: Sleeper; alerts: AlertSink; verifier: Pick<Verifier, "sha256">; timing?: Partial<ApplyTiming>;
+    state: UpdateStateSink; soakMinutes: number;
+    /** §5.4's attempt id, when the caller brings none (the control plane's own applies): 16 random bytes, base64url. */
+    mintAttempt: () => string;
   };
 
   constructor(p: {
     services: ServiceManager; probe: RoleProbe; schemas: SchemaInspector; backup: Backup; revocations: Revocations;
     hold: HoldWriter; applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock;
     sleeper: Sleeper; alerts: AlertSink; verifier: Pick<Verifier, "sha256">; timing?: Partial<ApplyTiming>;
+    state: UpdateStateSink; soakMinutes: number; mintAttempt: () => string;
   }) {
     this.#p = p;
   }
 
-  async apply(o: { now: boolean; automatic?: boolean; window?: Window | null; boot?: boolean }): Promise<ApplyOutcome> {
-    const { services, probe, schemas, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts, verifier } = this.#p;
+  async apply(o: {
+    now: boolean; automatic?: boolean; window?: Window | null; boot?: boolean; attempt?: string;
+  }): Promise<ApplyOutcome> {
+    const {
+      services, probe, schemas, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts, verifier,
+      state, soakMinutes, mintAttempt,
+    } = this.#p;
     const timing = timingOf(this.#p.timing);
-    const deps: ApplyDeps = { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts };
+    const deps: ApplyDeps = {
+      services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts,
+      state, soakMinutes,
+    };
+    // The id this Update reports itself under (§5.4): the fleet's own on a node (the offer's, or the one the
+    // apply unit was handed), minted here only where no other source can exist — the control plane's own applies.
+    const attempt = o.attempt ?? mintAttempt();
     // §8.3: only the automatic walk (the tick's) waits for its window; a person's ask never does.
     const automatic = o.automatic ?? false;
     const window = o.window ?? null;
@@ -85,6 +100,12 @@ export class ApplyService {
       if (staged === null || !installer.has(staged.version)) return { kind: "nothing_staged" };
       const target = parseVersion(staged.version);
       if (target === null) return { kind: "abandoned", reason: `the staged version ${staged.version} does not parse` };
+      // RL7: a Version that failed here is never walked again, by any door — not after the fleet resumes its
+      // Rollout, not from a staged record that outlived its rollback. Nothing is begun; state.json says why.
+      if (store.badVersions().some(text => { const bad = parseVersion(text); return bad !== null && compareVersions(bad, target) === 0; })) {
+        state.write({ state: "waiting", version: layout.current, target: staged.version, reason: "bad_here", at: clock.now() });
+        return { kind: "deferred", reason: "bad_here", blockers: [] };
+      }
       // The Manifest exactly as the check recorded it, re-read through the wire schema and re-hashed against the
       // record's own digest: the plan stands on the bytes that were verified, or not at all.
       const manifestText = store.manifestOf(staged.version);
@@ -120,9 +141,13 @@ export class ApplyService {
         doneMarks: [],
         judgeBaseline: null,
         backupOf: null,
+        attempt,
       };
       const ctx: StepCtx = { deps, timing, u: firstSave };
       store.saveUpdate(firstSave);
+      // The walk has begun: state.json says so from here until one of its endings rewrites it (§6.3, §7), under
+      // the attempt id every later record of this Update carries too (§5.4) — the id the fleet holds a halt against.
+      state.write({ state: "applying", version: oldText, target: staged.version, attempt, at: clock.now() });
       running = services.services();
 
       if (o.boot === true) return await bootApply(ctx, { staged: staged.version, oldText, plan: plan.value, running });
@@ -131,10 +156,12 @@ export class ApplyService {
       // the poll ends at the drain's wall and the answer is deferred, with nothing written and nothing stopped.
       const blockers = await waitSafePoint(ctx, running, { now: o.now, automatic, window });
       if (blockers !== null) {
+        state.write({ state: "waiting", version: oldText, reason: "the safe point never came", attempt, at: clock.now() });
         finish(ctx, "abandoned");
         return { kind: "deferred", reason: "the safe point never came", blockers };
       }
       if (await services.tmuxInAgentUnit()) {        // RL13: this updater never saws off its own branch
+        state.write({ state: "waiting", version: oldText, reason: "tmux_in_agent_unit", attempt, at: clock.now() });
         finish(ctx, "abandoned");
         return { kind: "deferred", reason: "tmux_in_agent_unit", blockers: [] };
       }
@@ -151,12 +178,14 @@ export class ApplyService {
       const unseen = await waitHoldSeen(ctx, running);
       if (unseen !== null) {
         hold.clear();
+        state.write({ state: "waiting", version: oldText, reason: "a service did not acknowledge the hold", attempt, at: clock.now() });
         finish(ctx, "abandoned");
         return { kind: "deferred", reason: "a service did not acknowledge the hold", blockers: unseen };
       }
       const drainBlockers = await waitSafePoint(ctx, running, { now: o.now, automatic, window });
       if (drainBlockers !== null) {
         hold.clear();
+        state.write({ state: "waiting", version: oldText, reason: "the drain did not finish", attempt, at: clock.now() });
         finish(ctx, "abandoned");
         return { kind: "deferred", reason: "the drain did not finish", blockers: drainBlockers };
       }
@@ -215,9 +244,15 @@ export class ApplyService {
   // put this Version here. The plan and the Backups are that commit's own (the record's backupOf names it);
   // without one — a Version installed by hand, a record too old — the swap still goes back, and nothing restores.
   async rollback(): Promise<ApplyOutcome> {
-    const { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts } = this.#p;
+    const {
+      services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts,
+      state, soakMinutes, mintAttempt,
+    } = this.#p;
     const timing = timingOf(this.#p.timing);
-    const deps: ApplyDeps = { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts };
+    const deps: ApplyDeps = {
+      services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts,
+      state, soakMinutes,
+    };
     const layout = installer.layout();
     if (layout.method !== "updater" || layout.current === null || parseVersion(layout.current) === null) {
       return { kind: "not_ours", detail: CHECKOUT_SENTENCE };
@@ -230,6 +265,8 @@ export class ApplyService {
       if (!begun.ok) return { kind: "no_previous" };
       const owner = store.recentUpdates(200)
         .find(row => row.state === "committed" && formatVersion(row.target) === layout.current) ?? null;
+      // The principal's rollback is its own Update, with an attempt id of its own (§5.4): minted, never reused —
+      // the commit's id was spent by its own report, and a halt must count this rollback once, by its own id.
       const firstSave: StoredUpdate = {
         ...begun.value,
         migrations: owner?.migrations ?? null,
@@ -238,9 +275,13 @@ export class ApplyService {
         startedAt: clock.now(),
         doneMarks: [],
         judgeBaseline: null,
+        attempt: mintAttempt(),
       };
       const ctx: StepCtx = { deps, timing, u: firstSave };
       store.saveUpdate(firstSave);
+      // Announced before anything moves (review of #111): the fleet counts a rollback only under an id it saw in an
+      // `applying` record first, and this one leaves the running Version — that Version's Rollout halts.
+      state.write({ state: "applying", version: layout.current, target: layout.current, attempt: firstSave.attempt!, at: clock.now() });
       // §5's `applying` mark before anything moves: a death past this point is the recovery unit's to finish.
       applying.set(ctx.u.id);
       const running = services.services();

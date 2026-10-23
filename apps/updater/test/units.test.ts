@@ -82,15 +82,22 @@ describe("the unit templates every Version ships (§5)", () => {
     }
   });
 
-  it("the tick is a oneshot behind a six-hour timer with an hour of spread", () => {
+  it("the hub talks to this machine's fleet: MORNDO_FLEET_SOCKET names the fleet's default client socket", () => {
+    // fleet-core design §16 ("morndo-hub.service: MORNDO_FLEET_SOCKET set"); without it an installed control plane's
+    // hub runs on the local adapters and never sees its fleet (6d's two-machine run: GET /api/updates answered 404).
+    const { entries } = readIni(readFileSync(join(UNITS, "morndo-hub.service"), "utf8"));
+    expect(entries.Environment).toBe("MORNDO_FLEET_SOCKET=%h/.local/state/morndo-fleet/fleet.sock");
+  });
+
+  it("the tick is a oneshot behind a 15-minute timer with 5 minutes of spread", () => {
     expect(readIni(readFileSync(join(UNITS, "morndo-update.service"), "utf8")).entries).toMatchObject({
       Type: "oneshot",
       ExecStart: "%h/.local/bin/morndo-update update tick",
     });
     expect(readIni(readFileSync(join(UNITS, "morndo-update.timer"), "utf8")).entries).toMatchObject({
       OnBootSec: "5min",
-      OnUnitActiveSec: "6h",
-      RandomizedDelaySec: "1h",
+      OnUnitActiveSec: "15min",
+      RandomizedDelaySec: "5min",
       Persistent: "true",
     });
   });
@@ -120,7 +127,10 @@ describe("the unit templates every Version ships (§5)", () => {
     const { entries } = readIni(readFileSync(join(UNITS, "morndo-update-apply@.service"), "utf8"));
     expect(entries).toMatchObject({
       Type: "oneshot",
-      ExecStart: "%h/.local/bin/morndo-update update apply --version %i",
+      // §5.4's attempt id rides an environment file the node agent writes (the instance carries only the Version);
+      // "-": a control plane, which mints its own, has none
+      EnvironmentFile: "-%h/.local/state/morndo-update/apply.env",
+      ExecStart: "%h/.local/bin/morndo-update update apply --version %i --attempt=${MORNDO_ATTEMPT}",
       // §8.4's own exits are answers, not a failed unit: `systemctl start` fails only for a crash
       SuccessExitStatus: "1 64 65 70 75 78",
     });

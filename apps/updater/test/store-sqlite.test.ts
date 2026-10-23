@@ -261,7 +261,7 @@ describe("the step record (RL4, §6.2)", () => {
     const store = open();
     expect(store.openUpdate()).toBeNull();
     const begun = beginUpdate({ id: "upd-4907", target: parseVersion("0.2.0")!, machine: MACHINE });
-    store.saveUpdate({ ...begun, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [], judgeBaseline: null, backupOf: null });
+    store.saveUpdate({ ...begun, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null });
     const live = store.openUpdate();
     expect(live).toMatchObject({
       id: "upd-4907", kind: "update", state: "staged", mark: null,
@@ -273,7 +273,7 @@ describe("the step record (RL4, §6.2)", () => {
     // the drain step's own save: the mark it stands in, recorded done, before the step runs (§6.2)
     const stepped = beginStep(live!, "draining", { lockHeld: true });
     expect(stepped.ok).toBe(true);
-    if (stepped.ok) store.saveUpdate({ ...stepped.value, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: ["draining"], judgeBaseline: null, backupOf: null });
+    if (stepped.ok) store.saveUpdate({ ...stepped.value, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: ["draining"], judgeBaseline: null, backupOf: null, attempt: null });
     expect(store.openUpdate()).toMatchObject({ state: "draining", mark: "draining", doneMarks: ["draining"] });
 
     store.finishUpdate("upd-4907", "abandoned", 2_000);
@@ -290,8 +290,8 @@ describe("the step record (RL4, §6.2)", () => {
     const store = open();
     const first = beginUpdate({ id: "upd-1", target: parseVersion("0.2.0")!, machine: MACHINE });
     const second = beginUpdate({ id: "upd-2", target: parseVersion("0.3.0")!, machine: MACHINE });
-    store.saveUpdate({ ...first, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [], judgeBaseline: null, backupOf: null });
-    store.saveUpdate({ ...second, format: RECORD_FORMAT, startedAt: 5_000, doneMarks: [], judgeBaseline: null, backupOf: null });
+    store.saveUpdate({ ...first, format: RECORD_FORMAT, startedAt: 1_000, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null });
+    store.saveUpdate({ ...second, format: RECORD_FORMAT, startedAt: 5_000, doneMarks: [], judgeBaseline: null, backupOf: null, attempt: null });
     expect(store.openUpdate()!.id).toBe("upd-2");
     store.finishUpdate("upd-2", "abandoned", 6_000);
     expect(store.openUpdate()!.id).toBe("upd-1");     // the older attempt is still live
@@ -306,7 +306,7 @@ describe("the step record (RL4, §6.2)", () => {
     const after: Installation = { ...MACHINE, current: parseVersion("0.2.0")!, previous: parseVersion("0.1.0")! };
     const begun = beginRollback({ id: "rb-1", machine: after });
     expect(begun.ok).toBe(true);
-    if (begun.ok) store.saveUpdate({ ...begun.value, format: RECORD_FORMAT, startedAt: 9_000, doneMarks: ["rolling_back"], judgeBaseline: null, backupOf: null });
+    if (begun.ok) store.saveUpdate({ ...begun.value, format: RECORD_FORMAT, startedAt: 9_000, doneMarks: ["rolling_back"], judgeBaseline: null, backupOf: null, attempt: null });
     const live = store.openUpdate()!;
     expect(live).toMatchObject({ id: "rb-1", kind: "rollback", state: "rolling_back", mark: "rolling_back" });
     expect(live.target).toEqual(parseVersion("0.1.0"));
