@@ -23,8 +23,8 @@ same machine as the hub.
    that changed what is shown.
 3. **The label rule.** `accountLabel` joins the name and the parts that exist, in order email, organization word
    (`Team`, `personal`), plan: "a3 · ada@example.test · Team · Max 5x". A missing part is not shown; no profile is
-   the name alone. The two named tiers map to "Max 5x" and "Max 20x"; any other tier, the free one, an empty or an unknown one, reads "no paid plan" (the `plan` field still says
-   "max" of an ended subscription), except a Max tier the table doesn't know, which shows the plan as written.
+   the name alone. The two named tiers map to "Max 5x" and "Max 20x"; the free tier (`default_claude_ai`) and an empty tier read "no paid plan" (the `plan` field still says "max" of an
+   ended subscription); any other tier, a seat the table doesn't know, shows the plan as written.
    Retired and logged-out accounts keep their label: it exists to say which account is which, whatever its state.
 4. **A guarded read.** The hub looks at the file once at start and then every minute, asynchronously, so nothing in
    the file can hold up the event loop. It opens the file without waiting for a writer (`O_NONBLOCK`; a named pipe
