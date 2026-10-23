@@ -19,6 +19,9 @@ export type Config = {
   quietAfterMs: number;
   managerWindow: string;           // the window name of the manager's pane
   ledgerPath: string | null;       // the manager's needs-you list (JSON), read-only; null = no list
+  // MORNDO_POOL_USAGE: the pool's usage file (JSON Lines), read-only, the one source of an account's label parts
+  // (ADR-0034); unset or empty: none, every account shows its name alone.
+  poolUsageFile?: string | null;
   paneLock: string | null;         // a lock file the box's other typists into the manager's pane take (flock); null = none
   vnc: { host: string; port: number; passwordFile: string } | null;   // the office's desktop (VNC); null = no Desktop tab
   enginesBin?: string | null;      // the engine layer's CLI (engine-layer bin/engines, ADR-0013); null = no Engines page
@@ -112,6 +115,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     quietAfterMs: Number(env.MORNDO_QUIET_AFTER_MS ?? 15_000),
     managerWindow: env.MORNDO_MANAGER_WINDOW || "manager",
     ledgerPath: env.MORNDO_LEDGER || null,
+    poolUsageFile: env.MORNDO_POOL_USAGE || null,
     paneLock: env.MORNDO_PANE_LOCK || null,
     vnc: vncTarget(env),
     // The engine layer's CLI, by path (it isn't on the box's PATH): its own ENGINES_CONFIG and ENGINES_STATE pass through.

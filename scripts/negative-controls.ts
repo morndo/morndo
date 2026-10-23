@@ -3065,6 +3065,14 @@ export const CONTROLS: Control[] = [
     find: "env: childEnv(this.#parent, loginEnv(\"codex\", runHome)),",
     replace: "env: { ...this.#parent, ...loginEnv(\"codex\", runHome) },",
     run: ["apps/connections/test/pool-cli.test.ts"], expect: "KEY" },
+  // ---- Account labels (ADR-0034; U5): the org word and the agent door's reply, each guard removed once.
+  { id: "al-org-personal", task: "T-399", file: "apps/hub/src/adapters/pool-accounts.ts",
+    find: "v === \"claude_team\" ? \"team\" : \"personal\"", replace: "\"team\"",
+    run: ["apps/hub/test/pool-accounts.test.ts"], expect: "maps the org and tier words" },
+  { id: "al-agent-reply-no-profile", task: "T-399", file: "apps/hub/src/application/usage-service.ts",
+    find: "return { ok: true, account: accountNow(next, now) };",
+    replace: "return { ok: true, account: { ...accountNow(next, now), profile: this.#profiles().get(account) ?? null } };",
+    run: ["apps/hub/test/usage.test.ts"], expect: "the agent door's reply carries none" },
   // ---- Memory, the node's memory.sync (ADR-0031; docs/design/memory/README.md): each guard removed once.
   { id: "m-node-marker", task: "M-node", file: "apps/node-agent/src/ops/memory-ops.ts",
     find: "if (!look(folder)?.isDirectory() || !ours(folder)) continue;", replace: "if (!look(folder)?.isDirectory()) continue;",

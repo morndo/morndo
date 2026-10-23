@@ -7,14 +7,14 @@
   import Hash from "@lucide/svelte/icons/hash";
   import Star from "@lucide/svelte/icons/star";
   import Terminal from "@lucide/svelte/icons/terminal";
-  import type { RosterEntry } from "@morndo/domain";
+  import { accountLabel, type AccountUsage, type RosterEntry } from "@morndo/domain";
   import type { SessionInfo } from "../feed.svelte.ts";
   import type { ConversationPrefs } from "./present.ts";
   import Avatar from "./Avatar.svelte";
   import SlackModal from "./SlackModal.svelte";
 
-  let { worker, displayName, session, prefs, tab: initialTab = "about", onPrefs, onScreen, onClose }: {
-    worker: RosterEntry; displayName: string; session: SessionInfo | undefined; prefs: ConversationPrefs;
+  let { worker, displayName, session, account, prefs, tab: initialTab = "about", onPrefs, onScreen, onClose }: {
+    worker: RosterEntry; displayName: string; session: SessionInfo | undefined; account: AccountUsage | null; prefs: ConversationPrefs;
     tab?: "about" | "settings"; onPrefs: (p: Partial<ConversationPrefs>) => void; onScreen: () => void; onClose: () => void;
   } = $props();
 
@@ -61,6 +61,7 @@
       <div class="field"><strong>State</strong><p>{stateText}</p></div>
       <div class="field"><strong>Folder</strong><p class="mono">{session?.cwd || worker.location}</p></div>
       <div class="field"><strong>Session</strong><p class:ph={!session}>{session ? `${session.name ?? "unnamed"} · agent CLI ${session.version ?? "?"}` : "No agent session found in this pane"}</p></div>
+      {#if account !== null}<div class="field"><strong>Account</strong><p>{accountLabel(account)}</p></div>{/if}
       <div class="field"><strong>Terminal</strong><p>tmux window <span class="mono">{worker.name}</span></p></div>
     </div>
     <p class="foot">Pane ID: {worker.id} <button class="copy" onclick={copyId} aria-label="Copy pane ID">{#if copied}<Check size={14} />{:else}<Copy size={14} />{/if}</button></p>

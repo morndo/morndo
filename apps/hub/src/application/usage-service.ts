@@ -1,7 +1,7 @@
 // Application service for the Usage context (ADR-0016): the status-line reports the agents' sessions post, kept per
 // account (U1 to U3), the latest state of every account on disk, and the whole pushed to every live feed when a report
 // changed what is shown. Usage decides nothing (U4): nothing here touches an Escalation, the engines or a Mandate.
-import { ACCOUNT_NAME, DEFAULT_ACCOUNT, accountNow, applyReport, takeNamed, type AccountUsage, type BoardActor, type NamedWindow, type UsageReport } from "@morndo/domain";
+import { ACCOUNT_NAME, DEFAULT_ACCOUNT, accountNow, applyReport, takeNamed, type AccountProfile, type AccountUsage, type BoardActor, type NamedWindow, type UsageReport } from "@morndo/domain";
 import type { UsageReportBody } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 
@@ -45,6 +45,7 @@ function namedLimits(raw: UsageReportBody["limits"]): NamedWindow[] | null {
   return takeNamed(rows);
 }
 const num = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+const EMPTY_PROFILES: ReadonlyMap<string, AccountProfile> = new Map();
 
 export class UsageService {
   #store: Store;
@@ -52,18 +53,28 @@ export class UsageService {
   #accounts = new Map<string, AccountUsage>();
   #listeners = new Set<(v: UsageView) => void>();
   #lastTold = "";
+  #profiles: () => ReadonlyMap<string, AccountProfile>;
 
-  constructor(p: { store: Store; now?: () => number }) {
+  constructor(p: { store: Store; now?: () => number; profiles?: () => ReadonlyMap<string, AccountProfile> }) {
     this.#store = p.store;
     this.#now = p.now ?? Date.now;
+    this.#profiles = p.profiles ?? (() => EMPTY_PROFILES);
     for (const a of this.#store.usageAccounts()) this.#accounts.set(a.account, a);
   }
 
   subscribe(fn: (v: UsageView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
 
+  // The label parts (U5) are overlaid here, on what the principal sees, and nowhere else: a stored account never
+  // carries them, and the agent door's reply (report, below) never does.
   view(): UsageView {
     const now = this.#now();
-    return { accounts: [...this.#accounts.values()].map(a => accountNow(a, now)).sort((a, b) => a.account.localeCompare(b.account)), at: now };
+    const profiles = this.#profiles();
+    return {
+      accounts: [...this.#accounts.values()]
+        .map(a => ({ ...accountNow(a, now), profile: profiles.get(a.account) ?? a.profile ?? null }))
+        .sort((a, b) => a.account.localeCompare(b.account)),
+      at: now,
+    };
   }
 
   // A report from a session: its account from the call's header (none: the default account). Told to the feeds only
@@ -75,8 +86,15 @@ export class UsageService {
     const next = applyReport(this.#accounts.get(account) ?? null, reportFrom(body, account, actor, now), now);
     this.#accounts.set(account, next);
     this.#store.saveUsageAccount(next);
+    this.#tellIfChanged();
+    return { ok: true, account: accountNow(next, now) };
+  }
+
+  // The pool's file can change with no report in sight (every lane quiet): what it changed is told the same way.
+  refreshProfiles() { this.#tellIfChanged(); }
+
+  #tellIfChanged() {
     const shown = JSON.stringify(this.view().accounts.map(a => ({ ...a, reportedAt: 0, sessions: a.sessions.map(s => ({ ...s, at: 0 })) })));
     if (shown !== this.#lastTold) { this.#lastTold = shown; const v = this.view(); for (const l of this.#listeners) l(v); }
-    return { ok: true, account: accountNow(next, now) };
   }
 }

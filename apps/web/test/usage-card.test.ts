@@ -64,7 +64,6 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
 let web: Web;
 beforeAll(async () => { web = await startWeb(PAGE); }, 60_000);
 afterAll(async () => { await web?.close(); });
-
 describe("Home usage card", () => {
   it("shows Cursor's own bars and leaves a status-line account on the 5-hour and weekly windows", async () => {
     const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -105,6 +104,64 @@ describe("Home usage card", () => {
     expect(zai).toContain("Weekly window");
     expect(zai).toContain("#worker-01");
     expect(errors).toEqual([]);
+    await tab.close();
+  });
+});
+
+const LABELS_PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+  import { mount } from "svelte";
+  import Home from "/src/lib/desktop/HomeView.svelte";
+  const NOW = ${NOW};
+  const HOUR = ${HOUR};
+  const acc = (account, five, profile) => ({
+    account, reportedAt: NOW - 60_000,
+    fiveHour: { usedPercentage: five, resetsAt: NOW + 2 * HOUR }, sevenDay: null, spend: null,
+    sessions: [{ sessionId: account + "-s", lane: "builder", model: "Opus", contextUsed: null, at: NOW }],
+    limits: null, onDemand: null, profile,
+  });
+  mount(Home, { target: document.body, props: { accounts: [
+    acc("a3", 44, { email: "ada@example.test", org: "team", plan: "Max 5x" }),
+    acc("b2", 12, { email: "lin@example.test", org: "personal", plan: "Max 20x" }),
+    acc("c4", 5, { email: null, org: null, plan: "pro" }),
+    acc("d5", 3, null),
+  ], at: NOW, now: NOW, live: true, onOpenLane: () => {} } });
+</script></body></html>`;
+
+describe("Home usage card: the account's label (ADR-0034)", () => {
+  let web: Web;
+  beforeAll(async () => { web = await startWeb(LABELS_PAGE); }, 60_000);
+  afterAll(async () => { await web?.close(); });
+
+  it("shows the email, organization and plan beside the name, on the card and in the tile; a missing part is not shown", async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors: string[] = [];
+    tab.on("pageerror", e => errors.push(e.message.split("\n")[0] ?? ""));
+    await tab.goto(web.url);
+    const norm = (s: string) => s.replace(/\s+/g, " ");                     // the ident is its own line in innerText
+    const a3 = tab.locator("[data-account='a3']");
+    await a3.waitFor();
+    const header = norm(await a3.locator("header").innerText());
+    expect(header).toContain("a3");
+    expect(header).toContain("ada@example.test");
+    expect(header).toContain("Team");
+    expect(header).toContain("Max 5x");
+    expect(await a3.getAttribute("aria-label")).toBe("Account a3 · ada@example.test · Team · Max 5x");
+    const fiveTile = tab.locator(".tile", { hasText: "Tightest 5-hour window" });
+    expect(norm(await fiveTile.innerText())).toContain("a3 · ada@example.test · Team · Max 5x");   // the tightest account, named by its label
+    expect(norm(await tab.locator("[data-account='b2']").innerText())).toContain("lin@example.test · personal · Max 20x");
+    expect(norm(await tab.locator("[data-account='c4']").innerText())).toContain("c4 · pro");
+    const bare = await tab.locator("[data-account='d5']").locator("header").innerText();
+    expect(bare).toContain("d5");
+    expect(bare).not.toContain("·");                                                        // no profile: the name alone
+    expect(errors).toEqual([]);
+    await tab.close();
+  });
+
+  it("a long email wraps on a phone: no horizontal scroll at 390 px", async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 390, height: 844 } });
+    await tab.goto(web.url);
+    await tab.locator("[data-account='a3']").waitFor();
+    expect(await tab.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await tab.close();
   });
 });

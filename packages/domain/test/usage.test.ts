@@ -1,7 +1,7 @@
 // Usage (ADR-0016; U1–U4 in docs/domain.md): the newest report sets an account's windows, a missing window is kept
 // until its reset passes, sessions count while fresh, and the headline picks the account nearest its limit.
 import { describe, expect, it } from "vitest";
-import { SESSION_FRESH_MS, accountNow, applyReport, pruneSessions, tightest, usageLevel, type UsageReport } from "../src/index.ts";
+import { SESSION_FRESH_MS, accountLabel, accountNow, applyReport, cleanProfile, pruneSessions, tightest, usageLevel, type AccountProfile, type AccountUsage, type UsageReport } from "../src/index.ts";
 
 const NOW = 1_700_000_000_000;
 const HOUR = 3_600_000;
@@ -142,5 +142,33 @@ describe("named windows with no reset time (review of the Codex runtime, point 2
   it("a named window that does name its reset stays until that reset, however long", () => {
     const a = applyReport(null, report({ fiveHour: null, sevenDay: null, limits: [{ label: "Weekly", usedPercentage: 50, resetsAt: NOW + 6 * 24 * HOUR, resetsOn: null }] }), NOW);
     expect(accountNow(a, NOW + 5 * 24 * HOUR).limits).not.toBeNull();
+  });
+});
+
+describe("an account's profile (U5)", () => {
+  const team: AccountProfile = { email: "ada@example.test", org: "team", plan: "Max 5x" };
+
+  it("the label is the name, then email, organization and plan; a missing part is skipped; no profile is the name alone", () => {
+    expect(accountLabel({ account: "a3", profile: team })).toBe("a3 · ada@example.test · Team · Max 5x");
+    expect(accountLabel({ account: "a3", profile: { ...team, email: null } })).toBe("a3 · Team · Max 5x");
+    expect(accountLabel({ account: "a3", profile: { ...team, org: null } })).toBe("a3 · ada@example.test · Max 5x");
+    expect(accountLabel({ account: "a3", profile: { ...team, plan: null } })).toBe("a3 · ada@example.test · Team");
+    expect(accountLabel({ account: "a3", profile: null })).toBe("a3");
+  });
+
+  it("a report never sets a profile and never clears one; a row stored without the field reads back as null", () => {
+    expect(applyReport(null, report(), NOW).profile).toBeNull();
+    const current: AccountUsage = { account: "max-1", reportedAt: NOW - 1000, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: team, sessions: [] };
+    expect(applyReport(current, report({ sessionId: "s2", at: NOW }), NOW).profile).toEqual(team);
+    const stored: Omit<AccountUsage, "profile"> = { account: "max-1", reportedAt: NOW, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, sessions: [] };
+    expect(accountNow(stored as AccountUsage, NOW).profile).toBeNull();
+  });
+
+  it("cleanProfile trims and caps its texts, drops an email without an '@', and an empty profile is none", () => {
+    expect(cleanProfile({ email: " ada@example.test ", org: "team", plan: " pro " })).toEqual({ email: "ada@example.test", org: "team", plan: "pro" });
+    expect(cleanProfile({ plan: "p".repeat(100) })).toEqual({ email: null, org: null, plan: "p".repeat(80) });
+    expect(cleanProfile({ email: "ada at example.test", plan: "pro" })).toEqual({ email: null, org: null, plan: "pro" });
+    expect(cleanProfile({ org: "family" })).toBeNull();
+    expect(cleanProfile({})).toBeNull();
   });
 });

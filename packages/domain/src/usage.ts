@@ -17,10 +17,14 @@ export type UsageReport = {
   fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; spend: SpendWindow | null; contextUsed: number | null;
   limits: NamedWindow[] | null; onDemand: string | null;
 };
+// U5: what names an account besides its name, for the label. Only the hub sets it, from the pool's usage file; a
+// Report never does, and no part of it reaches the agent door's reply.
+export type AccountProfile = { email: string | null; org: "team" | "personal" | null; plan: string | null };
 export type AccountUsage = {
   account: string; reportedAt: number;
   fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; spend: SpendWindow | null;
   limits: NamedWindow[] | null; onDemand: string | null;
+  profile: AccountProfile | null;
   sessions: SessionUsage[];
 };
 
@@ -113,7 +117,7 @@ const showsNamed = (a: AccountUsage): boolean => (a.limits?.length ?? 0) > 0;
 export function applyReport(current: AccountUsage | null, r: UsageReport, now: number): AccountUsage {
   const base: AccountUsage = current
     ? { ...current, limits: current.limits ?? null, onDemand: current.onDemand ?? null }
-    : { account: r.account, reportedAt: 0, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, sessions: [] };
+    : { account: r.account, reportedAt: 0, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: null, sessions: [] };
   const newer = r.at >= base.reportedAt;
   const session: SessionUsage = { sessionId: r.sessionId, lane: r.lane, model: r.model, contextUsed: r.contextUsed === null ? null : clampPct(r.contextUsed), at: r.at };
   const had = base.sessions.find(s => s.sessionId === r.sessionId);
@@ -130,6 +134,7 @@ export function applyReport(current: AccountUsage | null, r: UsageReport, now: n
     spend: r.spend ? { ...r.spend, usedPercentage: clampPct(r.spend.usedPercentage) } : keep(base.spend, now),
     limits,
     onDemand: namedNow ? demandOf(r.onDemand) : (limits === null ? null : base.onDemand),
+    profile: base.profile ?? null,
     sessions: pruneSessions(sessions, now),
   };
 }
@@ -139,12 +144,38 @@ export const pruneSessions = (sessions: readonly SessionUsage[], now: number): S
   sessions.filter(s => now - s.at < SESSION_FRESH_MS).sort((a, b) => b.at - a.at);
 
 // What the dashboard shows of an account now: its windows as kept, with past resets dropped, and only fresh sessions.
+// A row stored before profiles existed has no `profile`; it reads back as null.
 export function accountNow(a: AccountUsage, now: number): AccountUsage {
   const limits = keepNamed(a.limits, now, a.reportedAt);
   return {
     ...a, fiveHour: keep(a.fiveHour, now), sevenDay: keep(a.sevenDay, now), spend: keep(a.spend, now),
-    limits, onDemand: limits === null ? null : (a.onDemand ?? null), sessions: pruneSessions(a.sessions, now),
+    limits, onDemand: limits === null ? null : (a.onDemand ?? null), profile: a.profile ?? null, sessions: pruneSessions(a.sessions, now),
   };
+}
+
+// U5: how an organization is said, and the whole label: "a3 · ada@example.test · Team · Max 5x". A part that is
+// missing is not shown; no profile is the name alone.
+export const ORG_WORDS = { team: "Team", personal: "personal" } as const;
+export function accountLabel(a: { account: string; profile?: AccountProfile | null }): string {
+  const p = a.profile ?? null;
+  const parts = p ? [p.email, p.org ? ORG_WORDS[p.org] : null, p.plan] : [];
+  const shown = parts.filter(v => v);
+  return shown.length ? [a.account, ...shown].join(" · ") : a.account;
+}
+
+// What may be read into a profile: text is trimmed and capped, an email without an "@" is nothing, the org is one of
+// the two words, and a profile with nothing in it is no profile.
+export function cleanProfile(p: { email?: unknown; org?: unknown; plan?: unknown }): AccountProfile | null {
+  const text = (v: unknown): string | null => {
+    if (typeof v !== "string") return null;
+    const t = v.trim().slice(0, TEXT_LIMIT);
+    return t === "" ? null : t;
+  };
+  const email = text(p.email);
+  const org: "team" | "personal" | null = p.org === "team" ? "team" : p.org === "personal" ? "personal" : null;
+  const plan = text(p.plan);
+  const profile = { email: email !== null && email.includes("@") ? email : null, org, plan };
+  return profile.email || profile.org || profile.plan ? profile : null;
 }
 
 // The notice's level: named windows count, and a hidden 5-hour or weekly row does not.
