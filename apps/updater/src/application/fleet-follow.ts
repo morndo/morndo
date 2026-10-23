@@ -6,7 +6,7 @@
 // reads it itself — so this file asks the fleet nothing on the control plane's behalf, and the skew gate asks it
 // only for its node list.
 import {
-  NODE_JITTER_MAX_MS, beginRollout, formatVersion, haltRollout, nodeMayApply, parseVersion, skew,
+  NODE_JITTER_MAX_MS, beginRollout, formatVersion, nodeMayApply, parseVersion, skew,
   type ProtocolRange, type Version,
 } from "@morndo/domain";
 import type { FleetNode, FleetView, FleetWord, UpdateStore } from "./ports.ts";
@@ -74,6 +74,9 @@ export function nodeGate(p: {
     }
     return err({ reason: "not_committed" });
   }
+  // RL12 before the offer: the fleet offers a halted Version to no node, and the reason is the halt, not a Rollout
+  // never committed (6d's two-machine run showed "not committed" for a halted one).
+  if (wire.halted) return err({ reason: "halted" });
   // The offer (§5.4): the Rollout may be committed to this Version and still offered to this node nothing — an
   // offer of another Version is no offer of this one either.
   const offer = p.word.offer;
@@ -86,13 +89,12 @@ export function nodeGate(p: {
       + Math.floor(p.random() * NODE_JITTER_MAX_MS);
     p.store.recordJitter(targetText, jitterUntil);
   }
-  let rollout = beginRollout({
+  const rollout = beginRollout({
     version: p.target,
     controlPlaneCommittedAt: wire.controlPlaneCommittedAt,
     soakMinutes: wire.soakMinutes,
     ...(jitterUntil === null ? {} : { nodes: { [p.node]: { jitterUntil } } }),
   });
-  if (wire.halted) rollout = haltRollout(rollout, wire.haltedBy ?? p.node);
   const may = nodeMayApply({ rollout, node: p.node, controlPlane, now: p.now });
   if (!may.ok) return err({ reason: may.error });
   return { ok: true, attempt: offer.attempt };
