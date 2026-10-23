@@ -2,9 +2,11 @@
 // release PR failed `traces` with "names an assistant or a bot other than dependabot[bot]"). The author name and address
 // are only git metadata, so any pusher can write them: the identity alone admits nothing. A commit is admitted only when
 // ALL of these hold: its author is exactly the App's name with its address; its committer is GitHub's web-flow; GitHub's
-// own API reported it verified (CI hands the script the list of such ids in COMMIT_TRACES_VERIFIED; a script run without it,
-// like a local pre-push, admits no bot); and it changes nothing but release files (version fields of package.json and
-// lockfiles, the release manifest's versions, lines added to CHANGELOG.md). Real commits in a throwaway repo, the real script;
+// own API reported it verified, by web-flow, AND as a commit of a pull request that the App itself opened on a
+// release-please branch (release-commits-verified asks the API; CI hands the script the ids in COMMIT_TRACES_VERIFIED; a
+// script run without it, like a local pre-push, admits no bot); and it changes nothing but release files: the root
+// version of package.json and package-lock.json files (any other byte of them unchanged, so no dependency moves), the
+// root entry of the release manifest, lines added to CHANGELOG.md. Real commits in a throwaway repo, the real script;
 // made-up identities except the App's own, which is public.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -21,7 +23,7 @@ type Who = { name: string; mail: string };
 type Files = Record<string, string>;
 
 const PKG = (v: string) => `{\n  "name": "morndo",\n  "version": "${v}",\n  "private": true,\n  "scripts": { "test": "vitest run" }\n}\n`;
-const LOCK = (v: string) => `{\n  "name": "morndo",\n  "version": "${v}",\n  "packages": {\n    "": {\n      "name": "morndo",\n      "version": "${v}"\n    }\n  }\n}\n`;
+const LOCK = (v: string, dep = "1.3.0") => `{\n  "name": "morndo",\n  "version": "${v}",\n  "packages": {\n    "": {\n      "name": "morndo",\n      "version": "${v}"\n    },\n    "node_modules/left-pad": {\n      "version": "${dep}"\n    }\n  }\n}\n`;
 const MANIFEST = (v: string) => `{\n  ".": "${v}"\n}\n`;
 const CHANGELOG = (more = "") => `# Changelog\n${more}`;
 // What Release Please's release commit changes: exactly these four files.
@@ -132,6 +134,17 @@ describe("a forged identity is not admitted", () => {
     refused(BOT, WEB, { files: { "package-lock.json": LOCK("0.1.0").replace('"packages"', '"packagez"') } });
     refused(BOT, WEB, { files: { ".release-please-manifest.json": '{\n  ".": "0.1.0",\n  "apps/x": "9.9.9"\n}\n' } });
     refused(BOT, WEB, { files: { "package.json": PKG("not a version, run this") } });
+    refused(BOT, WEB, { files: { "package-lock.json": LOCK("not a version, run this") } });
+    refused(BOT, WEB, { files: { ".release-please-manifest.json": MANIFEST("not a version, run this") } });
+  });
+
+  it("package-lock.json: only the root package's version lines may move, a dependency's version never", () => {
+    expect(passes(BOT, WEB, { files: { "package-lock.json": LOCK("0.1.0") } })).toEqual([0, 0, ""]);
+    refused(BOT, WEB, { files: { "package-lock.json": LOCK("0.1.0", "2.0.0") } });                     // the root moved, and so did a dependency
+    refused(BOT, WEB, { files: { "package-lock.json": LOCK("0.0.0", "2.0.0") } });                     // only a dependency moved
+    refused(BOT, WEB, { files: { "package-lock.json": LOCK("0.1.0").replace('"node_modules/left-pad"', '"node_modules/right-pad"') } });
+    refused(BOT, WEB, { files: { "package-lock.json": LOCK("0.1.0").replace('"name": "morndo",\n  "version"', '"name": "other",\n  "version"') } });
+    refused(BOT, WEB, { files: { "package-lock.json": LOCK("0.1.0").replace('"version": "0.1.0"\n    },', '"version": "0.2.0"\n    },') } });   // the two root version lines must agree
   });
 
   it("refuses a CHANGELOG that loses lines, and accepts one that only gains them", () => {
@@ -233,21 +246,102 @@ describe("a forged identity is not admitted", () => {
   });
 });
 
-describe("the traces workflow asks GitHub which release commits it verified", () => {
-  const workflow = readFileSync(join(import.meta.dirname, "..", "..", ".github", "workflows", "commit-traces.yml"), "utf8");
+// release-commits-verified: which commits of a range GitHub vouches for as the release App's. It asks the commit API
+// (verified, by web-flow) and the pull requests of the commit (one the App itself opened, on a release-please branch of
+// this repository), only for commits whose author looks like the App. A fake `gh` answers from canned JSON, so the
+// script's own jq conditions run for real.
+describe("release-commits-verified", () => {
+  const LISTER = join(import.meta.dirname, "release-commits-verified");
+  const REPO = "morndo/morndo";
+  const GOOD_COMMIT = { commit: { verification: { verified: true, reason: "valid" } }, committer: { login: "web-flow" } };
+  const GOOD_PR = { number: 99, user: { login: "morndo-release[bot]", type: "Bot" }, head: { ref: "release-please--branches--main--components--morndo", repo: { full_name: REPO } } };
+  let bin: string;
+  beforeEach(() => {
+    bin = mkdtempSync(join(tmpdir(), "fakegh-"));
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_GH_LOG"\ncase "$2" in\n  */pulls) [ -f "$FAKE_GH_PULLS" ] && cat "$FAKE_GH_PULLS" || exit 1 ;;\n  *) [ -f "$FAKE_GH_COMMIT" ] && cat "$FAKE_GH_COMMIT" || exit 1 ;;\nesac\n`, { mode: 0o755 });
+  });
+  afterEach(() => { rmSync(bin, { recursive: true, force: true }); });
 
-  it("builds the list of verified ids from the commit API and hands it to the script, in both events", () => {
-    expect(workflow).toContain("COMMIT_TRACES_VERIFIED");
-    expect(workflow).toContain("repos/$REPO/commits/$sha");
-    expect(workflow).toContain(".commit.verification.verified");
-    expect(workflow).toContain('.committer.login == "web-flow"');
-    expect(workflow).toContain("GH_TOKEN: ${{ github.token }}");
-    expect(workflow).toMatch(/permissions:\n  contents: read\n/);
-    // one place builds the range, so the list and the check can not disagree about it
-    expect(workflow.match(/commit-traces range/g)).toHaveLength(1);
+  // The range holds one commit by the App's identity and one by Ada; the API is told `commit` and `pulls` (undefined: the call fails).
+  function list(commit: unknown, pulls: unknown, who: Who = BOT) {
+    const base = git(["rev-parse", "HEAD"]);
+    const mine = commit_(ADA, WEB, "fix: other", { "src/a.ts": "export const a = 5;\n" });
+    const app = commit_(who, WEB, "chore(main): release 0.1.0", RELEASE);
+    const files = { c: join(bin, "commit.json"), p: join(bin, "pulls.json"), log: join(bin, "calls.log") };
+    rmSync(files.c, { force: true });                      // a call that "fails" has no canned answer; none is left from the last list()
+    rmSync(files.p, { force: true });
+    writeFileSync(files.log, "");
+    if (commit !== undefined) writeFileSync(files.c, JSON.stringify(commit));
+    if (pulls !== undefined) writeFileSync(files.p, JSON.stringify(pulls));
+    const r = spawnSync("sh", [LISTER, `${base}..HEAD`], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, REPO, FAKE_GH_COMMIT: files.c, FAKE_GH_PULLS: files.p, FAKE_GH_LOG: files.log } });
+    return { listed: r.stdout.split("\n").filter(Boolean), app, mine, status: r.status, calls: readFileSync(files.log, "utf8").split("\n").filter(Boolean) };
+  }
+  function commit_(author: Who, committer: Who, message: string, files: Files) { write(files); return commit(author, committer, message); }
+
+  it("lists the App's commit when the API says verified by web-flow and a pull request of the App's on a release-please branch holds it", () => {
+    const r = list(GOOD_COMMIT, [GOOD_PR]);
+    expect(r.listed).toEqual([r.app]);
+    expect(r.status).toBe(0);
   });
 
-  it("only asks about commits of the App's identity, never about every commit", () => {
-    expect(workflow).toContain("morndo-release");
+  it("asks the API only about commits whose author looks like the App, twice each, for this repository", () => {
+    const r = list(GOOD_COMMIT, [GOOD_PR]);
+    expect(r.calls).toEqual([`api repos/${REPO}/commits/${r.app}`, `api repos/${REPO}/commits/${r.app}/pulls`]);
+  });
+
+  it("lists nothing for a commit GitHub does not call verified, or signed by anyone but web-flow", () => {
+    expect(list({ commit: { verification: { verified: false, reason: "unsigned" } }, committer: { login: "web-flow" } }, [GOOD_PR]).listed).toEqual([]);
+    expect(list({ commit: { verification: { verified: true } }, committer: { login: "jacksnxly" } }, [GOOD_PR]).listed).toEqual([]);
+    expect(list({ commit: { verification: { verified: "true" } }, committer: { login: "web-flow" } }, [GOOD_PR]).listed).toEqual([]);
+    expect(list({ commit: {}, committer: { login: "web-flow" } }, [GOOD_PR]).listed).toEqual([]);
+    expect(list({ message: "No commit found for SHA", status: "422" }, [GOOD_PR]).listed).toEqual([]);
+  });
+
+  it("lists nothing when the commit is in no pull request, or none of them is the App's", () => {
+    expect(list(GOOD_COMMIT, []).listed).toEqual([]);
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "jacksnxly", type: "User" } }]).listed).toEqual([]);                    // a lane's own PR on a release-please branch
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "morndo-release[bot]", type: "User" } }]).listed).toEqual([]);          // the name without being a Bot
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "dependabot[bot]", type: "Bot" } }]).listed).toEqual([]);              // another bot
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "x-morndo-release[bot]", type: "Bot" } }]).listed).toEqual([]);
+  });
+
+  it("lists nothing when the App's pull request is not on a release-please branch of this repository", () => {
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, head: { ref: "feat/anything", repo: { full_name: REPO } } }]).listed).toEqual([]);
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, head: { ref: "not-release-please--x", repo: { full_name: REPO } } }]).listed).toEqual([]);
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, head: { ref: GOOD_PR.head.ref, repo: { full_name: "someone/morndo" } } }]).listed).toEqual([]);   // a fork
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, head: { ref: GOOD_PR.head.ref, repo: null } }]).listed).toEqual([]);                         // a deleted fork
+  });
+
+  it("lists the commit when any one of several pull requests is the App's", () => {
+    const lane = { ...GOOD_PR, number: 7, user: { login: "jacksnxly", type: "User" } };
+    expect(list(GOOD_COMMIT, [lane, GOOD_PR]).listed).toHaveLength(1);
+  });
+
+  it("lists nothing when an API call fails, and never lists a commit of another author", () => {
+    expect(list(undefined, [GOOD_PR]).listed).toEqual([]);
+    expect(list(GOOD_COMMIT, undefined).listed).toEqual([]);
+    const r = list(GOOD_COMMIT, [GOOD_PR], ADA);
+    expect(r.listed).toEqual([]);
+    expect(r.calls).toEqual([]);
+  });
+
+  it("needs REPO", () => {
+    const r = spawnSync("sh", [LISTER, "HEAD"], { cwd: repo, encoding: "utf8", env: { ...process.env, REPO: "" } });
+    expect(r.status).not.toBe(0);
+  });
+});
+
+describe("the traces workflow hands the script the list release-commits-verified makes", () => {
+  const workflow = readFileSync(join(import.meta.dirname, "..", "..", ".github", "workflows", "commit-traces.yml"), "utf8");
+
+  it("builds the list with that script over the range, gives the token and repository, and passes the file in both events", () => {
+    expect(workflow).toContain("scripts/git-hooks/release-commits-verified");
+    expect(workflow).toContain("COMMIT_TRACES_VERIFIED");
+    expect(workflow).toContain("GH_TOKEN: ${{ github.token }}");
+    expect(workflow).toContain("REPO: ${{ github.repository }}");
+    expect(workflow).toMatch(/permissions:\n  contents: read\n  pull-requests: read\n/);
+    // one place builds the range, so the list and the check can not disagree about it
+    expect(workflow.match(/commit-traces range/g)).toHaveLength(1);
+    expect(workflow.match(/release-commits-verified/g)).toHaveLength(2);   // the comment and the call
   });
 });
