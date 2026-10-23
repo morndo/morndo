@@ -16,6 +16,11 @@ The root key signs only through the owner's password manager SSH agent. `keys.js
 signature over the current `keys.json`. Any edit to `keys.json` (its `expiresAt` included) makes it invalid, so
 it must be redone after every change.
 
+The release workflow pins the root public key and `KEY_SET_MIN_VERSION` (`release.yml`, top-level `env`), and
+`scripts/release/check-key-set.sh` refuses a set that is signed but older than that version or past its `expiresAt`. A
+new `keys.json` version (a rotation) raises `KEY_SET_MIN_VERSION` to the same number in the same change; a test fails
+if the two differ.
+
 On the machine with the agent (point `SSH_AUTH_SOCK` at the agent's socket if it is not the default), from the
 repository root:
 

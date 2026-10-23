@@ -250,6 +250,7 @@ switch (cmd) {
       },
       ledger: config.ledgerPath ? ledgerReader(config.ledgerPath) : null,
       store, managerName: config.managerWindow, send: (pane, text, key) => typist.send(pane, text, key), policy: () => access.policy(),
+      workerGraceMs: config.workerAskGraceMs,
       // An answer in doubt is settled as a send is, with its node (op.status; final review C1).
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
       queue,

@@ -38,7 +38,9 @@ const port = await freePort();
 const office = buildOffice({ home: HOME, socket: SOCKET, vncPort: await freePort() });
 const { panes, ledger, writeLedger, line: L, claudeDir: CLAUDE, env: officeEnv } = office;
 
-const env = { ...process.env, ...officeEnv(port) };
+// MORNDO_WORKER_ASK_GRACE_MS=0: this file checks the reviewer's question as a decision; N2's 10-minute grace would
+// hold a freshly asked one (as harness.ts does for every startOffice office).
+const env = { ...process.env, ...officeEnv(port), MORNDO_WORKER_ASK_GRACE_MS: "0" };
 const hubMain = join(ROOT, "apps/hub/src/main.ts");
 let hub: ChildProcess | null = spawn(process.execPath, [hubMain, "serve"], { env, stdio: ["ignore", "pipe", "inherit"] });
 await new Promise<void>((res, rej) => { hub?.stdout?.on("data", d => { if (String(d).includes("morndo hub on")) res(); }); hub?.once("exit", c => rej(new Error(`hub exited ${c}`))); });

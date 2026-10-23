@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { endpointId, sessionId, type Message } from "@morndo/domain";
+import { WORKER_ASK_GRACE_MS, endpointId, sessionId, type Message } from "@morndo/domain";
 import { Store } from "../src/adapters/store.ts";
 import { ledgerReader } from "../src/adapters/ledger.ts";
 import type { SendProblem } from "@morndo/node-ops";
@@ -80,6 +80,8 @@ describe("what lands in the panel", () => {
     workers.push({ id: "%4", name: "reviewer" });
     screens["%4"] = "work…\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n Esc to cancel\n\n";
     const s = service();
+    s.poll();                                            // first sight; a worker's ask waits WORKER_ASK_GRACE_MS (N2)
+    now += WORKER_ASK_GRACE_MS;
     s.poll();
     const items = Object.fromEntries(s.board().items.map(i => [i.id, i]));
     expect(items["q-toolu_1"]).toMatchObject({ asker: { kind: "worker", name: "builder", workerId: "%3" }, answerBy: "screen", answerable: "on_screen",
@@ -232,6 +234,8 @@ describe("the version of a menu on a worker's screen", () => {
     const menu = (above: string, question = "Do you want to proceed?") => `${above}\n ${question}\n ❯ 1. Yes\n   2. No\n Esc to cancel\n\n`;
     const s = service();
     screens["%4"] = menu("⠋ Working… (3s)");
+    s.poll();                                            // first sight; a worker's menu waits WORKER_ASK_GRACE_MS (N2)
+    now += WORKER_ASK_GRACE_MS;
     s.poll();
     const v1 = s.board().items.find(i => i.id === "menu-4")?.version;
     screens["%4"] = menu("⠙ Working… (4s)\nwrote 2 files");
