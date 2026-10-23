@@ -11,9 +11,17 @@ import { ACCOUNT_NAME, cleanProfile, type AccountProfile } from "@morndo/domain"
 // "claude_team" is a Team seat; any other non-empty org is a personal subscription.
 const orgOf = (v: unknown): "team" | "personal" | null =>
   typeof v !== "string" || v.trim() === "" ? null : v === "claude_team" ? "team" : "personal";
-// The two named tiers have words; any other or missing tier shows the plan as the file writes it.
-const planOf = (tier: unknown, plan: unknown): string | null =>
-  tier === "default_claude_max_5x" ? "Max 5x" : tier === "default_claude_max_20x" ? "Max 20x" : typeof plan === "string" ? plan : null;
+// The two named Max tiers have words. Any other tier (the free "default_claude_ai", an empty or an unknown one) is no
+// paid plan, whatever `plan` still says of an ended subscription. A tier that names a Max plan this table doesn't know
+// keeps the plan as the file writes it, since it is paid. No tier at all: nothing to say.
+export const NO_PAID_PLAN = "no paid plan";
+const planOf = (tier: unknown, plan: unknown): string | null => {
+  if (typeof tier !== "string") return null;
+  if (tier === "default_claude_max_5x") return "Max 5x";
+  if (tier === "default_claude_max_20x") return "Max 20x";
+  if (/max/i.test(tier)) return typeof plan === "string" ? plan : null;
+  return NO_PAID_PLAN;
+};
 
 // What the hub will read of the file: a pool of a few dozen accounts is a few KiB. Over it, the file is left alone.
 export const POOL_FILE_MAX_BYTES = 1024 * 1024;
