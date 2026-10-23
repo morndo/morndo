@@ -79,7 +79,9 @@ describe("the proof service (B13)", () => {
     atReview(board);
     await proof.file("T-1", brief, lane);                      // rev 4
     expect(proof.record("T-1", 4, { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 1 })).toBe(true);
-    board.act("T-1", { action: "move", to: "doing" }, lane);   // rev 5: the task is back in progress
+    board.act("T-1", { action: "move", to: "blocked", reason: "waiting on design" }, manager);   // rev 5: left review (the manager may; a lane may not)
+    expect(proof.view("T-1")?.brief).toBeNull();
+    board.act("T-1", { action: "move", to: "doing" }, lane);   // rev 6: back in progress
     const stale = proof.view("T-1");
     expect(stale?.rev).toBeNull();
     expect(stale?.brief).toBeNull();
@@ -88,11 +90,11 @@ describe("the proof service (B13)", () => {
       { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 1 },
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "pending", detail: null, checkedAt: NOW },
     ]);
-    board.act("T-1", { action: "move", to: "review" }, lane);  // rev 6
-    const again = await proof.file("T-1", brief, lane);        // rev 7: a new round files a new brief
-    expect(again).toMatchObject({ ok: true, event: { rev: 7 } });
+    board.act("T-1", { action: "move", to: "review" }, lane);  // rev 7
+    const again = await proof.file("T-1", brief, lane);        // rev 8: a new round files a new brief
+    expect(again).toMatchObject({ ok: true, event: { rev: 8 } });
     const view = proof.view("T-1");
-    expect(view?.rev).toBe(7);
+    expect(view?.rev).toBe(8);
     expect(view?.results).toEqual([                            // the old round's rows are never shown
       { ref: "morndo/morndo#42@3e9d1a7", state: "pending", detail: null, checkedAt: NOW },
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "pending", detail: null, checkedAt: NOW },
@@ -173,13 +175,12 @@ describe("the proof service (B13)", () => {
     store.close();
   });
 
-  it("a merge record's repository is allowed in a ref", async () => {
+  it("a merge record's repository does not join the allowlist", async () => {
     const { store, board, proof } = made();
     atReview(board);
     expect(await proof.file("T-1", { ...brief, refs: ["acme/shop#7@3e9d1a7"] }, lane)).toEqual({ ok: false, problem: "ref_repo", detail: "acme/shop" });
-    expect(board.act("T-1", { action: "merged", sha: "3e9d1a7", repo: "acme/shop" }, manager).ok).toBe(true);
-    const r = await proof.file("T-1", { ...brief, refs: ["acme/shop#7@3e9d1a7"] }, lane);
-    expect(r).toMatchObject({ ok: true, event: { change: { kind: "briefed", brief: { refs: ["acme/shop#7@3e9d1a7"] } } } });
+    expect(board.act("T-1", { action: "merged", sha: "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01", repo: "acme/shop" }, lane).ok).toBe(true);
+    expect(await proof.file("T-1", { ...brief, refs: ["acme/shop#7@3e9d1a7"] }, lane)).toEqual({ ok: false, problem: "ref_repo", detail: "acme/shop" });
     store.close();
   });
 });
@@ -201,6 +202,11 @@ describe("verifying (B14, B15)", () => {
   ];
   const RED_LINE = `proof: 1 of 2 green · ✗ morndo/morndo@3e9d1a7:ci,lint "lint" failed ${RUN_URL}`;
   const asked = (f: FakeForge) => f.requests.map(r => r.path).sort();
+  const proofSeen = (line: string, mode: ProofMode, kind: "accepted" | "warn-pass" | "override", overrideReason?: string): string => {
+    if (kind === "accepted") return `${line} [mode ${mode}]`;
+    if (kind === "warn-pass") return `${line} [mode warn: would have been refused]`;
+    return `${line}; override: ${overrideReason} [mode ${mode === "on" ? "on" : "warn: would have been refused"}]`;
+  };
 
   let fake: FakeForge;
   let clock = NOW;
@@ -438,7 +444,10 @@ describe("verifying (B14, B15)", () => {
 
   it("re-checking never changes the task's rev", async () => {
     fake.pr("morndo/morndo", 42, { head: FULL });
-    fake.runs("morndo/morndo", FULL, greenRuns());
+    fake.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "in_progress", conclusion: null },
+    ]);
     const { store, board, proof } = withForge();
     atReview(board);
     await proof.file("T-1", brief, lane);                                           // rev 4
@@ -446,15 +455,11 @@ describe("verifying (B14, B15)", () => {
     const task = store.task("T-1");
     const events = store.taskEvents("T-1");
     expect(events).toHaveLength(4);
-    clock = NOW + 60_000;
-    await proof.verify("T-1");                                                      // every ref again, later on the clock
-    await proof.tick();                                                             // and a pass that finds nothing due
-    expect(store.task("T-1")).toEqual(task);                                        // the task is exactly as it was
-    expect(store.taskEvents("T-1")).toEqual(events);                                // not one event more
-    expect(store.proofResultsOf("T-1", 4)).toEqual([                                // the rows alone moved
-      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 60_000 },
-      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW + 60_000 },
-    ]);
+    expect(store.proofResultsOf("T-1", 4)[1]?.state).toBe("pending");
+    clock = NOW + 10 * 60_000 + 1;                                                  // unauthenticated: 10 minutes between pending re-reads
+    expect(await proof.tick()).toBe(1);
+    expect(store.task("T-1")).toEqual(task);
+    expect(store.taskEvents("T-1")).toEqual(events);
     store.close();
   });
 
@@ -483,7 +488,7 @@ describe("verifying (B14, B15)", () => {
     await proof.idle();
     const r = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
     expect(r).toMatchObject({ ok: true, task: { status: "done", rev: 5 } });
-    expect(store.taskEvents("T-1").at(-1)?.change).toEqual({ kind: "moved", from: "review", to: "done", reason: "the row ships", proofSeen: RED_LINE });
+    expect(store.taskEvents("T-1").at(-1)?.change).toEqual({ kind: "moved", from: "review", to: "done", reason: "the row ships", proofSeen: proofSeen(RED_LINE, "warn", "warn-pass") });
     store.close();
   });
 
@@ -533,7 +538,40 @@ describe("verifying (B14, B15)", () => {
     await proof.idle();
     const r = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships", proofOverride: "the red lint is the old run" }, manager);
     expect(r).toMatchObject({ ok: true, task: { status: "done", rev: 5 } });
-    expect(store.taskEvents("T-1").at(-1)?.change).toEqual({ kind: "moved", from: "review", to: "done", reason: "the row ships", proofSeen: `${RED_LINE}; override: the red lint is the old run` });
+    expect(store.taskEvents("T-1").at(-1)?.change).toEqual({ kind: "moved", from: "review", to: "done", reason: "the row ships", proofSeen: proofSeen(RED_LINE, "on", "override", "the red lint is the old run") });
+    store.close();
+  });
+
+  it("a lane's merge record for another repository never aims the hub at it", async () => {
+    const VAULT = "acme/vault";
+    const VAULT_REF = `${VAULT}#7@3e9d1a7`;
+    const { store, board, proof } = withForge({ allowedRepos: ["morndo/morndo"] });
+    fake.pr(VAULT, 7, { head: FULL });
+    atReview(board);
+    expect(board.act("T-1", { action: "merged", sha: FULL, repo: VAULT }, lane).ok).toBe(true);
+    expect(await proof.file("T-1", { ...brief, refs: [VAULT_REF] }, lane)).toEqual({ ok: false, problem: "ref_repo", detail: VAULT });
+    await proof.file("T-1", brief, lane);
+    await proof.idle();
+    store.saveProofResult("T-1", 4, { ref: VAULT_REF, state: "pending", detail: null, checkedAt: NOW });
+    fake.requests.length = 0;
+    await proof.verify("T-1");
+    expect(fake.requests).toHaveLength(0);
+    store.close();
+  });
+
+  it("a pr merged as another commit than the task's recorded merge reports mismatch", async () => {
+    const RECORDED = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const OTHER = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    fake.pr("morndo/morndo", 42, { head: OTHER, merged: true, merge: OTHER });
+    const { store, board, proof } = withForge();
+    atReview(board);
+    await proof.file("T-1", brief, lane);
+    board.act("T-1", { action: "merged", sha: RECORDED, repo: "morndo/morndo" }, lane);
+    await proof.idle();
+    expect(store.proofResultsOf("T-1", 4)[0]).toMatchObject({
+      state: "mismatch",
+      detail: `merged as ${OTHER.slice(0, 7)}, the task records ${RECORDED.slice(0, 7)}`,
+    });
     store.close();
   });
 
@@ -583,14 +621,14 @@ describe("verifying (B14, B15)", () => {
       expect(await on.board.actChecked("T-1", { action: "move", to: "done", reason: "shipped" }, manager)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
       const overridden = await on.board.actChecked("T-1", { action: "move", to: "done", reason: "shipped", proofOverride: "private repo, read the CI page by hand" }, manager);
       expect(overridden).toMatchObject({ ok: true, task: { status: "done" } });
-      expect(on.store.taskEvents("T-1").at(-1)?.change).toMatchObject({ proofSeen: `${line}; override: private repo, read the CI page by hand` });
+      expect(on.store.taskEvents("T-1").at(-1)?.change).toMatchObject({ proofSeen: proofSeen(line, "on", "override", "private repo, read the CI page by hand") });
       on.store.close();
       const warn = withForge({ mode: "warn", allowedRepos: [PRIV] });
       atReview(warn.board);
       await warn.proof.file("T-1", { ...brief, ...priv }, lane);
       await warn.proof.idle();
       expect(await warn.board.actChecked("T-1", { action: "move", to: "done", reason: "shipped" }, manager)).toMatchObject({ ok: true });
-      expect(warn.store.taskEvents("T-1").at(-1)?.change).toMatchObject({ proofSeen: line });
+      expect(warn.store.taskEvents("T-1").at(-1)?.change).toMatchObject({ proofSeen: proofSeen(line, "warn", "warn-pass") });
       warn.store.close();
     });
 

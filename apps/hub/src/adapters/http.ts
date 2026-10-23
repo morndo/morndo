@@ -815,7 +815,11 @@ export function startHttp(p: {
         limited(buckets.commands.take(a.endpoint.id));
         const actor = service.principal(a);
         if ("problem" in actor) return json(res, 403, { error: actor.problem });
-        if (task) return boardAnswer(res, service.act(task[1] ?? "", await readBody(req, BoardActionBody), actor));
+        if (task) {
+          const body = await readBody(req, BoardActionBody);
+          if (body.action === "brief" && p.board.proof) return boardAnswer(res, await p.board.proof.file(task[1] ?? "", body.brief, actor));
+          return boardAnswer(res, await service.actChecked(task[1] ?? "", body, actor));
+        }
         return boardAnswer(res, service.create(await readBody(req, BoardCreateBody), actor));
       }
       throw new HttpError(404, "no such route");

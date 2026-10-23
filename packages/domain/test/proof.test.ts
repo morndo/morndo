@@ -92,13 +92,32 @@ describe("the brief (B13, B14)", () => {
     expect(checkBrief(input({ refs: ["acme/shop@9f8e7d6:ci"] }), ctx({ merges: [{ repo: "acme/shop", sha: "9f8e7d6" }] })).ok).toBe(true);
   });
 
-  it("checkBrief: a repository outside the allowed list is refused as ref_repo, one in a merge record is accepted", () => {
+  it("checkBrief: a repository outside the allowed list is refused as ref_repo, and a merge record does not add one", () => {
     expect(refusal(checkBrief(input({ refs: [PR] }), ctx({ allowedRepos: ["other/repo"] })))).toEqual({ problem: "ref_repo", detail: "acme/shop" });
-    // the list and the merge records match without regard to case, and the stored ref is the canonical form
+    // the list matches without regard to case, and the stored ref is the canonical form
     expect(value(checkBrief(input({ refs: ["ACME/SHOP#42@3E9D1A7"] }), ctx())).refs).toEqual(["ACME/SHOP#42@3e9d1a7"]);
-    expect(value(checkBrief(input({ refs: [PR] }), ctx({ allowedRepos: [], merges: [{ repo: "Acme/Shop", sha: "9999999" }] }))).refs).toEqual([PR]);
+    expect(refusal(checkBrief(input({ refs: [PR] }), ctx({ allowedRepos: [], merges: [{ repo: "Acme/Shop", sha: "9999999" }] }))))
+      .toEqual({ problem: "ref_repo", detail: "acme/shop" });
     // a ref written twice is kept once
     expect(value(checkBrief(input({ refs: [PR, PR, CI] }), ctx())).refs).toEqual([PR, CI]);
+  });
+
+  it("checkBrief: a brief with no code change is refused when the task has a merge record", () => {
+    expect(refusal(checkBrief(input({ noCode: "an analysis, no code changed" }), ctx({ merges: [{ repo: "acme/shop", sha: SHA }] }))))
+      .toEqual({ problem: "bad_ref", detail: "this task has a merge record; a brief with no code change cannot stand for it" });
+  });
+
+  it("checkBrief: a task with a merge record needs a reference in that repository", () => {
+    expect(refusal(checkBrief(input({ refs: [PR] }), ctx({ allowedRepos: ["acme/shop", "acme/vault"], merges: [{ repo: "acme/vault", sha: "1111111" }] }))))
+      .toEqual({ problem: "ref_unrelated", detail: "the task records a merge in acme/vault; a reference to that repository is needed" });
+    expect(checkBrief(input({ refs: [`acme/vault#9@${SHA}`, PR] }), ctx({ allowedRepos: ["acme/vault", "acme/shop"], merges: [{ repo: "acme/vault", sha: "1111111" }] })).ok).toBe(true);
+    // a repository outside the list is refused as such first, whatever the merge records say
+    expect(refusal(checkBrief(input({ refs: [PR] }), ctx({ allowedRepos: ["other/repo"], merges: [{ repo: "acme/vault", sha: "1111111" }] })))).toEqual({ problem: "ref_repo", detail: "acme/shop" });
+  });
+
+  it("checkBrief: C1 control characters are refused", () => {
+    expect(refusal(checkBrief(input({ summary: "a\u0080b" }), ctx()))).toEqual({ problem: "bad_text", detail: "summary" });
+    expect(refusal(checkBrief(input({ summary: "a\u009fb" }), ctx()))).toEqual({ problem: "bad_text", detail: "summary" });
   });
 
   it("checkBrief: limits (empty leftOut, 9 refs, 7 attested items, a control character, the 8 KiB bound)", () => {
@@ -167,6 +186,14 @@ describe("the proof state (B14, B15)", () => {
       .toEqual({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" });
   });
 
+  it("proofOf: no code change does not stand for a task that has a merge record", () => {
+    const b = brief({ refs: [], attested: [{ kind: "manual", how: "read the diff" }], noCode: "an analysis, no code changed" });
+    const proofOfMerges = proofOf as (brief: ProofBrief | null, results: readonly RefResult[], merges?: readonly { repo: string; sha: string }[]) => ReturnType<typeof proofOf>;
+    expect(proofOfMerges(b, [], [{ repo: "acme/shop", sha: SHA }]))
+      .toEqual({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: no code change claimed, but the task has a merge record (acme/shop)" });
+    expect(proofOf(b, [])).toEqual({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" });
+  });
+
   it("proofOf: a ref with no result is pending, a stale row for a ref not in the brief is ignored, unfetchable beats pending, failing beats unfetchable", () => {
     expect(proofOf(brief(), [])).toEqual({ kind: "pending", green: 0, total: 1, accepts: false, line: `proof: 0 of 1 green · … ${PR} pending` });
     expect(proofOf(brief(), [seen("acme/shop#43@9999999", "green")]).kind).toBe("pending");   // the row names a ref the brief does not
@@ -198,11 +225,16 @@ describe("the brief that counts (B13)", () => {
   it("a brief older than the last review to doing move is stale", () => {
     expect(currentBrief([filed(3), backToDoing(5)])).toBeNull();
     expect(currentBrief([filed(2), filed(3), backToDoing(5)])).toBeNull();      // the newest brief is the one judged
-    // any order; a brief after the move counts again, and only a move back from review to doing stales one
+    expect(currentBrief([filed(3), event(5, { kind: "moved", from: "review", to: "blocked", reason: "waiting on design" })])).toBeNull();
+    // any order; a brief after the move counts again, and any move out of review stales one
     expect(currentBrief([backToDoing(2), filed(7), filed(3)])).toEqual({ brief: brief(), rev: 7 });
     expect(currentBrief([filed(3), event(4, { kind: "moved", from: "doing", to: "review", reason: null })])).toEqual({ brief: brief(), rev: 3 });
     expect(currentBrief([])).toBeNull();
     expect(currentBrief([backToDoing(5)])).toBeNull();
+  });
+
+  it("a brief filed in progress survives its move to review", () => {
+    expect(currentBrief([filed(3), event(4, { kind: "moved", from: "doing", to: "review", reason: null })])).toEqual({ brief: brief(), rev: 3 });
   });
 });
 
@@ -222,6 +254,31 @@ describe("judging a reference against what the forge said (B14)", () => {
     expect(judgePr(ref, prFacts({ merged: true, headSha: MOVED, mergeSha: FULL }))).toEqual({ state: "green", detail: null });   // so is the merge's
     expect(judgePr(ref, prFacts({ headSha: MOVED }))).toEqual({ state: "mismatch", detail: `head is ${MOVED.slice(0, 7)}, ref says ${SHA}` });
     expect(judgePr(ref, prFacts({ state: "closed", merged: false, headSha: FULL }))).toEqual({ state: "red", detail: "closed without merge" });
+  });
+
+  it("judgePr: a merged pull request whose merge commit is not the task's recorded merge is a mismatch", () => {
+    const ref = value(parseProofRef(PR));
+    if (ref.kind !== "pr") throw new Error("not a pr ref");
+    const recorded = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const otherMerge = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    expect(judgePr(ref, prFacts({ merged: true, headSha: MOVED, mergeSha: otherMerge }), [{ repo: "acme/shop", sha: recorded }]))
+      .toEqual({ state: "mismatch", detail: `merged as ${otherMerge.slice(0, 7)}, the task records ${recorded.slice(0, 7)}` });
+    expect(judgePr(ref, prFacts({ merged: true, headSha: MOVED, mergeSha: FULL }), [{ repo: "acme/shop", sha: FULL }]))
+      .toEqual({ state: "green", detail: null });
+    expect(judgePr(ref, prFacts())).toEqual({ state: "green", detail: null });
+    expect(judgePr(ref, prFacts({ merged: true, headSha: MOVED, mergeSha: otherMerge }), [{ repo: "acme/vault", sha: recorded }]))
+      .toEqual({ state: "green", detail: null });
+  });
+
+  it("judgeCi: control characters in a check name are replaced and the detail is cut", () => {
+    const ci = value(parseProofRef(`acme/shop@${SHA}:*`));
+    if (ci.kind !== "ci") throw new Error("not a ci ref");
+    const evilName = `c${"\u0007"}${"x".repeat(120)}`;
+    const judged = judgeCi(ci, [run({ name: evilName, conclusion: "failure" })], false);
+    expect(judged.state).toBe("red");
+    expect(judged.detail!.length).toBeLessThanOrEqual(100);
+    const codes = Array.from({ length: judged.detail!.length }, (_, i) => judged.detail!.charCodeAt(i));
+    expect(codes.every(c => c > 0x1f && (c < 0x7f || c > 0x9f))).toBe(true);   // no control character survives
   });
 
   it("judgeCi: all named runs green is green; one failure is red and names the run; an unfinished run is pending", () => {

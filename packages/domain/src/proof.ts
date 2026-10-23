@@ -77,7 +77,7 @@ export type ProofBriefRefusal = { problem: ProofBriefProblem; detail?: string };
 // \n, each field is trimmed and bounded. Here the refusal names the brief's own rule, not the board's, and the field
 // it broke, so the one line a filer reads says what to fix.
 const briefText = (v: string, max: number, allowEmpty: boolean, field: string): Result<string, ProofBriefRefusal> => {
-  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(v)) return err({ problem: "bad_text", detail: field });
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/.test(v)) return err({ problem: "bad_text", detail: field });
   const t = v.replace(/\r\n?/g, "\n").trim();
   if (!t && !allowEmpty) return err({ problem: "empty", detail: field });
   if (t.length > max) return err({ problem: "too_long", detail: field });
@@ -118,7 +118,8 @@ export function checkBrief(input: BriefInput, ctx: { allowedRepos: readonly stri
   }
   const refsIn = input.refs ?? [];
   if (refsIn.length > BRIEF_LIMITS.refs) return err({ problem: "too_many", detail: "refs" });
-  const repos = new Set([...ctx.allowedRepos, ...ctx.merges.map(m => m.repo)].map(r => r.toLowerCase()));
+  // Task data never widens what the hub may read: only configured repositories are allowed, not merge records.
+  const repos = new Set(ctx.allowedRepos.map(r => r.toLowerCase()));
   const parsed: ProofRef[] = [];
   const refs: string[] = [];
   const held = new Set<string>();
@@ -127,10 +128,17 @@ export function checkBrief(input: BriefInput, ctx: { allowedRepos: readonly stri
     if (!r.ok) return err({ problem: "bad_ref", detail: `${raw}: ${r.error.detail}` });
     const canonical = refString(r.value);
     if (held.has(canonical)) continue;                    // written twice: kept once, order kept
-    if (!repos.has(r.value.repo.toLowerCase())) return err({ problem: "ref_repo", detail: r.value.repo });
     held.add(canonical);
+    if (!repos.has(r.value.repo.toLowerCase())) return err({ problem: "ref_repo", detail: r.value.repo });
     parsed.push(r.value);
     refs.push(canonical);
+  }
+  if (noCode.value !== "" && ctx.merges.length > 0)
+    return err({ problem: "bad_ref", detail: "this task has a merge record; a brief with no code change cannot stand for it" });
+  if (ctx.merges.length > 0) {
+    const mergeRepos = new Set(ctx.merges.map(m => m.repo.toLowerCase()));
+    if (!parsed.some(r => mergeRepos.has(r.repo.toLowerCase())))
+      return err({ problem: "ref_unrelated", detail: `the task records a merge in ${ctx.merges[0]!.repo}; a reference to that repository is needed` });
   }
   for (const ref of parsed) {
     if (ref.kind !== "ci") continue;
@@ -176,9 +184,11 @@ export const WORD: Record<RefState, string> = { green: "green", red: "failed", m
 // Verified proof only — attested items never move it (B14), one reference the board could not read is never green, and
 // one red reference makes the whole task failing whatever else is green. A reference with no row yet counts as pending.
 export const NO_BRIEF_LINE = "proof: no brief";   // proofOf's own line for no brief, for readers that skip it
-export function proofOf(brief: ProofBrief | null, results: readonly RefResult[]): ProofState {
+export function proofOf(brief: ProofBrief | null, results: readonly RefResult[], merges: readonly { repo: string; sha: string }[] = []): ProofState {
   if (brief === null) return { kind: "no_brief", green: 0, total: 0, accepts: false, line: NO_BRIEF_LINE };
   if (brief.refs.length === 0) {
+    if (brief.noCode !== "" && merges.length > 0)
+      return { kind: "unchecked", green: 0, total: 0, accepts: false, line: `proof: no code change claimed, but the task has a merge record (${merges[0]!.repo})` };
     if (brief.noCode !== "") return { kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" };
     return { kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" };
   }
@@ -198,11 +208,11 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[])
   return { kind, green, total: brief.refs.length, accepts: kind === "verified", line: whole.length > 600 ? `${cutText(whole, 599)}…` : whole };
 }
 
-// B13: the brief that still counts — the newest `briefed` event, unless the task has been back in progress since (a
-// review → doing move with a higher rev stales every brief before it; a new round of work files a new one).
+// B13: the brief that still counts — the newest `briefed` event, unless the task has left review since (any review →
+// elsewhere move with a higher rev stales every brief before it; a new round of work files a new one).
 export function currentBrief(events: readonly TaskEvent[]): { brief: ProofBrief; rev: number } | null {
   let back = 0;
-  for (const e of events) if (e.change.kind === "moved" && e.change.from === "review" && e.change.to === "doing" && e.rev > back) back = e.rev;
+  for (const e of events) if (e.change.kind === "moved" && e.change.from === "review" && e.rev > back) back = e.rev;
   let best: { brief: ProofBrief; rev: number } | null = null;
   for (const e of events) if (e.change.kind === "briefed" && e.rev > back && (best === null || e.rev > best.rev)) best = { brief: e.change.brief, rev: e.rev };
   return best;
@@ -220,8 +230,22 @@ export type Judged = { state: RefState; detail: string | null };
 // A pull request reference is green at the commit it names — the head, or the merge commit once it was merged (the head
 // moves on past it). Closed without a merge is the one thing a pull request is red at; a head somewhere else is a
 // mismatch, both shas said, so the person can see which moved.
-export function judgePr(ref: Extract<ProofRef, { kind: "pr" }>, facts: PrFacts): Judged {
+export function judgePr(ref: Extract<ProofRef, { kind: "pr" }>, facts: PrFacts, merges?: readonly { repo: string; sha: string }[]): Judged {
   if (facts.state === "closed" && !facts.merged) return { state: "red", detail: "closed without merge" };
+  const taskMerges = (merges ?? []).filter(m => m.repo.toLowerCase() === ref.repo.toLowerCase());
+  if (facts.merged && merges !== undefined && merges.length > 0 && taskMerges.length === 0)
+    return { state: "green", detail: null };
+  if (facts.merged && facts.mergeSha !== null && taskMerges.length > 0) {
+    const mergeSha = facts.mergeSha.toLowerCase();
+    const matches = taskMerges.some(m => {
+      const recorded = m.sha.toLowerCase();
+      return mergeSha.startsWith(recorded) || recorded.startsWith(mergeSha);
+    });
+    if (!matches) {
+      const recorded = taskMerges.map(m => m.sha.toLowerCase().slice(0, 7)).join(", ");
+      return { state: "mismatch", detail: `merged as ${mergeSha.slice(0, 7)}, the task records ${recorded}` };
+    }
+  }
   const at = facts.headSha.toLowerCase().startsWith(ref.sha)
     || (facts.merged && facts.mergeSha !== null && facts.mergeSha.toLowerCase().startsWith(ref.sha));
   return at ? { state: "green", detail: null }
@@ -252,6 +276,8 @@ const SELECTOR_RANK: Record<"red" | "missing" | "pending" | "green", number> = {
 // and ./_:-: and nothing else (no query, no fragment, no other host hiding in it).
 const RUN_URL = /^https:\/\/github\.com\/[A-Za-z0-9./_:~-]*$/;
 const withUrl = (line: string, url: string | null): string => (url !== null && RUN_URL.test(url) ? `${line} ${url}` : line);
+// Control characters in a detail line are shown as spaces and the line is bounded, so a forge cannot forge marks.
+const detailLine = (line: string): string => line.replace(/[\x00-\x1f\x7f-\x9f]/g, " ").slice(0, 100);
 
 // What judging one selector can say (judgeSelector): never a mismatch or unfetchable — those are a pull request's or
 // the hub's to say.
@@ -265,9 +291,9 @@ const judgeSelector = (label: string, runs: readonly CheckRunFacts[], young: boo
   }
   const w = worst!;
   if (w.verdict.state === "green") return { state: "green", detail: null };
-  if (w.verdict.state === "red") return { state: "red", detail: withUrl(`${label} ${w.verdict.word}`, w.run.url) };
-  if (w.verdict.state === "pending") return { state: "pending", detail: `${label} ${w.verdict.word}` };
-  return { state: "missing", detail: `${label} ${w.verdict.word}` };        // a check that did not run is not evidence
+  if (w.verdict.state === "red") return { state: "red", detail: detailLine(withUrl(`${label} ${w.verdict.word}`, w.run.url)) };
+  if (w.verdict.state === "pending") return { state: "pending", detail: detailLine(`${label} ${w.verdict.word}`) };
+  return { state: "missing", detail: detailLine(`${label} ${w.verdict.word}`) };        // a check that did not run is not evidence
 };
 
 // B14: a commit's checks, judged. Named selectors match runs by exact name or by the forge's own number; `checks: "*"`
@@ -280,9 +306,9 @@ export function judgeCi(ref: Extract<ProofRef, { kind: "ci" }>, runs: readonly C
     const first = (state: RunVerdict["state"]) => verdicts.findIndex(v => v.state === state);
     const at = (state: RunVerdict["state"]) => first(state) === -1 ? null : { i: first(state)!, verdict: verdicts[first(state)!]! };
     const red = at("red");
-    if (red !== null) return { state: "red", detail: withUrl(`"${runs[red.i]!.name}" ${red.verdict.word}`, runs[red.i]!.url) };
+    if (red !== null) return { state: "red", detail: detailLine(withUrl(`"${runs[red.i]!.name}" ${red.verdict.word}`, runs[red.i]!.url)) };
     const pending = at("pending");
-    if (pending !== null) return { state: "pending", detail: `"${runs[pending.i]!.name}" ${pending.verdict.word}` };
+    if (pending !== null) return { state: "pending", detail: detailLine(`"${runs[pending.i]!.name}" ${pending.verdict.word}`) };
     if (at("green") !== null) return { state: "green", detail: null };
     return { state: "missing", detail: "no check ran" };
   }

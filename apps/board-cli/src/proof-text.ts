@@ -8,6 +8,9 @@ import { MARK, WORD, parseProofRef, type MergeRecord, type ProofBrief, type RefR
 // needs, so a newer hub's extra fields pass through unheard.
 export type ProofView = { rev: number | null; brief: ProofBrief | null; results: readonly RefResult[]; state: { line: string } };
 
+// One line of brief text: newlines and runs of whitespace collapse so a lane cannot start its own line.
+const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
+
 // A brief's rows by reference, the latest check winning, as the domain's proofOf reads the same rows.
 const rowsBy = (results: readonly RefResult[]): ReadonlyMap<string, RefResult> => {
   const latest = new Map<string, RefResult>();
@@ -25,17 +28,18 @@ export function proofBlock(view: ProofView): string[] {
   if (view.brief === null) return [`  Proof: ${view.state.line}`];
   const b = view.brief;
   const rows = rowsBy(view.results);
-  const lines = [`  Proof: ${view.state.line}`, `    Brief (rev ${view.rev}): ${b.summary}`];
-  if (b.decisions !== "") lines.push(`    Decisions: ${b.decisions}`);
-  if (b.leftOut !== "") lines.push(`    Left out: ${b.leftOut}`);
-  if (b.limits !== "") lines.push(`    Limits: ${b.limits}`);
+  const lines = [`  Proof: ${view.state.line}`, `    Brief (rev ${view.rev}): ${oneLine(b.summary)}`];
+  if (b.decisions !== "") lines.push(`    Decisions: ${oneLine(b.decisions)}`);
+  if (b.leftOut !== "") lines.push(`    Left out: ${oneLine(b.leftOut)}`);
+  if (b.limits !== "") lines.push(`    Limits: ${oneLine(b.limits)}`);
   for (const ref of b.refs) {
     const row = rows.get(ref);
     const state: RefState = row?.state ?? "pending";           // no row yet: the check is on its way
-    lines.push(`    ${MARK[state]} ${ref} ${row?.detail ?? WORD[state]}`);
+    const tail = oneLine(row?.detail ?? WORD[state]);
+    lines.push(`    ${MARK[state]} ${ref} ${tail}`);
   }
-  for (const a of b.attested) lines.push(`    Attested (${a.kind}): ${a.how}  (the lane's word, not checked)`);
-  if (b.noCode !== "") lines.push(`    No code change: ${b.noCode}`);
+  for (const a of b.attested) lines.push(`    Attested (${a.kind}): ${oneLine(a.how)}  (the lane's word, not checked)`);
+  if (b.noCode !== "") lines.push(`    No code change: ${oneLine(b.noCode)}`);
   return lines;
 }
 

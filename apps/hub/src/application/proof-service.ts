@@ -79,7 +79,8 @@ export class ProofService {
     const current = currentBrief(this.#store.taskEvents(key));
     if (current === null) return { rev: null, brief: null, results: [], state: proofOf(null, []) };
     const results = this.#store.proofResultsOf(key, current.rev);
-    return { rev: current.rev, brief: current.brief, results, state: proofOf(current.brief, results) };
+    const merges = this.#store.mergesOf(key).map(m => ({ repo: m.repo, sha: m.sha }));
+    return { rev: current.rev, brief: current.brief, results, state: proofOf(current.brief, results, merges) };
   }
 
   // The one line per task in review (B15), for the board view the agents read: keyed by task, `no brief` included, so
@@ -131,6 +132,9 @@ export class ProofService {
   onBoardEvent(e: TaskEvent): void {
     if ((e.change.kind === "moved" && e.change.to === "review") || (e.change.kind === "created" && e.change.status === "review"))
       void this.verify(e.key);
+    // A merge record changes what a pull request reference means; re-read after any check already queued (not joined to verifyAll).
+    if (e.change.kind === "merged" || e.change.kind === "unmerged")
+      void this.#serialize(e.key, () => this.#check(e.key, brief => [...brief.brief.refs]));
   }
 
   // The timer pass: the tasks in review, by the board's own number, get their due references re-read — those still
@@ -178,32 +182,32 @@ export class ProofService {
     const briefAt = events.find(e => e.change.kind === "briefed" && e.rev === current.rev)?.at ?? 0;
     const rows = new Map(this.#store.proofResultsOf(key, current.rev).map(r => [r.ref, r] as const));
     const young = this.#now() - briefAt < YOUNG_MS;
-    // A repository the gate does not check (nor a merge record of the task) is never asked: a lane must not aim the
-    // hub's credential at work it has no business reading, so it is judged unread instead.
-    const allowed = new Set([...this.#allowedRepos, ...this.#store.mergesOf(key).map(m => m.repo)].map(r => r.toLowerCase()));
+    // Task data never widens what the hub may read: only configured repositories are asked, not merge records.
+    const allowed = new Set(this.#allowedRepos.map(r => r.toLowerCase()));
+    const merges = this.#store.mergesOf(key).map(m => ({ repo: m.repo, sha: m.sha }));
     const refs = pick({ brief: current.brief, rev: current.rev, at: briefAt }, rows);
     if (refs.length === 0) return;
     let next = 0;
-    const ask = async () => { while (next < refs.length) await this.#checkOne(key, current.rev, refs[next++]!, allowed, young); };
+    const ask = async () => { while (next < refs.length) await this.#checkOne(key, current.rev, refs[next++]!, allowed, young, merges); };
     await Promise.all(Array.from({ length: Math.min(10, refs.length) }, ask));
   }
 
-  async #checkOne(key: string, briefRev: number, ref: string, allowed: ReadonlySet<string>, young: boolean): Promise<void> {
+  async #checkOne(key: string, briefRev: number, ref: string, allowed: ReadonlySet<string>, young: boolean, merges: readonly { repo: string; sha: string }[]): Promise<void> {
     const parsed = parseProofRef(ref);
     if (!parsed.ok) return;                        // a stored ref always parses; anything else writes nothing
-    const judged = await this.#ask(parsed.value, allowed, young);
+    const judged = await this.#ask(parsed.value, allowed, young, merges);
     this.record(key, briefRev, { ref, state: judged.state, detail: judged.detail, checkedAt: this.#now() });
   }
 
   // One reference, asked and judged. A repository outside the allowlist is never asked (unread, not unfetched); a forge
   // failure is unfetchable with its detail; anything thrown is a network error. Nothing here reaches a task.
-  async #ask(ref: ProofRef, allowed: ReadonlySet<string>, young: boolean): Promise<Judged> {
+  async #ask(ref: ProofRef, allowed: ReadonlySet<string>, young: boolean, merges: readonly { repo: string; sha: string }[]): Promise<Judged> {
     const forge = this.#forge;
     if (forge === null || !allowed.has(ref.repo.toLowerCase())) return { state: "unfetchable", detail: "repository not checked" };
     try {
       if (ref.kind === "pr") {
         const answer = await forge.pullRequest(ref.repo, ref.number);
-        return answer.ok ? judgePr(ref, answer.value) : this.#unread(answer.failure);
+        return answer.ok ? judgePr(ref, answer.value, merges) : this.#unread(answer.failure);
       }
       const answer = await forge.checkRuns(ref.repo, ref.sha);
       return answer.ok ? judgeCi(ref, answer.value, young) : this.#unread(answer.failure);

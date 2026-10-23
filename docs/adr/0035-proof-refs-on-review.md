@@ -26,7 +26,8 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
    review, a timer, a Done attempt), never by reading a Run.
 5. **Results are rows, not events,** so a re-check never changes the task's `rev`.
 6. **Private repositories are read with an optional credential.** The repositories the hub may read are the ones its
-   settings list (`MORNDO_PROOF_REPOS`, default `morndo/morndo`); anything else is never asked. The credential is a
+   settings list (`MORNDO_PROOF_REPOS`, default `morndo/morndo`) and nothing a task says: a merge record is a lane's
+   word and adds no repository. Anything else is never asked. The credential is a
    read-only token in a file the settings name (`MORNDO_GITHUB_TOKEN_FILE`, mode 600), read once at start and never an
    environment value, a setting or a word in a log. Without it a private repository answers as one that does not exist,
    and the reference reads `private repo: not checked`: its own state, neither red nor unfetchable, not retried, and not
@@ -40,6 +41,11 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
   not change.
 - The hub makes outbound calls to `api.github.com` built from validated parts only, against a repository allowlist.
 - A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff.
+- After a rollback to a build from before this decision: the table is additive and is left alone, but the `briefed`
+  events and the `proofSeen` of Done events stay in a task's record, and an older build's event schema has no `briefed`
+  kind, so its CLI and app may fail to read the history of a task that carries one (not run; the fix is to roll forward,
+  or to ship the older build a reader that skips kinds it does not know). A hub rollback that keeps the data is therefore
+  not free for tasks that were briefed.
 - Screenshots and per-item human marks are not in this decision; they are a later one (plan, option C).
 - GitHub's documentation (read 2026-10-23) lists `Pull requests: read` and `Contents: read` for the pull request
   endpoint with fine-grained tokens and lists no fine-grained permission for the check-runs endpoint (`Checks` is a

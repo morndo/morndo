@@ -166,6 +166,7 @@ export const MORNDO_REPO = "morndo/morndo";
 export const PRINCIPAL_NOT_LIVE = "accepted by the principal";
 // B16: the principal's own click is the proof gate's override too, recorded in the Done event all the same.
 export const PRINCIPAL_PROOF_ACCEPT = "accepted by the principal";
+export const PROOF_SEEN_MAX = 900;
 // A task holds this many merge records at most: each one is a git check per node, and a lane can record any sha it likes.
 export const MAX_MERGES = 5;
 export const isMorndoRepo = (repo: string) => repo.toLowerCase() === MORNDO_REPO;
@@ -303,16 +304,24 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       // the board saw; off mode, no gate or no proof in the gate changes nothing and writes no proofSeen.
       let proofSeen: string | undefined;
       if (action.to === "done" && gate?.proof !== undefined && gate.proof.mode !== "off") {
-        const seen = proofOf(gate.proof.brief, gate.proof.results);
-        if (seen.accepts) proofSeen = seen.line;
+        const mergeShas = gate.merges.map(m => ({ repo: m.repo, sha: m.sha }));
+        const seen = proofOf(gate.proof.brief, gate.proof.results, mergeShas);
+        const mode = gate.proof.mode;
+        const warnSuffix = " [mode warn: would have been refused]";
+        const fit = (line: string, suffix: string) => {
+          const whole = `${line}${suffix}`;
+          if (whole.length <= PROOF_SEEN_MAX) return whole;
+          const budget = PROOF_SEEN_MAX - suffix.length;
+          return `${budget <= 1 ? "" : `${cutText(line, budget - 1)}…`}${suffix}`;
+        };
+        if (seen.accepts) proofSeen = fit(seen.line, ` [mode ${mode}]`);
         else if ((action.proofOverride ?? "").trim() !== "") {
           const why = line(action.proofOverride ?? "", REASON_MAX);
           if (!why.ok) return why;
-          proofSeen = `${seen.line}; override: ${why.value}`;
-        } else if (actor.kind === "principal") proofSeen = `${seen.line}; ${PRINCIPAL_PROOF_ACCEPT}`;
-        else if (gate.proof.mode === "on") return refuse("proof_not_green", undefined, undefined, seen.line);
-        else proofSeen = seen.line;
-        if (proofSeen.length > 600) proofSeen = cutText(proofSeen, 600);
+          proofSeen = fit(seen.line, `; override: ${why.value} [mode ${mode === "on" ? "on" : "warn: would have been refused"}]`);
+        } else if (actor.kind === "principal") proofSeen = fit(seen.line, `; ${PRINCIPAL_PROOF_ACCEPT} [mode ${mode === "on" ? "on" : "warn: would have been refused"}]`);
+        else if (mode === "on") return refuse("proof_not_green", undefined, undefined, seen.line);
+        else proofSeen = fit(seen.line, warnSuffix);
       }
       const moved: Task = { ...task, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null };
       return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }), ...(proofSeen === undefined ? {} : { proofSeen }) });
@@ -357,13 +366,13 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
     case "brief": {
       // B13 (ADR-0035): the brief is the assignee's word, its own action, never the board's (D5). Like a comment it
       // changes no state, so it needs no ifRev and races with nothing; it is filed while the task is in progress or in
-      // review. Its references are judged against the repositories the board checks (B14): MORNDO_REPO and the task's
-      // merge records, unless the gate names others.
+      // review. Its references are judged against the repositories the board checks (B14): configured allowlist only —
+      // task data never widens what the hub may read.
       if (actor.kind === "board") return refuse("not_allowed");
       if (actor.kind === "worker" && !mine) return refuse("not_yours");
       if (task.status !== "doing" && task.status !== "review") return refuse("bad_transition", undefined, task.status);
       const r = checkBrief(action.brief, {
-        allowedRepos: [...(gate?.proof?.allowedRepos ?? [MORNDO_REPO]), ...(gate?.merges ?? []).map(m => m.repo)],
+        allowedRepos: gate?.proof?.allowedRepos ?? [MORNDO_REPO],
         merges: gate?.merges ?? [],
       });
       if (!r.ok) return refuse(r.error.problem, undefined, undefined, r.error.detail);

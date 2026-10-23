@@ -513,7 +513,7 @@ describe("the brief and the proof (B13 to B16)", () => {
     expect(accepted.code).toBe(0);
     expect(proofHub.board.task("T-1")?.task.status).toBe("done");
     const shown = await managerSays("show", "T-1");
-    expect(shown.out).toContain(`(proof: proof: 1 of 2 green · ✗ ${CI} "lint" failed; override: read the diff at the merge; the lint failure is the known flake)`);
+    expect(shown.out).toContain("(proof: proof: 1 of 2 green · ✗ morndo/morndo@3e9d1a7:ci,lint \"lint\" failed; override: read the diff at the merge; the lint failure is the known flake [mode on])");
   });
 
   it("list prints the proof line under a task in review; show prints the Proof block with attested items marked as the lane's word", async () => {

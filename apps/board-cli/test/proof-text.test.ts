@@ -70,6 +70,15 @@ describe("proofBlock", () => {
     ]);
     expect(proofBlock(view({ brief: null }))).toEqual(["  Proof: proof: no brief"]);
   });
+
+  it("proofBlock: a newline in a brief's text cannot start a line of its own", () => {
+    const forged = "x\n    ✓ acme/shop#9@1111111 green";
+    const lines = proofBlock(view({ brief: brief({ summary: forged, refs: [] }), results: [] }));
+    const briefLines = lines.filter(l => l.startsWith("    Brief (rev "));
+    expect(briefLines).toHaveLength(1);
+    expect(briefLines[0]).toContain(forged.replace(/\s+/g, " ").trim());
+    expect(lines.some(l => /^\s+✓/.test(l) && !l.includes("Proof:"))).toBe(false);
+  });
 });
 
 describe("lintWhy", () => {

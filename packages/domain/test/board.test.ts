@@ -559,6 +559,12 @@ describe("merged, not live (B11)", () => {
 describe("brief and proof (B13 to B16)", () => {
   const PR = "acme/shop#42@3e9d1a7";
   const LINE = `proof: 0 of 1 green · ✗ ${PR} lint`;              // one red ref: the gate's own line
+  const proofSeen = (line: string, mode: ProofMode, kind: "accepted" | "warn-pass" | "override" | "principal", overrideReason?: string): string => {
+    if (kind === "accepted") return `${line} [mode ${mode}]`;
+    if (kind === "warn-pass") return `${line} [mode warn: would have been refused]`;
+    if (kind === "override") return `${line}; override: ${overrideReason} [mode ${mode === "on" ? "on" : "warn: would have been refused"}]`;
+    return `${line}; ${PRINCIPAL_PROOF_ACCEPT} [mode ${mode === "on" ? "on" : "warn: would have been refused"}]`;
+  };
   const brief = (o: Partial<ProofBrief> = {}): ProofBrief => ({ summary: "Totals row rounds to cents", decisions: "", leftOut: "nothing", limits: "none known", refs: [PR], attested: [], noCode: "", ...o });
   const filed: BriefInput = { summary: "Rounds the totals row to cents", leftOut: "nothing", limits: "none known" };
   const seen = (ref: string, state: RefState, detail: string | null = null): RefResult => ({ ref, state, detail, checkedAt: NOW + 5 });
@@ -579,19 +585,19 @@ describe("brief and proof (B13 to B16)", () => {
       .toEqual({ ok: false, error: { problem: "proof_not_green", detail: "proof: no brief" } });
     const warned = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, none("warn"));
     expect(value(warned).task.status).toBe("done");
-    expect(value(warned).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: "proof: no brief" });
+    expect(value(warned).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: proofSeen("proof: no brief", "warn", "warn-pass") });
   });
 
   it("the principal's accept is recorded as the override", () => {
     const r = act(inReview(), { action: "move", to: "done" }, principal, gate(proof()));
     expect(value(r).task.status).toBe("done");
-    expect(value(r).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: `${LINE}; ${PRINCIPAL_PROOF_ACCEPT}` });
+    expect(value(r).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: proofSeen(LINE, "on", "principal") });
   });
 
   it("the manager's override reason is recorded in the done event", () => {
     const r = act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: "flaky lint, rerun queued" }, manager, gate(proof()));
     expect(value(r).task.status).toBe("done");
-    expect(value(r).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: `${LINE}; override: flaky lint, rerun queued` });
+    expect(value(r).event.change).toMatchObject({ kind: "moved", to: "done", proofSeen: proofSeen(LINE, "on", "override", "flaky lint, rerun queued") });
     // an override that is not one clean line is refused as such, and one that says nothing is no override
     expect(problem(act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: "a\u0007b" }, manager, gate(proof())))).toBe("bad_text");
     expect(problem(act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: "  " }, manager, gate(proof())))).toBe("proof_not_green");
@@ -641,10 +647,10 @@ describe("brief and proof (B13 to B16)", () => {
     for (const mode of ["warn", "on"] as const) {
       const r = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, gate(proof({ mode, results: [seen(PR, "green")] })));
       expect(value(r).task.status, mode).toBe("done");
-      expect(value(r).event.change, mode).toMatchObject({ kind: "moved", to: "done", proofSeen: "proof: 1 of 1 green" });
+      expect(value(r).event.change, mode).toMatchObject({ kind: "moved", to: "done", proofSeen: proofSeen("proof: 1 of 1 green", mode, "accepted") });
     }
     expect(value(act(inReview(), { action: "move", to: "done", reason: "x" }, principal, gate(proof({ mode: "on", results: [seen(PR, "green")] })))).event.change)
-      .toMatchObject({ proofSeen: "proof: 1 of 1 green" });
+      .toMatchObject({ proofSeen: proofSeen("proof: 1 of 1 green", "on", "accepted") });
   });
 
   it("a done with a ref that was not checked is refused in on mode and recorded in warn mode", () => {
@@ -653,9 +659,31 @@ describe("brief and proof (B13 to B16)", () => {
     const line = `proof: 0 of 1 green · ○ ${PR} ${NOTE}`;
     expect(act(inReview(), { action: "move", to: "done", reason: "x" }, manager, unchecked("on")))
       .toEqual({ ok: false, error: { problem: "proof_not_green", detail: line } });
-    expect(value(act(inReview(), { action: "move", to: "done", reason: "x" }, manager, unchecked("warn"))).event.change).toMatchObject({ proofSeen: line });
+    expect(value(act(inReview(), { action: "move", to: "done", reason: "x" }, manager, unchecked("warn"))).event.change)
+      .toMatchObject({ proofSeen: proofSeen(line, "warn", "warn-pass") });
     expect(value(act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: "private repo, checked by hand" }, manager, unchecked("on"))).event.change)
-      .toMatchObject({ proofSeen: `${line}; override: private repo, checked by hand` });
+      .toMatchObject({ proofSeen: proofSeen(line, "on", "override", "private repo, checked by hand") });
+  });
+
+  it("a done with a no-code brief is refused in on mode when the task has a merge record", () => {
+    const noCodeBrief = brief({ refs: [], noCode: "an analysis, no code changed" });
+    const merges = [{ repo: MORNDO_REPO, sha: "a".repeat(40), at: NOW, by: "manager", override: null }];
+    const g: DoneGate = { merges, liveness: () => ({ live: true }), proof: proof({ brief: noCodeBrief, results: [] }) };
+    const proofOfWithMerges = proofOf as (b: ProofBrief | null, r: readonly RefResult[], m?: readonly { repo: string; sha: string }[]) => ReturnType<typeof proofOf>;
+    const line = proofOfWithMerges(noCodeBrief, [], merges.map(m => ({ repo: m.repo, sha: m.sha }))).line;
+    expect(act(inReview(), { action: "move", to: "done", reason: "read the memo" }, manager, g))
+      .toEqual({ ok: false, error: { problem: "proof_not_green", detail: line } });
+  });
+
+  it("proofSeen keeps the override reason whole when the line is long", () => {
+    const many = Array.from({ length: 8 }, (_, i) => `acme/shop#4${i}@${"3e9d1a7"}`);
+    const results = many.map(ref => seen(ref, "unfetchable", `${"z".repeat(95)}${ref.slice(-1)}`));
+    expect(proofOf(brief({ refs: many }), results).line.length).toBeGreaterThan(550);   // a line (cut at 600 by proofOf) that cannot fit with a 300-character reason beside it
+    const override = "o".repeat(300);
+    const r = act(inReview(), { action: "move", to: "done", reason: "x", proofOverride: override }, manager, gate(proof({ results })));
+    const text = (value(r).event.change as { proofSeen?: string }).proofSeen ?? "";
+    expect(text.endsWith(`; override: ${override} [mode on]`)).toBe(true);
+    expect(text.length).toBeLessThanOrEqual(900);
   });
 
   it("with mode off the done carries no proofSeen", () => {

@@ -499,3 +499,69 @@ describe("the proof on the agents' reads", () => {
     expect((await json(await m.get("/api/agent/board/tasks/T-1"))).task).toMatchObject({ status: "review" });
   });
 });
+
+describe("the principal's proof path (B13, B16)", () => {
+  const PR = "morndo/morndo#42@3e9d1a7";
+  const CI = "morndo/morndo@3e9d1a7:ci,lint";
+  const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  const briefBody = { summary: "Totals row rounds to cents", leftOut: "nothing", limits: "locale formats not covered", refs: [PR, CI] };
+  let forgeHub: InProcessHub;
+  let fakeForge: FakeForge;
+  let cookie: string;
+  let principalPost: (path: string, body: unknown) => Promise<Response>;
+  let forgeAgent: (token: string, lane?: string) => ReturnType<typeof agent>;
+  let forgeBuilderToken: string;
+
+  beforeEach(async () => {
+    fakeForge = await startFakeForge();
+    forgeHub = await startInProcessHub({ now: () => now, forge: new GithubChecks({ baseUrl: fakeForge.base, now: () => now }), proofMode: "on" });
+    cookie = await forgeHub.cookie();
+    principalPost = (path, body) => forgeHub.post(path, body, { cookie: `__Host-morndo=${cookie}` });
+    forgeBuilderToken = forgeHub.agents.issue("lanes", "worker").secret;
+    const managerTok = forgeHub.agents.issue("manager", "manager").secret;
+    forgeAgent = (token, lane) => ({
+      get: (path: string) => fetch(forgeHub.base + path, { headers: { authorization: `Bearer ${token}`, ...(lane ? { "x-morndo-lane": lane } : {}) } }),
+      post: (path: string, body: unknown) => fetch(forgeHub.base + path, {
+        method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(lane ? { "x-morndo-lane": lane } : {}) }, body: JSON.stringify(body),
+      }),
+    });
+    await forgeAgent(managerTok).post("/api/agent/board/tasks", { title: "Ship the totals row", assignee: "builder" });
+    await forgeAgent(forgeBuilderToken, "builder").post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await forgeAgent(forgeBuilderToken, "builder").post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+  });
+  afterEach(async () => { await forgeHub.close(); await fakeForge.close(); });
+
+  it("the principal's done refreshes stale results first", async () => {
+    fakeForge.pr("morndo/morndo", 42, { head: FULL });
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "failure" },
+    ]);
+    await forgeAgent(forgeBuilderToken, "builder").post("/api/agent/board/tasks/T-1", { action: "brief", brief: briefBody });
+    await forgeHub.proof.idle();
+    now += 31_000;
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    const done = await principalPost("/api/board/tasks/T-1", { action: "move", to: "done" });
+    expect(done.status).toBe(200);
+    const record = await json(await fetch(`${forgeHub.base}/api/board/tasks/T-1`, { headers: { cookie: `__Host-morndo=${cookie}` } }));
+    const moved = (record.events as Body[]).find(e => (e.change as Body).to === "done");
+    const change = moved?.change as Body | undefined;
+    expect(change?.proofSeen).toBe("proof: 2 of 2 green [mode on]");
+  });
+
+  it("a brief filed by the principal is seeded and verified", async () => {
+    fakeForge.pr("morndo/morndo", 42, { head: FULL });
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    expect((await principalPost("/api/board/tasks/T-1", { action: "brief", brief: briefBody })).status).toBe(200);
+    await forgeHub.proof.idle();
+    const view = forgeHub.proof.view("T-1");
+    expect(view?.state.kind).toBe("verified");
+    expect(view?.results.every(r => r.state === "green")).toBe(true);
+  });
+});
