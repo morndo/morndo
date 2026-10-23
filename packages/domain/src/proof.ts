@@ -159,6 +159,9 @@ function utf8Bytes(s: string): number {
 }
 
 export type RefState = "green" | "pending" | "red" | "mismatch" | "missing" | "unfetchable";
+// The states this build knows, for a store that reads a row without guessing: a state not among them (a newer hub
+// wrote it) is never taken for one.
+export const REF_STATES: readonly RefState[] = ["green", "pending", "red", "mismatch", "missing", "unfetchable"];
 export type RefResult = { ref: string; state: RefState; detail: string | null; checkedAt: number };   // ref: a brief's own canonical form
 export type ProofKind = "no_brief" | "unchecked" | "pending" | "failing" | "unfetchable" | "verified" | "attested_only";
 export type ProofState = { kind: ProofKind; green: number; total: number; accepts: boolean; line: string };

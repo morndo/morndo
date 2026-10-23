@@ -31,6 +31,7 @@ import { loadOrCreateVapid } from "../src/adapters/webpush.ts";
 import { enginesCli } from "../src/adapters/engines-cli.ts";
 import { EnginesService } from "../src/application/engines-service.ts";
 import { BoardService } from "../src/application/board-service.ts";
+import { ProofService } from "../src/application/proof-service.ts";
 import { AgentAccess } from "../src/application/agent-access.ts";
 import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
@@ -47,6 +48,7 @@ export type InProcessHub = {
   base: string; store: Store; access: AccessService; dir: string; identity: HubIdentity;
   notifications: NotificationService;
   board: BoardService;
+  proof: ProofService;
   agents: AgentAccess;
   briefs: BriefService;
   escalations: EscalationService;
@@ -141,6 +143,8 @@ export async function startInProcessHub(o: {
   // ADR-0015: the board, with the lanes a test's observation lists (none by default). `liveness`: a merge's liveness as
   // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
   const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}) });
+  // ADR-0035: the proof of work, over the same store, wired as main.ts wires it.
+  const proof = new ProofService({ store, board, ...(o.now ? { now: o.now } : {}) });
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}) });
   const queue = o.queue ? o.queue(store) : null;
@@ -167,7 +171,7 @@ export async function startInProcessHub(o: {
       queue ? { queue, isManager: id => id === o.manager } : null, () => o.manager ?? null),
     escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now), queue, ...(o.alerts ? { alerts: o.alerts } : {}),
     push: { publicKey: vapid.publicKey, notifications },
-    board: { service: board, agents }, usage, jobs, briefs,
+    board: { service: board, agents, proof }, usage, jobs, briefs,
     engines: o.engines ? new EnginesService({ cli: enginesCli(o.engines.bin, o.engines.env), store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}) }) : null,
     updatesService: o.updates ? new UpdatesService({
       fleet: o.updates.fleet, cli: o.updates.cli, sign: principalSigner(identity), store,
@@ -180,7 +184,7 @@ export async function startInProcessHub(o: {
   await http.ready;
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
   return {
-    base, store, access, dir, identity, notifications, board, agents, briefs, escalations, usage, jobs, pushes,
+    base, store, access, dir, identity, notifications, board, proof, agents, briefs, escalations, usage, jobs, pushes,
     async cookie() {
       const opts = await access.pairOptions(access.issueConsoleToken().secret, "phone");
       if (!("flowId" in opts)) throw new Error(opts.refused);

@@ -3988,6 +3988,10 @@ export const CONTROLS: Control[] = [
   { id: "t406-brief-not-the-board", task: "T-406", file: "packages/domain/src/board.ts",
     find: `      if (actor.kind === "board") return refuse("not_allowed");\n      if (actor.kind === "worker" && !mine) return refuse("not_yours");`, replace: `      if (actor.kind === "worker" && !mine) return refuse("not_yours");`,
     run: ["packages/domain/test/board.test.ts"], expect: "not_allowed" },
+  // ---- Proof of work, step 2 (board T-406): a result is stored only for the brief that counts and a ref it holds.
+  { id: "t406-record-only-the-live-brief", task: "T-406", file: "apps/hub/src/application/proof-service.ts",
+    find: `    if (current === null || current.rev !== briefRev || !current.brief.refs.includes(result.ref)) return false;\n`, replace: `    if (current === null) return false;\n`,
+    run: ["apps/hub/test/proof-service.test.ts"], expect: "ignored" },
   // ---- T-398: a DONE with a wake-up scheduled or a job running still moves the task to review, each guard removed once.
   { id: "t398-d1-wakeup-and-job", task: "T-398", file: "packages/domain/src/board.ts",
     find: `(run.wait?.on === "wakeup" || run.wait?.on === "job") && run.outcome === "done"`, replace: `false`,

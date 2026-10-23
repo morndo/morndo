@@ -393,3 +393,34 @@ describe("merged, not live (B11)", () => {
     expect((await builder.post("/api/agent/board/tasks/T-1", { action: "unmerged", sha: SHA })).status).toBe(403);
   });
 });
+
+describe("the brief on the agents' route (B13)", () => {
+  const brief = { summary: "Totals row rounds to cents", leftOut: "nothing", limits: "locale formats not covered", refs: ["morndo/morndo#42@3e9d1a7", "morndo/morndo@3e9d1a7:ci,lint"] };
+  // A task T-1 offered for review by its lane: where a brief is filed from.
+  const atReview = async () => {
+    await agent(managerToken).post("/api/agent/board/tasks", { title: "Ship the totals row", assignee: "builder" });
+    const builder = agent(workerToken, "builder");
+    await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+  };
+  it("a brief posted by the lane goes through the proof service and seeds its rows", async () => {
+    await atReview();
+    const r = await agent(workerToken, "builder").post("/api/agent/board/tasks/T-1", { action: "brief", brief });
+    expect(r.status).toBe(200);
+    expect(await json(r)).toMatchObject({ task: { key: "T-1", rev: 4 }, event: { rev: 4, change: { kind: "briefed" } } });
+    const view = hub.proof.view("T-1");
+    expect(view?.rev).toBe(4);
+    expect(view?.results.map(x => [x.ref, x.state, x.detail])).toEqual([
+      ["morndo/morndo#42@3e9d1a7", "pending", null],
+      ["morndo/morndo@3e9d1a7:ci,lint", "pending", null],
+    ]);
+    expect(view?.state).toMatchObject({ kind: "pending", green: 0, total: 2, accepts: false });
+  });
+  it("a refused brief answers with the problem", async () => {
+    await atReview();
+    const r = await agent(workerToken, "builder").post("/api/agent/board/tasks/T-1", { action: "brief", brief: { ...brief, refs: ["not a ref"] } });
+    expect(r.status).toBe(400);                                // bad_ref falls through boardProblemStatus's default
+    expect(await json(r)).toEqual({ error: "bad_ref", detail: "not a ref: a reference is owner/repo#PR@sha or owner/repo@sha:check,check" });
+    expect(hub.proof.view("T-1")).toEqual({ rev: null, brief: null, results: [], state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" } });
+  });
+});

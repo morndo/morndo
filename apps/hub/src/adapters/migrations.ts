@@ -262,6 +262,14 @@ export const MIGRATIONS: readonly Migration[] = [
       if (known === undefined) MIGRATIONS.find(m => m.version === 24)!.up(db);
     },
   },
+  {
+    version: 26,
+    name: "board_proofs (B14): one row per reference of a task's brief, its state as the hub read it, kept in rows of their own so a re-check never touches the task or its events; a new table only, so an older hub opens the database as it is",
+    compat: "additive",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS board_proofs (
+      key TEXT NOT NULL, brief_rev INTEGER NOT NULL, ref TEXT NOT NULL, state TEXT NOT NULL, detail TEXT, checked_at INTEGER NOT NULL,
+      PRIMARY KEY (key, brief_rev, ref))`),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

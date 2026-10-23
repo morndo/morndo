@@ -26,6 +26,7 @@ import { queuedCommand, type ManagerQueue } from "../application/manager-queue.t
 import type { EnginesService } from "../application/engines-service.ts";
 import type { ConnectionsPageService } from "../application/connections-page.ts";
 import type { BoardService } from "../application/board-service.ts";
+import type { ProofService } from "../application/proof-service.ts";
 import type { AgentAccess } from "../application/agent-access.ts";
 import type { JobsService } from "../application/jobs-service.ts";
 import type { AlertsService } from "../application/alerts-service.ts";
@@ -219,7 +220,7 @@ export function startHttp(p: {
   engines?: EnginesService | null;                                          // ADR-0013: the Engines page; null: not connected
   updatesService?: UpdatesService | null;                                   // updates §8.1 (PR 6c): every machine's Version; null: no fleet and no CLI
   connections?: ConnectionsPageService | null;                              // ADR-0018: LLM connections; null: no home set
-  board?: { service: BoardService; agents: AgentAccess } | null;            // ADR-0015: the board; null: off
+  board?: { service: BoardService; agents: AgentAccess; proof?: ProofService } | null;   // ADR-0015: the board (proof: ADR-0035, B13; absent: briefs are not seeded); null: off
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
   queue?: ManagerQueue | null;                                              // the manager's delivery queue (fleet-clients §9.1); null without a fleet
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
@@ -462,7 +463,13 @@ export function startHttp(p: {
       const t = service.task(task[1] ?? "");
       return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
     }
-    if (task && method === "POST") return boardAnswer(res, await service.actChecked(task[1] ?? "", await readBody(req, BoardActionBody), who.actor));
+    if (task && method === "POST") {
+      const body = await readBody(req, BoardActionBody);
+      // B13 (ADR-0035): a brief is filed through the proof service, which seeds its references as rows to check; every
+      // other action is the board's own. Without the service wired, a brief is the board's alone.
+      if (body.action === "brief" && p.board.proof) return boardAnswer(res, await p.board.proof.file(task[1] ?? "", body.brief, who.actor));
+      return boardAnswer(res, await service.actChecked(task[1] ?? "", body, who.actor));
+    }
     throw new HttpError(404, "no such route");
   }
 

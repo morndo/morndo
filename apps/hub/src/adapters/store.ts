@@ -8,9 +8,9 @@ import { log } from "./log.ts";
 import { migrate } from "./migrations.ts";
 import type { DeliveryState } from "@morndo/protocol";
 import {
-  endpointId, pairingTokenId, sessionId,
+  endpointId, pairingTokenId, sessionId, REF_STATES,
   type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
-  type Session, type Task, type TaskEvent, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
+  type RefResult, type Session, type Task, type TaskEvent, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
 } from "@morndo/domain";
 
 // What the audit log holds: Access events, and the principal's Decisions (the words of a Decision never, only their
@@ -587,6 +587,31 @@ export class Store {
   // regard to case, as the domain matches it.
   deleteMerge(key: string, repo: string, sha: string) {
     this.db.prepare("DELETE FROM board_merges WHERE key = ? AND lower(repo) = lower(?) AND sha = ?").run(key, repo, sha);
+  }
+
+  // The board's proof results (B14, ADR-0035): one row per reference of a brief, `brief_rev` the rev of the `briefed`
+  // event it belongs to, so rows of two rounds of work are kept apart. Results are rows, not events, so nothing here
+  // ever touches board_tasks or board_events; all three are plain statements, and the caller decides about transactions.
+
+  // One pending row per reference of a brief just filed. INSERT OR IGNORE: a row that exists (a replayed filing after a
+  // crash between the event and this) stands, its state as it was checked.
+  seedProofs(key: string, briefRev: number, refs: readonly string[], at: number) {
+    const ins = this.db.prepare("INSERT OR IGNORE INTO board_proofs (key, brief_rev, ref, state, detail, checked_at) VALUES (?, ?, ?, 'pending', NULL, ?)");
+    for (const ref of refs) ins.run(key, briefRev, ref, at);
+  }
+  // A reference's state as the hub read it: the row of (key, brief_rev, ref), replaced whole.
+  saveProofResult(key: string, briefRev: number, r: RefResult) {
+    this.db.prepare(`INSERT INTO board_proofs (key, brief_rev, ref, state, detail, checked_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(key, brief_rev, ref) DO UPDATE SET state = excluded.state, detail = excluded.detail, checked_at = excluded.checked_at`)
+      .run(key, briefRev, r.ref, r.state, r.detail, r.checkedAt);
+  }
+  // The results of one brief, ordered by ref. A row whose state is not one this build knows (a newer hub wrote it) is
+  // never guessed at: it reads as unfetchable, with the reason kept.
+  proofResultsOf(key: string, briefRev: number): RefResult[] {
+    return (this.db.prepare("SELECT ref, state, detail, checked_at FROM board_proofs WHERE key = ? AND brief_rev = ? ORDER BY ref").all(key, briefRev) as Row[])
+      .map(r => (REF_STATES as readonly string[]).includes(r.state as string)
+        ? { ref: r.ref as string, state: r.state as RefResult["state"], detail: (r.detail as string | null) ?? null, checkedAt: r.checked_at as number }
+        : { ref: r.ref as string, state: "unfetchable", detail: "unknown state", checkedAt: r.checked_at as number });
   }
 
   // Agent tokens (ADR-0015, B1).

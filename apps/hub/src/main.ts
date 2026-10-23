@@ -45,6 +45,7 @@ import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
+import { ProofService } from "./application/proof-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
 import { gitAncestry, gitHasCommit } from "./adapters/git-ancestry.ts";
@@ -329,6 +330,8 @@ switch (cmd) {
     });
     const following: { projector: BoardProjector | null } = { projector: null };
     const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null) });
+    // ADR-0035: the proof of work, over the same store — a brief filed on the board seeds its references as rows.
+    const proof = new ProofService({ store, board });
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
@@ -389,7 +392,7 @@ switch (cmd) {
     void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, store, files, inbox, reading, presence,
-      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
+      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents, proof }, usage, jobs, queue, alerts,
       transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) }, updatesService,
     });
     shutdown.onStop(async () => { await http.idle(); await http.close(); });
