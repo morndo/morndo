@@ -68,7 +68,7 @@ export const CHECK: Checkers = {
   "connections.role": decoded("connections.role"),
   "connections.revoke": decoded("connections.revoke"),
   "connections.narrow": decoded("connections.narrow"),
-  // Updates §5.4: the arguments as the fleet checked them (a Version). This node has no handler for the op yet —
-  // the executor answers unknown_op for it — and never announces CAP_UPDATE, so the fleet sends it none.
+  // Updates §5.4: the arguments as the fleet checked them (a Version). The node's handler starts the updater's
+  // apply unit (update-ops.ts); without CAP_UPDATE the fleet sends the op none of this.
   "update.apply": decoded("update.apply"),
 };

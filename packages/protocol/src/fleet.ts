@@ -247,6 +247,24 @@ export type Health = { memTotal: number; memAvailable: number; psiSome10: number
   // What the node's updater reports, when the node has one (updates §6.3, §7): absent from an older node, whose update
   // reads as null, never as a malformed health.
   update?: NodeUpdateHealth };
+
+// The status word the fleet gives a node (fleet clients §2.3): online, its agent connected; stale, its health went
+// quiet; offline, its agent gone.
+export const FLEET_NODE_STATUSES = ["online", "stale", "offline"] as const;
+export type FleetNodeStatus = (typeof FLEET_NODE_STATUSES)[number];
+// One row of GET /v1/nodes, as every client reads it (the hub's updates view among them, §8.1): the machine's name
+// and status, its last health report, the Version its agent said and the commit it runs (null before it said one),
+// the protocol versions its hello named (null when it is not connected), and its updater's last report (null before
+// any). A fleet from before updates sends the first four only — a client reads the rest as null, never as a mismatch.
+export type FleetNode = {
+  name: string;
+  status: FleetNodeStatus;
+  health: Health | null;
+  agent: string | null;
+  commit: string | null;
+  proto: number[] | null;
+  update: NodeUpdateHealth | null;
+};
 // "/lane": a lane state event the node made from its session state (fleet clients §7), carried and replayed like a hook.
 // Its body: { event: "needs_input" | "answered"; sessionId: string | null; question?: string }.
 export type HookEvent = { streamId: string; seq: number; at: number;
@@ -285,10 +303,13 @@ export type RunView = Run;
 // draft_stashed: a node stashed a lane's unsent draft so its deliveries could go in (#64);
 // the updates design (§7): rollout_halted — a Rollout halted, by a node's rollback or by hand; update_rolled_back — a
 // node rolled a Version back; update_rollback_failed — a rollback that did not reach the good Version;
-// update_skew_blocked — the control plane refused to ask a node for a Version above its own (RL11).
+// update_skew_blocked — the control plane held its apply while a joined node's agent protocol falls outside the
+// target's range (RL11): nothing ran, and the hold names the nodes.
+// journal_unreadable: a line of the fleet's revocation journal it could not read and skipped (updates design §11.5).
 export const ALERT_KINDS = ["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter", "backlog_full", "unrouted_hook",
   "job_failed", "job_unnoticed", "connection", "delivery_waiting", "subscriber_lagging", "engine_fallback", "draft_stashed",
-  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked"] as const;
+  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked",
+  "journal_unreadable"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 export type Alert = { id: number; at: number; node: string | null; kind: AlertKind; detail: Record<string, unknown> };
 // The alerts the app pushes (the owner, 2026-10-12): a node's key may be stolen (a new source, a second instance), events
@@ -302,6 +323,8 @@ export function urgentAlert(a: { kind: string; detail: Record<string, unknown> }
     // acts, and a node that rolled back is the fleet off its committed Version — each is a now, not a morning read.
     // update_skew_blocked stays quiet: the ask was refused, nothing ran (RL11), and the record is enough.
     case "rollout_halted": case "update_rolled_back": case "update_rollback_failed": return true;
+    // a revocation the journal holds may not have been applied again: someone should look
+    case "journal_unreadable": return true;
     case "delivery_waiting": return typeof a.detail.minutes === "number" && a.detail.minutes >= 15;
     default: return false;
   }
@@ -534,12 +557,18 @@ const UPDATE_HEALTH_FIELDS = {
   version: releaseVersion(), target: z.exactOptional(releaseVersion()), reason: z.exactOptional(label()), failedCheck: z.exactOptional(label()),
   attempt: z.exactOptional(z.string().check(z.regex(/^[A-Za-z0-9._:-]{1,64}$/))),
 };
-const UpdateHealthSchema = z.object(UPDATE_HEALTH_FIELDS);
+export const UpdateHealthSchema = z.object(UPDATE_HEALTH_FIELDS);
 // What a machine's updater last did, as it writes it to ~/.local/state/morndo-update/state.json (updates §7): a node's
 // agent reports it in its health; on the control plane the fleet reads it itself, so the control plane's own
 // rollback halts its Rollout without a route anyone else could call (review of #107). `at`: when it was written.
-export type UpdateStateFile = NodeUpdateHealth & { at: number };
-export const UpdateStateFileSchema = z.strictObject({ ...UPDATE_HEALTH_FIELDS, at: z.number() });
+// `soakMinutes` rides a `current` record: the commit's own soak (§4.5), the one number the fleet cannot know itself —
+// absent is the domain's default.
+export type UpdateStateFile = NodeUpdateHealth & { at: number; soakMinutes?: number };
+export const UpdateStateFileSchema = z.strictObject({
+  ...UPDATE_HEALTH_FIELDS,
+  at: z.number(),
+  soakMinutes: z.exactOptional(z.int().check(z.gte(0), z.lte(10_080))),
+});
 const HealthSchema = z.object({
   memTotal: z.number(), memAvailable: z.number(), psiSome10: z.nullable(z.number()), psiFull10: z.nullable(z.number()),
   diskFreeHome: z.number(), load1: z.number(), tmuxOk: z.boolean(), wallClock: z.number(), spoolDepth: count(), drops: count(),
@@ -610,6 +639,25 @@ export type RolloutWire = {
 export const RolloutWireSchema = z.object({
   version: releaseVersion(), controlPlaneCommittedAt: z.nullable(z.number()), soakMinutes: z.int().check(z.gte(0), z.lte(10_080)),
   halted: z.boolean(), haltedBy: z.nullable(nodeName()), haltReason: z.nullable(label()), haltedAt: z.nullable(z.number()),
+});
+
+// The fleet view file (updates §6.7, §7): ~/.local/state/morndo-node/fleet-view.json, what the node agent last heard
+// from the fleet — the build the control plane runs, the Rollout as it stands, and the offer the fleet made this node
+// (the Version it may take and the attempt id it reports a rollback of it under, §5.4) — with the moment it was
+// heard. The agent writes it; the node's updater reads it. `controlPlane` null: a fleet that ran no control plane said
+// so; `offer` null: the last word carried no offer, and a node without one applies nothing. Strict: anything else is
+// not a view, never a guess at what it might have meant.
+export type FleetViewFile = {
+  observedAt: number;
+  controlPlane: { version: string; commit: string | null } | null;
+  rollout: RolloutWire | null;
+  offer: { version: string; attempt: string } | null;
+};
+export const FleetViewFileSchema = z.strictObject({
+  observedAt: z.number(),
+  controlPlane: z.nullable(z.object({ version: semver(), commit: z.nullable(buildCommit()) })),
+  rollout: z.nullable(RolloutWireSchema),
+  offer: z.nullable(offer()),
 });
 
 // Every connection (§5.2). `caps`: the ops this node's policy allows, and capabilities beside them (CAP_LONG_TEXT;
@@ -762,5 +810,6 @@ check<Same<z.output<typeof RunViewSchema>, RunView>>(true);
 check<Same<z.output<typeof LaneStateBodySchema>, LaneStateBody>>(true);
 check<Same<z.output<typeof RolloutWireSchema>, RolloutWire>>(true);
 check<Same<z.output<typeof UpdateHealthSchema>, NodeUpdateHealth>>(true);
+check<Same<z.output<typeof FleetViewFileSchema>, FleetViewFile>>(true);
 check<Same<z.output<typeof UpdateStateFileSchema>, UpdateStateFile>>(true);
 check<Same<(typeof SESSION_STATUSES)[number], SessionStatus>>(true);

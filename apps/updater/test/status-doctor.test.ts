@@ -15,7 +15,9 @@ import { doctor, type DoctorReport } from "../src/application/doctor-service.ts"
 import { formatStatus, readStatus } from "../src/application/status-service.ts";
 import { SshSigVerifier } from "../src/adapters/verifier-sshsig.ts";
 import { openUpdateStore } from "../src/adapters/store-sqlite.ts";
-import { FakeArtifacts, FakeClock, FakeFeed, FakeInstaller, FakeSettings, FakeStore, wipe } from "./helpers/fakes.ts";
+import {
+  FakeArtifacts, FakeClock, FakeFeed, FakeFleetView, FakeInstaller, FakeSettings, FakeStateSink, FakeStore, wipe,
+} from "./helpers/fakes.ts";
 import { feedFixture, keySetDocument, makeKeys, manifestSignature, releaseFixture, signed, type Keys, type ReleaseFixture } from "./helpers/release-fixtures.ts";
 
 const NOW = 1_761_000_000_000;              // 2025-10-21T09:20:00Z, the same moment the check tests stand at
@@ -72,6 +74,7 @@ const build = (bend: (w: World) => void = () => {}, o: { manual?: boolean } = {}
   const service = new CheckService({
     feed: fakeFeed, artifacts, verifier: new SshSigVerifier(), installer, store, settings, clock,
     platform: rel.platform, switches: { disableUpdates: false },
+    fleet: new FakeFleetView(), state: new FakeStateSink(),
   });
   const world: World = {
     keys, ks1, rel, installer, store, settings, clock, ready: Promise.resolve(),

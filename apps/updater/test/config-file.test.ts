@@ -18,15 +18,20 @@ describe("the update settings file (§8.3)", () => {
 
   it("no file: the defaults, and reading it twice changes nothing", () => {
     const source = new ConfigFile(join(scratch, "absent.json"));
-    expect(source.read()).toEqual({ channel: "stable", mode: "apply", pin: null, window: null });
-    expect(source.read()).toEqual({ channel: "stable", mode: "apply", pin: null, window: null });
+    expect(source.read()).toEqual({ channel: "stable", mode: "apply", pin: null, window: null, soakMinutes: null });
+    expect(source.read()).toEqual({ channel: "stable", mode: "apply", pin: null, window: null, soakMinutes: null });
   });
   it("a full file: every field, the window minutes and the pin a parsed Version", () => {
     write(`${JSON.stringify({ channel: "latest", mode: "stage", window: "22:00-06:00", pin: "1.2.3-rc.1" }, null, 2)}\n`);
     expect(new ConfigFile(file()).read()).toEqual({
       channel: "latest", mode: "stage", window: { start: 1320, end: 360 },
       pin: { major: 1, minor: 2, patch: 3, pre: ["rc", "1"], build: null },
+      soakMinutes: null,                       // absent in the file: the domain's default, kept as null
     });
+  });
+  it("a soak the file names rides along (§4.5): the commit's state record carries it to the fleet", () => {
+    write(`${JSON.stringify({ soakMinutes: 45 })}\n`);
+    expect(new ConfigFile(file()).read()).toMatchObject({ soakMinutes: 45 });
   });
   it("a window that wraps midnight keeps end below start (22:00-06:00 is 1320 to 360)", () => {
     write(`${JSON.stringify({ window: "22:00-06:00" })}\n`);

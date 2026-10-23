@@ -155,7 +155,7 @@ export class Connections {
     const epoch = this.#nodes.nextEpoch(a.node);
     const previous = this.#nodes.recordSource(a.node, a.source);
     if (previous !== null) this.#audit.alert("source_changed", a.node, { from: previous, to: a.source });
-    this.#nodes.seen(a.node, a.agentVersion);
+    this.#nodes.seen(a.node, a.agentVersion, a.proto);
     this.#audit.record("agent", "conn.admitted", a.node, { instanceId: a.instanceId, epoch, source: a.source });
     const cur = this.#live.get(a.node);
     if (cur) {
@@ -259,6 +259,9 @@ export class Connections {
           return Promise.resolve(failed("unknown_op", `${node}'s agent has no update.apply; update Morndo on it`));
         if (this.#updates.aboveOwn(version))
           return Promise.resolve(failed("not_allowed", `update.apply on ${node} for ${version}: a node never runs a Version newer than its control plane (RL11)`));
+        const runs = this.latest(node).health?.update?.version;
+        if (runs !== undefined && this.#updates.aboveOwn(runs))
+          return Promise.resolve(failed("not_allowed", `update.apply on ${node}: it runs ${runs}, above the control plane's own; it moves only once the control plane catches up, or roll it back on ${node} by hand (morndo update --rollback)`));
         if (this.#updates.halted(version))
           return Promise.resolve(failed("not_allowed", `update.apply on ${node} for ${version}: the Rollout of ${version} is halted: resume it first (RL12)`));
         // The fleet's own attempt id for this ask, replacing any the caller sent: the id that node's rollback of it is
@@ -362,7 +365,8 @@ export class Connections {
     return this.#nodes.list().filter(n => n.revokedAt === null).map(n => ({
       name: n.name, status: this.status(n.name), health: this.latest(n.name).health, agent: this.#live.get(n.name)?.agentVersion ?? n.agentVersion,
       commit: this.#live.get(n.name)?.agentCommit ?? null,
-      proto: this.#live.get(n.name)?.proto ?? null, update: this.latest(n.name).health?.update ?? null,
+      // live, or the last hello's while offline (review of #111): an offline node still speaks those (RL11)
+      proto: this.#live.get(n.name)?.proto ?? n.lastProto, update: this.latest(n.name).health?.update ?? null,
     }));
   }
 

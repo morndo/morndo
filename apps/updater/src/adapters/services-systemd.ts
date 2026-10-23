@@ -160,11 +160,13 @@ export class SystemdServices implements ServiceManager {
     return group !== "" && this.tmuxInCgroup(join(this.cgroupRoot, group));
   }
 
-  async runApply(version: string): Promise<void> {
+  async runApply(version: string, o?: { wait?: boolean }): Promise<void> {
     // §6.2's apply runs as its own oneshot unit: `systemctl --user start` on a oneshot returns only when the
     // unit's run has ended (systemctl(1), systemd 255), so whoever asked for the apply — a person at a terminal,
     // the tick — can die without interrupting the walk, and the exit code the unit recorded is the answer.
-    await this.checked(["--user", "start", `morndo-update-apply@${version}.service`]);
+    // PR 6c's --detach adds --no-block: the start is asked for, not waited on, and the unit's own record is
+    // how it ended.
+    await this.checked(["--user", ...(o?.wait === false ? ["--no-block"] : []), "start", `morndo-update-apply@${version}.service`]);
   }
 
   async enable(units: readonly string[]): Promise<void> {

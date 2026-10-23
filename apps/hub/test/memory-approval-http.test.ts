@@ -63,7 +63,7 @@ async function hub(): Promise<Hub> {
   const memory = new MemoryService({ store: memoryStore, now: () => now, policy: () => access.policy() });
   const http = startHttp({
     config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000), steering: new SteeringService(store, tmux),
-    escalations, remote, board: { service: new BoardService({ store, policy: () => access.policy() }), agents }, memory: { service: memory, agents },
+    escalations, remote, store, board: { service: new BoardService({ store, policy: () => access.policy() }), agents }, memory: { service: memory, agents },
     now: () => now,
   });
   await http.ready;

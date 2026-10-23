@@ -9,8 +9,8 @@ import {
   runRollback, timingOf,
 } from "./apply-steps.ts";
 import type {
-  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager, Sleeper,
-  UpdateStore,
+  AlertSink, ApplyingMarker, Backup, Clock, HoldWriter, Installer, Revocations, RoleProbe, ServiceManager,
+  Sleeper, UpdateStateSink, UpdateStore,
 } from "./ports.ts";
 
 export type RecoverOutcome =
@@ -28,20 +28,28 @@ export class RecoveryService {
     services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
     applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
     alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    state: UpdateStateSink; soakMinutes: number;
   };
 
   constructor(p: {
     services: ServiceManager; probe: RoleProbe; backup: Backup; revocations: Revocations; hold: HoldWriter;
     applying: ApplyingMarker; installer: Installer; store: UpdateStore; clock: Clock; sleeper: Sleeper;
     alerts: AlertSink; timing?: Partial<ApplyTiming>;
+    state: UpdateStateSink; soakMinutes: number;
   }) {
     this.#p = p;
   }
 
   async recover(): Promise<RecoverOutcome> {
-    const { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts } = this.#p;
+    const {
+      services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts,
+      state, soakMinutes,
+    } = this.#p;
     const timing = timingOf(this.#p.timing);
-    const deps: ApplyDeps = { services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts };
+    const deps: ApplyDeps = {
+      services, probe, backup, revocations, hold, applying, installer, store, clock, sleeper, alerts,
+      state, soakMinutes,
+    };
     const lock = store.tryLock();                   // §6.6: whatever runs next takes the apply lock first
     if (lock === null) return { kind: "busy" };
     try {

@@ -139,7 +139,7 @@ Any other value matches only itself. An answer may hold no field that its exampl
 - `health` is the node's latest report: memory, load, disk, the clock, the depth of its hook spool. It is null until the node has sent one.
 - `agent` is the version its agent last reported.
 - `commit` is the commit its agent runs, from its live connection: null while the node is offline, or for an agent that does not report one.
-- `proto` is the protocol versions its agent offered on its live connection: null while the node is offline.
+- `proto` is the protocol versions its agent offered on its live connection, and while it is offline the ones its last hello named (null for a node that never connected): an offline node still speaks those, so the control plane's skew gate counts them (RL11). A joined node with null holds the control plane's apply as unknown. Revoking the node is how the owner lets a Release past one that will never come back.
 - `update` is the node's last update report (§5.4): `{ state, version, target?, reason?, failedCheck? }`, with `state` one of `current`, `staged`, `waiting`, `applying`, `rolled_back`, `rollback_failed`. Null before any.
 
 ```example nodes
@@ -226,15 +226,19 @@ GET /v1/rollout
 ---
 200
 
-{ "controlPlane": { "version": "{{string:cp}}", "commit": "{{string}}" }, "rollout": null, "aboveControlPlane": [] }
+{ "controlPlane": { "version": "{{string:cp}}", "commit": "{{string}}" }, "rollout": null, "aboveControlPlane": [], "nodesAhead": [] }
 ```
 
 - `controlPlane` is the fleet's own build: the Version and the commit of the tree it runs.
-- `rollout` is the Rollout nodes follow: the highest Version at or below the control plane's own that the fleet holds a Rollout of, or null. `aboveControlPlane` lists the halted Rollouts above it, highest first: what the control plane rolled back from. They never stand for the Rollout (no node runs above its control plane, RL11) and stay until resumed. `controlPlaneCommittedAt` is when the control plane committed to it and `soakMinutes` (0–10080, 30 by default) how long it runs it before a node may take it; `halted`, `haltedBy`, `haltReason` and `haltedAt` say when a machine or the owner stopped it.
+- `rollout` is the Rollout nodes follow: the highest Version at or below the control plane's own that the fleet holds a Rollout of, or null. `aboveControlPlane` lists the halted Rollouts above it, highest first: what the control plane rolled back from. They never stand for the Rollout (no node runs above its control plane, RL11) and stay until resumed. `nodesAhead` names the nodes whose updater says they run above the control plane's Version: after the control plane rolls back, the nodes that had taken the Version it left stay on it. Nothing moves them by itself: the fleet refuses every `update.apply` to such a node (`not_allowed`), and their own ticks take nothing lower, so they wait until the control plane catches up or the owner rolls each back on it by hand (`morndo update --rollback`). The control plane's own rollback, the principal's included, halts the Version it left (its updater announces the attempt first). `controlPlaneCommittedAt` is when the control plane committed to it and `soakMinutes` (0–10080, 30 by default) how long it runs it before a node may take it; `halted`, `haltedBy`, `haltReason` and `haltedAt` say when a machine or the owner stopped it.
 
-**Who may move a Rollout.** The socket is the user's, and a lane runs as that user too, so the fleet takes a commit or a halt only from the control plane's updater, and a resume or an `update.apply` only from the principal with a fresh passkey through the hub. Until the fleet can check them (the updater: updates PR 6b; the hub's step-up proof: PR 6c) it refuses all four, whoever asks: 403 `not_allowed` here, `not_allowed` for the op (§8). A halt still happens where a rollback does, by the two internal paths: a node's own `health` (below), and, for the control plane itself, its updater's state file (`~/.local/state/morndo-update/state.json`, read once a second like `hold.json`).
+**Who may move a Rollout.** The socket is the user's, and a lane runs as that user too, so the fleet takes a commit or a halt only from the control plane's updater, and a resume or an `update.apply` only from the principal with a fresh step-up through the hub. The principal's two carry the hub's signed assertion, `x-morndo-principal` (below); the fleet checks it under the hub's public key, which comes from its config (`principalKey`) when one is pinned and otherwise from the hub's own `identity.pub` (`$MORNDO_HOME`/`~/.local/share/morndo`, rewritten at each hub start), read afresh at each check; with neither to read it refuses them as before: 403 `not_allowed` here, `not_allowed` for the op (§8). The updater's two stay closed on their routes: it commits by writing its state file (below), and a halt comes where a rollback does, by the two internal paths: a node's own `health` (below), and, for the control plane itself, its updater's state file (`~/.local/state/morndo-update/state.json`, read once a second like `hold.json`).
 
-**Committing.** `POST /v1/rollout/committed` takes `{ version, soakMinutes? }` and starts the soak of that Version. The control plane commits only the Version it runs itself; anything else is 409 `not_allowed`, and nothing is stored. A Version is a Release's: SemVer without build metadata (`0.4.2`, not `0.4.2+x`), and a Rollout is found by precedence, so no spelling steps around a halt.
+**The principal's proof.** The hub signs one assertion per request — what it asks for (`rollout.resume` with a Version, or `update.apply` with a Version and a node), until when (`exp`), and a nonce — and sends it as `x-morndo-principal: <base64url payload>.<base64url signature>`, the signature Ed25519 over `"morndo-principal:"` plus the payload's exact bytes as sent. The fleet verifies under the key it holds for the hub (above) and accepts only when every check passes: a good signature; `exp` in the future and at most 60 s ahead of the fleet's own clock; the ask equal to the request's — op, Version, and node, so a proof for one machine or one Version opens no other's door; and a nonce it has not seen, kept until its `exp` and spent on use (at most 10,000 at once; when that many are still live the fleet refuses new ones rather than forget one). Any miss, and a missing header, is the same as no proof: refused, nothing moved.
+
+**What the proof does not stop (same user).** The proof keeps a lane's stray call from moving a Rollout; it is not a boundary against a process of the user itself, which every Morndo service already trusts (ADR-0004's limit, the updates design's same-user threat model). That process can read the hub's identity key (`0600`, the user's) and sign a fresh proof, or write the key file and the fleet's config. So the fleet does not pin the key by default: it reads the hub's `identity.pub` in the hub's data directory (`0700`), and a pinned `principalKey` changes nothing for that process. The nonces are the fleet process's memory: a restart forgets them, so a header seen in the 30 s before a restart could be sent once more after it. Only the user's own process can see one, since the header travels only over this `0600` socket, and it reaches only the same ask: the same resume, or the same `update.apply`, which the node's own gates still judge.
+
+**Committing.** The route is closed with the others: the control plane's updater commits by writing its state file (`~/.local/state/morndo-update/state.json`, read once a second like `hold.json`). A `current` record of the fleet's own running Version is the commit — `soakMinutes` rides the record (0–10080, the domain's 30 by default) and the soak starts at the record's own `at`, so a fleet that reads the same record again, after a restart among them, does not restart the soak and announces nothing anew; a `current` record of any other Version commits nothing. The control plane commits only the Version it runs itself. A Version is a Release's: SemVer without build metadata (`0.4.2`, not `0.4.2+x`), and a Rollout is found by precedence, so no spelling steps around a halt.
 
 ```example rollout-committed
 POST /v1/rollout/committed
@@ -1224,7 +1228,7 @@ content-type: application/json
 { "ok": true, "result": { "committed": true, "written": "{{number}}", "removed": "{{number}}", "skillDirs": "{{any}}", "conflicts": [] }, "invVersion": "{{number}}", "store": "{{uuid:store}}", "storeSeq": "{{number}}" }
 ```
 
-**`update.apply`** moves a whole node to a Version, so it takes a key and a fresh passkey at the hub (`STEP_UP_OPS`). The fleet refuses it before anything is sent: with `unknown_op` when the node's agent didn't announce the `update` capability (an agent from before updates), and with `not_allowed` when the Version is above the one the control plane runs (RL11) or the Rollout is halted (RL12, §5.4). Forwarded, it carries `attempt`, the id the fleet issued that node for that Version: the one its rollback of it is reported under. This node's agent predates updates:
+**`update.apply`** moves a whole node to a Version, so it is the principal's: it takes a key and the hub's signed assertion for exactly that node and Version (`x-morndo-principal`, §5.4), and the fleet refuses it before anything is sent when it cannot check that proof. With the proof good, the fleet still refuses — nothing sent — with `unknown_op` when the node's agent didn't announce the `update` capability (an agent from before updates), and with `not_allowed` when the Version is above the one the control plane runs (RL11) or the Rollout is halted (RL12, §5.4). Forwarded, it carries `attempt`, the id the fleet issued that node for that Version: the one its rollback of it is reported under. This one carries no proof:
 
 ```example op-update-apply
 POST /v1/op
@@ -1235,7 +1239,7 @@ content-type: application/json
 ---
 200
 
-{ "ok": false, "error": { "code": "not_allowed", "executed": "no", "message": "update.apply is the principal's, with a fresh passkey through the hub, which the fleet cannot check yet: refused" }, "store": null, "storeSeq": null }
+{ "ok": false, "error": { "code": "not_allowed", "executed": "no", "message": "update.apply is the principal's: it carries the hub's signed assertion (x-morndo-principal, updates §5.4) for exactly this node and Version, which the fleet cannot check here: refused" }, "store": null, "storeSeq": null }
 ```
 
 The two delivery ops are the node's own; a client reaches them through `/v1/deliveries`:
@@ -1376,7 +1380,7 @@ The Rollout changed while the examples above ran: the control plane's own update
 | `no_session` | no | A delivery to a pane with no live Claude Code session (no session file, or its process gone) that isn't waiting for one to start (§6.1). | `deliver-no-session` |
 | `already_typed` | no | `cancel` of a delivery past `queued`. | `cancel-typed` |
 | `updating` | no | The fleet or the node holds new work while it updates (503 from the fleet). Narrowing, revoking, `lane.stop`, `job.cancel` and `delivery.cancel` still run; a delivery already queued waits (`unavailable`). | none: needs an update in progress |
-| `not_allowed` | no | `file.put`: a file the attachment policy refuses (not an allowed kind, or a text file that isn't UTF-8). `update.apply`: refused until the fleet can check the principal's step-up (§5.4), then a Version above the control plane's own (RL11) or a halted Rollout (RL12). The Rollout routes answer 403 (who asks) or 409 (what is asked) with it too. | `op-update-apply` |
+| `not_allowed` | no | `file.put`: a file the attachment policy refuses (not an allowed kind, or a text file that isn't UTF-8). `update.apply`: without the hub's signed assertion for exactly this node and Version (§5.4), then a Version above the control plane's own (RL11) or a halted Rollout (RL12). The Rollout routes answer 403 (who asks) or 409 (what is asked) with it too. | `op-update-apply` |
 
 ```example err-bad-args
 POST /v1/op
@@ -1734,6 +1738,7 @@ An alert is something for the owner to look at that changes no state. Each one i
 | `unrouted_hook` | the first event of a script path that no subscriber takes | `{ path, events }` |
 | `delivery_waiting` | a delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes, once each; never while it waits `earlier` behind another to its lane | `{ id, lane, state, reason, minutes }` |
 | `draft_stashed` | a node stashed a lane's unsent draft so its deliveries could go in (§4, `stashed`); once per delivery | `{ id, lane \| workerId, since, at, chars, copy }` |
+| `journal_unreadable` | a line of the fleet's revocation journal (`revoked.log` beside fleet.db) the start could not read and skipped; the rest still applied | `{ file, line, why }` |
 | `subscriber_lagging` | a subscriber's oldest undelivered event is older than 60 s | `{ subscriber, oldestAgeMs, streams }`: `streams`, the streams it holds up |
 | `job_failed` | a background job exited non-zero, timed out or was lost; once per job (node, id) | `{ id, name, class, outcome }` |
 | `job_unnoticed` | a job's notice was given up before its lane took it; once per job | `{ id, name, class, outcome }` |
@@ -1741,7 +1746,7 @@ An alert is something for the owner to look at that changes no state. Each one i
 | `rollout_halted` | the Rollout was halted — the owner's hand or a machine's rollback (§5.4); no machine takes the Version until it is resumed. Urgent. | `{ version, machine, reason }` |
 | `update_rolled_back` | a machine's updater rolled back to the Version it ran (a node's health, or the control plane's own state file, then with node null); once per accepted attempt (the fleet's issued id, §5.4). Ignored reports are folded per machine into at most one a day, with `ignored` (the last reason) and `count`. Urgent. | `{ machine, version, target?, reason?, attempt?, ignored?, count? }` |
 | `update_rollback_failed` | a machine's updater says its rollback failed: it runs a Version it cannot vouch for; once per accepted attempt, ignored ones folded as above. Urgent. | `{ machine, version, target?, reason?, attempt?, ignored?, count? }` |
-| `update_skew_blocked` | kept for a node held back by protocol skew (updates §4.2); nothing raises it yet | |
+| `update_skew_blocked` | the control plane's updater held its own apply: a joined node's agent protocol falls outside the target Release's range, so nothing ran (RL11, updates §4.2, §7). One alert per Version and node list, however often the state file repeats the same hold. Not urgent. | `{ version, nodes }` |
 | `connection` | kept for a node's Connections service (`docs/design/secret-store/README.md`, `AlertSink`); nothing raises it yet | |
 
 ## 15. Sources

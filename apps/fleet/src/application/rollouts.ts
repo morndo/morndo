@@ -85,19 +85,37 @@ export class Rollouts {
   }
 
   // The control plane commits its own running Version (§4.3): a fleet never asks a node for a Version it doesn't run
-  // itself. A commit starts the soak from now; a halt stays through it (RL12: only the principal's resume, or a newer
-  // Release, lifts it), so a control plane the principal moved onto a halted Version by hand starts no node.
-  committed(version: string, soakMinutes: number = DEFAULT_SOAK_MINUTES): RolloutWrite | RolloutRefusal {
+  // itself. A commit starts the soak at its own moment — the state file names it (§4.5), so a fleet that reads the
+  // same record again, after a restart, does not restart the soak, and the same commit twice changes nothing. A halt
+  // stays through it (RL12: only the principal's resume, or a newer Release, lifts it), so a control plane the
+  // principal moved onto a halted Version by hand starts no node.
+  committed(version: string, soakMinutes: number = DEFAULT_SOAK_MINUTES, at: number = this.#now()): RolloutWrite | RolloutRefusal {
     const a = parseVersion(version), b = parseVersion(this.#own.version);
     if (a === null || b === null || !equalVersions(a, b))
       return { ok: false, refused: "not_allowed", message: `the control plane runs ${this.#own.version}, not ${version}` };
     const was = this.#find(version);
+    if (was !== null && was.controlPlaneCommittedAt === at && was.soakMinutes === soakMinutes)
+      return { ok: true, changed: false, rollout: was };
     const r: RolloutWire = {
-      version, controlPlaneCommittedAt: this.#now(), soakMinutes,
+      version, controlPlaneCommittedAt: at, soakMinutes,
       halted: was?.halted ?? false, haltedBy: was?.haltedBy ?? null, haltReason: was?.haltReason ?? null, haltedAt: was?.haltedAt ?? null,
     };
     this.#store.put(r);
     return { ok: true, changed: true, rollout: this.#announce(r) };
+  }
+
+  // The control plane held an apply for protocol skew (§7, RL11): one alert per Version and node list, however often
+  // the state file repeats the same hold — the record stays until the hold lifts, so the first word is the alert and
+  // the rest are that word again.
+  #skewSeen = new Set<string>();
+  skewBlocked(version: string, nodes: readonly string[]): void {
+    if (nodes.length === 0) return;
+    const list = [...nodes];
+    const key = `${version}|${list.join(",")}`;
+    if (this.#skewSeen.has(key)) return;
+    if (this.#skewSeen.size >= 1000) this.#skewSeen.clear();
+    this.#skewSeen.add(key);
+    this.#audit.alert("update_skew_blocked", null, { version, nodes: list });
   }
 
   // One machine's rollback (RL12) or the principal's hand stops the Rollout of a Version everywhere. Idempotent: a
@@ -123,6 +141,14 @@ export class Rollouts {
     const resumed: RolloutWire = { ...r, halted: false, haltedBy: null, haltReason: null, haltedAt: null };
     this.#store.put(resumed);
     return { ok: true, changed: true, rollout: this.#announce(resumed) };
+  }
+
+  // The nodes running above the control plane's own Version, by their updater's word (review of #111): after the
+  // control plane rolls back, nodes that took the Version it left stay on it. Nothing re-syncs them by itself: no
+  // update.apply reaches them (the fleet's gate) and their own ticks take nothing lower, so they wait until the
+  // control plane catches up or the owner rolls each back by hand; the app shows them, so the owner can.
+  nodesAhead(nodes: readonly { name: string; update: { version: string } | null }[]): string[] {
+    return nodes.filter(n => n.update !== null && this.aboveOwn(n.update.version)).map(n => n.name).sort();
   }
 
   // The store, for the tests' clock-driven pruning case.

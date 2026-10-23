@@ -19,8 +19,8 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { WebSocket } from "ws";
 import {
-  CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, readOpError, redactText, RolloutWireSchema, RunViewSchema, SEMVER, toLogFormat,
-  type Alert, type AlertKind, type Delivery, type DeliveryState, type Health, type JobsList, type LaneEvent, type LaneWatchEntry, type OpArgs, type OpError,
+  CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, PRINCIPAL_HEADER, readOpError, redactText, RolloutWireSchema, RunViewSchema, SEMVER, toLogFormat, UpdateHealthSchema,
+  type Alert, type AlertKind, type Delivery, type DeliveryState, type FleetNode, type JobsList, type LaneEvent, type LaneWatchEntry, type OpArgs, type OpError,
   type OpName, type OpResult, type RolloutWire, type RunView,
 } from "@morndo/protocol";
 
@@ -32,8 +32,9 @@ const stderrLog = (level: "warn" | "error") => (message: string, error?: unknown
   process.stderr.write(`${redactText(`[fleet-client] ${level}: ${message}${error === undefined ? "" : `\n${toLogFormat(error)}`}`, homedir())}\n`);
 };
 const STDERR_LOG: FleetLog = { warn: stderrLog("warn"), error: stderrLog("error") };
-// `commit`: the commit the node's build reports (B11, for the board's "merged, not live"); absent or null when it names none.
-export type FleetNode = { name: string; status: NodeStatus; health: Health | null; agent: string | null; commit?: string | null };
+// One row of GET /v1/nodes as this client reads it (the protocol's own shape now, updates §7): the updates fields —
+// commit, proto, update — may be missing from a fleet from before the updates design.
+export type { FleetNode };
 export type FleetLane = { name: string; node: string; workerId: string | null; conflict: boolean };
 // `alert`: its body is an Alert, and `node` is the alert's node or "". `delivery`, `lane` (fleet clients §4.4, §7),
 // `run` (a lane's Run, ADR-0032) and `rollout` (the Rollout as it stands, updates §7): their bodies are checked here,
@@ -116,11 +117,12 @@ const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "al
 // for a script path no subscriber takes (ADR-0012 decision 8; detail { path, events }). "delivery_waiting" and
 // "subscriber_lagging": fleet clients §4.5, §6. "job_failed" and "job_unnoticed": ADR-0017. "connection": the
 // connections store (ADR-0025). "engine_fallback": ADR-0027. "draft_stashed": a lane's unsent draft put away so its
-// deliveries went in (#64). The four update kinds: the updates design §7.
+// deliveries went in (#64). The four update kinds: the updates design §7. "journal_unreadable": a revocation journal
+// line the fleet skipped (updates design §11.5).
 // tests/rollout.test.ts checks this copy against the protocol's, so neither drifts from the other.
 export const ALERT_KINDS = new Set<string>(["instance_conflict", "source_changed", "clock_offset", "rate_limited", "lane_conflict", "dead_letter",
   "backlog_full", "unrouted_hook", "delivery_waiting", "subscriber_lagging", "job_failed", "job_unnoticed", "connection", "engine_fallback", "draft_stashed",
-  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked"] satisfies AlertKind[]);
+  "rollout_halted", "update_rolled_back", "update_rollback_failed", "update_skew_blocked", "journal_unreadable"] satisfies AlertKind[]);
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // A store sequence as the fleet passes it on, or null: absent, null, or not a count (never guessed at).
@@ -130,10 +132,24 @@ const seqOf = (v: unknown): number | null => (typeof v === "number" && Number.is
 const opErrorOf = (v: unknown): OpError | null =>
   isRecord(v) && typeof v.code === "string" && (v.executed === "no" || v.executed === "maybe") && typeof v.message === "string"
     ? readOpError(v.code, v.executed, v.message) : null;
-const isNode = (v: unknown): v is FleetNode =>
-  isRecord(v) && typeof v.name === "string" && typeof v.status === "string" && STATUSES.has(v.status)
-  && (v.health === null || isRecord(v.health)) && (v.agent === null || typeof v.agent === "string")
-  && (v.commit === undefined || v.commit === null || typeof v.commit === "string");
+// One row of GET /v1/nodes, or null when it isn't one: commit, proto and update may be missing from a fleet from
+// before the updates design (read as null, never as a mismatch), and an update this client cannot read reads as
+// none — like an alert of a kind it doesn't know, not a guess.
+const nodeOf = (v: unknown): FleetNode | null => {
+  if (!isRecord(v) || typeof v.name !== "string" || typeof v.status !== "string" || !STATUSES.has(v.status)
+    || !(v.health === null || isRecord(v.health)) || !(v.agent === null || typeof v.agent === "string")) return null;
+  // B11: a commit that is neither a string nor null is a mismatch, never guessed at; absent reads as null.
+  if (v.commit !== undefined && v.commit !== null && typeof v.commit !== "string") return null;
+  const update = v.update === undefined || v.update === null ? null : UpdateHealthSchema.safeParse(v.update);
+  return {
+    name: v.name, status: v.status as FleetNode["status"],
+    health: (v.health === null ? null : v.health) as FleetNode["health"],
+    agent: v.agent === null ? null : v.agent,
+    commit: typeof v.commit === "string" ? v.commit : null,
+    proto: Array.isArray(v.proto) && v.proto.every(p => typeof p === "number") ? v.proto : null,
+    update: update !== null && update.success ? update.data : null,
+  };
+};
 const isLane = (v: unknown): v is FleetLane =>
   isRecord(v) && typeof v.name === "string" && typeof v.node === "string" && (v.workerId === null || typeof v.workerId === "string")
   && typeof v.conflict === "boolean";
@@ -147,6 +163,9 @@ const fleetDelivery = (delivery: unknown, stale: unknown): FleetDelivery | null 
   return d && typeof stale === "boolean" ? { ...d, stale } : null;
 };
 const seg = (s: string) => encodeURIComponent(s);
+// The principal's proof as a header, or nothing without one (§5.4): only the hub's two writes carry it.
+const principalHeader = (principal: string | undefined): Record<string, string> | undefined =>
+  principal === undefined ? undefined : { [PRINCIPAL_HEADER]: principal };
 
 export class FleetClient {
   readonly #socketPath: string;
@@ -175,8 +194,10 @@ export class FleetClient {
 
   async nodes(): Promise<FleetNode[]> {
     const v = await this.#json("GET", "/v1/nodes");
-    if (!Array.isArray(v) || !v.every(isNode)) throw new FleetMismatch("GET /v1/nodes: not a node list");
-    return v;
+    if (!Array.isArray(v)) throw new FleetMismatch("GET /v1/nodes: not a node list");
+    const rows = v.map(nodeOf);
+    if (rows.some(r => r === null)) throw new FleetMismatch("GET /v1/nodes: not a node list");
+    return rows as FleetNode[];
   }
 
   // The fleet's job mirror (design §7). Unknown fields on a row are dropped by the schema.
@@ -204,12 +225,14 @@ export class FleetClient {
   // One typed op (spec §5.3). The result's fields are checked by whoever reads them; the envelope is checked here. The
   // delivery ops are never sent as ops: they go through deliver() and cancelDelivery(), whose routes resolve the target
   // and keep the fleet's mirror, and the fleet refuses them on /v1/op (bad_args).
-  async op<O extends ClientOp>(target: OpTarget, op: O, args: OpArgs[O], opts: { key?: string; timeoutMs?: number } = {}): Promise<OpAnswer<O>> {
+  // `principal` (updates §5.4): the hub's signed assertion for exactly this op, as x-morndo-principal — the only way
+  // the fleet takes an update.apply.
+  async op<O extends ClientOp>(target: OpTarget, op: O, args: OpArgs[O], opts: { key?: string; timeoutMs?: number; principal?: string } = {}): Promise<OpAnswer<O>> {
     if (DELIVERY_OPS.has(op)) throw new TypeError(`${op} goes through deliver() or cancelDelivery(), never POST /v1/op`);
     const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     const body = { ...target, op, args, timeoutMs, ...(opts.key !== undefined ? { key: opts.key } : {}) };
     // The fleet took the op, so an answer that isn't JSON at all (an HTML 502, say) leaves it in doubt as well (#outcome).
-    const v = (await this.#outcome("POST", "/v1/op", body, timeoutMs + ANSWER_SLACK_MS)).value;
+    const v = (await this.#outcome("POST", "/v1/op", body, timeoutMs + ANSWER_SLACK_MS, principalHeader(opts.principal))).value;
     if (isRecord(v) && v.ok === true && "result" in v && typeof v.store === "string") {
       return { ok: true, result: v.result as OpResult[O], invVersion: typeof v.invVersion === "number" ? v.invVersion : 0, store: v.store, storeSeq: seqOf(v.storeSeq) };
     }
@@ -307,15 +330,16 @@ export class FleetClient {
     return this.#rolloutWrite("halt", { version, machine, reason });
   }
   // The principal's word resumes a halted Rollout; not_halted is a refusal (FleetOpFailed), nothing changed.
-  async resumeRollout(version: string): Promise<RolloutWire> {
-    return this.#rolloutWrite("resume", { version });
+  // `principal` (updates §5.4): the hub's signed assertion for exactly this resume, as x-morndo-principal.
+  async resumeRollout(version: string, o: { principal?: string } = {}): Promise<RolloutWire> {
+    return this.#rolloutWrite("resume", { version }, principalHeader(o.principal));
   }
   // The three rollout writes: `ok: true` answers the Rollout now in force; a refusal carries its reason in the body
   // whatever the status (403 not_allowed for a caller the fleet won't take it from, 409 not_allowed or not_halted,
   // 400 a body that doesn't fit), and nothing was written; an
   // answer that is neither leaves the write in doubt, as an op's does.
-  async #rolloutWrite(kind: "committed" | "halt" | "resume", body: Record<string, unknown>): Promise<RolloutWire> {
-    const v = (await this.#outcome("POST", `/v1/rollout/${kind}`, body)).value;
+  async #rolloutWrite(kind: "committed" | "halt" | "resume", body: Record<string, unknown>, extra?: Record<string, string>): Promise<RolloutWire> {
+    const v = (await this.#outcome("POST", `/v1/rollout/${kind}`, body, DEFAULT_TIMEOUT_MS + ANSWER_SLACK_MS, extra)).value;
     const rollout = isRecord(v) && v.ok === true ? parseBody(RolloutWireSchema, v.rollout) : null;
     if (rollout) return rollout;
     const refused = isRecord(v) && typeof v.error === "string" && typeof v.message === "string" ? readOpError(v.error, "no", v.message) : null;
@@ -436,8 +460,8 @@ export class FleetClient {
 
   // A side effect's answer (POST /v1/op, the delivery routes): its outcome is in the body whatever the status, and the
   // fleet took the request, so an answer that isn't JSON at all (an HTML 502, say) leaves it in doubt as well.
-  async #outcome(method: "POST", path: string, body: unknown, timeoutMs = DEFAULT_TIMEOUT_MS + ANSWER_SLACK_MS): Promise<{ status: number; value: unknown }> {
-    try { return await this.#request(method, path, body, timeoutMs, true); }
+  async #outcome(method: "POST", path: string, body: unknown, timeoutMs = DEFAULT_TIMEOUT_MS + ANSWER_SLACK_MS, extra?: Record<string, string>): Promise<{ status: number; value: unknown }> {
+    try { return await this.#request(method, path, body, timeoutMs, true, extra); }
     catch (e) {
       if (e instanceof FleetMismatch) throw new FleetUnavailable(e.message, true, { cause: e });
       throw e;
@@ -459,14 +483,18 @@ export class FleetClient {
   }
 
   // A JSON request: its status and its body. `outcome`: a route whose refusals carry their outcome in the body, read
-  // whatever the status; any other route's 5xx is FleetUnavailable.
-  #request(method: "GET" | "POST", path: string, body?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS, outcome = false): Promise<{ status: number; value: unknown }> {
+  // whatever the status; any other route's 5xx is FleetUnavailable. `extra`: headers beyond this client's own — the
+  // principal's proof among them (§5.4).
+  #request(method: "GET" | "POST", path: string, body?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS, outcome = false, extra?: Record<string, string>): Promise<{ status: number; value: unknown }> {
     const data = body === undefined ? null : Buffer.from(JSON.stringify(body));
     return new Promise((resolve, reject) => {
       const dial = dialing();
       const req = request({
         socketPath: this.#socketPath, agent: dial.agent, method, path,
-        headers: data ? { ...this.#headers, "content-type": "application/json", "content-length": String(data.length) } : this.#headers,
+        headers: {
+          ...this.#headers, ...extra,
+          ...(data ? { "content-type": "application/json", "content-length": String(data.length) } : {}),
+        },
       }, res => {
         const chunks: Buffer[] = [];
         let size = 0;

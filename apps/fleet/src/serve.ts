@@ -5,9 +5,10 @@
 // and daily. A revoked node's lanes go whichever way it was revoked (the client API, or the console writing fleet.db).
 import type Database from "better-sqlite3";
 import { homedir } from "node:os";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import { DEFAULT_SOAK_MINUTES } from "@morndo/domain";
 import type { Delivery, Health, Pane } from "@morndo/protocol";
-import { Flight, HoldWatch, assertLocalDisk, holdFile, productBuild } from "@morndo/service-kit";
+import { Flight, HoldWatch, RevocationJournal, assertLocalDisk, holdFile, productBuild } from "@morndo/service-kit";
 import type { FleetConfig } from "./config.ts";
 import { Audit } from "./adapters/audit.ts";
 import { startClientApi } from "./adapters/client-api.ts";
@@ -38,8 +39,10 @@ import { LaneEventsPush } from "./application/lane-events-push.ts";
 import { LaneRegistry } from "./application/lane-registry.ts";
 import { LaneWatch, REBUILD_WINDOW_MS } from "./application/lane-watch.ts";
 import { CONTROL_PLANE_MACHINE, Rollouts } from "./application/rollouts.ts";
-import { CLOSED_ROLLOUT_AUTHORITY, type RolloutAuthority } from "./adapters/client-api.ts";
+import type { RolloutAuthority } from "./adapters/client-api.ts";
+import { decodePrincipalKey, hubFilePrincipalAuthority, hubIdentityPubFile, principalAuthority } from "./adapters/principal-check.ts";
 import { UpdaterStateWatch, updaterStateFile } from "./adapters/updater-state-watch.ts";
+import { applyRevocationJournal } from "./application/revocations.ts";
 import { Router } from "./application/router.ts";
 import { Runs } from "./application/runs.ts";
 
@@ -52,8 +55,13 @@ export type FleetOptions = {
   holdPath?: string;
   // Who may commit a Rollout (the control plane's updater) and who may resume one or ask update.apply (the
   // principal, with step-up). Closed unless a check says yes (review of #107): the socket is the user's, and a lane
-  // runs as that user too. PR 6b brings the updater's check, PR 6c the hub's step-up proof. Not in the config file.
+  // runs as that user too. An explicit authority here wins (the tests'); otherwise the config's pinned principalKey
+  // (updates §5.4, PR 6c) opens the principal's two doors to the hub's signed assertion, and without a pin the
+  // hub's own identity.pub does, read at each check (PR 6c round 2, R2). Neither is in the config file.
   rolloutAuthority?: RolloutAuthority;
+  // Where the fleet reads the hub's public key when the config pins none (R2): the hub's identity.pub. Default the
+  // hub's own data dir (MORNDO_HOME, else ~/.local/share/morndo), as the hub decides it.
+  principalKeyFile?: string;
   // The control plane's own updater's state file (updates §7): its rollback halts the Rollout. Default under HOME.
   updaterStatePath?: string;
   laneWatchSweepMs?: number;
@@ -76,9 +84,18 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   assertLocalDisk(dirname(config.dbPath));          // before the key file too, which lives beside it by default
   const key = loadOrCreateFleetKey(config.keyPath);
   const db = openFleetDb(config.dbPath);
-  const nodes = new NodesStore(db, now);
+  // RL10 (updates design §11.5): every revocation is journaled to revoked.log beside fleet.db before its database
+  // write, and each start applies the journal again, before anything below reads the nodes — so a fleet.db restored
+  // from an older copy (the updater's rollback) brings no revoked node back.
+  const journal = new RevocationJournal(join(dirname(config.dbPath), "revoked.log"));
+  const nodes = new NodesStore(db, now, journal);
   const events = new EventHub(e => log.error("an event subscriber failed", e));
   const audit = new Audit(db, { now, log, onAlert: a => events.emit({ t: "alert", node: a.node ?? "", body: a }) });
+  // A line the journal cannot read is an Alert, never a refusal to start: the rest of the journal still applies.
+  const reapplied = applyRevocationJournal(journal, nodes);
+  if (reapplied.applied > 0) log.info(`re-applied ${reapplied.applied} revocations from revoked.log`);
+  for (const b of reapplied.bad) audit.alert("journal_unreadable", null, { file: "revoked.log", line: b.line, why: b.why });
+  if (journal.compact()) log.info("revoked.log compacted to one entry per revocation");
   // On start and daily; a busy or full fleet.db is logged and tried again the next day, never thrown out of the timer.
   const pruneAudit = () => {
     try { const n = audit.prune(); if (n > 0) log.info(`audit: removed ${n} rows older than 90 days`); }
@@ -102,10 +119,22 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   // A node's updater reports with its health (updates §6.3, §7): a rollback alerts and halts the Rollout of the
   // Version it was leaving (RL12).
   // The control plane's own rollback, from its updater's state file (review of #107): the internal path, the only
-  // one besides a node's own health that halts without the principal.
+  // one besides a node's own health that halts without the principal. The state file is the control plane updater's
+  // only word out (§4.5, PR 6b), so the same read carries its commit — a `current` record of the fleet's own running
+  // Version, at the record's own moment and soak, so a re-read (a restart among them) changes nothing — and its skew
+  // hold: a `waiting` record whose reason names the nodes RL11 held it for. Both beside the health path, which still
+  // registers the `applying` attempt and halts a rollback under it.
   const updaterWatch = new UpdaterStateWatch({
     path: o.updaterStatePath ?? updaterStateFile(),
-    onReport: r => rollouts.health(CONTROL_PLANE_MACHINE, r, { own: true }),
+    onReport: r => {
+      if (r.state === "current" && r.version === rollouts.controlPlane().version)
+        rollouts.committed(r.version, r.soakMinutes ?? DEFAULT_SOAK_MINUTES, r.at);
+      if (r.state === "waiting" && r.reason !== undefined && r.reason.startsWith("skew_blocked:")) {
+        const nodes = r.reason.slice("skew_blocked:".length).split(",").map(s => s.trim()).filter(s => s !== "");
+        rollouts.skewBlocked(r.target ?? r.version, nodes);
+      }
+      rollouts.health(CONTROL_PLANE_MACHINE, r, { own: true });
+    },
   });
   updaterWatch.start();
   events.subscribe(e => {
@@ -214,7 +243,12 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   try {
     await agents.ready;
     api = await startClientApi(config.socketPath, {
-      router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, runs: laneRuns, rollouts, rolloutAuthority: o.rolloutAuthority ?? CLOSED_ROLLOUT_AUTHORITY, log,
+      router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, runs: laneRuns, rollouts,
+      rolloutAuthority: o.rolloutAuthority
+        ?? (config.principalKey !== undefined
+          ? principalAuthority(decodePrincipalKey(config.principalKey), { now })
+          : hubFilePrincipalAuthority(o.principalKeyFile ?? hubIdentityPubFile(), { now })),
+      log,
       ...(o.eventsBufferBytes === undefined ? {} : { eventsBufferBytes: o.eventsBufferBytes }),
       updates: { held: () => watch.held, flight },
     });

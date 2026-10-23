@@ -260,6 +260,27 @@ export const MIGRATIONS: readonly Migration[] = [
         issued_at INTEGER NOT NULL DEFAULT 0, used_at INTEGER);
     `),
   },
+  {
+    version: 17,
+    name: "a node's last hello protocols (review of #111): the skew gate counts an offline node too",
+    compat: "additive",
+    up: db => db.exec(`
+      -- The agent protocols a node's last hello named, as JSON (nodes.last_proto): an offline node still depends on
+      -- them, so GET /v1/nodes reports them when it is offline and the control plane's skew gate counts them (RL11).
+      ALTER TABLE nodes ADD COLUMN last_proto TEXT;
+    `),
+  },
+  {
+    version: 18,
+    name: "a node's enrolment: which join made its key, so a revocation names the enrolment it revoked (RL10)",
+    compat: "additive",
+    // A node keeps its name across a revoke and a join again; the revocation journal (updates design §11.5) keys a
+    // node's revocation by this, so it never revokes the next enrolment under the same name. Rows from before get one
+    // of their own now, as if each had joined once.
+    up: db => db.exec(`
+      ALTER TABLE nodes ADD COLUMN enrolment TEXT;
+      UPDATE nodes SET enrolment = lower(hex(randomblob(16))) WHERE enrolment IS NULL;`),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

@@ -11,6 +11,7 @@ import { writeFloor } from "@morndo/service-kit";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { databasePaths } from "../src/adapters/paths.ts";
 import { SqliteBackup } from "../src/adapters/backup-sqlite.ts";
+import { Store } from "../../hub/src/adapters/store.ts";
 
 let scratch = "";
 
@@ -102,6 +103,27 @@ describe("SqliteBackup (§11.3, §11.4)", () => {
     } finally {
       try { w.writer.close(); } catch { /* closed by the case */ }
     }
+  });
+
+  it("a restored hub database is a new store, even back on the inode it had (RL10, §11.5)", async () => {
+    // The hub's own store, as it runs: a store id tied to morndo.db. Backed up, then restored, the hub's next open
+    // must answer as another store, whatever inode the rename leaves the file on.
+    const home = mkdtempSync(join(scratch, "home-"));
+    const paths = databasePaths(home, {});
+    let hub = new Store(dirname(paths.hub));
+    const before = hub.storeId;
+    hub.close();
+    const backup = new SqliteBackup({ paths, backups: join(home, "state", "backups") });
+    expect((await backup.take("u-1", "hub")).ok).toBe(true);
+    backup.restore("u-1", "hub");
+    expect(existsSync(`${paths.hub}-wal`)).toBe(false);
+    const restored = new Database(paths.hub, { readonly: true });
+    try {
+      expect(restored.prepare("SELECT count(*) AS n FROM hub_store").get()).toEqual({ n: 0 });
+      expect(restored.pragma("quick_check", { simple: true })).toBe("ok");
+    } finally { restored.close(); }
+    hub = new Store(dirname(paths.hub));
+    try { expect(hub.storeId).not.toBe(before); } finally { hub.close(); }
   });
 
   it("a database that does not exist yet is backed up as absent, and restoring that removes what was made since", async () => {

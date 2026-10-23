@@ -9,13 +9,13 @@
   import Desktop from "$lib/desktop/Desktop.svelte";
   import LinkRequest from "$lib/LinkRequest.svelte";
   import type { Policy } from "$lib/SecurityChoices.svelte";
-  type Me = { endpoint: { name: string }; office: string; session: { verifiedAt: number }; policy: Policy; desktop?: boolean; engines?: boolean };
+  type Me = { endpoint: { name: string }; office: string; session: { verifiedAt: number }; policy: Policy; desktop?: boolean; engines?: boolean; updates?: boolean };
 
   type View =
     | { kind: "checking" }
     | { kind: "mismatch"; pinned: string; presented: string }
     | { kind: "locked"; paired: boolean }
-    | { kind: "ready"; device: string; office: string; verifiedAt: number | null; policy: Policy; desktop: boolean; engines: boolean }
+    | { kind: "ready"; device: string; office: string; verifiedAt: number | null; policy: Policy; desktop: boolean; engines: boolean; updates: boolean }
     | { kind: "failed"; message: string };
 
   let view = $state<View>({ kind: "checking" });
@@ -43,11 +43,14 @@
         if (e instanceof ApiError && e.status === 401) return null;
         throw e;
       });
-      view = me ? { kind: "ready", device: me.endpoint.name, office: me.office, verifiedAt: me.session.verifiedAt, policy: me.policy, desktop: me.desktop === true, engines: me.engines === true } : { kind: "locked", paired: pin !== null };
+      view = me ? { kind: "ready", device: me.endpoint.name, office: me.office, verifiedAt: me.session.verifiedAt, policy: me.policy, desktop: me.desktop === true, engines: me.engines === true, updates: me.updates === true } : { kind: "locked", paired: pin !== null };
     } catch (e) {
       view = { kind: "failed", message: explain(e) };
     }
   }
+
+  // The Updates link (updates §8.2, PR 6c part 2) follows /api/me's `updates`, as the Engines one follows `engines`:
+  // never a probe of /api/updates, whose 404 on a hub without a fleet every page logged as a console error.
 
   async function unlock() {
     busy = true;
@@ -58,7 +61,7 @@
       await api.post<{ endpoint: { name: string } }>("/api/login/verify", { flowId, response });
       const me = await api.get<Me>("/api/me");
       if (!readPin() && hub) writePin({ fingerprint: hub.fingerprint, device: me.endpoint.name, pairedAt: Date.now() });
-      view = { kind: "ready", device: me.endpoint.name, office: me.office, verifiedAt: me.session.verifiedAt, policy: me.policy, desktop: me.desktop === true, engines: me.engines === true };
+      view = { kind: "ready", device: me.endpoint.name, office: me.office, verifiedAt: me.session.verifiedAt, policy: me.policy, desktop: me.desktop === true, engines: me.engines === true, updates: me.updates === true };
     } catch (e) {
       error = explain(e);
     } finally {
@@ -70,9 +73,9 @@
 </script>
 
 {#if view.kind === "ready" && wide}
-  <Desktop device={view.device} office={view.office} verifiedAt={view.verifiedAt} policy={view.policy} desktop={view.desktop} engines={view.engines} onSignedOut={() => (view = { kind: "locked", paired: true })} />
+  <Desktop device={view.device} office={view.office} verifiedAt={view.verifiedAt} policy={view.policy} desktop={view.desktop} engines={view.engines} updates={view.updates} onSignedOut={() => (view = { kind: "locked", paired: true })} />
 {:else if view.kind === "ready"}
-  <Phone device={view.device} verifiedAt={view.verifiedAt} policy={view.policy} engines={view.engines} onSignedOut={() => (view = { kind: "locked", paired: true })} />
+  <Phone device={view.device} verifiedAt={view.verifiedAt} policy={view.policy} engines={view.engines} updates={view.updates} onSignedOut={() => (view = { kind: "locked", paired: true })} />
 {:else}
   <main class="page">
     <div class="brand">

@@ -386,4 +386,105 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     expect(fleet.audit.of("alert.update_rolled_back")).toHaveLength(1);
     expect(ignoredAlerts(fleet)).toHaveLength(0);
   });
+
+  // PR 6b: the write routes stay closed, so the control plane's updater speaks only through its state file, which
+  // the fleet reads itself (§4.5). A `current` record is the commit; a `waiting` record holding for protocol skew
+  // (§7, RL11) is the alert; and the chain works end to end with no route open at all.
+  it("the control plane's commit is its state file: a current record of the fleet's own Version commits, at the record's own moment and soak — and a re-read changes nothing", async () => {
+    const dir = tempDir();
+    const statePath = join(dir, "update-state.json");
+    const fleet = await startTestFleet({ dir, updaterStatePath: statePath });
+    const api = client(fleet.config.socketPath);
+    const write = (o: Record<string, unknown>) => writeFileSync(statePath, JSON.stringify(o));
+
+    // A current record of another Version commits nothing (§4.2: only the fleet's own running Version).
+    write({ state: "current", version: "9.9.9", attempt: "an-attempt-of-no-rollout-0", at: 1 });
+    await new Promise(r => setTimeout(r, 1500));
+    expect((await bodyOf(api.get("/v1/rollout")))?.rollout).toBeNull();
+
+    // The commit is the record: its own soak, its own moment — not the fleet's reading of it.
+    write({ state: "current", version: V, attempt: "the-planes-own-attempt-000000", soakMinutes: 45, at: 123_456 });
+    await vi.waitFor(() => expect(fleet.rollouts.committed(V, 45, 123_456)).toMatchObject({ ok: true, changed: false }),
+      { timeout: 5000 });                                     // the watcher already took this commit: the same one again changes nothing
+    expect((await bodyOf(api.get("/v1/rollout")))?.rollout).toMatchObject({
+      version: V, soakMinutes: 45, controlPlaneCommittedAt: 123_456, halted: false,
+    });
+
+    // A restart reads the same record afresh (the watcher keeps no moment across runs): the soak must not restart.
+    await fleet.close();
+    const again = await startTestFleet({ dir, updaterStatePath: statePath });
+    const rollout = await vi.waitFor(async () => {
+      const answer = await client(again.config.socketPath).get("/v1/rollout");
+      expect(answer?.body).toHaveProperty("rollout");
+      return (answer === null ? undefined : (answer.body as Body).rollout) as RolloutWire;
+    }, { timeout: 5000 });
+    expect(rollout).toMatchObject({ version: V, soakMinutes: 45, controlPlaneCommittedAt: 123_456, halted: false });
+    expect(again.rollouts.committed(V, 45, 123_456)).toMatchObject({ ok: true, changed: false });
+    await again.close();
+  });
+
+  it("a waiting record held by protocol skew raises one update_skew_blocked alert per Version and node list", async () => {
+    const dir = tempDir();
+    const statePath = join(dir, "update-state.json");
+    const fleet = await startTestFleet({ dir, updaterStatePath: statePath });
+    const write = (o: Record<string, unknown>) => writeFileSync(statePath, JSON.stringify(o));
+
+    write({ state: "waiting", version: V, target: "99.0.0", reason: "skew_blocked: n2, n3", at: 1 });
+    await vi.waitFor(() => expect(fleet.audit.of("alert.update_skew_blocked")).toHaveLength(1), { timeout: 5000 });
+    expect(fleet.audit.of("alert.update_skew_blocked")[0]?.detail).toEqual({ version: "99.0.0", nodes: ["n2", "n3"] });
+
+    // The same hold again — a new record, a new moment — is the same word, not a second alert.
+    write({ state: "waiting", version: V, target: "99.0.0", reason: "skew_blocked: n2, n3", at: 2 });
+    await new Promise(r => setTimeout(r, 1500));
+    expect(fleet.audit.of("alert.update_skew_blocked")).toHaveLength(1);
+
+    // A different node list is a different hold; a waiting record of another shape is no skew word at all.
+    write({ state: "waiting", version: V, target: "99.0.0", reason: "skew_blocked: n2, n4", at: 3 });
+    await vi.waitFor(() => expect(fleet.audit.of("alert.update_skew_blocked")).toHaveLength(2), { timeout: 5000 });
+    write({ state: "waiting", version: V, reason: "waiting_soak", at: 4 });
+    await new Promise(r => setTimeout(r, 1500));
+    expect(fleet.audit.of("alert.update_skew_blocked")).toHaveLength(2);
+    await fleet.close();
+  });
+
+  it("the whole chain with every write route closed: the state file commits, the offered node's rollback halts", async () => {
+    const dir = tempDir();
+    const statePath = join(dir, "update-state.json");
+    const fleet = await startTestFleet({ dir, updaterStatePath: statePath });   // authority closed: no route may write
+    const api = client(fleet.config.socketPath);
+    const node = await fleet.online("n2", { caps: [CAP_ROLLOUT] });
+    writeFileSync(statePath, JSON.stringify({
+      state: "current", version: V, attempt: "the-planes-own-attempt-000000", soakMinutes: 5, at: Date.now() - 10 * 60_000,
+    }));
+    const offer = await offerOf(node);                        // the commit the state file carried reaches the node as its offer
+    expect(offer).toMatchObject({ version: V });
+    node.health(rolledBack(offer!.attempt));
+    await vi.waitFor(async () => expect(await isHalted(api)).toBe(true), { timeout: 5000 });
+    await fleet.close();
+  });
+
+  // The review of #111 at 8a79723.
+  it("an offline node keeps its last hello's protocols in /v1/nodes, across a fleet restart too", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const b = await fleet.online("n2");
+    await b.close();
+    const node = async (f: typeof fleet) => ((await bodyOf(client(f.config.socketPath).get("/v1/nodes"))) as Body[] | undefined)?.find(n => n.name === "n2");
+    await vi.waitFor(async () => expect(await node(fleet)).toMatchObject({ status: "offline", proto: [1] }));
+    await fleet.close();
+    const again = await startTestFleet({ dir: fleet.dir, rolloutAuthority: OPEN });
+    await vi.waitFor(async () => expect(await node(again)).toMatchObject({ status: "offline", proto: [1] }), { timeout: 5000 });
+  });
+
+  it("a node running above the control plane is listed as ahead, and no update.apply reaches it until that ends", async () => {
+    const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+    const api = client(fleet.config.socketPath);
+    const b = await fleet.online("n2", { caps: [CAP_UPDATE] });
+    b.health(health({ update: { state: "current", version: "0.1.0" } }));   // V is 0.0.0: n2 runs above it
+    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.nodesAhead).toEqual(["n2"]));
+    const op = await api.post("/v1/op", { node: "n2", op: "update.apply", args: { version: V }, key: "hub:u-ahead" });
+    expect(op?.body).toMatchObject({ ok: false, error: { code: "not_allowed", executed: "no" } });
+    expect(((op?.body ?? {}) as Body).error.message).toContain("above the control plane");
+    expect(b.reqs.filter(r => r.op === "update.apply")).toHaveLength(0);
+  });
 });
+

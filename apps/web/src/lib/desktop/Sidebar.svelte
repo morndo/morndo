@@ -5,6 +5,7 @@
   // COLOR.md 2: an icon plus the state in words).
   import Bell from "@lucide/svelte/icons/bell";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
   import Cpu from "@lucide/svelte/icons/cpu";
   import Hash from "@lucide/svelte/icons/hash";
   import ListFilter from "@lucide/svelte/icons/list-filter";
@@ -18,10 +19,10 @@
   import { BACKGROUND_LABEL, inBackground, partitionAgents } from "../lanes.ts";
   import type { ConversationPrefs } from "./present.ts";
 
-  let { office, workers, manager, selected, view, unread, needsYouCount, decisions, decisionsOpen, prefsOf, engines = false, runs = null, onMenu, onSelect, onActivity, onDecisions, onCompose }: {
+  let { office, workers, manager, selected, view, unread, needsYouCount, decisions, decisionsOpen, prefsOf, engines = false, updates = false, runs = null, onMenu, onSelect, onActivity, onDecisions, onCompose }: {
     office: string; workers: RosterEntry[]; manager: RosterEntry | null; selected: string | null; view: "home" | "activity" | "board" | "dashboard";
     unread: (w: RosterEntry) => boolean; needsYouCount: number; decisions: number; decisionsOpen: boolean; prefsOf: (name: string) => ConversationPrefs;
-    engines?: boolean; runs?: ReadonlyMap<string, Run> | null;
+    engines?: boolean; updates?: boolean; runs?: ReadonlyMap<string, Run> | null;
     onMenu: (id: string, x: number, y: number) => void;
     onSelect: (id: string) => void; onActivity: () => void; onDecisions: () => void; onCompose: () => void;
   } = $props();
@@ -46,6 +47,7 @@
     <button class="title" onclick={onActivity}><span>{office}</span><ChevronDown size={16} /></button>
     <div class="acts">
       {#if engines}<a class="ib" href="/engines" aria-label="Engines" title="Engines: which AI does what"><Cpu size={18} /></a>{/if}
+      {#if updates}<a class="ib" href="/updates" aria-label="Updates" title="Updates: every machine's Version"><CircleArrowUp size={18} /></a>{/if}
       <a class="ib" href="/devices" aria-label="Devices and settings"><Settings size={18} /></a>
       <button class="ib" aria-label="Message the manager" onclick={onCompose}><SquarePen size={18} /></button>
     </div>
