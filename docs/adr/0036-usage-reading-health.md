@@ -1,38 +1,41 @@
-# ADR-0036: A usage reading has a health, a window has a cadence, a seat has one state
+# ADR-0036: A usage reading has a source, a state and a cadence; a seat has one state
 
-- **Status:** Proposed, 2026-10-23. Plan: [`docs/plans/2026-10-23-usage-detection.md`](../plans/2026-10-23-usage-detection.md). Design only; no product code.
+- **Status:** Proposed, 2026-10-23 (revised twice the same day). Plan: [`docs/plans/2026-10-23-usage-detection.md`](../plans/2026-10-23-usage-detection.md). Design only; no product code.
 - **Number:** 0035 is taken on a branch not yet on `main`. 0024 is proposed on a branch and its rules U5 to U8 collide with U5 (labels, ADR-0034); this ADR numbers its rules from U6.
 - **Builds on:** ADR-0016 (Usage, U1 to U4), ADR-0029 (the pool's seats), ADR-0034 (U5).
 
 ## Context
 
-1. **Home keeps the last figures it was told.** A reader that fails posts nothing, so a failed or dead source leaves old numbers on show with no sign of age (`packages/domain/src/usage.ts:44`, `:148-154`).
-2. **A window's name is the poster's word,** so a provider that changes a plan's cadence is mislabelled until a person notices.
-3. **A limit hit has three paths that never meet:** the pool, the fleet's `stop_failure` event (nothing reads it for an account) and a reader's own screen.
-4. **A probe failure carried the earliest signal of three unusable seats and was logged as one undifferentiated line:** 524 of 674 probes in five days, from three seats, 76 to 118 hours before a lane's failed turn marked them (plan §3.4).
+1. **Home keeps the last figures it was told.** A reader that fails posts nothing, so a failed or dead source leaves old numbers on show with no sign of age (`packages/domain/src/usage.ts:44`, `:148-154`). A status-line value that is not a percentage shows as 100% (`apps/hub/src/application/usage-service.ts:15-17`, `usage.ts:41-42`).
+2. **A window's name is the poster's word,** so a provider that changes a plan's cadence is mislabelled until a person notices (Cursor's weekly pool shown as monthly is the case that started this).
+3. **A limit hit has three paths that never meet:** the pool, the fleet's `stop_failure` event (nothing reads it for an account; the manager's never becomes an event) and a reader's own screen.
+4. **Claude is read by typing into a terminal.** Its failures carry one line for every cause (524 of 674 probes in five days, from three seats). The CLI documents a structured report instead (`SDKUsageReport`, experimental), checked by a run on 2026-10-23: 0 turns, $0.
+5. **The open-source monitors** (CodexBar, ccstatusline, Claude-Code-Usage-Monitor, the Codex TUI) agree on: a typed reading, four states, a rationed reader per account, limits decided from events, a baseline reset on a plan change, fixtures per source.
 
 ## Decision
 
-1. **Reading health.** Per account and source: `reading`, `aged`, `cannot-read since T` with a reason class (U6). A source may declare how often it will read; silence beyond `max(4 x every, 30 min)` from such a source is `cannot-read`. A source that declares nothing, the status line, is only ever `aged`. Home replaces the meters of a `cannot-read` source with the time and the reason.
-2. **Cadence.** A window's title comes from its length when the source reports it, else from the cycle the hub has observed, else from the furthest reset distance seen ("about"), else from the reset alone (U7). A caption is never a title.
-3. **Plan change.** A changed plan name, window set or window length, or a used percentage that falls by 20 points or more with its reset **unchanged** and still ahead on a window not declared rolling, is told once with what changed (U8). A rolling window never counts a fall. Notice signatures are kept in the hub, so a restart does not repeat one.
-4. **One seat state.** A limit hit, refusal or sign-out from any reporter sets the same state for the account it resolves to, with a back-at time and one notice (U9). The state is the pool's own `SeatState` (`logged-out`, `retired`, `out`, `low`, `ok`) plus a `why`. The account is resolved from the failure hook's own field, then a lane record written at `lane.start` and refreshed by reports, then the fresh sessions, else `unknown`. The fleet taps `/hook/failure` before its manager filter. The state is shown and told, never routed on (U10, U4).
-5. **Routes.** `POST /api/agent/usage/failure` and `POST /api/agent/usage/limit` under an agent token; `POST /api/usage/forget` for the principal only; optional `length_mins` and `rolling` on a named row; `X-Morndo-Source` and `X-Morndo-Every` on a report. A source dead for 14 days is forgotten with one notice (U11).
-6. **Remedies are a closed list.** A Fix is one of a fixed set the hub words itself; text from an agent token is a Hint, shown as "the source says", 120 characters, no links, never in a push.
-7. **Never:** a credential file, a web dashboard, a vendor bundle or internal endpoint as a source; a command taken from a post.
+1. **A Reading** carries source, node, captured-at, plan, and windows with percent (null, never 0), reset, length, rolling and a short note; or a failure with a class from a closed list. One route, `POST /api/agent/usage/readings`; the raw status-line route stays and the hub turns each report into a Reading.
+2. **Four states per source** (U6): `available`, `stale` (meters kept, dimmed, with age), `unavailable` (meters replaced by "can't read since X"), `missing`. Transient failures (429, timeout, 5xx) leave a source stale for up to an hour; permanent ones (signed out, refused, no scope, unknown shape) make it unavailable at once. A source's declared `every` is clamped to 5 s to 6 h; the status line is stale after 10 minutes and never unavailable by silence; any source silent for 14 days is forgotten with one notice, and the principal can forget one at any time (U11).
+3. **Cadence.** A window's title comes from its reported length, else the cycle the hub observed, else the furthest reset distance ("about"), else the reset alone (U7). A caption is never a title.
+4. **Plan change** (U8): a changed plan name, account identity, window set or length, or a used percentage that falls 20 points with its reset unchanged on a window not declared rolling, is told once, and only after a second reading agrees. Thresholds at 75% and 90% are told once per account, window, reset and level (U12). Bad values are dropped, never clamped (U14).
+5. **One seat state** (U9, U13): the pool's own `SeatState` plus a `why`. A limit hit from any reporter sets it for the account it resolves to, from the failure hook's own account field, then a lane record written at `lane.start`, then the fresh sessions, else `unknown`. The fleet taps `/hook/failure` before its manager filter. A limit is decided from an event or a flag, never a percentage, and ends only on a read after its `backAt` (an early contradicting read clears it only from a primary source).
+6. **Claude is read by the CLI's own headless `/usage`,** rationed (a lock per account, one read at a time per node, a 4-minute cache, a cooldown after a failure, a 120-second timeout), as the primary source; the status line is secondary, with guards. A token without the profile scope yields no report: the reason `no_scope`, never 0%, and the reading may come from a machine with a full login.
+7. **Remedies are a closed list** (U10). A Fix is one of a fixed set the hub words itself; text from an agent token is a Hint, shown as "the source says", 120 characters, no links, never in a push.
+8. **Never:** a credential file, a web dashboard, a vendor bundle, an undocumented endpoint (the OAuth usage endpoint with a harvested token), or a local transcript estimate as a limit. A terminal screen is read only by an operator's collector outside the repository (Cursor); a parser of captured text may live here.
 
 ## Alternatives
 
 | Option | Verdict |
 |---|---|
-| Show age only ("as of") and keep the meters | Rejected. A figure from a failed reader looks current; the user asked for "can't read since", not a smaller clock. |
-| Let each collector decide weekly or monthly | Rejected. Two collectors already have two private rules, one of them stateful; the hub holds the earlier reports. |
-| A screen probe inside the repository | Rejected for now. ADR-0024 lists reading a terminal screen under *Never*; a user who runs one posts its result and failures. |
-| A Claude runtime in the pool to get usage from the status line | Kept open (Option 3 of the plan). Large; needs its own terms check; a phone-side sign-in is unverified. |
+| Keep the tmux `/usage` probe and classify its failures | Kept only as the pool script's interim fix. A screen is brittle; the structured report is documented. |
+| Call the OAuth usage endpoint with the stored token | Rejected. Undocumented, aggressively rate limited, and it handles tokens the legal page forbids collecting. |
+| Show age only ("as of") and keep the meters | Rejected for a failed source. A figure from a failed reader looks current. Kept for a source that is only old. |
+| Let each collector decide weekly or monthly | Rejected. Three private rules already; the hub holds the earlier reports. |
+| A Claude runtime in the pool for usage from the status line | Kept open (plan, Option 3). Large; needs its own terms check. |
 
 ## Consequences
 
-- **Good:** a source that stops, a plan that changes and a seat that is refused are each shown within a poll, and told once.
-- **Cost:** two tables (health, notices), two routes, a title function in the domain, a seat-state record in Usage.
-- **Limit:** a Team seat has no status-line `rate_limits` (documented for Pro and Max only); its only source is a screen read, so it can be `cannot-read` for a long time.
+- **Good:** a source that stops, a plan that changes, a seat that is refused or a limit that is hit is shown within a poll and told once; Claude usage no longer depends on a screen.
+- **Cost:** tables for health, notices, cadence and lane records (one migration), three routes, a reader with rationing, a fixture matrix; seven pull requests (plan §5).
+- **Limits:** the `usage_report` type is experimental; a headless read during an endpoint rate limit may be last-known data with no marker; a machine with only pool tokens needs a full login or another machine's reading; a Team seat has no status-line `rate_limits`, so its source is the headless report.
 - **Not here:** usage history, routing on usage, the lanes waiting on a seat.
