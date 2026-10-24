@@ -1,15 +1,17 @@
 // The settings commands (design §8.1, §8.3): `update --channel`, `auto`, `pin`, `unpin` and `window`. Each is one
 // command alone. The file tests run over a scratch HOME the way cli.test.ts does; the ones that need a feed reuse
 // cli-apply.test.ts's world — a real install, a signed feed offering a higher Version, the machine's services faked.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { writeFloor } from "@morndo/service-kit";
-import { parseVersion, type UpdateService } from "@morndo/domain";
+import { parseVersion, PROBATION_MS, type UpdateService } from "@morndo/domain";
 import { UpdateStatusSchema } from "@morndo/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApplyTiming } from "../src/application/apply-steps.ts";
+import { configLockWaitMs } from "../src/adapters/config-file.ts";
 import { DirsInstaller } from "../src/adapters/installer-dirs.ts";
 import { databasePaths, updaterPaths } from "../src/adapters/paths.ts";
 import { openUpdateStore, SqliteUpdateStore } from "../src/adapters/store-sqlite.ts";
@@ -53,6 +55,8 @@ type World = {
   feed: FakeFeed;
   artifacts: FakeArtifacts;
   b: ReleaseFixture;
+  /** B plus any extra feed Versions this world was asked for. */
+  releases: ReleaseFixture[];
   current(): string | null;
   run(argv: string[], env?: Record<string, string | undefined>, o?: { timing?: Partial<ApplyTiming> }):
     Promise<{ code: number; out: string; err: string }>;
@@ -68,7 +72,7 @@ const feedOf = (keys: Keys, releases: readonly ReleaseFixture[]) => {
 };
 
 let worldCount = 0;
-async function world(o: { running?: UpdateService[]; preStageB?: boolean } = {}): Promise<World> {
+async function world(o: { running?: UpdateService[]; preStageB?: boolean; also?: readonly string[] } = {}): Promise<World> {
   const home = join(scratch, `home-${(worldCount += 1)}`);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const paths = updaterPaths(home);
@@ -105,12 +109,15 @@ async function world(o: { running?: UpdateService[]; preStageB?: boolean } = {})
   const die = new Die();
   const services = new FakeServices({ tape, die, currentOf: () => installer.layout().current, running: o.running });
   const probe = new FakeProbe({ tape, die, currentOf: () => installer.layout().current });
-  const feed = feedOf(keys, [b]);
+  // `also` puts more Versions on the feed beside B (one above it, one below A), built the same way.
+  const extras = (o.also ?? []).map(version => releaseFixture({ version, now: NOW - 3 * DAY }));
+  const releases = [...extras, b];
+  const feed = feedOf(keys, releases);
   const artifacts = new FakeArtifacts(paths.downloads);
   const fleet = new FakeFleetView();
   fleet.nodesWord = [];
   const w: World = {
-    home, paths, store, services, feed, artifacts, b,
+    home, paths, store, services, feed, artifacts, b, releases,
     current: () => installer.layout().current,
     run: async (argv, env = {}, opts = {}) => {
       const out: string[] = [], err: string[] = [];
@@ -381,5 +388,185 @@ describe("update settings commands (§8.1, §8.3)", () => {
     expect(statSync(config).mode & 0o777).toBe(0o600);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     expect(readdirSync(dir).filter(name => name !== "config.json")).toEqual([]);
+  });
+
+  it("the pin sentence says what the pin does at, above and below the running Version", async () => {
+    const w = await world();
+    const at = await w.run(["update", "pin", A]);
+    expect(at.code, at.err).toBe(0);
+    expect(at.out).toBe(
+      "Pin set from none to 0.1.0; this machine is held at 0.1.0: it takes no other Version.\n",
+    );
+    const above = await w.run(["update", "pin", B]);
+    expect(above.code, above.err).toBe(0);
+    expect(above.out).toBe(
+      "Pin set from 0.1.0 to 0.2.0; the next check moves this machine up to 0.2.0 if the feed lists it (skipping the Versions in between), then holds it there; a pin the feed does not list leaves the machine where it is.\n",
+    );
+    const below = await w.run(["update", "pin", "0.0.9"]);
+    expect(below.code, below.err).toBe(0);
+    expect(below.out).toBe(
+      "Pin set from 0.2.0 to 0.0.9; 0.0.9 is below the running 0.1.0: a pin never moves a machine down (RL2), so 0.1.0 stays and no other Version is taken; morndo update --rollback goes back one Version.\n",
+    );
+    const plain = freshHome();
+    const none = await run(plain, ["update", "pin", "1.2.3"]);
+    expect(none.code, none.err).toBe(0);
+    expect(none.out).toBe(
+      "Pin set from none to 1.2.3; this install is not managed by the updater, so the pin has no effect here.\n",
+    );
+  });
+
+  it("a pin above the running Version is reached by the next check, not the newest Version", async () => {
+    const w = await world({ also: ["0.3.0"] });
+    for (const release of w.releases) w.artifacts.serve(release.name, { bytes: release.archive });
+    const set = await w.run(["update", "pin", B]);
+    expect(set.code, set.err).toBe(0);
+    const check = await w.run(["update", "--check"]);
+    expect(check.code, `${check.out}\n${check.err}`).toBe(0);
+    expect(check.out).toMatch(/Staged 0\.2\.0/);
+    expect(check.out).not.toMatch(/0\.3\.0/);
+    expect(w.store.staged()?.version).toBe(B);
+    // The domain's probation is sixty seconds (judgeProbation); a shorter wall rolls the apply back as not_up.
+    const tick = await w.run(["update", "tick"], {}, { timing: { ...SHORT, probationMs: PROBATION_MS } });
+    expect(tick.code, `${tick.out}\n${tick.err}`).toBe(0);
+    expect(w.current()).toBe(B);
+  }, 120_000);
+
+  it("a pin below the running Version holds the machine where it is", async () => {
+    const w = await world({ also: ["0.0.9"] });
+    for (const release of w.releases) w.artifacts.serve(release.name, { bytes: release.archive });
+    const set = await w.run(["update", "pin", "0.0.9"]);
+    expect(set.code, set.err).toBe(0);
+    const check = await w.run(["update", "--check"]);
+    expect(check.code, `${check.out}\n${check.err}`).toBe(0);
+    expect(`${check.out}${check.err}`).toMatch(/Up to date/);
+    expect(w.store.staged()).toBeNull();
+    expect(w.current()).toBe(A);
+  }, 60_000);
+
+  it("a pin the feed does not list leaves the machine where it is", async () => {
+    const w = await world();
+    w.artifacts.serve(w.b.name, { bytes: w.b.archive });
+    const set = await w.run(["update", "pin", "0.1.5"]);
+    expect(set.code, set.err).toBe(0);
+    const check = await w.run(["update", "--check"]);
+    expect(check.code, `${check.out}\n${check.err}`).toBe(0);
+    expect(`${check.out}${check.err}`).toMatch(/pinned/);
+    expect(w.store.staged()).toBeNull();
+    expect(w.current()).toBe(A);
+  }, 60_000);
+
+  it("four settings commands at once lose no update", async () => {
+    const home = freshHome();
+    const root = process.cwd();
+    const commands = [
+      ["update", "--channel", "latest"],
+      ["update", "auto", "stage"],
+      ["update", "pin", "0.2.0"],
+      ["update", "window", "02:00-06:00"],
+    ];
+    const runs = commands.map(argv => new Promise<{ code: number; out: string; err: string }>((resolve, reject) => {
+      const proc = spawn(process.execPath, ["apps/updater/src/main.ts", ...argv], {
+        cwd: root,
+        env: { ...process.env, HOME: home },
+      });
+      let out = "";
+      let err = "";
+      proc.stdout.setEncoding("utf8");
+      proc.stderr.setEncoding("utf8");
+      proc.stdout.on("data", (chunk: string) => { out += chunk; });
+      proc.stderr.on("data", (chunk: string) => { err += chunk; });
+      proc.on("error", reject);
+      proc.on("close", code => resolve({ code: code ?? 1, out, err }));
+    }));
+    const results = await Promise.all(runs);
+    for (const r of results) expect(r.code, `${r.out}\n${r.err}`).toBe(0);
+    expect(JSON.parse(readFileSync(configOf(home), "utf8"))).toEqual({
+      channel: "latest", mode: "stage", pin: "0.2.0", window: "02:00-06:00",
+    });
+  }, 60_000);
+
+  it("a fresh lock held by another command times out with one sentence and exit 75", async () => {
+    const home = freshHome();
+    const config = configOf(home);
+    mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
+    const seeded = `${JSON.stringify({ channel: "stable" }, null, 2)}\n`;
+    writeFileSync(config, seeded, { mode: 0o600 });
+    const lock = `${config}.lock`;
+    writeFileSync(lock, "", { mode: 0o600 });
+    const previous = configLockWaitMs.ms;
+    configLockWaitMs.ms = 50;
+    try {
+      const r = await run(home, ["update", "--channel", "latest"]);
+      expect(r.code, r.err).toBe(75);
+      expect(r.err.trim().split("\n")).toHaveLength(1);
+      expect(r.err).toBe(`another settings command holds ${lock}; try again\n`);
+      expect(readFileSync(config, "utf8")).toBe(seeded);
+      expect(existsSync(lock)).toBe(true);
+    } finally {
+      configLockWaitMs.ms = previous;
+    }
+  });
+
+  it("a stale lock is taken over", async () => {
+    const home = freshHome();
+    const config = configOf(home);
+    mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
+    const lock = `${config}.lock`;
+    writeFileSync(lock, "", { mode: 0o600 });
+    const minuteAgo = new Date(Date.now() - 60_000);
+    utimesSync(lock, minuteAgo, minuteAgo);
+    const r = await run(home, ["update", "--channel", "latest"]);
+    expect(r.code, r.err).toBe(0);
+    expect(existsSync(lock)).toBe(false);
+    expect(JSON.parse(readFileSync(config, "utf8")).channel).toBe("latest");
+  });
+
+  it("a settings write that cannot be made is one sentence, exit 78 or 75, and leaves no temp file", async () => {
+    const home = freshHome();
+    const config = configOf(home);
+    const dir = dirname(config);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const seeded = `${JSON.stringify({ channel: "stable" }, null, 2)}\n`;
+    writeFileSync(config, seeded, { mode: 0o600 });
+    chmodSync(dir, 0o500);
+    try {
+      const r = await run(home, ["update", "--channel", "latest"]);
+      expect(r.code, r.err).toBe(78);
+      expect(r.err.trim().split("\n")).toHaveLength(1);
+      expect(r.err).toContain(config);
+      expect(r.err).toMatch(/could not write/);
+      expect(r.err).toMatch(/EACCES/);
+      expect(readFileSync(config, "utf8")).toBe(seeded);
+      expect(readdirSync(dir).filter(name => name.includes(".tmp") || name.endsWith(".lock"))).toEqual([]);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+  });
+
+  it("a leftover config.json.tmp from an older write does not matter", async () => {
+    const home = freshHome();
+    const config = configOf(home);
+    mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
+    const stray = `${config}.tmp`;
+    writeFileSync(stray, "older\n", { mode: 0o600 });
+    const r = await run(home, ["update", "--channel", "latest"]);
+    expect(r.code, r.err).toBe(0);
+    expect(readFileSync(stray, "utf8")).toBe("older\n");
+    expect(JSON.parse(readFileSync(config, "utf8")).channel).toBe("latest");
+  });
+
+  it("a window whose start equals its end is refused", async () => {
+    const home = freshHome();
+    const config = configOf(home);
+    mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
+    const seeded = `${JSON.stringify({ channel: "stable", window: "02:00-06:00" }, null, 2)}\n`;
+    writeFileSync(config, seeded, { mode: 0o600 });
+    for (const word of ["03:00-03:00", "00:00-00:00"]) {
+      const r = await run(home, ["update", "window", word]);
+      expect(r.code, `${word} ${r.err}`).toBe(64);
+      expect(r.err, word).toMatch(/window any/);
+      expect(r.err.trim().split("\n"), word).toHaveLength(1);
+      expect(readFileSync(config, "utf8"), word).toBe(seeded);
+    }
   });
 });

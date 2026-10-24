@@ -24,7 +24,7 @@ import type {
   AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, SettingsChange,
   UpdateHistory,
 } from "./application/ports.ts";
-import { ConfigFile, ConfigInvalid } from "./adapters/config-file.ts";
+import { ConfigBusy, ConfigFile, ConfigInvalid, ConfigWriteFailed } from "./adapters/config-file.ts";
 import { ApplyingFileMarker } from "./adapters/applying-file.ts";
 import { HttpsArtifacts } from "./adapters/artifacts-https.ts";
 import { SqliteBackup } from "./adapters/backup-sqlite.ts";
@@ -75,6 +75,18 @@ const USAGE = `usage: morndo-update update [--yes] [--now] [--detach] [--staged 
 morndo update --to arrives with the next settings step.`;
 
 const NOT_YET_SENTENCE = "morndo update --to arrives with the next settings step.";
+
+// A settings write's own failures (§8.4): a file that is not the settings shape, a permission to fix, or a lock
+// another command still holds. Anything else propagates. null: this error is not one of those.
+const settingsWriteCode = (error: unknown, io: { err(s: string): void }): number | null => {
+  if (error instanceof ConfigInvalid) { io.err(`${error.message}\n`); return EXIT_CONFIG; }
+  if (error instanceof ConfigWriteFailed) {
+    io.err(`${error.message}\n`);
+    return error.code === "EACCES" || error.code === "EPERM" || error.code === "EROFS" ? EXIT_CONFIG : EXIT_TEMPFAIL;
+  }
+  if (error instanceof ConfigBusy) { io.err(`${error.message}\n`); return EXIT_TEMPFAIL; }
+  return null;
+};
 // UpdateConfigSchema's window (§8.3): 24-hour, zero-padded. A window past midnight (22:00-06:00) matches.
 const WINDOW_TEXT = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
 const windowOf = (text: string): Window => {
@@ -344,7 +356,13 @@ export async function runUpdater(
     else if (flags[0] === "window" && flags.length === 2 && flags[1] === "any") {
       parsed = { cmd: "settings", change: { kind: "windowAny" } };
     } else if (flags[0] === "window" && flags.length === 2 && WINDOW_TEXT.test(flags[1] ?? "")) {
-      parsed = { cmd: "settings", change: { kind: "window", window: windowOf(flags[1]!) } };
+      const window = windowOf(flags[1]!);
+      // Equal ends wrap, in the domain, to every minute of the day (windowContains). That is `window any`.
+      if (window.start === window.end) {
+        io.err(`a window whose start equals its end is ambiguous (the domain reads it as all day); use "window any" for any hour\n`);
+        return EXIT_USAGE;
+      }
+      parsed = { cmd: "settings", change: { kind: "window", window } };
     } else if (flags[0] === "window") return usage();
     else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
     else if (flags.includes("--status") && flags.every(f => f === "--status" || f === "--json")) parsed = { cmd: "status" };
@@ -378,15 +396,18 @@ export async function runUpdater(
   // The settings commands (§8.1, §8.3): the file was read once, above. They edit that file and nothing else — no
   // service manager, no feed, no store. A switch stops updates, not this edit; the sentence says it still holds.
   if (parsed.cmd === "settings") {
+    // Read-only: the current link, when this updater owns the install. No store, no manager, no feed.
+    const currentText = new DirsInstaller({ releases: paths.releases }).layout().current;
+    const running = currentText === null ? null : parseVersion(currentText);
     const plan = planSettings(settings.read(), parsed.change, {
       disableUpdates: env.MORNDO_DISABLE_UPDATES === "1",
       disableAutoUpdate: env.MORNDO_DISABLE_AUTOUPDATE === "1",
-    });
+    }, running);
     try { settings.change(plan.change); }
     catch (error) {
-      if (!(error instanceof ConfigInvalid)) throw error;
-      io.err(`${error.message}\n`);
-      return EXIT_CONFIG;
+      const code = settingsWriteCode(error, io);
+      if (code === null) throw error;
+      return code;
     }
     io.out(`${plan.sentence}\n`);
     return EXIT_OK;
@@ -1070,12 +1091,17 @@ export async function runUpdater(
     installer.swap({ current: versionText, previous: null });
     installer.setGood(versionText);
     // The store's first words: this Version committed, the tree's key set trusted. The channel goes into the
-    // settings only when the file is absent — a user's config is never rewritten (§11.6).
+    // settings only when the file is absent — a user's config is never rewritten (§11.6) — through the same
+    // locked write a settings command uses.
     store.recordCommitted(versionText, systemClock.now(), null);
     store.saveTrust({ keySet: keySet.data, highestFeedSeq: { stable: 0, latest: 0 } });
     if (!existsSync(paths.config)) {
-      mkdirSync(dirname(paths.config), { recursive: true, mode: 0o700 });
-      writeFileSync(paths.config, `${JSON.stringify({ channel: parsed.channel }, null, 2)}\n`, { mode: 0o600 });
+      try { settings.change({ kind: "channel", channel: parsed.channel }); }
+      catch (error) {
+        const code = settingsWriteCode(error, io);
+        if (code === null) throw error;
+        return code;
+      }
     }
     // The launchers the tree ships, linked into ~/.local/bin through `current`, so an update moves them too.
     for (const name of launchers) {
