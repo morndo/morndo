@@ -47,6 +47,7 @@ try {
     MORNDO_FORGE_URL: fakeForge.base,
     MORNDO_PROOF_REPOS: "morndo/morndo",
     MORNDO_PROOF_GATE: "on",
+    MORNDO_SCRATCH_HUB: "1",                      // a stand-in forge with the gate on is refused unless the hub says it is a scratch one
   });
   const managerSecret = mint(office.env, "manager", "manager");
   const workerSecret = mint(office.env, "lanes", "worker");
@@ -91,6 +92,7 @@ try {
     await panel.locator("[data-proof-line]").waitFor({ timeout: 10_000 });
     assert((await panel.locator("[data-proof-line]").innerText()) === proofLine, "the panel line differs from the CLI");
     assert((await panel.locator("[data-proof-standin]").innerText()) === "Read from a stand-in forge, not GitHub", "a stand-in forge should be marked in the panel");
+    assert(await page.locator("[data-stand-in-forge]").count() === 1, "the board header should say the hub reads a stand-in forge");
     const refs = panel.locator("[data-proof-ref]");
     assert(await refs.count() === 2, "expected two reference rows");
     assert(await panel.locator('[data-proof-ref][data-state="red"]').count() === 1, "expected one red reference");

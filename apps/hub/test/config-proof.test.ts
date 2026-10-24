@@ -63,5 +63,14 @@ describe("the proof gate settings", () => {
     expect(notice).toContain("stand-in forge");
     expect(notice).toContain("not from GitHub");
   });
+
+  it("a stand-in forge is refused with the gate on, unless the hub says it is a scratch hub", () => {
+    const forge = { MORNDO_FORGE_URL: "http://127.0.0.1:18999" };
+    expect(() => loadConfig({ ...forge, MORNDO_PROOF_GATE: "on" })).toThrow(/stand-in forge.*MORNDO_PROOF_GATE=on/s);
+    expect(loadConfig({ ...forge, MORNDO_PROOF_GATE: "on", MORNDO_SCRATCH_HUB: "1" }).forgeUrl).toBe("http://127.0.0.1:18999");
+    expect(loadConfig({ ...forge, MORNDO_PROOF_GATE: "warn" }).forgeUrl).toBe("http://127.0.0.1:18999");     // recorded, never held
+    expect(loadConfig({ ...forge }).proofGate).toBe("warn");
+    expect(loadConfig({ MORNDO_PROOF_GATE: "on" }).proofGate).toBe("on");                                       // no stand-in: nothing to refuse
+  });
 });
 

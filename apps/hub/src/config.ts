@@ -147,7 +147,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     proofGate: proofGateOf(env),
     proofRepos: proofReposOf(env),
     githubTokenFile: tokenFileOf(env),
-    forgeUrl: forgeUrlOf(env),
+    forgeUrl: forgeUrlChecked(env),
   };
 }
 
@@ -158,6 +158,15 @@ function proofGateOf(env: NodeJS.ProcessEnv): ProofMode {
   if (v !== "off" && v !== "warn" && v !== "on")
     throw new Error(`MORNDO_PROOF_GATE must be off, warn or on: ${v}`);
   return v;
+}
+
+// A stand-in forge with the gate on would judge Dones on answers that are not GitHub's: refused, unless the hub is declared
+// a scratch hub (MORNDO_SCRATCH_HUB=1: an end-to-end office or a QA hub, never the real board).
+function forgeUrlChecked(env: NodeJS.ProcessEnv): string | null {
+  const url = forgeUrlOf(env);
+  if (url !== null && proofGateOf(env) === "on" && env.MORNDO_SCRATCH_HUB !== "1")
+    throw new Error("MORNDO_FORGE_URL names a stand-in forge and cannot be used with MORNDO_PROOF_GATE=on: a Done would be judged on answers that are not GitHub's (a scratch hub that is not the real board says so with MORNDO_SCRATCH_HUB=1)");
+  return url;
 }
 
 // The sentence the hub logs at start when its references are read from a stand-in forge (MORNDO_FORGE_URL): what it

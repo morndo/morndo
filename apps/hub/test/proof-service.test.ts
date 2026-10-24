@@ -751,6 +751,17 @@ describe("a stand-in forge is shown, not hidden (B14)", () => {
   });
 });
 
+describe("a stand-in forge is hub-wide, not only per task (B14)", () => {
+  it("the board view says so when the hub reads a stand-in forge, and says nothing otherwise", () => {
+    const store = new Store(tempDir());
+    const plain = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
+    const standIn = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW, standIn: true });
+    expect(plain.view()).not.toHaveProperty("standIn");
+    expect(standIn.view().standIn).toBe(true);
+    store.close();
+  });
+});
+
 describe("a Done task is a snapshot (B13, B16)", () => {
   const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
   const greenForge = (): ForgeChecks => ({

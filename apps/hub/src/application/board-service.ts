@@ -17,7 +17,8 @@ import type { Authenticated } from "./access-service.ts";
 // `runs` (ADR-0032 §6, BoardFrameSchema.runs): each lane's latest Run; empty without a fleet. `orphans`: the to do tasks
 // whose lane the fleet no longer lists (BoardProjector.orphans); empty without a fleet. `merged` (B11): one view per
 // shown task that has merges.
-export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[] };
+// `standIn`: set only when the hub reads its proof references from a stand-in forge, so every screen can say so (ADR-0035).
+export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[]; standIn?: true };
 // A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
 export const RUNS_EVERY_MS = 1000;
 export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus; detail?: string };
@@ -36,6 +37,7 @@ export class BoardService {
   #runs: () => RunView[];
   #liveness: (sha: string) => Liveness;
   #knows: ((sha: string) => Promise<"yes" | "no" | "unknown">) | null;
+  #standIn: boolean;
   #orphans: (tasks: readonly Task[], now: number) => string[];
   #runsEveryMs: number;
   #runsTimer: NodeJS.Timeout | null = null;
@@ -52,11 +54,12 @@ export class BoardService {
   // fleet no longer lists (BoardProjector.orphans; none without a fleet). `runsEveryMs`: the runs' throttle.
   // `liveness` (B11): a merge's liveness over the nodes' builds; without one nothing is ever live, so Done waits. `knows`:
   // whether the hub's checkout holds a commit, asked once for a lane's merge record (actChecked); without one none is asked.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown"> }) {
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
     this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
     this.#knows = p.knows ?? null;
+    this.#standIn = p.standIn ?? false;
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
@@ -94,7 +97,7 @@ export class BoardService {
   view(): BoardView {
     const now = this.#now();
     const tasks = boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now);
-    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks) };
+    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks), ...(this.#standIn ? { standIn: true as const } : {}) };
   }
   task(key: string): { task: Task; events: TaskEvent[]; merged: MergedView | null } | null {
     const task = this.#store.task(key);

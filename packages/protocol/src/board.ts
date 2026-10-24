@@ -78,6 +78,7 @@ export const BoardFrameSchema = z.object({
   t: z.literal("board"), tasks: z.array(z.unknown()), lanes: z.array(text()), at: count(), runs: z.exactOptional(z.array(z.unknown())),
   orphans: z.exactOptional(z.array(text())),
   merged: z.exactOptional(z.array(z.unknown())),
+  standIn: z.exactOptional(z.boolean()),     // the hub reads its proof references from a stand-in forge, not GitHub (ADR-0035)
 });
 
 // A new task, from the app or an agent. A worker's lands in the backlog whatever it says (B2).

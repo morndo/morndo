@@ -90,6 +90,7 @@ export async function startInProcessHub(o: {
   // `proofMode`, `proofRepos`: the gate's mode and the repositories it reads, as MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS
   // would give them.
   forge?: ForgeChecks;
+  standIn?: boolean;                                       // the hub reads a stand-in forge: the board view says so
   proofMode?: ProofMode;
   proofRepos?: string[];
   // `identity`: the hub's identity key (a test's own pair; default: one made in the temp dir) — it signs the
@@ -148,7 +149,7 @@ export async function startInProcessHub(o: {
   const vapid = loadOrCreateVapid(dir, "mailto:test@example.test");
   // ADR-0015: the board, with the lanes a test's observation lists (none by default). `liveness`: a merge's liveness as
   // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
-  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}) });
+  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}), ...(o.standIn ? { standIn: true } : {}) });
   // ADR-0035: the proof of work, over the same store, wired as main.ts wires it.
   const proof = new ProofService({
     store, board, ...(o.now ? { now: o.now } : {}), ...(o.forge ? { forge: o.forge } : {}),

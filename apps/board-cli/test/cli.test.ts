@@ -533,6 +533,19 @@ describe("the brief and the proof (B13 to B16)", () => {
     expect(JSON.parse((await managerSays("show", "T-1", "--json")).out).proof).toMatchObject({ rev: 4, state: { kind: "verified", green: 2, total: 2 } });
   });
 
+  it("list says so when the hub reads a stand-in forge", async () => {
+    const standIn = await startInProcessHub({ standIn: true });
+    try {
+      const m = standIn.agents.issue("manager", "manager").secret;
+      const out: string[] = [];
+      await run(["new", "A task"], { MORNDO_HUB: standIn.base, MORNDO_AGENT_TOKEN: m }, { fetch, lane: async () => null, out: l => out.push(l), err: () => {} });
+      out.length = 0;
+      await run(["list"], { MORNDO_HUB: standIn.base, MORNDO_AGENT_TOKEN: m }, { fetch, lane: async () => null, out: l => out.push(l), err: () => {} });
+      expect(out[0]).toBe("(proof references are read from a stand-in forge, not GitHub)");
+    } finally { await standIn.close(); }
+    expect((await managerSays("list")).out).not.toContain("stand-in");
+  });
+
   it("a bare --proof-override is a usage error", async () => {
     await atReview("T-1", "Ship the totals row");
     const bare = await managerSays("done", "T-1", "--why", "checked", "--proof-override");

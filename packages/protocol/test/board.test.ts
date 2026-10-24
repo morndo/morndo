@@ -151,3 +151,13 @@ describe("the proof list on the wire (B17)", () => {
     expect(parseBody(ProofViewSchema, { ...base, coverage: [{ ...coverageRow, status: "maybe" }] })).toBeNull();
   });
 });
+
+describe("the board frame says when the hub reads a stand-in forge", () => {
+  it("standIn is optional, a boolean, and kept", () => {
+    const frame = { t: "board", tasks: [], lanes: [], at: 1 };
+    expect(parseBody(BoardFrameSchema, frame)).toEqual(frame);
+    expect(parseBody(BoardFrameSchema, { ...frame, standIn: true })).toEqual({ ...frame, standIn: true });
+    expect(parseBody(BoardFrameSchema, { ...frame, standIn: "yes" })).toBeNull();
+  });
+});
+

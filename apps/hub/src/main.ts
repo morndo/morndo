@@ -331,7 +331,7 @@ switch (cmd) {
       onChange: () => held.board?.runsChanged(),
     });
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null) });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null), standIn: config.forgeUrl != null });
     // ADR-0035: the proof of work, over the same store — a brief filed on the board seeds its references as rows. Step
     // 3: the rows come from the forge (github-checks.ts holds the credential; nothing else reads it), the mode and the
     // checked repositories from MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS. A pass every minute re-reads what is still

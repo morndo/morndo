@@ -255,6 +255,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const lanes = new Set(d.lanes as string[]);
         // B11: each task's merges by key, so a row can say where its merge stands (the hub's label, its own brackets).
         const mergedBy = new Map((Array.isArray(d.merged) ? d.merged as MergedView[] : []).map(m => [m.key, m]));
+        if (d.standIn === true) io.out("(proof references are read from a stand-in forge, not GitHub)");
         for (const s of LIST_ORDER) {
           const rows = tasks.filter(t => t.status === s);
           if (!rows.length) continue;
