@@ -45,7 +45,8 @@ describe("what Home counts", () => {
     expect(shownLevel([classic])).toBe("ok");
     // and the mixed account takes part in the tightest tiles
     expect(tightestShown([mixed, classic], "fiveHour")).toEqual({ account: "codex", window: { usedPercentage: 95, resetsAt: NOW + HOUR } });
-    expect(tightestShown([mixed, classic], "sevenDay")).toEqual({ account: "codex", window: { usedPercentage: 30, resetsAt: NOW + 3 * 24 * HOUR } });
+    // its weekly row counts too, but the tightest is the highest one: classic's 41.2 beats the mixed account's 30
+    expect(tightestShown([mixed, classic], "sevenDay")).toEqual({ account: "max-1", window: { usedPercentage: 41.2, resetsAt: NOW + 3 * 24 * HOUR } });
     // a named-only account still counts only its named windows and its spend
     const namedOnly = applyReport(null, report({
       account: "cursor", fiveHour: null, sevenDay: null,

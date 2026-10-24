@@ -101,7 +101,10 @@ The collector reads `~/.config/morndo/usage-claude.json` (path from `MORNDO_USAG
   "hub": "http://127.0.0.1:8787",
   "tokenFile": "/etc/morndo/usage-claude.token",
   "node": "pc",
-  "accounts": { "seat-a": { "configDir": "/path/to/seat-a-config-dir" } }
+  "accounts": {
+    "seat-a": { "configDir": "/path/to/seat-a-config-dir" },
+    "codex-a": { "kind": "codex", "codexHome": "/path/to/codex-home" }
+  }
 }
 ```
 
@@ -130,6 +133,31 @@ derived out mark's back time passed and a confirming read is due. With a grant i
 per 4 minutes across all machines, one live lease per account and source across all nodes, and at most two live
 leases on the whole hub. A failure cools the account down on every machine at once — the provider's own retry word
 when it gave one, else 5 minutes, doubling on consecutive failures to half an hour, reset by a good reading.
+
+## Reading Codex usage
+
+The same collector reads a Codex subscription: an account entry with `"kind": "codex"` and `"codexHome"` (its
+`CODEX_HOME` directory) in the same config, and optionally `"codexBin"` when the `codex` on `PATH` is not the one to
+run (`MORNDO_CODEX_BIN` overrides it for a machine). It reads the app server's own `account/rateLimits/read` — the
+CLI's experimental JSON-RPC interface, `codex app-server` on stdio — and nothing else: never a token, never a
+credentials file. The reading carries the plan, every window the answer names (the 5-hour and weekly pair, and any
+other limit's windows under their limit's own name), and a digest of the account id — never the id itself.
+
+A codex account runs under the same lease as a claude one (source `app-server`): only a granted lease spawns a read,
+and the reading or the failure carries the lease id. How often it reads adapts to how full the fullest window is:
+every 15 minutes while it idles below 75%, every 5 from 75%, every 2 from 90%, once a minute from 99% — never faster
+than once a minute. The hub, not the collector, holds that rhythm through its lease.
+
+Two things only a leased reading may say. The identity digest feeds the plan watch: a changed identity between two
+agreeing readings is an account change ("the account behind it changed"), told once, and it drops a derived seat mark
+as a plan change does. And Codex's own limit flags — `ordinary_usage_allowed` false, or any `rate_limit_reached_type`
+— mark the seat out at the soonest reset of a window at 100%; flags that say all is well end a derived mark again. A
+reading without a valid lease never marks and never clears from its flags, and the type string itself is never shown
+and never stored.
+
+The app server also pushes `account/rateLimits/updated` notifications; Morndo maps one to the same reading body (a
+push needs no lease — it is nobody's rationed read). The long-lived app-server client that would receive those
+pushes is **not built yet**: until it is, Codex is read by the leased poll alone.
 
 ## Pool seats
 

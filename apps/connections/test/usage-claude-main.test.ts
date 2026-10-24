@@ -194,6 +194,7 @@ describe("the collector's codex account (S6, plan 4.6)", () => {
   });
 
   it("a refused read posts its failure classified by its words, with a redacted hint and the lease id", async () => {
+    hub.answerWith({ status: "granted", lease_id: "lease-9-test", expires_at: 4_102_444_800 });
     const { code } = await codexPassOnce({ mode: "error" });
     expect(code).toBe(0);
     const readings = hub.of("/api/agent/usage/readings");

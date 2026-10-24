@@ -97,7 +97,7 @@ describe("codex usage: the status-line report", () => {
 });
 
 describe("codex usage: the reading body (S6, plan 4.6)", () => {
-  const limits = (o: Partial<CodexLimits> = {}): CodexLimits => ({ primary: win(42, 300), secondary: win(17, 10_080), planType: "plus", others: [], ...o });
+  const limits = (o: Partial<CodexLimits> = {}): CodexLimits => ({ primary: win(42, 300), secondary: win(17, 10_080, 1_893_888_000), planType: "plus", others: [], ...o });
   const flags = { identity: "a1b2c3d4e5f6", ordinaryUsageAllowed: true, rateLimitReachedType: null, now: 1_700_000_012_345, node: "pc" };
   const noFlags = { identity: null, ordinaryUsageAllowed: null, rateLimitReachedType: null, now: 1_700_000_000_000, node: "pc" };
 

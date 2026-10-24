@@ -500,7 +500,17 @@ export class UsageService {
     // taken — the echo rule's line to draw against a status line's last word (PR #125, finding 1).
     const previous = prev.reading === null ? null : { capturedAt: prev.reading.capturedAt, windows: prev.reading.windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt })) };
     this.#store.saveUsageSource(account, body.source, node, { health, reading: { capturedAt, plan: body.plan ?? null, windows: list }, previous, hint: null, orderedAt });
-    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id);
+    // S6 (plan 4.6, AT-36): the limit flags count only on a leased reading. A flag that says the account cannot use its
+    // plan is a limit hit; flags that say all is well reach the FreshRead so they can end a derived mark (AT-34). The
+    // free-string type is never shown and never stored beyond this boolean effect.
+    const leased = this.#leaseBook.valid(body.lease_id, account, body.source);
+    const allowed = body.ordinary_usage_allowed === true && (body.rate_limit_reached_type ?? null) === null;
+    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id, body.identity ?? null, leased && allowed);
+    if (leased && (body.ordinary_usage_allowed === false || (body.rate_limit_reached_type ?? null) !== null)) {
+      // The soonest reset of a window at or above 100%, else no word on when it is back.
+      const back = list.filter(w => w.usedPercent !== null && w.usedPercent >= 100 && w.resetsAt !== null).map(w => w.resetsAt as number);
+      this.noteLimit({ account, kind: "usage_limit", backAt: back.length > 0 ? Math.min(...back) : null, by: "the usage reading", at: capturedAt });
+    }
     this.#thresholds(account, this.#mergedWindows(this.#baseOf(account, now), this.#store.usageSourcesOf(account), now), now);
     this.#completeLease(body.lease_id, account, body.source, { ok: true, capturedAt });
     this.#tellIfChanged();
@@ -522,11 +532,14 @@ export class UsageService {
 
   // What one good reading changes: the plan watch, the cycle books, and a seat mark it may end or drop. The
   // thresholds no longer run here: they watch the merged shown windows, after the reading is stored (finding 4b).
-  #observe(account: string, windows: readonly WindowReading[], capturedAt: number, source: UsageSource, plan: string | null, leaseId: unknown): void {
+  // S6 (plan 4.6): the reading's own identity digest feeds the plan watch (a changed identity is an account change),
+  // and `flagsAllowed` — true only on a leased reading whose flags say all is well — reaches the FreshRead so the flag
+  // path of clearsMark can end a derived mark.
+  #observe(account: string, windows: readonly WindowReading[], capturedAt: number, source: UsageSource, plan: string | null, leaseId: unknown, identity: string | null, flagsAllowed: boolean): void {
     const watches = this.#watchMap(account);
     // The plan watch (plan 4.2): a difference is held, and told only once a later reading agrees with it.
     const fact: PlanFact = {
-      plan, identity: null,
+      plan, identity,
       windows: windows.map(w => ({ id: w.id, lengthMins: w.lengthMins, usedPercent: w.usedPercent, resetsAt: w.resetsAt, rolling: w.rolling })),
       // Only the headless usage report lists the account's whole window set, so only a window missing from it is really gone.
       ...(source === "claude-usage" ? { complete: true } : {}),
@@ -558,7 +571,7 @@ export class UsageService {
     // A fresh leased reading of a new cycle is the one thing that ends a seat mark (plan 4.5, U13).
     const seat = this.#store.usageSeat(account)?.record ?? null;
     if (seat !== null) {
-      const read: FreshRead = { capturedAt, leased: this.#leaseBook.valid(leaseId, account, source), windows: windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt, lengthMins: w.lengthMins })) };
+      const read: FreshRead = { capturedAt, leased: this.#leaseBook.valid(leaseId, account, source), windows: windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt, lengthMins: w.lengthMins })), ...(flagsAllowed ? { ordinaryUsageAllowed: true, rateLimitReachedType: null } : {}) };
       if (clearSeat(seat, read).cleared) {
         this.#tx(() => {
           this.#store.deleteUsageSeat(account);

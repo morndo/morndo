@@ -65,7 +65,7 @@ const ADDRESSISH = /\S+@\S+/g;
 
 // The first 120 characters of a line, with every link, address and token shape removed: all the hub keeps of a
 // screen this reader does not know. Empty after that is nothing to say.
-function redactHead(text: string): string | null {
+export function redactHead(text: string): string | null {
   const head = text.slice(0, HINT_HEAD)
     .replace(URLISH, "[redacted]")
     .replace(TOKENISH, "[redacted]")

@@ -184,7 +184,16 @@
                   <p class="srcnote">{sourceLine(s, now)}</p>
                 {/each}
               {/if}
-              {#if a.limits?.length}
+              {#if a.limits?.length && (a.fiveHour !== null || a.sevenDay !== null)}
+                <!-- S6 (plan 4.6): a mixed account (named windows beside the fixed pair, e.g. Codex with other limits)
+                     shows the fixed rows first, as today, and the named ones after them under a small caption. -->
+                {@render meter("5-hour window", a.fiveHour, null, dim)}
+                {@render meter("Weekly window", a.sevenDay, null, dim)}
+                <p class="otherlimits">Other limits</p>
+                {#each a.limits as w, i (`${w.label}:${i}`)}
+                  {@render meter(w.title ? `${w.label} · ${w.title}` : w.label, w, resetsOnLabel(w.resetsOn), dim)}
+                {/each}
+              {:else if a.limits?.length}
                 {#each a.limits as w, i (`${w.label}:${i}`)}
                   {@render meter(w.title ? `${w.label} · ${w.title}` : w.label, w, resetsOnLabel(w.resetsOn), dim)}
                 {/each}
@@ -271,7 +280,9 @@
   .meter.l-warning { --fill: var(--morndo-warning); --track: var(--morndo-warning-subtle); }
   .meter.l-critical { --fill: var(--morndo-danger); --track: var(--morndo-danger-subtle); }
   .mh { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-  .ml { font: 700 13px/18px var(--font); }
+  .ml { font: 700 13px/18px var(--font); overflow-wrap: anywhere; }
+  /* S6: the caption between a mixed account's fixed rows and its named ones. */
+  .otherlimits { margin: 0; font: 700 12px/16px var(--font); color: var(--muted); }
   .mv { font: 600 15px/18px var(--font); }
   .mv small { font: 400 12px/18px var(--font); color: var(--muted); }
   .mv.muted { font: 400 13px/18px var(--font); color: var(--muted); }

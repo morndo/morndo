@@ -7,7 +7,12 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { productVersion } from "@morndo/service-kit";
+import type { UsageReason } from "@morndo/domain";
+import { childEnv } from "./runtime-claude.ts";
+import { redactHead } from "./usage-claude.ts";
 import { readClaude } from "./usage-claude-run.ts";
+import { codexReadingBody, everyFor, readCodexLimits } from "./usage-codex.ts";
 
 export type UsageClaudeAccount = { configDir: string };
 // S6 (plan 4.6): a codex account in the same config — kind "codex", the CODEX_HOME directory it reads under, and
@@ -53,8 +58,10 @@ function loadConfig(path: string): UsageClaudeConfig | null {
 }
 
 // One codex account's pass (S6, plan 4.6): the same lease, read and post loop as a claude account, asking for source
-// "app-server" and reading the app server's own account/rateLimits (never a token, never a credentials file). Round 1:
-// a stub.
+// "app-server" and reading the app server's own account/rateLimits (never a token, never a credentials file). The
+// binary is the entry's own codexBin, else the MORNDO_CODEX_BIN of the environment, else the PATH's codex; the child
+// runs under the account's CODEX_HOME with the same environment pool-cli's codexEnv builds. A refused read is
+// classified by its words, as the claude classifier does, with a redacted hint.
 export async function codexPass(o: {
   account: string;
   hub: string;
@@ -65,8 +72,46 @@ export async function codexPass(o: {
   now: () => number;
   post: (hub: string, path: string, token: string, headers: Record<string, string>, body: unknown) => Promise<Record<string, unknown> | null>;
 }): Promise<boolean> {
-  void o;
-  throw new Error("not implemented");
+  const headers = { "x-morndo-account": o.account, "x-morndo-lane": "usage-claude" };
+  const lease = await o.post(o.hub, "/api/agent/usage/lease", o.token, headers, { account: o.account, source: "app-server", node: o.node });
+  if (lease === null) return false;                          // the hub could not be asked: the pass is not clean
+  if (lease.status !== "granted" || typeof lease.lease_id !== "string") return true;   // fresh or denied: nothing to do
+  const read = await readCodexLimits({
+    bin: o.entry.codexBin ?? o.env.MORNDO_CODEX_BIN ?? "codex",
+    env: childEnv(o.env, { CODEX_HOME: o.entry.codexHome }),
+    version: productVersion(),
+  });
+  const body: Record<string, unknown> = read.ok
+    ? {
+      ...codexReadingBody(read.limits, {
+        identity: read.limits.identity ?? null,
+        ordinaryUsageAllowed: read.limits.ordinaryUsageAllowed ?? null,
+        rateLimitReachedType: read.limits.rateLimitReachedType ?? null,
+        now: o.now(), node: o.node,
+      }),
+      lease_id: lease.lease_id,
+    }
+    : {
+      source: "app-server", node: o.node, captured_at: Math.floor(o.now() / 1000), lease_id: lease.lease_id,
+      every_s: everyFor(null),                              // a failed read retries at the idle pace
+      failure: { reason: codexReasonOf(read.problem), hint: codexHintOf(read.problem) },
+    };
+  return await o.post(o.hub, "/api/agent/usage/readings", o.token, headers, body) !== null;
+}
+
+// The read's own problem, classified by its words: a sign-in problem signed_out, a limit rate_limited, a timeout
+// timeout, anything else unknown_screen — the same closed list the hub keeps, never a free string.
+function codexReasonOf(problem: string): UsageReason {
+  const words = problem.toLowerCase();
+  if (words.includes("in time")) return "timeout";
+  if (words.includes("login") || words.includes("sign in") || words.includes("signed in") || words.includes("sign-in")
+    || words.includes("401") || words.includes("403") || words.includes("authentication")) return "signed_out";
+  if (words.includes("429") || words.includes("rate limit")) return "rate_limited";
+  return "unknown_screen";
+}
+// Only an unknown shape carries a hint, and only its redacted head.
+function codexHintOf(problem: string): string | null {
+  return codexReasonOf(problem) === "unknown_screen" ? redactHead(problem) : null;
 }
 
 // One POST to the hub, with the agent token in the header — never in a body and never in a line of output. The
