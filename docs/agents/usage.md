@@ -74,6 +74,81 @@ that moment: it appears on Home as soon as a failure names it, and Forget (the p
 its seat and its lane records together, so a later failure of one of its lanes marks nothing until a start or a report
 names the account again.
 
+## Reading Claude usage (headless)
+
+Besides the status line, an account's whole window set — including windows a status line never names, such as a
+model-scoped weekly limit — can be read the documented way: the unmodified Claude CLI's own headless `/usage`, run by
+the `morndo-usage-claude` collector. Nothing else is ever read: not the OAuth usage endpoint, not a token, not a
+credentials file, no web dashboard. The collector spawns
+
+```sh
+claude -p /usage --tools "" --output-format stream-json --verbose --no-session-persistence
+```
+
+under the account's own config directory (`CLAUDE_CONFIG_DIR`), with every token variable (`CLAUDE_CODE_OAUTH_TOKEN`,
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`) removed from the child's environment, and parses the report out of its
+stdout. The read can take minutes on a loaded machine; the whole process group is killed after 180 s.
+
+**The account needs its FULL login on that machine.** A long-lived `setup-token` login has no usage scope: the read
+answers `no_scope` — "sign in fully here" — never 0%. Another machine that holds the full login may read the same
+account: the hub keys readings by account and node and never copies a token, so one machine can be the reader for an
+account whose sessions run elsewhere.
+
+The collector reads `~/.config/morndo/usage-claude.json` (path from `MORNDO_USAGE_CLAUDE_CONFIG`):
+
+```json
+{
+  "hub": "http://127.0.0.1:8787",
+  "tokenFile": "/etc/morndo/usage-claude.token",
+  "node": "pc",
+  "accounts": { "seat-a": { "configDir": "/path/to/seat-a-config-dir" } }
+}
+```
+
+`node` is the machine's own name; `tokenFile` holds the collector's own agent token, read from the file and never
+printed. The lease route answers a manager token or a worker token with the `usage-pool` scope (the limit route's
+rule), so the collector's token must carry that scope:
+
+```sh
+morndo agent-token new <name> --role worker --scope usage-pool
+```
+
+A systemd user unit runs the collector in the background:
+
+```ini
+# ~/.config/systemd/user/morndo-usage-claude.service
+[Unit]
+Description=Morndo Claude usage collector
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/node /opt/morndo/apps/connections/src/adapters/usage-claude-main.ts
+Environment=MORNDO_USAGE_CLAUDE_CONFIG=%h/.config/morndo/usage-claude.json
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+**It reads on demand, never on a timer.** Every 30 s the collector asks the hub — never the provider — for a lease
+(`POST /api/agent/usage/lease`), and only a granted lease spawns a read. The hub grants one only when somebody is
+looking (a feed hello — the principal opened Home — or the look route) and the account's own word is old, when a
+derived out mark's back time passed and a confirming read is due, or for an account the hub has never heard of —
+wanted once per name, and at most five new unknown names an hour per token. A lease belongs to the token that took
+it: only that token's reading completes it. With a grant in hand: at most one read per account
+per 4 minutes across all machines, one live lease per account and source across all nodes, and at most two live
+leases on the whole hub. A failure cools the account down on every machine at once — the provider's own retry word
+when it gave one (never shorter than a minute), else 5 minutes, doubling on consecutive failures to half an hour,
+reset by a good reading.
+
+**Known limits of the token model (said plainly).** The hub has no node configuration, so it cannot tell which
+accounts a node really reads. (1) The unknown-name budget is five new names per token per hour, not per node: a pool
+token that holds both lease slots can still spend its budget on invented names five times an hour. (2) Any token
+may post an *unleased* reading for any account. Such a reading cannot end a mark and cannot set the cache (only a
+lease does either), but it does change the windows Home shows and the thresholds that watch them. Worker tokens are
+shared by lanes, so the token binding only detects a second, different token. The fix is per-lane worker tokens and
+leases bound to the accounts a node actually reports; it is the follow-up T-430 on the board, not part of this change.
+
 ## Pool seats
 
 The accounts pool can set a seat by hand, with a token that carries the `usage-pool` scope:
@@ -95,7 +170,8 @@ either owner's seat with `POST /api/usage/seat/clear` (`{ "account": "max-1", "o
 `owner` for both).
 
 A limit post (`POST /api/agent/usage/limit`) is for a manager token or a token with the `usage-pool` scope; it always
-speaks for the hub's own derived seat, never the pool's. Until the headless reader arrives, a derived mark ends when
+speaks for the hub's own derived seat, never the pool's. A derived mark ends when a fresh leased read of a new cycle
+clears it — the headless reader above is granted exactly that lease once the mark's back time has passed — or when
 the plan or account changes, when the principal clears it, or when it expires: an out mark is dropped six hours after
 the later of its back time and the cycle's own reset (the cycle the limit hit is the clock, so a weekly window that
 resets days later is not shown as fine while it still reads 100%), with no newer hit to push either out. A retired or
