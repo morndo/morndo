@@ -114,10 +114,11 @@ const PAGES_YML = [
 
 // The good settings set: four environments with exactly the one reviewer (by id), Prevent self-review on and
 // administrator bypass off, every environment allowing the branch main only, release-please with no required reviewer
-// and the branch main only, a tag ruleset only the release App (by id) can bypass, a main ruleset whose bypass the
-// owner can read, a feed-branch ruleset with no bypass that blocks force pushes and deletion, CODEOWNERS naming an
-// owner for /trust/, the two signing keys as secrets of exactly the environments whose jobs use them, the App's two
-// secrets as secrets of release-please only, and the workflows on main using them.
+// and the branch main only, a tag ruleset only the release App (by id) can bypass, a main ruleset that requires
+// code-owner review with an empty exclude and no bypass actor, a feed-branch ruleset with no bypass that blocks force
+// pushes and deletion, CODEOWNERS naming an owner for /trust/, the two signing keys as secrets of exactly the
+// environments whose jobs use them, the App's two secrets as secrets of release-please only, and the workflows on
+// main using them.
 function world() {
   const dir = mkdtempSync(join(tmpdir(), "morndo-settings-"));
   roots.push(dir);
@@ -149,7 +150,7 @@ function world() {
   ]);
   put(`repos/${REPO}/rulesets/10`, {
     id: 10, name: "main: pull request and code owners", target: "branch", enforcement: "active",
-    bypass_actors: [{ actor_id: 3, actor_type: "RepositoryRole", bypass_mode: "always" }],
+    bypass_actors: [],
     conditions: { ref_name: { include: ["refs/heads/main"], exclude: [] } },
     rules: [{ type: "pull_request", parameters: { require_code_owner_review: true, required_approving_review_count: 1 } }, { type: "required_linear_history" }],
   });
@@ -210,7 +211,7 @@ describe("check-release-settings.sh", () => {
     expect(failLines(r.stdout)).toEqual([]);
     expect(r.stdout).not.toContain("KNOWN");
     expect(r.stdout).toMatch(/release-please allows the branch main only/);
-    expect(r.stdout).toContain("INFO: main ruleset");
+    expect(r.stdout).not.toContain("INFO: main ruleset");
     expect(r.stdout).toContain("INFO: tag ruleset bypass: Integration:7");
   });
 
@@ -949,6 +950,95 @@ describe("check-release-settings.sh", () => {
       expect(failLines(r.stdout), what).toEqual(expected === null ? [] : [expected]);
       expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(expected === null ? 0 : 1);
     }
+  });
+
+  it("CODEOWNERS: a later narrower line that covers a trust file decides", () => {
+    const path = `repos/${REPO}/contents/.github/CODEOWNERS?ref=main`;
+    const noEntry = "FAIL: CODEOWNERS has no entry for /trust/ with an owner";
+    const takes = (pattern: string) => `FAIL: CODEOWNERS: a later line for ${pattern} takes over /trust/, so its entry reviews nothing`;
+    const trust = "/trust/ @owner\n";
+    const cases: [string, string, string | null][] = [
+      ["/trust/keys.json with no owner", `${trust}/trust/keys.json\n`, noEntry],
+      ["*.json @other", `${trust}*.json @other\n`, takes("*.json")],
+      ["*.sig @other", `${trust}*.sig @other\n`, takes("*.sig")],
+      ["/trust/* with no owner", `${trust}/trust/*\n`, noEntry],
+      ["/trust/keys.json @owner2", `${trust}/trust/keys.json @owner2\n`, null],
+      ["an unrelated /docs/", `${trust}/docs/ @other\n`, null],
+      ["an earlier *.json", `*.json @other\n${trust}`, null],
+    ];
+    for (const [what, text, expected] of cases) {
+      const w = world();
+      w.raw(path, text);
+      const r = w.run();
+      expect(failLines(r.stdout), `${what}: ${r.stdout}${r.stderr}`).toEqual(expected === null ? [] : [expected]);
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(expected === null ? 0 : 1);
+    }
+  });
+
+  it("CODEOWNERS patterns follow gitignore rules", () => {
+    const path = `repos/${REPO}/contents/.github/CODEOWNERS?ref=main`;
+    const noEntry = "FAIL: CODEOWNERS has no entry for /trust/ with an owner";
+    for (const text of ["/trust @x\n", "trust/ @x\n", "/trust/** @x\n", "trust @x\n", "**/trust/ @x\n", "/trus? @x\n"]) {
+      const w = world();
+      w.raw(path, text);
+      const r = w.run();
+      expect(r.status, `${JSON.stringify(text)}: ${r.stdout}${r.stderr}`).toBe(0);
+      expect(failLines(r.stdout), text).toEqual([]);
+    }
+    const w = world();
+    w.raw(path, "/foo/trust/ @x\n");
+    const r = w.run();
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(failLines(r.stdout)).toEqual([noEntry]);
+  });
+
+  it("the code-owner ruleset does not count when its exclude drops main", () => {
+    const name = "main: pull request and code owners";
+    const generic = "FAIL: no active ruleset on main requires code-owner review (a pull_request rule with require_code_owner_review true), so the CODEOWNERS entry for /trust/ reviews nothing";
+    for (const pattern of ["refs/heads/main", "refs/heads/ma*"]) {
+      const w = world();
+      w.edit(`repos/${REPO}/rulesets/10`, d => ({ ...d, conditions: { ref_name: { include: ["refs/heads/main"], exclude: [pattern] } } }));
+      const r = w.run();
+      expect(r.status, `${pattern}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(failLines(r.stdout), pattern).toEqual([
+        `FAIL: ruleset '${name}' requires code-owner review but has an exclude (${pattern}): it may drop main`,
+        generic,
+      ]);
+    }
+  });
+
+  it("the code-owner ruleset does not count when it has a bypass actor", () => {
+    const generic = "FAIL: no active ruleset on main requires code-owner review (a pull_request rule with require_code_owner_review true), so the CODEOWNERS entry for /trust/ reviews nothing";
+    const w = world();
+    w.edit(`repos/${REPO}/rulesets/10`, d => ({ ...d, bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "pull_request" }] }));
+    const r = w.run();
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(failLines(r.stdout)).toEqual([
+      "FAIL: ruleset 'main: pull request and code owners' requires code-owner review but has a bypass actor (RepositoryRole:5:pull_request): the review can be skipped",
+      generic,
+    ]);
+  });
+
+  it("--allow-main-bypass accepts a bypass actor on the code-owner ruleset and says so", () => {
+    const w = world();
+    w.edit(`repos/${REPO}/rulesets/10`, d => ({ ...d, bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "pull_request" }] }));
+    const r = w.run(["--allow-main-bypass"]);
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout).toContain("WARN: main's code-owner review can be bypassed by RepositoryRole:5:pull_request (accepted with --allow-main-bypass)");
+    expect(failLines(r.stdout)).toEqual([]);
+  });
+
+  it("--allow-main-bypass does not accept an exclude", () => {
+    const generic = "FAIL: no active ruleset on main requires code-owner review (a pull_request rule with require_code_owner_review true), so the CODEOWNERS entry for /trust/ reviews nothing";
+    const w = world();
+    w.edit(`repos/${REPO}/rulesets/10`, d => ({ ...d, conditions: { ref_name: { include: ["refs/heads/main"], exclude: ["refs/heads/main"] } } }));
+    const r = w.run(["--allow-main-bypass"]);
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(r.stdout).not.toContain("WARN:");
+    expect(failLines(r.stdout)).toEqual([
+      "FAIL: ruleset 'main: pull request and code owners' requires code-owner review but has an exclude (refs/heads/main): it may drop main",
+      generic,
+    ]);
   });
 
   it("it reports every problem at once, not only the first", () => {

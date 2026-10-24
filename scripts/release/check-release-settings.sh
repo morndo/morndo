@@ -1,5 +1,5 @@
 #!/bin/sh
-# check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets]: proves,
+# check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets] [--allow-main-bypass]: proves,
 # read-only, the GitHub settings a release depends on; it never changes a setting (GitHub API GETs through gh api only)
 # and never prints a secret value (secret NAMES only). The environments release, feed, promote and withdraw must each
 # have exactly one required reviewer, the second account, named by its id (--reviewer-id: a team, the maintainer account
@@ -14,15 +14,18 @@
 # rule. A tag ruleset must hold refs/tags/v* with only the release App, by its id (--app-id), as its bypass actor, so
 # nobody else, administrators included, can create or move a release tag. The feed branch needs its own ruleset: active,
 # include exactly refs/heads/feed with an empty exclude, the non_fast_forward and deletion rules, and no bypass actor,
-# so nobody, administrators included, can force-push or delete it. .github/CODEOWNERS on main must have an entry for
-# the trust files (a pattern /trust/ or /trust/* or trust/ or trust/*, with at least one @owner); a line for * does not
-# count. A key secret is a secret a job uses in one of
+# so nobody, administrators included, can force-push or delete it. .github/CODEOWNERS on main must give each trust
+# file (trust/keys.json, trust/keys.json.sig, trust/release_allowed_signers, trust/feed_allowed_signers) a last
+# matching line that names an @owner and the trust directory; a later generic line takes that file over. The entry
+# reviews nothing unless an active ruleset on main requires code-owner review, its include covers main, its exclude is
+# empty and it has no bypass actor. --allow-main-bypass accepts a bypass actor on that ruleset and warns instead of
+# failing; an exclude is never accepted. A key secret is a secret a job uses in one of
 # the four environments (a `secrets.NAME` of that job in the workflows on main, not a name pattern): it must be a secret
 # of that environment and of no other, and neither a repository nor an organisation secret, because a repository secret
 # is readable by any workflow from any branch. RELEASE_SSH_KEY, FEED_SSH_KEY, RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY
 # are keys by name as well, and the App's two must be secrets of the environment release-please and of no other place.
 # Any other secret a job with no environment uses is printed as INFO. Every problem is one FAIL line on stdout, and the
-# exit status is 1 when there was one, 2 for a usage error; INFO lines never fail. The check runs before every release
+# exit status is 1 when there was one, 2 for a usage error; INFO and WARN lines never fail. The check runs before every release
 # and every Monday, on a machine with an administrator token, never inside Actions (the Actions token cannot read
 # environment secrets, rulesets or reviewers). gh, jq and awk come from the caller's PATH, which the administrator's
 # machine provides. Endpoints and response shapes, read 2026-10-24:
@@ -38,12 +41,14 @@ set -eu
 problems=0
 fail() { printf 'FAIL: %s\n' "$*"; problems=$((problems + 1)); }
 info() { printf 'INFO: %s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*"; }
 
-usage='usage: check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets]'
+usage='usage: check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets] [--allow-main-bypass]'
 repo=morndo/morndo
 reviewer_id=
 app_id=
 org_secrets=1
+allow_main_bypass=0
 number() { case $1 in ''|*[!0-9]*) return 1 ;; esac; }
 while [ $# -gt 0 ]; do
   case $1 in
@@ -51,6 +56,7 @@ while [ $# -gt 0 ]; do
     --reviewer-id) [ $# -ge 2 ] && number "$2" || { echo "$usage" >&2; exit 2; }; reviewer_id=$2; shift 2 ;;
     --app-id) [ $# -ge 2 ] && number "$2" || { echo "$usage" >&2; exit 2; }; app_id=$2; shift 2 ;;
     --no-org-secrets) org_secrets=0; shift ;;
+    --allow-main-bypass) allow_main_bypass=1; shift ;;
     *) echo "$usage" >&2; exit 2 ;;
   esac
 done
@@ -292,49 +298,148 @@ if [ "$have_rulesets" = 1 ]; then
     done
   fi
   # A CODEOWNERS entry is a required review only when an active ruleset on main requires code-owner review: a
-  # pull_request rule with require_code_owner_review true. Without it the /trust/ line below reviews nothing.
+  # pull_request rule with require_code_owner_review true, an include that covers main, an empty exclude (an exclude
+  # may drop main) and no bypass actor. --allow-main-bypass lets a bypass actor through and warns; an exclude is
+  # never accepted. Without such a ruleset the /trust/ line below reviews nothing.
   owners_rule=0
   for id in $(jq -r '.[]? | select(.target == "branch") | .id' "$tmp/rulesets"); do
     [ -f "$tmp/ruleset-$id" ] || continue
     if jq -e '.enforcement == "active"
         and ((.conditions.ref_name.include // []) | any(. == "~DEFAULT_BRANCH" or . == "~ALL" or . == "refs/heads/main"))
         and ((.rules // []) | any(.type == "pull_request" and (.parameters.require_code_owner_review == true)))' "$tmp/ruleset-$id" >/dev/null; then
-      owners_rule=1
+      name=$(jq -r '.name // "?"' "$tmp/ruleset-$id")
+      exclude=$(jq -r '(.conditions.ref_name.exclude // []) | join(", ")' "$tmp/ruleset-$id")
+      actors=$(jq -r '[.bypass_actors[]? | "\(.actor_type):\(.actor_id):\(.bypass_mode)"] | join(", ")' "$tmp/ruleset-$id")
+      if [ -n "$exclude" ]; then
+        fail "ruleset '$name' requires code-owner review but has an exclude ($exclude): it may drop main"
+      fi
+      if [ -n "$actors" ] && [ "$allow_main_bypass" != 1 ]; then
+        fail "ruleset '$name' requires code-owner review but has a bypass actor ($actors): the review can be skipped"
+      fi
+      if [ -z "$exclude" ] && { [ -z "$actors" ] || [ "$allow_main_bypass" = 1 ]; }; then
+        owners_rule=1
+        if [ -n "$actors" ]; then
+          warn "main's code-owner review can be bypassed by $actors (accepted with --allow-main-bypass)"
+        fi
+      fi
     fi
   done
   [ "$owners_rule" = 1 ] || fail "no active ruleset on main requires code-owner review (a pull_request rule with require_code_owner_review true), so the CODEOWNERS entry for /trust/ reviews nothing"
 fi
 
 # .github/CODEOWNERS on main, through the contents API with the raw media type, the same call the workflows use.
-# CODEOWNERS is last-match-wins, so the LAST line whose pattern is the trust directory decides, and it must be
-# followed by an @owner; a later catch-all line (*, **, /**) takes the trust files over and fails too. A comment is
-# not an entry even when the words after "#" name /trust/ and an owner: those words are read and then refused
-# because the line is a comment. A line for * before the trust line does not count as the entry.
+# Last match wins per trust file. The last non-comment line whose gitignore pattern covers that file must name an
+# @owner and must name the trust directory (a path component that globs "trust" and has a literal in it). A later
+# generic line (*, **, /**, **/*, *.json, *.sig) decides the owner instead, so the trust entry reviews nothing.
+# *, **, /** and **/* keep the sentence that names "*", which is asserted; every other pattern is named. A comment
+# is not an entry. A line that comes before the trust line does not count: it is overridden.
 if gh api "repos/$repo/contents/.github/CODEOWNERS?ref=main" -H "Accept: application/vnd.github.raw+json" >"$tmp/codeowners" 2>/dev/null; then
-  rc=0
   awk '
-    BEGIN { decided = 0; owned = 0; overridden = 0 }
-    /^[ \t]*$/ { next }
-    {
-      comment = ($0 ~ /^[ \t]*#/)
-      line = $0
-      sub(/^[ \t]*#[ \t]+/, "", line)
-      n = split(line, f)
-      if (comment) next
-      if (f[1] ~ /^\/?trust\/\*?$/) {
-        decided = 1; owned = 0; overridden = 0
-        for (i = 2; i <= n; i++) if (f[i] ~ /^@/) owned = 1
-        next
-      }
-      if (decided && f[1] ~ /^(\*|\*\*|\/\*\*|\*\*\/\*)$/) overridden = 1
+    function esc(c) {
+      if (c == "." || c == "^" || c == "$" || c == "+" || c == "|" || c == "(" || c == ")" || c == "{" || c == "}" || c == "[" || c == "]" || c == "\\") return "\\" c
+      return c
     }
-    END { if (!decided || !owned) exit 1; if (overridden) exit 2; exit 0 }
-  ' "$tmp/codeowners" || rc=$?
-  case $rc in
-    0) ;;
-    2) fail "CODEOWNERS: a later line for * takes over /trust/, so its entry reviews nothing" ;;
-    *) fail "CODEOWNERS has no entry for /trust/ with an owner" ;;
-  esac
+    function pat2re(pat,    s, anchored, re, i, n, c) {
+      s = pat
+      sub(/\/$/, "", s)
+      anchored = (index(s, "/") > 0)
+      if (substr(s, 1, 1) == "/") s = substr(s, 2)
+      re = ""
+      n = length(s)
+      i = 1
+      while (i <= n) {
+        if (substr(s, i, 3) == "**/") { re = re "(.*/)?"; i += 3; continue }
+        if (substr(s, i, 2) == "**") { re = re ".*"; i += 2; continue }
+        c = substr(s, i, 1)
+        if (c == "*") { re = re "[^/]*"; i++; continue }
+        if (c == "?") { re = re "[^/]"; i++; continue }
+        re = re esc(c)
+        i++
+      }
+      if (anchored) return "^" re "$"
+      return "(^|.*/)" re "$"
+    }
+    function covers(pat, file,    re, dir) {
+      re = pat2re(pat)
+      if (file ~ re) return 1
+      dir = file
+      while (dir ~ /\//) {
+        sub(/\/[^/]*$/, "", dir)
+        if (dir ~ re) return 1
+      }
+      return 0
+    }
+    function comp2re(comp,    re, i, n, c) {
+      re = "^"
+      n = length(comp)
+      i = 1
+      while (i <= n) {
+        if (substr(comp, i, 2) == "**") { re = re ".*"; i += 2; continue }
+        c = substr(comp, i, 1)
+        if (c == "*") { re = re "[^/]*"; i++; continue }
+        if (c == "?") { re = re "[^/]"; i++; continue }
+        re = re esc(c)
+        i++
+      }
+      return re "$"
+    }
+    function names_trust(pat,    s, n, i, comp, lit, parts) {
+      s = pat
+      sub(/^\/+/, "", s)
+      sub(/\/+$/, "", s)
+      n = split(s, parts, "/")
+      for (i = 1; i <= n; i++) {
+        comp = parts[i]
+        if (comp == "" || comp == "**") continue
+        lit = comp
+        gsub(/[*?]/, "", lit)
+        if (lit == "") continue
+        if ("trust" ~ comp2re(comp)) return 1
+      }
+      return 0
+    }
+    function showpat(pat) {
+      if (pat ~ /^(\*|\*\*|\/\*\*|\*\*\/\*)$/) return "*"
+      return pat
+    }
+    function add(msg) {
+      if (msg != "" && !seen[msg]) { seen[msg] = 1; print msg }
+    }
+    BEGIN { nfiles = split("trust/keys.json trust/keys.json.sig trust/release_allowed_signers trust/feed_allowed_signers", files, " ") }
+    /^[ \t]*$/ { next }
+    /^[ \t]*#/ { next }
+    {
+      n = split($0, f)
+      nt = n
+      for (i = 1; i <= n; i++) if (f[i] ~ /^#/) { nt = i - 1; break }
+      if (nt < 1) next
+      owned = 0
+      for (i = 2; i <= nt; i++) if (f[i] ~ /^@/) owned = 1
+      lc++
+      pats[lc] = f[1]
+      owns[lc] = owned
+    }
+    END {
+      for (fi = 1; fi <= nfiles; fi++) {
+        found = 0
+        explicit_before = 0
+        was_explicit = 0
+        last_owned = 0
+        last_pat = ""
+        for (li = 1; li <= lc; li++) {
+          if (!covers(pats[li], files[fi])) continue
+          if (found && was_explicit) explicit_before = 1
+          found = 1
+          last_pat = pats[li]
+          last_owned = owns[li]
+          was_explicit = names_trust(pats[li])
+        }
+        if (!found || !last_owned || (!was_explicit && !explicit_before)) add("CODEOWNERS has no entry for /trust/ with an owner")
+        else if (!was_explicit) add("CODEOWNERS: a later line for " showpat(last_pat) " takes over /trust/, so its entry reviews nothing")
+      }
+    }
+  ' "$tmp/codeowners" >"$tmp/codeowners-problems"
+  while IFS= read -r line; do fail "$line"; done <"$tmp/codeowners-problems"
 else
   rm -f "$tmp/codeowners"
   fail "cannot read repos/$repo/contents/.github/CODEOWNERS?ref=main"
