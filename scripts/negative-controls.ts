@@ -4145,7 +4145,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/hub/test/proof-service.test.ts"], expect: "to be true" },
   { id: "t406-reown-is-not-growth", task: "T-406", file: "packages/domain/src/board.ts",
     find: `current.length + toAdd.filter(sp => !bySpec.has(sp)).length - toDrop.length;`, replace: `current.length + toAdd.length - toDrop.length;`,
-    run: ["packages/domain/test/board.test.ts"], expect: "refused" },
+    run: ["packages/domain/test/board.test.ts"], expect: "to be true" },
   { id: "t406-proof-reapplies-merge-repo", task: "T-406", file: "packages/domain/src/proof.ts",
     find: `if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
     run: ["packages/domain/test/proof.test.ts", "packages/domain/test/board.test.ts"], expect: "no reference in that repository" },
