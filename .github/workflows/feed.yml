@@ -63,7 +63,7 @@ jobs:
           fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
       - if: steps.prepare.outputs.status == 'ready'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: feed-unsigned
           path: |
@@ -112,7 +112,7 @@ jobs:
             /usr/bin/ssh-keygen -Y sign -f "$key" -n feed@morndo.github.io "$file"
             /usr/bin/ssh-keygen -Y verify -f trust/feed_allowed_signers -I feed@morndo.github.io -n feed@morndo.github.io -s "$file.sig" < "$file"
           done
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: feed-signatures
           path: |
