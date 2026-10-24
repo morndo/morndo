@@ -349,7 +349,7 @@ switch (cmd) {
     const laneNode = fleet ? (lane: string) => observation.snapshot().workers.find(w => w.name === lane)?.node ?? null : undefined;
     const usage = new UsageService({ store, profiles: pool.current, ...(laneNode ? { laneNode } : {}) });
     // The fleet's usage taps (plan 4.5 item 4): a lane's start with an account, and its limit failures.
-    const stopUsageEvents = fleet ? fleet.client.events(e => { if (e.t === "usage") usage.fromFleet(e.node, e.body); }) : null;
+    const stopUsageEvents = fleet ? fleet.client.events(e => { if (e.t !== "usage") return; try { usage.fromFleet(e.node, e.body); } catch (err) { log.warn("a usage tap from the fleet could not be taken", err); } }) : null;
     if (stopUsageEvents) shutdown.onStop(stopUsageEvents);
     const lookAtPool = () => { void pool.refresh().then(changed => { if (changed) usage.refreshProfiles(); }, e => log.warn("the pool's usage file could not be looked at", e)); };
     lookAtPool();

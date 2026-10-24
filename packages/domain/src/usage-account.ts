@@ -13,17 +13,39 @@ export type Resolved = { account: string | null; by: "hook" | "record" | "sessio
 export const RECORD_FRESH_MS = 7 * 86_400_000;
 
 export function resolveAccount(i: ResolveInput): Resolved {
-  // Round 2: the hook's own word (a string that fits ACCOUNT_NAME), else a record for the lane no older than
-  // RECORD_FRESH_MS (one whose node equals this node first, else one of node ""), else the fresh session of the
-  // session id, else the node's only account (its records' and its fresh sessions' accounts, through laneNode) —
-  // two accounts or none: { account: null, by: null }.
-  void i; void ACCOUNT_NAME;
-  throw new Error("not implemented");
+  // The hook's own word: the lane's lane, whatever any record or session says.
+  if (typeof i.hookAccount === "string" && ACCOUNT_NAME.test(i.hookAccount)) return { account: i.hookAccount, by: "hook" };
+  // The lane's record: this node's own before one of node "" (the hub could not place the lane), the newest at among them.
+  if (i.lane !== null) {
+    const fresh = i.records.filter(r => r.lane === i.lane && i.now - r.at <= RECORD_FRESH_MS);
+    const placed = fresh.filter(r => r.node === i.node);
+    const mine = placed.length > 0 ? placed : fresh.filter(r => r.node === "");
+    if (mine.length > 0) {
+      let newest = mine[0]!;
+      for (const r of mine) if (r.at > newest.at) newest = r;
+      return { account: newest.account, by: "record" };
+    }
+  }
+  // The session of the session id, when one is fresh.
+  if (i.sessionId !== null) {
+    const s = i.sessions.find(x => x.sessionId === i.sessionId);
+    if (s !== undefined) return { account: s.account, by: "session" };
+  }
+  // The node's only account: its fresh records' and its fresh sessions' (through laneNode). A node of "" is never the node.
+  if (i.node !== "") {
+    const accounts = new Set<string>();
+    for (const r of i.records) if (r.node === i.node && i.now - r.at <= RECORD_FRESH_MS) accounts.add(r.account);
+    for (const s of i.sessions) if (s.lane !== null && i.laneNode(s.lane) === i.node) accounts.add(s.account);
+    if (accounts.size === 1) return { account: accounts.values().next().value as string, by: "node" };
+  }
+  return { account: null, by: null };
 }
 
 export function limitKindOfError(error: string): LimitKind | null {
-  // Round 2: trimmed and lowercased — "rate_limit" a usage limit, "billing_error" billing, "authentication_failed" a
-  // sign-out, "account_on_hold" and "oauth_org_not_allowed" a refusal; anything else, "overloaded" and "" among them, null.
-  void error;
-  throw new Error("not implemented");
+  const word = error.trim().toLowerCase();
+  if (word === "rate_limit") return "usage_limit";
+  if (word === "billing_error") return "billing";
+  if (word === "authentication_failed") return "signed_out";
+  if (word === "account_on_hold" || word === "oauth_org_not_allowed") return "refused";
+  return null;
 }

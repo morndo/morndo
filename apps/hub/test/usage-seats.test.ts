@@ -124,7 +124,7 @@ describe("seats (plan 4.5)", () => {
     expect(await noticesOf("seat")).toEqual([]);
   });
 
-  // S3 (plan 4.5 item 4): the fleet's taps and the pool's word. Red until round 2 (fromFleet, poolSeat, shownSeat).
+  // S3 (plan 4.5 item 4): the fleet's taps and the pool's word.
   it("a lane's failure and a manager's limit post set the same seat state (AT-15)", async () => {
     hub.usage.fromFleet("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", account: "seat-a", at: now });
     expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived" });
@@ -147,7 +147,8 @@ describe("seats (plan 4.5)", () => {
     expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
     now += 65 * MIN;
     const lease = hub.usage.leases.grant("seat-b", "app-server", null);
-    expect(read({ account: "seat-b", capturedAt: now, usedPercent: 20, resetsAt: now + 3 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
+    // A cycle begun at or after the mark (AT-18's rule): the read is 65 min past it, its 5-hour window reset 4 h out.
+    expect(read({ account: "seat-b", capturedAt: now, usedPercent: 20, resetsAt: now + 4 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
     expect(await seatOf("seat-b")).toBeUndefined();
     // Authority is the token's: the scope, not the role — the manager's own token is refused without it.
     const managerToken = hub.agents.issue("manager", "manager").secret;

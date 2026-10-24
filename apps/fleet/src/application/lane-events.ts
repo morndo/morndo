@@ -27,7 +27,7 @@
 // Hook fields: https://code.claude.com/docs/en/hooks (Stop: last_assistant_message, background_tasks [], session_crons [];
 // StopFailure: error_type), read 2026-10-08; a background task's id, type, status, description (up to 1000 characters)
 // and, for a shell task, command; a cron's id, schedule, recurring and prompt (Stop input), read 2026-10-20.
-import { pendingOf } from "@morndo/domain";
+import { ACCOUNT_NAME, limitKindOfError, pendingOf } from "@morndo/domain";
 import { LIMITS, firstLineOf as firstLine, redactKeyMaterial, statusLineOf, type HookEvent, type LaneEvent, type UsageTapFailure } from "@morndo/protocol";
 import type { LaneEventsConfig } from "../config.ts";
 import type { LaneEventDraft, LaneEventsStore } from "../adapters/lane-events-store.ts";
@@ -55,9 +55,7 @@ const countOf = (v: unknown): number => (Array.isArray(v) ? v.length : Number.is
 // A text field: a string as it is, a number or a boolean written out, anything else none.
 const textOf = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "");
 
-// The error words whose failures are limits (the domain's limitKindOfError, usage-account.ts): named here only so a
-// failure that is no limit at all — an overloaded turn — stays no tap while the reading of the limit ones waits.
-const LIMIT_ERROR_WORDS = new Set(["rate_limit", "billing_error", "authentication_failed", "account_on_hold", "oauth_org_not_allowed"]);
+// The error words whose failures are limits are the domain's own closed list (limitKindOfError, usage-account.ts).
 
 // A limit failure as a usage tap (plan 4.5 item 4): read before the manager and ignore filters, so the manager's own
 // window and an ignored one are in it. An error that is no limit makes no tap at all; the manager's own window and an
@@ -66,10 +64,17 @@ export function limitTapOf(e: HookEvent): UsageTapFailure | null {
   if (e.path !== "/hook/failure") return null;
   const b = isObject(e.body) ? e.body : {};
   const error = textOf(b.error_type ?? b.error ?? "unknown").slice(0, 60) || "unknown";
-  if (!LIMIT_ERROR_WORDS.has(error.trim().toLowerCase())) return null;
-  // Round 2: the account the hook's own field names (when it fits the account-name rule), the lane and its window, the
-  // session id as laneEventOf reads it, and the hook's own time.
-  throw new Error("not implemented");
+  if (limitKindOfError(error) === null) return null;
+  const sid = b.session_id;
+  return {
+    kind: "failure",
+    lane: e.window,
+    window: e.window,
+    ...(typeof sid === "string" && SESSION_ID.test(sid) ? { sessionId: sid } : {}),
+    error,
+    account: typeof b.account === "string" && ACCOUNT_NAME.test(b.account) ? b.account : null,
+    at: e.at,
+  };
 }
 
 // The lane event a hook makes, or null.

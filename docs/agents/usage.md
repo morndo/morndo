@@ -42,3 +42,39 @@ With a pool, each member posts its own windows: see [`codex.md`](codex.md) §5.
 
 Usage decides nothing (U4): which engine runs is the engine layer's (ADR-0013), and a lane that hits its limit says so
 itself in its conversation. Home only shows what the accounts reported.
+
+## A lane's failure and its account
+
+When a turn fails, the failure hook posts its JSON to the node relay as it does today; it SHOULD add the account the
+session runs on as `"account": "$MORNDO_ACCOUNT"` (a pool-style hook may send the config directory's name instead).
+The fleet turns a failure whose error word is a limit (`rate_limit`, `billing_error`, `authentication_failed`,
+`account_on_hold`, `oauth_org_not_allowed`) into a usage tap and hands it to the hub, which resolves the account in
+this order:
+
+1. the hook's own `account` field, when it is a valid account name;
+2. the lane's last record — written when a lane is started with an account, and by each status-line report — if it is
+   at most seven days old;
+3. the session the failure's `session_id` names, while that session is fresh;
+4. the node's only account, when every record and session on that node names the same one.
+
+A failure that resolves to no account is kept as nothing: no seat changes (U9).
+
+## Pool seats
+
+The accounts pool can set a seat by hand, with a token that carries the `usage-pool` scope:
+
+```sh
+morndo agent-token new pool --role worker --scope usage-pool
+```
+
+That token posts to `POST /api/agent/usage/pool`:
+
+```json
+{ "account": "max-1", "action": "set", "state": "retired", "why": "refused", "by": "pool-bot", "at": 1760000000 }
+```
+
+`state` is one of `logged-out`, `retired`, `out`, `low`, `ok`; `why` one of `usage_limit`, `refused`, `signed_out`,
+`plan_ended`, `billing`, `by_hand`; `action: "cleared"` removes the pool's word again. A pool-set seat is sticky: no
+reading clears it, and it wins over the hub's own derived mark when both name the same state. The principal clears
+either owner's seat with `POST /api/usage/seat/clear` (`{ "account": "max-1", "owner": "pool" | "derived" }`, no
+`owner` for both). Any other token's limit post makes a derived state that a fresh leased read can end.

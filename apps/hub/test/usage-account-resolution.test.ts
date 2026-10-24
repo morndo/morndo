@@ -1,7 +1,7 @@
 // Account resolution from the fleet's usage taps (S3, plan 4.5 item 4, AT-19 to AT-20b): a limit failure resolves to
 // the account the lane works under — the hook's own word first, then the lane's fresh record, the session, the node's
-// only account — and marks that account's seat; nothing resolved changes nothing (U9). Red until round 2: fromFleet
-// throws "not implemented". Real server on a random port, fake clock, synthetic data only.
+// only account — and marks that account's seat; nothing resolved changes nothing (U9). Real server on a random
+// port, fake clock, synthetic data only.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 

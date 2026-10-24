@@ -6,7 +6,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { HookEvent, LaneEvent } from "@morndo/protocol";
-import { LaneEvents, firstLineOf, globMatcher, laneEventOf, limitTapOf, lineOf, partsOf, rulesOf, statusOf } from "../src/application/lane-events.ts";
+import { LaneEvents, firstLineOf, globMatcher, laneEventOf, lineOf, partsOf, rulesOf, statusOf } from "../src/application/lane-events.ts";
 import { EventHub } from "../src/application/events.ts";
 import { openFleetDb } from "../src/adapters/db.ts";
 import { LaneEventsStore } from "../src/adapters/lane-events-store.ts";
@@ -149,7 +149,7 @@ describe("the manager's message", () => {
 
 // The usage tap (S3, plan 4.5 item 4): read inside the intake's transaction before any lane-event filter, so a limit
 // failure is a tap even where it makes no lane event — the manager's own window, an ignored one — while a failure that
-// is no limit at all and a stop are no tap. Red until round 2: the reading throws "not implemented".
+// is no limit at all and a stop are no tap.
 describe("the usage tap", () => {
   const takeWith = (window: string | null, body: unknown, path: HookEvent["path"] = "/hook/failure") => {
     const db = openFleetDb(join(tempDir(), "fleet.db"));

@@ -121,7 +121,7 @@ describe("events no subscriber takes (final review I3, ADR-0012 decision 8: neve
 
 // S3, plan 4.5 item 4: the tap rides the batch's own transaction, like its lane events — published only once that
 // commit is on the disk, so a batch that rolled back told nothing, and never again for a replayed hook. The limit
-// reading itself is round 2; until then a limit failure throws "not implemented".
+// reading itself is limitTapOf's.
 describe("usage taps in the intake", () => {
   const SID = "45460920-67e6-4bea-8c1d-2f3a4b5c6d7e";
   const fail = (seq: number, error: string): HookEvent =>

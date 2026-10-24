@@ -35,8 +35,8 @@ describe("which account a lane's failure belongs to (plan 4.5 item 4)", () => {
       .toEqual({ account: "seat-a", by: "record" });
     expect(resolveAccount(input({ records: [record({ account: "seat-b" })] }))).toEqual({ account: "seat-b", by: "record" });
     expect(resolveAccount(input({ records: [record({ account: "seat-b", at: T - 30_000 }), record({ account: "seat-c" })] })))
-      .toEqual({ account: "seat-c", by: "record" });
-    expect(resolveAccount(input({ lane: null, records: [record()] }))).toEqual({ account: null, by: null });
+      .toEqual({ account: "seat-b", by: "record" });       // seat-b's stamp (T-30s) is the newer of the two
+    expect(resolveAccount(input({ lane: null, records: [record()] }))).toEqual({ account: "seat-a", by: "node" });      // no lane: the record step is skipped, the node's only account still serves
   });
 
   it("a record older than seven days is ignored; seven days less one minute is not", () => {

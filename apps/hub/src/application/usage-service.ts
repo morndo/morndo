@@ -6,15 +6,18 @@
 import {
   ACCOUNT_NAME, DEFAULT_ACCOUNT, FORGET_MS, NOTICE_KEEP, SESSION_FRESH_MS,
   accountNow, applyLimit, applyReport, backNoticeText, cadenceInput, cadenceOf, changeSignature, cleanHint, cleanLength,
-  cleanNote, clearSeat, failedRead, fixFor, fixForReason, forgottenNoticeText, mergeWindow, noCycleBook, noHealth,
-  noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, reasonOf, seatNoticeText, seatResetNoticeText,
-  sourceState, shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince, watchPlan, watchThreshold,
-  windowTitle,
+  cleanNote, clearSeat, failedRead, fixFor, fixForReason, forgottenNoticeText, limitKindOfError, mergeWindow, noCycleBook,
+  noHealth, noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, pruneSessions, reasonOf, resolveAccount,
+  seatNoticeText,
+  seatResetNoticeText, shownSeat, sourceState, shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince,
+  watchPlan, watchThreshold, windowTitle,
+  poolSeat as poolSeatOf,
   type AccountProfile, type AccountUsage, type BoardActor, type Candidate, type CycleBook, type DisagreeView,
-  type FreshRead, type LimitHit, type LimitKind, type NamedWindow, type PlanFact, type PlanWatch, type SeatRecord,
-  type SeatState, type SeatView, type SeatWhy, type SourceView, type ThresholdWatch, type UsageNotice, type UsageReport,
-  type UsageSource, type UsageWindow, type WindowReading, type NoticeKind,
+  type FreshRead, type FreshSession, type LaneRecord, type LimitHit, type LimitKind, type NamedWindow, type PlanFact,
+  type PlanWatch, type SeatRecord, type SeatState, type SeatView, type SeatWhy, type SourceView, type ThresholdWatch,
+  type UsageNotice, type UsageReport, type UsageSource, type UsageWindow, type WindowReading, type NoticeKind,
 } from "@morndo/domain";
+import { UsageTapBody } from "@morndo/protocol";
 import type { UsageReadingsBody, UsageReportBody } from "@morndo/protocol";
 import type { Store, UsageSourceBody, UsageSourceRow } from "../adapters/store.ts";
 import { LeaseBook } from "./usage-leases.ts";
@@ -113,18 +116,20 @@ export class UsageService {
     const now = this.#now();
     const profiles = this.#profiles();
     const rows = this.#store.usageSources();
-    const seats = new Map(this.#store.usageSeats().map(s => [s.account, s.record]));
+    const derived = new Map(this.#store.usageSeats().map(s => [s.account, s.record]));
+    // The pool's own seats (U15, U17) stand beside the derived ones; what the principal is shown is the worse of the two.
+    const pooled = new Map(this.#store.usagePoolSeats().map(s => [s.account, s.record]));
     const byAccount = new Map<string, UsageSourceRow[]>();
     for (const r of rows) {
       const mine = byAccount.get(r.account) ?? [];
       mine.push(r);
       byAccount.set(r.account, mine);
     }
-    const names = [...new Set([...this.#accounts.keys(), ...byAccount.keys(), ...seats.keys()])].sort((a, b) => a.localeCompare(b));
+    const names = [...new Set([...this.#accounts.keys(), ...byAccount.keys(), ...derived.keys(), ...pooled.keys()])].sort((a, b) => a.localeCompare(b));
     const accounts = names.map(account => {
       const mine = byAccount.get(account) ?? [];
       const base = this.#accounts.has(account) ? accountNow(this.#accounts.get(account)!, now) : this.#skeleton(account, mine);
-      return { ...this.#accountView(base, mine, seats.get(account) ?? null, now), profile: profiles.get(account) ?? base.profile ?? null };
+      return { ...this.#accountView(base, mine, shownSeat(pooled.get(account) ?? null, derived.get(account) ?? null), now), profile: profiles.get(account) ?? base.profile ?? null };
     });
     return { accounts, at: now, notices: this.#store.usageNotices(NOTICE_KEEP) };
   }
@@ -275,26 +280,74 @@ export class UsageService {
   // resolves to an account — the hook's own word, the lane's record, the session, the node's only one — and marks that
   // account's seat. A failure that resolves to nothing is kept as nothing (U9): no seat changes.
   fromFleet(node: string, body: unknown): void {
-    // Round 2: parse with UsageTapBody; a lane_account saves the record; a failure resolves and calls noteLimit.
-    void node; void body;
-    throw new Error("not implemented");
+    const parsed = UsageTapBody.safeParse(body);
+    if (!parsed.success) return;
+    const tap = parsed.data;
+    if (tap.kind === "lane_account") {
+      this.#store.saveLaneAccount(node, tap.lane, tap.account, tap.at);
+      return;
+    }
+    const kind = limitKindOfError(tap.error);
+    if (kind === null) return;
+    const now = this.#now();
+    // The fresh sessions of every account, as pruneSessions keeps them: a failure's session id resolves through them.
+    const sessions: FreshSession[] = [];
+    for (const a of this.#accounts.values()) for (const s of pruneSessions(a.sessions, now)) sessions.push({ account: a.account, sessionId: s.sessionId, lane: s.lane });
+    const records: readonly LaneRecord[] = this.#store.laneAccounts();
+    const resolved = resolveAccount({
+      hookAccount: tap.account, node, lane: tap.lane, sessionId: tap.sessionId ?? null, now,
+      records, sessions, laneNode: this.#laneNode,
+    });
+    // An unresolved hit is kept as nothing (U9): no seat changes. `by` is the lane's name, cleaned inside noteLimit.
+    if (resolved.account === null) return;
+    this.noteLimit({ account: resolved.account, kind, backAt: null, by: tap.lane ?? "a lane", at: tap.at });
   }
 
   // The pool's own word on a seat (U15): set by a token with the usage-pool scope, cleared by the same or by the
   // principal. One seat notice per change, one back notice per clear.
   poolSeat(a: { account: string; action: "set" | "cleared"; state?: SeatState; why?: SeatWhy | null; backAt: number | null; at: number | null; by: string }): { ok: true } | { ok: false; problem: "bad_account" | "bad_state" } {
-    // Round 2: a bad name is bad_account, a set without a state is bad_state; a set saves the pool's record and tells
-    // one seat notice when its state or why changed; a cleared removes the record and tells one back notice.
-    void a;
-    throw new Error("not implemented");
+    if (!ACCOUNT_NAME.test(a.account)) return { ok: false, problem: "bad_account" };
+    if (a.action === "cleared") {
+      const prev = this.#store.usagePoolSeats().find(s => s.account === a.account)?.record ?? null;
+      if (prev === null) return { ok: true };
+      this.#store.atomically(() => {
+        this.#store.deleteUsagePoolSeat(a.account);
+        this.#note(a.account, "back", `pool|back|${prev.markedAt}`, backNoticeText(a.account, "the pool"));
+      });
+      this.#tellIfChanged();
+      return { ok: true };
+    }
+    if (a.state === undefined) return { ok: false, problem: "bad_state" };
+    // `by` is a reporter's untrusted display text, cleaned before it is stored, like every limit's.
+    const by = cleanNote(a.by) ?? "a source";
+    const at = a.at ?? this.#now();
+    const record = poolSeatOf({ state: a.state, why: a.why ?? null, backAt: a.backAt, at, by });
+    const prev = this.#store.usagePoolSeats().find(s => s.account === a.account)?.record ?? null;
+    // One seat notice when the state or the why differs from what is already there; no seat yet is a change too.
+    const changed = prev === null || prev.state !== record.state || prev.why !== record.why;
+    this.#store.atomically(() => {
+      this.#store.saveUsagePoolSeat(a.account, record);
+      if (changed) this.#note(a.account, "seat", `pool|${record.state}|${record.why}|${at}`, seatNoticeText(a.account, record));
+    });
+    this.#tellIfChanged();
+    return { ok: true };
   }
 
   // The principal's own clear of a seat (U17): true when something was removed, with one back notice. Without an
   // owner, both the pool's and the derived one go.
   clearSeat(account: string, owner?: "pool" | "derived"): boolean {
-    // Round 2: remove the named owner's record (or both), one back notice when one was there.
-    void account; void owner;
-    throw new Error("not implemented");
+    if (!ACCOUNT_NAME.test(account)) return false;
+    const pool = owner === undefined || owner === "pool" ? this.#store.usagePoolSeats().find(s => s.account === account)?.record ?? null : null;
+    const derived = owner === undefined || owner === "derived" ? this.#store.usageSeats().find(s => s.account === account)?.record ?? null : null;
+    if (pool === null && derived === null) return false;
+    const now = this.#now();
+    this.#store.atomically(() => {
+      if (pool !== null) this.#store.deleteUsagePoolSeat(account);
+      if (derived !== null) this.#store.deleteUsageSeat(account);
+      this.#note(account, "back", `cleared|${now}`, backNoticeText(account, "the principal"));
+    });
+    this.#tellIfChanged();
+    return true;
   }
 
   // A usage reading a source posts (plan 4.3, U14): the windows it can see now, or the one reason it cannot. The
@@ -455,10 +508,11 @@ export class UsageService {
     if (!ACCOUNT_NAME.test(account)) return false;
     const rows = this.#store.usageSources().filter(r => r.account === account);
     if (source === undefined) {
-      const had = rows.length > 0 || this.#accounts.has(account) || this.#store.usageSeats().some(s => s.account === account);
+      const had = rows.length > 0 || this.#accounts.has(account) || this.#store.usageSeats().some(s => s.account === account) || this.#store.usagePoolSeats().some(s => s.account === account);
       this.#store.deleteUsageSources(account);
       this.#store.deleteUsageWatches(account);
       this.#store.deleteUsageSeat(account);
+      this.#store.deleteUsagePoolSeat(account);
       this.#store.deleteUsageAccount(account);
       this.#accounts.delete(account);
       if (had) this.#tellIfChanged();
@@ -500,6 +554,8 @@ export class UsageService {
       if (a.sessions.some(s => now - s.at < SESSION_FRESH_MS)) continue;
       this.#store.deleteUsageAccount(a.account);
       this.#store.deleteUsageWatches(a.account);
+      // The pool's seat goes with the whole account (U15): the pool sets it again if its word still stands.
+      this.#store.deleteUsagePoolSeat(a.account);
       this.#accounts.delete(a.account);
       this.#note(a.account, "forgotten", `|${now}`, forgottenNoticeText(a.account, null));
     }
